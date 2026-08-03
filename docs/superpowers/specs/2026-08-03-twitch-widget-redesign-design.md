@@ -1,13 +1,14 @@
 # Twitch Chat Widget Visual Redesign Design Specification
 
 ## Overview
-This specification details the visual redesign for `TwitchChatStreamWidget` in `ModernWigiDash.Widgets`. The redesign addresses header clutter/redundancy (duplicate channel names and gibberish titles), improves chat legibility with larger default font sizes and a customizable `FontSize` property, implements block-style username and multi-line word wrapping, and guarantees strict canvas boundary clipping.
+This specification details the visual redesign for `TwitchChatStreamWidget` in `ModernWigiDash.Widgets`. The redesign addresses header clutter/redundancy (duplicate channel names and gibberish titles), improves chat legibility with larger default font sizes and a customizable `FontSize` property, implements block-style username and multi-line word wrapping, and guarantees strict canvas boundary clipping—all implemented using **.NET 10** and modern **C# language best practices**.
 
 ## Goals & Objectives
 1. **Clean Header Layout**: Remove redundant `#channelname` text and gibberish title strings. Display `#CHANNELNAME` in a top-left badge and live connection status (`● LIVE`, `⟳ Connecting…`, `○ Disconnected`) on the top-right.
 2. **Enhanced Typography & Readability**: Increase default chat message font size from `12f` to `16f * scale`, introduce a configurable `FontSize` widget property (range 12–24pt), and scale line heights proportionally.
 3. **Block-Style Chat Formatting**: Position usernames on their own line per chat item using the user's Twitch color, allowing chat message body text to wrap edge-to-edge across the full available width.
 4. **Strict Boundary Clipping**: Enclose message rendering within Skia `SKCanvas` clip bounds (`canvas.Save()`, `canvas.ClipRect(...)`, `canvas.Restore()`) to ensure no text overflows outside the widget borders or overlaps the header.
+5. **.NET 10 & C# Best Practices**: Target `.NET 10.0`, enforce strict nullability (`#nullable enable`), leverage pattern matching, allocation-conscious string handling, disposal of Skia Sharp disposable resources (`using` blocks), and maintain SonarAnalyzer compliance.
 
 ## Architectural & Component Changes
 
@@ -21,7 +22,7 @@ Location: `ModernWigiDash.Widgets/SocialAndVisualWidgets.cs`
 
 ### 2. IRC Status Text Sanitization
 Location: `ModernWigiDash.Widgets/SocialAndVisualWidgets.cs`
-- Update `_statusDetail` assignment in IRC handlers:
+- Update `_statusDetail` assignment in IRC handlers using C# pattern matching:
   - Connected state: set `_statusDetail = "LIVE"` (or `""`), eliminating repetitive `#channelname` string concatenation in status text.
 
 ### 3. Rendering Pipeline (`Render` Method)
@@ -32,7 +33,8 @@ Location: `ModernWigiDash.Widgets/SocialAndVisualWidgets.cs`
 - **Top Right**: Draw status indicator (`statusText`) aligned to `bounds.Right - pad`.
 - **Header Line Clearance**: Set `headerBottom = top + titleSize + 8f * scale`.
 
-#### B. Canvas Boundary Clipping
+#### B. Canvas Boundary Clipping & Resource Management
+- Ensure all created Skia paints and fonts use C# `using` statements for prompt native disposal.
 - Before rendering chat message history, save canvas state and apply clip rect:
   ```csharp
   var contentBounds = new SKRect(bounds.Left + pad, headerBottom, bounds.Right - pad, bounds.Bottom - pad);
@@ -55,9 +57,9 @@ Location: `ModernWigiDash.Widgets/SocialAndVisualWidgets.cs`
 
 ## Verification Plan
 1. **Automated Unit Tests**:
-   - Run existing unit test suite in `ModernWigiDash.Tests` (including `UnitTestSuite.cs` Twitch widget tests).
+   - Run existing unit test suite in `ModernWigiDash.Tests` targeting `.NET 10.0`.
    - Add unit test verifying default `FontSize` property equals `16`.
    - Add unit test verifying `TwitchChatStreamWidget` rendering logic cleanly executes with updated colors and header formats without crashing.
 2. **Manual Verification**:
    - Build `ModernWigiDash.slnx` using `dotnet build`.
-   - Verify zero compiler warnings or errors in `ModernWigiDash.Widgets`.
+   - Verify zero compiler warnings, static analysis warnings, or errors in `ModernWigiDash.Widgets`.
