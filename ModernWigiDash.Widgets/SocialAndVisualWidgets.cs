@@ -31,8 +31,8 @@ public class PictureAndGifWidget : ModernWidgetBase
     [WidgetProperty("Corner Radius", WidgetPropertyType.Number, "Rounded corners radius", 16f)]
     public float CornerRadius { get; set; } = 16f;
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Placeholder icon and hint color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Placeholder icon and hint color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     private string[] _folderImages = Array.Empty<string>();
     private int _imageIndex = 0;
@@ -812,8 +812,8 @@ public class WeatherForecastWidget : ModernWidgetBase
     [WidgetProperty("Layout Mode", WidgetPropertyType.Choice, "Display view style", "Detailed", "Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact")]
     public string LayoutMode { get; set; } = "Detailed";
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary glowing accent color", "#870000")]
-    public string AccentColorHex { get; set; } = "#870000";
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary glowing accent color", "#F59E0B")]
+    public string AccentColorHex { get; set; } = "#F59E0B";
 
     [WidgetProperty("Show Humidity", WidgetPropertyType.Boolean, "Display relative humidity metric", true)]
     public bool ShowHumidity { get; set; } = true;

@@ -295,11 +295,11 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Action Path/Command", WidgetPropertyType.Path, "Executable, file, folder, or URL. You can type a URL or select a local path.", "")]
     public string ActionCommand { get; set; } = "";
 
-    [WidgetProperty("Button Color Hex", WidgetPropertyType.Color, "Button glow accent color", "#870000")]
-    public string ButtonColorHex { get; set; } = "#870000"; // Deep Crimson Red
+    [WidgetProperty("Button Color Hex", WidgetPropertyType.Color, "Button glow accent color", "#F59E0B")]
+    public string ButtonColorHex { get; set; } = "#F59E0B";
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Button label color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Button label color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Toggle Actions", WidgetPropertyType.Boolean, "Run the toggled action list after the first press", false)]
     public bool ToggleActions { get; set; }
@@ -426,11 +426,11 @@ public class StopwatchTimerWidget : ModernWidgetBase
     private DateTime _startTime = DateTime.Now;
     private TimeSpan _elapsed = TimeSpan.Zero;
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Status label color", "#FFFFFF")]
-    public string AccentColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Status label color", "#F59E0B")]
+    public string AccentColorHex { get; set; } = "#F59E0B";
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -502,8 +502,8 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     [WidgetProperty("Price Decimals", WidgetPropertyType.Choice, "Decimal places for small-value assets (Auto adjusts to price)", "Auto", "Auto", "2", "4", "6", "8")]
     public string PriceDecimals { get; set; } = "Auto";
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Symbol and price color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Symbol and price color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Positive Color", WidgetPropertyType.Color, "Upward change badge color", "#22C55E")]
     public string PositiveColorHex { get; set; } = "#22C55E";

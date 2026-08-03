@@ -27,11 +27,11 @@ public class FrameTimeWidget : ModernWidgetBase
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#FFCD85")]
-    public string AccentColorHex { get; set; } = "#FFCD85";
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#F59E0B")]
+    public string AccentColorHex { get; set; } = "#F59E0B";
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Show Process", WidgetPropertyType.Boolean, "Show the tracked game/process name", true)]
     public bool ShowProcess { get; set; } = true;

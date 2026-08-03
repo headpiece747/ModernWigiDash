@@ -127,7 +127,7 @@ public class UnitTestSuite
         Assert.AreEqual("Fixed Location", widget.LocationType);
         Assert.AreEqual("Detailed", widget.LayoutMode);
         Assert.AreEqual("Fahrenheit (°F, mph)", widget.UnitSystem);
-        Assert.AreEqual("#870000", widget.AccentColorHex);
+        Assert.AreEqual("#F59E0B", widget.AccentColorHex);
         Assert.IsTrue(widget.ShowHumidity);
         Assert.IsTrue(widget.ShowWind);
         Assert.IsTrue(widget.ShowFeelsLike);
@@ -229,15 +229,16 @@ public class UnitTestSuite
     [TestMethod]
     public void WidgetColorProperties_Defaults_UseThemeHexes()
     {
-        Assert.AreEqual("#FFFFFF", new DigitalAnalogClockWidget().TextColorHex);
-        Assert.AreEqual("#FFCD85", new HardwareMonitorWidget().AccentColorHex);
-        Assert.AreEqual("#FFCD85", new FrameTimeWidget().AccentColorHex);
-        Assert.AreEqual("#FFFFFF", new FrameTimeWidget().TextColorHex);
-        Assert.AreEqual("#FFCD85", new NowPlayingWidget().AccentColorHex);
-        Assert.AreEqual("#FFFFFF", new HotkeyButtonWidget().TextColorHex);
-        Assert.AreEqual("#FFFFFF", new StopwatchTimerWidget().TextColorHex);
-        Assert.AreEqual("#FFFFFF", new CryptoStockTickerWidget().TextColorHex);
-        Assert.AreEqual("#FFFFFF", new PictureAndGifWidget().TextColorHex);
+        Assert.AreEqual("#FAFAFA", new DigitalAnalogClockWidget().TextColorHex);
+        Assert.AreEqual("#F59E0B", new HardwareMonitorWidget().AccentColorHex);
+        Assert.AreEqual("#F59E0B", new FrameTimeWidget().AccentColorHex);
+        Assert.AreEqual("#FAFAFA", new FrameTimeWidget().TextColorHex);
+        Assert.AreEqual("#F59E0B", new NowPlayingWidget().AccentColorHex);
+        Assert.AreEqual("#FAFAFA", new HotkeyButtonWidget().TextColorHex);
+        Assert.AreEqual("#FAFAFA", new StopwatchTimerWidget().TextColorHex);
+        Assert.AreEqual("#FAFAFA", new CryptoStockTickerWidget().TextColorHex);
+        Assert.AreEqual("#FAFAFA", new PictureAndGifWidget().TextColorHex);
+        Assert.AreEqual("#F59E0B", new HotkeyButtonWidget().ButtonColorHex);
         Assert.AreEqual("#F8FAFC", new TwitchChatStreamWidget().MessageColorHex);
     }
 

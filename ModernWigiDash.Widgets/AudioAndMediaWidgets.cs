@@ -17,8 +17,8 @@ public class AudioVisualizerWidget : ModernWidgetBase
     [WidgetProperty("Bar Count", WidgetPropertyType.Number, "Number of spectrum bars", 32f)]
     public float BarCount { get; set; } = 32f;
 
-    [WidgetProperty("Primary Color", WidgetPropertyType.Color, "Color for high spectrum peaks", "#FFCD85")]
-    public string PrimaryColorHex { get; set; } = "#FFCD85"; // Warm Golden Amber
+    [WidgetProperty("Primary Color", WidgetPropertyType.Color, "Color for high spectrum peaks", "#F59E0B")]
+    public string PrimaryColorHex { get; set; } = "#F59E0B";
 
     private WasapiLoopbackCapture? _audioCapture;
     private readonly float[] _fftSpectrum = new float[64];

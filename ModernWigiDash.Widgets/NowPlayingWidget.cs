@@ -30,11 +30,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private const float DesignWidth = 1016f;
     private const float DesignHeight = 592f;
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Progress fill, active toggles, and placeholder accent", "#FFCD85")]
-    public string AccentColorHex { get; set; } = "#FFCD85";
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Progress fill, active toggles, and placeholder accent", "#F59E0B")]
+    public string AccentColorHex { get; set; } = "#F59E0B";
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Title, artist, and icon color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Title, artist, and icon color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Show Source Badge", WidgetPropertyType.Boolean, "Show which app is playing (tap to switch sources)", true)]
     public bool ShowSourceBadge { get; set; } = true;

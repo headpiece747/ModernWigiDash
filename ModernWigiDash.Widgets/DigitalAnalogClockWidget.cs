@@ -17,11 +17,11 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     [WidgetProperty("Time Format", WidgetPropertyType.Choice, "12 or 24 hour format", "12H", "12H", "24H")]
     public string TimeFormat { get; set; } = "12H";
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color for typography or hands", "#870000")]
-    public string AccentColorHex { get; set; } = "#FF0000";
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color for typography or hands", "#F59E0B")]
+    public string AccentColorHex { get; set; } = "#F59E0B";
 
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Primary text, tick, and hand color", "#FFFFFF")]
-    public string TextColorHex { get; set; } = "#FFFFFF";
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Primary text, tick, and hand color", "#FAFAFA")]
+    public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Show Date", WidgetPropertyType.Boolean, "Display calendar date badge", true)]
     public bool ShowDate { get; set; } = true;
