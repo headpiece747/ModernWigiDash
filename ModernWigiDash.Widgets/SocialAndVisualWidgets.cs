@@ -688,46 +688,48 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         var msgColor = SKColor.TryParse(MessageColorHex, out var parsedMsg) ? parsedMsg : new SKColor(248, 250, 252);
 
         using var bgPaint = new SKPaint { Color = bg, IsAntialias = true };
-        canvas.DrawRoundRect(bounds, 14f, 14f, bgPaint);
+        canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, bgPaint);
 
         float pad = 12f * scale;
-        float titleSize = 13f * scale;
+        float titleSize = 14f * scale;
         float statusSize = 10f * scale;
-        float msgSize = 12f * scale;
-        float lineHeight = 20f * scale;
 
-        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, titleSize);
+        using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, titleSize);
         using var statusFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, statusSize);
-        using var titlePaint = new SKPaint { Color = headerColor, IsAntialias = true };
+        using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
         using var statusPaint = new SKPaint { Color = headerColor.WithAlpha((byte)(headerColor.Alpha * 0.65f)), IsAntialias = true };
 
         float top = bounds.Top + pad;
-        canvas.DrawText("💬 TWITCH LIVE CHAT", bounds.Left + pad, top + titleSize, SKTextAlign.Left, titleFont, titlePaint);
-        canvas.DrawText("#" + NormalizeChannel(ChannelName).ToUpperInvariant(), bounds.Right - pad, top + titleSize, SKTextAlign.Right, titleFont, titlePaint);
-
-        float headerBottom = top + titleSize + 6f * scale;
+        string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
+        canvas.DrawText(channelBadge, bounds.Left + pad, top + titleSize, SKTextAlign.Left, badgeFont, badgePaint);
 
         string statusText = _status switch
         {
-            StatusConnected => "● " + _statusDetail,
-            StatusConnecting => "⟳ " + _statusDetail,
-            _ => "○ " + _statusDetail
+            StatusConnected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
+            StatusConnecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
+            _ => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
         };
-        if (_statusDetail.Length == 0)
+        canvas.DrawText(statusText, bounds.Right - pad, top + titleSize, SKTextAlign.Right, statusFont, statusPaint);
+
+        float headerBottom = top + titleSize + 8f * scale;
+
+        var contentBounds = new SKRect(bounds.Left + pad, headerBottom, bounds.Right - pad, bounds.Bottom - pad);
+        if (contentBounds.Width <= 0 || contentBounds.Height <= 0)
         {
-            statusText = _status switch
-            {
-                StatusConnected => "● LIVE",
-                StatusConnecting => "⟳ Connecting…",
-                _ => "○ Disconnected"
-            };
+            return;
         }
-        float statusY = headerBottom + 6f * scale;
-        canvas.DrawText(statusText, bounds.Left + pad, statusY + statusSize, SKTextAlign.Left, statusFont, statusPaint);
-        headerBottom = statusY + statusSize + 4f * scale;
+
+        canvas.Save();
+        canvas.ClipRect(contentBounds);
 
         ChatMessage[] snapshot;
         lock (_messagesLock) snapshot = _messages.ToArray();
+
+        float baseFontSize = Math.Max(10f, FontSize) * scale;
+        float msgSize = baseFontSize;
+        float userSize = Math.Max(10f, baseFontSize - 2f);
+        float lineHeight = msgSize * 1.4f;
+        float userLineHeight = userSize * 1.35f;
 
         if (snapshot.Length == 0)
         {
@@ -739,14 +741,14 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 StatusDisconnected when !AutoConnect => "Tap to connect",
                 _ => "Waiting for connection…"
             };
-            canvas.DrawText(hint, bounds.Left + pad, headerBottom + msgSize, SKTextAlign.Left, emptyFont, emptyPaint);
+            canvas.DrawText(hint, contentBounds.Left, contentBounds.Top + msgSize, SKTextAlign.Left, emptyFont, emptyPaint);
+            canvas.Restore();
             return;
         }
 
-        float maxTextWidth = bounds.Width - pad * 2f;
-        float cursor = bounds.Bottom - pad;
+        float cursor = contentBounds.Bottom;
 
-        using var userFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, msgSize);
+        using var userFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, userSize);
         using var msgFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, msgSize);
         using var userPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         using var msgPaint = new SKPaint { Color = msgColor, IsAntialias = true };
@@ -754,25 +756,23 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         for (int i = snapshot.Length - 1; i >= 0; i--)
         {
             var m = snapshot[i];
-            var userLabel = m.Username + ": ";
-            var userLabelWidth = userFont.MeasureText(userLabel);
-            var wrapWidth = Math.Max(20f, maxTextWidth - userLabelWidth);
-            var lines = WrapText(m.Text, msgFont, wrapWidth);
+            var lines = WrapText(m.Text, msgFont, contentBounds.Width);
 
-            float blockH = lines.Count * lineHeight;
+            float blockH = userLineHeight + lines.Count * lineHeight + 4f * scale;
             cursor -= blockH;
-            if (cursor < headerBottom) break;
+            if (cursor < contentBounds.Top - userLineHeight) break;
 
             userPaint.Color = m.Color;
-            canvas.DrawText(userLabel, bounds.Left + pad, cursor + lineHeight - 4f * scale, SKTextAlign.Left, userFont, userPaint);
+            canvas.DrawText(m.Username, contentBounds.Left, cursor + userSize, SKTextAlign.Left, userFont, userPaint);
 
-            float tx = bounds.Left + pad + userLabelWidth;
+            float msgY = cursor + userLineHeight;
             for (int li = 0; li < lines.Count; li++)
             {
-                canvas.DrawText(lines[li], tx, cursor + (li + 1) * lineHeight - 4f * scale, SKTextAlign.Left, msgFont, msgPaint);
-                tx = bounds.Left + pad;
+                canvas.DrawText(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, SKTextAlign.Left, msgFont, msgPaint);
             }
         }
+
+        canvas.Restore();
     }
 
     public override async ValueTask DisposeAsync()

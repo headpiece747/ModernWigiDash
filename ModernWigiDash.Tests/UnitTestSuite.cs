@@ -263,6 +263,16 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void TwitchWidget_RenderExecutesWithoutErrors()
+    {
+        var widget = new TwitchChatStreamWidget { HeaderColorHex = "#FFCD85", MessageColorHex = "#C6E0FF", FontSize = 18 };
+        using var bitmap = new SkiaSharp.SKBitmap(400, 300);
+        using var canvas = new SkiaSharp.SKCanvas(bitmap);
+        var bounds = new SkiaSharp.SKRect(0, 0, 400, 300);
+        widget.Render(canvas, bounds);
+    }
+
+    [TestMethod]
     public void HotkeyWidget_DefaultActions_AreLaunchAction()
     {
         var widget = new HotkeyButtonWidget();
