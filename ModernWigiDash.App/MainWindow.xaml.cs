@@ -1263,6 +1263,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             Background = (Brush)FindResource("PanelBackground"),
             Foreground = Brushes.White
         };
+        dialog.SourceInitialized += (_, _) => ApplyDarkTitleBarToWindow(dialog, ThemeSettings.Theme.TitleBar);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
@@ -1582,6 +1583,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             Background = (Brush)FindResource("BgPanel"),
             FontFamily = (FontFamily)FindResource("PrimaryFont")
         };
+        dialog.SourceInitialized += (_, _) => ApplyDarkTitleBarToWindow(dialog, ThemeSettings.Theme.TitleBar);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
