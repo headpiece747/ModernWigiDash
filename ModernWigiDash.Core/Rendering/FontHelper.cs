@@ -46,6 +46,26 @@ public static class FontHelper
     /// </summary>
     public static SKTypeface GeistTypeface => _geistTypeface.Value ?? SKTypeface.Default;
 
+    private static readonly Lazy<SKTypeface> _segoeEmojiTypeface = new(() => SKTypeface.FromFamilyName("Segoe UI Emoji") ?? SKTypeface.Default);
+    private static readonly Lazy<SKTypeface> _segoeSymbolTypeface = new(() => SKTypeface.FromFamilyName("Segoe UI Symbol") ?? SKTypeface.Default);
+    private static readonly Lazy<SKTypeface> _segoeUiTypeface = new(() => SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default);
+
+    /// <summary>
+    /// Checks whether a typeface contains a glyph for the given codepoint using SKFont (the non-obsolete API).
+    /// </summary>
+    private static bool ContainsGlyphSafe(SKTypeface typeface, int codepoint)
+    {
+        try
+        {
+            using var font = new SKFont(typeface, 12f);
+            return font.ContainsGlyph(codepoint);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Resolves an appropriate SKTypeface for a given codepoint and style, using Geist Variable Font if available,
     /// or falling back to system matched fonts (e.g. Segoe UI Emoji/Symbol/Segoe UI).
@@ -53,29 +73,29 @@ public static class FontHelper
     public static SKTypeface GetTypefaceForCodepoint(int codepoint, SKFontStyle style)
     {
         var geist = GeistTypeface;
-        if (geist != null && geist.Handle != IntPtr.Zero && geist.ContainsGlyph(codepoint))
+        if (geist is { Handle: not 0 } && ContainsGlyphSafe(geist, codepoint))
         {
             return geist;
         }
 
         return _fallbackCache.GetOrAdd((codepoint, style), key =>
         {
-            var emojiTf = SKTypeface.FromFamilyName("Segoe UI Emoji", key.Style);
-            if (emojiTf != null && emojiTf.Handle != IntPtr.Zero && emojiTf.ContainsGlyph(key.Codepoint))
+            var emoji = _segoeEmojiTypeface.Value;
+            if (emoji is { Handle: not 0 } && ContainsGlyphSafe(emoji, key.Codepoint))
             {
-                return emojiTf;
+                return emoji;
             }
 
-            var symbolTf = SKTypeface.FromFamilyName("Segoe UI Symbol", key.Style);
-            if (symbolTf != null && symbolTf.Handle != IntPtr.Zero && symbolTf.ContainsGlyph(key.Codepoint))
+            var symbol = _segoeSymbolTypeface.Value;
+            if (symbol is { Handle: not 0 } && ContainsGlyphSafe(symbol, key.Codepoint))
             {
-                return symbolTf;
+                return symbol;
             }
 
-            var segoeTf = SKTypeface.FromFamilyName("Segoe UI", key.Style);
-            if (segoeTf != null && segoeTf.Handle != IntPtr.Zero && segoeTf.ContainsGlyph(key.Codepoint))
+            var segoe = _segoeUiTypeface.Value;
+            if (segoe is { Handle: not 0 } && ContainsGlyphSafe(segoe, key.Codepoint))
             {
-                return segoeTf;
+                return segoe;
             }
 
             try
@@ -83,15 +103,16 @@ public static class FontHelper
                 SKTypeface? matched;
                 lock (_fontManagerLock)
                 {
-                    matched = SKFontManager.Default.MatchCharacter("Segoe UI Emoji", key.Style, null, key.Codepoint);
+                    matched = SKFontManager.Default.MatchCharacter(key.Codepoint);
                 }
-                if (matched != null && matched.Handle != IntPtr.Zero)
+                if (matched is { Handle: not 0 })
                 {
                     return matched;
                 }
             }
             catch
             {
+                // Silently fall through to default typeface
             }
 
             return SKTypeface.Default;

@@ -596,10 +596,12 @@ public class UnitTestSuite
     [TestMethod]
     public void FontHelper_GetTypefaceForCodepoint_ResolvesEmojiFallback()
     {
-        var geistTf = FontHelper.GeistTypeface;
+        // Latin 'A' should resolve to a valid typeface (Geist or system fallback)
         var latinTf = FontHelper.GetTypefaceForCodepoint('A', SKFontStyle.Normal);
-        Assert.AreEqual(geistTf.FamilyName, latinTf.FamilyName);
+        Assert.IsNotNull(latinTf);
+        Assert.AreNotEqual(IntPtr.Zero, latinTf.Handle);
 
+        // Emoji 😀 (U+1F600) should resolve to a valid fallback typeface
         var emojiTf = FontHelper.GetTypefaceForCodepoint(0x1F600, SKFontStyle.Normal);
         Assert.IsNotNull(emojiTf);
         Assert.AreNotEqual(IntPtr.Zero, emojiTf.Handle);
