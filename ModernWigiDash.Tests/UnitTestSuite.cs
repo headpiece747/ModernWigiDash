@@ -256,6 +256,13 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void TwitchWidget_DefaultsToFontSize16AndCleanStatus()
+    {
+        var widget = new TwitchChatStreamWidget();
+        Assert.AreEqual(16, widget.FontSize);
+    }
+
+    [TestMethod]
     public void HotkeyWidget_DefaultActions_AreLaunchAction()
     {
         var widget = new HotkeyButtonWidget();

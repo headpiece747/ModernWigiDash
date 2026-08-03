@@ -299,6 +299,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Background Color", WidgetPropertyType.Color, "Widget background color", "#0F1117")]
     public string BackgroundHex { get; set; } = "#0F1117";
 
+    [WidgetProperty("Font Size", WidgetPropertyType.Number, "Chat text font size in points", 16)]
+    public int FontSize { get; set; } = 16;
+
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
 
@@ -566,7 +569,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             case "ROOMSTATE":
                 _status = StatusConnected;
-                _statusDetail = "LIVE · #" + NormalizeChannel(ChannelName).ToUpperInvariant();
+                _statusDetail = "LIVE";
                 Context.RequestRender();
                 break;
             case "PRIVMSG":
@@ -585,7 +588,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
                 {
                     _status = StatusConnected;
-                    _statusDetail = "LIVE · #" + NormalizeChannel(ChannelName).ToUpperInvariant();
+                    _statusDetail = "LIVE";
                     Context.RequestRender();
                 }
                 else
