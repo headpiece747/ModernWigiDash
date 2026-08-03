@@ -18,31 +18,31 @@ public readonly record struct RgbaColor(byte A, byte R, byte G, byte B);
 public class ThemeSettings
 {
     // Surfaces
-    public string BgDark { get; set; } = "#1B2930";
-    public string BgPanel { get; set; } = "#243742";
-    public string BgCard { get; set; } = "#2F4550";
-    public string Border { get; set; } = "#586F7C";
+    public string BgDark { get; set; } = "#121214";
+    public string BgPanel { get; set; } = "#1A1A1E";
+    public string BgCard { get; set; } = "#26262B";
+    public string Border { get; set; } = "#3F3F46";
 
     // Accents
-    public string AccentRed { get; set; } = "#870000";
-    public string M3Primary { get; set; } = "#FFCD85";
-    public string M3PrimaryContainer { get; set; } = "#586F7C";
-    public string M3OnPrimaryContainer { get; set; } = "#FFCD85";
-    public string AccentGreen { get; set; } = "#FFCD85";
+    public string AccentRed { get; set; } = "#F59E0B";
+    public string M3Primary { get; set; } = "#FBBF24";
+    public string M3PrimaryContainer { get; set; } = "#3F3F46";
+    public string M3OnPrimaryContainer { get; set; } = "#FBBF24";
+    public string AccentGreen { get; set; } = "#10B981";
 
     // Text
-    public string TextPrimary { get; set; } = "#C6E0FF";
-    public string TextSecondary { get; set; } = "#98B4C8";
+    public string TextPrimary { get; set; } = "#FAFAFA";
+    public string TextSecondary { get; set; } = "#A1A1AA";
 
     // Interactive states & chrome extras
-    public string ControlHover { get; set; } = "#3D5A68";
-    public string DropdownHover { get; set; } = "#25334D";
-    public string TitleBar { get; set; } = "#0F111A";
-    public string StatusBarBackground { get; set; } = "#10121C";
+    public string ControlHover { get; set; } = "#3F3F46";
+    public string DropdownHover { get; set; } = "#2A2A30";
+    public string TitleBar { get; set; } = "#0B0B0C";
+    public string StatusBarBackground { get; set; } = "#0E0E10";
     public string DangerBackground { get; set; } = "#7F1D1D";
     public string DangerBorder { get; set; } = "#EF4444";
-    public string SuccessBackground { get; set; } = "#14532D";
-    public string SuccessBorder { get; set; } = "#22C55E";
+    public string SuccessBackground { get; set; } = "#064E3B";
+    public string SuccessBorder { get; set; } = "#10B981";
 
     public static ThemeSettings Theme { get; set; } = new();
 

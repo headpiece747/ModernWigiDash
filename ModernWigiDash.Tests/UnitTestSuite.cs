@@ -576,4 +576,19 @@ public class UnitTestSuite
                 $"Missing group for '{name}'");
         }
     }
+
+    [TestMethod]
+    public void ThemeSettings_DefaultsToTitaniumAmberPalette()
+    {
+        var theme = new ModernWigiDash.Core.Theming.ThemeSettings();
+        Assert.AreEqual("#121214", theme.BgDark);
+        Assert.AreEqual("#1A1A1E", theme.BgPanel);
+        Assert.AreEqual("#26262B", theme.BgCard);
+        Assert.AreEqual("#3F3F46", theme.Border);
+        Assert.AreEqual("#F59E0B", theme.AccentRed);
+        Assert.AreEqual("#FBBF24", theme.M3Primary);
+        Assert.AreEqual("#FAFAFA", theme.TextPrimary);
+        Assert.AreEqual("#A1A1AA", theme.TextSecondary);
+        Assert.AreEqual("#0B0B0C", theme.TitleBar);
+    }
 }

@@ -3,30 +3,30 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Custom Crimson & Slate Scheme — values are overridden at runtime by app_theme.json -->
-        <Color x:Key="BgDarkColor">#1B2930</Color>
-        <Color x:Key="BgPanelColor">#243742</Color>
-        <Color x:Key="BgCardColor">#2F4550</Color>
-        <Color x:Key="BorderColor">#586F7C</Color>
+        <!-- Custom Titanium & Sunset Amber Scheme — values are overridden at runtime by app_theme.json -->
+        <Color x:Key="BgDarkColor">#121214</Color>
+        <Color x:Key="BgPanelColor">#1A1A1E</Color>
+        <Color x:Key="BgCardColor">#26262B</Color>
+        <Color x:Key="BorderColor">#3F3F46</Color>
         
         <!-- Primary & Secondary Accent Tokens -->
-        <Color x:Key="AccentRedColor">#870000</Color>
-        <Color x:Key="M3PrimaryColor">#FFCD85</Color>
-        <Color x:Key="M3PrimaryContainerColor">#586F7C</Color>
-        <Color x:Key="M3OnPrimaryContainerColor">#FFCD85</Color>
-        <Color x:Key="AccentGreenColor">#FFCD85</Color>
-        <Color x:Key="TextPrimaryColor">#C6E0FF</Color>
-        <Color x:Key="TextSecondaryColor">#98B4C8</Color>
+        <Color x:Key="AccentRedColor">#F59E0B</Color>
+        <Color x:Key="M3PrimaryColor">#FBBF24</Color>
+        <Color x:Key="M3PrimaryContainerColor">#3F3F46</Color>
+        <Color x:Key="M3OnPrimaryContainerColor">#FBBF24</Color>
+        <Color x:Key="AccentGreenColor">#10B981</Color>
+        <Color x:Key="TextPrimaryColor">#FAFAFA</Color>
+        <Color x:Key="TextSecondaryColor">#A1A1AA</Color>
 
         <!-- Interactive states & chrome extras -->
-        <Color x:Key="ControlHoverColor">#3D5A68</Color>
-        <Color x:Key="DropdownHoverColor">#25334D</Color>
-        <Color x:Key="TitleBarColor">#0F111A</Color>
-        <Color x:Key="StatusBarBackgroundColor">#10121C</Color>
+        <Color x:Key="ControlHoverColor">#3F3F46</Color>
+        <Color x:Key="DropdownHoverColor">#2A2A30</Color>
+        <Color x:Key="TitleBarColor">#0B0B0C</Color>
+        <Color x:Key="StatusBarBackgroundColor">#0E0E10</Color>
         <Color x:Key="DangerBackgroundColor">#7F1D1D</Color>
         <Color x:Key="DangerBorderColor">#EF4444</Color>
-        <Color x:Key="SuccessBackgroundColor">#14532D</Color>
-        <Color x:Key="SuccessBorderColor">#22C55E</Color>
+        <Color x:Key="SuccessBackgroundColor">#064E3B</Color>
+        <Color x:Key="SuccessBorderColor">#10B981</Color>
 
         <SolidColorBrush x:Key="BgDark" Color="{DynamicResource BgDarkColor}"/>
         <SolidColorBrush x:Key="BgPanel" Color="{DynamicResource BgPanelColor}"/>
