@@ -5,6 +5,7 @@
     <ProjectReference Include="..\ModernWigiDash.Hardware\ModernWigiDash.Hardware.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Widgets\ModernWigiDash.Widgets.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
+    <ProjectReference Include="..\ModernWigiDash.Service\ModernWigiDash.Service.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -12,18 +13,33 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\WinUSBNet.dll" Link="WinUSBNet.dll">
+    <!-- Vendor DLLs removed - using clean native HID/WinUSB transport -->
+    <Resource Include="Resources\Fonts\Geist-VariableFont_wght.ttf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    </Resource>
+    <Resource Include="Resources\Fonts\Geist-Regular.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Fonts\Geist-Medium.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Fonts\Geist-SemiBold.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Fonts\Geist-Bold.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
   </ItemGroup>
 </Project>

@@ -1,15 +1,26 @@
-using System;
 using System.IO;
 using System.Windows;
+using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;
 
 public partial class App : Application
 {
-    private static readonly string CrashLogPath = @"c:\Users\tobia\.gemini\antigravity\scratch\ModernWigiDash\crash.log";
+    private static readonly string CrashLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
+    private static readonly string StartupLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "display_device.log");
 
     public App()
     {
+        // Log startup so we know the app actually launched
+        try
+        {
+            File.AppendAllText(StartupLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] [App] === Application starting === BaseDir={AppDomain.CurrentDomain.BaseDirectory}{Environment.NewLine}");
+        }
+        catch (IOException)
+        {
+            // Startup log is best-effort; silently ignore if file is locked
+        }
+
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             LogCrash(e.ExceptionObject as Exception);
@@ -22,6 +33,13 @@ public partial class App : Application
         };
     }
 
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        ThemeSettings.Theme = ThemeSettings.Load();
+        ThemeManager.ApplyToApplication();
+        base.OnStartup(e);
+    }
+
     private static void LogCrash(Exception? ex)
     {
         string msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] UNHANDLED EXCEPTION: {ex}{Environment.NewLine}";
@@ -30,6 +48,9 @@ public partial class App : Application
         {
             File.AppendAllText(CrashLogPath, msg);
         }
-        catch { }
+        catch (IOException)
+        {
+            // Crash log is best-effort; silently ignore if file is locked
+        }
     }
 }

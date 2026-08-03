@@ -1,5 +1,6 @@
 using SkiaSharp;
 using ModernWigiDash.Sdk;
+using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
@@ -16,52 +17,40 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     [WidgetProperty("Time Format", WidgetPropertyType.Choice, "12 or 24 hour format", "12H", "12H", "24H")]
     public string TimeFormat { get; set; } = "12H";
 
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color for typography or hands", "#E53935")]
-    public string AccentColorHex { get; set; } = "#E53935"; // Material 3 Red
+    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color for typography or hands", "#870000")]
+    public string AccentColorHex { get; set; } = "#FF0000";
+
+    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Primary text, tick, and hand color", "#FFFFFF")]
+    public string TextColorHex { get; set; } = "#FFFFFF";
 
     [WidgetProperty("Show Date", WidgetPropertyType.Boolean, "Display calendar date badge", true)]
     public bool ShowDate { get; set; } = true;
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        using var bgPaint = new SKPaint
-        {
-            Color = new SKColor(31, 34, 50, 230),
-            IsAntialias = true
-        };
-        using var borderPaint = new SKPaint
-        {
-            Color = new SKColor(229, 57, 53, 100),
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.5f,
-            IsAntialias = true
-        };
-        canvas.DrawRoundRect(bounds, 16f, 16f, bgPaint);
-        canvas.DrawRoundRect(bounds, 16f, 16f, borderPaint);
-
         var now = DateTime.Now;
-        SKColor.TryParse(AccentColorHex, out var accentColor);
-        if (accentColor.Alpha == 0) accentColor = new SKColor(229, 57, 53);
+        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsed) ? parsed : new SKColor(135, 0, 0);
+        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
 
         if (ClockMode == "Analog")
         {
-            RenderAnalog(canvas, bounds, now, accentColor);
+            RenderAnalog(canvas, bounds, now, accentColor, textColor);
         }
         else
         {
-            RenderDigital(canvas, bounds, now, accentColor);
+            RenderDigital(canvas, bounds, now, accentColor, textColor);
         }
     }
 
-    private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor)
+    private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
-        string timeStr = TimeFormat == "24H" ? now.ToString("HH:mm:ss") : now.ToString("hh:mm:ss");
+        string timeStr = TimeFormat == "24H" ? now.ToString("HH:mm") : now.ToString("hh:mm");
         string amPmStr = TimeFormat == "24H" ? "" : now.ToString("tt");
         string dateStr = now.ToString("dddd, MMMM dd, yyyy");
 
         float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
-        using var font = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), fontSize);
-        using var textPaint = new SKPaint { Color = new SKColor(244, 239, 244), IsAntialias = true };
+        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize);
+        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
 
         var timeBounds = new SKRect();
         font.MeasureText(timeStr, out timeBounds, textPaint);
@@ -73,28 +62,28 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
         if (!string.IsNullOrEmpty(amPmStr))
         {
-            using var amFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), fontSize * 0.35f);
+            using var amFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize * 0.35f);
             using var amPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawText(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), SKTextAlign.Left, amFont, amPaint);
         }
 
         if (ShowDate)
         {
-            using var dateFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal), fontSize * 0.32f);
-            using var datePaint = new SKPaint { Color = new SKColor(224, 194, 196), IsAntialias = true };
+            using var dateFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, fontSize * 0.32f);
+            using var datePaint = new SKPaint { Color = textColor, IsAntialias = true };
             var dateBounds = new SKRect();
             dateFont.MeasureText(dateStr, out dateBounds, datePaint);
             canvas.DrawText(dateStr, centerX - (dateBounds.Width / 2f), centerY + (fontSize * 0.5f) + 10f, SKTextAlign.Left, dateFont, datePaint);
         }
     }
 
-    private void RenderAnalog(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor)
+    private void RenderAnalog(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
         float radius = Math.Min(bounds.Width, bounds.Height) / 2f - 15f;
         float cx = bounds.MidX;
         float cy = bounds.MidY;
 
-        using var facePaint = new SKPaint { Color = new SKColor(255, 255, 255, 10), IsAntialias = true };
+        using var facePaint = new SKPaint { Color = textColor.WithAlpha(10), IsAntialias = true };
         canvas.DrawCircle(cx, cy, radius, facePaint);
 
         for (int i = 0; i < 12; i++)
@@ -104,7 +93,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
             float y1 = cy - (radius - 12f) * (float)Math.Cos(angle);
             float x2 = cx + radius * (float)Math.Sin(angle);
             float y2 = cy - radius * (float)Math.Cos(angle);
-            using var tickPaint = new SKPaint { Color = i % 3 == 0 ? accentColor : new SKColor(244, 239, 244), StrokeWidth = i % 3 == 0 ? 3f : 1.5f, IsAntialias = true };
+            using var tickPaint = new SKPaint { Color = textColor, StrokeWidth = i % 3 == 0 ? 3f : 1.5f, IsAntialias = true };
             canvas.DrawLine(x1, y1, x2, y2, tickPaint);
         }
 
@@ -112,15 +101,15 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         float minAngle = (now.Minute + now.Second / 60f) * 6f * (float)(Math.PI / 180f);
         float secAngle = now.Second * 6f * (float)(Math.PI / 180f);
 
-        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, 4.5f, new SKColor(244, 239, 244));
-        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, 3f, new SKColor(244, 239, 244));
+        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, 4.5f, textColor);
+        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, 3f, textColor);
         DrawHand(canvas, cx, cy, secAngle, radius * 0.85f, 1.5f, accentColor);
 
-        using var centerDot = new SKPaint { Color = accentColor, IsAntialias = true };
+        using var centerDot = new SKPaint { Color = textColor, IsAntialias = true };
         canvas.DrawCircle(cx, cy, 5f, centerDot);
     }
 
-    private void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, float width, SKColor color)
+    private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, float width, SKColor color)
     {
         float x = cx + length * (float)Math.Sin(angleRad);
         float y = cy - length * (float)Math.Cos(angleRad);

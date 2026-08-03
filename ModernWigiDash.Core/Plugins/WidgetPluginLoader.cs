@@ -19,14 +19,14 @@ public class PluginInfo
 
 public class WidgetPluginLoader
 {
-    private readonly Dictionary<string, AssemblyLoadContext> _loadContexts = new();
-    private readonly Dictionary<string, PluginInfo> _registeredPlugins = new();
+    private readonly Dictionary<string, AssemblyLoadContext> _loadContexts = [];
+    private readonly Dictionary<string, PluginInfo> _registeredPlugins = [];
 
     public IReadOnlyCollection<PluginInfo> RegisteredPlugins => _registeredPlugins.Values;
 
     public void RegisterBuiltInPlugin(Type widgetType)
     {
-        if (!typeof(IModernWidget).IsAssignableFrom(widgetType) || widgetType.IsAbstract || widgetType.IsInterface)
+        if (!typeof(ModernWidget).IsAssignableFrom(widgetType) || widgetType.IsAbstract || widgetType.IsInterface)
             return;
 
         var attr = widgetType.GetCustomAttribute<WidgetMetadataAttribute>();
@@ -60,7 +60,7 @@ public class WidgetPluginLoader
             var assembly = alc.LoadFromAssemblyPath(Path.GetFullPath(dllPath));
             foreach (var type in assembly.GetTypes())
             {
-                if (typeof(IModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
+                if (typeof(ModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
                 {
                     RegisterBuiltInPlugin(type);
                 }
@@ -75,11 +75,11 @@ public class WidgetPluginLoader
         }
     }
 
-    public IModernWidget? CreateInstance(string pluginId)
+    public ModernWidget? CreateInstance(string pluginId)
     {
         if (_registeredPlugins.TryGetValue(pluginId, out var info))
         {
-            return (IModernWidget?)Activator.CreateInstance(info.WidgetType);
+            return (ModernWidget?)Activator.CreateInstance(info.WidgetType);
         }
         return null;
     }

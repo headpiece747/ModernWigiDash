@@ -37,7 +37,26 @@ public enum WidgetPropertyType
     Boolean,
     Color,
     Choice,
-    SensorSelector
+    SensorSelector,
+    Path,
+    ActionList,
+    Button
+}
+
+public sealed record WidgetPropertyOption(string Value, string DisplayName)
+{
+    public override string ToString() => DisplayName;
+}
+
+public interface IWidgetPropertyOptionsProvider
+{
+    IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName);
+}
+
+public interface IWidgetActionPresentationProvider
+{
+    string? GetWidgetActionLabel(string propertyName);
+    bool IsWidgetActionActive(string propertyName);
 }
 
 [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
@@ -60,6 +79,6 @@ public sealed class WidgetPropertyAttribute : Attribute
         PropertyType = propertyType;
         Description = description;
         DefaultValue = defaultValue;
-        Options = options ?? Array.Empty<string>();
+        Options = options ?? [];
     }
 }

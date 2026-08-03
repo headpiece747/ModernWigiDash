@@ -361,3 +361,12 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local agent and editor tooling
+/.agents/
+/.codegraph/
+/.opencode/
+/data/
+/opencode.json
+/skills-lock.json
+/repomix-output.xml

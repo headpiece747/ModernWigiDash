@@ -2,20 +2,20 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Sdk;
 
-public interface IModernWidget : IAsyncDisposable
+public interface ModernWidget : IAsyncDisposable
 {
     string InstanceId { get; set; }
     WidgetSizeMode SizeMode { get; }
     SKSize DefaultSize { get; }
     SKSize MinimumSize { get; }
 
-    ValueTask InitializeAsync(IWidgetContext context, CancellationToken cancellationToken = default);
+    ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default);
     void Render(SKCanvas canvas, SKRect bounds);
     void OnTouch(SKPoint localPoint, TouchEventType eventType);
     void OnPropertyChanged(string propertyName, object? newValue);
 }
 
-public abstract class ModernWidgetBase : IModernWidget
+public abstract class ModernWidgetBase : ModernWidget
 {
     public string InstanceId { get; set; } = Guid.NewGuid().ToString();
     
@@ -23,9 +23,9 @@ public abstract class ModernWidgetBase : IModernWidget
     public virtual SKSize DefaultSize => new SKSize(408, 300); // 2x2 grid cell default
     public virtual SKSize MinimumSize => new SKSize(100, 50);
 
-    protected IWidgetContext Context { get; private set; } = null!;
+    protected ModernWigiDashContext Context { get; private set; } = null!;
 
-    public virtual ValueTask InitializeAsync(IWidgetContext context, CancellationToken cancellationToken = default)
+    public virtual ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         Context = context ?? throw new ArgumentNullException(nameof(context));
         return ValueTask.CompletedTask;
@@ -48,4 +48,13 @@ public abstract class ModernWidgetBase : IModernWidget
     {
         return ValueTask.CompletedTask;
     }
+}
+
+/// <summary>
+/// Optional interface widgets can implement to expose inspector buttons
+/// (WidgetPropertyType.Button) that trigger a widget-specific action.
+/// </summary>
+public interface IWidgetActionInvoker
+{
+    void InvokeWidgetAction(string propertyName);
 }

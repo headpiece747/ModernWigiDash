@@ -3,42 +3,63 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Material 3 (M3) Red Dark Color Scheme -->
-        <Color x:Key="BgDarkColor">#0F111A</Color>
-        <Color x:Key="BgPanelColor">#161824</Color>
-        <Color x:Key="BgCardColor">#1F2232</Color>
-        <Color x:Key="BorderColor">#3B282A</Color>
+        <!-- Custom Crimson & Slate Scheme — values are overridden at runtime by app_theme.json -->
+        <Color x:Key="BgDarkColor">#1B2930</Color>
+        <Color x:Key="BgPanelColor">#243742</Color>
+        <Color x:Key="BgCardColor">#2F4550</Color>
+        <Color x:Key="BorderColor">#586F7C</Color>
         
-        <!-- M3 Red Primary Tokens -->
-        <Color x:Key="AccentRedColor">#E53935</Color>
-        <Color x:Key="M3PrimaryColor">#FFB4AB</Color>
-        <Color x:Key="M3PrimaryContainerColor">#8C1D18</Color>
-        <Color x:Key="M3OnPrimaryContainerColor">#FFDAD6</Color>
-        <Color x:Key="AccentGreenColor">#81C784</Color>
-        <Color x:Key="TextPrimaryColor">#F4EFF4</Color>
-        <Color x:Key="TextSecondaryColor">#E0C2C4</Color>
+        <!-- Primary & Secondary Accent Tokens -->
+        <Color x:Key="AccentRedColor">#870000</Color>
+        <Color x:Key="M3PrimaryColor">#FFCD85</Color>
+        <Color x:Key="M3PrimaryContainerColor">#586F7C</Color>
+        <Color x:Key="M3OnPrimaryContainerColor">#FFCD85</Color>
+        <Color x:Key="AccentGreenColor">#FFCD85</Color>
+        <Color x:Key="TextPrimaryColor">#C6E0FF</Color>
+        <Color x:Key="TextSecondaryColor">#98B4C8</Color>
 
-        <SolidColorBrush x:Key="BgDark" Color="{StaticResource BgDarkColor}"/>
-        <SolidColorBrush x:Key="BgPanel" Color="{StaticResource BgPanelColor}"/>
-        <SolidColorBrush x:Key="BgCard" Color="{StaticResource BgCardColor}"/>
-        <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
-        <SolidColorBrush x:Key="AccentRed" Color="{StaticResource AccentRedColor}"/>
-        <SolidColorBrush x:Key="M3Primary" Color="{StaticResource M3PrimaryColor}"/>
-        <SolidColorBrush x:Key="AccentBlue" Color="{StaticResource M3PrimaryColor}"/>
-        <SolidColorBrush x:Key="M3PrimaryContainer" Color="{StaticResource M3PrimaryContainerColor}"/>
-        <SolidColorBrush x:Key="M3OnPrimaryContainer" Color="{StaticResource M3OnPrimaryContainerColor}"/>
-        <SolidColorBrush x:Key="AccentGreen" Color="{StaticResource AccentGreenColor}"/>
-        <SolidColorBrush x:Key="TextPrimary" Color="{StaticResource TextPrimaryColor}"/>
-        <SolidColorBrush x:Key="TextSecondary" Color="{StaticResource TextSecondaryColor}"/>
+        <!-- Interactive states & chrome extras -->
+        <Color x:Key="ControlHoverColor">#3D5A68</Color>
+        <Color x:Key="DropdownHoverColor">#25334D</Color>
+        <Color x:Key="TitleBarColor">#0F111A</Color>
+        <Color x:Key="StatusBarBackgroundColor">#10121C</Color>
+        <Color x:Key="DangerBackgroundColor">#7F1D1D</Color>
+        <Color x:Key="DangerBorderColor">#EF4444</Color>
+        <Color x:Key="SuccessBackgroundColor">#14532D</Color>
+        <Color x:Key="SuccessBorderColor">#22C55E</Color>
 
-        <!-- Modern M3 Red Button Style -->
+        <SolidColorBrush x:Key="BgDark" Color="{DynamicResource BgDarkColor}"/>
+        <SolidColorBrush x:Key="BgPanel" Color="{DynamicResource BgPanelColor}"/>
+        <SolidColorBrush x:Key="BgCard" Color="{DynamicResource BgCardColor}"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="{DynamicResource BorderColor}"/>
+        <SolidColorBrush x:Key="AccentRed" Color="{DynamicResource AccentRedColor}"/>
+        <SolidColorBrush x:Key="M3Primary" Color="{DynamicResource M3PrimaryColor}"/>
+        <SolidColorBrush x:Key="AccentBlue" Color="{DynamicResource TextPrimaryColor}"/>
+        <SolidColorBrush x:Key="M3PrimaryContainer" Color="{DynamicResource M3PrimaryContainerColor}"/>
+        <SolidColorBrush x:Key="M3OnPrimaryContainer" Color="{DynamicResource M3OnPrimaryContainerColor}"/>
+        <SolidColorBrush x:Key="AccentGreen" Color="{DynamicResource AccentGreenColor}"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="{DynamicResource TextPrimaryColor}"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="{DynamicResource TextSecondaryColor}"/>
+        <SolidColorBrush x:Key="ControlHover" Color="{DynamicResource ControlHoverColor}"/>
+        <SolidColorBrush x:Key="DropdownHover" Color="{DynamicResource DropdownHoverColor}"/>
+        <SolidColorBrush x:Key="TitleBarBrush" Color="{DynamicResource TitleBarColor}"/>
+        <SolidColorBrush x:Key="StatusBarBackground" Color="{DynamicResource StatusBarBackgroundColor}"/>
+        <SolidColorBrush x:Key="DangerBackground" Color="{DynamicResource DangerBackgroundColor}"/>
+        <SolidColorBrush x:Key="DangerBorder" Color="{DynamicResource DangerBorderColor}"/>
+        <SolidColorBrush x:Key="SuccessBackground" Color="{DynamicResource SuccessBackgroundColor}"/>
+        <SolidColorBrush x:Key="SuccessBorder" Color="{DynamicResource SuccessBorderColor}"/>
+
+        <!-- Geist Variable Font Resource -->
+        <FontFamily x:Key="PrimaryFont">pack://application:,,,/Resources/Fonts/#Geist, Segoe UI</FontFamily>
+
+        <!-- Custom Button Style -->
         <Style TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource BgCard}"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource BgCard}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource PrimaryFont}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
@@ -52,11 +73,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="#2D1F23"/>
-                                <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource AccentRed}"/>
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource ControlHover}"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource M3Primary}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="{StaticResource AccentRed}"/>
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource AccentRed}"/>
                                 <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -68,22 +89,131 @@
             </Setter>
         </Style>
 
-        <!-- M3 Red Primary Button Style -->
+        <!-- Custom Primary Accent Button Style -->
         <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Background" Value="{StaticResource AccentRed}"/>
-            <Setter Property="BorderBrush" Value="#FF897D"/>
+            <Setter Property="Background" Value="{DynamicResource AccentRed}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource M3Primary}"/>
             <Setter Property="Foreground" Value="White"/>
         </Style>
 
-        <!-- Modern M3 Red Input Style -->
+        <!-- Dark ComboBox Style -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource BgCard}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="PART_Border" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8" Padding="{TemplateBinding Padding}">
+                                <Grid>
+                                    <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      Margin="4,0,24,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                    <ToggleButton x:Name="toggleButton" Background="Transparent" BorderThickness="0" Width="20"
+                                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                                  Focusable="False" ClickMode="Press" HorizontalAlignment="Right">
+                                        <TextBlock Text="▼" FontSize="8" Foreground="{DynamicResource AccentBlue}" VerticalAlignment="Center"/>
+                                    </ToggleButton>
+                                </Grid>
+                            </Border>
+                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                                   x:Name="PART_Popup" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border x:Name="DropDown" Background="{DynamicResource BgCard}"
+                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" MinWidth="{TemplateBinding ActualWidth}">
+                                    <ScrollViewer Margin="4">
+                                        <StackPanel IsItemsHost="True"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{DynamicResource BgCard}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource DropdownHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource DropdownHover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Custom Dark ScrollBar Style (matches OS title bar) -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="MinWidth" Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBorder" CornerRadius="4" Margin="2"
+                                                        Background="{DynamicResource TitleBarBrush}"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource BgCard}"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource BorderBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter Property="Width" Value="Auto"/>
+                                <Setter Property="Height" Value="10"/>
+                                <Setter Property="MinHeight" Value="10"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern Input Style -->
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="{StaticResource BgCard}"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource BgCard}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,5"/>
             <Setter Property="FontFamily" Value="Segoe UI"/>
-            <Setter Property="CaretBrush" Value="{StaticResource AccentRed}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource AccentBlue}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">

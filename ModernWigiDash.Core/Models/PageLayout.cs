@@ -3,22 +3,22 @@ namespace ModernWigiDash.Core.Models;
 public class PageLayout
 {
     public string PageId { get; set; } = Guid.NewGuid().ToString();
-    public string PageName { get; set; } = "Main Dashboard";
-    public string BackgroundHexColor { get; set; } = "#12141D";
+    public string PageName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Main Dashboard" : value.Trim(); } = "Main Dashboard";
+    public string BackgroundHexColor { get; set => field = string.IsNullOrWhiteSpace(value) ? "#12141D" : value.Trim(); } = "#12141D";
     public string BackgroundImagePath { get; set; } = string.Empty;
 
     public bool SnapToGrid { get; set; } = true;
-    public float GridSpacingPx { get; set; } = 25f;
+    public float GridSpacingPx { get; set => field = Math.Clamp(value, 5f, 100f); } = 25f;
 
-    public List<PlacedWidgetInstance> Widgets { get; set; } = new();
+    public List<PlacedWidgetInstance> Widgets { get; set; } = [];
 }
 
 public class ProfileLayout
 {
     public string ProfileId { get; set; } = Guid.NewGuid().ToString();
-    public string ProfileName { get; set; } = "Default Profile";
-    public List<PageLayout> Pages { get; set; } = new() { new PageLayout() };
-    public int ActivePageIndex { get; set; } = 0;
+    public string ProfileName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Default Profile" : value.Trim(); } = "Default Profile";
+    public List<PageLayout> Pages { get; set; } = [new PageLayout()];
+    public int ActivePageIndex { get; set => field = Math.Max(0, value); } = 0;
 
     public PageLayout ActivePage => Pages.Count > 0 && ActivePageIndex >= 0 && ActivePageIndex < Pages.Count
         ? Pages[ActivePageIndex]

@@ -1,4 +1,4 @@
-using SkiaSharp;
+﻿using SkiaSharp;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 
@@ -6,7 +6,8 @@ namespace ModernWigiDash.Core.Rendering;
 
 public class SkiaFrameCompositor : IDisposable
 {
-    private readonly SKBitmap _frameBuffer = new(1024, 600);
+    private readonly SKBitmap _frameBuffer = new(1016, 592);
+    private readonly SKTypeface _uiTypeface = FontHelper.GeistTypeface;
     private bool _isEditMode = true;
     private PlacedWidgetInstance? _selectedWidget;
 
@@ -26,11 +27,11 @@ public class SkiaFrameCompositor : IDisposable
     {
         using var canvas = new SKCanvas(_frameBuffer);
         
-        // 1. Clear background with dark slate / page background color
+        // 1. Clear background with charcoal slate / page background color
         if (SKColor.TryParse(page.BackgroundHexColor, out var bgColor))
             canvas.Clear(bgColor);
         else
-            canvas.Clear(new SKColor(18, 20, 29)); // #12141D
+            canvas.Clear(new SKColor(27, 41, 48)); // #1B2930
 
         // 2. Draw Grid Lines if SnapToGrid and Edit Mode are enabled
         if (_isEditMode && page.SnapToGrid)
@@ -43,13 +44,13 @@ public class SkiaFrameCompositor : IDisposable
             };
 
             // Classic 5x4 cell grid lines or custom spacing
-            for (int x = 0; x <= 1024; x += (int)GridSizeExtensions.CellWidth)
+            for (int x = 0; x <= 1016; x += (int)GridSizeExtensions.CellWidth)
             {
-                canvas.DrawLine(x, 0, x, 600, gridPaint);
+                canvas.DrawLine(x, 0, x, 592, gridPaint);
             }
-            for (int y = 0; y <= 600; y += (int)GridSizeExtensions.CellHeight)
+            for (int y = 0; y <= 592; y += (int)GridSizeExtensions.CellHeight)
             {
-                canvas.DrawLine(0, y, 1024, y, gridPaint);
+                canvas.DrawLine(0, y, 1016, y, gridPaint);
             }
         }
 
@@ -108,12 +109,30 @@ public class SkiaFrameCompositor : IDisposable
                         Color = SKColors.White,
                         IsAntialias = true
                     };
-                    using var font = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 12f);
+                    using var font = FontHelper.CreateFont(_uiTypeface, 12f);
                     string badgeText = $"{widget.DisplayName} (Z: {widget.ZIndex})";
                     var textBounds = new SKRect();
                     font.MeasureText(badgeText, out textBounds, textPaint);
                     canvas.DrawRect(0, -20, textBounds.Width + 10, 20, badgeBg);
                     canvas.DrawText(badgeText, 5, -5, SKTextAlign.Left, font, textPaint);
+
+                    // Draw resize handle at bottom-right corner
+                    using var handlePaint = new SKPaint
+                    {
+                        Color = new SKColor(59, 130, 246, 200),
+                        Style = SKPaintStyle.Fill,
+                        IsAntialias = true
+                    };
+                    float hs = 10f;
+                    canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, handlePaint);
+                    using var handleStroke = new SKPaint
+                    {
+                        Color = SKColors.White,
+                        Style = SKPaintStyle.Stroke,
+                        StrokeWidth = 1.5f,
+                        IsAntialias = true
+                    };
+                    canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, handleStroke);
                 }
             }
             finally
@@ -122,64 +141,16 @@ public class SkiaFrameCompositor : IDisposable
             }
         }
 
-        // 4. Render Page Navigation Controls & Page Dots if multiple pages exist
-        if (pageCount > 1)
-        {
-            // Draw Previous Page Arrow (Left)
-            if (pageIndex > 0)
-            {
-                using var arrowBg = new SKPaint { Color = new SKColor(0, 0, 0, 120), IsAntialias = true };
-                canvas.DrawCircle(24, 300, 20, arrowBg);
-                using var arrowFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 18f);
-                using var arrowPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-                canvas.DrawText("◄", 17, 306, SKTextAlign.Left, arrowFont, arrowPaint);
-            }
-
-            // Draw Next Page Arrow (Right)
-            if (pageIndex < pageCount - 1)
-            {
-                using var arrowBg = new SKPaint { Color = new SKColor(0, 0, 0, 120), IsAntialias = true };
-                canvas.DrawCircle(1000, 300, 20, arrowBg);
-                using var arrowFont = new SKFont(SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold), 18f);
-                using var arrowPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-                canvas.DrawText("►", 993, 306, SKTextAlign.Left, arrowFont, arrowPaint);
-            }
-
-            // Draw Bottom Page Dots
-            float dotSpacing = 16f;
-            float totalDotsWidth = (pageCount - 1) * dotSpacing;
-            float startX = 512f - (totalDotsWidth / 2f);
-            float dotY = 582f;
-
-            for (int i = 0; i < pageCount; i++)
-            {
-                float dx = startX + (i * dotSpacing);
-                bool isActive = (i == pageIndex);
-                using var dotPaint = new SKPaint
-                {
-                    Color = isActive ? new SKColor(59, 130, 246) : new SKColor(255, 255, 255, 100),
-                    IsAntialias = true
-                };
-                canvas.DrawCircle(dx, dotY, isActive ? 5f : 3.5f, dotPaint);
-            }
-        }
     }
 
-    public PlacedWidgetInstance? HitTest(PageLayout page, float pointX, float pointY)
+    public static PlacedWidgetInstance? HitTest(PageLayout page, float pointX, float pointY)
     {
         // Check top-most widgets first (highest ZIndex)
         var sortedDesc = page.Widgets.OrderByDescending(w => w.ZIndex);
-        foreach (var widget in sortedDesc)
-        {
-            if (widget.ContainsPoint(pointX, pointY))
-            {
-                return widget;
-            }
-        }
-        return null;
+        return sortedDesc.FirstOrDefault(w => w.ContainsPoint(pointX, pointY));
     }
 
-    public void RouteTouch(PageLayout page, float pointX, float pointY, TouchEventType eventType)
+    public static void RouteTouch(PageLayout page, float pointX, float pointY, TouchEventType eventType)
     {
         var target = HitTest(page, pointX, pointY);
         if (target?.ActiveInstance != null)
@@ -189,8 +160,22 @@ public class SkiaFrameCompositor : IDisposable
         }
     }
 
+    private bool _disposed;
+
     public void Dispose()
     {
-        _frameBuffer.Dispose();
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed) return;
+        if (disposing)
+        {
+            _frameBuffer.Dispose();
+            _uiTypeface.Dispose();
+        }
+        _disposed = true;
     }
 }

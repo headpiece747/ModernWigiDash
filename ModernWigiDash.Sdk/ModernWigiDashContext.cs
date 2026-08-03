@@ -1,6 +1,6 @@
 namespace ModernWigiDash.Sdk;
 
-public interface IWidgetContext
+public interface ModernWigiDashContext
 {
     // Global telemetry or configuration data passed from host to widget
     string GetSetting(string key, string defaultValue = "");
@@ -11,7 +11,14 @@ public interface IWidgetContext
     // Request a repaint on the Skia canvas
     void RequestRender();
     
-    // Shared sensor access bridge (HWiNFO / AIDA64 / System telemetry values)
+    // Shared sensor access bridge (LibreHardwareMonitor / System telemetry values)
     bool TryGetSensorValue(string sensorId, out float value);
     string GetSensorFormattedString(string sensorId);
+}
+
+public interface IWidgetHostInteraction
+{
+    void RequestInspectorRefresh();
+    void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt);
+    void CloseDeviceAuthorization();
 }

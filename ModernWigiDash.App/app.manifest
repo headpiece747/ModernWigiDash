@@ -4,8 +4,8 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- Require Administrator privileges so WinUSB can open G.SKILL WigiDash hardware -->
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <!-- Run as standard user (non-administrator) -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
