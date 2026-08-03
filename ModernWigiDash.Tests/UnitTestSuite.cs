@@ -592,4 +592,16 @@ public class UnitTestSuite
         Assert.AreEqual("#A1A1AA", theme.TextSecondary);
         Assert.AreEqual("#0B0B0C", theme.TitleBar);
     }
+
+    [TestMethod]
+    public void FontHelper_GetTypefaceForCodepoint_ResolvesEmojiFallback()
+    {
+        var geistTf = FontHelper.GeistTypeface;
+        var latinTf = FontHelper.GetTypefaceForCodepoint('A', SKFontStyle.Normal);
+        Assert.AreEqual(geistTf.FamilyName, latinTf.FamilyName);
+
+        var emojiTf = FontHelper.GetTypefaceForCodepoint(0x1F600, SKFontStyle.Normal);
+        Assert.IsNotNull(emojiTf);
+        Assert.AreNotEqual(IntPtr.Zero, emojiTf.Handle);
+    }
 }
