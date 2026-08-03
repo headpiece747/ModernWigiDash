@@ -60,24 +60,39 @@ public static class FontHelper
 
         return _fallbackCache.GetOrAdd((codepoint, style), key =>
         {
-            SKTypeface? matched;
-            lock (_fontManagerLock)
-            {
-                matched = SKFontManager.Default.MatchCharacter(key.Codepoint);
-            }
-            if (matched != null && matched.Handle != IntPtr.Zero)
-            {
-                return matched;
-            }
-
             var emojiTf = SKTypeface.FromFamilyName("Segoe UI Emoji", key.Style);
-            if (emojiTf != null && emojiTf.Handle != IntPtr.Zero) return emojiTf;
+            if (emojiTf != null && emojiTf.Handle != IntPtr.Zero && emojiTf.ContainsGlyph(key.Codepoint))
+            {
+                return emojiTf;
+            }
 
             var symbolTf = SKTypeface.FromFamilyName("Segoe UI Symbol", key.Style);
-            if (symbolTf != null && symbolTf.Handle != IntPtr.Zero) return symbolTf;
+            if (symbolTf != null && symbolTf.Handle != IntPtr.Zero && symbolTf.ContainsGlyph(key.Codepoint))
+            {
+                return symbolTf;
+            }
 
             var segoeTf = SKTypeface.FromFamilyName("Segoe UI", key.Style);
-            if (segoeTf != null && segoeTf.Handle != IntPtr.Zero) return segoeTf;
+            if (segoeTf != null && segoeTf.Handle != IntPtr.Zero && segoeTf.ContainsGlyph(key.Codepoint))
+            {
+                return segoeTf;
+            }
+
+            try
+            {
+                SKTypeface? matched;
+                lock (_fontManagerLock)
+                {
+                    matched = SKFontManager.Default.MatchCharacter("Segoe UI Emoji", key.Style, null, key.Codepoint);
+                }
+                if (matched != null && matched.Handle != IntPtr.Zero)
+                {
+                    return matched;
+                }
+            }
+            catch
+            {
+            }
 
             return SKTypeface.Default;
         });

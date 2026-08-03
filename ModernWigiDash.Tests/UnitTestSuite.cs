@@ -604,4 +604,15 @@ public class UnitTestSuite
         Assert.IsNotNull(emojiTf);
         Assert.AreNotEqual(IntPtr.Zero, emojiTf.Handle);
     }
+
+    [TestMethod]
+    public void TwitchWidget_RendersMessagesWithEmojisWithoutErrors()
+    {
+        var widget = new TwitchChatStreamWidget();
+        using var bitmap = new SKBitmap(400, 300);
+        using var canvas = new SKCanvas(bitmap);
+        var bounds = new SKRect(0, 0, 400, 300);
+        widget.AddTestChatMessageForTesting("GamerOne", "Hello world! 🔥 🎉 💬");
+        widget.Render(canvas, bounds);
+    }
 }

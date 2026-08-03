@@ -627,6 +627,15 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         Context.RequestRender();
     }
 
+    internal void AddTestChatMessageForTesting(string username, string text)
+    {
+        lock (_messagesLock)
+        {
+            _messages.Add(new ChatMessage(username, text, SKColors.White));
+            while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
+        }
+    }
+
     private static string GetTag(string[] tags, string key)
     {
         foreach (var t in tags)
@@ -661,7 +670,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         foreach (var word in text.Split(' '))
         {
             var candidate = current.Length == 0 ? word : current.ToString() + " " + word;
-            if (font.MeasureText(candidate) <= maxWidth || current.Length == 0)
+            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth || current.Length == 0)
             {
                 if (current.Length > 0) current.Append(' ');
                 current.Append(word);
@@ -701,7 +710,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         float top = bounds.Top + pad;
         string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
-        canvas.DrawText(channelBadge, bounds.Left + pad, top + titleSize, SKTextAlign.Left, badgeFont, badgePaint);
+        canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, badgePaint, SKTextAlign.Left);
 
         string statusText = _status switch
         {
@@ -709,7 +718,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             StatusConnecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
             _ => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
         };
-        canvas.DrawText(statusText, bounds.Right - pad, top + titleSize, SKTextAlign.Right, statusFont, statusPaint);
+        canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;
 
@@ -741,7 +750,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 StatusDisconnected when !AutoConnect => "Tap to connect",
                 _ => "Waiting for connection…"
             };
-            canvas.DrawText(hint, contentBounds.Left, contentBounds.Top + msgSize, SKTextAlign.Left, emptyFont, emptyPaint);
+            canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
             canvas.Restore();
             return;
         }
@@ -763,12 +772,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             if (cursor < contentBounds.Top - userLineHeight) break;
 
             userPaint.Color = m.Color;
-            canvas.DrawText(m.Username, contentBounds.Left, cursor + userSize, SKTextAlign.Left, userFont, userPaint);
+            canvas.DrawTextWithFallback(m.Username, contentBounds.Left, cursor + userSize, userFont, userPaint, SKTextAlign.Left);
 
             float msgY = cursor + userLineHeight;
             for (int li = 0; li < lines.Count; li++)
             {
-                canvas.DrawText(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, SKTextAlign.Left, msgFont, msgPaint);
+                canvas.DrawTextWithFallback(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, msgFont, msgPaint, SKTextAlign.Left);
             }
         }
 
