@@ -76,6 +76,45 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void TextLabelWidget_Defaults_MatchSpec()
+    {
+        var widget = new TextLabelWidget();
+        Assert.AreEqual("Your text here", widget.Text);
+        Assert.AreEqual("Geist", widget.FontFamily);
+        Assert.AreEqual(32, widget.FontSize);
+        Assert.AreEqual("#FAFAFA", widget.TextColorHex);
+        Assert.AreEqual("Center", widget.Alignment);
+        Assert.AreEqual("#00000000", widget.BackgroundHex);
+    }
+
+    [TestMethod]
+    public void TextLabelWidget_ProvidesFontOptions()
+    {
+        var widget = new TextLabelWidget();
+        var provider = (IWidgetPropertyOptionsProvider)widget;
+        var options = provider.GetPropertyOptions(nameof(widget.FontFamily));
+        Assert.IsTrue(options.Count > 0);
+        Assert.AreEqual(options[0].Value, options[0].DisplayName);
+        Assert.AreEqual(0, provider.GetPropertyOptions("UnknownProperty").Count);
+    }
+
+    [TestMethod]
+    public void TextLabelWidget_RendersMultiLineTextWithoutExceptions()
+    {
+        var widget = new TextLabelWidget
+        {
+            Text = "Line one\nLine two is a longer line that should wrap",
+            FontFamily = "Arial",
+            FontSize = 24,
+            Alignment = "Center"
+        };
+        using var surface = SKSurface.Create(new SKImageInfo(400, 200));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 400, 200));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout
@@ -289,6 +328,7 @@ public class UnitTestSuite
         Assert.AreEqual("#FAFAFA", new PictureAndGifWidget().TextColorHex);
         Assert.AreEqual("#F59E0B", new HotkeyButtonWidget().ButtonColorHex);
         Assert.AreEqual("#F8FAFC", new TwitchChatStreamWidget().MessageColorHex);
+        Assert.AreEqual("#FAFAFA", new TextLabelWidget().TextColorHex);
     }
 
     [TestMethod]

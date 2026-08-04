@@ -121,6 +121,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         _loader.RegisterBuiltInPlugin(typeof(PictureAndGifWidget));
         _loader.RegisterBuiltInPlugin(typeof(TwitchChatStreamWidget));
         _loader.RegisterBuiltInPlugin(typeof(WeatherForecastWidget));
+        _loader.RegisterBuiltInPlugin(typeof(TextLabelWidget));
 
         // 2. Populate Catalog UI
         ListCatalog.ItemsSource = _loader.RegisteredPlugins;
@@ -1067,6 +1068,73 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                             }
                         };
                         propPanel.Children.Add(combo);
+                    }
+                    else if (attr.PropertyType == WidgetPropertyType.Font)
+                    {
+                        var combo = new ComboBox
+                        {
+                            ItemsSource = propertyOptions.Count > 0
+                                ? propertyOptions
+                                : FontCatalog.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray(),
+                            DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
+                            SelectedValuePath = nameof(WidgetPropertyOption.Value),
+                            SelectedValue = currentVal?.ToString(),
+                            Padding = new Thickness(8, 4, 8, 4)
+                        };
+                        combo.SelectionChanged += (s, e) =>
+                        {
+                            if (_isUpdatingInspector) return;
+                            string? selectedValue = combo.SelectedValue?.ToString();
+                            if (!string.IsNullOrWhiteSpace(selectedValue))
+                            {
+                                prop.SetValue(_selectedWidget.ActiveInstance, selectedValue);
+                                _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, selectedValue);
+                                _selectedWidget.PropertyValues[prop.Name] = selectedValue;
+                            }
+                        };
+                        propPanel.Children.Add(combo);
+                    }
+                    else if (attr.PropertyType == WidgetPropertyType.Icon)
+                    {
+                        var combo = new ComboBox
+                        {
+                            ItemsSource = IconLibrary.Names,
+                            SelectedItem = currentVal?.ToString(),
+                            Padding = new Thickness(8, 4, 8, 4)
+                        };
+                        var preview = new TextBlock
+                        {
+                            FontSize = 22,
+                            Foreground = Brushes.White,
+                            HorizontalAlignment = HorizontalAlignment.Left,
+                            Margin = new Thickness(0, 4, 0, 0)
+                        };
+                        string fontDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Fonts");
+                        if (File.Exists(Path.Combine(fontDir, IconLibrary.FontFileName)))
+                        {
+                            preview.FontFamily = new FontFamily(new Uri(fontDir + "\\"), "./#" + IconLibrary.FontFamilyName);
+                        }
+
+                        void UpdatePreview()
+                        {
+                            preview.Text = IconLibrary.GlyphString(combo.SelectedItem?.ToString() ?? "");
+                        }
+
+                        combo.SelectionChanged += (s, e) =>
+                        {
+                            if (_isUpdatingInspector) return;
+                            string? selectedValue = combo.SelectedItem?.ToString();
+                            if (!string.IsNullOrWhiteSpace(selectedValue))
+                            {
+                                prop.SetValue(_selectedWidget.ActiveInstance, selectedValue);
+                                _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, selectedValue);
+                                _selectedWidget.PropertyValues[prop.Name] = selectedValue;
+                            }
+                            UpdatePreview();
+                        };
+                        propPanel.Children.Add(combo);
+                        propPanel.Children.Add(preview);
+                        UpdatePreview();
                     }
                     else if (attr.PropertyType == WidgetPropertyType.Boolean)
                     {
