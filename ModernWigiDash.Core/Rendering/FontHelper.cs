@@ -228,12 +228,13 @@ public static class FontHelper
     /// </summary>
     public static SKTypeface GetTypeface(string familyName, SKFontStyle style)
     {
-        if (familyName.Equals("Segoe UI Emoji", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(familyName) ||
+            familyName.Equals("Geist", StringComparison.OrdinalIgnoreCase))
         {
-            return SKTypeface.FromFamilyName("Segoe UI Emoji", style) ?? SKTypeface.Default;
+            return _geistTypeface.Value ?? SKTypeface.FromFamilyName("Geist", style) ?? SKTypeface.FromFamilyName("Segoe UI", style) ?? SKTypeface.Default;
         }
 
-        return _geistTypeface.Value ?? SKTypeface.FromFamilyName("Geist", style) ?? SKTypeface.FromFamilyName("Segoe UI", style) ?? SKTypeface.Default;
+        return FontCatalog.GetTypeface(familyName, style);
     }
 
     /// <summary>

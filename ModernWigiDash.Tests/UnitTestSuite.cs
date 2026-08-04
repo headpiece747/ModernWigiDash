@@ -34,6 +34,25 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void FontCatalog_ListsSystemFontFamiliesOnce()
+    {
+        string[] families = FontCatalog.GetAllFamilies();
+        Assert.IsNotNull(families);
+        Assert.IsTrue(families.Length > 0);
+        Assert.AreEqual(families.Length, families.Select(f => f.ToUpperInvariant()).Distinct().Count());
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTypeface_ResolvesNamedSystemFamilies()
+    {
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        SKTypeface direct = SKTypeface.FromFamilyName("Arial", SKFontStyle.Normal);
+        Assert.IsNotNull(arial);
+        Assert.AreNotEqual(IntPtr.Zero, arial.Handle);
+        Assert.AreEqual(direct.FamilyName, arial.FamilyName, true);
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout
