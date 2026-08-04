@@ -303,7 +303,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Button label color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
-    [WidgetProperty("Icon", WidgetPropertyType.Icon, "Material Symbols icon shown above the label (blank = none)", "")]
+    [WidgetProperty("Icon", WidgetPropertyType.Icon, "Griddy icon shown above the label (blank = none)", "")]
     public string Icon { get; set; } = "";
 
     [WidgetProperty("Icon Color", WidgetPropertyType.Color, "Icon color", "#FAFAFA")]
@@ -353,22 +353,17 @@ public class HotkeyButtonWidget : ModernWidgetBase
         }
 
         string label = _isToggled && ToggleActions ? ToggledButtonLabel : ButtonLabel;
-        string glyph = IconLibrary.GlyphString(Icon);
 
-        if (string.IsNullOrEmpty(glyph))
+        if (string.IsNullOrWhiteSpace(Icon) || !GriddyIcons.Contains(Icon))
         {
             DrawLabelOnly(canvas, bounds, label, textColor, Description);
             return;
         }
 
         float iconSize = IconSize > 0 ? IconSize : Math.Min(bounds.Width, bounds.Height) * 0.4f;
-        using var iconFont = FontHelper.CreateFont(IconLibrary.GetTypeface(), iconSize);
-        using var iconPaint = new SKPaint { Color = iconColor, IsAntialias = true };
-
-        var glyphBounds = new SKRect();
-        iconFont.MeasureText(glyph, out glyphBounds, iconPaint);
-        canvas.DrawText(glyph, bounds.MidX - glyphBounds.Width / 2f + IconOffsetX,
-            bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f) + IconOffsetY, SKTextAlign.Left, iconFont, iconPaint);
+        GriddyIcons.Draw(canvas, Icon,
+            new SKPoint(bounds.MidX, bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f)),
+            iconSize, iconColor, IconOffsetX, IconOffsetY);
 
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
         using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, labelSize);

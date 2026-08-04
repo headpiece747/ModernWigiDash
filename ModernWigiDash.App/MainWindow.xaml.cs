@@ -1096,45 +1096,68 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                     }
                     else if (attr.PropertyType == WidgetPropertyType.Icon)
                     {
-                        var combo = new ComboBox
+                        var preview = new System.Windows.Shapes.Path
                         {
-                            ItemsSource = IconLibrary.Names,
-                            SelectedItem = currentVal?.ToString(),
-                            Padding = new Thickness(8, 4, 8, 4)
-                        };
-                        var preview = new TextBlock
-                        {
-                            FontSize = 22,
-                            Foreground = Brushes.White,
+                            Width = 24,
+                            Height = 24,
+                            Fill = Brushes.White,
+                            Stretch = Stretch.Uniform,
                             HorizontalAlignment = HorizontalAlignment.Left,
                             Margin = new Thickness(0, 4, 0, 0)
                         };
-                        string fontDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Fonts");
-                        if (File.Exists(Path.Combine(fontDir, IconLibrary.FontFileName)))
+                        var searchBox = new TextBox
                         {
-                            preview.FontFamily = new FontFamily(new Uri(fontDir + "\\"), "./#" + IconLibrary.FontFamilyName);
+                            Text = currentVal?.ToString() ?? "",
+                            Margin = new Thickness(0, 2, 0, 4),
+                            ToolTip = "Search icons by name"
+                        };
+                        var iconList = new ListBox
+                        {
+                            MaxHeight = 200,
+                            ItemsSource = GriddyIcons.Names.ToList(),
+                            SelectedItem = currentVal?.ToString(),
+                            Padding = new Thickness(4, 4, 4, 4)
+                        };
+
+                        void UpdatePreview(string? iconName)
+                        {
+                            preview.Data = null;
+                            if (string.IsNullOrWhiteSpace(iconName)) return;
+                            if (!GriddyIcons.TryGetPathData(iconName, out string? pathData)) return;
+                            try
+                            {
+                                preview.Data = Geometry.Parse(pathData);
+                            }
+                            catch
+                            {
+                                preview.Data = null;
+                            }
                         }
 
-                        void UpdatePreview()
-                        {
-                            preview.Text = IconLibrary.GlyphString(combo.SelectedItem?.ToString() ?? "");
-                        }
-
-                        combo.SelectionChanged += (s, e) =>
+                        void ApplyIconSelection(string? selectedValue)
                         {
                             if (_isUpdatingInspector) return;
-                            string? selectedValue = combo.SelectedItem?.ToString();
-                            if (!string.IsNullOrWhiteSpace(selectedValue))
-                            {
-                                prop.SetValue(_selectedWidget.ActiveInstance, selectedValue);
-                                _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, selectedValue);
-                                _selectedWidget.PropertyValues[prop.Name] = selectedValue;
-                            }
-                            UpdatePreview();
+                            if (string.IsNullOrWhiteSpace(selectedValue)) return;
+                            prop.SetValue(_selectedWidget.ActiveInstance, selectedValue);
+                            _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, selectedValue);
+                            _selectedWidget.PropertyValues[prop.Name] = selectedValue;
+                            UpdatePreview(selectedValue);
+                        }
+
+                        searchBox.TextChanged += (s, e) =>
+                        {
+                            if (_isUpdatingInspector) return;
+                            string filter = searchBox.Text?.Trim() ?? "";
+                            iconList.ItemsSource = string.IsNullOrEmpty(filter)
+                                ? GriddyIcons.Names.ToList()
+                                : GriddyIcons.Names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToList();
                         };
-                        propPanel.Children.Add(combo);
+                        iconList.SelectionChanged += (s, e) => ApplyIconSelection(iconList.SelectedItem?.ToString());
+
                         propPanel.Children.Add(preview);
-                        UpdatePreview();
+                        propPanel.Children.Add(searchBox);
+                        propPanel.Children.Add(iconList);
+                        UpdatePreview(currentVal?.ToString());
                     }
                     else if (attr.PropertyType == WidgetPropertyType.Boolean)
                     {

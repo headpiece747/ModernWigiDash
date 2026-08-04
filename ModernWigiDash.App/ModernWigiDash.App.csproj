@@ -41,8 +41,5 @@
     <Resource Include="Resources\Fonts\Geist-Bold.ttf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
-    <Resource Include="..\ModernWigiDash.Widgets\Resources\Fonts\MaterialSymbolsRounded-Regular.ttf">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Resource>
   </ItemGroup>
 </Project>

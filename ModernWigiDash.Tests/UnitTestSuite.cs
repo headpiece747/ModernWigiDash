@@ -53,26 +53,29 @@ public class UnitTestSuite
     }
 
     [TestMethod]
-    public void IconLibrary_CuratedIcons_ResolveToGlyphs()
+    public void GriddyIcons_Names_CountAndUnique()
     {
-        string[] required = { "power_settings_new", "play_arrow", "pause", "volume_up", "skip_next", "home" };
-        foreach (string name in required)
-        {
-            Assert.IsTrue(IconLibrary.TryGetGlyph(name, out string glyph), "Missing icon: " + name);
-            Assert.IsFalse(string.IsNullOrEmpty(glyph));
-        }
-        Assert.IsTrue(IconLibrary.Names.Count > 50);
-        Assert.AreEqual("Material Symbols Rounded", IconLibrary.FontFamilyName);
-        Assert.AreEqual("MaterialSymbolsRounded-Regular.ttf", IconLibrary.FontFileName);
+        Assert.IsTrue(GriddyIcons.Names.Count > 1000);
+        Assert.AreEqual(GriddyIcons.Names.Count, GriddyIcons.Names.Distinct().Count());
+        Assert.IsTrue(GriddyIcons.Contains("activity"));
+        Assert.IsTrue(GriddyIcons.Contains("ACTIVITY"));
     }
 
     [TestMethod]
-    public void IconLibrary_UnknownIcons_ReturnEmptyGlyph()
+    public void GriddyIcons_AllPaths_ParseToSkPath()
     {
-        Assert.IsFalse(IconLibrary.TryGetGlyph("definitely_not_an_icon", out string glyph));
-        Assert.AreEqual("", glyph);
-        Assert.AreEqual("", IconLibrary.GlyphString(""));
-        Assert.AreEqual("", IconLibrary.GlyphString(null!));
+        var failed = GriddyIcons.Names.Where(n => !GriddyIcons.TryGetPath(n, out _)).ToList();
+        Assert.AreEqual(0, failed.Count, "Icons failing to parse: " + string.Join(", ", failed.Take(10)));
+    }
+
+    [TestMethod]
+    public void GriddyIcons_Unknown_ReturnsFalse()
+    {
+        Assert.IsFalse(GriddyIcons.Contains("definitely_not_an_icon"));
+        Assert.IsFalse(GriddyIcons.TryGetPathData("definitely_not_an_icon", out string? pathData));
+        Assert.AreEqual("", pathData);
+        Assert.IsFalse(GriddyIcons.TryGetPath("", out _));
+        Assert.IsFalse(GriddyIcons.TryGetPath(null!, out _));
     }
 
     [TestMethod]
@@ -198,9 +201,9 @@ public class UnitTestSuite
     }
 
     [TestMethod]
-    public void HotkeyWidget_WithIcon_RendersWithoutExceptions()
+    public void HotkeyWidget_WithGriddyIcon_RendersWithoutExceptions()
     {
-        var widget = new HotkeyButtonWidget { Icon = "power_settings_new" };
+        var widget = new HotkeyButtonWidget { Icon = "activity" };
         using var surface = SKSurface.Create(new SKImageInfo(200, 150));
         var canvas = surface.Canvas;
         widget.Render(canvas, new SKRect(0, 0, 200, 150));
@@ -221,7 +224,7 @@ public class UnitTestSuite
     {
         var widget = new HotkeyButtonWidget
         {
-            Icon = "power_settings_new",
+            Icon = "activity",
             IconSize = 48,
             IconOffsetX = 10,
             IconOffsetY = -5
