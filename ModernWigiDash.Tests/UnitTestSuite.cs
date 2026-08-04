@@ -208,6 +208,31 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void HotkeyWidget_IconPositionAndSize_DefaultToAutoCenter()
+    {
+        var widget = new HotkeyButtonWidget();
+        Assert.AreEqual(0, widget.IconSize);
+        Assert.AreEqual(0, widget.IconOffsetX);
+        Assert.AreEqual(0, widget.IconOffsetY);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_WithIconSizeAndOffsets_RendersWithoutExceptions()
+    {
+        var widget = new HotkeyButtonWidget
+        {
+            Icon = "power_settings_new",
+            IconSize = 48,
+            IconOffsetX = 10,
+            IconOffsetY = -5
+        };
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
     public void MediaKeyCatalog_ListsSevenActionsWithFriendlyNames()
     {
         Assert.AreEqual(7, MediaKeyCatalog.Options.Count);

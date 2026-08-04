@@ -309,6 +309,15 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Icon Color", WidgetPropertyType.Color, "Icon color", "#FAFAFA")]
     public string IconColorHex { get; set; } = "#FAFAFA";
 
+    [WidgetProperty("Icon Size", WidgetPropertyType.Number, "Icon size in px (0 = auto-scale with the widget)", 0)]
+    public int IconSize { get; set; } = 0;
+
+    [WidgetProperty("Icon Offset X", WidgetPropertyType.Number, "Horizontal shift of the icon in px (negative = left)", 0)]
+    public int IconOffsetX { get; set; } = 0;
+
+    [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
+    public int IconOffsetY { get; set; } = 0;
+
     [WidgetProperty("Toggle Actions", WidgetPropertyType.Boolean, "Run the toggled action list after the first press", false)]
     public bool ToggleActions { get; set; }
 
@@ -352,14 +361,14 @@ public class HotkeyButtonWidget : ModernWidgetBase
             return;
         }
 
-        float iconSize = Math.Min(bounds.Width, bounds.Height) * 0.4f;
+        float iconSize = IconSize > 0 ? IconSize : Math.Min(bounds.Width, bounds.Height) * 0.4f;
         using var iconFont = FontHelper.CreateFont(IconLibrary.GetTypeface(), iconSize);
         using var iconPaint = new SKPaint { Color = iconColor, IsAntialias = true };
 
         var glyphBounds = new SKRect();
         iconFont.MeasureText(glyph, out glyphBounds, iconPaint);
-        canvas.DrawText(glyph, bounds.MidX - glyphBounds.Width / 2f,
-            bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f), SKTextAlign.Left, iconFont, iconPaint);
+        canvas.DrawText(glyph, bounds.MidX - glyphBounds.Width / 2f + IconOffsetX,
+            bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f) + IconOffsetY, SKTextAlign.Left, iconFont, iconPaint);
 
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
         using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, labelSize);
