@@ -36,6 +36,7 @@ public sealed class HotkeyAction
             HotkeyActionKind.Launch => $"Launch {Value}",
             HotkeyActionKind.OpenUrl => $"Open {Value}",
             HotkeyActionKind.Delay => $"Wait {Math.Max(0, DelayMs)} ms",
+            HotkeyActionKind.MediaKey => $"Media: {MediaKeyCatalog.GetDisplayName(Value) ?? Value}",
             _ => $"{Kind}: {Value}"
         };
 }
@@ -233,7 +234,7 @@ internal static class HotkeyActionExecutor
         Process.Start(new ProcessStartInfo(uri.ToString()) { UseShellExecute = true });
     }
 
-    private static ushort ParseVirtualKey(string value)
+    internal static ushort ParseVirtualKey(string value)
     {
         string key = value.Trim().ToUpperInvariant();
         if (key.Length == 1 && ((key[0] is >= 'A' and <= 'Z') || (key[0] is >= '0' and <= '9')))
@@ -270,6 +271,7 @@ internal static class HotkeyActionExecutor
             "VOLUMEDOWN" => 0xAE,
             "MUTE" => 0xAD,
             "PLAYPAUSE" => 0xB3,
+            "STOP" => 0xB2,
             "NEXT" => 0xB0,
             "PREVIOUS" or "PREV" => 0xB1,
             _ => throw new ArgumentException($"Unknown key '{value}'.", nameof(value))

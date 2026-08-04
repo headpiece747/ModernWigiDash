@@ -1349,10 +1349,21 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
         var kind = new ComboBox { ItemsSource = Enum.GetValues<HotkeyActionKind>(), Padding = new Thickness(6, 3, 6, 3) };
         var value = new TextBox { Padding = new Thickness(6, 3, 6, 3) };
+        var mediaKey = new ComboBox
+        {
+            ItemsSource = MediaKeyCatalog.Options,
+            DisplayMemberPath = nameof(MediaKeyOption.DisplayName),
+            Padding = new Thickness(6, 3, 6, 3)
+        };
         var arguments = new TextBox { Padding = new Thickness(6, 3, 6, 3) };
         var delay = new TextBox { Text = "20", Padding = new Thickness(6, 3, 6, 3) };
         var repeat = new TextBox { Text = "1", Padding = new Thickness(6, 3, 6, 3) };
         var enabled = new CheckBox { Content = "Enabled", IsChecked = true, Foreground = Brushes.White, Margin = new Thickness(0, 8, 0, 8) };
+
+        var valueLabel = new TextBlock { Text = "Value", FontSize = 11, Foreground = Brushes.White, Margin = new Thickness(0, 0, 0, 3) };
+        var valueSpacer = new Border { Height = 8, Opacity = 0 };
+        var mediaKeyLabel = new TextBlock { Text = "Media key", FontSize = 11, Foreground = Brushes.White, Margin = new Thickness(0, 0, 0, 3) };
+        var mediaKeySpacer = new Border { Height = 8, Opacity = 0 };
 
         void AddRow(string label, Control control)
         {
@@ -1362,11 +1373,28 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         }
 
         AddRow("Action type", kind);
-        AddRow("Value", value);
+        editor.Children.Add(valueLabel);
+        editor.Children.Add(value);
+        editor.Children.Add(valueSpacer);
+        editor.Children.Add(mediaKeyLabel);
+        editor.Children.Add(mediaKey);
+        editor.Children.Add(mediaKeySpacer);
         AddRow("Arguments (launch only)", arguments);
         AddRow("Delay after action (ms)", delay);
         AddRow("Repeat count", repeat);
         editor.Children.Add(enabled);
+
+        void UpdateMediaKeyVisibility()
+        {
+            bool isMediaKey = kind.SelectedItem is HotkeyActionKind.MediaKey;
+            valueLabel.Visibility = isMediaKey ? Visibility.Collapsed : Visibility.Visible;
+            value.Visibility = isMediaKey ? Visibility.Collapsed : Visibility.Visible;
+            valueSpacer.Visibility = isMediaKey ? Visibility.Collapsed : Visibility.Visible;
+            mediaKeyLabel.Visibility = isMediaKey ? Visibility.Visible : Visibility.Collapsed;
+            mediaKey.Visibility = isMediaKey ? Visibility.Visible : Visibility.Collapsed;
+            mediaKeySpacer.Visibility = isMediaKey ? Visibility.Visible : Visibility.Collapsed;
+        }
+        kind.SelectionChanged += (_, _) => UpdateMediaKeyVisibility();
 
         var listButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 12, 0) };
         var add = new Button { Content = "Add", Padding = new Thickness(10, 4, 10, 4) };
@@ -1394,7 +1422,9 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         {
             if (selected < 0 || selected >= actions.Count) return;
             if (kind.SelectedItem is HotkeyActionKind selectedKind) actions[selected].Kind = selectedKind;
-            actions[selected].Value = value.Text.Trim();
+            actions[selected].Value = (kind.SelectedItem is HotkeyActionKind.MediaKey && mediaKey.SelectedItem is MediaKeyOption mediaOption)
+                ? mediaOption.Value
+                : value.Text.Trim();
             actions[selected].Arguments = arguments.Text;
             actions[selected].DelayMs = int.TryParse(delay.Text, out int parsedDelay) ? Math.Clamp(parsedDelay, 0, 5000) : 20;
             actions[selected].Repeat = int.TryParse(repeat.Text, out int parsedRepeat) ? Math.Clamp(parsedRepeat, 1, 20) : 1;
@@ -1407,10 +1437,12 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             var action = actions[selected];
             kind.SelectedItem = action.Kind;
             value.Text = action.Value;
+            mediaKey.SelectedItem = MediaKeyCatalog.Options.FirstOrDefault(o => o.Value.Equals(action.Value, StringComparison.OrdinalIgnoreCase));
             arguments.Text = action.Arguments;
             delay.Text = action.DelayMs.ToString();
             repeat.Text = action.Repeat.ToString();
             enabled.IsChecked = action.Enabled;
+            UpdateMediaKeyVisibility();
         }
 
         void RefreshList(int select)
