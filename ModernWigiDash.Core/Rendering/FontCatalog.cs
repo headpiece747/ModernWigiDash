@@ -22,6 +22,8 @@ public static class FontCatalog
             {
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var list = new List<string>();
+                if (seen.Add("Geist"))
+                    list.Add("Geist");
                 foreach (string family in SKFontManager.Default.FontFamilies)
                 {
                     if (!string.IsNullOrWhiteSpace(family) && seen.Add(family))

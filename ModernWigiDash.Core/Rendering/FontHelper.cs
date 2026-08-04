@@ -67,11 +67,17 @@ public static class FontHelper
     }
 
     /// <summary>
-    /// Resolves an appropriate SKTypeface for a given codepoint and style, using Geist Variable Font if available,
-    /// or falling back to system matched fonts (e.g. Segoe UI Emoji/Symbol/Segoe UI).
+    /// Resolves an appropriate SKTypeface for a given codepoint and style. The preferred typeface (the
+    /// font the caller actually selected, e.g. from the Font Family property) wins when it contains the
+    /// glyph; otherwise Geist Variable Font is tried, then system matched fonts (Segoe UI Emoji/Symbol/Segoe UI).
     /// </summary>
-    public static SKTypeface GetTypefaceForCodepoint(int codepoint, SKFontStyle style)
+    public static SKTypeface GetTypefaceForCodepoint(int codepoint, SKFontStyle style, SKTypeface? preferred = null)
     {
+        if (preferred is { Handle: not 0 } && ContainsGlyphSafe(preferred, codepoint))
+        {
+            return preferred;
+        }
+
         var geist = GeistTypeface;
         if (geist is { Handle: not 0 } && ContainsGlyphSafe(geist, codepoint))
         {
@@ -121,8 +127,9 @@ public static class FontHelper
 
     /// <summary>
     /// Splits text into runs of contiguous characters sharing the same SKTypeface for rendering.
+    /// The preferred typeface is honored first for every codepoint it covers.
     /// </summary>
-    public static List<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style)
+    public static List<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
     {
         var runs = new List<(string Text, SKTypeface Typeface)>();
         if (string.IsNullOrEmpty(text))
@@ -137,7 +144,7 @@ public static class FontHelper
         {
             int codepoint = char.ConvertToUtf32(text, i);
             string charStr = char.ConvertFromUtf32(codepoint);
-            var tf = GetTypefaceForCodepoint(codepoint, style);
+            var tf = GetTypefaceForCodepoint(codepoint, style, preferred);
 
             if (currentTf == null)
             {
@@ -176,7 +183,7 @@ public static class FontHelper
         }
 
         var style = baseFont.Typeface?.FontStyle ?? SKFontStyle.Normal;
-        var runs = GetTextRuns(text, style);
+        var runs = GetTextRuns(text, style, baseFont.Typeface);
         float totalWidth = 0f;
 
         foreach (var run in runs)
@@ -200,7 +207,7 @@ public static class FontHelper
         }
 
         var style = baseFont.Typeface?.FontStyle ?? SKFontStyle.Normal;
-        var runs = GetTextRuns(text, style);
+        var runs = GetTextRuns(text, style, baseFont.Typeface);
 
         if (align == SKTextAlign.Right)
         {

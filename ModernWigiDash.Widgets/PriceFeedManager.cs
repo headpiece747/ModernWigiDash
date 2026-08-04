@@ -263,18 +263,25 @@ public sealed class PriceFeedManager : IDisposable
             await Task.Delay(_stockRestInterval, _cts.Token);
             foreach (string key in _subscribedFx.Keys)
             {
+                if (key.Length != 6)
+                {
+                    continue;
+                }
+
+                string baseCurrency = key[..3];
+                string quoteCurrency = key[3..];
                 try
                 {
-                    var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol=OANDA:{key}&token={_finnhubKey}", _cts.Token);
-                    using var doc = JsonDocument.Parse(json);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("c", out var c) && root.TryGetProperty("dp", out var dp) && dp.ValueKind != JsonValueKind.Null)
+                    string start = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    string end = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
+                    if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
                     {
                         _prices[key] = new PriceInfo
                         {
-                            Price = c.GetDecimal(),
-                            ChangePercent = dp.GetDecimal(),
-                            Source = "Finnhub",
+                            Price = price,
+                            ChangePercent = change,
+                            Source = "Frankfurter",
                             Timestamp = DateTime.UtcNow,
                             CurrencySymbol = ""
                         };
@@ -285,6 +292,54 @@ public sealed class PriceFeedManager : IDisposable
                     // Individual symbol failure is non-fatal.
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Parses a Frankfurter (ECB) daily-rate series. The last entry is the current rate; the
+    /// day-over-day change percent is computed from the last two entries.
+    /// </summary>
+    internal static bool TryParseFrankfurterSeries(string json, string quoteCurrency, out decimal price, out decimal changePercent)
+    {
+        price = 0m;
+        changePercent = 0m;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("rates", out var rates) || rates.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var dates = new List<string>();
+            var ratesByDate = new Dictionary<string, decimal>(StringComparer.Ordinal);
+            foreach (var entry in rates.EnumerateObject())
+            {
+                if (!entry.Value.TryGetProperty(quoteCurrency, out var rateEl) || rateEl.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+                dates.Add(entry.Name);
+                ratesByDate[entry.Name] = rateEl.GetDecimal();
+            }
+
+            if (dates.Count == 0)
+            {
+                return false;
+            }
+
+            dates.Sort(StringComparer.Ordinal); // ISO yyyy-MM-dd sorts chronologically.
+            price = ratesByDate[dates[^1]];
+            if (dates.Count >= 2 && ratesByDate[dates[^2]] != 0m)
+            {
+                changePercent = (ratesByDate[dates[^1]] / ratesByDate[dates[^2]] - 1m) * 100m;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

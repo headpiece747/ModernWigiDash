@@ -149,6 +149,47 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void PriceFeedManager_ParsesFrankfurterSeries_ComputesChange()
+    {
+        const string json = """
+        {
+          "amount": 1.0,
+          "base": "EUR",
+          "start_date": "2026-07-30",
+          "end_date": "2026-08-04",
+          "rates": {
+            "2026-07-30": { "USD": 1.1476 },
+            "2026-07-31": { "USD": 1.1485 },
+            "2026-08-03": { "USD": 1.1511 },
+            "2026-08-04": { "USD": 1.1515 }
+          }
+        }
+        """;
+        Assert.IsTrue(PriceFeedManager.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
+        Assert.AreEqual(1.1515m, price);
+        Assert.AreEqual((1.1515m / 1.1511m - 1m) * 100m, change);
+    }
+
+    [TestMethod]
+    public void PriceFeedManager_ParsesFrankfurterSeries_HandlesMissingQuoteMalformedJsonAndSingleEntry()
+    {
+        const string json = """
+        {
+          "base": "EUR",
+          "rates": {
+            "2026-07-30": { "USD": 1.1476 }
+          }
+        }
+        """;
+        Assert.IsFalse(PriceFeedManager.TryParseFrankfurterSeries(json, "GBP", out _, out _));
+        Assert.IsFalse(PriceFeedManager.TryParseFrankfurterSeries("not-json", "USD", out _, out _));
+
+        Assert.IsTrue(PriceFeedManager.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
+        Assert.AreEqual(1.1476m, price);
+        Assert.AreEqual(0m, change);
+    }
+
+    [TestMethod]
     public void HotkeyWidget_IconDefaults_AreEmptyAndThemeHex()
     {
         var widget = new HotkeyButtonWidget();
@@ -777,6 +818,52 @@ public class UnitTestSuite
         var emojiTf = FontHelper.GetTypefaceForCodepoint(0x1F600, SKFontStyle.Normal);
         Assert.IsNotNull(emojiTf);
         Assert.AreNotEqual(IntPtr.Zero, emojiTf.Handle);
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTypefaceForCodepoint_HonorsPreferredTypeface()
+    {
+        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        Assert.IsNotNull(arial);
+        Assert.AreNotEqual(IntPtr.Zero, arial.Handle);
+
+        var resolved = FontHelper.GetTypefaceForCodepoint('A', SKFontStyle.Normal, arial);
+        Assert.AreEqual(arial.FamilyName, resolved.FamilyName, true);
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTypefaceForCodepoint_PreferredWithoutGlyph_FallsBack()
+    {
+        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var emoji = FontHelper.GetTypefaceForCodepoint(0x1F600, SKFontStyle.Normal, arial);
+        Assert.IsNotNull(emoji);
+        Assert.AreNotEqual(IntPtr.Zero, emoji.Handle);
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTextRuns_RespectsPreferredTypeface()
+    {
+        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var runs = FontHelper.GetTextRuns("Hello", SKFontStyle.Normal, arial);
+        Assert.AreEqual(1, runs.Count);
+        Assert.AreEqual(arial.FamilyName, runs[0].Typeface.FamilyName, true);
+    }
+
+    [TestMethod]
+    public void FontHelper_MeasureTextWithFallback_MatchesDirectFontMeasure()
+    {
+        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        using var font = FontHelper.CreateFont(arial, 24f);
+        float direct = font.MeasureText("Hello");
+        float fallback = FontHelper.MeasureTextWithFallback("Hello", font);
+        Assert.AreEqual(direct, fallback, 0.01f);
+    }
+
+    [TestMethod]
+    public void FontCatalog_GetAllFamilies_IncludesGeist()
+    {
+        string[] families = FontCatalog.GetAllFamilies();
+        Assert.IsTrue(families.Contains("Geist"), "Geist must be listed so the inspector can select the default font.");
     }
 
     [TestMethod]
