@@ -301,6 +301,12 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Button label color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    [WidgetProperty("Icon", WidgetPropertyType.Icon, "Material Symbols icon shown above the label (blank = none)", "")]
+    public string Icon { get; set; } = "";
+
+    [WidgetProperty("Icon Color", WidgetPropertyType.Color, "Icon color", "#FAFAFA")]
+    public string IconColorHex { get; set; } = "#FAFAFA";
+
     [WidgetProperty("Toggle Actions", WidgetPropertyType.Boolean, "Run the toggled action list after the first press", false)]
     public bool ToggleActions { get; set; }
 
@@ -322,6 +328,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
     {
         SKColor btnColor = SKColor.TryParse(ButtonColorHex, out var parsed) ? parsed : new SKColor(135, 0, 0);
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
+        SKColor iconColor = SKColor.TryParse(IconColorHex, out var parsedIcon) ? parsedIcon : SKColors.White;
 
         var fillPaint = new SKPaint
         {
@@ -334,21 +341,58 @@ public class HotkeyButtonWidget : ModernWidgetBase
             canvas.DrawRoundRect(bounds, 16f, 16f, fillPaint);
         }
 
+        string label = _isToggled && ToggleActions ? ToggledButtonLabel : ButtonLabel;
+        string glyph = IconLibrary.GlyphString(Icon);
+
+        if (string.IsNullOrEmpty(glyph))
+        {
+            DrawLabelOnly(canvas, bounds, label, textColor, Description);
+            return;
+        }
+
+        float iconSize = Math.Min(bounds.Width, bounds.Height) * 0.4f;
+        using var iconFont = FontHelper.CreateFont(IconLibrary.GetTypeface(), iconSize);
+        using var iconPaint = new SKPaint { Color = iconColor, IsAntialias = true };
+
+        var glyphBounds = new SKRect();
+        iconFont.MeasureText(glyph, out glyphBounds, iconPaint);
+        canvas.DrawText(glyph, bounds.MidX - glyphBounds.Width / 2f,
+            bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f), SKTextAlign.Left, iconFont, iconPaint);
+
+        float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
+        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, labelSize);
+        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
+        var textBounds = new SKRect();
+        font.MeasureText(label, out textBounds, textPaint);
+        canvas.DrawText(label, bounds.MidX - textBounds.Width / 2f,
+            bounds.Top + Math.Max(iconSize * 1.9f, bounds.Height * 0.76f), SKTextAlign.Left, font, textPaint);
+
+        if (!string.IsNullOrWhiteSpace(Description))
+        {
+            using var descriptionFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
+            using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
+            descriptionFont.MeasureText(Description, out var descriptionBounds, descriptionPaint);
+            canvas.DrawText(Description, bounds.MidX - descriptionBounds.Width / 2f,
+                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), SKTextAlign.Left, descriptionFont, descriptionPaint);
+        }
+    }
+
+    private void DrawLabelOnly(SKCanvas canvas, SKRect bounds, string label, SKColor textColor, string description)
+    {
         float fontSize = Math.Min(bounds.Width / 6f, bounds.Height / 5f);
         using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
 
         var textBounds = new SKRect();
-        string label = _isToggled && ToggleActions ? ToggledButtonLabel : ButtonLabel;
         font.MeasureText(label, out textBounds, textPaint);
-        canvas.DrawText(label, bounds.MidX - (textBounds.Width / 2f), bounds.MidY - (textBounds.Height / 4f), SKTextAlign.Left, font, textPaint);
+        canvas.DrawText(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, SKTextAlign.Left, font, textPaint);
 
-        if (!string.IsNullOrWhiteSpace(Description))
+        if (!string.IsNullOrWhiteSpace(description))
         {
             using var descriptionFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
             using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
-            descriptionFont.MeasureText(Description, out var descriptionBounds, descriptionPaint);
-            canvas.DrawText(Description, bounds.MidX - descriptionBounds.Width / 2f,
+            descriptionFont.MeasureText(description, out var descriptionBounds, descriptionPaint);
+            canvas.DrawText(description, bounds.MidX - descriptionBounds.Width / 2f,
                 bounds.Bottom - Math.Max(12f, fontSize * 0.65f), SKTextAlign.Left, descriptionFont, descriptionPaint);
         }
     }

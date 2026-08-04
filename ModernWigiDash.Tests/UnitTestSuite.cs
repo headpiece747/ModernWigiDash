@@ -149,6 +149,24 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void HotkeyWidget_IconDefaults_AreEmptyAndThemeHex()
+    {
+        var widget = new HotkeyButtonWidget();
+        Assert.AreEqual("", widget.Icon);
+        Assert.AreEqual("#FAFAFA", widget.IconColorHex);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_WithIcon_RendersWithoutExceptions()
+    {
+        var widget = new HotkeyButtonWidget { Icon = "power_settings_new" };
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout
