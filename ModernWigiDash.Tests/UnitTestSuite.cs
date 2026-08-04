@@ -53,6 +53,29 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void IconLibrary_CuratedIcons_ResolveToGlyphs()
+    {
+        string[] required = { "power_settings_new", "play_arrow", "pause", "volume_up", "skip_next", "home" };
+        foreach (string name in required)
+        {
+            Assert.IsTrue(IconLibrary.TryGetGlyph(name, out string glyph), "Missing icon: " + name);
+            Assert.IsFalse(string.IsNullOrEmpty(glyph));
+        }
+        Assert.IsTrue(IconLibrary.Names.Count > 50);
+        Assert.AreEqual("Material Symbols Rounded", IconLibrary.FontFamilyName);
+        Assert.AreEqual("MaterialSymbolsRounded-Regular.ttf", IconLibrary.FontFileName);
+    }
+
+    [TestMethod]
+    public void IconLibrary_UnknownIcons_ReturnEmptyGlyph()
+    {
+        Assert.IsFalse(IconLibrary.TryGetGlyph("definitely_not_an_icon", out string glyph));
+        Assert.AreEqual("", glyph);
+        Assert.AreEqual("", IconLibrary.GlyphString(""));
+        Assert.AreEqual("", IconLibrary.GlyphString(null!));
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout
