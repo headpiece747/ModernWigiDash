@@ -27,6 +27,13 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void WidgetPropertyType_ContainsFontAndIconEditors()
+    {
+        Assert.IsTrue(Enum.IsDefined(typeof(WidgetPropertyType), WidgetPropertyType.Font));
+        Assert.IsTrue(Enum.IsDefined(typeof(WidgetPropertyType), WidgetPropertyType.Icon));
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout

@@ -37,6 +37,8 @@ public enum WidgetPropertyType
     Boolean,
     Color,
     Choice,
+    Font,
+    Icon,
     SensorSelector,
     Path,
     ActionList,
