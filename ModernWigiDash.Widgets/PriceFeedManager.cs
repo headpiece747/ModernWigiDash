@@ -3,16 +3,25 @@ using System.Globalization;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ModernWigiDash.Widgets;
+
+public enum AssetKind
+{
+    Crypto,
+    Stock,
+    Fx
+}
 
 public class PriceInfo
 {
     public decimal Price { get; set; }
     public decimal ChangePercent { get; set; }
+    public string CurrencySymbol { get; set; } = "$";
     public string Source { get; set; } = "";
     public DateTime Timestamp { get; set; }
-    public string FormattedPrice => $"${Price:N2}";
+    public string FormattedPrice => $"{CurrencySymbol}{Price:N2}";
     public string FormattedChange => $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent:F2}%";
     public bool IsPositive => ChangePercent >= 0;
     public bool IsStale => (DateTime.UtcNow - Timestamp).TotalSeconds > 60;
@@ -71,12 +80,13 @@ public sealed class PriceFeedManager : IDisposable
         ["algorand"] = "ALGO", ["algo"] = "ALGO",
     };
 
-    private static readonly HashSet<string> KnownCryptos = [.. CryptoMap.Keys];
+    private static readonly HashSet<string> KnownCryptos = new(CryptoMap.Keys, StringComparer.OrdinalIgnoreCase);
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
     private readonly ConcurrentDictionary<string, byte> _subscribedCrypto = new();
     private readonly ConcurrentDictionary<string, byte> _subscribedStocks = new();
+    private readonly ConcurrentDictionary<string, byte> _subscribedFx = new();
     private readonly HttpClient _http = new();
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
@@ -88,6 +98,7 @@ public sealed class PriceFeedManager : IDisposable
     private Task? _finnhubTask;
     private Task? _stockRestTask;
     private Task? _cryptoRestTask;
+    private Task? _fxRestTask;
     private bool _disposed;
 
     public PriceFeedManager(string? finnhubApiKey = null)
@@ -100,35 +111,70 @@ public sealed class PriceFeedManager : IDisposable
     public static string NormalizeSymbol(string symbol) =>
         CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper();
 
-    public void Subscribe(string symbol, bool? forceCrypto = null)
+    private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled);
+
+    public static bool TryParseFxPair(string symbol, out string baseCurrency, out string quoteCurrency)
     {
-        bool isCrypto = forceCrypto ?? IsCrypto(symbol);
-        if (isCrypto)
+        baseCurrency = "";
+        quoteCurrency = "";
+        if (string.IsNullOrWhiteSpace(symbol)) return false;
+        Match match = FxPairRegex.Match(symbol.Trim());
+        if (!match.Success) return false;
+        baseCurrency = match.Groups[1].Value.ToUpperInvariant();
+        quoteCurrency = match.Groups[2].Value.ToUpperInvariant();
+        return true;
+    }
+
+    public static string NormalizeFxKey(string symbol)
+        => symbol.Trim().ToUpperInvariant().Replace("/", "", StringComparison.Ordinal);
+
+    public static AssetKind DetectAssetKind(string symbol, string assetType)
+    {
+        if (assetType == "Crypto") return AssetKind.Crypto;
+        if (assetType == "Stock") return AssetKind.Stock;
+        if (assetType == "FX Pair") return AssetKind.Fx;
+        if (TryParseFxPair(symbol, out _, out _)) return AssetKind.Fx;
+        return IsCrypto(symbol) ? AssetKind.Crypto : AssetKind.Stock;
+    }
+
+    public void Subscribe(string symbol, AssetKind kind)
+    {
+        switch (kind)
         {
-            var baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
-            if (_subscribedCrypto.TryAdd(baseCoin, 0))
-            {
-                _binanceTask ??= RunBinanceLoopAsync();
-                _cryptoRestTask ??= RunCryptoRestPollerAsync();
-            }
-        }
-        else
-        {
-            var sym = symbol.ToUpper();
-            if (_subscribedStocks.TryAdd(sym, 0))
-            {
-                _finnhubTask ??= RunFinnhubLoopAsync();
-                _stockRestTask ??= RunStockRestPollerAsync();
-            }
+            case AssetKind.Crypto:
+                var baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
+                if (_subscribedCrypto.TryAdd(baseCoin, 0))
+                {
+                    _binanceTask ??= RunBinanceLoopAsync();
+                    _cryptoRestTask ??= RunCryptoRestPollerAsync();
+                }
+                break;
+            case AssetKind.Fx:
+                string fxKey = NormalizeFxKey(symbol);
+                if (_subscribedFx.TryAdd(fxKey, 0))
+                {
+                    _fxRestTask ??= RunFxRestPollerAsync();
+                }
+                break;
+            default:
+                string stockSym = symbol.ToUpper();
+                if (_subscribedStocks.TryAdd(stockSym, 0))
+                {
+                    _finnhubTask ??= RunFinnhubLoopAsync();
+                    _stockRestTask ??= RunStockRestPollerAsync();
+                }
+                break;
         }
     }
 
-    public PriceInfo? GetPrice(string symbol, bool? forceCrypto = null)
+    public PriceInfo? GetPrice(string symbol, AssetKind kind)
     {
-        bool useCrypto = forceCrypto ?? IsCrypto(symbol);
-        var key = useCrypto
-            ? CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper()
-            : symbol.ToUpper();
+        string key = kind switch
+        {
+            AssetKind.Crypto => CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper(),
+            AssetKind.Fx => NormalizeFxKey(symbol),
+            _ => symbol.ToUpper()
+        };
         return _prices.TryGetValue(key, out var info) ? info : null;
     }
 
@@ -206,6 +252,38 @@ public sealed class PriceFeedManager : IDisposable
                     }
                 }
                 catch { /* individual symbol failure is non-fatal */ }
+            }
+        }
+    }
+
+    private async Task RunFxRestPollerAsync()
+    {
+        while (!_disposed)
+        {
+            await Task.Delay(_stockRestInterval, _cts.Token);
+            foreach (string key in _subscribedFx.Keys)
+            {
+                try
+                {
+                    var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol=OANDA:{key}&token={_finnhubKey}", _cts.Token);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("c", out var c) && root.TryGetProperty("dp", out var dp) && dp.ValueKind != JsonValueKind.Null)
+                    {
+                        _prices[key] = new PriceInfo
+                        {
+                            Price = c.GetDecimal(),
+                            ChangePercent = dp.GetDecimal(),
+                            Source = "Finnhub",
+                            Timestamp = DateTime.UtcNow,
+                            CurrencySymbol = ""
+                        };
+                    }
+                }
+                catch
+                {
+                    // Individual symbol failure is non-fatal.
+                }
             }
         }
     }

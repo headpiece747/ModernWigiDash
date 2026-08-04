@@ -115,6 +115,40 @@ public class UnitTestSuite
     }
 
     [TestMethod]
+    public void PriceFeedManager_DetectsFxPairsAndNormalizesKeys()
+    {
+        Assert.IsTrue(PriceFeedManager.TryParseFxPair("EUR/USD", out string baseCur, out string quoteCur));
+        Assert.AreEqual("EUR", baseCur);
+        Assert.AreEqual("USD", quoteCur);
+        Assert.AreEqual("EURUSD", PriceFeedManager.NormalizeFxKey(" eur/usd "));
+        Assert.AreEqual(AssetKind.Fx, PriceFeedManager.DetectAssetKind("EUR/USD", "Auto"));
+        Assert.AreEqual(AssetKind.Stock, PriceFeedManager.DetectAssetKind("AAPL", "Auto"));
+        Assert.AreEqual(AssetKind.Crypto, PriceFeedManager.DetectAssetKind("BTC", "Auto"));
+        Assert.AreEqual(AssetKind.Crypto, PriceFeedManager.DetectAssetKind("AAPL", "Crypto"));
+        Assert.AreEqual(AssetKind.Fx, PriceFeedManager.DetectAssetKind("BTC", "FX Pair"));
+        Assert.IsFalse(PriceFeedManager.TryParseFxPair("AAPL", out _, out _));
+    }
+
+    [TestMethod]
+    public void CryptoStockTickerWidget_FxPair_RendersWithoutExceptions()
+    {
+        var widget = new CryptoStockTickerWidget { Symbol = "EUR/USD" };
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void PriceInfo_FormattedPrice_RespectsCurrencySymbol()
+    {
+        var stock = new PriceInfo { Price = 150.25m, CurrencySymbol = "$" };
+        Assert.AreEqual("$150.25", stock.FormattedPrice);
+        var fx = new PriceInfo { Price = 1.0843m, CurrencySymbol = "" };
+        Assert.AreEqual("1.08", fx.FormattedPrice);
+    }
+
+    [TestMethod]
     public void ProfileLayout_Serialization_RoundTripsSuccessfully()
     {
         var profile = new ProfileLayout

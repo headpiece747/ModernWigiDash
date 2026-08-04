@@ -486,7 +486,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     [WidgetProperty("Symbol", WidgetPropertyType.Text, "Crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT)")]
     public string Symbol { get; set; } = "";
 
-    [WidgetProperty("Asset Type", WidgetPropertyType.Choice, "Force type when auto-detection doesn't recognize your symbol", "Auto", "Auto", "Crypto", "Stock")]
+    [WidgetProperty("Asset Type", WidgetPropertyType.Choice, "Force type when auto-detection doesn't recognize your symbol", "Auto", "Auto", "Crypto", "Stock", "FX Pair")]
     public string AssetType { get; set; } = "Auto";
 
     [WidgetProperty("Display Name", WidgetPropertyType.Text, "Optional custom label (leave blank to auto-generate from symbol)")]
@@ -514,23 +514,32 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     private static readonly PriceFeedManager _feed = new();
     private static readonly HttpClient _httpClient = new HttpClient();
     private string? _lastSubscribedSymbol;
-    private bool _lastSubscribedIsCrypto;
+    private AssetKind _lastSubscribedKind = AssetKind.Stock;
     private DateTime _lastFallback = DateTime.MinValue;
 
-    private bool IsCryptoAsset => AssetType == "Crypto" || (AssetType == "Auto" && PriceFeedManager.IsCrypto(Symbol));
+    private AssetKind AssetKindValue => PriceFeedManager.DetectAssetKind(Symbol, AssetType);
+    private bool IsCryptoAsset => AssetKindValue == AssetKind.Crypto;
+    private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
 
-    private string DisplayLabel => !string.IsNullOrEmpty(DisplayName)
-        ? DisplayName
-        : PriceFeedManager.NormalizeSymbol(Symbol);
+    private string DisplayLabel
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(DisplayName)) return DisplayName;
+            if (IsFxAsset && PriceFeedManager.TryParseFxPair(Symbol, out string baseCur, out string quoteCur))
+                return $"{baseCur} / {quoteCur}";
+            return PriceFeedManager.NormalizeSymbol(Symbol);
+        }
+    }
 
-    private string FormatPrice(decimal rawPrice)
+    private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
     {
         int d = PriceDecimals switch
         {
             "2" => 2, "4" => 4, "6" => 6, "8" => 8,
             _ => rawPrice >= 100 ? 2 : rawPrice >= 1 ? 4 : rawPrice >= 0.01m ? 6 : 8
         };
-        return "$" + rawPrice.ToString("N" + d);
+        return currencySymbol + rawPrice.ToString("N" + d);
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -541,18 +550,18 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             return;
         }
 
-        bool isCrypto = IsCryptoAsset;
-        if (_lastSubscribedSymbol != Symbol || _lastSubscribedIsCrypto != isCrypto)
+        AssetKind kind = AssetKindValue;
+        if (_lastSubscribedSymbol != Symbol || _lastSubscribedKind != kind)
         {
             _lastSubscribedSymbol = Symbol;
-            _lastSubscribedIsCrypto = isCrypto;
-            _feed.Subscribe(Symbol, isCrypto);
+            _lastSubscribedKind = kind;
+            _feed.Subscribe(Symbol, kind);
         }
 
-        var info = _feed.GetPrice(Symbol, isCrypto);
+        var info = _feed.GetPrice(Symbol, kind);
         if (info != null)
         {
-            Price = FormatPrice(info.Price);
+            Price = FormatPrice(info.Price, info.CurrencySymbol);
             ChangeBadge = info.FormattedChange;
         }
         else if ((DateTime.Now - _lastFallback).TotalSeconds >= 15)
@@ -621,6 +630,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     {
         try
         {
+            if (IsFxAsset) return;
             if (IsCryptoAsset)
             {
                 string url = $"https://api.coingecko.com/api/v3/simple/price?ids={Symbol.ToLower()}&vs_currencies=usd&include_24hr_change=true";
