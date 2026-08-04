@@ -126,8 +126,8 @@ Fields (in order): Button Label, Description, Action Type (dropdown), Action / C
 Button Color, Text Color, **Icon (box + Browse... button)**, Icon Color, Icon Size,
 Icon Offset X, Icon Offset Y.
 
-- The `Action / Command` field shows only for `Launch App` / `Open URL`; hidden or
-  disabled for media options (pattern mirrors the existing media-visibility swap,
+- The `Action / Command` field shows only for `Launch App` / `Open URL`; hidden for
+  media options (pattern mirrors the existing media-visibility swap,
   `MainWindow.xaml.cs:1410-1419`).
 - Removed from inspector: Task Manager choice, Toggle Actions, Toggled Button Label,
   Actions + "edit actions", Toggled Actions + "edit toggled actions".
