@@ -1829,6 +1829,13 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
             PanelPageTabs.Children.Add(container);
         }
+
+        // Auto-scroll to active tab
+        if (PanelPageTabs.Children.Count > _profile.ActivePageIndex &&
+            PanelPageTabs.Children[_profile.ActivePageIndex] is FrameworkElement activeTab)
+        {
+            activeTab.BringIntoView();
+        }
     }
 
     private void RenamePage(int index)
@@ -1913,6 +1920,14 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         if (index < 0 || index >= _profile.Pages.Count) return;
         _profile.ActivePageIndex = index;
         RebuildPageTabsUI();
+
+        // Auto-scroll to the newly active tab
+        if (PanelPageTabs.Children.Count > index &&
+            PanelPageTabs.Children[index] is FrameworkElement targetTab)
+        {
+            targetTab.BringIntoView();
+        }
+
         SelectWidget(null);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
