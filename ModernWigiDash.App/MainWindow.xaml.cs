@@ -2168,6 +2168,11 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
     private static void ApplyDarkTitleBarToWindow(System.Windows.Window window, string captionHex = "#0F111A")
     {
+        if (window.Icon == null)
+        {
+            window.Icon = new System.Windows.Media.Imaging.BitmapImage(
+                new System.Uri("pack://application:,,,/Resources/Logo/logo.ico"));
+        }
         var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
         // Enable dark mode title bar (Windows 10 1809+)

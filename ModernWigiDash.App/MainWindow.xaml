@@ -6,6 +6,7 @@
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         mc:Ignorable="d"
         Title="ModernWigiDash - Next-Generation .NET 10 Manager"
+        Icon="Resources/Logo/logo.ico"
         WindowState="Normal"
         WindowStartupLocation="CenterScreen"
         Width="1680" Height="824"
