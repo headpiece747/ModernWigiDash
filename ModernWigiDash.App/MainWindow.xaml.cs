@@ -127,8 +127,8 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         _loader.RegisterBuiltInPlugin(typeof(WeatherForecastWidget));
         _loader.RegisterBuiltInPlugin(typeof(TextLabelWidget));
 
-        // 2. Populate Catalog UI
-        ListCatalog.ItemsSource = _loader.RegisteredPlugins;
+        // 2. Populate Catalog UI (sorted alphabetically by display name)
+        ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
 
         // 3. Setup Default Profile Layout with 3 cool starter widgets
         SetupDefaultStarterLayout();
@@ -696,21 +696,38 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         var page = _profile.ActivePage;
         page.Widgets.Clear();
 
-        // Add Clock at top left — snapped to grid (col 0, row 0), Size 2x1
+        // ── Page 1: Main Dashboard ──
         PlaceWidgetOnCanvas("clock_modern", 0, 0, 406, 148);
-        // Add Weather below clock — snapped to grid (col 0, row 1), Size 2x1
         PlaceWidgetOnCanvas("weather_forecast", 0, 148, 406, 148);
-        // Add Audio Visualizer at bottom — snapped to grid (col 0, row 2), Size 4x2
-        PlaceWidgetOnCanvas("audio_visualizer", 0, 296, 813, 296);
-        // Add FPS / Frame Time at top-right — snapped to grid (col 3, row 0), Size 2x2
-        PlaceWidgetOnCanvas("frame_time", 609, 0, 406, 296);
+        PlaceWidgetOnCanvas("audio_visualizer", 0, 296, 1016, 296);
+        PlaceWidgetOnCanvas("frame_time", 406, 0, 406, 148);
+        PlaceWidgetOnCanvas("ticker_stock", 406, 148, 203, 148);
+        PlaceWidgetOnCanvas("text_label", 610, 148, 203, 148);
+        PlaceWidgetOnCanvas("hotkey_button", 813, 0, 203, 148);
+        PlaceWidgetOnCanvas("stopwatch_timer", 813, 148, 203, 148);
 
-        // Page 2: Now Playing full-screen (Size5x4). Swipe right-to-left to reach it.
+        // ── Page 2: Now Playing ──
         int pageIndex = _profile.Pages.Count;
         var nowPlayingPage = new PageLayout { PageName = "Now Playing" };
         _profile.Pages.Add(nowPlayingPage);
         _profile.ActivePageIndex = pageIndex;
         PlaceWidgetOnCanvas("now_playing", 0, 0, 1016, 592);
+
+        // ── Page 3: Weather Forecast ──
+        pageIndex = _profile.Pages.Count;
+        var weatherPage = new PageLayout { PageName = "Weather Forecast" };
+        _profile.Pages.Add(weatherPage);
+        _profile.ActivePageIndex = pageIndex;
+        PlaceWidgetOnCanvas("weather_forecast", 0, 0, 1016, 592);
+
+        // ── Page 4: Twitch & Picture ──
+        pageIndex = _profile.Pages.Count;
+        var twitchPage = new PageLayout { PageName = "Twitch & Picture" };
+        _profile.Pages.Add(twitchPage);
+        _profile.ActivePageIndex = pageIndex;
+        PlaceWidgetOnCanvas("twitch_chat", 0, 0, 406, 592);
+        PlaceWidgetOnCanvas("picture_viewer", 406, 0, 610, 592);
+
         _profile.ActivePageIndex = 0;
     }
 
@@ -1704,18 +1721,25 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
     #region Catalog, Header, and Action Handlers
 
+    private void ScrollerPageTabs_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        ScrollerPageTabs.ScrollToHorizontalOffset(
+            ScrollerPageTabs.HorizontalOffset - e.Delta);
+    }
+
     private void TxtSearchCatalog_TextChanged(object sender, TextChangedEventArgs e)
     {
         string query = TxtSearchCatalog.Text.Trim();
         if (string.IsNullOrEmpty(query))
         {
-            ListCatalog.ItemsSource = _loader.RegisteredPlugins;
+            ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
         }
         else
         {
-            ListCatalog.ItemsSource = _loader.RegisteredPlugins.Where(p =>
-                p.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                p.Category.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+            ListCatalog.ItemsSource = _loader.RegisteredPlugins
+                .Where(p => p.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            p.Category.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(p => p.DisplayName).ToList();
         }
     }
 

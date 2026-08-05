@@ -45,7 +45,11 @@
 
                 <!-- Center Page Tabs -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
+                    <ScrollViewer x:Name="ScrollerPageTabs" HorizontalScrollBarVisibility="Auto" 
+                                  VerticalScrollBarVisibility="Disabled" 
+                                  MouseWheel="ScrollerPageTabs_MouseWheel">
+                        <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
+                    </ScrollViewer>
                     <Button x:Name="BtnAddPage" Content="+ Add Page" Margin="6,0,0,0" Padding="12,6" Click="BtnAddPage_Click"/>
                 </StackPanel>
 
