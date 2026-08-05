@@ -1104,7 +1104,15 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                     else if (attr.PropertyType == WidgetPropertyType.Icon)
                     {
                         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-                        var box = new TextBox { Text = currentVal?.ToString() ?? "" };
+                        var iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile))!;
+                        string seed = currentVal?.ToString() ?? "";
+                        if (string.IsNullOrEmpty(seed)
+                            && _selectedWidget?.ActiveInstance is HotkeyButtonWidget hotkeySeed
+                            && !string.IsNullOrEmpty(hotkeySeed.IconFile))
+                        {
+                            seed = hotkeySeed.IconFile;
+                        }
+                        var box = new TextBox { Text = seed };
                         var btnBrowse = new Button { Content = "Browse\u2026", Padding = new Thickness(8, 2, 8, 2) };
                         DockPanel.SetDock(btnBrowse, Dock.Right);
                         btnBrowse.Click += (_, _) =>
@@ -1115,6 +1123,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                         box.TextChanged += (s, e) =>
                         {
                             if (_isUpdatingInspector) return;
+                            ApplyInspectorPropertyValue(iconFileProp, "");
                             ApplyInspectorPropertyValue(prop, box.Text);
                         };
                         row.Children.Add(btnBrowse);
@@ -1453,7 +1462,15 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                 ApplyInspectorPropertyValue(iconProp, chosen);
                 hotkey.IconFile = "";
                 hotkey.Icon = chosen;
-                box.Text = chosen;
+                _isUpdatingInspector = true;
+                try
+                {
+                    box.Text = chosen;
+                }
+                finally
+                {
+                    _isUpdatingInspector = false;
+                }
             }
             dialog.DialogResult = true;
         };

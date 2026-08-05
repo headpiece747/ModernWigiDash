@@ -520,6 +520,8 @@ public class UnitTestSuite
         var widget = new HotkeyButtonWidget();
         Assert.AreEqual("Launch App", widget.ActionType);
         Assert.AreEqual("", widget.ActionCommand);
+        Assert.AreEqual("Hotkey", widget.ButtonLabel);
+        Assert.AreEqual("Tap to run", widget.Description);
     }
 
     [TestMethod]
