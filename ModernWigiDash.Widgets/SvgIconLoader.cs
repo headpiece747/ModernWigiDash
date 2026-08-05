@@ -4,7 +4,7 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 
-internal static class SvgIconLoader
+public static class SvgIconLoader
 {
     private static readonly ConcurrentDictionary<string, SKPath> PathCache = new(StringComparer.OrdinalIgnoreCase);
 
