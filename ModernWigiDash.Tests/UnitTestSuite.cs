@@ -515,14 +515,62 @@ public class UnitTestSuite
     }
 
     [TestMethod]
-    public void HotkeyWidget_DefaultActions_AreLaunchAction()
+    public void HotkeyWidget_ActionType_DefaultsToLaunchApp()
     {
         var widget = new HotkeyButtonWidget();
-
-        Assert.AreEqual("Hotkey", widget.ButtonLabel);
-        Assert.AreEqual("Tap to run", widget.Description);
+        Assert.AreEqual("Launch App", widget.ActionType);
         Assert.AreEqual("", widget.ActionCommand);
-        Assert.AreEqual(0, widget.Actions.Count);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_MediaActionTypes_MapToMediaKeys()
+    {
+        var map = new Dictionary<string, string>
+        {
+            ["Media Play / Pause"] = "PLAYPAUSE",
+            ["Media Next"] = "NEXT",
+            ["Media Previous"] = "PREVIOUS",
+            ["Media Stop"] = "STOP",
+            ["Volume Up"] = "VOLUMEUP",
+            ["Volume Down"] = "VOLUMEDOWN",
+            ["Mute"] = "MUTE"
+        };
+        foreach (var (actionType, expectedValue) in map)
+        {
+            var action = HotkeyButtonWidget.CreateAction(actionType, "");
+            Assert.AreEqual(HotkeyActionKind.MediaKey, action.Kind, actionType);
+            Assert.AreEqual(expectedValue, action.Value, actionType);
+        }
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_TaskManagerLegacyType_MapsToLaunchTaskmgr()
+    {
+        var action = HotkeyButtonWidget.CreateAction("Task Manager", "");
+        Assert.AreEqual(HotkeyActionKind.Launch, action.Kind);
+        Assert.AreEqual("taskmgr.exe", action.Value);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_OpenUrlActionType_MapsToOpenUrl()
+    {
+        var action = HotkeyButtonWidget.CreateAction("Open URL", "https://example.com");
+        Assert.AreEqual(HotkeyActionKind.OpenUrl, action.Kind);
+        Assert.AreEqual("https://example.com", action.Value);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_SingleAction_ExecutesOneAction()
+    {
+        var launch = HotkeyButtonWidget.CreateAction("Launch App", "notepad.exe");
+        Assert.AreEqual(HotkeyActionKind.Launch, launch.Kind);
+        Assert.AreEqual("notepad.exe", launch.Value);
+        var openUrl = HotkeyButtonWidget.CreateAction("Open URL", "https://example.com");
+        Assert.AreEqual(HotkeyActionKind.OpenUrl, openUrl.Kind);
+        Assert.AreEqual("https://example.com", openUrl.Value);
+        var mute = HotkeyButtonWidget.CreateAction("Mute", "");
+        Assert.AreEqual(HotkeyActionKind.MediaKey, mute.Kind);
+        Assert.AreEqual("MUTE", mute.Value);
     }
 
     [TestMethod]

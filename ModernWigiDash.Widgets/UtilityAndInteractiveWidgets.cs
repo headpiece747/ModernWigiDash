@@ -291,7 +291,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Description", WidgetPropertyType.Text, "Optional secondary text displayed below the button label", "Tap to run")]
     public string Description { get; set; } = "Tap to run";
 
-    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", "Launch App", "Launch App", "Open URL", "Task Manager")]
+    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", "Launch App", "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute")]
     public string ActionType { get; set; } = "Launch App";
 
     [WidgetProperty("Action Path/Command", WidgetPropertyType.Path, "Executable, file, folder, or URL. You can type a URL or select a local path.", "")]
@@ -306,6 +306,9 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Icon", WidgetPropertyType.Icon, "Griddy icon shown above the label (blank = none)", "")]
     public string Icon { get; set; } = "";
 
+    [WidgetProperty("Icon File", WidgetPropertyType.Path, "Custom SVG icon file copied into the icons folder (overrides Icon)", "")]
+    public string IconFile { get; set; } = "";
+
     [WidgetProperty("Icon Color", WidgetPropertyType.Color, "Icon color", "#FAFAFA")]
     public string IconColorHex { get; set; } = "#FAFAFA";
 
@@ -318,20 +321,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
     [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
     public int IconOffsetY { get; set; } = 0;
 
-    [WidgetProperty("Toggle Actions", WidgetPropertyType.Boolean, "Run the toggled action list after the first press", false)]
-    public bool ToggleActions { get; set; }
-
-    [WidgetProperty("Toggled Button Label", WidgetPropertyType.Text, "Label shown while toggled", "Active")]
-    public string ToggledButtonLabel { get; set; } = "Active";
-
-    [WidgetProperty("Actions", WidgetPropertyType.ActionList, "Actions run in order on the normal state")]
-    public List<HotkeyAction> Actions { get; set; } = [];
-
-    [WidgetProperty("Toggled Actions", WidgetPropertyType.ActionList, "Actions run in order on the toggled state")]
-    public List<HotkeyAction> ToggledActions { get; set; } = [];
-
     private bool _isPressed = false;
-    private bool _isToggled;
     private readonly SemaphoreSlim _actionGate = new(1, 1);
     private CancellationTokenSource? _actionCts;
 
@@ -352,7 +342,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
             canvas.DrawRoundRect(bounds, 16f, 16f, fillPaint);
         }
 
-        string label = _isToggled && ToggleActions ? ToggledButtonLabel : ButtonLabel;
+        string label = ButtonLabel;
 
         if (string.IsNullOrWhiteSpace(Icon) || !GriddyIcons.Contains(Icon))
         {
@@ -426,14 +416,13 @@ public class HotkeyButtonWidget : ModernWidgetBase
         _actionCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {
-            var actions = (ToggleActions && _isToggled) ? ToggledActions : Actions;
-            if (actions.Count == 0)
+            var action = CreateAction(ActionType, ActionCommand);
+            if (string.IsNullOrWhiteSpace(action.Value) && action.Kind is HotkeyActionKind.Launch or HotkeyActionKind.OpenUrl)
             {
-                if (string.IsNullOrWhiteSpace(ActionCommand)) return;
-                actions = [CreateLegacyAction()];
+                Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
+                return;
             }
-            await HotkeyActionExecutor.ExecuteAsync(actions, _actionCts.Token).ConfigureAwait(false);
-            if (ToggleActions) _isToggled = !_isToggled;
+            await HotkeyActionExecutor.ExecuteAsync([action], _actionCts.Token).ConfigureAwait(false);
             Context?.RequestRender();
         }
         catch (OperationCanceledException) { }
@@ -449,12 +438,19 @@ public class HotkeyButtonWidget : ModernWidgetBase
         }
     }
 
-    private HotkeyAction CreateLegacyAction()
-        => ActionType switch
+    internal static HotkeyAction CreateAction(string actionType, string actionCommand)
+        => actionType switch
         {
-            "Open URL" => new HotkeyAction { Kind = HotkeyActionKind.OpenUrl, Value = ActionCommand },
+            "Open URL" => new HotkeyAction { Kind = HotkeyActionKind.OpenUrl, Value = actionCommand },
+            "Media Play / Pause" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "PLAYPAUSE" },
+            "Media Next" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "NEXT" },
+            "Media Previous" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "PREVIOUS" },
+            "Media Stop" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "STOP" },
+            "Volume Up" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "VOLUMEUP" },
+            "Volume Down" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "VOLUMEDOWN" },
+            "Mute" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "MUTE" },
             "Task Manager" => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = "taskmgr.exe" },
-            _ => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = ActionCommand }
+            _ => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = actionCommand }
         };
 
     public override async ValueTask DisposeAsync()
