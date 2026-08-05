@@ -2137,8 +2137,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         {
             TxtUsbStatus.Text = text;
             var resources = Application.Current.Resources;
-            UsbBadgeBorder.Background = (Brush)resources[_usbDevice.IsHardwareActive ? "SuccessBackground" : "DangerBackground"];
-            UsbBadgeBorder.BorderBrush = (Brush)resources[_usbDevice.IsHardwareActive ? "SuccessBorder" : "DangerBorder"];
+            UsbStatusDot.Fill = (Brush)resources[_usbDevice.IsHardwareActive ? "AccentGreen" : "DangerBorder"];
         }
     }
 
