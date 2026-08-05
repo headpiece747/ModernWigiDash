@@ -224,7 +224,7 @@ git commit -m "feat(widgets): single-action hotkey model with media keys"
 
 **Interfaces:**
 - Consumes: `HotkeyButtonWidget.IconFile` (Task 1), `GriddyIcons` (unchanged).
-- Produces: `internal static class SvgIconLoader` with `string IconsDirectory`, `string ResolveFullPath(string iconFile)`, `string CopyToIcons(string sourcePath)`, `bool TryGetPath(string iconFile, out SKPath? path)`, `void Draw(SKCanvas canvas, SKPath path, SKPoint center, float sizePx, SKColor color, float offsetX, float offsetY)`.
+- Produces: `public static class SvgIconLoader` (made public by user decision on 2026-08-04 because Task 4 consumes it from the App assembly; `InternalsVisibleTo` covers only Tests) with `string IconsDirectory`, `string ResolveFullPath(string iconFile)`, `string CopyToIcons(string sourcePath)`, `bool TryGetPath(string iconFile, out SKPath? path)`, `void Draw(SKCanvas canvas, SKPath path, SKPoint center, float sizePx, SKColor color, float offsetX, float offsetY)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -329,7 +329,7 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 
-internal static class SvgIconLoader
+public static class SvgIconLoader
 {
     private static readonly ConcurrentDictionary<string, SKPath> PathCache = new(StringComparer.OrdinalIgnoreCase);
 
