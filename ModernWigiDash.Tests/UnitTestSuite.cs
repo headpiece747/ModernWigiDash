@@ -489,7 +489,7 @@ public class UnitTestSuite
         var widget = new TwitchChatStreamWidget();
         var optionsProvider = (IWidgetPropertyOptionsProvider)widget;
 
-        Assert.AreEqual("shroud", widget.ChannelName);
+        Assert.AreEqual("twitch", widget.ChannelName);
         Assert.AreEqual("", widget.TwitchClientId);
         Assert.IsTrue(widget.AutoConnect);
         Assert.AreEqual(0, optionsProvider.GetPropertyOptions(nameof(widget.ChannelName)).Count);

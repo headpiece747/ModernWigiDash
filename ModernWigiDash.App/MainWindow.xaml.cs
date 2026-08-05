@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
@@ -67,6 +68,9 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
     private bool _isMouseDown = false;
     private bool _isDraggingWidget = false;
     private bool _isResizingWidget = false;
+    private bool _isDraggingIcon = false;
+    private bool _iconDragMoved = false;
+    private Point _iconGrabOffset;
     private const float ResizeHandleSize = 14f;
     private Point _lastMousePos;
     private float _swipeStartX;
@@ -860,6 +864,15 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             {
                 _isResizingWidget = true;
             }
+            else if (hit.ActiveInstance is HotkeyButtonWidget hotkeyWidget &&
+                     IsPointOverWidgetIcon(hotkeyWidget, hit.Width, hit.Height,
+                         (float)pos.X - hit.X, (float)pos.Y - hit.Y))
+            {
+                _isDraggingIcon = true;
+                _iconDragMoved = false;
+                if (TryGetWidgetIconCenter(hotkeyWidget, hit.Width, hit.Height, out var iconCenter, out _))
+                    _iconGrabOffset = new Point(iconCenter.X - ((float)pos.X - hit.X), iconCenter.Y - ((float)pos.Y - hit.Y));
+            }
             else
             {
                 _isDraggingWidget = true;
@@ -900,6 +913,31 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             UpdateInspectorTransformsOnly();
             SkiaCanvas.InvalidateVisual();
         }
+        else if (_isDraggingIcon && _selectedWidget != null &&
+                 _selectedWidget.ActiveInstance is HotkeyButtonWidget iconHotkey &&
+                 _compositor.IsEditMode)
+        {
+            float localX = (float)pos.X - _selectedWidget.X;
+            float localY = (float)pos.Y - _selectedWidget.Y;
+            if (TryGetWidgetIconCenter(iconHotkey, _selectedWidget.Width, _selectedWidget.Height, out var iconCenter, out float half))
+            {
+                float cx = Math.Clamp(localX + (float)_iconGrabOffset.X, half, _selectedWidget.Width - half);
+                float cy = Math.Clamp(localY + (float)_iconGrabOffset.Y, half, _selectedWidget.Height - half);
+                int newX = (int)Math.Round(cx - _selectedWidget.Width / 2f);
+                int newY = (int)Math.Round(cy - _selectedWidget.Height * 0.31f);
+                if (newX != iconHotkey.IconOffsetX || newY != iconHotkey.IconOffsetY)
+                {
+                    _iconDragMoved = true;
+                    iconHotkey.IconOffsetX = newX;
+                    iconHotkey.IconOffsetY = newY;
+                    iconHotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetX), newX);
+                    iconHotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetY), newY);
+                    _selectedWidget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetX)] = newX;
+                    _selectedWidget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetY)] = newY;
+                    SkiaCanvas.InvalidateVisual();
+                }
+            }
+        }
         else if (_selectedWidget != null && !_compositor.IsEditMode)
         {
             SkiaFrameCompositor.RouteTouch(_profile.ActivePage, (float)pos.X, (float)pos.Y, TouchEventType.TouchMove);
@@ -914,7 +952,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         float deltaX = (float)pos.X - _swipeStartX;
         float deltaY = (float)pos.Y - _swipeStartY;
 
-        if (_profile.Pages.Count > 1 && !_isDraggingWidget && Math.Abs(deltaX) > 80 && Math.Abs(deltaY) < 70)
+        if (_profile.Pages.Count > 1 && !_isDraggingWidget && !_isDraggingIcon && Math.Abs(deltaX) > 80 && Math.Abs(deltaY) < 70)
         {
             if (deltaX < -80 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
             {
@@ -953,6 +991,48 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         _isMouseDown = false;
         _isDraggingWidget = false;
         _isResizingWidget = false;
+        _isDraggingIcon = false;
+
+        if (_iconDragMoved && _selectedWidget != null)
+            UpdateInspectorPanel();
+        _iconDragMoved = false;
+    }
+
+    private static bool TryGetWidgetIconCenter(HotkeyButtonWidget hotkey, float width, float height, out SKPoint center, out float half)
+    {
+        float maxIconSize = Math.Min(width, height * 0.62f);
+        float iconSize = hotkey.IconSize > 0 ? hotkey.IconSize : Math.Min(width, height) * 0.4f;
+        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
+        half = iconSize / 2f;
+        if (half <= 0f)
+        {
+            center = default;
+            return false;
+        }
+        center = new SKPoint(
+            Math.Clamp(width / 2f + hotkey.IconOffsetX, half, width - half),
+            Math.Clamp(height * 0.31f + hotkey.IconOffsetY, half, height - half));
+        return true;
+    }
+
+    private static bool IsPointOverWidgetIcon(HotkeyButtonWidget hotkey, float width, float height, float localX, float localY)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey.IconFile))
+        {
+            if (string.IsNullOrWhiteSpace(hotkey.Icon) || !GriddyIcons.Contains(hotkey.Icon))
+                return false;
+        }
+        else if (!SvgIconLoader.TryGetPath(hotkey.IconFile, out _))
+        {
+            return false;
+        }
+
+        if (!TryGetWidgetIconCenter(hotkey, width, height, out var center, out float half))
+            return false;
+
+        float dx = localX - center.X;
+        float dy = localY - center.Y;
+        return dx * dx + dy * dy <= half * half;
     }
 
     #endregion
@@ -1074,6 +1154,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                                 _selectedWidget.PropertyValues[prop.Name] = selectedValue;
                             }
                         };
+                        AttachDropdownWithinWindow(combo);
                         propPanel.Children.Add(combo);
                     }
                     else if (attr.PropertyType == WidgetPropertyType.Font)
@@ -1099,6 +1180,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                                 _selectedWidget.PropertyValues[prop.Name] = selectedValue;
                             }
                         };
+                        AttachDropdownWithinWindow(combo);
                         propPanel.Children.Add(combo);
                     }
                     else if (attr.PropertyType == WidgetPropertyType.Icon)
@@ -1225,6 +1307,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                                     _selectedWidget.PropertyValues[prop.Name] = combo.SelectedItem.ToString();
                                 }
                             };
+                            AttachDropdownWithinWindow(combo);
                             propPanel.Children.Add(combo);
                         }
                         else
@@ -1290,6 +1373,78 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         }
     }
 
+    /// <summary>
+    /// Keeps a ComboBox dropdown inside the window's client area. WPF positions the
+    /// popup against the screen, so a dropdown near the window's bottom edge extends
+    /// below the window where its options can't be clicked. This flips the dropdown
+    /// upward (or clamps it) and caps its height so every option stays inside the window.
+    /// </summary>
+    private static void AttachDropdownWithinWindow(ComboBox combo)
+    {
+        combo.Loaded += (_, _) =>
+        {
+            combo.ApplyTemplate();
+            if (Window.GetWindow(combo) is not Window window) return;
+            if (combo.Template?.FindName("PART_Popup", combo) is not Popup popup) return;
+            if (window.Content is not Visual content) return;
+
+            popup.Placement = PlacementMode.Custom;
+            popup.CustomPopupPlacementCallback = (popupSize, targetSize, _) =>
+            {
+                double clientW = (content as FrameworkElement)?.ActualWidth ?? window.ActualWidth;
+                double clientH = (content as FrameworkElement)?.ActualHeight ?? window.ActualHeight;
+                var tl = combo.TransformToAncestor(content).Transform(new Point(0, 0));
+
+                var placements = new List<CustomPopupPlacement>();
+                if (clientH - (tl.Y + targetSize.Height) >= popupSize.Height)
+                {
+                    placements.Add(new CustomPopupPlacement(new Point(0, targetSize.Height), PopupPrimaryAxis.Horizontal));
+                }
+                if (tl.Y >= popupSize.Height)
+                {
+                    placements.Add(new CustomPopupPlacement(new Point(0, -popupSize.Height), PopupPrimaryAxis.Horizontal));
+                }
+
+                double popupLeft = Math.Clamp(tl.X, 0, Math.Max(0, clientW - popupSize.Width));
+                double popupTop = Math.Clamp(tl.Y + targetSize.Height, 0, Math.Max(0, clientH - popupSize.Height));
+                placements.Add(new CustomPopupPlacement(new Point(popupLeft - tl.X, popupTop - tl.Y), PopupPrimaryAxis.Horizontal));
+                return placements.ToArray();
+            };
+        };
+
+        combo.DropDownOpened += (_, _) =>
+        {
+            if (Window.GetWindow(combo) is not Window window) return;
+            if (window.Content is not FrameworkElement content) return;
+            if (combo.Template?.FindName("PART_Popup", combo) is not Popup popup) return;
+
+            var tl = combo.TransformToAncestor(content).Transform(new Point(0, 0));
+            double below = content.ActualHeight - (tl.Y + combo.ActualHeight);
+            double above = tl.Y;
+            double available = Math.Max(120, Math.Max(below, above) - 10);
+
+            if (popup.Child is FrameworkElement popupContent)
+            {
+                if (FindVisualChild<ScrollViewer>(popupContent) is ScrollViewer scroll)
+                {
+                    scroll.MaxHeight = available;
+                }
+            }
+        };
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            if (FindVisualChild<T>(child) is T inner) return inner;
+        }
+        return null;
+    }
+
     private void ShowIconSelectorPopup(PropertyInfo iconProp, HotkeyButtonWidget hotkey, TextBox box)
     {
         var iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile))!;
@@ -1301,7 +1456,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             Height = 620,
             Owner = this,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = (Brush)FindResource("PanelBackground"),
+            Background = TryFindResource("BgPanel") as Brush ?? TryFindResource("PanelBackground") as Brush ?? Brushes.Black,
             Foreground = Brushes.White
         };
         dialog.SourceInitialized += (_, _) => ApplyDarkTitleBarToWindow(dialog, ThemeSettings.Theme.TitleBar);

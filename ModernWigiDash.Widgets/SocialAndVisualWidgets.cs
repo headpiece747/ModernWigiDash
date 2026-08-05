@@ -272,8 +272,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
     public override SKSize MinimumSize => new SKSize(180, 120);
 
-    [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "shroud")]
-    public string ChannelName { get; set; } = "shroud";
+    [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
+    public string ChannelName { get; set; } = "twitch";
 
     [WidgetProperty("Twitch Client ID", WidgetPropertyType.Text, "Public Twitch application ID. This is not a user token or secret.", "")]
     public string TwitchClientId { get; set; } = "";
@@ -291,7 +291,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public bool AutoConnect { get; set; } = true;
 
     [WidgetProperty("Header Color", WidgetPropertyType.Color, "Channel header text color", "#FFFFFF")]
-    public string HeaderColorHex { get; set; } = "#FFFFFF";
+    public string HeaderColorHex { get; set; } = "#F59E0B";
 
     [WidgetProperty("Message Color", WidgetPropertyType.Color, "Chat message text color", "#F8FAFC")]
     public string MessageColorHex { get; set; } = "#F8FAFC";
@@ -299,8 +299,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Background Color", WidgetPropertyType.Color, "Widget background color", "#0F1117")]
     public string BackgroundHex { get; set; } = "#0F1117";
 
-    [WidgetProperty("Font Size", WidgetPropertyType.Number, "Chat text font size in points", 16)]
-    public int FontSize { get; set; } = 16;
+    [WidgetProperty("Font Size", WidgetPropertyType.Number, "Chat text font size in points", 24)]
+    public int FontSize { get; set; } = 24;
 
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
@@ -653,7 +653,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private static string NormalizeChannel(string channel)
     {
         var c = channel.Trim().TrimStart('#');
-        return c.Length == 0 ? "shroud" : c.ToLowerInvariant();
+        return c.Length == 0 ? "twitch" : c.ToLowerInvariant();
     }
 
     private static SKColor PaletteFor(string name)
@@ -700,13 +700,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, bgPaint);
 
         float pad = 12f * scale;
-        float titleSize = 14f * scale;
-        float statusSize = 10f * scale;
+        float baseFontSize = Math.Max(10f, Math.Min(32f, FontSize));
+        float titleSize = (baseFontSize + 2f) * scale;
+        float statusSize = 13f * scale;
 
         using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, titleSize);
-        using var statusFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, statusSize);
+        using var statusFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, statusSize);
         using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
-        using var statusPaint = new SKPaint { Color = headerColor.WithAlpha((byte)(headerColor.Alpha * 0.65f)), IsAntialias = true };
 
         float top = bounds.Top + pad;
         string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
@@ -718,6 +718,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             StatusConnecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
             _ => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
         };
+
+        var statusColor = _status == StatusConnected
+            ? new SKColor(0x10, 0xB9, 0x81)
+            : SKColors.White;
+        using var statusPaint = new SKPaint { Color = statusColor, IsAntialias = true };
         canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;
@@ -734,9 +739,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         ChatMessage[] snapshot;
         lock (_messagesLock) snapshot = _messages.ToArray();
 
-        float baseFontSize = Math.Max(10f, FontSize) * scale;
-        float msgSize = baseFontSize;
-        float userSize = Math.Max(10f, baseFontSize - 2f);
+        float msgSize = baseFontSize * scale;
+        float userSize = (Math.Max(10f, baseFontSize - 2f)) * scale;
         float lineHeight = msgSize * 1.4f;
         float userLineHeight = userSize * 1.35f;
 

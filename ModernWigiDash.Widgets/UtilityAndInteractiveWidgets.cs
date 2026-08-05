@@ -344,39 +344,36 @@ public class HotkeyButtonWidget : ModernWidgetBase
 
         string label = ButtonLabel;
 
+        float maxIconSize = Math.Min(bounds.Width, bounds.Height * 0.62f);
         float iconSize = IconSize > 0 ? IconSize : Math.Min(bounds.Width, bounds.Height) * 0.4f;
-        var iconCenter = new SKPoint(bounds.MidX, bounds.Top + Math.Max(iconSize * 0.95f, bounds.Height * 0.42f));
+        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
+        float half = iconSize / 2f;
+        var iconCenter = new SKPoint(
+            Math.Clamp(bounds.MidX + IconOffsetX, bounds.Left + half, bounds.Right - half),
+            Math.Clamp(bounds.Top + bounds.Height * 0.31f + IconOffsetY, bounds.Top + half, bounds.Bottom - half));
 
-        if (!string.IsNullOrWhiteSpace(IconFile))
+        bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
+        SKPath? resolvedPath = null;
+        bool hasIcon = useCustomFile
+            ? SvgIconLoader.TryGetPath(IconFile, out resolvedPath) && resolvedPath != null
+            : !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
+
+        if (!hasIcon)
         {
-            if (SvgIconLoader.TryGetPath(IconFile, out var customPath) && customPath != null)
-            {
-                SvgIconLoader.Draw(canvas, customPath, iconCenter, iconSize, iconColor, IconOffsetX, IconOffsetY);
-            }
-            else
-            {
+            if (useCustomFile)
                 Context?.LogError($"Hotkey custom icon file not found or unsupported: {IconFile}");
-                DrawLabelOnly(canvas, bounds, label, textColor, Description);
-                return;
-            }
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(Icon) || !GriddyIcons.Contains(Icon))
-            {
-                DrawLabelOnly(canvas, bounds, label, textColor, Description);
-                return;
-            }
-            GriddyIcons.Draw(canvas, Icon, iconCenter, iconSize, iconColor, IconOffsetX, IconOffsetY);
+            DrawLabelOnly(canvas, bounds, label, textColor, Description);
+            return;
         }
 
+        // Draw label and description first so the icon can render in front of them
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
         using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, labelSize);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
         var textBounds = new SKRect();
         font.MeasureText(label, out textBounds, textPaint);
         canvas.DrawText(label, bounds.MidX - textBounds.Width / 2f,
-            bounds.Top + Math.Max(iconSize * 1.9f, bounds.Height * 0.76f), SKTextAlign.Left, font, textPaint);
+            bounds.Top + bounds.Height * 0.78f, SKTextAlign.Left, font, textPaint);
 
         if (!string.IsNullOrWhiteSpace(Description))
         {
@@ -386,6 +383,12 @@ public class HotkeyButtonWidget : ModernWidgetBase
             canvas.DrawText(Description, bounds.MidX - descriptionBounds.Width / 2f,
                 bounds.Bottom - Math.Max(8f, labelSize * 0.4f), SKTextAlign.Left, descriptionFont, descriptionPaint);
         }
+
+        // Icon drawn last so it stays in front of the text when overlapped
+        if (useCustomFile)
+            SvgIconLoader.Draw(canvas, resolvedPath!, iconCenter, iconSize, iconColor, 0, 0);
+        else
+            GriddyIcons.Draw(canvas, Icon, iconCenter, iconSize, iconColor, 0, 0);
     }
 
     private void DrawLabelOnly(SKCanvas canvas, SKRect bounds, string label, SKColor textColor, string description)
