@@ -1448,7 +1448,15 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             hotkey.IconFile = relative;
             hotkey.Icon = "";
             chip.Text = $"Custom: {relative}";
-            box.Text = relative;
+            _isUpdatingInspector = true;
+            try
+            {
+                box.Text = relative;
+            }
+            finally
+            {
+                _isUpdatingInspector = false;
+            }
             UpdateSelected(relative);
         };
 
