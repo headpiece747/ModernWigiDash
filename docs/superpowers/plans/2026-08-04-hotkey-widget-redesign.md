@@ -826,3 +826,12 @@ git commit -m "refactor(app): remove legacy hotkey action-list editor"
 **Placeholder scan:** no TBD/TODO/"add error handling"; every step carries exact code or a concrete check.
 
 **Type consistency:** `HotkeyButtonWidget.CreateAction(string, string)` introduced in Task 1 and used identically by the Task 1 tests and the Task 1 implementation; `SvgIconLoader.TryGetPath(string, out SKPath?)`, `CopyToIcons`, `Draw`, `ResolveFullPath`, `IconsDirectory` introduced in Task 2 and consumed unchanged in Tasks 2 and 4; `IconFile` property name is consistent across Tasks 1, 2, 3, 4. Task 3 Step 3 keeps exactly two locals (`actionTypeCombo` in the `Choice` branch, `actionCommandPanel` in the `Path` branch).
+
+---
+
+## Post-final-review amendments (2026-08-04)
+
+Applied after the whole-branch review returned "With fixes":
+
+1. **Task 4 inspector Icon branch oversight:** the plan did not clear `IconFile` when the user types a Griddy icon name (or clears the box) in the inspector's Icon box, so a custom SVG kept silently winning at render and manual typing appeared to do nothing. Fixed in `ModernWigiDash.App/MainWindow.xaml.cs` by clearing `IconFile` on manual typing (via `ApplyInspectorPropertyValue(iconFileProp, "")`) and seeding the box from `IconFile` when `Icon` is empty.
+2. **Test coverage:** `HotkeyWidget_ActionType_DefaultsToLaunchApp` now re-asserts the default `ButtonLabel` ("Hotkey") and `Description` ("Tap to run") from `HotkeyButtonWidget`'s property initializers.
