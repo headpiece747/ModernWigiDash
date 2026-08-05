@@ -990,10 +990,16 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             if (_selectedWidget.ActiveInstance != null)
             {
                 var type = _selectedWidget.ActiveInstance.GetType();
+                ComboBox? actionTypeCombo = null;
+                StackPanel? actionCommandPanel = null;
                 foreach (var prop in type.GetProperties())
                 {
                     var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
                     if (attr == null) continue;
+
+                    if (prop.DeclaringType == typeof(HotkeyButtonWidget) &&
+                        prop.Name == nameof(HotkeyButtonWidget.IconFile))
+                        continue;
 
                     if (attr.PropertyType == WidgetPropertyType.Button)
                     {
@@ -1056,6 +1062,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                             SelectedValue = currentVal?.ToString(),
                             Padding = new Thickness(8, 4, 8, 4)
                         };
+                        if (prop.Name == nameof(HotkeyButtonWidget.ActionType)) actionTypeCombo = combo;
                         combo.SelectionChanged += (s, e) =>
                         {
                             if (_isUpdatingInspector) return;
@@ -1242,6 +1249,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                         row.Children.Add(btnFolder);
                         row.Children.Add(txt);
                         propPanel.Children.Add(row);
+                        if (prop.Name == nameof(HotkeyButtonWidget.ActionCommand)) actionCommandPanel = propPanel;
                     }
                     else if (attr.PropertyType == WidgetPropertyType.SensorSelector)
                     {
@@ -1313,6 +1321,18 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                     }
 
                     PanelCustomProperties.Children.Add(propPanel);
+                }
+
+                if (actionTypeCombo != null && actionCommandPanel != null)
+                {
+                    void UpdateActionCommandVisibility()
+                    {
+                        string? selected = actionTypeCombo.SelectedValue?.ToString();
+                        actionCommandPanel.Visibility =
+                            selected is "Launch App" or "Open URL" ? Visibility.Visible : Visibility.Collapsed;
+                    }
+                    actionTypeCombo.SelectionChanged += (_, _) => UpdateActionCommandVisibility();
+                    UpdateActionCommandVisibility();
                 }
             }
         }
