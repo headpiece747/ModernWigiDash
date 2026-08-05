@@ -600,6 +600,87 @@ public class UnitTestSuite
         Assert.AreEqual("Wait 100 ms", new HotkeyAction { Kind = HotkeyActionKind.Delay, DelayMs = 100 }.Summary());
     }
 
+    private static readonly string SinglePathSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path d=\"M4 4h16v16H4z\"/></svg>";
+    private static readonly string MultiPathSvg =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path d=\"M4 4h16v16H4z\"/><path d=\"M8 8h8v8H8z\"/></svg>";
+
+    private static string WriteTempSvg(string content)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"hw_icon_{Guid.NewGuid():N}.svg");
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_CustomSvg_ExtractsSinglePathAndRenders()
+    {
+        string svg = WriteTempSvg(SinglePathSvg);
+        try
+        {
+            Assert.IsTrue(SvgIconLoader.TryGetPath(svg, out var path));
+            Assert.IsNotNull(path);
+            Assert.IsFalse(path!.IsEmpty);
+            var widget = new HotkeyButtonWidget { IconFile = svg };
+            using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+            widget.Render(surface.Canvas, new SKRect(0, 0, 200, 150));
+            Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            File.Delete(svg);
+        }
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_CustomSvg_MultiPath_FallsBackToLabelOnly()
+    {
+        string svg = WriteTempSvg(MultiPathSvg);
+        try
+        {
+            Assert.IsFalse(SvgIconLoader.TryGetPath(svg, out _));
+            var widget = new HotkeyButtonWidget { IconFile = svg };
+            using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+            widget.Render(surface.Canvas, new SKRect(0, 0, 200, 150));
+            Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            File.Delete(svg);
+        }
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_CustomSvg_MissingFile_FallsBackToLabelOnly()
+    {
+        var widget = new HotkeyButtonWidget
+        {
+            IconFile = Path.Combine(Path.GetTempPath(), $"hw_missing_{Guid.NewGuid():N}.svg")
+        };
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        widget.Render(surface.Canvas, new SKRect(0, 0, 200, 150));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void HotkeyWidget_IconFile_WinsOverIcon()
+    {
+        string svg = WriteTempSvg(SinglePathSvg);
+        try
+        {
+            Assert.IsTrue(SvgIconLoader.TryGetPath(svg, out var path));
+            Assert.IsFalse(path!.IsEmpty);
+            var widget = new HotkeyButtonWidget { Icon = "activity", IconFile = svg };
+            using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+            widget.Render(surface.Canvas, new SKRect(0, 0, 200, 150));
+            Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            File.Delete(svg);
+        }
+    }
+
     [TestMethod]
     public void ColorizedWidgets_RenderWithCustomColors_ExecuteWithoutExceptions()
     {
