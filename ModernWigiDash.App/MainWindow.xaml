@@ -36,7 +36,7 @@
                 <!-- Left Title & Logo -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <Image Source="Resources/Logo/logo.png" Width="38" Height="38" Stretch="Uniform"
-                           VerticalAlignment="Top" Margin="0,0,12,0"/>
+                           VerticalAlignment="Top" Margin="0,0,24,0"/>
                     <StackPanel VerticalAlignment="Top">
                         <TextBlock Text="MODERN WIGIDASH" FontSize="16" FontWeight="Bold" Foreground="White"/>
                         <TextBlock Text="Free-Form Canvas &amp; Dynamic Engine" FontSize="11" Foreground="{DynamicResource AccentBlue}"/>
@@ -44,17 +44,26 @@
                 </StackPanel>
 
                 <!-- Center Page Tabs -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <ScrollViewer x:Name="ScrollerPageTabs" HorizontalScrollBarVisibility="Auto" 
-                                  VerticalScrollBarVisibility="Disabled" 
-                                  MouseWheel="ScrollerPageTabs_MouseWheel">
-                        <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
-                    </ScrollViewer>
-                    <Button x:Name="BtnAddPage" Content="+ Add Page" Margin="6,0,0,0" Padding="12,6" Click="BtnAddPage_Click"/>
-                </StackPanel>
+                <Grid Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="{DynamicResource BgCard}" 
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" 
+                            CornerRadius="12" Padding="4,4" VerticalAlignment="Center">
+                        <ScrollViewer x:Name="ScrollerPageTabs" HorizontalScrollBarVisibility="Auto" 
+                                      VerticalScrollBarVisibility="Disabled" MaxWidth="800"
+                                      MouseWheel="ScrollerPageTabs_MouseWheel">
+                            <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                    </Border>
+                    <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" Click="BtnAddPage_Click"/>
+                </Grid>
 
                 <!-- Right Mode Toggles & USB Badge -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="1" Height="24" Background="{DynamicResource BorderBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                     <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
                     <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
                     <Button x:Name="BtnTheme" Content="🎨 Theme" Padding="12,6" Margin="0,0,16,0" Click="BtnTheme_Click"/>
