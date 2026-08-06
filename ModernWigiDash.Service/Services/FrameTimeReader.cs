@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
-using ModernWigiDash.Core.Telemetry;
 using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Services;

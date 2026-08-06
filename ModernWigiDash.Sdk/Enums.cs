@@ -72,7 +72,8 @@ public static class GridSizeExtensions
             GridSizePreset.Size3x4 => new SKSize(609, 592),
             GridSizePreset.Size4x4 => new SKSize(813, 592),
             GridSizePreset.Size5x4 => new SKSize(1016, 592),
-            _ => new SKSize(300, 200)
+            GridSizePreset.FreeForm => new SKSize(300, 200),
+            _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, "Unknown GridSizePreset")
         };
     }
 }

@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using System.Threading.Channels;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Service.Contracts;
@@ -16,9 +17,9 @@ namespace ModernWigiDash.Service.Wcf;
 /// DisplayHardwareWorkerService is the sole USB writer (avoids concurrent access).
 /// </summary>
 [CoreWCF.ServiceBehavior(IncludeExceptionDetailInFaults = false)]
-public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
+public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContract
 {
-    private readonly DisplayHidTransport _transport;
+    private readonly IDisplayTransport _transport;
     private readonly DisplayHardwareWorkerService? _hardwareWorker;
     private readonly ChannelWriter<byte[]> _frameChannelWriter;
     private readonly ChannelReader<DisplayTouchInput> _touchReader;
@@ -30,7 +31,7 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
         .Assembly.GetName().Version?.ToString() ?? "1.0.0.0";
 
     public ModernWigiDashDisplayService(
-        DisplayHidTransport transport,
+        IDisplayTransport transport,
         DisplayHardwareWorkerService? hardwareWorker,
         ChannelWriter<byte[]> frameChannelWriter,
         ChannelReader<DisplayTouchInput> touchReader,
@@ -54,15 +55,15 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
     {
         try
         {
+            AuditCall(nameof(InitializeDisplay));
             _logger.LogInformation("CoreWCF: InitializeDisplay requested");
-#pragma warning disable S6966 // WCF contract methods cannot be async; async would require interface change
             bool connected;
             if (_transport.IsConnected)
             {
                 // The display may have been switched to the vendor welcome screen by a prior
                 // Shutdown(). Re-run the full init sequence on the existing connection so the
                 // display returns to Base0 with all pages configured.
-                bool reinitOk = _transport.SendInitCommandsAsync().GetAwaiter().GetResult();
+                bool reinitOk = _transport.SendInitCommands();
                 if (reinitOk)
                 {
                     connected = true;
@@ -70,17 +71,16 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
                 else
                 {
                     // Existing handles are unresponsive (e.g. device physically re-enumerated).
-                    // Tear down and fully reconnect so ConnectAsync re-initializes the device.
+                    // Tear down and fully reconnect so Connect re-initializes the device.
                     LogToFile("[WCF] Re-init on existing connection failed — forcing full reconnect");
-                    _transport.DisconnectAsync().GetAwaiter().GetResult();
-                    connected = _transport.ConnectAsync().GetAwaiter().GetResult();
+                    _transport.Disconnect();
+                    connected = _transport.Connect();
                 }
             }
             else
             {
-                connected = _transport.ConnectAsync().GetAwaiter().GetResult();
+                connected = _transport.Connect();
             }
-#pragma warning restore S6966
             _logger.LogInformation("CoreWCF: InitializeDisplay result: {Connected}", connected);
             return connected;
         }
@@ -95,10 +95,9 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
     {
         try
         {
+            AuditCall(nameof(DeInitializeDisplay));
             _logger.LogInformation("CoreWCF: DeInitializeDisplay requested");
-#pragma warning disable S6966 // WCF contract methods cannot be async
-            _transport.DisconnectAsync().GetAwaiter().GetResult();
-#pragma warning restore S6966
+            _transport.Disconnect();
             return true;
         }
         catch (Exception ex)
@@ -138,11 +137,10 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
     {
         try
         {
+            AuditCall(nameof(SetBrightness));
             byte clamped = (byte)Math.Clamp((int)brightnessPercent, 0, 100);
             _logger.LogInformation("CoreWCF: SetBrightness to {Brightness}", clamped);
-#pragma warning disable S6966 // WCF contract methods cannot be async
-            bool result = _transport.SetBrightnessAsync(clamped).AsTask().GetAwaiter().GetResult();
-#pragma warning restore S6966
+            bool result = _transport.SetBrightness(clamped);
             return result;
         }
         catch (Exception ex)
@@ -156,8 +154,7 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
     {
         try
         {
-            LogToFile($"[WCF] SendFrame called with payload size: {payload?.Data?.Length ?? 0}");
-
+            AuditCall(nameof(SendFrame));
             if (payload == null || payload.Data == null || payload.Data.Length == 0)
             {
                 _logger.LogWarning("CoreWCF: SendFrame received null or empty FramePayload");
@@ -177,12 +174,7 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
             // DropOldest policy ensures we always send the most recent frame (no buildup).
             byte[] frameCopy = payload.Data.ToArray();
             bool queued = _frameChannelWriter.TryWrite(frameCopy);
-            if (queued)
-            {
-                _logger.LogDebug("CoreWCF: SendFrame queued ({Size} bytes)", frameCopy.Length);
-                LogToFile($"[WCF] SendFrame queued: {frameCopy.Length} bytes");
-            }
-            else
+            if (!queued)
             {
                 _logger.LogWarning("CoreWCF: SendFrame channel full — dropped frame ({Size} bytes)", frameCopy.Length);
                 LogToFile($"[WCF] SendFrame DROPPED: channel full ({frameCopy.Length} bytes)");
@@ -257,12 +249,11 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
     {
         try
         {
+            AuditCall(nameof(Shutdown));
             _logger.LogInformation("CoreWCF: Shutdown requested — resetting display to welcome screen");
-#pragma warning disable S6966, S5034 // WCF contract methods cannot be async; ValueTask consumed intentionally
-            _transport.ClearPageAsync(0).AsTask().GetAwaiter().GetResult();
-            _transport.GoToScreenAsync(0x01).AsTask().GetAwaiter().GetResult();
-#pragma warning restore S6966, S5034
-            return true;
+            bool cleared = _transport.ClearPage(0);
+            bool switched = _transport.GoToScreen(0x01);
+            return cleared && switched;
         }
         catch (Exception ex)
         {
@@ -311,17 +302,29 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
         }
     }
 
-    private static void LogToFile(string message)
+    private static void LogToFile(string message) => FileLog.Write(message);
+
+    /// <summary>
+    /// Records an audit entry for a mutating operation: which principal invoked
+    /// it and from where. The service runs as LocalSystem, so every state change
+    /// (InitializeDisplay, SetBrightness, SendFrame, Shutdown, ...) must leave
+    /// a trace of the requesting caller.
+    /// </summary>
+    private static void AuditCall(string operation)
     {
         try
         {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
-            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            string? caller = System.Security.Principal.WindowsIdentity.GetCurrent()?.Name;
+            string? remote = CoreWCF.OperationContext.Current?.IncomingMessageProperties
+                .TryGetValue(CoreWCF.Channels.RemoteEndpointMessageProperty.Name, out var ep) == true
+                ? ((CoreWCF.Channels.RemoteEndpointMessageProperty)ep).Address
+                : null;
+            FileLog.Write($"[WCF-AUDIT] {operation} by {(caller ?? "unknown")} from {(remote ?? "unknown")}");
         }
         catch
         {
-            System.Diagnostics.Debug.WriteLine("LogToFile failed; ignoring logging error");
-            // Ignore logging failures
+            // Audit logging must never break the operation.
+            System.Diagnostics.Debug.WriteLine($"WCF audit entry failed for {operation}");
         }
     }
 }

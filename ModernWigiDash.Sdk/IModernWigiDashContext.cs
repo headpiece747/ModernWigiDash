@@ -1,6 +1,6 @@
 namespace ModernWigiDash.Sdk;
 
-public interface ModernWigiDashContext
+public interface IModernWigiDashContext
 {
     // Global telemetry or configuration data passed from host to widget
     string GetSetting(string key, string defaultValue = "");
@@ -14,10 +14,8 @@ public interface ModernWigiDashContext
     // Shared sensor access bridge (LibreHardwareMonitor / System telemetry values)
     bool TryGetSensorValue(string sensorId, out float value);
     string GetSensorFormattedString(string sensorId);
-}
 
-public interface IWidgetHostInteraction
-{
+    // Host interaction capabilities (inspector refresh and device authorization UI)
     void RequestInspectorRefresh();
     void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt);
     void CloseDeviceAuthorization();

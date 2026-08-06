@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using System.Diagnostics;
 using System.Threading.Channels;
 using ModernWigiDash.Hardware.Transport;
@@ -11,11 +12,10 @@ namespace ModernWigiDash.Service.Services;
 public sealed class DisplayHardwareWorkerService(
     ChannelReader<byte[]> frameChannelReader,
     ChannelWriter<DisplayTouchInput> touchWriter,
-    DisplayHidTransport transport,
+    IDisplayTransport transport,
     ILogger<DisplayHardwareWorkerService> logger) : BackgroundService
 {
     private long _framesProcessed;
-    private static readonly string LogPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
 
     private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TouchPollInterval = TimeSpan.FromMilliseconds(16);
@@ -27,12 +27,12 @@ public sealed class DisplayHardwareWorkerService(
         LogToFile("Starting Display Hardware Worker Service...");
         logger.LogDebug("Display Hardware Worker starting");
 
-        bool connected = await transport.ConnectAsync(stoppingToken);
+        bool connected = transport.Connect();
         LogToFile($"Display Device Connection: {connected} ({transport.DevicePath})");
 
         if (connected)
         {
-            await transport.SetBrightnessAsync(100, stoppingToken);
+            transport.SetBrightness(100);
         }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -58,16 +58,11 @@ public sealed class DisplayHardwareWorkerService(
                     {
                         // Drain all queued frames, only send the latest to USB
                         // (avoids replaying stale frames when WCF is faster than USB)
-                        byte[]? latestFrame = null;
-                        while (frameChannelReader.TryRead(out var frameBuffer))
-                        {
-                            if (frameBuffer != null && frameBuffer.Length > 0)
-                                latestFrame = frameBuffer;
-                        }
+                        byte[]? latestFrame = ChannelFrameCoalescer.DrainToLatest(frameChannelReader);
 
                         if (latestFrame != null)
                         {
-                            bool success = await transport.SendFrameAsync(latestFrame);
+                            bool success = transport.SendFrame(latestFrame);
                             if (success)
                             {
                                 long count = Interlocked.Increment(ref _framesProcessed);
@@ -115,12 +110,12 @@ public sealed class DisplayHardwareWorkerService(
                 var now = Stopwatch.GetTimestamp();
                 if (Stopwatch.GetElapsedTime(keepaliveDue).TotalSeconds >= 5)
                 {
-                    await transport.ClearTimeoutAsync();
+                    transport.ClearTimeout();
                     keepaliveDue = now;
                 }
 
                 var touch = transport.ReadTouch();
-                if (touch is DisplayHidTransport.TouchReport t)
+                if (touch is TouchReport t)
                 {
                     var evt = new DisplayTouchInput
                     {
@@ -131,7 +126,6 @@ public sealed class DisplayHardwareWorkerService(
                     };
 
                     touchWriter.TryWrite(evt);
-                    LogToFile($"[TOUCH] Type={t.Type} X={t.X} Y={t.Y}");
                 }
 
                 await Task.Delay(TouchPollInterval, stoppingToken);
@@ -145,20 +139,7 @@ public sealed class DisplayHardwareWorkerService(
         }
     }
 
-    private static void LogToFile(string msg)
-    {
-        try
-        {
-            using var fs = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var sw = new StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-        }
-        catch (IOException)
-        {
-            System.Diagnostics.Debug.WriteLine("LogToFile: log file locked or unavailable");
-            // Log file may be locked or unavailable; silently ignore
-        }
-    }
+    private static void LogToFile(string msg) => FileLog.Write(msg);
 }
 
 /// <summary>

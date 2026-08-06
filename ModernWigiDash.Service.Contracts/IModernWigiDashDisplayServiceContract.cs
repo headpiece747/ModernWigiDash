@@ -11,7 +11,7 @@ namespace ModernWigiDash.Service.Wcf;
 /// </summary>
 [CoreWCF.ServiceContract(Namespace = "http://modernwigidash.service/2024")]
 [System.ServiceModel.ServiceContract(Namespace = "http://modernwigidash.service/2024")]
-public interface ModernWigiDashDisplayServiceContract
+public interface IModernWigiDashDisplayServiceContract
 {
     /// <summary>
     /// Initialize the display hardware connection.
@@ -42,7 +42,10 @@ public interface ModernWigiDashDisplayServiceContract
     bool SetBrightness(byte brightnessPercent);
 
     /// <summary>
-    /// Send a frame buffer payload to the display device.
+    /// Queues a frame buffer payload for delivery to the display device.
+    /// Returns true when the frame was accepted into the delivery queue; under
+    /// the DropOldest policy a later frame may supersede it before the worker
+    /// writes it to the device.
     /// </summary>
     [CoreWCF.OperationContract]
     [System.ServiceModel.OperationContract]

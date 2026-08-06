@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using System.ServiceModel;
 using ModernWigiDash.Service.Contracts;
 
@@ -11,8 +12,8 @@ namespace ModernWigiDash.Service.Wcf;
 /// </summary>
 public sealed class ModernWigiDashDisplayServiceClient : IDisposable
 {
-    private readonly ChannelFactory<ModernWigiDashDisplayServiceContract> _factory;
-    private ModernWigiDashDisplayServiceContract _channel;
+    private readonly ChannelFactory<IModernWigiDashDisplayServiceContract> _factory;
+    private IModernWigiDashDisplayServiceContract _channel;
     private bool _isDisposed;
 
     public const int DefaultPort = 8733;
@@ -37,7 +38,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
             ReceiveTimeout = TimeSpan.FromSeconds(30)
         };
 
-        _factory = new ChannelFactory<ModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(address));
+        _factory = new ChannelFactory<IModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(address));
         _channel = _factory.CreateChannel();
     }
 
@@ -52,33 +53,40 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     {
         var portsToCheck = new[] { DefaultPort }.Concat(FallbackPorts).Distinct().ToArray();
 
-        // Shared HttpClient — reuse across all port probes to avoid handler/socket overhead
-        using var http = new System.Net.Http.HttpClient
+        // Fast HTTP health check — identifies candidate ports without WCF channel
+        // overhead. A port is only ACCEPTED after the WCF protocol check below
+        // verifies it actually speaks the ModernWigiDashDisplayService contract,
+        // so an impostor binding a fallback port cannot hijack frame streaming.
+        List<int> candidates = [];
+        using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(1) })
         {
-            Timeout = TimeSpan.FromSeconds(1)
-        };
-
-        // Fast HTTP health check — avoids WCF channel overhead for detection
-        foreach (int port in portsToCheck)
-        {
-            try
+            foreach (int port in portsToCheck)
             {
-                var resp = await http.GetAsync($"http://localhost:{port}/ModernWigiDashDisplayService").ConfigureAwait(false);
-                if (resp.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.MethodNotAllowed or System.Net.HttpStatusCode.NotFound)
+                try
                 {
-                    return port;
+                    var resp = await http.GetAsync($"http://localhost:{port}/ModernWigiDashDisplayService").ConfigureAwait(false);
+                    if (resp.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.MethodNotAllowed or System.Net.HttpStatusCode.NotFound)
+                    {
+                        candidates.Add(port);
+                    }
                 }
-            }
-            catch
-            {
-                System.Diagnostics.Debug.WriteLine("HTTP health probe failed; trying next port");
-                // Try next port
+                catch
+                {
+                    System.Diagnostics.Debug.WriteLine($"HTTP health probe failed on port {port}; trying next port");
+                    // Try next port
+                }
             }
         }
 
-        // Fallback: full WCF channel test (only if HTTP check failed)
+        // Protocol check: only a real ModernWigiDashDisplayService endpoint
+        // answers GetVersion with a non-empty version string.
+        if (candidates.Count == 0)
+        {
+            candidates.AddRange(portsToCheck);
+        }
+
         using var fallbackHttp = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-        foreach (int port in portsToCheck)
+        foreach (int port in candidates)
         {
             try
             {
@@ -88,8 +96,8 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                     OpenTimeout = TimeSpan.FromSeconds(1),
                     SendTimeout = TimeSpan.FromSeconds(1)
                 };
-                using var factory = new ChannelFactory<ModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(url));
-                ModernWigiDashDisplayServiceContract? client = null;
+                using var factory = new ChannelFactory<IModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(url));
+                IModernWigiDashDisplayServiceContract? client = null;
                 try
                 {
                     client = factory.CreateChannel();
@@ -104,19 +112,17 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                     try { ((ICommunicationObject?)client)?.Abort(); }
                     catch (CommunicationObjectFaultedException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Abort failed: WCF probe channel already faulted");
                         /* Expected: channel already faulted */
                     }
                     catch (ObjectDisposedException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Abort failed: WCF probe channel already disposed");
                         /* Expected: channel already disposed */
                     }
                 }
             }
             catch
             {
-                System.Diagnostics.Debug.WriteLine("WCF probe failed; trying next port");
+                System.Diagnostics.Debug.WriteLine($"WCF probe failed on port {port}; trying next port");
                 // Try next port
             }
         }
@@ -189,8 +195,6 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         return ExecuteWithFaultRecovery(() => _channel.GetFrameTimeSnapshot(preferredProcessId));
     }
 
-    private static readonly string LogPath = System.IO.Path.Combine(AppContext.BaseDirectory, "display_device.log");
-
     private T ExecuteWithFaultRecovery<T>(Func<T> operation)
     {
         try
@@ -211,20 +215,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         }
     }
 
-    private static void LogClient(string msg)
-    {
-        try
-        {
-            using var fs = new System.IO.FileStream(LogPath, System.IO.FileMode.Append, System.IO.FileAccess.Write, System.IO.FileShare.ReadWrite);
-            using var sw = new System.IO.StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-        }
-        catch (System.IO.IOException)
-        {
-            System.Diagnostics.Debug.WriteLine("LogClient failed: IOException writing log file");
-            // Log file may be locked or unavailable; silently ignore
-        }
-    }
+    private static void LogClient(string msg) => FileLog.Write(msg);
 
     private void RecreateChannel()
     {

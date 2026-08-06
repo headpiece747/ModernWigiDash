@@ -5,28 +5,20 @@ public sealed class WidgetMetadataAttribute : Attribute
 {
     public string Id { get; }
     public string DisplayName { get; }
-    public string Description { get; }
-    public string Author { get; }
-    public string Version { get; }
-    public string Category { get; }
-    public GridSizePreset DefaultGridSize { get; }
+    public string Description { get; set; } = "";
+    public string Author { get; set; } = "Community";
+    public string Version { get; set; } = "1.0.0";
+    public string Category { get; set; } = "General";
+    public GridSizePreset DefaultGridSize { get; set; } = GridSizePreset.Size2x2;
 
-    public WidgetMetadataAttribute(
-        string id,
-        string displayName,
-        string description = "",
-        string author = "Community",
-        string version = "1.0.0",
-        string category = "General",
-        GridSizePreset defaultGridSize = GridSizePreset.Size2x2)
+    /// <summary>
+    /// Only the required identity fields are positional; optional metadata is
+    /// set via named properties so adding a field never breaks existing usages.
+    /// </summary>
+    public WidgetMetadataAttribute(string id, string displayName)
     {
         Id = id;
         DisplayName = displayName;
-        Description = description;
-        Author = author;
-        Version = version;
-        Category = category;
-        DefaultGridSize = defaultGridSize;
     }
 }
 

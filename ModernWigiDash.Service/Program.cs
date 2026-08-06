@@ -517,7 +517,7 @@ public static class Program
         builder.Services.AddSingleton(touchChannel.Writer);
 
         // Hardware transport singleton
-        builder.Services.AddSingleton<DisplayHidTransport>();
+        builder.Services.AddSingleton<IDisplayTransport, DisplayHidTransport>();
 
         // DisplayHardwareWorkerService as singleton so WCF service can inject it for frame stats
         builder.Services.AddSingleton<DisplayHardwareWorkerService>();
@@ -575,7 +575,7 @@ public static class Program
                     serviceOptions.DebugBehavior.IncludeExceptionDetailInFaults = true;
                 }
             });
-            serviceOptions.AddServiceEndpoint<ModernWigiDashDisplayService, ModernWigiDashDisplayServiceContract>(
+            serviceOptions.AddServiceEndpoint<ModernWigiDashDisplayService, IModernWigiDashDisplayServiceContract>(
                 httpBinding, WcfServicePath);
         });
 
