@@ -1,7 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 using ModernWigiDash.Core.Rendering;
@@ -279,7 +277,7 @@ internal static class HotkeyActionExecutor
     }
 }
 
-[WidgetMetadata("hotkey_button", "Hotkey", "Interactive touch button executing macros, shortcuts, or application launches.", "ModernWigiDash", "2.0.0", "Utilities", GridSizePreset.Size1x1)]
+[WidgetMetadata("hotkey_button", "Hotkey", Description = "Interactive touch button executing macros, shortcuts, or application launches.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class HotkeyButtonWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
@@ -435,7 +433,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
         try
         {
             var action = CreateAction(ActionType, ActionCommand);
-            if (string.IsNullOrWhiteSpace(action.Value) && action.Kind is HotkeyActionKind.Launch or HotkeyActionKind.OpenUrl)
+            if (string.IsNullOrWhiteSpace(action.Value) && IsLaunchOrUrlAction(ActionType))
             {
                 Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
                 return;
@@ -474,263 +472,19 @@ public class HotkeyButtonWidget : ModernWidgetBase
             _ => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = actionCommand }
         };
 
+    /// <summary>
+    /// Single source of truth for 'action needs a command value' (Launch/URL).
+    /// The inspector panel and the executor both consult this instead of
+    /// re-listing action-type strings.
+    /// </summary>
+    public static bool IsLaunchOrUrlAction(string actionType)
+        => actionType is "Launch App" or "Open URL";
+
     public override async ValueTask DisposeAsync()
     {
         _actionCts?.Cancel();
         _actionCts?.Dispose();
         _actionGate.Dispose();
         await base.DisposeAsync();
-    }
-}
-
-[WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", "Precision millisecond stopwatch with touch Start/Pause/Reset controls.", "ModernWigiDash", "2.0.0", "Utilities", GridSizePreset.Size1x1)]
-public class StopwatchTimerWidget : ModernWidgetBase
-{
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
-    public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
-
-    private bool _isRunning = false;
-    private DateTime _startTime = DateTime.Now;
-    private TimeSpan _elapsed = TimeSpan.Zero;
-
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
-    public string TextColorHex { get; set; } = "#FAFAFA";
-
-    [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Status label color", "#F59E0B")]
-    public string AccentColorHex { get; set; } = "#F59E0B";
-
-    public override void Render(SKCanvas canvas, SKRect bounds)
-    {
-        var total = _isRunning ? _elapsed + (DateTime.Now - _startTime) : _elapsed;
-        string timeStr = $"{total.Minutes:D2}:{total.Seconds:D2}.{total.Milliseconds / 10:D2}";
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
-
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, bounds.Width * 0.18f);
-        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        var tb = new SKRect();
-        font.MeasureText(timeStr, out tb, textPaint);
-        canvas.DrawText(timeStr, bounds.MidX - (tb.Width / 2f), bounds.MidY - 5f, SKTextAlign.Left, font, textPaint);
-
-        using var subFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 11f);
-        using var subPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-        string statusStr = _isRunning ? "TAP TO PAUSE" : "TAP TO START";
-        var sb = new SKRect();
-        subFont.MeasureText(statusStr, out sb, subPaint);
-        float dotR = 4f;
-        float dotX = bounds.MidX - (sb.Width / 2f) - dotR * 2f - 5f;
-        float dotY = bounds.Bottom - 16f - 4f;
-        using var dotPaint = new SKPaint { Color = _isRunning ? new SKColor(239, 68, 68) : new SKColor(34, 197, 94), IsAntialias = true };
-        canvas.DrawCircle(dotX, dotY, dotR, dotPaint);
-        canvas.DrawText(statusStr, bounds.MidX - (sb.Width / 2f), bounds.Bottom - 16f, SKTextAlign.Left, subFont, subPaint);
-    }
-
-    public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-    {
-        if (eventType == TouchEventType.TouchDown)
-        {
-            if (_isRunning)
-            {
-                _elapsed += DateTime.Now - _startTime;
-                _isRunning = false;
-            }
-            else
-            {
-                _startTime = DateTime.Now;
-                _isRunning = true;
-            }
-            Context?.RequestRender();
-        }
-    }
-}
-
-[WidgetMetadata("ticker_stock", "Stock & Crypto", "Shows live stock/crypto symbol, real-time price, and trend badges via WebSocket.", "ModernWigiDash", "2.0.0", "Utilities", GridSizePreset.Size1x1)]
-public class CryptoStockTickerWidget : ModernWidgetBase
-{
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
-    public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
-
-    [WidgetProperty("Symbol", WidgetPropertyType.Text, "Crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT)")]
-    public string Symbol { get; set; } = "";
-
-    [WidgetProperty("Asset Type", WidgetPropertyType.Choice, "Force type when auto-detection doesn't recognize your symbol", "Auto", "Auto", "Crypto", "Stock", "FX Pair")]
-    public string AssetType { get; set; } = "Auto";
-
-    [WidgetProperty("Display Name", WidgetPropertyType.Text, "Optional custom label (leave blank to auto-generate from symbol)")]
-    public string DisplayName { get; set; } = "";
-
-    public string Price { get; set; } = "";
-
-    public string ChangeBadge { get; set; } = "";
-
-    [WidgetProperty("Show Change", WidgetPropertyType.Boolean, "Show or hide the change percentage badge", true)]
-    public bool ShowChange { get; set; } = true;
-
-    [WidgetProperty("Price Decimals", WidgetPropertyType.Choice, "Decimal places for small-value assets (Auto adjusts to price)", "Auto", "Auto", "2", "4", "6", "8")]
-    public string PriceDecimals { get; set; } = "Auto";
-
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Symbol and price color", "#FAFAFA")]
-    public string TextColorHex { get; set; } = "#FAFAFA";
-
-    [WidgetProperty("Positive Color", WidgetPropertyType.Color, "Upward change badge color", "#22C55E")]
-    public string PositiveColorHex { get; set; } = "#22C55E";
-
-    [WidgetProperty("Negative Color", WidgetPropertyType.Color, "Downward change badge color", "#EF4444")]
-    public string NegativeColorHex { get; set; } = "#EF4444";
-
-    private static readonly PriceFeedManager _feed = new();
-    private static readonly HttpClient _httpClient = new HttpClient();
-    private string? _lastSubscribedSymbol;
-    private AssetKind _lastSubscribedKind = AssetKind.Stock;
-    private DateTime _lastFallback = DateTime.MinValue;
-
-    private AssetKind AssetKindValue => PriceFeedManager.DetectAssetKind(Symbol, AssetType);
-    private bool IsCryptoAsset => AssetKindValue == AssetKind.Crypto;
-    private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
-
-    private string DisplayLabel
-    {
-        get
-        {
-            if (!string.IsNullOrEmpty(DisplayName)) return DisplayName;
-            if (IsFxAsset && PriceFeedManager.TryParseFxPair(Symbol, out string baseCur, out string quoteCur))
-                return $"{baseCur} / {quoteCur}";
-            return PriceFeedManager.NormalizeSymbol(Symbol);
-        }
-    }
-
-    private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
-    {
-        int d = PriceDecimals switch
-        {
-            "2" => 2, "4" => 4, "6" => 6, "8" => 8,
-            _ => rawPrice >= 100 ? 2 : rawPrice >= 1 ? 4 : rawPrice >= 0.01m ? 6 : 8
-        };
-        return currencySymbol + rawPrice.ToString("N" + d);
-    }
-
-    public override void Render(SKCanvas canvas, SKRect bounds)
-    {
-        if (string.IsNullOrWhiteSpace(Symbol))
-        {
-            DrawPlaceholder(canvas, bounds);
-            return;
-        }
-
-        AssetKind kind = AssetKindValue;
-        if (_lastSubscribedSymbol != Symbol || _lastSubscribedKind != kind)
-        {
-            _lastSubscribedSymbol = Symbol;
-            _lastSubscribedKind = kind;
-            _feed.Subscribe(Symbol, kind);
-        }
-
-        var info = _feed.GetPrice(Symbol, kind);
-        if (info != null)
-        {
-            Price = FormatPrice(info.Price, info.CurrencySymbol);
-            ChangeBadge = info.FormattedChange;
-        }
-        else if ((DateTime.Now - _lastFallback).TotalSeconds >= 15)
-        {
-            _lastFallback = DateTime.Now;
-            _ = FallbackFetchAsync();
-        }
-
-        bool isPositive = info?.IsPositive ?? ChangeBadge.StartsWith('+');
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor posColor = SKColor.TryParse(PositiveColorHex, out var parsedPos) ? parsedPos : new SKColor(34, 197, 94);
-        SKColor negColor = SKColor.TryParse(NegativeColorHex, out var parsedNeg) ? parsedNeg : new SKColor(239, 68, 68);
-
-        float pad = 14f;
-        float priceSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
-
-        using var symFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
-        using var symPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        string symbolText = TruncateToFit(DisplayLabel, symFont, symPaint, bounds.Width - pad * 2f);
-        canvas.DrawText(symbolText, pad, pad + priceSize * 0.8f, SKTextAlign.Left, symFont, symPaint);
-
-        using var priceFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
-        using var pricePaint = new SKPaint { Color = textColor, IsAntialias = true };
-        canvas.DrawText(Price, pad, bounds.MidY + priceSize * 0.35f, SKTextAlign.Left, priceFont, pricePaint);
-
-        if (ShowChange)
-        {
-            using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
-            using var badgePaint = new SKPaint { Color = isPositive ? posColor : negColor, IsAntialias = true };
-            canvas.DrawText(ChangeBadge, pad, bounds.Bottom - pad, SKTextAlign.Left, badgeFont, badgePaint);
-        }
-    }
-
-    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
-    {
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        float mainSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
-
-        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
-        using var titlePaint = new SKPaint { Color = textColor, IsAntialias = true };
-        string title = "Enter a symbol";
-        float titleW = titleFont.MeasureText(title);
-        canvas.DrawText(title, bounds.MidX - titleW / 2f, bounds.MidY - 4f, SKTextAlign.Left, titleFont, titlePaint);
-
-        using var hintFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(mainSize * 0.4f, 11f));
-        using var hintPaint = new SKPaint { Color = textColor.WithAlpha(160), IsAntialias = true };
-        string hint = "e.g. BTC, ETH, AAPL, MSFT";
-        float hintW = hintFont.MeasureText(hint);
-        canvas.DrawText(hint, bounds.MidX - hintW / 2f, bounds.MidY + 16f, SKTextAlign.Left, hintFont, hintPaint);
-    }
-
-    private static string TruncateToFit(string text, SKFont font, SKPaint paint, float maxWidth)
-    {
-        if (font.MeasureText(text, paint) <= maxWidth) return text;
-
-        const string ellipsis = "…";
-        string truncated = text;
-        while (truncated.Length > 1 && font.MeasureText(truncated + ellipsis, paint) > maxWidth)
-        {
-            truncated = truncated[..^1];
-        }
-        return truncated + ellipsis;
-    }
-
-    private async Task FallbackFetchAsync()
-    {
-        try
-        {
-            if (IsFxAsset) return;
-            if (IsCryptoAsset)
-            {
-                string url = $"https://api.coingecko.com/api/v3/simple/price?ids={Symbol.ToLower()}&vs_currencies=usd&include_24hr_change=true";
-                string json = await _httpClient.GetStringAsync(url);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty(Symbol.ToLower(), out var coinEl))
-                {
-                    if (coinEl.TryGetProperty("usd", out var usdEl))
-                        Price = FormatPrice((decimal)usdEl.GetDouble());
-                    if (coinEl.TryGetProperty("usd_24h_change", out var changeEl))
-                        ChangeBadge = $"{(changeEl.GetDouble() >= 0 ? "+" : "")}{changeEl.GetDouble():F2}%";
-                    Context?.RequestRender();
-                }
-            }
-            else
-            {
-                string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{Symbol.ToUpper()}?interval=1d&range=1d";
-                string json = await _httpClient.GetStringAsync(url);
-                using var doc = JsonDocument.Parse(json);
-                var result = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
-                var meta = result.GetProperty("meta");
-                decimal price = (decimal)meta.GetProperty("regularMarketPrice").GetDouble();
-                decimal prevClose = (decimal)meta.GetProperty("chartPreviousClose").GetDouble();
-                decimal change = price - prevClose;
-                decimal changePct = (change / prevClose) * 100;
-                Price = FormatPrice(price);
-                ChangeBadge = $"{(change >= 0 ? "+" : "")}{changePct:F2}%";
-                Context?.RequestRender();
-            }
-        }
-        catch
-        {
-            System.Diagnostics.Debug.WriteLine("Market price fetch failed; keeping last known price");
-        }
     }
 }

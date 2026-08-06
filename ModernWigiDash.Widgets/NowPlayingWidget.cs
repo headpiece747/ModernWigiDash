@@ -13,14 +13,7 @@ namespace ModernWigiDash.Widgets;
 /// Covers Spotify, browsers (YouTube/Netflix), VLC, iTunes, Windows Media Player, games —
 /// zero polling, zero network, zero login, works for free-tier accounts.
 /// </summary>
-[WidgetMetadata(
-    "now_playing",
-    "Now Playing",
-    "Displays live media playback (Spotify, browsers, VLC, iTunes, games) with album art, progress, shuffle/repeat, and touch controls via Windows media sessions.",
-    "ModernWigiDash",
-    "2.0.0",
-    "Media & Audio",
-    GridSizePreset.Size5x4)]
+[WidgetMetadata("now_playing", "Now Playing", Description = "Displays live media playback (Spotify, browsers, VLC, iTunes, games) with album art, progress, shuffle/repeat, and touch controls via Windows media sessions.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class NowPlayingWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
@@ -40,7 +33,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     public bool ShowSourceBadge { get; set; } = true;
 
     // ── SMTC state (all mutated on the UI thread) ─────────────────────────
-    private GlobalSystemMediaTransportControlsSessionManager? _smctManager;
+    private GlobalSystemMediaTransportControlsSessionManager? _mediaSessionManager;
     private GlobalSystemMediaTransportControlsSession? _session;
     private MediaSnapshot? _snapshot;
     private SKBitmap? _albumArt;
@@ -82,14 +75,14 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
-    public override ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
-        _ = InitSmctAsync();
+        _ = InitMediaSessionManagerAsync();
         return ValueTask.CompletedTask;
     }
 
-    private async Task InitSmctAsync()
+    private async Task InitMediaSessionManagerAsync()
     {
         try
         {
@@ -98,7 +91,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
             if (_disposed) return;
 
-            _smctManager = manager;
+            _mediaSessionManager = manager;
             manager.CurrentSessionChanged += OnCurrentSessionChanged;
             manager.SessionsChanged += OnSessionsChanged;
             AttachSession(manager.GetCurrentSession());
@@ -106,7 +99,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         catch (Exception ex)
         {
             Context?.LogError($"SMTC init failed: {ex.Message}", ex);
-            await PushRenderAsync();
+            Context?.RequestRender();
         }
     }
 
@@ -161,7 +154,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             _snapshot = null;
             DisposeArtwork();
             _bgColor = new SKColor(18, 18, 24);
-            await PushRenderAsync();
+            Context?.RequestRender();
             return;
         }
 
@@ -218,7 +211,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                 await LoadArtworkAsync(props?.Thumbnail, artKey);
             }
 
-            await PushRenderAsync();
+            Context?.RequestRender();
         }
         catch (Exception ex)
         {
@@ -289,12 +282,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _loadedArtworkKey = "";
     }
 
-    private async Task PushRenderAsync()
-    {
-        Context?.RequestRender();
-        await Task.CompletedTask;
-    }
-
     // ── Render ────────────────────────────────────────────────────────────
 
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -345,8 +332,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         float pad = 24f * scale;
         string name = FriendlyAppName(snap.SourceAppId);
-        using var font = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 14f * scale);
-        FontHelper.ConfigureHighQualityFont(font);
+        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 14f * scale);
         using var textPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White), IsAntialias = true };
         float textW = font.MeasureText(name);
         float h = 26f * scale;
@@ -426,14 +412,10 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor text = ParseColor(TextColorHex, SKColors.White);
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
-        using var titleFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 40f * scale);
-        FontHelper.ConfigureHighQualityFont(titleFont);
-        using var artistFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 28f * scale);
-        FontHelper.ConfigureHighQualityFont(artistFont);
-        using var albumFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), 22f * scale);
-        FontHelper.ConfigureHighQualityFont(albumFont);
-        using var metaFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), 18f * scale);
-        FontHelper.ConfigureHighQualityFont(metaFont);
+        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 40f * scale);
+        using var artistFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 28f * scale);
+        using var albumFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 22f * scale);
+        using var metaFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 18f * scale);
 
         using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
         using var artistPaint = new SKPaint { Color = text.WithAlpha(230), IsAntialias = true };
@@ -502,8 +484,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
         // Time labels above progress bar track
-        using var timeFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 16f * scale);
-        FontHelper.ConfigureHighQualityFont(timeFont);
+        using var timeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 16f * scale);
         using var timePaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
         canvas.DrawText(FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, SKTextAlign.Left, timeFont, timePaint);
 
@@ -792,8 +773,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         if (repeatOne)
         {
-            using var numFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), r.Width * 0.24f);
-            FontHelper.ConfigureHighQualityFont(numFont);
+            using var numFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, r.Width * 0.24f);
             using var numPaint = new SKPaint { Color = paint.Color, IsAntialias = true };
             numFont.MeasureText("1", out var nb, numPaint);
             canvas.DrawText("1", cx - nb.Width / 2f, cy + nb.Height / 3f, SKTextAlign.Left, numFont, numPaint);
@@ -850,7 +830,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             };
             _ = _session?.TryChangeAutoRepeatModeAsync(next);
         }
-        else if (_badgeBtn.Contains(hitPoint) && _smctManager is not null)
+        else if (_badgeBtn.Contains(hitPoint) && _mediaSessionManager is not null)
         {
             CycleSession();
         }
@@ -867,9 +847,9 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void CycleSession()
     {
-        if (_smctManager is null) return;
+        if (_mediaSessionManager is null) return;
 
-        var sessions = _smctManager.GetSessions();
+        var sessions = _mediaSessionManager.GetSessions();
         if (sessions.Count <= 1) return;
 
         int idx = -1;
@@ -1056,13 +1036,13 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (_disposed) return;
         _disposed = true;
 
-        if (_smctManager is not null)
+        if (_mediaSessionManager is not null)
         {
-            _smctManager.CurrentSessionChanged -= OnCurrentSessionChanged;
-            _smctManager.SessionsChanged -= OnSessionsChanged;
+            _mediaSessionManager.CurrentSessionChanged -= OnCurrentSessionChanged;
+            _mediaSessionManager.SessionsChanged -= OnSessionsChanged;
         }
         DetachSessionEvents();
-        _smctManager = null;
+        _mediaSessionManager = null;
         _session = null;
         _snapshot = null;
         DisposeArtwork();

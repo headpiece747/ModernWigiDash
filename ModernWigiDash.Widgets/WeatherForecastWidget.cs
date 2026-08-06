@@ -1,10 +1,7 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using SkiaSharp;
@@ -13,803 +10,7 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("picture_viewer", "Picture & GIF Viewer", "Displays pictures and animated GIFs with rounded borders and click-to-cycle folder viewing.", "ModernWigiDash", "2.0.0", "Social & Visual", GridSizePreset.Size2x2)]
-public class PictureAndGifWidget : ModernWidgetBase
-{
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
-    public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
-
-    [WidgetProperty("Image Folder/File Path", WidgetPropertyType.Path, "Path to image or folder of images", "C:\\Pictures")]
-    public string ImagePath { get; set; } = "C:\\Pictures";
-
-    [WidgetProperty("Source Mode", WidgetPropertyType.Choice, "Auto detects file or folder; forces one mode when set", "Auto", "Auto", "Single Image", "Folder (Cycle)")]
-    public string SourceMode { get; set; } = "Auto";
-
-    [WidgetProperty("Fit Mode", WidgetPropertyType.Choice, "Aspect ratio scaling mode", "Cover", "Cover", "Contain", "Stretch")]
-    public string FitMode { get; set; } = "Cover";
-
-    [WidgetProperty("Corner Radius", WidgetPropertyType.Number, "Rounded corners radius", 16f)]
-    public float CornerRadius { get; set; } = 16f;
-
-    [WidgetProperty("Text Color", WidgetPropertyType.Color, "Placeholder icon and hint color", "#FAFAFA")]
-    public string TextColorHex { get; set; } = "#FAFAFA";
-
-    private string[] _folderImages = Array.Empty<string>();
-    private int _imageIndex = 0;
-    private SKBitmap? _staticBitmap;
-    private SKCodec? _gifCodec;
-    private SKBitmap[]? _gifFrames;
-    private int _gifFrameIndex;
-    private long _gifNextFrameTick;
-    private string _loadedPath = "";
-
-    public override void OnPropertyChanged(string propertyName, object? newValue)
-    {
-        if (propertyName is nameof(ImagePath) or nameof(SourceMode))
-        {
-            ResetMedia();
-        }
-        base.OnPropertyChanged(propertyName, newValue);
-    }
-
-    public override void Render(SKCanvas canvas, SKRect bounds)
-    {
-        string? currentFile = GetActiveImageFile();
-
-        if (!string.IsNullOrEmpty(currentFile) && File.Exists(currentFile))
-        {
-            if (currentFile != _loadedPath)
-            {
-                LoadMedia(currentFile);
-            }
-
-            if (_gifFrames is { Length: > 1 })
-            {
-                if (Environment.TickCount64 >= _gifNextFrameTick)
-                {
-                    _gifFrameIndex = (_gifFrameIndex + 1) % _gifFrames.Length;
-                    _gifNextFrameTick = Environment.TickCount64 + GifFrameDurationMs(_gifFrameIndex);
-                }
-                DrawImage(canvas, bounds, _gifFrames[_gifFrameIndex]);
-                return;
-            }
-
-            if (_staticBitmap != null)
-            {
-                DrawImage(canvas, bounds, _staticBitmap);
-                return;
-            }
-        }
-
-        DrawPlaceholder(canvas, bounds);
-    }
-
-    private void LoadMedia(string path)
-    {
-        ResetMedia();
-        _loadedPath = path;
-
-        try
-        {
-            _gifCodec = SKCodec.Create(path);
-            if (_gifCodec != null && _gifCodec.FrameCount > 1)
-            {
-                int frameCount = _gifCodec.FrameCount;
-                SKImageInfo info = _gifCodec.Info;
-                _gifFrames = new SKBitmap[frameCount];
-
-                for (int i = 0; i < frameCount; i++)
-                {
-                    var frame = new SKBitmap(info);
-                    IntPtr pixels = frame.GetPixels();
-                    var options = new SKCodecOptions { FrameIndex = i };
-                    if (_gifCodec.GetPixels(info, pixels, options) != SKCodecResult.Success)
-                    {
-                        frame.Dispose();
-                        frame = new SKBitmap(info);
-                    }
-                    _gifFrames[i] = frame;
-                }
-
-                _gifFrameIndex = 0;
-                _gifNextFrameTick = Environment.TickCount64 + GifFrameDurationMs(0);
-                return;
-            }
-
-            _gifCodec?.Dispose();
-            _gifCodec = null;
-            _staticBitmap = SKBitmap.Decode(path);
-        }
-        catch
-        {
-            ResetMedia();
-        }
-    }
-
-    private void ResetMedia()
-    {
-        _loadedPath = "";
-        if (_gifFrames != null)
-        {
-            foreach (var frame in _gifFrames)
-            {
-                frame.Dispose();
-            }
-            _gifFrames = null;
-        }
-        _gifCodec?.Dispose();
-        _gifCodec = null;
-        _staticBitmap?.Dispose();
-        _staticBitmap = null;
-        _gifFrameIndex = 0;
-        _folderImages = Array.Empty<string>();
-        _imageIndex = 0;
-    }
-
-    private long GifFrameDurationMs(int frameIndex)
-    {
-        if (_gifCodec != null && frameIndex >= 0 && frameIndex < _gifCodec.FrameInfo.Length)
-        {
-            long ms = _gifCodec.FrameInfo[frameIndex].Duration;
-            if (ms > 0) return ms;
-        }
-        return 100L;
-    }
-
-    private void DrawImage(SKCanvas canvas, SKRect bounds, SKBitmap bitmap)
-    {
-        if (bitmap == null) return;
-
-        canvas.Save();
-        float radius = Math.Clamp(CornerRadius, 0f, Math.Min(bounds.Width, bounds.Height) / 2f);
-        using (var clipBuilder = new SKPathBuilder())
-        {
-            clipBuilder.AddRoundRect(bounds, radius, radius);
-            using var clipPath = clipBuilder.Snapshot();
-            canvas.ClipPath(clipPath);
-            canvas.DrawBitmap(bitmap, GetDrawRect(bounds, bitmap.Width, bitmap.Height), new SKSamplingOptions(SKFilterMode.Linear));
-        }
-        canvas.Restore();
-    }
-
-    private SKRect GetDrawRect(SKRect bounds, int imgW, int imgH)
-    {
-        if (FitMode == "Stretch")
-        {
-            return bounds;
-        }
-
-        float scale = FitMode == "Contain"
-            ? Math.Min(bounds.Width / imgW, bounds.Height / imgH)
-            : Math.Max(bounds.Width / imgW, bounds.Height / imgH);
-
-        float w = imgW * scale;
-        float h = imgH * scale;
-        return new SKRect(bounds.MidX - w / 2f, bounds.MidY - h / 2f, bounds.MidX + w / 2f, bounds.MidY + h / 2f);
-    }
-
-    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
-    {
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, 36f);
-        using var iconPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        var tb = new SKRect();
-        iconFont.MeasureText("🖼️", out tb, iconPaint);
-        canvas.DrawText("🖼️", bounds.MidX - (tb.Width / 2f), bounds.MidY - 10f, SKTextAlign.Left, iconFont, iconPaint);
-
-        using var labelFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 12f);
-        using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        string hint = "Click/Tap to Cycle Pictures";
-        var lb = new SKRect();
-        labelFont.MeasureText(hint, out lb, labelPaint);
-        canvas.DrawText(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 25f, SKTextAlign.Left, labelFont, labelPaint);
-    }
-
-    private string? GetActiveImageFile()
-    {
-        bool singleMode = SourceMode == "Single Image";
-        bool folderMode = SourceMode == "Folder (Cycle)";
-
-        if (!folderMode && File.Exists(ImagePath))
-        {
-            return ImagePath;
-        }
-
-        if (!singleMode && Directory.Exists(ImagePath))
-        {
-            if (_folderImages.Length == 0)
-            {
-                _folderImages = Directory.GetFiles(ImagePath, "*.*")
-                    .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-            }
-
-            if (_folderImages.Length > 0)
-            {
-                _imageIndex %= _folderImages.Length;
-                return _folderImages[_imageIndex];
-            }
-        }
-
-        return null;
-    }
-
-    public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-    {
-        bool folderMode = SourceMode == "Folder (Cycle)";
-        bool autoFolder = SourceMode == "Auto" && Directory.Exists(ImagePath);
-
-        if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 && (folderMode || autoFolder))
-        {
-            _imageIndex = (_imageIndex + 1) % _folderImages.Length;
-            _loadedPath = "";
-            Context?.RequestRender();
-        }
-    }
-
-    public override ValueTask DisposeAsync()
-    {
-        ResetMedia();
-        return base.DisposeAsync();
-    }
-}
-
-[WidgetMetadata("twitch_chat", "Twitch", "Live Twitch chat with live followed-channel selection and anonymous read-only IRC access.", "ModernWigiDash", "4.1.0", "Social & Visual", GridSizePreset.Size2x4)]
-public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IWidgetPropertyOptionsProvider, IWidgetActionPresentationProvider
-{
-    private const string AnonymousNickPrefix = "justinfan";
-    private const string AnonymousPass = "SCHMOOPIIE";
-    private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
-
-    private const int StatusDisconnected = 0;
-    private const int StatusConnecting = 1;
-    private const int StatusConnected = 2;
-
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
-    public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
-    public override SKSize MinimumSize => new SKSize(180, 120);
-
-    [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
-    public string ChannelName { get; set; } = "twitch";
-
-    [WidgetProperty("Twitch Client ID", WidgetPropertyType.Text, "Public Twitch application ID. This is not a user token or secret.", "")]
-    public string TwitchClientId { get; set; } = "";
-
-    [WidgetProperty("Log in with Twitch", WidgetPropertyType.Button, "Authorize followed-channel access in your browser")]
-    public string LoginWithTwitch { get; set; } = "";
-
-    [WidgetProperty("Refresh live channels", WidgetPropertyType.Button, "Reload followed channels that are currently live")]
-    public string RefreshLiveChannels { get; set; } = "";
-
-    [WidgetProperty("Log out of Twitch", WidgetPropertyType.Button, "Remove the locally stored Twitch authorization")]
-    public string LogoutTwitch { get; set; } = "";
-
-    [WidgetProperty("Auto Connect", WidgetPropertyType.Boolean, "Connect automatically when the widget loads", true)]
-    public bool AutoConnect { get; set; } = true;
-
-    [WidgetProperty("Header Color", WidgetPropertyType.Color, "Channel header text color", "#FFFFFF")]
-    public string HeaderColorHex { get; set; } = "#F59E0B";
-
-    [WidgetProperty("Message Color", WidgetPropertyType.Color, "Chat message text color", "#F8FAFC")]
-    public string MessageColorHex { get; set; } = "#F8FAFC";
-
-    [WidgetProperty("Background Color", WidgetPropertyType.Color, "Widget background color", "#0F1117")]
-    public string BackgroundHex { get; set; } = "#0F1117";
-
-    [WidgetProperty("Font Size", WidgetPropertyType.Number, "Chat text font size in points", 24)]
-    public int FontSize { get; set; } = 24;
-
-    [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
-    public int MaxMessages { get; set; } = 30;
-
-    private readonly object _messagesLock = new();
-    private readonly List<ChatMessage> _messages = new();
-    private CancellationTokenSource? _cts;
-    private ClientWebSocket? _socket;
-    private Task? _ircTask;
-    private readonly SemaphoreSlim _authActionGate = new(1, 1);
-    private volatile int _status;
-    private volatile string _statusDetail = "";
-    private volatile bool _disposed;
-
-    private sealed record ChatMessage(string Username, string Text, SKColor Color);
-
-    private static readonly SKColor[] NamePalette =
-    {
-        new(255, 121, 198), new(189, 147, 249), new(127, 202, 250), new(187, 247, 208),
-        new(254, 240, 138), new(253, 186, 116), new(199, 210, 254), new(165, 243, 252)
-    };
-
-    public override ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default)
-    {
-        base.InitializeAsync(context, cancellationToken);
-        if (AutoConnect) StartConnection();
-        _ = RestoreTwitchSessionAsync(cancellationToken);
-        return ValueTask.CompletedTask;
-    }
-
-    public void InvokeWidgetAction(string propertyName)
-    {
-        if (propertyName is nameof(LoginWithTwitch) or nameof(RefreshLiveChannels) or nameof(LogoutTwitch))
-            _ = RunTwitchActionAsync(propertyName);
-    }
-
-    public string? GetWidgetActionLabel(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && TwitchSession.Shared.IsAuthenticated
-            ? "Twitch logged in"
-            : null;
-
-    public bool IsWidgetActionActive(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && TwitchSession.Shared.IsAuthenticated;
-
-    public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
-    {
-        if (propertyName != nameof(ChannelName)) return [];
-
-        return TwitchSession.Shared.FollowedChannels
-            .Select(channel => new WidgetPropertyOption(channel.Login, channel.DisplayLabel))
-            .ToArray();
-    }
-
-    public override void OnPropertyChanged(string propertyName, object? newValue)
-    {
-        switch (propertyName)
-        {
-            case nameof(ChannelName):
-                if (AutoConnect) StartConnection();
-                break;
-            case nameof(AutoConnect):
-                if (newValue is true) StartConnection();
-                else StopConnection();
-                break;
-            case nameof(MaxMessages):
-                lock (_messagesLock)
-                {
-                    while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
-                }
-                break;
-        }
-        base.OnPropertyChanged(propertyName, newValue);
-    }
-
-    private async Task RestoreTwitchSessionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await TwitchSession.Shared.RestoreAsync(TwitchClientId, Context, cancellationToken).ConfigureAwait(false);
-            (Context as IWidgetHostInteraction)?.RequestInspectorRefresh();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            System.Diagnostics.Debug.WriteLine("Twitch session restore cancelled during shutdown");
-        }
-        catch (Exception ex)
-        {
-            Context.LogError("Unable to restore the Twitch login", ex);
-        }
-    }
-
-    private async Task RunTwitchActionAsync(string propertyName)
-    {
-        if (!await _authActionGate.WaitAsync(0).ConfigureAwait(false)) return;
-
-        try
-        {
-            switch (propertyName)
-            {
-                case nameof(LoginWithTwitch):
-                    await TwitchSession.Shared.LoginAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
-                    break;
-                case nameof(RefreshLiveChannels):
-                    await TwitchSession.Shared.RefreshFollowedChannelsAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
-                    break;
-                case nameof(LogoutTwitch):
-                    await TwitchSession.Shared.LogoutAsync(CancellationToken.None).ConfigureAwait(false);
-                    break;
-            }
-
-            (Context as IWidgetHostInteraction)?.RequestInspectorRefresh();
-            Context.RequestRender();
-        }
-        catch (Exception ex)
-        {
-            Context.LogError("Twitch action failed", ex);
-        }
-        finally
-        {
-            _authActionGate.Release();
-        }
-    }
-
-    public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-    {
-        if (eventType != TouchEventType.TouchUp) return;
-        if (_status == StatusConnected) StopConnection();
-        else StartConnection();
-    }
-
-    private void StartConnection()
-    {
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-        lock (_messagesLock) _messages.Clear();
-        _status = StatusConnecting;
-        _statusDetail = "";
-        Context.RequestRender();
-        _ircTask = Task.Run(() => RunIrcLoopAsync(_cts.Token));
-    }
-
-    private void StopConnection()
-    {
-        _cts?.Cancel();
-        _socket?.Abort();
-        _status = StatusDisconnected;
-        _statusDetail = "";
-        Context.RequestRender();
-    }
-
-    private async Task RunIrcLoopAsync(CancellationToken ct)
-    {
-        var backoff = TimeSpan.FromSeconds(1);
-        while (!ct.IsCancellationRequested && !_disposed)
-        {
-            try
-            {
-                await ConnectAndReadAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                Context.LogError("Twitch IRC error", ex);
-            }
-
-            if (!AutoConnect || ct.IsCancellationRequested || _disposed) break;
-
-            _status = StatusDisconnected;
-            _statusDetail = "Reconnecting…";
-            Context.RequestRender();
-            backoff = TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, 30));
-            try { await Task.Delay(backoff, ct); }
-            catch (OperationCanceledException) { break; }
-        }
-        _status = StatusDisconnected;
-        _statusDetail = "";
-        Context.RequestRender();
-    }
-
-    private async Task ConnectAndReadAsync(CancellationToken ct)
-    {
-        using var socket = new ClientWebSocket();
-        _socket = socket;
-        _status = StatusConnecting;
-        _statusDetail = "Connecting…";
-        Context.RequestRender();
-
-        await socket.ConnectAsync(IrcEndpoint, ct);
-
-        var channel = NormalizeChannel(ChannelName);
-        string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString();
-        string pass = AnonymousPass;
-
-        await SendAsync(socket, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct);
-        await SendAsync(socket, "PASS " + pass, ct);
-        await SendAsync(socket, "NICK " + nick, ct);
-        await SendAsync(socket, "JOIN #" + channel, ct);
-
-        _status = StatusConnecting;
-        _statusDetail = "Joining #" + channel + "…";
-        Context.RequestRender();
-
-        var buffer = new byte[8192];
-        var pending = new List<byte>();
-        while (!ct.IsCancellationRequested)
-        {
-            var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
-            if (result.MessageType == WebSocketMessageType.Close) break;
-            pending.AddRange(buffer.AsSpan(0, result.Count).ToArray());
-            if (result.EndOfMessage)
-            {
-                ProcessIncoming(Encoding.UTF8.GetString(pending.ToArray()));
-                pending.Clear();
-            }
-        }
-    }
-
-    private static async Task SendAsync(ClientWebSocket socket, string line, CancellationToken ct)
-    {
-        var bytes = Encoding.UTF8.GetBytes(line + "\r\n");
-        await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
-    }
-
-    private void ProcessIncoming(string data)
-    {
-        foreach (var rawLine in data.Split("\r\n", StringSplitOptions.RemoveEmptyEntries))
-        {
-            ProcessLine(rawLine);
-        }
-    }
-
-    private void ProcessLine(string line)
-    {
-        if (line.StartsWith("PING", StringComparison.Ordinal))
-        {
-            var sock = _socket;
-            if (sock != null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try { await SendAsync(sock, "PONG :tmi.twitch.tv", _cts?.Token ?? CancellationToken.None); }
-                    catch
-                    {
-                        System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
-                        /* socket closed / cancelled during shutdown */
-                    }
-                });
-            }
-            return;
-        }
-
-        string[] tags = [];
-        if (line.StartsWith('@'))
-        {
-            var tagEnd = line.IndexOf(' ');
-            if (tagEnd < 0) return;
-            tags = line[1..tagEnd].Split(';');
-            line = line[(tagEnd + 1)..];
-        }
-
-        var parts = line.Split(' ', 4);
-        if (parts.Length < 2) return;
-        var command = parts[1];
-        var trailing = parts.Length > 3 ? parts[3] : "";
-
-        switch (command)
-        {
-            case "ROOMSTATE":
-                _status = StatusConnected;
-                _statusDetail = "LIVE";
-                Context.RequestRender();
-                break;
-            case "PRIVMSG":
-                HandlePrivmsg(tags, trailing);
-                break;
-            case "NOTICE":
-            {
-                var msg = trailing.TrimStart(':');
-                if (msg.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase) ||
-                    msg.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
-                {
-                    _status = StatusDisconnected;
-                    _statusDetail = "Login failed — check token & username";
-                    Context.LogError("Twitch login failed: " + msg);
-                }
-                else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
-                {
-                    _status = StatusConnected;
-                    _statusDetail = "LIVE";
-                    Context.RequestRender();
-                }
-                else
-                {
-                    Context.LogInfo("Twitch notice: " + msg);
-                }
-                break;
-            }
-        }
-    }
-
-    private void HandlePrivmsg(string[] tags, string trailing)
-    {
-        if (!trailing.StartsWith(':')) return;
-
-        var text = Unescape(trailing[1..]);
-        if (text.Length > 400) text = text[..400];
-
-        var displayName = GetTag(tags, "display-name");
-        var login = GetTag(tags, "login");
-        string username;
-        if (displayName.Length > 0) username = displayName;
-        else if (login.Length > 0) username = login;
-        else username = "user";
-
-        var colorHex = GetTag(tags, "color");
-        var color = SKColors.White;
-        if (colorHex.StartsWith('#')) SKColor.TryParse(colorHex, out color);
-        if (color == SKColors.White) color = PaletteFor(login.Length > 0 ? login : username);
-
-        lock (_messagesLock)
-        {
-            _messages.Add(new ChatMessage(username, text, color));
-            while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
-        }
-        Context.RequestRender();
-    }
-
-    internal void AddTestChatMessageForTesting(string username, string text)
-    {
-        lock (_messagesLock)
-        {
-            _messages.Add(new ChatMessage(username, text, SKColors.White));
-            while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
-        }
-    }
-
-    private static string GetTag(string[] tags, string key)
-    {
-        foreach (var t in tags)
-        {
-            var eq = t.IndexOf('=');
-            var k = eq < 0 ? t : t[..eq];
-            if (k == key) return eq < 0 ? "" : t[(eq + 1)..];
-        }
-        return "";
-    }
-
-    private static string Unescape(string s) =>
-        s.Replace("\\s", " ").Replace("\\:", ";").Replace("\\\\", "\\");
-
-    private static string NormalizeChannel(string channel)
-    {
-        var c = channel.Trim().TrimStart('#');
-        return c.Length == 0 ? "twitch" : c.ToLowerInvariant();
-    }
-
-    private static SKColor PaletteFor(string name)
-    {
-        int hash = 17;
-        foreach (var c in name) hash = (hash * 31 + c) & 0x7FFFFFFF;
-        return NamePalette[hash % NamePalette.Length];
-    }
-
-    private static List<string> WrapText(string text, SKFont font, float maxWidth)
-    {
-        var result = new List<string>();
-        var current = new StringBuilder();
-        foreach (var word in text.Split(' '))
-        {
-            var candidate = current.Length == 0 ? word : current.ToString() + " " + word;
-            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth || current.Length == 0)
-            {
-                if (current.Length > 0) current.Append(' ');
-                current.Append(word);
-            }
-            else
-            {
-                result.Add(current.ToString());
-                current.Clear();
-                current.Append(word);
-            }
-        }
-        if (current.Length > 0) result.Add(current.ToString());
-        if (result.Count == 0) result.Add("");
-        return result;
-    }
-
-    public override void Render(SKCanvas canvas, SKRect bounds)
-    {
-        var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
-        if (float.IsNaN(scale) || scale <= 0) scale = 1f;
-
-        var bg = SKColor.TryParse(BackgroundHex, out var parsedBg) ? parsedBg : new SKColor(15, 17, 23, 235);
-        var headerColor = SKColor.TryParse(HeaderColorHex, out var parsedHeader) ? parsedHeader : SKColors.White;
-        var msgColor = SKColor.TryParse(MessageColorHex, out var parsedMsg) ? parsedMsg : new SKColor(248, 250, 252);
-
-        using var bgPaint = new SKPaint { Color = bg, IsAntialias = true };
-        canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, bgPaint);
-
-        float pad = 12f * scale;
-        float baseFontSize = Math.Max(10f, Math.Min(32f, FontSize));
-        float titleSize = (baseFontSize + 2f) * scale;
-        float statusSize = 13f * scale;
-
-        using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, titleSize);
-        using var statusFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, statusSize);
-        using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
-
-        float top = bounds.Top + pad;
-        string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
-        canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, badgePaint, SKTextAlign.Left);
-
-        string statusText = _status switch
-        {
-            StatusConnected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
-            StatusConnecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
-            _ => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
-        };
-
-        var statusColor = _status == StatusConnected
-            ? new SKColor(0x10, 0xB9, 0x81)
-            : SKColors.White;
-        using var statusPaint = new SKPaint { Color = statusColor, IsAntialias = true };
-        canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
-
-        float headerBottom = top + titleSize + 8f * scale;
-
-        var contentBounds = new SKRect(bounds.Left + pad, headerBottom, bounds.Right - pad, bounds.Bottom - pad);
-        if (contentBounds.Width <= 0 || contentBounds.Height <= 0)
-        {
-            return;
-        }
-
-        canvas.Save();
-        canvas.ClipRect(contentBounds);
-
-        ChatMessage[] snapshot;
-        lock (_messagesLock) snapshot = _messages.ToArray();
-
-        float msgSize = baseFontSize * scale;
-        float userSize = (Math.Max(10f, baseFontSize - 2f)) * scale;
-        float lineHeight = msgSize * 1.4f;
-        float userLineHeight = userSize * 1.35f;
-
-        if (snapshot.Length == 0)
-        {
-            using var emptyFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, msgSize);
-            using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
-            var hint = _status switch
-            {
-                StatusConnected => "Waiting for chat…",
-                StatusDisconnected when !AutoConnect => "Tap to connect",
-                _ => "Waiting for connection…"
-            };
-            canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
-            canvas.Restore();
-            return;
-        }
-
-        float cursor = contentBounds.Bottom;
-
-        using var userFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, userSize);
-        using var msgFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, msgSize);
-        using var userPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        using var msgPaint = new SKPaint { Color = msgColor, IsAntialias = true };
-
-        for (int i = snapshot.Length - 1; i >= 0; i--)
-        {
-            var m = snapshot[i];
-            var lines = WrapText(m.Text, msgFont, contentBounds.Width);
-
-            float blockH = userLineHeight + lines.Count * lineHeight + 4f * scale;
-            cursor -= blockH;
-            if (cursor < contentBounds.Top - userLineHeight) break;
-
-            userPaint.Color = m.Color;
-            canvas.DrawTextWithFallback(m.Username, contentBounds.Left, cursor + userSize, userFont, userPaint, SKTextAlign.Left);
-
-            float msgY = cursor + userLineHeight;
-            for (int li = 0; li < lines.Count; li++)
-            {
-                canvas.DrawTextWithFallback(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, msgFont, msgPaint, SKTextAlign.Left);
-            }
-        }
-
-        canvas.Restore();
-    }
-
-    public override async ValueTask DisposeAsync()
-    {
-        _disposed = true;
-        if (_cts is { } cts) await cts.CancelAsync();
-        _socket?.Abort();
-        try { if (_ircTask != null) await _ircTask; }
-        catch
-        {
-            System.Diagnostics.Debug.WriteLine("IRC connection task already ended during disposal (cancelled/disposed)");
-            /* connection task was already cancelled/disposed */
-        }
-        _cts?.Dispose();
-        await base.DisposeAsync();
-    }
-}
-
-[WidgetMetadata("weather_forecast", "Weather Forecast", "Displays live real-time weather, hourly/daily forecasts, metrics, and custom layouts via Open-Meteo API. Supports city names, ZIP/postal codes, and coordinates.", "ModernWigiDash", "2.0.0", "Social & Visual", GridSizePreset.Size5x4)]
+[WidgetMetadata("weather_forecast", "Weather Forecast", Description = "Displays live real-time weather, hourly/daily forecasts, metrics, and custom layouts via Open-Meteo API. Supports city names, ZIP/postal codes, and coordinates.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
 public class WeatherForecastWidget : ModernWidgetBase
 {
     private const float DesignWidth = 406f;
@@ -871,7 +72,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     });
 
     private DateTime _lastFetchTime = DateTime.MinValue;
-    private bool _isFetching;
+    private volatile bool _isFetching;
     private string _lastLocationQuery = "";
 
     private double? _lat;
@@ -888,13 +89,17 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private readonly List<DailyForecastItem> _dailyForecasts = [];
     private readonly List<HourlyForecastItem> _hourlyForecasts = [];
+    private readonly object _forecastGate = new();
+    private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
+    private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
+    private SKRect _lastBounds;
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
     private Timer? _refreshTimer;
     private CancellationTokenSource? _pollCts;
     private string CachePath => Path.Combine(CacheDir, $"weather_{InstanceId}.json");
 
-    public override ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
         Directory.CreateDirectory(CacheDir);
@@ -934,6 +139,16 @@ public class WeatherForecastWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         _ = FetchLiveWeatherAsync();
+
+        _lastBounds = bounds;
+
+        // Snapshot the forecast lists so the fetch thread's swaps never mutate
+        // a list mid-render.
+        lock (_forecastGate)
+        {
+            _dailyForecastSnapshot = _dailyForecasts.ToArray();
+            _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
+        }
 
         SKColor accentColor = SKColors.White;
         SKColor textPrimary = SKColors.White;
@@ -1002,7 +217,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         float h = bounds.Height;
 
         // Show forecast strip only if container height is at least 150px physical units
-        bool hasForecast = ShowForecast && _dailyForecasts.Count > 0 && h >= 150f;
+        bool hasForecast = ShowForecast && _dailyForecastSnapshot.Count > 0 && h >= 150f;
         float forecastH = hasForecast ? Math.Clamp(80f * sy, 45f, 160f) : 0f;
 
         var metrics = new List<string>();
@@ -1157,7 +372,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         // Render Forecast Strip with exact visual bounding box horizontal centering for emoji icons
         if (hasForecast)
         {
-            int count = Math.Min(_dailyForecasts.Count, 5);
+            int count = Math.Min(_dailyForecastSnapshot.Count, 5);
             float stripY = bounds.Bottom - forecastH;
             SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
 
@@ -1171,7 +386,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
             for (int i = 0; i < count; i++)
             {
-                var day = _dailyForecasts[i];
+                var day = _dailyForecastSnapshot[i];
                 var (dayIcon, _) = MapWmoCode(day.WeatherCode);
                 float colCx = bounds.Left + (i + 0.5f) * colWidth;
 
@@ -1217,7 +432,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
     {
-        int count = Math.Min(_dailyForecasts.Count, 5);
+        int count = Math.Min(_dailyForecastSnapshot.Count, 5);
         if (count == 0) return;
 
         float rowHeight = bounds.Height / count;
@@ -1225,7 +440,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         for (int i = 0; i < count; i++)
         {
-            var day = _dailyForecasts[i];
+            var day = _dailyForecastSnapshot[i];
             float y = bounds.Top + (i * rowHeight);
             SKRect rowRect = new(bounds.Left, y + 2, bounds.Right, y + rowHeight - 2);
 
@@ -1257,7 +472,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
     {
-        int count = Math.Min(_hourlyForecasts.Count, 6);
+        int count = Math.Min(_hourlyForecastSnapshot.Count, 6);
         if (count == 0) return;
 
         float itemWidth = bounds.Width / count;
@@ -1265,7 +480,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         for (int i = 0; i < count; i++)
         {
-            var item = _hourlyForecasts[i];
+            var item = _hourlyForecastSnapshot[i];
             float x = bounds.Left + (i * itemWidth);
             SKRect colRect = new(x + 2, bounds.Top + 4, x + itemWidth - 2, bounds.Bottom - 4);
 
@@ -1379,10 +594,13 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         if (eventType != TouchEventType.TouchUp) return;
 
-        float sx = DefaultSize.Width / DesignWidth;
-        float sy = DefaultSize.Height / DesignHeight;
+        // Hit-test against the last rendered bounds so touches line up with the
+        // drawn controls at any widget size, not just the design size.
+        var b = _lastBounds.Width > 0 ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        float sx = b.Width / DesignWidth;
+        float sy = b.Height / DesignHeight;
 
-        if (localPoint.Y < 44f * sy && localPoint.X > DefaultSize.Width - 64f * sx)
+        if (localPoint.Y < 44f * sy && localPoint.X > b.Width - 64f * sx)
         {
             UnitSystem = UnitSystem.StartsWith("Fahrenheit", StringComparison.OrdinalIgnoreCase)
                 ? "Celsius (°C, km/h)"
@@ -1524,17 +742,18 @@ public class WeatherForecastWidget : ModernWidgetBase
                 if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
                     _humidity = hums[0].GetDouble();
 
-                _hourlyForecasts.Clear();
-                if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes))
+                var hourlyForecasts = new List<HourlyForecastItem>();
+                if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
                 {
-                    int hLen = Math.Min(times.GetArrayLength(), temps.GetArrayLength());
+                    int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
                     for (int i = 0; i < Math.Min(hLen, 12); i++)
                     {
                         string timeStr = times[i].GetString() ?? "";
                         string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
-                        _hourlyForecasts.Add(new HourlyForecastItem(label, temps[i].GetDouble(), codes[i].GetInt32()));
+                        hourlyForecasts.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), codes[i].GetInt32()));
                     }
                 }
+                lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(hourlyForecasts); }
             }
 
             if (root.TryGetProperty("daily", out var daily))
@@ -1544,21 +763,22 @@ public class WeatherForecastWidget : ModernWidgetBase
                 if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
                     _lowTempC = mins[0].GetDouble();
 
-                _dailyForecasts.Clear();
-                if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes))
+                var dailyForecasts = new List<DailyForecastItem>();
+                if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
                 {
                     int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
                     for (int i = 0; i < Math.Min(dLen, 7); i++)
                     {
                         string dateStr = dTimes[i].GetString() ?? "";
-                        string dayName = DateTime.TryParse(dateStr, out var parsedDate) ? parsedDate.ToString("ddd") : $"Day {i + 1}";
-                        _dailyForecasts.Add(new DailyForecastItem(
+                        string dayName = DateTime.TryParse(dateStr, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
+                        dailyForecasts.Add(new DailyForecastItem(
                             i == 0 ? "Today" : dayName,
                             maxes[i].GetDouble(),
                             mins[i].GetDouble(),
                             dCodes[i].GetInt32()));
                     }
                 }
+                lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
             }
 
             _lastFetchTime = DateTime.Now;
@@ -1644,10 +864,13 @@ public class WeatherForecastWidget : ModernWidgetBase
             _lat = data.Lat;
             _lon = data.Lon;
             _lastFetchTime = DateTime.Now;
-            _dailyForecasts.Clear();
-            _dailyForecasts.AddRange(data.DailyForecasts.Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)));
-            _hourlyForecasts.Clear();
-            _hourlyForecasts.AddRange(data.HourlyForecasts.Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)));
+            lock (_forecastGate)
+            {
+                _dailyForecasts.Clear();
+                _dailyForecasts.AddRange(data.DailyForecasts.Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)));
+                _hourlyForecasts.Clear();
+                _hourlyForecasts.AddRange(data.HourlyForecasts.Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)));
+            }
         }
         catch (Exception ex)
         {

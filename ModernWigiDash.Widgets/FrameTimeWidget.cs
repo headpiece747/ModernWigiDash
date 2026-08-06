@@ -14,14 +14,7 @@ namespace ModernWigiDash.Widgets;
 /// tool such as PresentMon, MSI Afterburner, or RTSS needs to be running.
 /// When no DirectX app is focused, the monitor's refresh rate is shown.
 /// </summary>
-[WidgetMetadata(
-    "frame_time",
-    "FPS / Frame Time",
-    "Live FPS, frame time, 1% low, 0.1% low, GPU busy, and CPU frame time for the most active game. Captured in-process via Windows ETW (DXGI/D3D9/DxgKrnl) by the service — no external tool required.",
-    "ModernWigiDash",
-    "1.0.0",
-    "System Monitoring",
-    GridSizePreset.Size2x2)]
+[WidgetMetadata("frame_time", "FPS / Frame Time", Description = "Live FPS, frame time, 1% low, 0.1% low, GPU busy, and CPU frame time for the most active game. Captured in-process via Windows ETW (DXGI/D3D9/DxgKrnl) by the service — no external tool required.", Author = "ModernWigiDash", Version = "1.0.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
 public class FrameTimeWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
@@ -104,11 +97,11 @@ public class FrameTimeWidget : ModernWidgetBase
         FrameTimeSnapshotRecord snapshot = FrameTimeStore.ReadSnapshot();
         if (!snapshot.IsAvailable)
         {
-            DrawPlaceholder(canvas, bounds, "Frame capture unavailable", "Run the service with admin/SYSTEM rights", text);
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Run the service with admin/SYSTEM rights", text);
             return;
         }
 
-        if (snapshot.IsAvailable && snapshot.ProcessId <= 0)
+        if (snapshot.ProcessId <= 0)
         {
             // No process targeted (desktop / static window focused, or the App
             // itself): show the monitor refresh rate as the FPS.
@@ -137,10 +130,9 @@ public class FrameTimeWidget : ModernWidgetBase
         if (!tiny && ShowProcess && !string.IsNullOrWhiteSpace(snapshot.ProcessName))
         {
             float procSize = Math.Clamp((contentBottom - contentTop) * 0.08f, 10f, 15f);
-            using var processFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), procSize);
-            FontHelper.ConfigureHighQualityFont(processFont);
+            using var processFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, procSize);
             using var processPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            string process = TruncateToWidth(snapshot.ProcessName, processFont, bounds.Width - pad * 2f);
+            string process = TextRenderHelper.TruncateText(snapshot.ProcessName, processFont, bounds.Width - pad * 2f);
             canvas.DrawText(process, bounds.Right - pad - processFont.MeasureText(process), contentTop + procSize, SKTextAlign.Left, processFont, processPaint);
             heroTop = contentTop + procSize + 6f;
         }
@@ -151,8 +143,7 @@ public class FrameTimeWidget : ModernWidgetBase
 
         // Big Hero FPS Value (Largest Font Size!)
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        using var fpsFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), fpsFontSize);
-        FontHelper.ConfigureHighQualityFont(fpsFont);
+        using var fpsFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
         string fpsText = snapshot.Fps.ToString("F0", CultureInfo.InvariantCulture);
@@ -164,13 +155,11 @@ public class FrameTimeWidget : ModernWidgetBase
 
         // "FPS" Label & Frame Time (ms) stacked next to big FPS number
         float unitX = fpsX + fpsBounds.Width + 10f;
-        using var unitFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), fpsFontSize * 0.32f);
-        FontHelper.ConfigureHighQualityFont(unitFont);
+        using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
         canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
 
-        using var msFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), fpsFontSize * 0.36f);
-        FontHelper.ConfigureHighQualityFont(msFont);
+        using var msFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
         using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
         string msText = $"{snapshot.FrameTimeMs:F1} ms";
         canvas.DrawText(msText, unitX, fpsBaseline, SKTextAlign.Left, msFont, msPaint);
@@ -204,15 +193,13 @@ public class FrameTimeWidget : ModernWidgetBase
 
     private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, float width, float height, string label, string value, float valSize, float lblSize, SKColor accent, SKColor text)
     {
-        using var valFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), valSize);
-        FontHelper.ConfigureHighQualityFont(valFont);
+        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, valSize);
         using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         valFont.MeasureText(value, out var valBounds, valPaint);
         float valY = topY + valSize * 0.85f;
         canvas.DrawText(value, cx - valBounds.Width / 2f, valY, SKTextAlign.Left, valFont, valPaint);
 
-        using var lblFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), lblSize);
-        FontHelper.ConfigureHighQualityFont(lblFont);
+        using var lblFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, lblSize);
         using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
         lblFont.MeasureText(label, out var lblBounds, lblPaint);
         float lblY = valY + lblSize + 4f;
@@ -226,8 +213,7 @@ public class FrameTimeWidget : ModernWidgetBase
         float heroH = Math.Max(8f, bounds.Height - pad * 2f);
 
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        using var fpsFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), fpsFontSize);
-        FontHelper.ConfigureHighQualityFont(fpsFont);
+        using var fpsFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
         string fpsText = MonitorRefreshRateHz.Value.ToString(CultureInfo.InvariantCulture);
@@ -238,13 +224,11 @@ public class FrameTimeWidget : ModernWidgetBase
         canvas.DrawText(fpsText, fpsX, fpsBaseline, SKTextAlign.Left, fpsFont, fpsPaint);
 
         float unitX = fpsX + fpsBounds.Width + 10f;
-        using var unitFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), fpsFontSize * 0.32f);
-        FontHelper.ConfigureHighQualityFont(unitFont);
+        using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
         canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
 
-        using var capFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), 13f);
-        FontHelper.ConfigureHighQualityFont(capFont);
+        using var capFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 13f);
         using var capPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
         string cap = "MONITOR";
         canvas.DrawText(cap, bounds.Right - pad - capFont.MeasureText(cap), heroTop + 13f, SKTextAlign.Left, capFont, capPaint);
@@ -260,67 +244,7 @@ public class FrameTimeWidget : ModernWidgetBase
             hi += 1;
         }
 
-        float span = area.Width / Math.Max(1, samples.Count - 1);
-        var line = new SKPath();
-        var fill = new SKPath();
-        bool first = true;
-        for (int i = 0; i < samples.Count; i++)
-        {
-            float x = area.Left + i * span;
-            float y = area.Bottom - (float)((samples[i] - lo) / (hi - lo)) * area.Height;
-            if (first)
-            {
-                line.MoveTo(x, y);
-                fill.MoveTo(x, y);
-                first = false;
-            }
-            else
-            {
-                line.LineTo(x, y);
-                fill.LineTo(x, y);
-            }
-        }
-
-        fill.LineTo(area.Right, area.Bottom);
-        fill.LineTo(area.Left, area.Bottom);
-        fill.Close();
-
-        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
-        canvas.DrawPath(fill, fillPaint);
-
-        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-        canvas.DrawPath(line, linePaint);
-    }
-
-    private static void DrawPlaceholder(SKCanvas canvas, SKRect bounds, string title, string subtitle, SKColor text)
-    {
-        using var titleFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 16f);
-        FontHelper.ConfigureHighQualityFont(titleFont);
-        using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
-        titleFont.MeasureText(title, out var titleBounds, titlePaint);
-        canvas.DrawText(title, bounds.MidX - titleBounds.Width / 2f, bounds.MidY - 2f, SKTextAlign.Left, titleFont, titlePaint);
-
-        using var subFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), 11f);
-        FontHelper.ConfigureHighQualityFont(subFont);
-        using var subPaint = new SKPaint { Color = text.WithAlpha(150), IsAntialias = true };
-        subFont.MeasureText(subtitle, out var subBounds, subPaint);
-        canvas.DrawText(subtitle, bounds.MidX - subBounds.Width / 2f, bounds.MidY + 20f, SKTextAlign.Left, subFont, subPaint);
-    }
-
-    private static string TruncateToWidth(string text, SKFont font, float maxWidth)
-    {
-        if (font.MeasureText(text) <= maxWidth || maxWidth <= 0)
-        {
-            return text;
-        }
-
-        string trimmed = text;
-        while (trimmed.Length > 1 && font.MeasureText(trimmed + "…") > maxWidth)
-        {
-            trimmed = trimmed[..^1];
-        }
-
-        return trimmed + "…";
+        TextRenderHelper.DrawSparkline(canvas, area, samples, lo, hi, accent);
     }
 
     public override ValueTask DisposeAsync()

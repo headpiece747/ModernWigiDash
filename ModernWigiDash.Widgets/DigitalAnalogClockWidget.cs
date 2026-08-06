@@ -4,7 +4,7 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("clock_modern", "Clock", "Displays the current time and date with digital and analog modes.", "ModernWigiDash", "2.0.0", "Clock & Time", GridSizePreset.Size2x1)]
+[WidgetMetadata("clock_modern", "Clock", Description = "Displays the current time and date with digital and analog modes.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Clock & Time", DefaultGridSize = GridSizePreset.Size2x1)]
 public class DigitalAnalogClockWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;

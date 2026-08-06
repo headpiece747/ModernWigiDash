@@ -6,8 +6,6 @@ namespace ModernWigiDash.Widgets;
 
 public static class SvgIconLoader
 {
-    private static readonly ConcurrentDictionary<string, SKPath> PathCache = new(StringComparer.OrdinalIgnoreCase);
-
     public static string IconsDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ModernWigiDash",
@@ -35,47 +33,17 @@ public static class SvgIconLoader
         string fullPath = ResolveFullPath(iconFile);
         if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath)) return false;
 
-        path = PathCache.GetOrAdd(fullPath, key =>
-        {
-            try
-            {
-                if (!TryExtractSinglePathData(key, out string? pathData) || string.IsNullOrWhiteSpace(pathData))
-                    return new SKPath();
-
-                SKPath? parsed = SKPath.ParseSvgPathData(pathData);
-                if (parsed != null && parsed.Bounds.Width > 0 && parsed.Bounds.Height > 0)
-                {
-                    parsed.FillType = SKPathFillType.Winding;
-                    return parsed;
-                }
-                parsed?.Dispose();
-            }
-            catch
-            {
-                // Fall through to an empty path.
-                System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
-            }
-            return new SKPath();
-        });
+        path = TextRenderHelper.SvgPathCache.GetOrParse(fullPath, () =>
+            TryExtractSinglePathData(fullPath, out string? pathData) && !string.IsNullOrWhiteSpace(pathData)
+                ? pathData
+                : "");
 
         return !path.IsEmpty;
     }
 
     public static void Draw(SKCanvas canvas, SKPath path, SKPoint center, float sizePx, SKColor color, float offsetX, float offsetY)
     {
-        if (sizePx <= 0 || path.IsEmpty) return;
-        var bounds = path.Bounds;
-        float maxDim = Math.Max(bounds.Width, bounds.Height);
-        if (maxDim <= 0) return;
-
-        float scale = sizePx / maxDim;
-        canvas.Save();
-        canvas.Translate(center.X + offsetX, center.Y + offsetY);
-        canvas.Scale(scale, scale);
-        canvas.Translate(-bounds.MidX, -bounds.MidY);
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
-        canvas.DrawPath(path, paint);
-        canvas.Restore();
+        TextRenderHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
     }
 
     private static bool TryExtractSinglePathData(string filePath, out string? pathData)

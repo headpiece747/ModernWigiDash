@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace ModernWigiDash.Widgets;
+namespace ModernWigiDash.Widgets.Twitch;
 
 internal sealed class TwitchTokenStore
 {
@@ -24,16 +24,21 @@ internal sealed class TwitchTokenStore
             byte[] plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
             return JsonSerializer.Deserialize<TwitchTokenSet>(plaintext, JsonOptions);
         }
-        catch (CryptographicException)
+        catch (CryptographicException ex)
         {
+            // Entropy changed or the file was written by another user/scope —
+            // the stored session is unrecoverable, so a fresh login is required.
+            System.Diagnostics.Debug.WriteLine($"Twitch token unprotect failed (session reset): {ex.Message}");
             return null;
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Twitch token file corrupted (session reset): {ex.Message}");
             return null;
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Twitch token read failed: {ex.Message}");
             return null;
         }
     }

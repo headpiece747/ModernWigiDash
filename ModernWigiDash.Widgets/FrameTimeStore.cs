@@ -1,3 +1,5 @@
+using ModernWigiDash.Service.Contracts;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -15,10 +17,19 @@ public sealed record FrameTimeSnapshotRecord(
     double Low01PercentFps,
     double GpuBusyPercent,
     double CpuFrameTimeMs,
-    IReadOnlyList<double> RecentFrameTimesMs)
+    IReadOnlyList<double> RecentFrameTimesMs,
+    DateTime LastUpdate = default)
 {
     public static FrameTimeSnapshotRecord Unavailable() =>
         new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, Array.Empty<double>());
+
+    /// <summary>
+    /// True when the snapshot was produced by an active polling loop within
+    /// <paramref name="maxAge"/>. A stale snapshot means the App stopped
+    /// polling (service disconnected or app suspending), so widgets should
+    /// render their unavailable state instead of frozen data.
+    /// </summary>
+    public bool IsFresh(TimeSpan maxAge) => LastUpdate != default && DateTime.UtcNow - LastUpdate <= maxAge;
 }
 
 /// <summary>
@@ -43,7 +54,37 @@ public static class FrameTimeStore
     {
         lock (Gate)
         {
-            _current = snapshot;
+            _current = snapshot with { LastUpdate = DateTime.UtcNow };
+        }
+    }
+
+    /// <summary>
+    /// Maps a service frame-time DTO into the widget-side record and caches it.
+    /// Keeps the DTO-to-render-model mapping owned by the store.
+    /// </summary>
+    public static void UpdateFromDto(FrameTimeSnapshotDto? dto)
+    {
+        Update(new FrameTimeSnapshotRecord(
+            dto?.IsAvailable ?? false,
+            dto?.ProcessId ?? 0,
+            dto?.ProcessName ?? string.Empty,
+            dto?.Fps ?? 0,
+            dto?.FrameTimeMs ?? 0,
+            dto?.Low1PercentFps ?? 0,
+            dto?.Low01PercentFps ?? 0,
+            dto?.GpuBusyPercent ?? 0,
+            dto?.CpuFrameTimeMs ?? 0,
+            dto?.RecentFrameTimesMs ?? []));
+    }
+
+    /// <summary>
+    /// Resets the cache to the unavailable state. Intended for test isolation.
+    /// </summary>
+    public static void Reset()
+    {
+        lock (Gate)
+        {
+            _current = FrameTimeSnapshotRecord.Unavailable();
         }
     }
 }

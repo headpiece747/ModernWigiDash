@@ -5,7 +5,7 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("audio_visualizer", "Audio Visualizer", "Visualizes live system audio output (Spotify, YouTube, Games) via WASAPI loopback capture.", "ModernWigiDash", "2.0.0", "Media & Audio", GridSizePreset.Size4x2)]
+[WidgetMetadata("audio_visualizer", "Audio Visualizer", Description = "Visualizes live system audio output (Spotify, YouTube, Games) via WASAPI loopback capture.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size4x2)]
 public class AudioVisualizerWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
@@ -27,7 +27,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
     private int _waveformHead = 0;
     private readonly object _audioLock = new();
 
-    public override async ValueTask InitializeAsync(ModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken);
         StartLiveAudioCapture();

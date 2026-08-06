@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
@@ -9,8 +8,6 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public static class GriddyIcons
 {
-    private static readonly ConcurrentDictionary<string, SKPath> PathCache = new(StringComparer.OrdinalIgnoreCase);
-
     public static IReadOnlyCollection<string> Names => GriddyIconPaths.Map.Keys.ToArray();
 
     public static bool Contains(string name)
@@ -33,26 +30,7 @@ public static class GriddyIcons
         path = null;
         if (!TryGetPathData(name, out string pathData)) return false;
 
-        path = PathCache.GetOrAdd(name.Trim(), key =>
-        {
-            try
-            {
-                SKPath? parsed = SKPath.ParseSvgPathData(pathData);
-                if (parsed != null && parsed.Bounds.Width > 0 && parsed.Bounds.Height > 0)
-                {
-                    parsed.FillType = SKPathFillType.Winding;
-                    return parsed;
-                }
-                parsed?.Dispose();
-            }
-            catch
-            {
-                // Fall through to an empty path.
-                System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
-            }
-            return new SKPath();
-        });
-
+        path = TextRenderHelper.SvgPathCache.GetOrParse(name.Trim(), pathData);
         return !path.IsEmpty;
     }
 
@@ -61,13 +39,6 @@ public static class GriddyIcons
         if (sizePx <= 0) return;
         if (!TryGetPath(name, out SKPath? path) || path == null || path.IsEmpty) return;
 
-        float scale = sizePx / 24f;
-        canvas.Save();
-        canvas.Translate(center.X + offsetX, center.Y + offsetY);
-        canvas.Scale(scale, scale);
-        canvas.Translate(-12f, -12f);
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
-        canvas.DrawPath(path, paint);
-        canvas.Restore();
+        TextRenderHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
     }
 }

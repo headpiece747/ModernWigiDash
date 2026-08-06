@@ -5,7 +5,7 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("text_label", "Text", "Flexible text label with system fonts, color, size, and alignment.", "ModernWigiDash", "1.0.0", "Utilities", GridSizePreset.Size2x1)]
+[WidgetMetadata("text_label", "Text", Description = "Flexible text label with system fonts, color, size, and alignment.", Author = "ModernWigiDash", Version = "1.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size2x1)]
 public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;

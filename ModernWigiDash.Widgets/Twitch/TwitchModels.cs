@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ModernWigiDash.Widgets;
+namespace ModernWigiDash.Widgets.Twitch;
 
 internal sealed record TwitchTokenSet(
     string ClientId,

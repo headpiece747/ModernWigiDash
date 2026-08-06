@@ -147,6 +147,9 @@ public sealed class PriceFeedManager : IDisposable
                 {
                     _binanceTask ??= RunBinanceLoopAsync();
                     _cryptoRestTask ??= RunCryptoRestPollerAsync();
+                    // Push an incremental subscribe so symbols added after the
+                    // socket connected still receive real-time ticks.
+                    _ = SendWsSubscribeAsync($"wss://stream.binance.us:9443/ws", $"{baseCoin.ToLower()}usdt@ticker");
                 }
                 break;
             case AssetKind.Fx:
@@ -162,7 +165,53 @@ public sealed class PriceFeedManager : IDisposable
                 {
                     _finnhubTask ??= RunFinnhubLoopAsync();
                     _stockRestTask ??= RunStockRestPollerAsync();
+                    _ = SendWsSubscribeAsync($"wss://ws.finnhub.io?token={_finnhubKey}", stockSym);
                 }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Sends an incremental WebSocket subscription for a symbol added after the
+    /// feed socket was already connected. No-op when the socket is not open.
+    /// </summary>
+    private async Task SendWsSubscribeAsync(string uri, string payload)
+    {
+        try
+        {
+            ClientWebSocket? ws = uri.Contains("finnhub", StringComparison.Ordinal) ? _finnhubWs : _binanceWs;
+            if (ws == null || ws.State != WebSocketState.Open) return;
+            object message = uri.Contains("finnhub", StringComparison.Ordinal)
+                ? new { type = "subscribe", symbol = payload }
+                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
+            await SendJsonAsync(ws, message);
+        }
+        catch
+        {
+            // Incremental subscribe is best-effort; the connect-time payload
+            // covers the symbols known at that point.
+            System.Diagnostics.Debug.WriteLine($"Incremental feed subscribe failed for {payload}");
+        }
+    }
+
+    /// <summary>
+    /// Stops polling for <paramref name="symbol"/> (e.g. after the widget was
+    /// removed from the canvas). The underlying loops keep running while any
+    /// symbol remains subscribed, and stop entirely when the last one leaves.
+    /// </summary>
+    public void Unsubscribe(string symbol, AssetKind kind)
+    {
+        switch (kind)
+        {
+            case AssetKind.Crypto:
+                string baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
+                _subscribedCrypto.TryRemove(baseCoin, out _);
+                break;
+            case AssetKind.Fx:
+                _subscribedFx.TryRemove(NormalizeFxKey(symbol), out _);
+                break;
+            default:
+                _subscribedStocks.TryRemove(symbol.ToUpper(), out _);
                 break;
         }
     }
@@ -178,56 +227,108 @@ public sealed class PriceFeedManager : IDisposable
         return _prices.TryGetValue(key, out var info) ? info : null;
     }
 
-    private async Task RunBinanceLoopAsync()
+    /// <summary>
+    /// One-shot fallback price fetch for a single symbol (crypto via CoinGecko
+    /// using the CoinGeckoIds mapping, stocks via Yahoo). Used by widgets when
+    /// no live feed price is available yet; stores into the shared price map.
+    /// </summary>
+    public async Task FetchFallbackAsync(string symbol, AssetKind kind)
     {
-        while (!_disposed)
+        if (kind == AssetKind.Crypto)
         {
-            var ws = new ClientWebSocket();
-            try
+            string baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
+            if (!CoinGeckoIds.TryGetValue(baseCoin, out string? geckoId)) return;
+            string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
+            string json = await _http.GetStringAsync(url, _cts.Token);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty(geckoId, out var coinEl))
             {
-                _binanceWs = ws;
-                await ws.ConnectAsync(new Uri("wss://stream.binance.us:9443/ws"), _cts.Token);
-
-                var subscribe = new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 };
-                await SendJsonAsync(ws, subscribe);
-
-                await ReadLoopAsync(ws, ParseBinanceTicker, _cts.Token);
+                if (coinEl.TryGetProperty("usd", out var usdEl) && usdEl.ValueKind != JsonValueKind.Null)
+                {
+                    decimal price = usdEl.GetDecimal();
+                    decimal change = coinEl.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null
+                        ? changeEl.GetDecimal()
+                        : 0m;
+                    _prices[baseCoin] = new PriceInfo
+                    {
+                        Price = price,
+                        ChangePercent = change,
+                        Source = "CoinGecko",
+                        Timestamp = DateTime.UtcNow
+                    };
+                }
             }
-            catch when (!_disposed)
+        }
+        else if (kind == AssetKind.Stock)
+        {
+            string stockSym = symbol.ToUpper();
+            string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{stockSym}?interval=1d&range=1d";
+            string json = await _http.GetStringAsync(url, _cts.Token);
+            using var doc = JsonDocument.Parse(json);
+            var result = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
+            var meta = result.GetProperty("meta");
+            decimal price = (decimal)meta.GetProperty("regularMarketPrice").GetDouble();
+            decimal prevClose = (decimal)meta.GetProperty("chartPreviousClose").GetDouble();
+            decimal changePct = prevClose != 0 ? (price - prevClose) / prevClose * 100m : 0m;
+            _prices[stockSym] = new PriceInfo
             {
-                System.Diagnostics.Debug.WriteLine("Binance WebSocket feed loop ended unexpectedly; reconnecting");
-            }
-            finally
-            {
-                _binanceWs = null;
-                ws.Dispose();
-            }
-            if (!_disposed) await Task.Delay(5000);
+                Price = price,
+                ChangePercent = changePct,
+                Source = "Yahoo",
+                Timestamp = DateTime.UtcNow
+            };
         }
     }
 
+    private async Task RunBinanceLoopAsync()
+        => await RunWebSocketLoopAsync(
+            "wss://stream.binance.us:9443/ws",
+            ws => SendJsonAsync(ws, new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }),
+            ParseBinanceTicker,
+            ws => _binanceWs = ws,
+            () => _binanceWs = null);
+
     private async Task RunFinnhubLoopAsync()
+        => await RunWebSocketLoopAsync(
+            $"wss://ws.finnhub.io?token={_finnhubKey}",
+            async ws =>
+            {
+                foreach (var sym in _subscribedStocks.Keys)
+                    await SendJsonAsync(ws, new { type = "subscribe", symbol = sym });
+            },
+            ParseFinnhubMessage,
+            ws => _finnhubWs = ws,
+            () => _finnhubWs = null);
+
+    /// <summary>
+    /// Shared WebSocket feed loop: connect, subscribe, read until closed, then
+    /// reconnect after a delay. The per-feed differences (URI, subscription
+    /// payload, message parser) are supplied as delegates.
+    /// </summary>
+    private async Task RunWebSocketLoopAsync(
+        string uri,
+        Func<ClientWebSocket, Task> subscribe,
+        Action<string> parseMessage,
+        Action<ClientWebSocket> onConnected,
+        Action onClosed)
     {
         while (!_disposed)
         {
             var ws = new ClientWebSocket();
             try
             {
-                _finnhubWs = ws;
-                await ws.ConnectAsync(new Uri($"wss://ws.finnhub.io?token={_finnhubKey}"), _cts.Token);
-
-                foreach (var sym in _subscribedStocks.Keys)
-                    await SendJsonAsync(ws, new { type = "subscribe", symbol = sym });
-
-                await ReadLoopAsync(ws, ParseFinnhubMessage, _cts.Token);
+                onConnected(ws);
+                await ws.ConnectAsync(new Uri(uri), _cts.Token);
+                await subscribe(ws);
+                await ReadLoopAsync(ws, parseMessage, _cts.Token);
             }
             catch when (!_disposed)
             {
-                System.Diagnostics.Debug.WriteLine("Finnhub WebSocket feed loop ended unexpectedly; reconnecting");
+                System.Diagnostics.Debug.WriteLine("WebSocket feed loop ended unexpectedly; reconnecting");
             }
             finally
             {
-                _finnhubWs = null;
+                onClosed();
                 ws.Dispose();
             }
             if (!_disposed) await Task.Delay(5000);
@@ -235,72 +336,72 @@ public sealed class PriceFeedManager : IDisposable
     }
 
     private async Task RunStockRestPollerAsync()
+        => await RunRestPollLoopAsync(_stockRestInterval, _subscribedStocks.Keys, PollStockSymbolAsync);
+
+    private async Task PollStockSymbolAsync(string sym)
     {
-        while (!_disposed)
+        var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.TryGetProperty("c", out var c) && root.TryGetProperty("dp", out var dp) && dp.ValueKind != JsonValueKind.Null)
         {
-            await Task.Delay(_stockRestInterval, _cts.Token);
-            foreach (var sym in _subscribedStocks.Keys)
+            _prices[sym] = new PriceInfo
             {
-                try
-                {
-                    var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
-                    using var doc = JsonDocument.Parse(json);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("c", out var c) && root.TryGetProperty("dp", out var dp) && dp.ValueKind != JsonValueKind.Null)
-                    {
-                        _prices[sym] = new PriceInfo
-                        {
-                            Price = c.GetDecimal(),
-                            ChangePercent = dp.GetDecimal(),
-                            Source = "Finnhub",
-                            Timestamp = DateTime.UtcNow
-                        };
-                    }
-                }
-                catch
-                {
-                    /* individual symbol failure is non-fatal */
-                    System.Diagnostics.Debug.WriteLine("Stock REST poll failed for a symbol; continuing");
-                }
-            }
+                Price = c.GetDecimal(),
+                ChangePercent = dp.GetDecimal(),
+                Source = "Finnhub",
+                Timestamp = DateTime.UtcNow
+            };
         }
     }
 
     private async Task RunFxRestPollerAsync()
+        => await RunRestPollLoopAsync(_stockRestInterval, _subscribedFx.Keys, PollFxPairAsync);
+
+    private async Task PollFxPairAsync(string key)
+    {
+        if (key.Length != 6)
+        {
+            return;
+        }
+
+        string baseCurrency = key[..3];
+        string quoteCurrency = key[3..];
+        string start = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string end = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
+        if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
+        {
+            _prices[key] = new PriceInfo
+            {
+                Price = price,
+                ChangePercent = change,
+                Source = "Frankfurter",
+                Timestamp = DateTime.UtcNow,
+                CurrencySymbol = ""
+            };
+        }
+    }
+
+    /// <summary>
+    /// Shared REST polling loop: delay, then poll every subscribed symbol via
+    /// <paramref name="pollSymbol"/> (individual failures are non-fatal).
+    /// </summary>
+    private async Task RunRestPollLoopAsync(TimeSpan interval, IEnumerable<string> subscribed, Func<string, Task> pollSymbol)
     {
         while (!_disposed)
         {
-            await Task.Delay(_stockRestInterval, _cts.Token);
-            foreach (string key in _subscribedFx.Keys)
+            await Task.Delay(interval, _cts.Token);
+            foreach (var symbol in subscribed)
             {
-                if (key.Length != 6)
-                {
-                    continue;
-                }
-
-                string baseCurrency = key[..3];
-                string quoteCurrency = key[3..];
                 try
                 {
-                    string start = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                    string end = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                    var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
-                    if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
-                    {
-                        _prices[key] = new PriceInfo
-                        {
-                            Price = price,
-                            ChangePercent = change,
-                            Source = "Frankfurter",
-                            Timestamp = DateTime.UtcNow,
-                            CurrencySymbol = ""
-                        };
-                    }
+                    await pollSymbol(symbol);
                 }
                 catch
                 {
                     // Individual symbol failure is non-fatal.
-                    System.Diagnostics.Debug.WriteLine("FX REST poll failed for a currency pair; continuing");
+                    System.Diagnostics.Debug.WriteLine($"REST poll failed for {symbol}; continuing");
                 }
             }
         }

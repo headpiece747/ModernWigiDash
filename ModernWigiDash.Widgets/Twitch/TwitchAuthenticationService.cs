@@ -1,6 +1,6 @@
 using ModernWigiDash.Sdk;
 
-namespace ModernWigiDash.Widgets;
+namespace ModernWigiDash.Widgets.Twitch;
 
 internal sealed class TwitchSession
 {
@@ -34,7 +34,7 @@ internal sealed class TwitchSession
 
     public async Task<bool> RestoreAsync(
         string? configuredClientId,
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -57,7 +57,7 @@ internal sealed class TwitchSession
 
     public async Task LoginAsync(
         string? configuredClientId,
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         CancellationToken cancellationToken)
     {
         string clientId = ResolveClientId(configuredClientId);
@@ -69,9 +69,8 @@ internal sealed class TwitchSession
         {
             var api = new TwitchApiClient(clientId);
             TwitchDeviceAuthorization device = await api.StartDeviceAuthorizationAsync(cancellationToken).ConfigureAwait(false);
-            var host = context as IWidgetHostInteraction;
 
-            host?.ShowDeviceAuthorization("Twitch", device.VerificationUri, device.UserCode, device.ExpiresAt);
+            context.ShowDeviceAuthorization("Twitch", device.VerificationUri, device.UserCode, device.ExpiresAt);
             TryOpenBrowser(device.VerificationUri, context);
 
             try
@@ -95,7 +94,7 @@ internal sealed class TwitchSession
             }
             finally
             {
-                host?.CloseDeviceAuthorization();
+                context.CloseDeviceAuthorization();
             }
         }
         finally
@@ -106,7 +105,7 @@ internal sealed class TwitchSession
 
     public async Task<IReadOnlyList<TwitchFollowedChannel>> RefreshFollowedChannelsAsync(
         string? configuredClientId,
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -161,7 +160,7 @@ internal sealed class TwitchSession
     }
 
     private async Task<IReadOnlyList<TwitchFollowedChannel>> RefreshFollowedChannelsCoreAsync(
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         CancellationToken cancellationToken)
     {
         TwitchTokenSet token;
@@ -201,7 +200,7 @@ internal sealed class TwitchSession
 
     private async Task<bool> EnsureAuthenticatedCoreAsync(
         string? configuredClientId,
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         bool forceValidate,
         CancellationToken cancellationToken)
     {
@@ -241,7 +240,7 @@ internal sealed class TwitchSession
 
     private async Task<bool> RefreshTokenCoreAsync(
         TwitchApiClient api,
-        ModernWigiDashContext context,
+        IModernWigiDashContext context,
         CancellationToken cancellationToken)
     {
         TwitchTokenSet? current;
@@ -265,8 +264,9 @@ internal sealed class TwitchSession
         }
         catch (TwitchApiException ex) when (ex.StatusCode is 400 or 401)
         {
+            System.Diagnostics.Debug.WriteLine($"Twitch token refresh rejected (HTTP {ex.StatusCode}): {ex.Message}");
             ClearState(deleteStoredToken: true);
-            (context as IWidgetHostInteraction)?.RequestInspectorRefresh();
+            context.RequestInspectorRefresh();
             return false;
         }
     }
@@ -286,7 +286,7 @@ internal sealed class TwitchSession
         lock (_stateGate) _followedChannels = channels.ToArray();
     }
 
-    private void StartValidationMonitor(ModernWigiDashContext context)
+    private void StartValidationMonitor(IModernWigiDashContext context)
     {
         if (_validationCts is { IsCancellationRequested: false }) return;
 
@@ -295,7 +295,7 @@ internal sealed class TwitchSession
         _ = Task.Run(() => ValidationLoopAsync(context, monitorCts.Token));
     }
 
-    private async Task ValidationLoopAsync(ModernWigiDashContext context, CancellationToken cancellationToken)
+    private async Task ValidationLoopAsync(IModernWigiDashContext context, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
         try
@@ -308,7 +308,7 @@ internal sealed class TwitchSession
                     if (!await EnsureAuthenticatedCoreAsync(null, context, forceValidate: true, cancellationToken).ConfigureAwait(false))
                     {
                         ClearState(deleteStoredToken: true);
-                        (context as IWidgetHostInteraction)?.RequestInspectorRefresh();
+                        context.RequestInspectorRefresh();
                         return;
                     }
                 }
@@ -322,6 +322,12 @@ internal sealed class TwitchSession
         {
             // The hourly validation loop ends when the session is logged out or the process exits.
             System.Diagnostics.Debug.WriteLine("Twitch validation loop canceled; ending the hourly refresh cycle.");
+        }
+        catch (Exception ex)
+        {
+            // A transient network/API failure must not kill the hourly monitor
+            // silently: log it and let the next tick retry.
+            System.Diagnostics.Debug.WriteLine($"Twitch validation loop failed; will retry next hour: {ex.Message}");
         }
     }
 
@@ -351,7 +357,7 @@ internal sealed class TwitchSession
         return value?.Trim() ?? "";
     }
 
-    private static void TryOpenBrowser(Uri verificationUri, ModernWigiDashContext context)
+    private static void TryOpenBrowser(Uri verificationUri, IModernWigiDashContext context)
     {
         try
         {
