@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using System.IO;
 using System.Windows;
 using ModernWigiDash.Core.Theming;
@@ -7,14 +8,13 @@ namespace ModernWigiDash.App;
 public partial class App : Application
 {
     private static readonly string CrashLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
-    private static readonly string StartupLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "display_device.log");
 
     public App()
     {
         // Log startup so we know the app actually launched
         try
         {
-            File.AppendAllText(StartupLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] [App] === Application starting === BaseDir={AppDomain.CurrentDomain.BaseDirectory}{Environment.NewLine}");
+            FileLog.Write($"[App] === Application starting === BaseDir={AppDomain.CurrentDomain.BaseDirectory}");
         }
         catch (IOException)
         {

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -26,7 +27,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInteraction
+public partial class MainWindow : Window, IModernWigiDashContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -52,6 +53,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
     /// This matches the vendor WigiDashService architecture.
     /// </summary>
     private ModernWigiDashDisplayServiceClient? _wcfClient;
+    private DateTime _lastWcfRetry = DateTime.MinValue;
 
     /// <summary>
     /// Whether the Windows Service is active and handling USB communication.
@@ -61,8 +63,6 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
     private ProfileLayout _profile = new();
     private PlacedWidgetInstance? _selectedWidget;
     private Window? _deviceAuthorizationWindow;
-
-    private static readonly string LogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "display_device.log");
 
     // Mouse & Swipe Gesture Interaction State
     private bool _isMouseDown = false;
@@ -113,19 +113,9 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         // Do NOT block the UI thread waiting for USB — the render timer will
         // start sending frames as soon as the background connection succeeds.
 
-        // 1. Register Built-In Display Suite
-        _loader.RegisterBuiltInPlugin(typeof(DigitalAnalogClockWidget));
-        _loader.RegisterBuiltInPlugin(typeof(HardwareMonitorWidget));
-        _loader.RegisterBuiltInPlugin(typeof(FrameTimeWidget));
-        _loader.RegisterBuiltInPlugin(typeof(AudioVisualizerWidget));
-        _loader.RegisterBuiltInPlugin(typeof(NowPlayingWidget));
-        _loader.RegisterBuiltInPlugin(typeof(HotkeyButtonWidget));
-        _loader.RegisterBuiltInPlugin(typeof(StopwatchTimerWidget));
-        _loader.RegisterBuiltInPlugin(typeof(CryptoStockTickerWidget));
-        _loader.RegisterBuiltInPlugin(typeof(PictureAndGifWidget));
-        _loader.RegisterBuiltInPlugin(typeof(TwitchChatStreamWidget));
-        _loader.RegisterBuiltInPlugin(typeof(WeatherForecastWidget));
-        _loader.RegisterBuiltInPlugin(typeof(TextLabelWidget));
+        // 1. Register Built-In Display Suite (attribute-driven catalog — adding a
+        //    widget to the Widgets assembly needs no registration here)
+        _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
 
         // 2. Populate Catalog UI (sorted alphabetically by display name)
         ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
@@ -189,6 +179,13 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                         }
                     }
                 }
+                else if (touchType == TouchEventType.TouchUp)
+                {
+                    // The device reports the release state for more than one
+                    // poll. Ignore subsequent releases so one physical tap
+                    // becomes one action.
+                    return;
+                }
 
                 // Map hardware touch type to widget touch event
                 // Hardware only sends: Down(1) for contact+movement, Up(2) for release
@@ -219,21 +216,29 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         _renderTimer.Interval = TimeSpan.FromMilliseconds(33.3); // 30 FPS
         _renderTimer.Tick += (s, e) =>
         {
-            _compositor.Compose(_profile.ActivePage, 30.0f, _profile.ActivePageIndex, _profile.Pages.Count);
+            // Composition happens once per paint in SkiaCanvas_PaintSurface;
+            // the timer only drives repaints and frame sends. Composing here
+            // too would double-advance widget history/animations per frame.
             SkiaCanvas.InvalidateVisual();
 
             // Push frame to async channel (non-blocking, drop oldest if backlogged)
             if (_serviceActive && _wcfClient != null)
             {
-                ConvertToRgb565(_compositor.FrameBuffer, ref _rgb565PoolBuffer);
+                FrameEncoder.ConvertToRgb565(_compositor.FrameBuffer, ref _rgb565PoolBuffer);
                 // Copy to channel — channel may hold the buffer briefly
                 byte[] frameCopy = new byte[_rgb565PoolBuffer!.Length];
                 Buffer.BlockCopy(_rgb565PoolBuffer, 0, frameCopy, 0, _rgb565PoolBuffer.Length);
-                _frameChannel.Writer.TryWrite(frameCopy);
-            }
+                _frameChannel.Writer.TryWrite(frameCopy);            }
             else if (_usbDevice.IsConnected && !_usbDevice.IsSimulationMode)
             {
                 _usbDevice.SendFrameBuffer(_compositor.FrameBuffer);
+            }
+            else if (_usbDevice.IsHardwareActive && !_serviceActive)
+            {
+                // The engine yielded to a running service, but our one-shot WCF
+                // routing failed (e.g. the service was still starting). Retry
+                // detection (throttled) so frames don't get dropped forever.
+                TryRetryServiceRouting();
             }
 
             UpdateUsbBadge();
@@ -277,419 +282,6 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         UpdateUsbBadge();
         UpdateActiveCount();
         UpdateInspectorPanel();
-    }
-
-    /// <summary>
-    /// Detects if the ModernWigiDash.Windows Service is running and initializes WCF client.
-    /// When the service is active, it owns the USB device handle (running as LocalSystem).
-    /// The App routes frames through WCF instead of connecting directly.
-    /// </summary>
-    private async Task InitializeWcfRoutingAsync()
-    {
-        try
-        {
-            Log("[WCF] Detecting service port...");
-            int? port = await ModernWigiDashDisplayServiceClient.DetectServicePortAsync();
-            if (port.HasValue)
-            {
-                string endpointUrl = $"http://localhost:{port.Value}/ModernWigiDashDisplayService";
-                Log($"[WCF] Port {port.Value} detected, creating client...");
-                _wcfClient = new ModernWigiDashDisplayServiceClient(endpointUrl);
-
-                try
-                {
-                    string version = _wcfClient.GetVersion();
-                    _serviceActive = true;
-                    Log($"[WCF] Connected! Version: {version}, Port: {port.Value}");
-
-                    bool displayInit = _wcfClient.InitializeDisplay();
-                    Log($"[WCF] Display initialization: {displayInit}");
-
-                    StartTouchPolling();
-                    StartSensorPolling();
-                    StartFrameTimePolling();
-                }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Connected but GetVersion failed: {ex.Message}");
-                    _wcfClient?.Dispose();
-                    _wcfClient = null;
-                    _serviceActive = false;
-                }
-            }
-            else
-            {
-                Log("[WCF] No service detected. Using direct USB mode.");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"[WCF] Detection failed ({ex.Message}). Using direct USB mode.");
-        }
-    }
-
-    /// <summary>
-    /// Background loop that drains the frame channel and sends via WCF.
-    /// When multiple frames queue up (because WCF round-trip is slower than
-    /// the render timer), it drains all available frames and only sends the
-    /// latest one. This keeps the display showing real-time content instead
-    /// of replaying stale buffered frames.
-    /// </summary>
-    private async Task FrameSenderLoop(CancellationToken ct)
-    {
-        var reader = _frameChannel.Reader;
-        int sentCount = 0;
-        try
-        {
-            while (await reader.WaitToReadAsync(ct))
-            {
-                // Drain all queued frames, keep only the latest
-                byte[]? latestFrame = null;
-                while (reader.TryRead(out var frame))
-                {
-                    latestFrame = frame;
-                }
-
-                if (latestFrame == null) continue;
-
-                try
-                {
-                    bool ok = _wcfClient?.SendFrame(latestFrame) == true;
-                    sentCount++;
-                    if (sentCount <= 5 || sentCount % 120 == 0)
-                        Log($"[WCF] Frame #{sentCount} sent ({latestFrame.Length} bytes) ok={ok}");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Frame send failed: {ex.Message}");
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected: frame sender loop cancelled during shutdown
-            System.Diagnostics.Debug.WriteLine("Frame sender loop cancelled during shutdown");
-        }
-    }
-
-    /// <summary>
-    /// Starts polling for hardware touch input via WCF at 50ms intervals.
-    /// Runs on a background thread to avoid blocking the WPF UI.
-    /// Routes touch events to SkiaFrameCompositor and handles page swipe navigation.
-    /// </summary>
-    private void StartTouchPolling()
-    {
-        if (_touchPollCts != null) return;
-
-        _touchPollCts = new CancellationTokenSource();
-        var ct = _touchPollCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            Log("[TOUCH] Touch polling started (50ms interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(500, ct);
-                        continue;
-                    }
-
-                    var touch = _wcfClient.PollTouch();
-                    if (touch != null)
-                    {
-                        await Dispatcher.BeginInvoke(() =>
-                        {
-                            ProcessHardwareTouch(touch);
-                        });
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Touch poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(16, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
-    }
-
-    /// <summary>
-    /// Background loop that polls the service for the latest hardware sensor
-    /// snapshot (~1s) and caches it in <see cref="LhmSensorStore"/> so widgets
-    /// read it on the render thread without a WCF round-trip.
-    /// </summary>
-    private void StartSensorPolling()
-    {
-        if (_sensorPollCts != null) return;
-
-        _sensorPollCts = new CancellationTokenSource();
-        var ct = _sensorPollCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            Log("[SENSOR] Sensor polling started (1s interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(1000, ct);
-                        continue;
-                    }
-
-                    var dto = _wcfClient.GetSensorSnapshot();
-                    var readings = dto?.Readings
-                        .Select(r => new LhmReading(
-                            r.SensorId,
-                            r.SensorName,
-                            $"{r.HardwareName}: {r.SensorName}",
-                            r.Unit,
-                            r.Value,
-                            r.Min,
-                            r.Max,
-                            r.Avg))
-                        .ToList() ?? [];
-
-                    LhmSensorStore.Update(new LhmSnapshot(
-                        dto?.IsConnected ?? false,
-                        dto?.LastUpdate ?? DateTime.UtcNow,
-                        readings));
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Sensor poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(1000, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
-    }
-
-    /// <summary>
-    /// Resolves the process id of the currently focused (foreground) window.
-    /// Returns 0 when there is no foreground window.
-    /// </summary>
-    private static int GetForegroundProcessId()
-    {
-        try
-        {
-            IntPtr hwnd = GetForegroundWindow();
-            if (hwnd == IntPtr.Zero)
-            {
-                return 0;
-            }
-
-            GetWindowThreadProcessId(hwnd, out uint pid);
-            return unchecked((int)pid);
-        }
-        catch (Exception)
-        {
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// Background loop that polls the service for the latest FPS / frame-time
-    /// snapshot (~1s) and caches it in <see cref="FrameTimeStore"/> so the
-    /// frame-time widget reads it on the render thread without a WCF round-trip.
-    /// </summary>
-    private void StartFrameTimePolling()
-    {
-        if (_frameTimePollCts != null) return;
-
-        _frameTimePollCts = new CancellationTokenSource();
-        var ct = _frameTimePollCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            Log("[FRAME] Frame-time polling started (1s interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(1000, ct);
-                        continue;
-                    }
-
-                    // Track the foreground window's process so the widget shows
-                    // the focused game's FPS. When the App itself (or nothing)
-                    // is focused, pass -1 so the service returns the idle view
-                    // instead of falling back to the most active presenter.
-                    int preferredPid = GetForegroundProcessId();
-                    if (preferredPid <= 0 || preferredPid == Environment.ProcessId)
-                    {
-                        preferredPid = -1;
-                    }
-
-                    var dto = _wcfClient.GetFrameTimeSnapshot(preferredPid);
-                    var record = new FrameTimeSnapshotRecord(
-                        dto?.IsAvailable ?? false,
-                        dto?.ProcessId ?? 0,
-                        dto?.ProcessName ?? string.Empty,
-                        dto?.Fps ?? 0,
-                        dto?.FrameTimeMs ?? 0,
-                        dto?.Low1PercentFps ?? 0,
-                        dto?.Low01PercentFps ?? 0,
-                        dto?.GpuBusyPercent ?? 0,
-                        dto?.CpuFrameTimeMs ?? 0,
-                        dto?.RecentFrameTimesMs ?? []);
-
-                    FrameTimeStore.Update(record);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Frame-time poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(1000, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
-    }
-    /// Handles page swipe navigation and routes to widget compositor.
-    /// Hardware touch protocol: None=0, Down=1 (contact+movement), Up=2 (release).
-    /// Intermediate movement points during a swipe are also sent as Down(1).
-    /// </summary>
-    private void ProcessHardwareTouch(TouchEventInfo touch)
-    {
-        if (touch.Type == DisplayProtocolConstants.TouchTypeDown)
-        {
-            // Only record start position on the first Down (not intermediate movement points)
-            if (!_hwTouchActive)
-            {
-                _hwTouchStartX = touch.X;
-                _hwTouchStartY = touch.Y;
-                _hwTouchActive = true;
-            }
-        }
-        else if (touch.Type == DisplayProtocolConstants.TouchTypeUp && _hwTouchActive)
-        {
-            _hwTouchActive = false;
-            float deltaX = touch.X - _hwTouchStartX;
-            float deltaY = touch.Y - _hwTouchStartY;
-
-            if (_profile.Pages.Count > 1)
-            {
-                // Swipe detection
-                if (Math.Abs(deltaX) > 70 && Math.Abs(deltaY) < 80)
-                {
-                    if (deltaX < -70 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex + 1);
-                        return;
-                    }
-                    else if (deltaX > 70 && _profile.ActivePageIndex > 0)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex - 1);
-                        return;
-                    }
-                }
-
-                // Arrow tap fallback (stationary tap near edges)
-                if (Math.Abs(deltaX) < 30 && Math.Abs(deltaY) < 30)
-                {
-                    if (touch.X <= 60 && touch.Y >= 200 && touch.Y <= 400 && _profile.ActivePageIndex > 0)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex - 1);
-                        return;
-                    }
-                    if (touch.X >= 964 && touch.Y >= 200 && touch.Y <= 400 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex + 1);
-                        return;
-                    }
-                }
-            }
-        }
-        else if (touch.Type == DisplayProtocolConstants.TouchTypeUp)
-        {
-            // The device reports the release state for more than one poll.
-            // Ignore subsequent releases so one physical tap becomes one action.
-            return;
-        }
-
-        // Map hardware touch type to widget touch event
-        // Hardware only sends: Down(1) for contact+movement, Up(2) for release
-        TouchEventType touchEventType = touch.Type switch
-        {
-            DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
-            DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
-            _ => TouchEventType.TouchMove
-        };
-
-        SkiaFrameCompositor.RouteTouch(_profile.ActivePage, touch.X, touch.Y, touchEventType);
-        SkiaCanvas.InvalidateVisual();
-    }
-
-    /// <summary>
-    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian byte array.
-    /// Reuses a pooled buffer to reduce GC pressure at 60 FPS.
-    /// </summary>
-    private static void ConvertToRgb565(SKBitmap bitmap, ref byte[]? poolBuffer)
-    {
-        int width = DisplayProtocolConstants.FramebufferWidth;
-        int height = DisplayProtocolConstants.FramebufferHeight;
-        int frameSize = DisplayProtocolConstants.FrameBufferSize;
-
-        if (poolBuffer == null || poolBuffer.Length < frameSize)
-            poolBuffer = new byte[frameSize];
-
-        byte[] rgb565 = poolBuffer;
-        int idx = 0;
-
-        int srcWidth = bitmap.Width;
-        int srcHeight = bitmap.Height;
-
-        if (srcWidth == width && srcHeight == height)
-        {
-            using var pixmap = bitmap.PeekPixels();
-            if (pixmap != null && pixmap.GetPixels() != IntPtr.Zero)
-            {
-                unsafe
-                {
-                    byte* srcPtr = (byte*)pixmap.GetPixels();
-                    fixed (byte* dstPtr = rgb565)
-                    {
-                        ushort* dstUshort = (ushort*)dstPtr;
-                        int pixelCount = width * height;
-                        for (int i = 0; i < pixelCount; i++)
-                        {
-                            byte b = srcPtr[i * 4];
-                            byte g = srcPtr[i * 4 + 1];
-                            byte r = srcPtr[i * 4 + 2];
-                            dstUshort[i] = (ushort)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
-                        }
-                    }
-                }
-                return;
-            }
-        }
-
-        for (int y = 0; y < height; y++)
-        {
-            int srcY = srcHeight > 0 ? Math.Clamp((y * srcHeight) / height, 0, srcHeight - 1) : 0;
-            for (int x = 0; x < width; x++)
-            {
-                int srcX = srcWidth > 0 ? Math.Clamp((x * srcWidth) / width, 0, srcWidth - 1) : 0;
-
-                SKColor color = bitmap.GetPixel(srcX, srcY);
-                ushort rgb565Pixel = (ushort)(((color.Red >> 3) << 11) | ((color.Green >> 2) << 5) | (color.Blue >> 3));
-
-                rgb565[idx++] = (byte)(rgb565Pixel & 0xFF);
-                rgb565[idx++] = (byte)(rgb565Pixel >> 8);
-            }
-        }
     }
 
     private void SetupDefaultStarterLayout()
@@ -759,7 +351,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
     /// Creates and initializes the active widget instance for a placed widget, then applies
     /// the user-configured custom property values (surviving Export/Import round-trips).
     /// </summary>
-    private ModernWidget? RehydrateWidget(PlacedWidgetInstance placed)
+    private IModernWidget? RehydrateWidget(PlacedWidgetInstance placed)
     {
         var instance = _loader.CreateInstance(placed.PluginId);
         if (instance == null) return null;
@@ -1205,7 +797,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                     else if (attr.PropertyType == WidgetPropertyType.Icon)
                     {
                         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-                        var iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile))!;
+                        PropertyInfo? iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile));
                         string seed = currentVal?.ToString() ?? "";
                         if (string.IsNullOrEmpty(seed)
                             && _selectedWidget?.ActiveInstance is HotkeyButtonWidget hotkeySeed
@@ -1379,7 +971,9 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
                     {
                         string? selected = actionTypeCombo.SelectedValue?.ToString();
                         actionCommandPanel.Visibility =
-                            selected is "Launch App" or "Open URL" ? Visibility.Visible : Visibility.Collapsed;
+                            selected != null && HotkeyButtonWidget.IsLaunchOrUrlAction(selected)
+                                ? Visibility.Visible
+                                : Visibility.Collapsed;
                     }
                     actionTypeCombo.SelectionChanged += (_, _) => UpdateActionCommandVisibility();
                     UpdateActionCommandVisibility();
@@ -1466,7 +1060,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
     private void ShowIconSelectorPopup(PropertyInfo iconProp, HotkeyButtonWidget hotkey, TextBox box)
     {
-        var iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile))!;
+        PropertyInfo? iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile));
 
         var dialog = new Window
         {
@@ -1676,12 +1270,30 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         _isUpdatingInspector = false;
     }
 
-    private void ApplyInspectorPropertyValue(PropertyInfo prop, object value)
+    private void ApplyInspectorPropertyValue(PropertyInfo? prop, object value)
     {
-        if (_selectedWidget?.ActiveInstance == null) return;
-        prop.SetValue(_selectedWidget.ActiveInstance, value);
-        _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, value);
-        _selectedWidget.PropertyValues[prop.Name] = value;
+        if (_selectedWidget?.ActiveInstance == null || prop == null) return;
+
+        object? converted = value;
+        // TextBox input arrives as string; convert to the property's CLR type
+        // so a Number/Color/etc. property is never silently dropped by a
+        // SetValue type mismatch.
+        if (value is string str && prop.PropertyType != typeof(string))
+        {
+            try
+            {
+                converted = TypeDescriptor.GetConverter(prop.PropertyType).ConvertFromInvariantString(str);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Inspector value '{str}' not convertible to {prop.PropertyType.Name} for {prop.Name}: {ex.Message}");
+                return;
+            }
+        }
+
+        prop.SetValue(_selectedWidget.ActiveInstance, converted);
+        _selectedWidget.ActiveInstance.OnPropertyChanged(prop.Name, converted);
+        _selectedWidget.PropertyValues[prop.Name] = converted;
     }
 
     private void Transform_Changed(object sender, TextChangedEventArgs e)
@@ -2039,137 +1651,6 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
     #endregion
 
-    #region ModernWigiDashContext Implementation for Telemetry & Host Services
-
-    public string GetSetting(string key, string defaultValue = "") => defaultValue;
-    public void SetSetting(string key, string value) { }
-    public void LogInfo(string message) => System.Diagnostics.Debug.WriteLine($"[Display INFO] {message}");
-    public void LogError(string message, Exception? ex = null) => System.Diagnostics.Debug.WriteLine($"[Display ERROR] {message}: {ex}");
-    public void RequestRender() => Dispatcher.InvokeAsync(() => SkiaCanvas?.InvalidateVisual());
-    public bool TryGetSensorValue(string sensorId, out float value) { value = 50f; return true; }
-    public string GetSensorFormattedString(string sensorId) => "50.0";
-
-    public void RequestInspectorRefresh()
-    {
-        if (Dispatcher.CheckAccess())
-        {
-            UpdateInspectorPanel();
-            return;
-        }
-
-        _ = Dispatcher.InvokeAsync(UpdateInspectorPanel);
-    }
-
-    public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt)
-    {
-        void ShowDialog()
-        {
-            _deviceAuthorizationWindow?.Close();
-
-            var window = new Window
-            {
-                Title = $"ModernWigiDash - {serviceName} Login",
-                Width = 430,
-                SizeToContent = SizeToContent.Height,
-                Owner = this,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ResizeMode = ResizeMode.NoResize,
-                FontFamily = TryFindResource("PrimaryFont") as FontFamily ?? FontFamily,
-                Background = TryFindResource("BgPanel") as Brush ?? TryFindResource("PanelBackground") as Brush ?? Brushes.Black,
-                Foreground = TryFindResource("TextPrimary") as Brush ?? Brushes.White
-            };
-            window.SourceInitialized += (_, _) => ApplyDarkTitleBarToWindow(window, ThemeSettings.Theme.TitleBar);
-
-            var root = new StackPanel { Margin = new Thickness(20) };
-            root.Children.Add(new TextBlock
-            {
-                Text = $"Authorize {serviceName} in your browser",
-                FontSize = 18,
-                FontWeight = FontWeights.SemiBold,
-                Margin = new Thickness(0, 0, 0, 10)
-            });
-            root.Children.Add(new TextBlock
-            {
-                Text = "The browser should open automatically. If it does not, open the verification URL below and enter this code:",
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 10)
-            });
-
-            var code = new TextBox
-            {
-                Text = userCode,
-                IsReadOnly = true,
-                FontSize = 24,
-                FontWeight = FontWeights.Bold,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                Padding = new Thickness(8),
-                Margin = new Thickness(0, 0, 0, 10)
-            };
-            root.Children.Add(code);
-            root.Children.Add(new TextBlock
-            {
-                Text = verificationUri.AbsoluteUri,
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.8,
-                Margin = new Thickness(0, 0, 0, 8)
-            });
-            root.Children.Add(new TextBlock
-            {
-                Text = $"This code expires at {expiresAt.LocalDateTime:t}.",
-                Opacity = 0.8,
-                Margin = new Thickness(0, 0, 0, 16)
-            });
-
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var open = new Button { Content = "Open Twitch", Padding = new Thickness(12, 5, 12, 5) };
-            var copy = new Button { Content = "Copy code", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0) };
-            var close = new Button { Content = "Cancel", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0) };
-            if (TryFindResource("AccentButton") is Style accentStyle) open.Style = accentStyle;
-
-            open.Click += (_, _) =>
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(verificationUri.AbsoluteUri) { UseShellExecute = true });
-                }
-                catch (Exception ex)
-                {
-                    LogError("Unable to open the Twitch authorization page", ex);
-                }
-            };
-            copy.Click += (_, _) => Clipboard.SetText(userCode);
-            close.Click += (_, _) => window.Close();
-
-            buttons.Children.Add(open);
-            buttons.Children.Add(copy);
-            buttons.Children.Add(close);
-            root.Children.Add(buttons);
-            window.Content = root;
-            window.Closed += (_, _) =>
-            {
-                if (ReferenceEquals(_deviceAuthorizationWindow, window)) _deviceAuthorizationWindow = null;
-            };
-            _deviceAuthorizationWindow = window;
-            window.Show();
-        }
-
-        if (Dispatcher.CheckAccess()) ShowDialog();
-        else Dispatcher.Invoke(ShowDialog);
-    }
-
-    public void CloseDeviceAuthorization()
-    {
-        void CloseDialog()
-        {
-            _deviceAuthorizationWindow?.Close();
-            _deviceAuthorizationWindow = null;
-        }
-
-        if (Dispatcher.CheckAccess()) CloseDialog();
-        else Dispatcher.Invoke(CloseDialog);
-    }
-
-    #endregion
 
     private void UpdateUsbBadge()
     {
@@ -2395,18 +1876,5 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         dialog.Close();
     }
 
-    private static void Log(string msg)
-    {
-        try
-        {
-            using var fs = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var sw = new StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-        }
-        catch (IOException)
-        {
-            // Log file may be locked or unavailable; surface to debug output.
-            System.Diagnostics.Debug.WriteLine("App log write failed (file locked)");
-        }
-    }
+    private static void Log(string msg) => FileLog.Write(msg);
 }

@@ -4,6 +4,7 @@
   <Project Path="ModernWigiDash.Hardware/ModernWigiDash.Hardware.csproj" />
   <Project Path="ModernWigiDash.Sdk/ModernWigiDash.Sdk.csproj" />
   <Project Path="ModernWigiDash.Widgets/ModernWigiDash.Widgets.csproj" />
+  <Project Path="ModernWigiDash.Service.Contracts/ModernWigiDash.Service.Contracts.csproj" />
   <Project Path="ModernWigiDash.Service/ModernWigiDash.Service.csproj" />
   <Project Path="ModernWigiDash.Tests/ModernWigiDash.Tests.csproj" />
 

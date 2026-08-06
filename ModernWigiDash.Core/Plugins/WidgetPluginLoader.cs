@@ -26,7 +26,7 @@ public class WidgetPluginLoader
 
     public void RegisterBuiltInPlugin(Type widgetType)
     {
-        if (!typeof(ModernWidget).IsAssignableFrom(widgetType) || widgetType.IsAbstract || widgetType.IsInterface)
+        if (!typeof(IModernWidget).IsAssignableFrom(widgetType) || widgetType.IsAbstract || widgetType.IsInterface)
             return;
 
         var attr = widgetType.GetCustomAttribute<WidgetMetadataAttribute>();
@@ -46,6 +46,22 @@ public class WidgetPluginLoader
         };
     }
 
+    /// <summary>
+    /// Registers every concrete <see cref="IModernWidget"/> in <paramref name="assembly"/>
+    /// (usually the Widgets assembly), so adding a built-in widget needs no
+    /// host-side registration — the [WidgetMetadata] attribute drives the catalog.
+    /// </summary>
+    public void RegisterBuiltInAssembly(Assembly assembly)
+    {
+        foreach (var type in assembly.GetTypes())
+        {
+            if (typeof(IModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
+            {
+                RegisterBuiltInPlugin(type);
+            }
+        }
+    }
+
     public Assembly? LoadExternalAssembly(string dllPath)
     {
         if (!File.Exists(dllPath))
@@ -60,28 +76,40 @@ public class WidgetPluginLoader
             var assembly = alc.LoadFromAssemblyPath(Path.GetFullPath(dllPath));
             foreach (var type in assembly.GetTypes())
             {
-                if (typeof(ModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
+                if (typeof(IModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
                 {
                     RegisterBuiltInPlugin(type);
                 }
             }
             return assembly;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Plugin load failed for {dllPath}: {ex.Message}");
             alc.Unload();
             _loadContexts.Remove(dllPath);
             return null;
         }
     }
 
-    public ModernWidget? CreateInstance(string pluginId)
+    public IModernWidget? CreateInstance(string pluginId)
     {
-        if (_registeredPlugins.TryGetValue(pluginId, out var info))
+        if (!_registeredPlugins.TryGetValue(pluginId, out var info))
         {
-            return (ModernWidget?)Activator.CreateInstance(info.WidgetType);
+            return null;
         }
-        return null;
+
+        try
+        {
+            return (IModernWidget?)Activator.CreateInstance(info.WidgetType);
+        }
+        catch (Exception ex)
+        {
+            // A widget whose constructor throws must not crash the host; surface
+            // the failure so the catalog can show the plugin as broken.
+            System.Diagnostics.Debug.WriteLine($"Widget instantiation failed for {pluginId}: {ex.Message}");
+            return null;
+        }
     }
 
     public void UnloadExternalPlugin(string dllPath)

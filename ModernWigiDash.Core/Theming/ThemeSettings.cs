@@ -44,7 +44,18 @@ public class ThemeSettings
     public string SuccessBackground { get; set; } = "#064E3B";
     public string SuccessBorder { get; set; } = "#10B981";
 
-    public static ThemeSettings Theme { get; set; } = new();
+    private static ThemeSettings? _theme;
+
+    /// <summary>
+    /// The active theme. Lazily loaded from app_theme.json on first access so
+    /// consumers never observe the default unloaded state, regardless of when
+    /// they touch it relative to App startup.
+    /// </summary>
+    public static ThemeSettings Theme
+    {
+        get => _theme ??= Load();
+        set => _theme = value;
+    }
 
     /// <summary>
     /// Human-friendly label for each theme property, used by the theme dialog so a user

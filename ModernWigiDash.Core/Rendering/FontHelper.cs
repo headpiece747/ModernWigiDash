@@ -249,26 +249,6 @@ public static class FontHelper
     /// <summary>
     /// Creates a high-quality Geist SKFont (subpixel antialiasing + full hinting) for the requested size and style.
     /// </summary>
-    public static SKFont CreateFont(float size, SKFontStyle style)
-    {
-        var font = new SKFont(GetTypeface("Geist", style), size);
-        ConfigureHighQualityFont(font);
-        return font;
-    }
-
-    /// <summary>
-    /// Creates a high-quality SKFont (subpixel antialiasing + full hinting) for the requested family, size, and style.
-    /// </summary>
-    public static SKFont CreateFont(string familyName, float size, SKFontStyle style)
-    {
-        var font = new SKFont(GetTypeface(familyName, style), size);
-        ConfigureHighQualityFont(font);
-        return font;
-    }
-
-    /// <summary>
-    /// Creates a high-quality SKFont (subpixel antialiasing + full hinting) for the requested family, style, and size.
-    /// </summary>
     public static SKFont CreateFont(string familyName, SKFontStyle style, float size)
     {
         var font = new SKFont(GetTypeface(familyName, style), size);

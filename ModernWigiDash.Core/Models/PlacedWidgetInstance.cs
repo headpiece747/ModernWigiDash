@@ -25,7 +25,7 @@ public class PlacedWidgetInstance
 
     // Runtime active widget instance (not serialized)
     [JsonIgnore]
-    public ModernWidget? ActiveInstance { get; set; }
+    public IModernWidget? ActiveInstance { get; set; }
 
     public bool ContainsPoint(float pointX, float pointY)
     {
