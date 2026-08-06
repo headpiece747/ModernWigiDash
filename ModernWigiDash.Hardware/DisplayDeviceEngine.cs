@@ -477,6 +477,10 @@ public sealed class DisplayDeviceEngine : IDisposable
         _reconnectTimer.Dispose();
         _sFrameQueueCts?.Cancel();
         _sFrameQueueCts?.Dispose();
+        // Reset the static queue state so a later engine instance can start a
+        // fresh frame queue instead of reusing (and crashing on) the disposed CTS.
+        _sFrameQueueCts = null;
+        _sFrameQueueStarted = false;
         DisconnectInternal();
     }
 }
