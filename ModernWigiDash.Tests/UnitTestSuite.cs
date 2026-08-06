@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
@@ -498,10 +499,10 @@ public class UnitTestSuite
     }
 
     [TestMethod]
-    public void TwitchWidget_DefaultsToFontSize16AndCleanStatus()
+    public void TwitchWidget_DefaultsToFontSize24AndCleanStatus()
     {
         var widget = new TwitchChatStreamWidget();
-        Assert.AreEqual(16, widget.FontSize);
+        Assert.AreEqual(24, widget.FontSize);
     }
 
     [TestMethod]

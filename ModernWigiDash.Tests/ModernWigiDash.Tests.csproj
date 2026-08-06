@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWPF>true</UseWPF>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
@@ -23,6 +24,7 @@
     <ProjectReference Include="..\ModernWigiDash.Hardware\ModernWigiDash.Hardware.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Service\ModernWigiDash.Service.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Widgets\ModernWigiDash.Widgets.csproj" />
+    <ProjectReference Include="..\ModernWigiDash.App\ModernWigiDash.App.csproj" />
   </ItemGroup>
 
 </Project>

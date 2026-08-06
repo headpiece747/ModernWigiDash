@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.Serialization;
 using ModernWigiDash.Service.Contracts;
 
