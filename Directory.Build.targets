@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    SkiaSharp's native runtime assets copy ~85 MB of libSkiaSharp.pdb per
+    architecture (x86/x64/arm64) into every build output. These native PDBs
+    are only useful for debugging SkiaSharp-internal crashes, never at
+    runtime, and bloat output by ~1.5 GB across the solution. Remove them
+    after each build. Lives in .targets because it is a custom post-build
+    target, not a property default.
+  -->
+  <Target Name="TrimSkiaSharpNativePdb" AfterTargets="Build">
+    <ItemGroup>
+      <_SkiaPdb Include="$(TargetDir)**\libSkiaSharp.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_SkiaPdb)" />
+  </Target>
+
+</Project>

@@ -1,8 +1,18 @@
 <Project>
+
+  <PropertyGroup>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Company>headpiece747</Company>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.14.0.120626">
+    <PackageReference Include="SonarAnalyzer.CSharp">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+
 </Project>

@@ -2,19 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ModernWigiDash.Hardware</AssemblyName>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="4.150.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.10" />
-    <PackageReference Include="LibUsbDotNet" Version="3.0.224" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" />
+    <PackageReference Include="LibUsbDotNet" />
   </ItemGroup>
 
   <ItemGroup>

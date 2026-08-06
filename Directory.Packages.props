@@ -1,0 +1,29 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="CoreWCF.Http" Version="1.9.1" />
+    <PackageVersion Include="CoreWCF.Primitives" Version="1.9.1" />
+    <PackageVersion Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageVersion Include="LibUsbDotNet" Version="3.0.224" />
+    <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.5" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="MSTest.TestAdapter" Version="4.3.2" />
+    <PackageVersion Include="MSTest.TestFramework" Version="4.3.2" />
+    <PackageVersion Include="NAudio.Wasapi" Version="2.3.0" />
+    <PackageVersion Include="SkiaSharp" Version="4.150.1" />
+    <PackageVersion Include="SkiaSharp.Views.WPF" Version="4.150.1" />
+    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.14.0.120626" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
+    <!-- Lift transitive System.ServiceModel.Http dependency off the vulnerable 10.0.0 (NU1903) -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <PackageVersion Include="System.ServiceModel.Http" Version="10.0.652802" />
+    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.10" />
+  </ItemGroup>
+
+</Project>
