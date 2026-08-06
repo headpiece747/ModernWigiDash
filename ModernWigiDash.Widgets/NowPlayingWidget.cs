@@ -444,20 +444,20 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         float artistH = artistFont.Metrics.Bottom - artistFont.Metrics.Top;
         float albumH = albumFont.Metrics.Bottom - albumFont.Metrics.Top;
 
-        canvas.DrawText(TruncateText(IsEmpty(snap.Title) ? "Unknown Title" : snap.Title, titleFont, textW),
+        canvas.DrawText(TextRenderHelper.TruncateText(IsEmpty(snap.Title) ? "Unknown Title" : snap.Title, titleFont, textW),
                         textX, textTop - titleFont.Metrics.Top, SKTextAlign.Left, titleFont, titlePaint);
 
         float currentY = textTop + titleH + 6f * scale;
 
         if (!IsEmpty(snap.Artist))
         {
-            canvas.DrawText(TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, SKTextAlign.Left, artistFont, artistPaint);
+            canvas.DrawText(TextRenderHelper.TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, SKTextAlign.Left, artistFont, artistPaint);
             currentY += artistH + 5f * scale;
         }
 
         if (!IsEmpty(snap.Album))
         {
-            canvas.DrawText(TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, SKTextAlign.Left, albumFont, albumPaint);
+            canvas.DrawText(TextRenderHelper.TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, SKTextAlign.Left, albumFont, albumPaint);
             currentY += albumH + 5f * scale;
         }
 
@@ -1041,26 +1041,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     }
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
-
-    private static string TruncateText(string text, SKFont font, float maxWidth)
-    {
-        if (string.IsNullOrEmpty(text) || font.MeasureText(text) <= maxWidth)
-            return text;
-
-        string ellipsis = "…";
-        float ellipsisW = font.MeasureText(ellipsis);
-        if (ellipsisW >= maxWidth) return "";
-
-        int len = text.Length;
-        while (len > 0)
-        {
-            string sub = text[..len] + ellipsis;
-            if (font.MeasureText(sub) <= maxWidth)
-                return sub;
-            len--;
-        }
-        return ellipsis;
-    }
 
     private static string FormatTime(double totalSeconds)
     {

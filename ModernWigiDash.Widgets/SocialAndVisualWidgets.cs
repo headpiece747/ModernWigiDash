@@ -384,6 +384,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            System.Diagnostics.Debug.WriteLine("Twitch session restore cancelled during shutdown");
         }
         catch (Exception ex)
         {
@@ -545,7 +546,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 _ = Task.Run(async () =>
                 {
                     try { await SendAsync(sock, "PONG :tmi.twitch.tv", _cts?.Token ?? CancellationToken.None); }
-                    catch { /* socket closed / cancelled during shutdown */ }
+                    catch
+                    {
+                        System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
+                        /* socket closed / cancelled during shutdown */
+                    }
                 });
             }
             return;
@@ -794,7 +799,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         if (_cts is { } cts) await cts.CancelAsync();
         _socket?.Abort();
         try { if (_ircTask != null) await _ircTask; }
-        catch { /* connection task was already cancelled/disposed */ }
+        catch
+        {
+            System.Diagnostics.Debug.WriteLine("IRC connection task already ended during disposal (cancelled/disposed)");
+            /* connection task was already cancelled/disposed */
+        }
         _cts?.Dispose();
         await base.DisposeAsync();
     }
@@ -951,7 +960,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         float badgeHeight = Math.Clamp(26f * sy, 16f, 50f);
         float maxTitleW = Math.Max(30f, bounds.Width - pad * 2f - badgeWidth);
 
-        string truncatedHeader = TruncateText(headerDisplay, titleFont, maxTitleW);
+        string truncatedHeader = TextRenderHelper.TruncateText(headerDisplay, titleFont, maxTitleW);
         canvas.DrawText(truncatedHeader, bounds.Left + pad, headerTextY, SKTextAlign.Left, titleFont, titlePaint);
 
         // Styled Unit Toggle Badge [°F] / [°C] (No background card)
@@ -1703,26 +1712,6 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         public string TimeLabel { get; set; } = "";
         public double TempC { get; set; }
-        public int WeatherCode { get; set; }
-    }
-
-    private static string TruncateText(string text, SKFont font, float maxWidth)
-    {
-        if (string.IsNullOrEmpty(text) || font.MeasureText(text) <= maxWidth)
-            return text;
-
-        string ellipsis = "…";
-        float ellipsisW = font.MeasureText(ellipsis);
-        if (ellipsisW >= maxWidth) return "";
-
-        int len = text.Length;
-        while (len > 0)
-        {
-            string sub = text[..len] + ellipsis;
-            if (font.MeasureText(sub) <= maxWidth)
-                return sub;
-            len--;
-        }
-        return ellipsis;
+        public         int WeatherCode { get; set; }
     }
 }
