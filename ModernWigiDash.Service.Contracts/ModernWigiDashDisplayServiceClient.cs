@@ -5,6 +5,19 @@ using ModernWigiDash.Service.Contracts;
 namespace ModernWigiDash.Service.Wcf;
 
 /// <summary>
+/// Thrown when a WCF operation cannot be completed because the service channel
+/// is faulted or the service is unreachable. The client recreates its channel
+/// before throwing, so a subsequent call may succeed.
+/// </summary>
+public sealed class ServiceUnavailableException : Exception
+{
+    public ServiceUnavailableException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
 /// WCF Client using System.ServiceModel.ChannelFactory for CoreWCF IPC.
 /// Provides direct typed WCF calls between the WPF application and the ModernWigiDash service.
 /// The interface is dual-decorated with CoreWCF and System.ServiceModel attributes
@@ -173,13 +186,13 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         {
             LogClient($"[WCF-CLIENT] Faulted: {ex.Message}");
             RecreateChannel();
-            return default!;
+            throw new ServiceUnavailableException("WCF channel faulted; the service may be restarting.", ex);
         }
         catch (CommunicationException ex)
         {
             LogClient($"[WCF-CLIENT] Communication error: {ex.GetType().Name}: {ex.Message}");
             RecreateChannel();
-            return default!;
+            throw new ServiceUnavailableException("WCF service unreachable.", ex);
         }
     }
 

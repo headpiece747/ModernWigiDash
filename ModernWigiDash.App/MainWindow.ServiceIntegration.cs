@@ -47,18 +47,10 @@ public partial class MainWindow
 
                 try
                 {
+                    // Faulted/unreachable channels throw ServiceUnavailableException
+                    // (never a null version), so a non-empty version here means the
+                    // service is genuinely serving the contract.
                     string version = _wcfClient.GetVersion();
-                    if (string.IsNullOrEmpty(version))
-                    {
-                        // Fault recovery returns null for a dead/unreachable
-                        // channel; a null version means the service is NOT
-                        // actually serving, so treat it as disconnected.
-                        Log("[WCF] Connected but GetVersion returned null (service unreachable)");
-                        _wcfClient?.Dispose();
-                        _wcfClient = null;
-                        _serviceActive = false;
-                        return;
-                    }
 
                     _serviceActive = true;
                     Log($"[WCF] Connected! Version: {version}, Endpoint: {pipeEndpoint}");
@@ -293,82 +285,39 @@ public partial class MainWindow
     /// </summary>
     private void ProcessHardwareTouch(TouchEventInfo touch)
     {
-        if (touch.Type == DisplayProtocolConstants.TouchTypeDown)
+        TouchEventType type = touch.Type switch
         {
-            // Only record start position on the first Down (not intermediate movement points)
-            if (!_hwTouchActive)
-            {
-                _hwTouchStartX = touch.X;
-                _hwTouchStartY = touch.Y;
-                _hwTouchActive = true;
-            }
-        }
-        else if (touch.Type == DisplayProtocolConstants.TouchTypeUp && _hwTouchActive)
-        {
-            _hwTouchActive = false;
-            float deltaX = touch.X - _hwTouchStartX;
-            float deltaY = touch.Y - _hwTouchStartY;
+            DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
+            DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
+            _ => TouchEventType.TouchMove
+        };
 
-            if (_profile.Pages.Count > 1)
-            {
-                // Swipe detection
-                if (Math.Abs(deltaX) > 70 && Math.Abs(deltaY) < 80)
-                {
-                    if (deltaX < -70 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex + 1);
-                        return;
-                    }
-                    else if (deltaX > 70 && _profile.ActivePageIndex > 0)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex - 1);
-                        return;
-                    }
-                }
+        var outcome = _gestureInterpreter.Feed(type, touch.X, touch.Y, _profile.Pages.Count, _profile.ActivePageIndex);
+        ApplyGestureOutcome(outcome, touch.X, touch.Y);
+    }
 
-                // Arrow tap fallback (stationary tap near edges)
-                if (Math.Abs(deltaX) < 30 && Math.Abs(deltaY) < 30)
-                {
-                    if (touch.X <= 60 && touch.Y >= 200 && touch.Y <= 400 && _profile.ActivePageIndex > 0)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex - 1);
-                        return;
-                    }
-                    if (touch.X >= 964 && touch.Y >= 200 && touch.Y <= 400 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-                    {
-                        SwitchToPage(_profile.ActivePageIndex + 1);
-                        return;
-                    }
-                }
-            }
-        }
-        else if (touch.Type == DisplayProtocolConstants.TouchTypeUp)
+    /// <summary>
+    /// Applies a gesture decision: performs page navigation, or routes the
+    /// touch sample to the widget compositor. Shared by the USB-direct and
+    /// WCF touch paths.
+    /// </summary>
+    private void ApplyGestureOutcome(Gestures.GestureOutcome outcome, float x, float y)
+    {
+        switch (outcome.PageAction)
         {
-            // The device reports the release state for more than one poll.
-            // Ignore subsequent releases so one physical tap becomes one action.
-            return;
+            case Gestures.GesturePageAction.NextPage:
+                SwitchToPage(_profile.ActivePageIndex + 1);
+                return;
+            case Gestures.GesturePageAction.PrevPage:
+                SwitchToPage(_profile.ActivePageIndex - 1);
+                return;
         }
 
-        // Map hardware touch type to widget touch event
-        // Hardware only sends: Down(1) for contact+movement, Up(2) for release
-        TouchEventType touchEventType;
-        if (touch.Type == DisplayProtocolConstants.TouchTypeDown && _hwTouchActive &&
-            (Math.Abs(_hwTouchStartX - touch.X) > 0.5f || Math.Abs(_hwTouchStartY - touch.Y) > 0.5f))
+        if (outcome.RouteToWidgets)
         {
-            touchEventType = TouchEventType.TouchMove;
+            SkiaFrameCompositor.RouteTouch(_profile.ActivePage, x, y, outcome.WidgetTouchType);
+            SkiaCanvas.InvalidateVisual();
         }
-        else
-        {
-            touchEventType = touch.Type switch
-            {
-                DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
-                DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
-                _ => TouchEventType.TouchMove
-            };
-        }
-
-        SkiaFrameCompositor.RouteTouch(_profile.ActivePage, touch.X, touch.Y, touchEventType);
-        SkiaCanvas.InvalidateVisual();
     }
 
 }

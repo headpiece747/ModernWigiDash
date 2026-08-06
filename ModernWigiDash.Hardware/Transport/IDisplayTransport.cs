@@ -74,15 +74,6 @@ public interface IDisplayTransport : IAsyncDisposable, IDisposable
     bool ClearTimeout();
 
     /// <summary>
-    /// Adds a widget to the screen configuration.
-    /// </summary>
-    /// <param name="page">Page number.</param>
-    /// <param name="widgetId">Widget ID.</param>
-    /// <param name="config">Widget config payload (20 bytes).</param>
-    /// <returns>True if the command succeeded; otherwise, false.</returns>
-    bool AddWidget(byte page, byte widgetId, byte[] config);
-
-    /// <summary>
     /// Reads the latest touch report from the display, or null when none is pending.
     /// </summary>
     TouchReport? ReadTouch();

@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 
@@ -29,6 +30,12 @@ public class PriceInfo
 
 public sealed class PriceFeedManager : IDisposable
 {
+    private enum WebSocketFeed
+    {
+        Binance,
+        Finnhub
+    }
+
     private static readonly Dictionary<string, string> CryptoMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["bitcoin"] = "BTC", ["btc"] = "BTC",
@@ -103,13 +110,31 @@ public sealed class PriceFeedManager : IDisposable
 
     public PriceFeedManager(string? finnhubApiKey = null)
     {
-        _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "REDACTED";
+        // The Finnhub key must come from an explicit argument or the
+        // FINNHUB_API_KEY environment variable — never from source control.
+        _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "";
+        if (string.IsNullOrEmpty(_finnhubKey))
+        {
+            FileLog.Write("[PRICE-FEED] FINNHUB_API_KEY not configured — stock WebSocket/REST feeds disabled. Set the FINNHUB_API_KEY environment variable or pass the key to the constructor. Yahoo Finance fallback still works.");
+        }
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("ModernWigiDash/2.0");
     }
 
     public static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);
     public static string NormalizeSymbol(string symbol) =>
         CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper();
+
+    /// <summary>
+    /// Maps a user-entered symbol to the canonical feed key for an asset kind:
+    /// crypto aliases resolve to the base coin (e.g. "bitcoin" → "BTC"), FX
+    /// pairs to "EURUSD", everything else to the upper-cased symbol.
+    /// </summary>
+    public static string ToFeedKey(string symbol, AssetKind kind) => kind switch
+    {
+        AssetKind.Crypto => CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper(),
+        AssetKind.Fx => NormalizeFxKey(symbol),
+        _ => symbol.ToUpper()
+    };
 
     private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled);
 
@@ -142,14 +167,14 @@ public sealed class PriceFeedManager : IDisposable
         switch (kind)
         {
             case AssetKind.Crypto:
-                var baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
+                var baseCoin = ToFeedKey(symbol, kind);
                 if (_subscribedCrypto.TryAdd(baseCoin, 0))
                 {
                     _binanceTask ??= RunBinanceLoopAsync();
                     _cryptoRestTask ??= RunCryptoRestPollerAsync();
                     // Push an incremental subscribe so symbols added after the
                     // socket connected still receive real-time ticks.
-                    _ = SendWsSubscribeAsync($"wss://stream.binance.us:9443/ws", $"{baseCoin.ToLower()}usdt@ticker");
+                    _ = SendWsSubscribeAsync(WebSocketFeed.Binance, $"{baseCoin.ToLower()}usdt@ticker");
                 }
                 break;
             case AssetKind.Fx:
@@ -163,9 +188,14 @@ public sealed class PriceFeedManager : IDisposable
                 string stockSym = symbol.ToUpper();
                 if (_subscribedStocks.TryAdd(stockSym, 0))
                 {
-                    _finnhubTask ??= RunFinnhubLoopAsync();
-                    _stockRestTask ??= RunStockRestPollerAsync();
-                    _ = SendWsSubscribeAsync($"wss://ws.finnhub.io?token={_finnhubKey}", stockSym);
+                    // Without a Finnhub key the WS/REST stock feeds cannot work;
+                    // the Yahoo Finance fallback in FetchFallbackAsync still does.
+                    if (!string.IsNullOrEmpty(_finnhubKey))
+                    {
+                        _finnhubTask ??= RunFinnhubLoopAsync();
+                        _stockRestTask ??= RunStockRestPollerAsync();
+                        _ = SendWsSubscribeAsync(WebSocketFeed.Finnhub, stockSym);
+                    }
                 }
                 break;
         }
@@ -175,13 +205,13 @@ public sealed class PriceFeedManager : IDisposable
     /// Sends an incremental WebSocket subscription for a symbol added after the
     /// feed socket was already connected. No-op when the socket is not open.
     /// </summary>
-    private async Task SendWsSubscribeAsync(string uri, string payload)
+    private async Task SendWsSubscribeAsync(WebSocketFeed feed, string payload)
     {
         try
         {
-            ClientWebSocket? ws = uri.Contains("finnhub", StringComparison.Ordinal) ? _finnhubWs : _binanceWs;
+            ClientWebSocket? ws = feed == WebSocketFeed.Finnhub ? _finnhubWs : _binanceWs;
             if (ws == null || ws.State != WebSocketState.Open) return;
-            object message = uri.Contains("finnhub", StringComparison.Ordinal)
+            object message = feed == WebSocketFeed.Finnhub
                 ? new { type = "subscribe", symbol = payload }
                 : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
             await SendJsonAsync(ws, message);
@@ -204,8 +234,7 @@ public sealed class PriceFeedManager : IDisposable
         switch (kind)
         {
             case AssetKind.Crypto:
-                string baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
-                _subscribedCrypto.TryRemove(baseCoin, out _);
+                _subscribedCrypto.TryRemove(ToFeedKey(symbol, kind), out _);
                 break;
             case AssetKind.Fx:
                 _subscribedFx.TryRemove(NormalizeFxKey(symbol), out _);
@@ -218,12 +247,7 @@ public sealed class PriceFeedManager : IDisposable
 
     public PriceInfo? GetPrice(string symbol, AssetKind kind)
     {
-        string key = kind switch
-        {
-            AssetKind.Crypto => CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper(),
-            AssetKind.Fx => NormalizeFxKey(symbol),
-            _ => symbol.ToUpper()
-        };
+        string key = ToFeedKey(symbol, kind);
         return _prices.TryGetValue(key, out var info) ? info : null;
     }
 
@@ -236,7 +260,7 @@ public sealed class PriceFeedManager : IDisposable
     {
         if (kind == AssetKind.Crypto)
         {
-            string baseCoin = CryptoMap.TryGetValue(symbol, out var mapped) ? mapped : symbol.ToUpper();
+            string baseCoin = ToFeedKey(symbol, kind);
             if (!CoinGeckoIds.TryGetValue(baseCoin, out string? geckoId)) return;
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
             string json = await _http.GetStringAsync(url, _cts.Token);
@@ -289,7 +313,14 @@ public sealed class PriceFeedManager : IDisposable
             () => _binanceWs = null);
 
     private async Task RunFinnhubLoopAsync()
-        => await RunWebSocketLoopAsync(
+    {
+        if (string.IsNullOrEmpty(_finnhubKey))
+        {
+            FileLog.Write("[PRICE-FEED] Finnhub WebSocket feed skipped: FINNHUB_API_KEY not configured.");
+            return;
+        }
+
+        await RunWebSocketLoopAsync(
             $"wss://ws.finnhub.io?token={_finnhubKey}",
             async ws =>
             {
@@ -299,6 +330,7 @@ public sealed class PriceFeedManager : IDisposable
             ParseFinnhubMessage,
             ws => _finnhubWs = ws,
             () => _finnhubWs = null);
+    }
 
     /// <summary>
     /// Shared WebSocket feed loop: connect, subscribe, read until closed, then

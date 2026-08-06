@@ -676,20 +676,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         return ok;
     }
 
-    /// <summary>
-    /// Switches the active page for subsequent frame writes.
-    /// Does NOT send GoToScreen — use GoToScreen for display switching.
-    /// </summary>
-    public bool SwitchPage(byte page)
-    {
-        if (page >= NumPages)
-            return false;
-
-        _currentPage = page;
-        LogToFile($"[PAGE] Switched to page {page}");
-        return true;
-    }
-
     public bool ClearPage(byte page = 0)
     {
         if (!_isConnected)
@@ -707,61 +693,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
         bool ok = ControlOut(DisplayProtocolConstants.CmdClearTimeout, 0, null);
         if (ok) _logger.LogInformation("ClearTimeout");
-        return ok;
-    }
-
-    public bool AddWidget(byte page, byte widgetId, byte[] config)
-    {
-        if (!_isConnected)
-            return false;
-
-        ushort wValue = (ushort)((page << 8) | widgetId);
-        bool ok = ControlOut(DisplayProtocolConstants.CmdAddWidget, wValue, config);
-        if (ok) _logger.LogInformation("AddWidget page={Page} id={WidgetId}", page, widgetId);
-        return ok;
-    }
-
-    /// <summary>
-    /// Adds a widget using the structured WidgetConfig helper.
-    /// </summary>
-    public bool AddWidget(byte page, byte widgetId, short x, short y, short width, short height)
-    {
-        byte[] config = BuildWidgetConfig(x, y, width, height);
-        return AddWidget(page, widgetId, config);
-    }
-
-    /// <summary>
-    /// Removes a widget from a page's screen config.
-    /// CMD_SCREENCFG_WIDGET_REMOVE (0x92), wValue = (page << 8) | widgetId.
-    /// </summary>
-    public bool RemoveWidget(byte page, byte widgetId)
-    {
-        if (!_isConnected)
-            return false;
-
-        ushort wValue = (ushort)((page << 8) | widgetId);
-        bool ok = ControlOut(0x92, wValue, null);
-        if (ok) _logger.LogInformation("RemoveWidget page={Page} id={WidgetId}", page, widgetId);
-        return ok;
-    }
-
-    /// <summary>
-    /// Moves a widget to new coordinates on a page.
-    /// CMD_SCREENCFG_WIDGET_MOVE (0x93), wValue = (page << 8) | widgetId.
-    /// Data: [x:2 LE, y:2 LE].
-    /// </summary>
-    public bool MoveWidget(byte page, byte widgetId, short x, short y)
-    {
-        if (!_isConnected)
-            return false;
-
-        byte[] data = new byte[4];
-        BitConverter.GetBytes(x).CopyTo(data, 0);
-        BitConverter.GetBytes(y).CopyTo(data, 2);
-
-        ushort wValue = (ushort)((page << 8) | widgetId);
-        bool ok = ControlOut(0x93, wValue, data);
-        if (ok) _logger.LogInformation("MoveWidget page={Page} id={WidgetId} to ({X},{Y})", page, widgetId, x, y);
         return ok;
     }
 
