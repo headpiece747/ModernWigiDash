@@ -8,6 +8,7 @@ using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Transport;
 
@@ -44,18 +45,23 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         get
         {
             if (!_isConnected) return "Disconnected";
-            string transport = _winUsbBulk != null && _winUsbBulk.IsOpen ? "WinUSB" : "LibUsbDotNet";
-            return $"{transport} {DisplayProtocolConstants.VendorId:X4}:{DisplayProtocolConstants.ProductId:X4}";
+            if (_winUsbBulk != null && _winUsbBulk.IsOpen)
+            {
+                return !string.IsNullOrEmpty(_winUsbBulk.DevicePath)
+                    ? _winUsbBulk.DevicePath
+                    : $"WinUSB {DisplayProtocolConstants.VendorId:X4}:{DisplayProtocolConstants.ProductId:X4}";
+            }
+            return $"LibUsbDotNet {DisplayProtocolConstants.VendorId:X4}:{DisplayProtocolConstants.ProductId:X4}";
         }
     }
     public long FramesSent => Volatile.Read(ref _framesSent);
     public long FramesFailed => Volatile.Read(ref _framesFailed);
     public int CurrentPage => _currentPage;
 
-    public ValueTask<bool> ConnectAsync(CancellationToken cancellationToken = default)
+    public bool Connect()
     {
         if (_isConnected)
-            return ValueTask.FromResult(true);
+            return true;
 
         _logger.LogInformation("Connecting to WigiDash...");
 
@@ -74,20 +80,26 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 // Verify with PING
                 byte[] pingBuf = new byte[4];
                 bool pingOk = _winUsbBulk.ControlIn(0x00, pingBuf);
-                LogToFile($"[USB-WINUSB] PING: ok={pingOk} buf=[{string.Join(",", pingBuf.Select(b => b.ToString("X2")))}]");
+                LogToFile($"[USB-WINUSB] PING: ok={pingOk}");
 
                 if (pingOk)
                 {
                     LogToFile("[USB-WINUSB] Using WinUSB for all transfers (control + bulk)");
                     _logger.LogInformation("Connected to WigiDash via WinUSB");
-                    SendInitCommands();
-                    return ValueTask.FromResult(true);
+                    bool initOk = SendInitCommands();
+                    if (!initOk)
+                    {
+                        LogToFile("[USB-WINUSB] Init commands failed — treating connection as failed");
+                        Cleanup();
+                    }
+                    return initOk;
                 }
 
                 // PING failed, close WinUSB and try LibUsbDotNet
                 LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
                 _winUsbBulk.Dispose();
                 _winUsbBulk = null;
+                _isConnected = false;
             }
             else
             {
@@ -101,6 +113,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             LogToFile($"[USB-WINUSB] Exception: {ex.Message}, falling back to LibUsbDotNet");
             _winUsbBulk?.Dispose();
             _winUsbBulk = null;
+            _isConnected = false;
         }
 
         // --- Fallback to LibUsbDotNet ---
@@ -121,7 +134,8 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             {
                 _logger.LogWarning("No WigiDash device found (VID=0x{VID:X4}, PID=0x{PID:X4})",
                     DisplayProtocolConstants.VendorId, DisplayProtocolConstants.ProductId);
-                return ValueTask.FromResult(false);
+                _isConnected = false;
+                return false;
             }
 
             LogToFile($"[USB-FIND] Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
@@ -136,7 +150,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             catch (Exception ex)
             {
                 LogToFile($"[USB-OPEN] device.Open() THREW: {ex.GetType().FullName}: {ex.Message}");
-                LogToFile($"[USB-OPEN] Stack: {ex.StackTrace}");
                 throw;
             }
 
@@ -155,7 +168,8 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             {
                 _logger.LogError("Failed to claim USB interface 0");
                 device.Close();
-                return ValueTask.FromResult(false);
+                _isConnected = false;
+                return false;
             }
 
             LogToFile("[USB-CLAIM] ClaimInterface(0) succeeded");
@@ -169,17 +183,23 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
             LogToFile($"[USB-LIBUSB] Connected: endpoint={endpointId}");
 
-            SendInitCommands();
+            bool initOk = SendInitCommands();
+            if (!initOk)
+            {
+                LogToFile("[USB-LIBUSB] Init commands failed — treating connection as failed");
+                Cleanup();
+                return false;
+            }
 
             _logger.LogInformation("Connected to WigiDash via LibUsbDotNet 3.0");
-            return ValueTask.FromResult(true);
+            return true;
         }
         catch (Exception ex)
         {
             LogToFile($"[USB-LIBUSB] Connect exception: {ex.GetType().FullName}: {ex.Message}");
             _logger.LogError(ex, "Failed to connect to WigiDash");
             Cleanup();
-            return ValueTask.FromResult(false);
+            return false;
         }
     }
 
@@ -221,14 +241,14 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         return (WriteEndpointID)DisplayProtocolConstants.BulkOutPipeId;
     }
 
-    private bool SendInitCommands()
+    public bool SendInitCommands()
     {
         _logger.LogInformation("Sending device initialization commands...");
 
         // PING command (CMD_PING = 0x00, Control IN)
         byte[] pingBuf = new byte[4];
         bool pingOk = ControlIn(0x00, 0, 0, pingBuf);
-        LogToFile($"[USB-INIT] PING: ok={pingOk} buf=[{string.Join(",", pingBuf.Select(b => b.ToString("X2")))}]");
+        LogToFile($"[USB-INIT] PING: ok={pingOk}");
 
         // Set brightness to 100%
         ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [100]);
@@ -271,7 +291,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     ///   ushort BaseClr(2), pad(2), uint DrawAddr(4), byte DrawLock(1), byte InvalidateFlag(1),
     ///   byte UpdateFromCache(1), pad(1) = 20 bytes total.
     /// </summary>
-    private static byte[] BuildWidgetConfig(short x, short y, short width, short height)
+    internal static byte[] BuildWidgetConfig(short x, short y, short width, short height)
     {
         byte[] config = new byte[20];
         BitConverter.GetBytes(x).CopyTo(config, 0);
@@ -286,16 +306,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         // UpdateFromCache at offset 18 = 0 (byte)
         // Padding at offset 19 (1 byte)
         return config;
-    }
-
-    /// <summary>
-    /// Public async wrapper for initialization sequence.
-    /// Returns true when the page config and GoToScreen(Base0) init completed successfully.
-    /// </summary>
-    public ValueTask<bool> SendInitCommandsAsync()
-    {
-        bool ok = SendInitCommands();
-        return ValueTask.FromResult(ok);
     }
 
     private void WriteBlankFramebuffer(byte page, byte widgetId)
@@ -421,7 +431,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 bool ok = _winUsbBulk.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out int transferred);
                 if (ok && transferred == data.Length)
                 {
-                    LogToFile($"[USB-WINUSB-BULK] Direct WinUSB write: {transferred}/{data.Length} bytes OK");
                     return true;
                 }
 
@@ -446,7 +455,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             Error error = _bulkWriter.Write(data, 0, totalBytes, 10000, out int singleTransferred);
             if (error == Error.Success && singleTransferred == totalBytes)
             {
-                LogToFile($"[USB-BULK-LIBUSB] Single write: {singleTransferred}/{totalBytes} bytes OK");
                 return true;
             }
 
@@ -481,7 +489,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 totalTransferred += transferLength;
             }
 
-            LogToFile($"[USB-BULK-FALLBACK] Complete: {totalTransferred}/{totalBytes} bytes");
             return totalTransferred == totalBytes;
         }
         catch (Exception ex)
@@ -520,7 +527,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             short y = BitConverter.ToInt16(touchBuf, 4);
 
             if (_touchDiagCount++ % 200 == 0)
-                LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y} buf=[{string.Join(",", touchBuf.Select(b => b.ToString("X2")))}]");
+                LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y}");
 
             if (type == DisplayProtocolConstants.TouchTypeNone)
                 return null;
@@ -548,10 +555,9 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         }
     }
 
-    public ValueTask DisconnectAsync()
+    public void Disconnect()
     {
         Cleanup();
-        return ValueTask.CompletedTask;
     }
 
     private void Cleanup()
@@ -584,11 +590,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
             // Context is a shared singleton - don't dispose
         }
-
-    public ValueTask<bool> SendFrameAsync(ReadOnlyMemory<byte> frameBuffer, CancellationToken cancellationToken = default)
-    {
-        return ValueTask.FromResult(SendFrame(frameBuffer.Span));
-    }
 
     public bool SendFrame(ReadOnlySpan<byte> frameBuffer)
     {
@@ -646,22 +647,22 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         }
     }
 
-    public ValueTask<bool> SetBrightnessAsync(byte brightnessPercent, CancellationToken cancellationToken = default)
+    public bool SetBrightness(byte brightnessPercent)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         byte clamped = (byte)Math.Clamp((int)brightnessPercent, 0, 100);
         byte[] brightnessBuf = [clamped];
         bool ok = ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, brightnessBuf);
         if (ok) _logger.LogInformation("SetBrightness to {Brightness}%", clamped);
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
-    public ValueTask<bool> GoToScreenAsync(byte screenId, byte transition = 0, CancellationToken cancellationToken = default)
+    public bool GoToScreen(byte screenId, byte transition = 0)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         ushort wValue = (ushort)((transition << 2) | screenId);
         bool ok = ControlOut(DisplayProtocolConstants.CmdGoToScreen, wValue, null);
@@ -672,76 +673,76 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             if (screenId >= 0x20 && screenId <= 0x22)
                 _currentPage = screenId - 0x20;
         }
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
     /// <summary>
     /// Switches the active page for subsequent frame writes.
-    /// Does NOT send GoToScreen — use GoToScreenAsync for display switching.
+    /// Does NOT send GoToScreen — use GoToScreen for display switching.
     /// </summary>
-    public ValueTask<bool> SwitchPageAsync(byte page, CancellationToken cancellationToken = default)
+    public bool SwitchPage(byte page)
     {
         if (page >= NumPages)
-            return ValueTask.FromResult(false);
+            return false;
 
         _currentPage = page;
         LogToFile($"[PAGE] Switched to page {page}");
-        return ValueTask.FromResult(true);
+        return true;
     }
 
-    public ValueTask<bool> ClearPageAsync(byte page = 0, CancellationToken cancellationToken = default)
+    public bool ClearPage(byte page = 0)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         bool ok = ControlOut(DisplayProtocolConstants.CmdClearPage, page, null);
         if (ok) _logger.LogInformation("ClearPage {Page}", page);
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
-    public ValueTask<bool> ClearTimeoutAsync(CancellationToken cancellationToken = default)
+    public bool ClearTimeout()
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         bool ok = ControlOut(DisplayProtocolConstants.CmdClearTimeout, 0, null);
         if (ok) _logger.LogInformation("ClearTimeout");
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
-    public ValueTask<bool> AddWidgetAsync(byte page, byte widgetId, byte[] config, CancellationToken cancellationToken = default)
+    public bool AddWidget(byte page, byte widgetId, byte[] config)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         ushort wValue = (ushort)((page << 8) | widgetId);
         bool ok = ControlOut(DisplayProtocolConstants.CmdAddWidget, wValue, config);
         if (ok) _logger.LogInformation("AddWidget page={Page} id={WidgetId}", page, widgetId);
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
     /// <summary>
     /// Adds a widget using the structured WidgetConfig helper.
     /// </summary>
-    public ValueTask<bool> AddWidgetAsync(byte page, byte widgetId, short x, short y, short width, short height, CancellationToken cancellationToken = default)
+    public bool AddWidget(byte page, byte widgetId, short x, short y, short width, short height)
     {
         byte[] config = BuildWidgetConfig(x, y, width, height);
-        return AddWidgetAsync(page, widgetId, config, cancellationToken);
+        return AddWidget(page, widgetId, config);
     }
 
     /// <summary>
     /// Removes a widget from a page's screen config.
     /// CMD_SCREENCFG_WIDGET_REMOVE (0x92), wValue = (page << 8) | widgetId.
     /// </summary>
-    public ValueTask<bool> RemoveWidgetAsync(byte page, byte widgetId, CancellationToken cancellationToken = default)
+    public bool RemoveWidget(byte page, byte widgetId)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         ushort wValue = (ushort)((page << 8) | widgetId);
         bool ok = ControlOut(0x92, wValue, null);
         if (ok) _logger.LogInformation("RemoveWidget page={Page} id={WidgetId}", page, widgetId);
-        return ValueTask.FromResult(ok);
+        return ok;
     }
 
     /// <summary>
@@ -749,10 +750,10 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     /// CMD_SCREENCFG_WIDGET_MOVE (0x93), wValue = (page << 8) | widgetId.
     /// Data: [x:2 LE, y:2 LE].
     /// </summary>
-    public ValueTask<bool> MoveWidgetAsync(byte page, byte widgetId, short x, short y, CancellationToken cancellationToken = default)
+    public bool MoveWidget(byte page, byte widgetId, short x, short y)
     {
         if (!_isConnected)
-            return ValueTask.FromResult(false);
+            return false;
 
         byte[] data = new byte[4];
         BitConverter.GetBytes(x).CopyTo(data, 0);
@@ -761,44 +762,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         ushort wValue = (ushort)((page << 8) | widgetId);
         bool ok = ControlOut(0x93, wValue, data);
         if (ok) _logger.LogInformation("MoveWidget page={Page} id={WidgetId} to ({X},{Y})", page, widgetId, x, y);
-        return ValueTask.FromResult(ok);
-    }
-
-    /// <summary>
-    /// Writes frame data to a specific page and widget (for targeted updates).
-    /// </summary>
-    public bool WriteWidgetFrame(byte page, byte widgetId, ReadOnlySpan<byte> frameBuffer)
-    {
-        if (!_isConnected || frameBuffer.Length < DisplayProtocolConstants.FrameBufferSize)
-            return false;
-
-        try
-        {
-            byte[] frameArray = frameBuffer.ToArray();
-
-            lock (_usbLock)
-            {
-                byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-                BitConverter.GetBytes((uint)0).CopyTo(header, 0);
-                BitConverter.GetBytes((uint)frameArray.Length).CopyTo(header, 4);
-
-                ushort wValue = (ushort)((page << 8) | widgetId);
-                if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header))
-                    return false;
-
-                if (!WriteBulkData(frameArray))
-                {
-                    ControlOut(DisplayProtocolConstants.CmdFrameAbort, 0, null);
-                    return false;
-                }
-            }
-
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return ok;
     }
 
     public void Dispose()
@@ -811,34 +775,9 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     public ValueTask DisposeAsync()
     {
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return ValueTask.CompletedTask;
-        return DisconnectAsync();
+        Cleanup();
+        return ValueTask.CompletedTask;
     }
 
-    private static void LogToFile(string msg)
-    {
-        try
-        {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
-            using var fs = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var sw = new StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-        }
-        catch (IOException)
-        {
-            // Log file may be locked or unavailable; silently ignore
-            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
-        }
-    }
-
-    /// <summary>
-    /// Touch report data structure from the WigiDash display.
-    /// </summary>
-    public readonly record struct TouchReport
-    {
-        public byte Type { get; init; }
-        public short X { get; init; }
-        public short Y { get; init; }
-        public byte ScreenState { get; init; }
-        public bool SleepState { get; init; }
-    }
+    private static void LogToFile(string msg) => FileLog.Write(msg);
 }

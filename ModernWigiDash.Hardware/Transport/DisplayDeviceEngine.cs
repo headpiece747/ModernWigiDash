@@ -4,11 +4,10 @@
 // </copyright>
 
 using System.Threading.Channels;
-using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 
-namespace ModernWigiDash.Hardware;
+namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
 /// Unified hardware engine for the USB display device.
@@ -18,30 +17,28 @@ namespace ModernWigiDash.Hardware;
 public sealed class DisplayDeviceEngine : IDisposable
 {
     // -- Constants --
-    public const int ScreenWidth = DisplayProtocolConstants.FramebufferWidth;  // 1024
-    public const int ScreenHeight = DisplayProtocolConstants.FramebufferHeight; // 600
-    public const int FrameBufferSize = DisplayProtocolConstants.FrameBufferSize; // 1,228,800 bytes (1024 * 600 * 2)
-
-    private static readonly string LogPath =
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "display_device.log");
+    public const int ScreenWidth = DisplayProtocolConstants.FramebufferWidth;  // 1016
+    public const int ScreenHeight = DisplayProtocolConstants.FramebufferHeight; // 592
+    public const int FrameBufferSize = DisplayProtocolConstants.FrameBufferSize; // 1,202,944 bytes (1016 * 592 * 2)
 
     // -- Static Connection Guard --
-    private static DisplayHidTransport? _sTransport;
-    private static bool _sConnected;
-    private static bool _sConnecting; // Prevent concurrent connection attempts
-    private static bool _sServiceActive; // Yielded to the ModernWigiDash service
-    private static readonly Lock _sLock = new();
+    private static DisplayHidTransport? sTransport;
+    private static bool sConnected;
+    private static bool sConnecting; // Prevent concurrent connection attempts
+    private static bool sServiceActive; // Yielded to the ModernWigiDash service
+    private static readonly Lock sLock = new();
 
     // -- Static Frame Processing --
-    private static bool _sFrameQueueStarted;
-    private static int _sFramesSent;
-    private static CancellationTokenSource? _sFrameQueueCts;
-    private static readonly Channel<SKBitmap> _sFrameChannel =
+    private static bool sFrameQueueStarted;
+    private static int sFramesSent;
+    private static CancellationTokenSource? sFrameQueueCts;
+    private static int sInstanceCount;
+    private static readonly Channel<SKBitmap> sFrameChannel =
         Channel.CreateBounded<SKBitmap>(new BoundedChannelOptions(5)
         {
             FullMode = BoundedChannelFullMode.DropOldest
         });
-    private static DateTime _sLastFrameSent = DateTime.MinValue;
+    private static DateTime sLastFrameSent = DateTime.MinValue;
     private static readonly TimeSpan MinFrameInterval =
         TimeSpan.FromMilliseconds(33); // ~30 FPS - device capability
 
@@ -50,7 +47,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     private readonly Timer _reconnectTimer;
 
     // -- Public Properties --
-    public bool IsConnected => _sConnected;
+    public bool IsConnected => sConnected;
     public bool IsHardwareActive { get; private set; }
     public bool IsSimulationMode { get; private set; } = true;
     public string DeviceStatus { get; private set; } = "🟡 Initializing...";
@@ -78,21 +75,23 @@ public sealed class DisplayDeviceEngine : IDisposable
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
 
-        // Start frame processing (only once across all instances)
-        if (!_sFrameQueueStarted)
+        // Start frame processing (only once across all instances). The queue is
+        // reference-counted: it stops only when the LAST live instance disposes.
+        Interlocked.Increment(ref sInstanceCount);
+        if (!sFrameQueueStarted)
         {
-            _sFrameQueueStarted = true;
-            _sFrameQueueCts = new CancellationTokenSource();
-            _ = Task.Run(() => ProcessFrameQueueAsync(_sFrameQueueCts.Token));
+            sFrameQueueStarted = true;
+            sFrameQueueCts = new CancellationTokenSource();
+            _ = Task.Run(() => ProcessFrameQueueAsync(sFrameQueueCts.Token));
         }
 
         // Setup reconnection timer
         _reconnectTimer = new Timer(_ =>
         {
             bool shouldReconnect;
-            lock (_sLock)
+            lock (sLock)
             {
-                shouldReconnect = Volatile.Read(ref _isDisposed) == 0 && !_sConnected && !_sConnecting;
+                shouldReconnect = Volatile.Read(ref _isDisposed) == 0 && !sConnected && !sConnecting;
             }
             if (shouldReconnect)
             {
@@ -108,7 +107,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     public async Task<bool> TryConnectAsync()
     {
         // Fast-path: already connected
-        if (_sConnected)
+        if (sConnected)
         {
             Log("[TryConnectAsync] Already connected, skipping");
             return true;
@@ -121,10 +120,10 @@ public sealed class DisplayDeviceEngine : IDisposable
             using var sc = new System.ServiceProcess.ServiceController("ModernWigiDashService");
             if (sc.Status == System.ServiceProcess.ServiceControllerStatus.Running)
             {
-                if (!_sServiceActive)
+                if (!sServiceActive)
                 {
                     Log("[TryConnectAsync] ModernWigiDashService Windows Service is running. Yielding USB hardware handle to service.");
-                    _sServiceActive = true;
+                    sServiceActive = true;
                 }
                 IsSimulationMode = false;
                 IsHardwareActive = true;
@@ -144,10 +143,10 @@ public sealed class DisplayDeviceEngine : IDisposable
             var svcProcesses = System.Diagnostics.Process.GetProcessesByName("ModernWigiDash.Service");
             if (svcProcesses.Length > 0)
             {
-                if (!_sServiceActive)
+                if (!sServiceActive)
                 {
                     Log($"[TryConnectAsync] ModernWigiDash.Service process running (PID={svcProcesses[0].Id}). Yielding USB hardware handle to service.");
-                    _sServiceActive = true;
+                    sServiceActive = true;
                 }
                 foreach (var p in svcProcesses) p.Dispose();
                 IsSimulationMode = false;
@@ -162,39 +161,15 @@ public sealed class DisplayDeviceEngine : IDisposable
             System.Diagnostics.Debug.WriteLine("Process check failed; falling through to direct connection");
         }
 
-        // Also check if the WCF endpoint is responding (covers -test mode where process is "dotnet")
-        try
-        {
-            using var tcp = new System.Net.Sockets.TcpClient();
-            await tcp.ConnectAsync("localhost", 8733).ConfigureAwait(false);
-            if (tcp.Connected)
-            {
-                if (!_sServiceActive)
-                {
-                    Log("[TryConnectAsync] WCF service detected on port 8733. Yielding USB hardware handle to service.");
-                    _sServiceActive = true;
-                }
-                IsSimulationMode = false;
-                IsHardwareActive = true;
-                DeviceStatus = "🟢 Worker Service Active";
-                return true;
-            }
-        }
-        catch
-        {
-            // WCF check failed — fall through to direct connection
-            System.Diagnostics.Debug.WriteLine("WCF check failed; falling through to direct connection");
-        }
-
         // Guard against concurrent connection attempts
-        lock (_sLock)
+        lock (sLock)
         {
-            if (_sConnecting || Volatile.Read(ref _isDisposed) != 0)
+            if (sConnecting || Volatile.Read(ref _isDisposed) != 0)
             {
-                Log($"[TryConnectAsync] Connection in progress or disposed, skipping (connected={_sConnected})");
-                return _sConnected;
+                Log($"[TryConnectAsync] Connection in progress or disposed, skipping (connected={sConnected})");
+                return sConnected;
             }
-            _sConnecting = true;
+            sConnecting = true;
         }
 
         try
@@ -208,16 +183,16 @@ public sealed class DisplayDeviceEngine : IDisposable
             try
             {
                 transport = new DisplayHidTransport();
-                connected = await transport.ConnectAsync();
+                connected = transport.Connect();
 
                 if (connected)
                 {
-                    lock (_sLock)
+                    lock (sLock)
                     {
-                        _sTransport = transport;
-                        _sConnected = true;
+                        sTransport = transport;
+                        sConnected = true;
                     }
-                    _sServiceActive = false;
+                    sServiceActive = false;
                     IsSimulationMode = false;
 
                     // Send device initialization sequence (PING + blank frame + GoToScreen)
@@ -227,7 +202,7 @@ public sealed class DisplayDeviceEngine : IDisposable
                         try
                         {
                             await Task.Delay(100); // Small delay after connection
-                            await transport.SendInitCommandsAsync();
+                            transport.SendInitCommands();
                             Log("[INIT] Device initialization sequence completed");
                         }
                         catch (Exception ex)
@@ -255,12 +230,12 @@ public sealed class DisplayDeviceEngine : IDisposable
 
             if (!connected)
             {
-                lock (_sLock)
+                lock (sLock)
                 {
-                    _sTransport = null;
-                    _sConnected = false;
+                    sTransport = null;
+                    sConnected = false;
                 }
-                _sServiceActive = false;
+                sServiceActive = false;
                 IsSimulationMode = true;
                 IsHardwareActive = false;
                 DeviceStatus = "🟡 Device Unavailable (Simulation Mode)";
@@ -271,38 +246,33 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         finally
         {
-            lock (_sLock)
+            lock (sLock)
             {
-                _sConnecting = false;
+                sConnecting = false;
             }
         }
     }
 
     /// <summary>
-    /// Synchronous connection wrapper for legacy callers.
-    /// </summary>
-    public bool TryConnect()
-    {
-#pragma warning disable S6966 // Intentional sync wrapper — callers require synchronous connection check
-        return TryConnectAsync().GetAwaiter().GetResult();
-#pragma warning restore S6966
-    }
-
-    /// <summary>
-    /// Sends a frame buffer to the device display.
+    /// Queues a frame buffer for delivery to the device display.
     /// Uses a bounded channel to prevent frame queue buildup.
     /// </summary>
-    public void SendFrameBuffer(SKBitmap frameBitmap)
+    /// <returns>True when the frame was queued; false when the engine is not
+    /// connected, disposed, or the bounded queue was full (frame dropped).</returns>
+    public bool SendFrameBuffer(SKBitmap frameBitmap)
     {
-        if (Volatile.Read(ref _isDisposed) != 0 || !_sConnected || frameBitmap == null)
-            return;
+        if (Volatile.Read(ref _isDisposed) != 0 || !sConnected || frameBitmap == null)
+            return false;
 
         // Copy the frame to prevent disposal issues
         SKBitmap copy = frameBitmap.Copy();
-        if (!_sFrameChannel.Writer.TryWrite(copy))
+        if (!sFrameChannel.Writer.TryWrite(copy))
         {
             copy.Dispose();
+            return false;
         }
+
+        return true;
     }
 
     /// <summary>
@@ -327,14 +297,14 @@ public sealed class DisplayDeviceEngine : IDisposable
             SKBitmap? skFrame = null;
             try
             {
-                skFrame = await _sFrameChannel.Reader.ReadAsync(ct);
+                skFrame = await sFrameChannel.Reader.ReadAsync(ct);
                 framesRead++;
 
                 if (framesRead <= 3 || framesRead % 300 == 0)
-                    Log($"[FrameQueue] Read frame #{framesRead}, connected={_sConnected}");
+                    Log($"[FrameQueue] Read frame #{framesRead}, connected={sConnected}");
 
                 // Rate limiting - delay if too soon since last frame (don't drop the frame)
-                var elapsed = DateTime.Now - _sLastFrameSent;
+                var elapsed = DateTime.Now - sLastFrameSent;
                 if (elapsed < MinFrameInterval)
                 {
                     await Task.Delay((int)(MinFrameInterval.TotalMilliseconds - elapsed.TotalMilliseconds));
@@ -343,17 +313,17 @@ public sealed class DisplayDeviceEngine : IDisposable
                 // Snapshot connection state (minimize lock hold time)
                 bool connected;
                 DisplayHidTransport? transport;
-                lock (_sLock)
+                lock (sLock)
                 {
-                    connected = _sConnected;
-                    transport = _sTransport;
+                    connected = sConnected;
+                    transport = sTransport;
                 }
 
                 if (!connected || transport == null)
                     continue;
 
                 // Convert SKBitmap to RGB565 byte array (outside lock - expensive)
-                byte[] frameBytes = ConvertToRgb565(skFrame!);
+                byte[] frameBytes = FrameEncoder.ConvertToRgb565(skFrame!);
 
                 // Send frame via transport (outside lock - may block on I/O)
 #pragma warning disable S6966 // Transport SendFrame is synchronous by design for frame pacing
@@ -362,17 +332,17 @@ public sealed class DisplayDeviceEngine : IDisposable
 
                 if (success)
                 {
-                    lock (_sLock)
+                    lock (sLock)
                     {
-                        _sFramesSent++;
-                        _sLastFrameSent = DateTime.Now;
+                        sFramesSent++;
+                        sLastFrameSent = DateTime.Now;
                     }
-                    if (_sFramesSent <= 5 || _sFramesSent % 30 == 0)
-                        Log($"Frame #{_sFramesSent} sent successfully");
+                    if (sFramesSent <= 5 || sFramesSent % 30 == 0)
+                        Log($"Frame #{sFramesSent} sent successfully");
                 }
                 else
                 {
-                    Log($"Frame send failed at frame #{_sFramesSent + 1}");
+                    Log($"Frame send failed at frame #{sFramesSent + 1}");
                 }
             }
             catch (Exception ex)
@@ -388,51 +358,17 @@ public sealed class DisplayDeviceEngine : IDisposable
     }
 
     /// <summary>
-    /// Converts an SKBitmap to RGB565 little-endian byte array.
-    /// </summary>
-    private static byte[] ConvertToRgb565(SKBitmap bitmap)
-    {
-        int width = bitmap.Width;
-        int height = bitmap.Height;
-        byte[] rgb565 = new byte[width * height * 2];
-
-        using var pixmap = bitmap.PeekPixels();
-        unsafe
-        {
-            byte* srcPtr = (byte*)pixmap.GetPixels();
-            fixed (byte* dstPtr = rgb565)
-            {
-                ushort* dstUshort = (ushort*)dstPtr;
-                int pixelCount = width * height;
-
-                for (int i = 0; i < pixelCount; i++)
-                {
-                    byte b = srcPtr[i * 4];
-                    byte g = srcPtr[i * 4 + 1];
-                    byte r = srcPtr[i * 4 + 2];
-
-                    // Convert RGBA to RGB565
-                    ushort val = (ushort)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
-                    dstUshort[i] = val;
-                }
-            }
-        }
-
-        return rgb565;
-    }
-
-    /// <summary>
     /// Disconnects from the device and cleans up resources.
     /// </summary>
     private void DisconnectInternal()
     {
         DisplayHidTransport? oldTransport;
-        lock (_sLock)
+        lock (sLock)
         {
-            _sConnected = false;
+            sConnected = false;
             IsHardwareActive = false;
-            oldTransport = _sTransport;
-            _sTransport = null;
+            oldTransport = sTransport;
+            sTransport = null;
         }
 
         // Dispose outside lock to avoid holding lock during I/O
@@ -452,20 +388,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// <summary>
     /// Writes a log message to the log file.
     /// </summary>
-    private static void Log(string msg)
-    {
-        try
-        {
-            using var fs = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var sw = new StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {msg}");
-        }
-        catch (IOException)
-        {
-            // Log file may be locked or unavailable; silently ignore
-            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
-        }
-    }
+    private static void Log(string msg) => FileLog.Write(msg);
 
     /// <summary>
     /// Releases all resources used by the engine.
@@ -475,12 +398,15 @@ public sealed class DisplayDeviceEngine : IDisposable
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
 
         _reconnectTimer.Dispose();
-        _sFrameQueueCts?.Cancel();
-        _sFrameQueueCts?.Dispose();
-        // Reset the static queue state so a later engine instance can start a
-        // fresh frame queue instead of reusing (and crashing on) the disposed CTS.
-        _sFrameQueueCts = null;
-        _sFrameQueueStarted = false;
+
+        // Stop the shared frame queue only when the last live instance disposes.
+        if (Interlocked.Decrement(ref sInstanceCount) <= 0)
+        {
+            sFrameQueueCts?.Cancel();
+            sFrameQueueCts?.Dispose();
+            sFrameQueueCts = null;
+            sFrameQueueStarted = false;
+        }
         DisconnectInternal();
     }
 }

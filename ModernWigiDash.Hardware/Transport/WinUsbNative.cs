@@ -4,6 +4,7 @@
 // </copyright>
 
 using System.Runtime.InteropServices;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Transport;
 
@@ -163,22 +164,9 @@ internal sealed class WinUsbBulkDevice : IDisposable
 
     public IntPtr InterfaceHandle => _interfaceHandle;
     public bool IsOpen => _interfaceHandle != IntPtr.Zero;
+    public string DevicePath { get; private set; } = "";
 
-    private static void Log(string msg)
-    {
-        try
-        {
-            var logPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
-            using var fs = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            using var sw = new StreamWriter(fs);
-            sw.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] [USB-WINUSB] {msg}");
-        }
-        catch (IOException)
-        {
-            // Log file may be locked or unavailable; silently ignore
-            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
-        }
-    }
+    private static void Log(string msg) => FileLog.Write(msg, "[USB-WINUSB]");
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.
@@ -262,6 +250,7 @@ internal sealed class WinUsbBulkDevice : IDisposable
                     const int cbSizeOffset = 4;
                     string devicePath = Marshal.PtrToStringUni(detailBuffer + cbSizeOffset) ?? "";
                     Log($"Device path: {devicePath}");
+                    DevicePath = devicePath;
 
                     if (string.IsNullOrEmpty(devicePath))
                     {
