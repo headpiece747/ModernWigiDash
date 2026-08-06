@@ -16,7 +16,7 @@ dotnet run --project ModernWigiDash.App\ModernWigiDash.App.csproj
 
 ### Run the Service (Background + USB)
 
-Runs the CoreWCF background service with USB device support on `http://localhost:8733/`:
+Runs the CoreWCF background service with USB device support over a named pipe (`net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc`):
 
 ```powershell
 dotnet run --project ModernWigiDash.Service\ModernWigiDash.Service.csproj -- -test
@@ -57,7 +57,7 @@ dotnet build ModernWigiDash.slnx
 | **ModernWigiDash.Core** | SkiaSharp frame compositor, profile/layout model, plugin loader |
 | **ModernWigiDash.Hardware** | Native USB transport layer (WinUSB bulk streaming) |
 | **ModernWigiDash.Widgets** | Built-in widgets (clock, weather, system telemetry, media) |
-| **ModernWigiDash.Service** | CoreWCF HTTP background service, USB device manager |
+| **ModernWigiDash.Service** | CoreWCF named-pipe background service, USB device manager |
 | **ModernWigiDash.App** | WPF desktop application with widget editor |
 | **ModernWigiDash.Tests** | MSTest suite |
 

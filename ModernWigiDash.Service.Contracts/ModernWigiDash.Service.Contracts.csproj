@@ -8,10 +8,9 @@
 
   <ItemGroup>
     <PackageReference Include="CoreWCF.Primitives" />
-    <!-- Direct reference lifts System.ServiceModel.Http's transitive
+    <!-- Direct reference lifts System.ServiceModel.Primitives' transitive
          System.Security.Cryptography.Xml off the vulnerable 10.0.0 (NU1903). -->
     <PackageReference Include="System.Security.Cryptography.Xml" />
-    <PackageReference Include="System.ServiceModel.Http" />
     <PackageReference Include="System.ServiceModel.NetNamedPipe" />
   </ItemGroup>
 

@@ -16,7 +16,7 @@ namespace ModernWigiDash.Service;
 ///
 /// Architecture:
 /// - Windows Service running as LocalSystem for full USB device access
-/// - CoreWCF HTTP endpoint at http://localhost:8733/ for IPC and display control
+/// - CoreWCF named-pipe endpoint (net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc) for IPC and display control
 /// - Background workers for display hardware and system telemetry
 /// - CLI commands: -install, -uninstall, -start, -stop, -reinstall
 ///

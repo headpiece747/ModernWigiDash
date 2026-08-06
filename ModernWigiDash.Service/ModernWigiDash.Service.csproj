@@ -18,11 +18,9 @@
   <ItemGroup>
     <PackageReference Include="LibreHardwareMonitorLib" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
-    <PackageReference Include="CoreWCF.Http" />
     <PackageReference Include="CoreWCF.NetNamedPipe" />
     <PackageReference Include="CoreWCF.Primitives" />
     <PackageReference Include="System.ServiceProcess.ServiceController" />
-    <PackageReference Include="System.ServiceModel.Http" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
   </ItemGroup>
 

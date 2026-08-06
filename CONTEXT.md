@@ -33,9 +33,9 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | Term | Definition |
 |------|-----------|
 | **Service** | A Windows Service (`ModernWigiDashService`) running as LocalSystem that owns the USB device, captures telemetry, and exposes a WCF endpoint. |
-| **WCF endpoint** | `http://localhost:8733/ModernWigiDashDisplayService` — the CoreWCF service contract for IPC between the service and the app. |
+| **WCF endpoint** | `net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc` — the CoreWCF service contract for IPC between the service and the app, hosted over a named pipe (kernel-level ACL security; no TCP exposure). |
 | **Service.Contracts** | Shared assembly containing the WCF contract interface (`IModernWigiDashDisplayServiceContract`), DTOs (`FrameTimeSnapshotDto`, `SensorSnapshotDto`), data models, and the WCF client (`ModernWigiDashDisplayServiceClient`). No Hardware dependency — purely a contract library. |
-| **DetectServicePort** | Protocol-verified service discovery: HTTP health probe → WCF GetVersion handshake. An impostor port cannot hijack frames without speaking the contract. |
+| **DetectServicePort** | Protocol-verified service discovery: probes known named pipe endpoints → WCF GetVersion handshake. An impostor pipe cannot hijack frames without speaking the contract. |
 
 ### Telemetry & Data Flow
 
@@ -82,7 +82,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 │  Compositor → RGB565 → Channel → WCF client             │
 │  Touch routing → gesture detection → widget dispatch     │
 └──────────────────┬──────────────────────────────────────┘
-                   │ WCF (localhost:8733)
+                   │ WCF (named pipe)
 ┌──────────────────▼──────────────────────────────────────┐
 │  ModernWigiDash.Service.Contracts                       │
 │  Contract + DTOs + Client (no Hardware dependency)      │

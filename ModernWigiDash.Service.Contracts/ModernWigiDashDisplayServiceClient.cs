@@ -19,9 +19,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     public static string DefaultEndpointAddress => "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc";
     private static readonly string[] KnownPipeEndpoints =
     [
-        "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc",
-        "net.pipe://localhost/ModernWigiDashDisplayService/",
-        "net.pipe://localhost/ModernWigiDashService/WigiDashWcf/"
+        "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc"
     ];
 
     public ModernWigiDashDisplayServiceClient(string? endpointAddress = null)
