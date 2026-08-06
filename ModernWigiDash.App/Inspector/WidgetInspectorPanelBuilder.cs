@@ -41,8 +41,8 @@ public static class WidgetInspectorPanelBuilder
     /// </summary>
     /// <param name="widget">The placed widget being inspected (must have an active instance).</param>
     /// <param name="target">The panel to populate (cleared by the caller).</param>
-    /// <param name="isUpdatingInspector">Suppresses change events while the inspector is being rebuilt.</param>
-    public static void BuildCustomPropertyEditors(PlacedWidgetInstance widget, UIElementCollection target, bool isUpdatingInspector, InspectorCallbacks callbacks)
+    /// <param name="isUpdatingInspector">Live check suppressing change events while the inspector is being rebuilt. Must be a delegate — a captured bool snapshot would stay true forever because the panel is rebuilt under the guard.</param>
+    public static void BuildCustomPropertyEditors(PlacedWidgetInstance widget, UIElementCollection target, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
     {
         var instance = widget.ActiveInstance;
         if (instance == null) return;
@@ -124,7 +124,7 @@ public static class WidgetInspectorPanelBuilder
                 if (prop.Name == nameof(HotkeyButtonWidget.ActionType)) actionTypeCombo = combo;
                 combo.SelectionChanged += (s, e) =>
                 {
-                    if (isUpdatingInspector) return;
+                    if (isUpdatingInspector()) return;
                     string? selectedValue = combo.SelectedValue?.ToString();
                     if (!string.IsNullOrWhiteSpace(selectedValue))
                     {
@@ -150,7 +150,7 @@ public static class WidgetInspectorPanelBuilder
                 };
                 combo.SelectionChanged += (s, e) =>
                 {
-                    if (isUpdatingInspector) return;
+                    if (isUpdatingInspector()) return;
                     string? selectedValue = combo.SelectedValue?.ToString();
                     if (!string.IsNullOrWhiteSpace(selectedValue))
                     {
@@ -183,7 +183,7 @@ public static class WidgetInspectorPanelBuilder
                 };
                 box.TextChanged += (s, e) =>
                 {
-                    if (isUpdatingInspector) return;
+                    if (isUpdatingInspector()) return;
                     callbacks.ApplyInspectorPropertyValue(iconFileProp, "");
                     callbacks.ApplyInspectorPropertyValue(prop, box.Text);
                 };
@@ -212,7 +212,7 @@ public static class WidgetInspectorPanelBuilder
                 var txt = new TextBox { Text = currentVal?.ToString() ?? "" };
                 txt.TextChanged += (s, e) =>
                 {
-                    if (isUpdatingInspector) return;
+                    if (isUpdatingInspector()) return;
                     callbacks.ApplyInspectorPropertyValue(prop, txt.Text);
                 };
 
@@ -306,7 +306,7 @@ public static class WidgetInspectorPanelBuilder
                 var txt = new TextBox { Text = currentVal?.ToString() ?? "" };
                 txt.TextChanged += (s, e) =>
                 {
-                    if (isUpdatingInspector) return;
+                    if (isUpdatingInspector()) return;
                     string str = txt.Text;
                     if (prop.PropertyType == typeof(float) && float.TryParse(str, out float fVal))
                     {

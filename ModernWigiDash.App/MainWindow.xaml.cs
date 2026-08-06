@@ -603,7 +603,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 Inspector.WidgetInspectorPanelBuilder.BuildCustomPropertyEditors(
                     _selectedWidget,
                     PanelCustomProperties.Children,
-                    _isUpdatingInspector,
+                    () => _isUpdatingInspector,
                     new Inspector.InspectorCallbacks
                     {
                         TryFindResource = name => TryFindResource(name),
