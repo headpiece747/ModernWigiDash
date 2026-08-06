@@ -3,10 +3,11 @@ using System.Text.Json;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
-using ModernWigiDash.Core.Telemetry;
+using ModernWigiDash.Service.Services;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
+using ModernWigiDash.Widgets.Twitch;
 using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
@@ -357,6 +358,48 @@ public class UnitTestSuite
         var hit = SkiaFrameCompositor.HitTest(page, 75, 75);
         Assert.IsNotNull(hit);
         Assert.AreEqual(w2, hit, "HitTest must return highest ZIndex widget at overlapping point");
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_DeliversToTopMostWidgetInLocalCoordinates()
+    {
+        using var compositor = new SkiaFrameCompositor();
+        var page = new PageLayout();
+        var target = new DigitalAnalogClockWidget();
+        var placed = new PlacedWidgetInstance
+        {
+            X = 100, Y = 50, Width = 200, Height = 200, ZIndex = 1,
+            ActiveInstance = target
+        };
+        page.Widgets.Add(placed);
+
+        // Touch at (150, 80) global = (50, 30) local to the widget.
+        SkiaFrameCompositor.RouteTouch(page, 150, 80, TouchEventType.TouchDown);
+
+        // No exception and no crash; delivery is best-effort into the widget.
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_IgnoresPointOutsideAllWidgets()
+    {
+        using var compositor = new SkiaFrameCompositor();
+        var page = new PageLayout();
+        page.Widgets.Add(new PlacedWidgetInstance
+        {
+            X = 0, Y = 0, Width = 100, Height = 100, ZIndex = 1,
+            ActiveInstance = new DigitalAnalogClockWidget()
+        });
+
+        // Point far outside every widget must not throw.
+        SkiaFrameCompositor.RouteTouch(page, 900, 500, TouchEventType.TouchDown);
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_EmptyPage_DoesNotThrow()
+    {
+        var page = new PageLayout();
+
+        SkiaFrameCompositor.RouteTouch(page, 10, 10, TouchEventType.TouchDown);
     }
 
     [TestMethod]

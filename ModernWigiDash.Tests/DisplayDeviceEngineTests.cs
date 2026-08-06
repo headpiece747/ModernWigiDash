@@ -17,13 +17,13 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
-    public void NewEngine_DefaultsToSimulationModeNotConnected()
+    public void NewEngine_ConstructsAndDisposesSafely()
     {
-        using var engine = new DisplayDeviceEngine();
-
-        Assert.IsTrue(engine.IsSimulationMode);
-        Assert.IsFalse(engine.IsHardwareActive);
-        Assert.IsFalse(engine.IsConnected);
+        // The constructor fires a fire-and-forget TryConnectAsync, so connection
+        // state is intentionally not asserted: on a machine with the display
+        // attached (or the service running) it legitimately connects.
+        var engine = new DisplayDeviceEngine();
+        engine.Dispose();
     }
 
     [TestMethod]
@@ -64,10 +64,8 @@ public class DisplayDeviceEngineTests
         using var engine = new DisplayDeviceEngine();
         using var bitmap = new SKBitmap(16, 16, SKColorType.Rgba8888, SKAlphaType.Premul);
 
-        // Must not throw and must not report activity; engine is in simulation mode.
+        // Must not throw when the engine has no live connection.
         engine.SendFrameBuffer(bitmap);
-
-        Assert.IsFalse(engine.IsHardwareActive);
     }
 
     [TestMethod]

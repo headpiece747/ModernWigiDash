@@ -216,7 +216,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void Contract_Namespace_IsStable()
     {
-        var attr = (System.ServiceModel.ServiceContractAttribute?)typeof(ModernWigiDashDisplayServiceContract)
+        var attr = (System.ServiceModel.ServiceContractAttribute?)typeof(IModernWigiDashDisplayServiceContract)
             .GetCustomAttributes(typeof(System.ServiceModel.ServiceContractAttribute), inherit: false)
             .FirstOrDefault();
 
