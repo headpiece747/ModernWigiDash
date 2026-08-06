@@ -365,8 +365,11 @@ FodyWeavers.xsd
 # Local agent and editor tooling
 /.agents/
 /.codegraph/
+/.desloppify/
 /.opencode/
+/.superpowers/
 /data/
 /opencode.json
 /skills-lock.json
 /repomix-output.xml
+/scorecard.png

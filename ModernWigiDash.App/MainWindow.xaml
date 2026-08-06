@@ -49,16 +49,14 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Background="{DynamicResource BgCard}" 
-                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" 
-                            CornerRadius="12" Padding="4,4" VerticalAlignment="Center">
+                    <Border Grid.Column="0" CornerRadius="12" Padding="4,4" VerticalAlignment="Center">
                         <ScrollViewer x:Name="ScrollerPageTabs" HorizontalScrollBarVisibility="Auto" 
                                       VerticalScrollBarVisibility="Disabled" MaxWidth="800"
                                       MouseWheel="ScrollerPageTabs_MouseWheel">
                             <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
                         </ScrollViewer>
                     </Border>
-                    <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" Click="BtnAddPage_Click"/>
+                    <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>
                 </Grid>
 
                 <!-- Right Mode Toggles & USB Badge -->
@@ -70,7 +68,7 @@
                     <Border x:Name="UsbBadgeBorder" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,6">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="UsbStatusDot" Width="8" Height="8" Fill="{DynamicResource DangerBorder}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash Detached" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource M3Primary}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource M3Primary}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

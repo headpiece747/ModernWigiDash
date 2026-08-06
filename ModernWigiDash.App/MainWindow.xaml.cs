@@ -368,6 +368,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         catch (OperationCanceledException)
         {
             // Expected: frame sender loop cancelled during shutdown
+            System.Diagnostics.Debug.WriteLine("Frame sender loop cancelled during shutdown");
         }
     }
 
@@ -785,6 +786,7 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
             catch
             {
                 // Stored value is incompatible with the widget property type; ignore it
+                System.Diagnostics.Debug.WriteLine("Stored value incompatible with widget property type (ignored)");
             }
         }
 
@@ -2171,13 +2173,8 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
 
     private void UpdateUsbBadge()
     {
-        string text = _usbDevice.IsHardwareActive ? "WigiDash Attached" : "WigiDash Detached";
-        if (TxtUsbStatus.Text != text)
-        {
-            TxtUsbStatus.Text = text;
-            var resources = Application.Current.Resources;
-            UsbStatusDot.Fill = (Brush)resources[_usbDevice.IsHardwareActive ? "AccentGreen" : "DangerBorder"];
-        }
+        var resources = Application.Current.Resources;
+        UsbStatusDot.Fill = (Brush)resources[_usbDevice.IsHardwareActive ? "AccentGreen" : "DangerBorder"];
     }
 
     private void ApplyTheme()
@@ -2408,7 +2405,8 @@ public partial class MainWindow : Window, ModernWigiDashContext, IWidgetHostInte
         }
         catch (IOException)
         {
-            // Log file may be locked or unavailable; silently ignore
+            // Log file may be locked or unavailable; surface to debug output.
+            System.Diagnostics.Debug.WriteLine("App log write failed (file locked)");
         }
     }
 }

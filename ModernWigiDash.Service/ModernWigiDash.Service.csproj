@@ -8,7 +8,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>ModernWigiDash.Service</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon />
+    <ApplicationIcon>Resources\Logo\logo.ico</ApplicationIcon>
+    <Company>headpiece747</Company>
     <UserSecretsId>modernwigidash-service-debug</UserSecretsId>
   </PropertyGroup>
 
@@ -33,6 +34,10 @@
     <None Include="app.manifest">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- logo.ico: exe icon (keep in sync with ModernWigiDash.App/Resources/Logo/logo.ico) -->
+    <Resource Include="Resources\Logo\logo.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
   </ItemGroup>
 
   <ItemGroup>

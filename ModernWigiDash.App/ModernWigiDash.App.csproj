@@ -22,6 +22,7 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\Logo\logo.ico</ApplicationIcon>
+    <Company>headpiece747</Company>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
