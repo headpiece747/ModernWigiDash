@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         mc:Ignorable="d"
-        Title="ModernWigiDash - Next-Generation .NET 10 Manager"
+        Title="ModernWigiDash - Next-Generation .NET 10"
         Icon="Resources/Logo/logo.ico"
         WindowState="Normal"
         WindowStartupLocation="CenterScreen"
