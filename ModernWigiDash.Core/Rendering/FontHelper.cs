@@ -36,6 +36,7 @@ public static class FontHelper
         catch
         {
             // Clean fallback
+            System.Diagnostics.Debug.WriteLine("Geist font load failed, using clean fallback");
         }
 
         return SKTypeface.FromFamilyName("Geist") ?? SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default;
@@ -119,6 +120,7 @@ public static class FontHelper
             catch
             {
                 // Silently fall through to default typeface
+                System.Diagnostics.Debug.WriteLine("Font match failed, using default typeface");
             }
 
             return SKTypeface.Default;

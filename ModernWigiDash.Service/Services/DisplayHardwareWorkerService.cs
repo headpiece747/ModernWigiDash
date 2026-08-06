@@ -155,6 +155,7 @@ public sealed class DisplayHardwareWorkerService(
         }
         catch (IOException)
         {
+            System.Diagnostics.Debug.WriteLine("LogToFile: log file locked or unavailable");
             // Log file may be locked or unavailable; silently ignore
         }
     }

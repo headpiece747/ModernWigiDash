@@ -577,6 +577,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 catch (IOException)
                 {
                     // USB device may already be disconnected
+                    System.Diagnostics.Debug.WriteLine("USB device release failed; device may already be disconnected");
                 }
                 _usbDevice = null;
             }
@@ -825,6 +826,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         catch (IOException)
         {
             // Log file may be locked or unavailable; silently ignore
+            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
         }
     }
 

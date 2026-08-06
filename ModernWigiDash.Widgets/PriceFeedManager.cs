@@ -193,7 +193,10 @@ public sealed class PriceFeedManager : IDisposable
 
                 await ReadLoopAsync(ws, ParseBinanceTicker, _cts.Token);
             }
-            catch when (!_disposed) { }
+            catch when (!_disposed)
+            {
+                System.Diagnostics.Debug.WriteLine("Binance WebSocket feed loop ended unexpectedly; reconnecting");
+            }
             finally
             {
                 _binanceWs = null;
@@ -218,7 +221,10 @@ public sealed class PriceFeedManager : IDisposable
 
                 await ReadLoopAsync(ws, ParseFinnhubMessage, _cts.Token);
             }
-            catch when (!_disposed) { }
+            catch when (!_disposed)
+            {
+                System.Diagnostics.Debug.WriteLine("Finnhub WebSocket feed loop ended unexpectedly; reconnecting");
+            }
             finally
             {
                 _finnhubWs = null;
@@ -251,7 +257,11 @@ public sealed class PriceFeedManager : IDisposable
                         };
                     }
                 }
-                catch { /* individual symbol failure is non-fatal */ }
+                catch
+                {
+                    /* individual symbol failure is non-fatal */
+                    System.Diagnostics.Debug.WriteLine("Stock REST poll failed for a symbol; continuing");
+                }
             }
         }
     }
@@ -290,6 +300,7 @@ public sealed class PriceFeedManager : IDisposable
                 catch
                 {
                     // Individual symbol failure is non-fatal.
+                    System.Diagnostics.Debug.WriteLine("FX REST poll failed for a currency pair; continuing");
                 }
             }
         }
@@ -394,7 +405,10 @@ public sealed class PriceFeedManager : IDisposable
                         }
                     }
                 }
-                catch { }
+                catch
+                {
+                    System.Diagnostics.Debug.WriteLine("Crypto REST poll failed for a symbol; continuing");
+                }
             }
             await FallbackCoinGeckoAsync();
         }
@@ -437,7 +451,10 @@ public sealed class PriceFeedManager : IDisposable
                 });
             }
         }
-        catch { }
+        catch
+        {
+            System.Diagnostics.Debug.WriteLine("CoinGecko fallback price fetch failed; continuing");
+        }
     }
 
     private void ParseBinanceTicker(string json)
@@ -474,7 +491,10 @@ public sealed class PriceFeedManager : IDisposable
                 };
             }
         }
-        catch { }
+        catch
+        {
+            System.Diagnostics.Debug.WriteLine("Failed to parse Binance ticker message; ignoring");
+        }
     }
 
     private void ParseFinnhubMessage(string json)
@@ -496,7 +516,10 @@ public sealed class PriceFeedManager : IDisposable
                 }
             }
         }
-        catch { }
+        catch
+        {
+            System.Diagnostics.Debug.WriteLine("Failed to parse Finnhub message; ignoring");
+        }
     }
 
     private static async Task ReadLoopAsync(ClientWebSocket ws, Action<string> handler, CancellationToken ct)

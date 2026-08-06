@@ -443,7 +443,10 @@ public class HotkeyButtonWidget : ModernWidgetBase
             await HotkeyActionExecutor.ExecuteAsync([action], _actionCts.Token).ConfigureAwait(false);
             Context?.RequestRender();
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            System.Diagnostics.Debug.WriteLine("Hotkey action cancelled (30s timeout or shutdown)");
+        }
         catch (Exception ex)
         {
             Context?.LogError($"Hotkey action failed: {ex.Message}", ex);
@@ -727,6 +730,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         }
         catch
         {
+            System.Diagnostics.Debug.WriteLine("Market price fetch failed; keeping last known price");
         }
     }
 }

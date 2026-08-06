@@ -135,6 +135,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         catch
         {
             // Service check failed (permissions, etc.) — fall through
+            System.Diagnostics.Debug.WriteLine("Service check failed; falling through to direct connection");
         }
 
         // Also check for a running service process (e.g. "-test" mode)
@@ -158,6 +159,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         catch
         {
             // Process check failed — fall through to direct connection
+            System.Diagnostics.Debug.WriteLine("Process check failed; falling through to direct connection");
         }
 
         // Also check if the WCF endpoint is responding (covers -test mode where process is "dotnet")
@@ -181,6 +183,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         catch
         {
             // WCF check failed — fall through to direct connection
+            System.Diagnostics.Debug.WriteLine("WCF check failed; falling through to direct connection");
         }
 
         // Guard against concurrent connection attempts
@@ -460,6 +463,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         catch (IOException)
         {
             // Log file may be locked or unavailable; silently ignore
+            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
         }
     }
 

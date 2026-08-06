@@ -47,6 +47,7 @@ public static class FontCatalog
             catch
             {
                 // Fall through to the app font below.
+                System.Diagnostics.Debug.WriteLine("Typeface lookup failed, falling back to app font");
             }
 
             return FontHelper.GeistTypeface;

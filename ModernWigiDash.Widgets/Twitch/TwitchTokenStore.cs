@@ -69,6 +69,7 @@ internal sealed class TwitchTokenStore
         catch (IOException)
         {
             // Logout should remain best-effort if the local file is temporarily unavailable.
+            System.Diagnostics.Debug.WriteLine("Twitch token file delete failed; logout continues best-effort.");
         }
     }
 }

@@ -48,6 +48,7 @@ public static class GriddyIcons
             catch
             {
                 // Fall through to an empty path.
+                System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
             }
             return new SKPath();
         });

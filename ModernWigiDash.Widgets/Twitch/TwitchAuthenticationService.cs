@@ -148,6 +148,7 @@ internal sealed class TwitchSession
                 catch (TwitchApiException)
                 {
                     // Local logout still clears credentials when Twitch revocation is unavailable.
+                    System.Diagnostics.Debug.WriteLine("Twitch token revocation failed; proceeding with local logout.");
                 }
             }
 
@@ -320,6 +321,7 @@ internal sealed class TwitchSession
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // The hourly validation loop ends when the session is logged out or the process exits.
+            System.Diagnostics.Debug.WriteLine("Twitch validation loop canceled; ending the hourly refresh cycle.");
         }
     }
 

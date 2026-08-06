@@ -18,7 +18,8 @@ public partial class App : Application
         }
         catch (IOException)
         {
-            // Startup log is best-effort; silently ignore if file is locked
+            // Startup log is best-effort; file may be locked. Surface to debug output.
+            System.Diagnostics.Debug.WriteLine("Startup log write failed (file locked)");
         }
 
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
@@ -50,7 +51,8 @@ public partial class App : Application
         }
         catch (IOException)
         {
-            // Crash log is best-effort; silently ignore if file is locked
+            // Crash log is best-effort; file may be locked. Surface to debug output.
+            System.Diagnostics.Debug.WriteLine("Crash log write failed (file locked)");
         }
     }
 }

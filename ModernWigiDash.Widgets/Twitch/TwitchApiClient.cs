@@ -220,6 +220,7 @@ internal sealed class TwitchApiClient
             catch (JsonException)
             {
                 // Keep the generic status message when Twitch returns non-JSON content.
+                System.Diagnostics.Debug.WriteLine("Twitch API error body is not valid JSON; keeping the generic status message.");
             }
         }
 

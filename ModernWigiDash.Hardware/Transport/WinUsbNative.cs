@@ -176,6 +176,7 @@ internal sealed class WinUsbBulkDevice : IDisposable
         catch (IOException)
         {
             // Log file may be locked or unavailable; silently ignore
+            System.Diagnostics.Debug.WriteLine("Log file write failed (may be locked or unavailable); ignoring");
         }
     }
 

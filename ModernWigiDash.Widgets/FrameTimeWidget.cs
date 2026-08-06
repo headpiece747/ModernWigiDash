@@ -54,6 +54,7 @@ public class FrameTimeWidget : ModernWidgetBase
         catch (Exception)
         {
             // Fall through to 60 Hz default
+            System.Diagnostics.Debug.WriteLine("Failed to query monitor refresh rate; defaulting to 60 Hz");
         }
         return 60;
     });

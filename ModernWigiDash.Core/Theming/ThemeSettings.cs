@@ -151,6 +151,7 @@ public class ThemeSettings
         catch (Exception)
         {
             // Corrupt or unreadable theme file — fall back to defaults
+            System.Diagnostics.Debug.WriteLine("Theme load failed, falling back to defaults");
         }
         return new ThemeSettings();
     }
@@ -199,6 +200,7 @@ public class ThemeSettings
         catch (Exception)
         {
             // Invalid hex value — treat as unparseable
+            System.Diagnostics.Debug.WriteLine("Invalid theme hex color value, treating as unparseable");
         }
         return null;
     }

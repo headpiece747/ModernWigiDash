@@ -345,6 +345,7 @@ public static class Program
                     }
                     catch (InvalidOperationException)
                     {
+                        System.Diagnostics.Debug.WriteLine("Install poll: service not yet registered in Service Control Manager");
                         // Service not yet registered in Service Control Manager
                     }
                 }
