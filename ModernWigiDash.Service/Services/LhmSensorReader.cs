@@ -1,5 +1,5 @@
 using LibreHardwareMonitor.Hardware;
-using ModernWigiDash.Service.Wcf;
+using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Services;
 
@@ -95,6 +95,7 @@ public sealed class LhmSensorReader : BackgroundService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            _logger.LogDebug("LhmSensorReader: sensor poll loop cancelled (normal shutdown).");
             // normal shutdown
         }
         finally

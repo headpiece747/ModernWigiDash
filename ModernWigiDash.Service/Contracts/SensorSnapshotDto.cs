@@ -1,6 +1,6 @@
 using System.Runtime.Serialization;
 
-namespace ModernWigiDash.Service.Wcf;
+namespace ModernWigiDash.Service.Contracts;
 
 /// <summary>
 /// A single hardware sensor reading collected by LibreHardwareMonitorLib.

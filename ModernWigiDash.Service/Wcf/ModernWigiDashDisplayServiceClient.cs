@@ -1,4 +1,5 @@
 using System.ServiceModel;
+using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Wcf;
 
@@ -70,6 +71,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
             }
             catch
             {
+                System.Diagnostics.Debug.WriteLine("HTTP health probe failed; trying next port");
                 // Try next port
             }
         }
@@ -100,12 +102,21 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                 finally
                 {
                     try { ((ICommunicationObject?)client)?.Abort(); }
-                    catch (CommunicationObjectFaultedException) { /* Expected: channel already faulted */ }
-                    catch (ObjectDisposedException) { /* Expected: channel already disposed */ }
+                    catch (CommunicationObjectFaultedException)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Abort failed: WCF probe channel already faulted");
+                        /* Expected: channel already faulted */
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Abort failed: WCF probe channel already disposed");
+                        /* Expected: channel already disposed */
+                    }
                 }
             }
             catch
             {
+                System.Diagnostics.Debug.WriteLine("WCF probe failed; trying next port");
                 // Try next port
             }
         }
@@ -210,6 +221,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         }
         catch (System.IO.IOException)
         {
+            System.Diagnostics.Debug.WriteLine("LogClient failed: IOException writing log file");
             // Log file may be locked or unavailable; silently ignore
         }
     }
@@ -217,8 +229,16 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     private void RecreateChannel()
     {
         try { ((ICommunicationObject?)_channel)?.Abort(); }
-        catch (CommunicationObjectFaultedException) { /* Expected: channel already faulted */ }
-        catch (ObjectDisposedException) { /* Expected: channel already disposed */ }
+        catch (CommunicationObjectFaultedException)
+        {
+            System.Diagnostics.Debug.WriteLine("Abort failed: channel already faulted");
+            /* Expected: channel already faulted */
+        }
+        catch (ObjectDisposedException)
+        {
+            System.Diagnostics.Debug.WriteLine("Abort failed: channel already disposed");
+            /* Expected: channel already disposed */
+        }
         _channel = _factory.CreateChannel();
     }
 

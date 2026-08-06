@@ -1,6 +1,6 @@
 using System.Runtime.Serialization;
 
-namespace ModernWigiDash.Service.Wcf;
+namespace ModernWigiDash.Service.Contracts;
 
 /// <summary>
 /// A point-in-time snapshot of the FPS / frame-time telemetry captured by the

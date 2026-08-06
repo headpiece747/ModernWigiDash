@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using ModernWigiDash.Hardware.Transport;
+using ModernWigiDash.Service.Contracts;
 using ModernWigiDash.Service.Services;
 
 namespace ModernWigiDash.Service.Wcf;
@@ -319,6 +320,7 @@ public class ModernWigiDashDisplayService : ModernWigiDashDisplayServiceContract
         }
         catch
         {
+            System.Diagnostics.Debug.WriteLine("LogToFile failed; ignoring logging error");
             // Ignore logging failures
         }
     }

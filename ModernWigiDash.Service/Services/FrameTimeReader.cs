@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Session;
 using ModernWigiDash.Core.Telemetry;
-using ModernWigiDash.Service.Wcf;
+using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Services;
 
@@ -128,6 +128,7 @@ public sealed class FrameTimeReader : BackgroundService
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            _logger.LogDebug("FrameTimeReader: ETW capture session cancelled (normal shutdown).");
             // Normal shutdown
         }
         catch (Exception ex)
@@ -186,6 +187,7 @@ public sealed class FrameTimeReader : BackgroundService
         }
         catch (Exception)
         {
+            _logger.LogDebug("FrameTimeReader: dropped malformed ETW event.");
             // A single malformed event must never break the capture loop.
         }
     }

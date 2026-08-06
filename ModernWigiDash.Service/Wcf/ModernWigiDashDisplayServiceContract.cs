@@ -1,4 +1,5 @@
 using System.Runtime.Serialization;
+using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Wcf;
 
