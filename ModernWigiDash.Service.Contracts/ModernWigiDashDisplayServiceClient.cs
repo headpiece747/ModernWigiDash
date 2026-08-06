@@ -16,15 +16,19 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     private IModernWigiDashDisplayServiceContract _channel;
     private bool _isDisposed;
 
-    public const int DefaultPort = 8733;
-    public static string DefaultEndpointAddress => $"http://localhost:{DefaultPort}/ModernWigiDashDisplayService";
-    private static readonly int[] FallbackPorts = [8733, 5000, 5001, 62073];
+    public static string DefaultEndpointAddress => "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc";
+    private static readonly string[] KnownPipeEndpoints =
+    [
+        "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc",
+        "net.pipe://localhost/ModernWigiDashDisplayService/",
+        "net.pipe://localhost/ModernWigiDashService/WigiDashWcf/"
+    ];
 
     public ModernWigiDashDisplayServiceClient(string? endpointAddress = null)
     {
         string address = endpointAddress ?? DefaultEndpointAddress;
 
-        var binding = new BasicHttpBinding
+        var binding = new NetNamedPipeBinding(NetNamedPipeSecurityMode.Transport)
         {
             MaxReceivedMessageSize = 32 * 1024 * 1024,
             MaxBufferSize = 32 * 1024 * 1024,
@@ -42,61 +46,28 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         _channel = _factory.CreateChannel();
     }
 
-    public static int? DetectServicePort()
+    public static string? DetectServicePort()
     {
 #pragma warning disable S6966 // Intentional sync wrapper — callers require synchronous port detection
         return DetectServicePortAsync().GetAwaiter().GetResult();
 #pragma warning restore S6966
     }
 
-    public static async Task<int?> DetectServicePortAsync()
+    public static async Task<string?> DetectServicePortAsync()
     {
-        var portsToCheck = new[] { DefaultPort }.Concat(FallbackPorts).Distinct().ToArray();
-
-        // Fast HTTP health check — identifies candidate ports without WCF channel
-        // overhead. A port is only ACCEPTED after the WCF protocol check below
-        // verifies it actually speaks the ModernWigiDashDisplayService contract,
-        // so an impostor binding a fallback port cannot hijack frame streaming.
-        List<int> candidates = [];
-        using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(1) })
-        {
-            foreach (int port in portsToCheck)
-            {
-                try
-                {
-                    var resp = await http.GetAsync($"http://localhost:{port}/ModernWigiDashDisplayService").ConfigureAwait(false);
-                    if (resp.StatusCode is System.Net.HttpStatusCode.OK or System.Net.HttpStatusCode.MethodNotAllowed or System.Net.HttpStatusCode.NotFound)
-                    {
-                        candidates.Add(port);
-                    }
-                }
-                catch
-                {
-                    System.Diagnostics.Debug.WriteLine($"HTTP health probe failed on port {port}; trying next port");
-                    // Try next port
-                }
-            }
-        }
-
         // Protocol check: only a real ModernWigiDashDisplayService endpoint
-        // answers GetVersion with a non-empty version string.
-        if (candidates.Count == 0)
-        {
-            candidates.AddRange(portsToCheck);
-        }
-
-        using var fallbackHttp = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-        foreach (int port in candidates)
+        // answers GetVersion with a non-empty version string, so an impostor
+        // pipe cannot hijack frame streaming without speaking the contract.
+        foreach (string pipeName in KnownPipeEndpoints)
         {
             try
             {
-                string url = $"http://localhost:{port}/ModernWigiDashDisplayService";
-                var binding = new BasicHttpBinding
+                var binding = new NetNamedPipeBinding(NetNamedPipeSecurityMode.Transport)
                 {
-                    OpenTimeout = TimeSpan.FromSeconds(1),
-                    SendTimeout = TimeSpan.FromSeconds(1)
+                    OpenTimeout = TimeSpan.FromSeconds(2),
+                    SendTimeout = TimeSpan.FromSeconds(2)
                 };
-                using var factory = new ChannelFactory<IModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(url));
+                using var factory = new ChannelFactory<IModernWigiDashDisplayServiceContract>(binding, new EndpointAddress(pipeName));
                 IModernWigiDashDisplayServiceContract? client = null;
                 try
                 {
@@ -104,7 +75,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                     string version = client.GetVersion();
                     if (!string.IsNullOrEmpty(version))
                     {
-                        return port;
+                        return pipeName;
                     }
                 }
                 finally
@@ -122,8 +93,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
             }
             catch
             {
-                System.Diagnostics.Debug.WriteLine($"WCF probe failed on port {port}; trying next port");
-                // Try next port
+                // Pipe not available — try next endpoint
             }
         }
         return null;

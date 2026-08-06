@@ -34,19 +34,21 @@ public static class Program
     private const string ServiceDisplayName = "ModernWigiDash Display Service";
 
     /// <summary>
-    /// WCF endpoint port matching vendor's configuration (port 8733).
+    /// Named pipe listen base address. CoreWCF derives the pipe name from this
+    /// URI, so the trailing slash is required.
     /// </summary>
-    private const int WcfPort = 8733;
+    private static string WcfPipeBase => "net.pipe://localhost/ModernWigiDashDisplayService/";
 
     /// <summary>
-    /// Full WCF endpoint base URL.
+    /// Relative service path — combined with <see cref="WcfPipeBase"/> to form
+    /// the full endpoint address.
     /// </summary>
-    private static string WcfEndpoint => $"http://localhost:{WcfPort}/";
+    private const string WcfServicePath = "WigiDash.svc";
 
     /// <summary>
-    /// Full WCF service endpoint path.
+    /// Full WCF endpoint address the client connects to.
     /// </summary>
-    private const string WcfServicePath = "/ModernWigiDashDisplayService";
+    private static string WcfEndpoint => WcfPipeBase + WcfServicePath;
 
     public static async Task Main(string[] args)
     {
@@ -85,15 +87,15 @@ public static class Program
         Console.WriteLine(" Connecting to running Windows Service via CoreWCF");
         Console.WriteLine("==========================================================");
 
-        // Auto-detect the running service port (handles port drift between installs)
-        Console.WriteLine("\nAuto-detecting WCF service port...");
+        // Auto-detect the running service via named pipe
+        Console.WriteLine("\nAuto-detecting WCF named pipe service...");
 #pragma warning disable S6966 // Console app entry point; sync is acceptable
-        int? detectedPort = ModernWigiDashDisplayServiceClient.DetectServicePort();
+        string? detectedEndpoint = ModernWigiDashDisplayServiceClient.DetectServicePort();
 #pragma warning restore S6966
 
-        if (!detectedPort.HasValue)
+        if (detectedEndpoint == null)
         {
-            Console.WriteLine($"ERROR: No WCF service detected on ports {WcfPort}, 5000, 5001, 62073.");
+            Console.WriteLine($"ERROR: No WCF service detected on named pipe endpoint.");
             Console.WriteLine("The Windows Service may not be running. Start it with:");
             Console.WriteLine($"  sc.exe start {ServiceName}");
             Console.WriteLine("Or install it with:");
@@ -103,12 +105,11 @@ public static class Program
             return;
         }
 
-        Console.WriteLine($"Port {detectedPort} detected. Connecting via WCF...");
+        Console.WriteLine($"Pipe {detectedEndpoint} detected. Connecting via WCF...");
 
         try
         {
-            string endpointUrl = $"http://localhost:{detectedPort.Value}{WcfServicePath}";
-            using var client = new ModernWigiDashDisplayServiceClient(endpointUrl);
+            using var client = new ModernWigiDashDisplayServiceClient(detectedEndpoint);
 
             // Test connection
             Console.WriteLine("\nTesting WCF connection...");
@@ -479,9 +480,14 @@ public static class Program
         builder.Logging.AddConsole();
         builder.Logging.AddDebug();
 
-        // Explicitly bind Kestrel to the WCF port so the client can always find the service.
-        // Without this, Kestrel picks an unpredictable default port when running as a Windows Service.
-        builder.WebHost.UseUrls($"http://localhost:{WcfPort}");
+        // Named pipe transport: kernel-level ACL security, no TCP exposure.
+        // CoreWCF owns the pipe listener — do NOT use UseUrls() for net.pipe://
+        // (Kestrel only accepts http/https there). The trailing slash on the
+        // listen base address is required for CoreWCF's pipe-name derivation.
+        builder.WebHost.UseNetNamedPipe(options =>
+        {
+            options.Listen(new Uri(WcfPipeBase));
+        });
 
         // Configure Kestrel web host to allow up to 32MB request body size for 1.23MB frame payload SOAP messages
         builder.WebHost.ConfigureKestrel(serverOptions =>
@@ -551,8 +557,8 @@ public static class Program
         // Diagnostic: verify Kestrel is reachable outside CoreWCF pipeline
         app.Map("/trace", () => "ModernWigiDash Service is running.");
 
-        // Register CoreWCF endpoint.
-        var httpBinding = new BasicHttpBinding
+        // Register CoreWCF endpoint over named pipes.
+        var pipeBinding = new NetNamedPipeBinding
         {
             MaxReceivedMessageSize = 32 * 1024 * 1024,
             MaxBufferSize = 32 * 1024 * 1024,
@@ -561,6 +567,10 @@ public static class Program
                 MaxArrayLength = 32 * 1024 * 1024,
                 MaxBytesPerRead = 32 * 1024 * 1024,
                 MaxStringContentLength = 32 * 1024 * 1024
+            },
+            Security = new NetNamedPipeSecurity
+            {
+                Mode = NetNamedPipeSecurityMode.Transport
             }
         };
 
@@ -576,7 +586,7 @@ public static class Program
                 }
             });
             serviceOptions.AddServiceEndpoint<ModernWigiDashDisplayService, IModernWigiDashDisplayServiceContract>(
-                httpBinding, WcfServicePath);
+                pipeBinding, WcfServicePath);
         });
 
         Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] CoreWCF endpoint registered at {WcfEndpoint} -> {WcfServicePath}");

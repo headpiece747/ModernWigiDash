@@ -106,7 +106,7 @@ public class WcfDisplayServiceTests
         ServiceDiagnostics diag = service.GetDiagnostics();
 
         Assert.AreEqual("ModernWigiDashService", diag.ServiceName);
-        Assert.AreEqual("http://localhost:8733/", diag.WcfEndpoint);
+        Assert.AreEqual("net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc", diag.WcfEndpoint);
         Assert.IsFalse(string.IsNullOrWhiteSpace(diag.Version));
     }
 
@@ -209,7 +209,7 @@ public class WcfDisplayServiceTests
     public void Client_Defaults_AreWellFormed()
     {
         Assert.AreEqual(
-            $"http://localhost:{ModernWigiDashDisplayServiceClient.DefaultPort}/ModernWigiDashDisplayService",
+            "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc",
             ModernWigiDashDisplayServiceClient.DefaultEndpointAddress);
     }
 

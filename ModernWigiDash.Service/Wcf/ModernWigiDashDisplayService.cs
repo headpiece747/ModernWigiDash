@@ -200,7 +200,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
                 ServiceAccount = "[redacted]",
                 Uptime = uptime.ToString(@"hh\:mm\:ss\.fff"),
                 DisplayStatus = $"IsConnected={_transport.IsConnected} | Path={_transport.DevicePath}",
-                WcfEndpoint = "http://localhost:8733/",
+                WcfEndpoint = "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc",
                 Version = VersionString
             };
         }

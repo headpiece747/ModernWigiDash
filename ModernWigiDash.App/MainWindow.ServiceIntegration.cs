@@ -38,13 +38,12 @@ public partial class MainWindow
     {
         try
         {
-            Log("[WCF] Detecting service port...");
-            int? port = await ModernWigiDashDisplayServiceClient.DetectServicePortAsync();
-            if (port.HasValue)
+            Log("[WCF] Detecting named pipe service...");
+            string? pipeEndpoint = await ModernWigiDashDisplayServiceClient.DetectServicePortAsync();
+            if (pipeEndpoint != null)
             {
-                string endpointUrl = $"http://localhost:{port.Value}/ModernWigiDashDisplayService";
-                Log($"[WCF] Port {port.Value} detected, creating client...");
-                _wcfClient = new ModernWigiDashDisplayServiceClient(endpointUrl);
+                Log($"[WCF] Pipe {pipeEndpoint} detected, creating client...");
+                _wcfClient = new ModernWigiDashDisplayServiceClient(pipeEndpoint);
 
                 try
                 {
@@ -62,7 +61,7 @@ public partial class MainWindow
                     }
 
                     _serviceActive = true;
-                    Log($"[WCF] Connected! Version: {version}, Port: {port.Value}");
+                    Log($"[WCF] Connected! Version: {version}, Endpoint: {pipeEndpoint}");
 
                     bool displayInit = _wcfClient.InitializeDisplay();
                     Log($"[WCF] Display initialization: {displayInit}");
