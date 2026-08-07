@@ -6,7 +6,18 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\Logo\logo.ico</ApplicationIcon>
     <UserSecretsId>modernwigidash-service-debug</UserSecretsId>
+    <!-- The Web SDK defaults to Server GC (one heap per core); this low-throughput
+         IPC service needs neither the heaps nor the GC threads. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
+
+  <!-- Memory-conservation runtime tuning (works identically on small and large
+       RAM machines): GC compacts past 30% memory load; 1 MB regions for this
+       small heap cut GC bookkeeping and reserved virtual memory. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HighMemoryPercent" Value="30" />
+    <RuntimeHostConfigurationOption Include="System.GC.RegionSize" Value="1048576" />
+  </ItemGroup>
 
   <!-- Debug configuration: enable detailed logging + XML docs for IDE IntelliSense -->
   <PropertyGroup Condition="'$(Configuration)'=='Debug'">

@@ -493,10 +493,16 @@ public static class Program
             options.Listen(new Uri(WcfPipeBase));
         });
 
-        // Configure Kestrel web host to allow up to 32MB request body size for 1.23MB frame payload SOAP messages
+        // Configure Kestrel: the app talks to the service exclusively over the
+        // named pipe, so the HTTP listener is only the ASP.NET host CoreWCF
+        // requires. Bind a private ephemeral loopback port instead of the
+        // default :5000 to avoid conflicts and keep the surface minimal.
         builder.WebHost.ConfigureKestrel(serverOptions =>
         {
             serverOptions.Limits.MaxRequestBodySize = 32 * 1024 * 1024;
+            // Ephemeral loopback port: ListenLocalhost rejects port 0, so bind
+            // the loopback address explicitly.
+            serverOptions.Listen(System.Net.IPAddress.Loopback, 0);
         });
 
         // Register CoreWCF infrastructure services

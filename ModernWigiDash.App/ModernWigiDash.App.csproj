@@ -20,6 +20,17 @@
     <ApplicationIcon>Resources\Logo\logo.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Memory-conservation runtime tuning (works identically on small and large
+       RAM machines):
+       - HighMemoryPercent=30: GC compacts and returns memory once load passes
+         30% of physical RAM (default 90% means it never does on big machines).
+       - RegionSize=1MB: .NET 10 regions sized for this app's small heap,
+         cutting GC bookkeeping and reserved virtual memory. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HighMemoryPercent" Value="30" />
+    <RuntimeHostConfigurationOption Include="System.GC.RegionSize" Value="1048576" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Vendor DLLs removed - using clean native HID/WinUSB transport -->
     <Resource Include="Resources\Fonts\Geist-VariableFont_wght.ttf">
