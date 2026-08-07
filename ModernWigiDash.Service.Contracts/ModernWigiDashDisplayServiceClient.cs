@@ -26,8 +26,11 @@ public sealed class ServiceUnavailableException : Exception
 public sealed class ModernWigiDashDisplayServiceClient : IDisposable
 {
     private readonly ChannelFactory<IModernWigiDashDisplayServiceContract> _factory;
+    private readonly TimeProvider _timeProvider;
     private IModernWigiDashDisplayServiceContract _channel;
     private bool _isDisposed;
+    private DateTimeOffset _lastRecreate = DateTimeOffset.MinValue;
+    private static readonly TimeSpan MinRecreateInterval = TimeSpan.FromSeconds(10);
 
     public static string DefaultEndpointAddress => "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc";
     private static readonly string[] KnownPipeEndpoints =
@@ -35,8 +38,9 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc"
     ];
 
-    public ModernWigiDashDisplayServiceClient(string? endpointAddress = null)
+    public ModernWigiDashDisplayServiceClient(string? endpointAddress = null, TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         string address = endpointAddress ?? DefaultEndpointAddress;
 
         var binding = new NetNamedPipeBinding(NetNamedPipeSecurityMode.Transport)
@@ -206,6 +210,15 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
 
     private void RecreateChannel()
     {
+        // Bound channel churn: when the service is down every failing op would
+        // otherwise rebuild the proxy — the 16ms touch poll alone would create
+        // a channel per tick. Recreate at most once per interval; in between,
+        // ops fail fast on the faulted channel and the App's poll-failure
+        // counting drives the throttled re-detect instead.
+        var now = _timeProvider.GetUtcNow();
+        if (now - _lastRecreate < MinRecreateInterval) return;
+        _lastRecreate = now;
+
         try { ((ICommunicationObject?)_channel)?.Abort(); }
         catch (CommunicationObjectFaultedException)
         {

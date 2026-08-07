@@ -6,6 +6,7 @@ using CoreWCF;
 using CoreWCF.Configuration;
 using CoreWCF.Description;
 using ModernWigiDash.Hardware.Transport;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Service.Services;
 using ModernWigiDash.Service.Wcf;
 
@@ -513,21 +514,28 @@ public static class Program
             builder.Services.AddServiceModelMetadata();
         }
 
-        // Configure Bounded Channel — only keep latest frame (display always shows most recent)
-        var channelOptions = new BoundedChannelOptions(capacity: 2)
+        // Frame delivery: one policy module (bounded DropOldest channel →
+        // drain-to-latest → paced send) owned by the service. The WCF service
+        // pushes encoded bytes in; the send seam writes them to USB. This is
+        // the same module the App uses for its WCF and direct-USB hops, so a
+        // backlog behaves identically in every mode. No pacing here: the pipe
+        // round-trip already bounds delivery, and pacing would add
+        // display-visible latency to page switches.
+        builder.Services.AddSingleton(sp =>
         {
-            SingleWriter = false,
-            SingleReader = true,
-            FullMode = BoundedChannelFullMode.DropOldest
-        };
-
-        Channel<byte[]> frameChannel = Channel.CreateBounded<byte[]>(channelOptions);
-        builder.Services.AddSingleton(frameChannel.Reader);
-        builder.Services.AddSingleton(frameChannel.Writer);
+            var transport = sp.GetRequiredService<IDisplayTransport>();
+            var timeProvider = sp.GetRequiredService<TimeProvider>();
+            return new FrameDelivery(
+                send: bytes => transport.IsConnected && transport.SendFrame(bytes),
+                isReady: () => transport.IsConnected,
+                minInterval: TimeSpan.Zero,
+                timeProvider: timeProvider,
+                log: msg => FileLog.Write(msg));
+        });
 
         // Touch input channel (hardware -> WCF -> app)
         // Unbounded — touch events are tiny (~30 bytes) and must not be dropped to preserve gesture data.
-        Channel<DisplayTouchInput> touchChannel = Channel.CreateUnbounded<DisplayTouchInput>(
+        Channel<TouchEventInfo> touchChannel = Channel.CreateUnbounded<TouchEventInfo>(
             new UnboundedChannelOptions { SingleWriter = true, SingleReader = false });
         builder.Services.AddSingleton(touchChannel.Reader);
         builder.Services.AddSingleton(touchChannel.Writer);

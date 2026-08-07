@@ -28,20 +28,30 @@ public sealed record LhmSnapshot(bool IsConnected, DateTime LastUpdate, IReadOnl
 
     /// <summary>
     /// True when the snapshot was produced by an active polling loop within
-    /// <paramref name="maxAge"/>. A stale snapshot means the App stopped
-    /// polling (service disconnected or app suspending), so widgets should
-    /// render their unavailable state instead of frozen data.
+    /// <paramref name="maxAge"/> — measured against the producer timestamp, so
+    /// cross-machine clock skew does not affect the decision. A stale snapshot
+    /// means the App stopped polling (service disconnected or app suspending),
+    /// so widgets should render their unavailable state instead of frozen data.
     /// </summary>
-    public bool IsFresh(TimeSpan maxAge) => LastUpdate != DateTime.MinValue && TimeProvider.System.GetUtcNow().UtcDateTime - LastUpdate <= maxAge;
+    public bool IsFresh(TimeSpan maxAge, TimeProvider? timeProvider = null)
+    {
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+        return LastUpdate != DateTime.MinValue && now - LastUpdate <= maxAge;
+    }
 }
 
 /// <summary>
 /// In-process cache of the latest hardware sensor snapshot fetched from the
 /// service over WCF. The App's polling loop calls <see cref="Update"/>; widgets
-/// read the cached snapshot on the render thread without touching WCF.
+/// read the cached snapshot on the render thread without touching WCF. The
+/// store owns the staleness decision — consumers ask <see cref="TryReadFresh"/>
+/// and cannot skip the check.
 /// </summary>
 public static class LhmSensorStore
 {
+    /// <summary>Default staleness window for sensor data (~1s poll cadence).</summary>
+    public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(10);
+
     private static readonly Lock Gate = new();
     private static LhmSnapshot _current = LhmSnapshot.Disconnected();
 
@@ -53,11 +63,26 @@ public static class LhmSensorStore
         }
     }
 
+    /// <summary>
+    /// Returns the cached snapshot when it is fresh enough, else null. The
+    /// freshness decision uses the producer timestamp with an injectable clock.
+    /// </summary>
+    public static LhmSnapshot? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
+    {
+        var snapshot = ReadSnapshot();
+        return snapshot.IsFresh(maxAge ?? DefaultMaxAge, timeProvider) ? snapshot : null;
+    }
+
+    /// <summary>
+    /// Stores a snapshot. The producer timestamp is preserved — <see cref="UpdateFromDto"/>
+    /// is responsible for providing it (falling back to the receive time when
+    /// the producer did not stamp one).
+    /// </summary>
     public static void Update(LhmSnapshot snapshot)
     {
         lock (Gate)
         {
-            _current = snapshot with { LastUpdate = TimeProvider.System.GetUtcNow().UtcDateTime };
+            _current = snapshot;
         }
     }
 
@@ -81,7 +106,7 @@ public static class LhmSensorStore
 
         Update(new LhmSnapshot(
             dto?.IsConnected ?? false,
-            dto?.LastUpdate ?? TimeProvider.System.GetUtcNow().UtcDateTime,
+            ProducerTimestamp(dto?.LastUpdate),
             readings));
     }
 
@@ -95,4 +120,7 @@ public static class LhmSensorStore
             _current = LhmSnapshot.Disconnected();
         }
     }
+
+    private static DateTime ProducerTimestamp(DateTime? producer)
+        => producer is { } ts && ts != default ? ts : TimeProvider.System.GetUtcNow().UtcDateTime;
 }

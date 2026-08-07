@@ -53,44 +53,43 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// This matches the vendor WigiDashService architecture.
     /// </summary>
     private ModernWigiDashDisplayServiceClient? _wcfClient;
-    private DateTime _lastWcfRetry = DateTime.MinValue;
 
     /// <summary>
-    /// Whether the Windows Service is active and handling USB communication.
+    /// App↔service routing truth: readiness, poll-failure counting, and the
+    /// throttled re-detect trigger (see <see cref="ServiceRouting.ServiceRoutingState"/>).
     /// </summary>
-    private volatile bool _serviceActive = false;
+    private readonly ServiceRouting.ServiceRoutingState _routingState;
+
+    // WCF poll loops — one parameterized loop module per producer (touch,
+    // sensor, frame-time). Constructed in the ctor, started on connect.
+    private readonly ServiceRouting.WcfPollLoop _touchPoll;
+    private readonly ServiceRouting.WcfPollLoop _sensorPoll;
+    private readonly ServiceRouting.WcfPollLoop _frameTimePoll;
 
     private ProfileLayout _profile = new();
     private PlacedWidgetInstance? _selectedWidget;
     private Window? _deviceAuthorizationWindow;
 
-    // Mouse & Swipe Gesture Interaction State
+    // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
+    // application, and edit-mode manipulation decisions live in InputController;
+    // MainWindow only tracks button state and drives UI refresh.
     private bool _isMouseDown = false;
-    private bool _isDraggingWidget = false;
-    private bool _isResizingWidget = false;
-    private bool _isDraggingIcon = false;
-    private bool _iconDragMoved = false;
-    private Point _iconGrabOffset;
-    private const float ResizeHandleSize = 14f;
-    private Point _lastMousePos;
-    private readonly Gestures.GestureInterpreter _gestureInterpreter = new();
+    private readonly Input.InputController _inputController;
     private bool _isUpdatingInspector = false;
 
     // Async frame pipeline — decouple UI render timer from transport round-trips.
-    // Each sink owns its encode→pool→coalesce→deliver lifecycle; the router
-    // picks the first-ready sink (WCF service over direct USB) per render tick.
-    private readonly WcfFrameSink _wcfSink = new();
-    private readonly DirectUsbFrameSink _usbSink;
+    // Both transports are FrameDelivery instances (the single encode→pool→
+    // coalesce policy); the router picks the first-ready one per render tick.
+    // The WCF instance does not pace (the pipe round-trip already bounds it and
+    // pacing would add display-visible latency to page switches); the direct-USB
+    // instance keeps the 33ms default the engine used to pace USB writes.
+    private readonly FrameDelivery _wcfSink = new(
+        encoder: new SkiaRgb565Encoder(),
+        pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
+        minInterval: TimeSpan.Zero,
+        log: msg => FileLog.Write("[WCF] " + msg));
+    private readonly FrameDelivery _usbSink;
     private readonly FrameSinkRouter _frameSinkRouter;
-
-    // Touch polling via WCF (polls hardware touch at 50ms intervals, off UI thread)
-    private CancellationTokenSource? _touchPollCts;
-
-    // Sensor polling via WCF (refreshes the LHM snapshot cache off UI thread)
-    private CancellationTokenSource? _sensorPollCts;
-
-    // Frame-time polling via WCF (refreshes the ETW FPS/frame-time snapshot cache off UI thread)
-    private CancellationTokenSource? _frameTimePollCts;
 
     public MainWindow()
     {
@@ -98,12 +97,28 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SourceInitialized += (_, _) => ApplyTheme();
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
-        _usbSink = new DirectUsbFrameSink(_usbDevice);
+        _usbSink = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
+            send: _usbDevice.SendFrameBytes,
+            isReady: () => _usbDevice.IsConnected && !_usbDevice.IsSimulationMode,
+            log: msg => FileLog.Write("[HW] " + msg));
         _frameSinkRouter = new FrameSinkRouter(
             _wcfSink,
             _usbSink,
             retryTrigger: TryRetryServiceRouting,
             isHardwareActive: () => _usbDevice.IsHardwareActive);
+
+        // App↔service wiring: routing truth + one poll loop per producer.
+        _routingState = new ServiceRouting.ServiceRoutingState(
+            onReconnect: TryRetryServiceRouting,
+            log: msg => Log(msg));
+        _touchPoll = new ServiceRouting.WcfPollLoop(
+            "TOUCH", TimeSpan.FromMilliseconds(16), ServiceReady, TouchPollTick, _routingState.ReportFailure, msg => Log(msg));
+        _sensorPoll = new ServiceRouting.WcfPollLoop(
+            "SENSOR", TimeSpan.FromSeconds(1), ServiceReady, SensorPollTick, _routingState.ReportFailure, msg => Log(msg));
+        _frameTimePoll = new ServiceRouting.WcfPollLoop(
+            "FRAME", TimeSpan.FromSeconds(1), ServiceReady, FrameTimePollTick, _routingState.ReportFailure, msg => Log(msg));
 
         // Detect if Windows Service is running and initialize WCF client for frame routing.
         // Fire-and-forget async to avoid blocking the UI thread during port detection.
@@ -124,14 +139,22 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SetupDefaultStarterLayout();
         RebuildPageTabsUI();
 
-        // 4. Hook up USB Hardware physical touch events to Skia RouteTouch & hardware page swipe navigation
+        // Single input module: gesture machine + outcome application + edit-mode
+        // manipulation. All input sources feed it; page-switch UI work stays here.
+        _inputController = new Input.InputController(
+            navigateTo: SwitchToPage,
+            requestRender: () => SkiaCanvas.InvalidateVisual());
+
+        // 4. Hook up USB Hardware physical touch events to Skia RouteTouch & hardware page swipe navigation.
+        // Display touches are runtime input: they always route to widgets (hotkeys
+        // fire on the device even while the desktop is in edit mode) — only the
+        // mouse path carries the desktop edit-mode veto.
         _usbDevice.OnTouchEvent += (point, touchType) =>
         {
-            Dispatcher.Invoke(() =>
-            {
-                var outcome = _gestureInterpreter.Feed(touchType, point.X, point.Y, _profile.Pages.Count, _profile.ActivePageIndex);
-                ApplyGestureOutcome(outcome, point.X, point.Y, routeWidgets: true);
-            });
+            Dispatcher.Invoke(() => _inputController.Feed(
+                touchType, point.X, point.Y,
+                suppressWidgetRouting: false,
+                _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage));
         };
 
         // 5. Start 30 FPS Skia Render Loop & Hardware Frame Streamer
@@ -156,12 +179,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         Closed += (s, e) =>
         {
             _renderTimer.Stop();
-            _touchPollCts?.Cancel();
-            _touchPollCts?.Dispose();
-            _sensorPollCts?.Cancel();
-            _sensorPollCts?.Dispose();
-            _frameTimePollCts?.Cancel();
-            _frameTimePollCts?.Dispose();
+            _touchPoll.Stop();
+            _sensorPoll.Stop();
+            _frameTimePoll.Stop();
             _frameSinkRouter.Dispose();
 
             // Reset display to standby (clear framebuffer + switch to welcome screen)
@@ -339,59 +359,25 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SelectWidget(null);
     }
 
-    /// <summary>
-    /// Feeds a mouse input sample through the shared gesture machine. The mouse
-    /// is expressed in the same Down/Move/Up vocabulary as hardware touch, so
-    /// swipes, arrow-taps, and widget touches all follow the canonical gesture
-    /// rules. Widget routing is suppressed while the canvas is in edit mode;
-    /// page actions are still applied.
-    /// </summary>
-    private void FeedMouseGesture(TouchEventType type, Point pos)
-    {
-        var outcome = _gestureInterpreter.Feed(type, (float)pos.X, (float)pos.Y, _profile.Pages.Count, _profile.ActivePageIndex);
-        ApplyGestureOutcome(outcome, (float)pos.X, (float)pos.Y, routeWidgets: !_compositor.IsEditMode);
-    }
-
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
         _isMouseDown = true;
         var pos = e.GetPosition(SkiaCanvas);
-        _lastMousePos = pos;
 
         // Hit test against active widgets
         var hit = SkiaFrameCompositor.HitTest(_profile.ActivePage, (float)pos.X, (float)pos.Y);
         SelectWidget(hit);
 
-        // Edit-mode manipulation (resize / icon-drag / widget-drag) stays wholly
-        // in the mouse handlers and gates the gesture machine for this gesture.
-        if (hit != null && _compositor.IsEditMode)
+        // Edit-mode manipulation (resize / icon-drag / widget-drag) is decided
+        // inside the input controller; a non-manipulating press feeds the
+        // shared gesture machine (page navigation + widget touch routing). The
+        // mouse carries the edit-mode veto: authoring presses manipulate.
+        var kind = _inputController.Begin(hit, _selectedWidget, (float)pos.X, (float)pos.Y, _compositor.IsEditMode);
+        if (kind == Input.ManipulationKind.None)
         {
-            // Check if click is in the resize handle (bottom-right corner)
-            if (hit == _selectedWidget &&
-                pos.X >= hit.X + hit.Width - ResizeHandleSize &&
-                pos.Y >= hit.Y + hit.Height - ResizeHandleSize)
-            {
-                _isResizingWidget = true;
-            }
-            else if (hit.ActiveInstance is HotkeyButtonWidget hotkeyWidget &&
-                     IsPointOverWidgetIcon(hotkeyWidget, hit.Width, hit.Height,
-                         (float)pos.X - hit.X, (float)pos.Y - hit.Y))
-            {
-                _isDraggingIcon = true;
-                _iconDragMoved = false;
-                if (TryGetWidgetIconCenter(hotkeyWidget, hit.Width, hit.Height, out var iconCenter, out _))
-                    _iconGrabOffset = new Point(iconCenter.X - ((float)pos.X - hit.X), iconCenter.Y - ((float)pos.Y - hit.Y));
-            }
-            else
-            {
-                _isDraggingWidget = true;
-            }
-            return;
+            _inputController.Feed(TouchEventType.TouchDown, (float)pos.X, (float)pos.Y,
+                _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
         }
-
-        // Non-manipulating press feeds the shared gesture machine (page
-        // navigation + widget touch routing).
-        FeedMouseGesture(TouchEventType.TouchDown, pos);
     }
 
     private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
@@ -399,58 +385,19 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (!_isMouseDown) return;
         var pos = e.GetPosition(SkiaCanvas);
 
-        if (_isResizingWidget && _selectedWidget != null && _compositor.IsEditMode)
+        // A manipulation consumes the sample; otherwise it feeds the machine.
+        if (_inputController.Move(_selectedWidget, (float)pos.X, (float)pos.Y, _compositor.IsEditMode, out bool changed))
         {
-            float newW = (float)(pos.X - _selectedWidget.X);
-            float newH = (float)(pos.Y - _selectedWidget.Y);
-            _selectedWidget.Width = Math.Max(40, newW);
-            _selectedWidget.Height = Math.Max(30, newH);
-
-            _lastMousePos = pos;
-            UpdateInspectorTransformsOnly();
-            SkiaCanvas.InvalidateVisual();
-        }
-        else if (_isDraggingWidget && _selectedWidget != null && _compositor.IsEditMode)
-        {
-            float dx = (float)(pos.X - _lastMousePos.X);
-            float dy = (float)(pos.Y - _lastMousePos.Y);
-
-            _selectedWidget.X += dx;
-            _selectedWidget.Y += dy;
-
-            _lastMousePos = pos;
-            UpdateInspectorTransformsOnly();
-            SkiaCanvas.InvalidateVisual();
-        }
-        else if (_isDraggingIcon && _selectedWidget != null &&
-                 _selectedWidget.ActiveInstance is HotkeyButtonWidget iconHotkey &&
-                 _compositor.IsEditMode)
-        {
-            float localX = (float)pos.X - _selectedWidget.X;
-            float localY = (float)pos.Y - _selectedWidget.Y;
-            if (TryGetWidgetIconCenter(iconHotkey, _selectedWidget.Width, _selectedWidget.Height, out var iconCenter, out float half))
+            if (changed)
             {
-                float cx = Math.Clamp(localX + (float)_iconGrabOffset.X, half, _selectedWidget.Width - half);
-                float cy = Math.Clamp(localY + (float)_iconGrabOffset.Y, half, _selectedWidget.Height - half);
-                int newX = (int)Math.Round(cx - _selectedWidget.Width / 2f);
-                int newY = (int)Math.Round(cy - _selectedWidget.Height * 0.31f);
-                if (newX != iconHotkey.IconOffsetX || newY != iconHotkey.IconOffsetY)
-                {
-                    _iconDragMoved = true;
-                    iconHotkey.IconOffsetX = newX;
-                    iconHotkey.IconOffsetY = newY;
-                    iconHotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetX), newX);
-                    iconHotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetY), newY);
-                    _selectedWidget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetX)] = newX;
-                    _selectedWidget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetY)] = newY;
-                    SkiaCanvas.InvalidateVisual();
-                }
+                UpdateInspectorTransformsOnly();
+                SkiaCanvas.InvalidateVisual();
             }
+            return;
         }
-        else
-        {
-            FeedMouseGesture(TouchEventType.TouchMove, pos);
-        }
+
+        _inputController.Feed(TouchEventType.TouchMove, (float)pos.X, (float)pos.Y,
+            _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -458,70 +405,24 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var pos = e.GetPosition(SkiaCanvas);
 
         // A manipulation gesture never reaches the gesture machine — it stays
-        // wholly in the mouse handlers (resize / drag / icon-drag).
-        if (!_isDraggingWidget && !_isResizingWidget && !_isDraggingIcon && _isMouseDown)
+        // wholly in the input controller (resize / drag / icon-drag).
+        bool wasManipulating = _inputController.End(_selectedWidget, _compositor.IsEditMode, _profile.ActivePage.SnapToGrid, out bool iconMoved);
+        if (!wasManipulating && _isMouseDown)
         {
-            FeedMouseGesture(TouchEventType.TouchUp, pos);
+            _inputController.Feed(TouchEventType.TouchUp, (float)pos.X, (float)pos.Y,
+                _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
         }
 
-        if ((_isDraggingWidget || _isResizingWidget) && _selectedWidget != null && _profile.ActivePage.SnapToGrid)
+        _isMouseDown = false;
+
+        if (wasManipulating)
         {
-            _selectedWidget.X = (float)Math.Round(_selectedWidget.X / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-            _selectedWidget.Y = (float)Math.Round(_selectedWidget.Y / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
-            if (_isResizingWidget)
-            {
-                _selectedWidget.Width = (float)Math.Round(_selectedWidget.Width / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-                _selectedWidget.Height = (float)Math.Round(_selectedWidget.Height / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
-            }
             UpdateInspectorTransformsOnly();
             SkiaCanvas.InvalidateVisual();
         }
 
-        _isMouseDown = false;
-        _isDraggingWidget = false;
-        _isResizingWidget = false;
-        _isDraggingIcon = false;
-
-        if (_iconDragMoved && _selectedWidget != null)
+        if (iconMoved)
             UpdateInspectorPanel();
-        _iconDragMoved = false;
-    }
-
-    private static bool TryGetWidgetIconCenter(HotkeyButtonWidget hotkey, float width, float height, out SKPoint center, out float half)
-    {
-        float maxIconSize = Math.Min(width, height * 0.62f);
-        float iconSize = hotkey.IconSize > 0 ? hotkey.IconSize : Math.Min(width, height) * 0.4f;
-        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
-        half = iconSize / 2f;
-        if (half <= 0f)
-        {
-            center = default;
-            return false;
-        }
-        center = new SKPoint(
-            Math.Clamp(width / 2f + hotkey.IconOffsetX, half, width - half),
-            Math.Clamp(height * 0.31f + hotkey.IconOffsetY, half, height - half));
-        return true;
-    }
-
-    private static bool IsPointOverWidgetIcon(HotkeyButtonWidget hotkey, float width, float height, float localX, float localY)
-    {
-        if (string.IsNullOrWhiteSpace(hotkey.IconFile))
-        {
-            if (string.IsNullOrWhiteSpace(hotkey.Icon) || !GriddyIcons.Contains(hotkey.Icon))
-                return false;
-        }
-        else if (!SvgIconLoader.TryGetPath(hotkey.IconFile, out _))
-        {
-            return false;
-        }
-
-        if (!TryGetWidgetIconCenter(hotkey, width, height, out var center, out float half))
-            return false;
-
-        float dx = localX - center.X;
-        float dy = localY - center.Y;
-        return dx * dx + dy * dy <= half * half;
     }
 
     #endregion
@@ -558,8 +459,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
             PanelCustomProperties.Children.Clear();
             if (_selectedWidget.ActiveInstance != null)
             {
-                Inspector.WidgetInspectorPanelBuilder.BuildCustomPropertyEditors(
+                Inspector.InspectorPanelRenderer.Render(
                     _selectedWidget,
+                    Inspector.InspectorModelBuilder.Describe(_selectedWidget),
                     PanelCustomProperties.Children,
                     () => _isUpdatingInspector,
                     new Inspector.InspectorCallbacks
@@ -567,7 +469,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
                         TryFindResource = name => TryFindResource(name),
                         ApplyInspectorPropertyValue = ApplyInspectorPropertyValue,
                         ShowIconSelectorPopup = ShowIconSelectorPopup,
-                        AttachDropdownWithinWindow = AttachDropdownWithinWindow
+                        AttachDropdownWithinWindow = AttachDropdownWithinWindow,
+                        BrowseFile = (title, filter) =>
+                        {
+                            var dlg = new Microsoft.Win32.OpenFileDialog { Title = title, Filter = filter };
+                            return dlg.ShowDialog() == true ? dlg.FileName : null;
+                        },
+                        BrowseFolder = title =>
+                        {
+                            var dlg = new Microsoft.Win32.OpenFolderDialog { Title = title };
+                            return dlg.ShowDialog() == true ? dlg.FolderName : null;
+                        }
                     });
             }
         }

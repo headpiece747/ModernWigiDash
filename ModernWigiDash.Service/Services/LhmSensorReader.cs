@@ -108,10 +108,10 @@ public sealed class LhmSensorReader(
         }
     }
 
-    private static SensorSnapshotDto BuildSnapshot(IEnumerable<IHardware> hardware)
+    private SensorSnapshotDto BuildSnapshot(IEnumerable<IHardware> hardware)
     {
         List<SensorReadingDto> readings = [];
-        var now = TimeProvider.System.GetUtcNow().UtcDateTime;
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
 
         foreach (var hardwareItem in hardware)
         {

@@ -118,15 +118,17 @@ public sealed class GestureInterpreter
                     }
                 }
 
-                // Arrow-tap fallback: stationary tap near the left/right edges.
-                if (Math.Abs(deltaX) < TapThreshold && Math.Abs(deltaY) < TapThreshold)
+                // Arrow-tap fallback: stationary tap near the left/right edges
+                // (the canonical 60/964 × 200–400 zone owned by IsInArrowTapZone).
+                if (Math.Abs(deltaX) < TapThreshold && Math.Abs(deltaY) < TapThreshold &&
+                    IsInArrowTapZone(x, y))
                 {
-                    if (x <= EdgeLeftX && y >= EdgeTopY && y <= EdgeBottomY && activePageIndex > 0)
+                    if (x <= EdgeLeftX && activePageIndex > 0)
                     {
                         return new GestureOutcome(GesturePageAction.PrevPage, false, x, y, TouchEventType.TouchUp);
                     }
 
-                    if (x >= EdgeRightX && y >= EdgeTopY && y <= EdgeBottomY && activePageIndex < pageCount - 1)
+                    if (x >= EdgeRightX && activePageIndex < pageCount - 1)
                     {
                         return new GestureOutcome(GesturePageAction.NextPage, false, x, y, TouchEventType.TouchUp);
                     }
@@ -137,13 +139,5 @@ public sealed class GestureInterpreter
         }
 
         return new GestureOutcome(GesturePageAction.None, true, x, y, TouchEventType.TouchMove);
-    }
-
-    /// <summary>
-    /// Clears in-progress gesture state (e.g. when the active page changes mid-gesture).
-    /// </summary>
-    public void Reset()
-    {
-        _active = false;
     }
 }

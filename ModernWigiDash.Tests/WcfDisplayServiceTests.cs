@@ -1,8 +1,10 @@
 using System.IO;
 using System.Runtime.Serialization;
+using System.Threading;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModernWigiDash.Hardware.Transport;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Service.Contracts;
 using ModernWigiDash.Service.Services;
 using ModernWigiDash.Service.Wcf;
@@ -12,24 +14,15 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class WcfDisplayServiceTests
 {
-    private static ModernWigiDashDisplayService CreateService(
-        out ChannelWriter<byte[]> writer,
-        out ChannelReader<byte[]> reader)
+    private static ModernWigiDashDisplayService CreateService(FrameDelivery? delivery = null)
     {
-        var channel = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = true
-        });
-        writer = channel.Writer;
-        reader = channel.Reader;
+        delivery ??= new FrameDelivery(isReady: () => true);
 
-        var touchChannel = Channel.CreateUnbounded<DisplayTouchInput>();
+        var touchChannel = Channel.CreateUnbounded<TouchEventInfo>();
         var transport = new DisplayHidTransport(null);
         return new ModernWigiDashDisplayService(
             transport,
-            null,
-            writer,
+            delivery,
             touchChannel.Reader,
             NullLogger<ModernWigiDashDisplayService>.Instance);
     }
@@ -39,7 +32,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void SendFrame_NullPayload_ReturnsFalse()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         bool result = service.SendFrame(null!);
 
@@ -49,7 +42,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void SendFrame_EmptyPayload_ReturnsFalse()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         bool result = service.SendFrame(new FramePayload());
 
@@ -59,14 +52,25 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void SendFrame_ValidPayload_QueuesCopyAndReturnsTrue()
     {
-        var service = CreateService(out _, out var reader);
+        var delivered = new List<byte[]>();
+        using var signal = new ManualResetEventSlim(false);
+        using var delivery = new FrameDelivery(
+            send: bytes =>
+            {
+                lock (delivered) { delivered.Add(bytes); }
+                signal.Set();
+                return true;
+            });
+        var service = CreateService(delivery);
         byte[] original = new byte[64];
         for (int i = 0; i < original.Length; i++) original[i] = (byte)i;
 
         bool result = service.SendFrame(new FramePayload { Data = original });
 
         Assert.IsTrue(result);
-        Assert.IsTrue(reader.TryRead(out byte[]? queued));
+        Assert.IsTrue(signal.Wait(TimeSpan.FromSeconds(5)), "Delivery must reach the send seam");
+        byte[]? queued;
+        lock (delivered) { queued = delivered.FirstOrDefault(); }
         Assert.IsNotNull(queued);
         CollectionAssert.AreEqual(original, queued);
         // The queued copy must be independent of the caller's buffer.
@@ -77,7 +81,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void SendFrame_OversizedPayload_ReturnsFalse()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
         var payload = new FramePayload
         {
             Data = new byte[DisplayProtocolConstants.FrameBufferSize * 2 + 1]
@@ -92,7 +96,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void GetVersion_ReturnsNonEmptyVersion()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         string version = service.GetVersion();
 
@@ -102,7 +106,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void GetDiagnostics_ReturnsServiceNameAndEndpoint()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         ServiceDiagnostics diag = service.GetDiagnostics();
 
@@ -114,7 +118,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void GetFrameTimeSnapshot_WithoutReader_ReturnsUnavailableSnapshot()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         FrameTimeSnapshotDto snapshot = service.GetFrameTimeSnapshot();
 
@@ -125,7 +129,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void GetSensorSnapshot_WithoutReader_ReturnsDisconnectedSnapshot()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         SensorSnapshotDto snapshot = service.GetSensorSnapshot();
 
@@ -135,7 +139,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void PollTouch_WithoutReader_ReturnsNull()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         Assert.IsNull(service.PollTouch());
     }
@@ -143,11 +147,29 @@ public class WcfDisplayServiceTests
     // ── Data contracts ─────────────────────────────────────
 
     [TestMethod]
+    public void NormalizeTouchType_Down_ReturnsTouchDown()
+    {
+        Assert.AreEqual(TouchEventType.TouchDown, DisplayHardwareWorkerService.NormalizeTouchType(DisplayProtocolConstants.TouchTypeDown));
+    }
+
+    [TestMethod]
+    public void NormalizeTouchType_Up_ReturnsTouchUp()
+    {
+        Assert.AreEqual(TouchEventType.TouchUp, DisplayHardwareWorkerService.NormalizeTouchType(DisplayProtocolConstants.TouchTypeUp));
+    }
+
+    [TestMethod]
+    public void NormalizeTouchType_Unknown_ReturnsTouchMove()
+    {
+        Assert.AreEqual(TouchEventType.TouchMove, DisplayHardwareWorkerService.NormalizeTouchType(0x7F));
+    }
+
+    [TestMethod]
     public void TouchEventInfo_DataContract_RoundTrips()
     {
         var info = new TouchEventInfo
         {
-            Type = 1,
+            Type = TouchEventType.TouchDown,
             X = 12,
             Y = 34,
             TimestampUtcTicks = 123456789
@@ -222,7 +244,7 @@ public class WcfDisplayServiceTests
             .FirstOrDefault();
 
         Assert.IsNotNull(attr);
-        Assert.AreEqual("http://modernwigidash.service/2024", attr!.Namespace);
+        Assert.AreEqual("http://modernwigidash.service/2024", attr.Namespace);
     }
 
     // ── Standby / Shutdown ─────────────────────────────────
@@ -230,7 +252,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void Shutdown_WhenTransportDisconnected_ReturnsFalse_WithoutThrowing()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         bool result = service.Shutdown();
 
@@ -240,7 +262,7 @@ public class WcfDisplayServiceTests
     [TestMethod]
     public void Shutdown_IsIdempotent_WithoutThrowing()
     {
-        var service = CreateService(out _, out _);
+        var service = CreateService();
 
         _ = service.Shutdown();
         bool second = service.Shutdown();

@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.App.FrameSinks;
@@ -34,10 +35,11 @@ public sealed class FrameSinkRouter : IDisposable
     }
 
     /// <summary>
-    /// Sends <paramref name="frame"/> to the first ready sink. Returns true when
-    /// a sink accepted the frame.
+    /// Sends <paramref name="frame"/> to the first ready sink. Returns the
+    /// sink's truthful result; <see cref="FrameDeliveryResult.Dropped"/> when
+    /// no sink can route.
     /// </summary>
-    public bool Send(SKBitmap frame)
+    public FrameDeliveryResult Send(SKBitmap frame)
     {
         if (_wcfSink.IsReady)
             return _wcfSink.SendFrame(frame);
@@ -51,7 +53,7 @@ public sealed class FrameSinkRouter : IDisposable
         if (_isHardwareActive?.Invoke() == true)
             _retryTrigger?.Invoke();
 
-        return false;
+        return FrameDeliveryResult.Dropped;
     }
 
     public void Dispose()

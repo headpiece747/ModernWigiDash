@@ -16,63 +16,9 @@ public partial class MainWindow
 {
     #region IModernWigiDashContext Implementation for Telemetry & Host Services
 
-    // In-session widget settings store. Keys map to theme properties when they
-    // match, otherwise they live in this dictionary for the session.
-    private readonly Dictionary<string, string> _widgetSettings = new();
-
-    public string GetSetting(string key, string defaultValue = "")
-    {
-        if (ThemeSettings.Theme != null && typeof(ThemeSettings).GetProperty(key)?.PropertyType == typeof(string))
-        {
-            return (string?)ThemeSettings.Theme.GetType().GetProperty(key)?.GetValue(ThemeSettings.Theme) ?? defaultValue;
-        }
-
-        return _widgetSettings.TryGetValue(key, out var value) ? value : defaultValue;
-    }
-
-    public void SetSetting(string key, string value)
-    {
-        if (ThemeSettings.Theme != null && typeof(ThemeSettings).GetProperty(key)?.PropertyType == typeof(string))
-        {
-            ThemeSettings.Theme.GetType().GetProperty(key)?.SetValue(ThemeSettings.Theme, value);
-            return;
-        }
-
-        _widgetSettings[key] = value;
-    }
     public void LogInfo(string message) => FileLog.Write($"[Display INFO] {message}");
     public void LogError(string message, Exception? ex = null) => FileLog.Write($"[Display ERROR] {message}{(ex != null ? $": {ex}" : "")}");
     public void RequestRender() => Dispatcher.InvokeAsync(() => SkiaCanvas?.InvalidateVisual());
-    public bool TryGetSensorValue(string sensorId, out float value)
-    {
-        value = 0f;
-        var snapshot = LhmSensorStore.ReadSnapshot();
-        if (!snapshot.IsConnected) return false;
-
-        var reading = snapshot.Readings.FirstOrDefault(r =>
-            string.Equals(r.SensorId, sensorId, StringComparison.OrdinalIgnoreCase))
-            ?? snapshot.Readings.FirstOrDefault(r =>
-                string.Equals(r.Label, sensorId, StringComparison.OrdinalIgnoreCase));
-        if (reading == null) return false;
-
-        value = (float)reading.Value;
-        return true;
-    }
-
-    public string GetSensorFormattedString(string sensorId)
-    {
-        var snapshot = LhmSensorStore.ReadSnapshot();
-        if (!snapshot.IsConnected) return "N/A";
-
-        var reading = snapshot.Readings.FirstOrDefault(r =>
-            string.Equals(r.SensorId, sensorId, StringComparison.OrdinalIgnoreCase))
-            ?? snapshot.Readings.FirstOrDefault(r =>
-                string.Equals(r.Label, sensorId, StringComparison.OrdinalIgnoreCase));
-        if (reading == null) return "N/A";
-
-        string value = reading.Value.ToString("0.#");
-        return string.IsNullOrWhiteSpace(reading.Unit) ? value : $"{value} {reading.Unit}";
-    }
 
     public void RequestInspectorRefresh()
     {

@@ -2,27 +2,27 @@ using ModernWigiDash.Sdk;
 using System.Diagnostics;
 using System.Threading.Channels;
 using ModernWigiDash.Hardware.Transport;
+using ModernWigiDash.Service.Wcf;
 
 namespace ModernWigiDash.Service.Services;
 
 /// <summary>
-/// Worker service managing the physical USB display hardware connection and frame buffer streaming.
-/// Also polls for touch input from the display and relays events via a channel.
+/// Worker service managing the physical USB display hardware connection and touch input.
+/// Frame delivery is owned by the shared <see cref="FrameDelivery"/> module: the WCF
+/// service pushes bytes in, and this worker's only frame role is exposing delivery stats.
 /// </summary>
 public sealed class DisplayHardwareWorkerService(
-    ChannelReader<byte[]> frameChannelReader,
-    ChannelWriter<DisplayTouchInput> touchWriter,
+    ChannelWriter<TouchEventInfo> touchWriter,
     IDisplayTransport transport,
+    FrameDelivery frameDelivery,
     ILogger<DisplayHardwareWorkerService> logger,
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
-    private long _framesProcessed;
 
-    private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TouchPollInterval = TimeSpan.FromMilliseconds(16);
 
-    public long TotalFramesProcessed => Volatile.Read(ref _framesProcessed);
+    public long TotalFramesProcessed => frameDelivery.FramesSent;
 
     /// <summary>
     /// Puts the display into standby before the host shuts the service down
@@ -64,60 +64,9 @@ public sealed class DisplayHardwareWorkerService(
         }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var frameTask = RunFrameLoop(linkedCts.Token);
         var touchTask = RunTouchPollLoop(linkedCts.Token);
 
-        await Task.WhenAll(frameTask, touchTask);
-    }
-
-    private async Task RunFrameLoop(CancellationToken stoppingToken)
-    {
-                LogToFile("[FrameLoop] Starting frame loop");
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                timeoutCts.CancelAfter(FrameTimeout);
-
-                try
-                {
-                    if (await frameChannelReader.WaitToReadAsync(timeoutCts.Token))
-                    {
-                        // Drain all queued frames, only send the latest to USB
-                        // (avoids replaying stale frames when WCF is faster than USB)
-                        byte[]? latestFrame = ChannelFrameCoalescer.DrainToLatest(frameChannelReader);
-
-                        if (latestFrame != null)
-                        {
-                            bool success = transport.SendFrame(latestFrame);
-                            if (success)
-                            {
-                                long count = Interlocked.Increment(ref _framesProcessed);
-                                if (count <= 5 || count % 60 == 0)
-                                    LogToFile($"[HW] Frame #{count} sent to USB ({latestFrame.Length} bytes)");
-                            }
-                            else
-                            {
-                                LogToFile($"[HW] Frame send FAILED (buffer={latestFrame.Length} bytes)");
-                            }
-                        }
-                    }
-                }
-                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    LogToFile("[FrameLoop] Timeout - no frames received");
-                    // No-op on timeout — don't clear the display or send any commands.
-                    // The display should keep showing the last frame it received.
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception ex)
-            {
-                LogToFile($"Frame loop error: {ex.Message}");
-                await Task.Delay(100, stoppingToken);
-            }
-        }
+        await Task.WhenAll(touchTask);
     }
 
     private async Task RunTouchPollLoop(CancellationToken stoppingToken)
@@ -145,12 +94,12 @@ public sealed class DisplayHardwareWorkerService(
                 var touch = transport.ReadTouch();
                 if (touch is TouchReport t)
                 {
-                    var evt = new DisplayTouchInput
+                    var evt = new TouchEventInfo
                     {
-                        Type = t.Type,
+                        Type = NormalizeTouchType(t.Type),
                         X = t.X,
                         Y = t.Y,
-                        Timestamp = _timeProvider.GetUtcNow().UtcDateTime
+                        TimestampUtcTicks = _timeProvider.GetUtcNow().UtcTicks
                     };
 
                     touchWriter.TryWrite(evt);
@@ -167,16 +116,18 @@ public sealed class DisplayHardwareWorkerService(
         }
     }
 
-    private static void LogToFile(string msg) => FileLog.Write(msg);
-}
+    /// <summary>
+    /// Maps the raw vendor protocol byte to the SDK touch vocabulary. This is
+    /// the single normalization site: the contract and the App only ever see
+    /// <see cref="TouchEventType"/>. Protocol: None=0, Down=1 (contact +
+    /// movement), Up=2 (release).
+    /// </summary>
+    public static TouchEventType NormalizeTouchType(byte raw) => raw switch
+    {
+        DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
+        DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
+        _ => TouchEventType.TouchMove
+    };
 
-/// <summary>
-/// Touch input event from the display hardware.
-/// </summary>
-public sealed class DisplayTouchInput
-{
-    public byte Type { get; init; }
-    public short X { get; init; }
-    public short Y { get; init; }
-    public DateTime Timestamp { get; init; }
+    private static void LogToFile(string msg) => FileLog.Write(msg);
 }

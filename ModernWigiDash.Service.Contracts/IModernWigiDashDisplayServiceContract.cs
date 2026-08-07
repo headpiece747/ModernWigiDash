@@ -1,4 +1,5 @@
 using System.Runtime.Serialization;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Service.Contracts;
 
 namespace ModernWigiDash.Service.Wcf;
@@ -104,12 +105,14 @@ public interface IModernWigiDashDisplayServiceContract
 
 /// <summary>
 /// Data contract for touch input events relayed from the display hardware.
+/// Type is already normalized to the SDK vocabulary (<see cref="TouchEventType"/>)
+/// at the service's transport seam — the App never sees vendor protocol bytes.
 /// </summary>
 [DataContract(Namespace = "http://modernwigidash.service/2024")]
 public class TouchEventInfo
 {
     [DataMember]
-    public byte Type { get; set; }
+    public TouchEventType Type { get; set; }
 
     [DataMember]
     public short X { get; set; }

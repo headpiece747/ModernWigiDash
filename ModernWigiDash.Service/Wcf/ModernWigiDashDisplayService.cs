@@ -13,16 +13,16 @@ namespace ModernWigiDash.Service.Wcf;
 /// When running as a Windows Service with LocalSystem account, this service
 /// has full access to USB HID/WinUSB devices required for the WigiDash display.
 ///
-/// Frame writes are routed through the Channel&lt;byte[]&gt; so that
-/// DisplayHardwareWorkerService is the sole USB writer (avoids concurrent access).
+/// Frame writes are pushed into the shared <see cref="FrameDelivery"/> module,
+/// whose single policy (DropOldest → drain-to-latest → paced send) owns the
+/// service hop exactly as it owns the App's WCF and direct-USB hops.
 /// </summary>
 [CoreWCF.ServiceBehavior(IncludeExceptionDetailInFaults = false)]
 public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContract
 {
     private readonly IDisplayTransport _transport;
-    private readonly DisplayHardwareWorkerService? _hardwareWorker;
-    private readonly ChannelWriter<byte[]> _frameChannelWriter;
-    private readonly ChannelReader<DisplayTouchInput> _touchReader;
+    private readonly FrameDelivery _frameDelivery;
+    private readonly ChannelReader<TouchEventInfo> _touchReader;
     private readonly LhmSensorReader? _lhmSensorReader;
     private readonly FrameTimeReader? _frameTimeReader;
     private readonly ILogger<ModernWigiDashDisplayService> _logger;
@@ -33,17 +33,15 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
 
     public ModernWigiDashDisplayService(
         IDisplayTransport transport,
-        DisplayHardwareWorkerService? hardwareWorker,
-        ChannelWriter<byte[]> frameChannelWriter,
-        ChannelReader<DisplayTouchInput> touchReader,
+        FrameDelivery frameDelivery,
+        ChannelReader<TouchEventInfo> touchReader,
         ILogger<ModernWigiDashDisplayService> logger,
         LhmSensorReader? lhmSensorReader = null,
         FrameTimeReader? frameTimeReader = null,
         TimeProvider? timeProvider = null)
     {
         _transport = transport;
-        _hardwareWorker = hardwareWorker;
-        _frameChannelWriter = frameChannelWriter;
+        _frameDelivery = frameDelivery;
         _touchReader = touchReader;
         _lhmSensorReader = lhmSensorReader;
         _frameTimeReader = frameTimeReader;
@@ -115,7 +113,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     {
         try
         {
-            long frames = _hardwareWorker?.TotalFramesProcessed ?? 0;
+            long frames = _frameDelivery.FramesSent;
             return new DisplayStatus
             {
                 IsConnected = _transport.IsConnected,
@@ -174,14 +172,13 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
                 return false;
             }
 
-            // Route through the channel so DisplayHardwareWorkerService is the sole USB writer.
-            // DropOldest policy ensures we always send the most recent frame (no buildup).
-            byte[] frameCopy = payload.Data.ToArray();
-            bool queued = _frameChannelWriter.TryWrite(frameCopy);
+            // Push through the shared delivery module so the service hop obeys
+            // the same DropOldest → drain-to-latest policy as every other hop.
+            bool queued = _frameDelivery.PushBytes(payload.Data.ToArray()) == ModernWigiDash.Sdk.FrameDeliveryResult.Queued;
             if (!queued)
             {
-                _logger.LogWarning("CoreWCF: SendFrame channel full — dropped frame ({Size} bytes)", frameCopy.Length);
-                LogToFile($"[WCF] SendFrame DROPPED: channel full ({frameCopy.Length} bytes)");
+                _logger.LogWarning("CoreWCF: SendFrame rejected ({Size} bytes)", payload.Data.Length);
+                LogToFile($"[WCF] SendFrame DROPPED: pipeline rejected ({payload.Data.Length} bytes)");
             }
             return queued;
         }
@@ -230,15 +227,11 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     {
         try
         {
+            // The worker normalizes the raw protocol byte to TouchEventType at
+            // the transport seam, so this hop is a pure pass-through.
             if (_touchReader.TryRead(out var touch))
             {
-                return new TouchEventInfo
-                {
-                    Type = touch.Type,
-                    X = touch.X,
-                    Y = touch.Y,
-                    TimestampUtcTicks = touch.Timestamp.Ticks
-                };
+                return touch;
             }
             return null;
         }

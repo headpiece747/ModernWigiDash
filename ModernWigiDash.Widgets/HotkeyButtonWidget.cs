@@ -323,6 +323,14 @@ public class HotkeyButtonWidget : ModernWidgetBase
     private readonly SemaphoreSlim _actionGate = new(1, 1);
     private CancellationTokenSource? _actionCts;
 
+    /// <summary>
+    /// Test seam for action execution. Defaults to
+    /// <see cref="HotkeyActionExecutor.ExecuteAsync"/>; tests inject a fake so
+    /// the press path (gate, skip, failure logging) can be exercised without
+    /// launching processes or sending keys.
+    /// </summary>
+    public Func<IReadOnlyList<HotkeyAction>, CancellationToken, Task>? ActionExecutor { get; set; }
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor btnColor = SKColor.TryParse(ButtonColorHex, out var parsed) ? parsed : new SKColor(135, 0, 0);
@@ -438,7 +446,8 @@ public class HotkeyButtonWidget : ModernWidgetBase
                 Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
                 return;
             }
-            await HotkeyActionExecutor.ExecuteAsync([action], _actionCts.Token).ConfigureAwait(false);
+            var executor = ActionExecutor ?? HotkeyActionExecutor.ExecuteAsync;
+            await executor([action], _actionCts.Token).ConfigureAwait(false);
             Context?.RequestRender();
         }
         catch (OperationCanceledException)

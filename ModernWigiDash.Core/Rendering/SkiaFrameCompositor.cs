@@ -6,6 +6,13 @@ namespace ModernWigiDash.Core.Rendering;
 
 public class SkiaFrameCompositor : IDisposable
 {
+    /// <summary>
+    /// Size of the edit-mode resize handle, in canvas pixels. Single source of
+    /// truth for the affordance: drawn here, hit-tested by the App's
+    /// <c>InputController</c> against this constant.
+    /// </summary>
+    public const float ResizeHandleSize = 14f;
+
     private readonly SKBitmap _frameBuffer = new(1016, 592);
     private readonly SKTypeface _uiTypeface = FontHelper.GeistTypeface;
     private bool _isEditMode = true;
@@ -117,7 +124,9 @@ public class SkiaFrameCompositor : IDisposable
                     canvas.DrawRect(0, -20, textBounds.Width + 10, 20, badgeBg);
                     canvas.DrawText(badgeText, 5, -5, SKTextAlign.Left, font, textPaint);
 
-                    // Draw resize handle at bottom-right corner
+                    // Draw resize handle at bottom-right corner. The size is the
+                    // single source of truth for the edit-mode resize affordance —
+                    // the App's InputController hit-tests against this constant.
                     using var handlePaint = new SKPaint
                     {
 
@@ -125,7 +134,7 @@ public class SkiaFrameCompositor : IDisposable
                         Style = SKPaintStyle.Fill,
                         IsAntialias = true
                     };
-                    float hs = 10f;
+                    float hs = ResizeHandleSize;
                     canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, handlePaint);
                     using var handleStroke = new SKPaint
                     {

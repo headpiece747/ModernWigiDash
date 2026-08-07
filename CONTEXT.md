@@ -16,7 +16,8 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **PlacedWidgetInstance** | A widget bound to a position on a page — holds coordinates, size, rotation, opacity, and the widget instance. |
 | **Profile** | The persisted set of pages, active page index, and widget placements. |
 | **Frame** | A pixel buffer (SKBitmap) composited by `SkiaFrameCompositor`, converted to RGB565, and streamed to the display over USB or WCF. |
-| **FrameSink** | A destination for composited frames. `IFrameSink` exposes `SendFrame(SKBitmap)` + `IsReady`; each sink owns the encode→pool→coalesce→deliver lifecycle for one transport (`WcfFrameSink`, `DirectUsbFrameSink`). `FrameSinkRouter` picks the first-ready sink per render tick and owns the WCF-retry trigger. |
+| **FrameSink** | A destination for composited frames. `IFrameSink` exposes `SendFrame(SKBitmap)` + `IsReady`, returning a truthful `FrameDeliveryResult`. Each `FrameDelivery` instance is a sink for one transport (WCF, direct USB); `FrameSinkRouter` picks the first-ready sink per render tick and owns the WCF-retry trigger. |
+| **FrameDelivery** | The single frame-delivery policy module (Sdk): bounded DropOldest channel → drain-to-latest → paced send, owning encode, pooled exact-size buffers, and drop accounting. Two entry points feed one policy: `Push(SKBitmap)` (encode + pool) and `PushBytes(byte[])` (service hop). Every transport hop — App WCF sink, App direct-USB engine, Service `RunFrameLoop` — is an instance behind the same interface, so backlog behaves identically in every mode. Pacing default 33ms (the USB engine's device-capability rate); the two WCF hops set it to zero — the pipe round-trip already bounds them, and pacing there adds display-visible latency to page switches. Drop counting lives inside the module. |
 | **Render tick** | The 30 FPS `DispatcherTimer` in MainWindow that calls `Compositor.Compose()`, converts the frame to RGB565, and queues it for delivery. |
 
 ### Hardware / Transport
@@ -25,7 +26,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 |------|-----------|
 | **Transport** | The USB HID communication layer. `DisplayHidTransport` handles WinUSB (primary) and LibUsbDotNet (fallback) for control transfers, bulk writes, and touch reads. All operations are synchronous — no fake async wrappers. |
 | **FrameEncoder** | Converts SKBitmap (RGBA) → RGB565 little-endian byte array for the display's framebuffer format. Handles scaling when the source bitmap isn't exactly 1016×592. |
-| **TouchReport** | Hardware touch input from the display: type (Down/Up), X/Y coordinates. Polled by the worker and routed through a channel to MainWindow for widget delivery. |
+| **TouchReport** | Hardware touch input from the display: type (Down/Up), X/Y coordinates. Polled by the worker, normalized once at the service transport seam (`RunTouchPollLoop` maps the raw protocol byte to `TouchEventType`), and routed through a channel to MainWindow. The App never sees vendor protocol bytes. |
 | **DisplayProtocolConstants** | USB vendor commands, framebuffer dimensions, and protocol constants for the WigiDash hardware. |
 | **WinUsbBulkDevice** | Raw WinUSB P/Invoke wrapper for bulk and control transfers. Owned lifecycle (opens SetupAPI handle, initializes WinUSB, manages pipe timeouts). |
 
@@ -37,14 +38,16 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **WCF endpoint** | `net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc` — the CoreWCF service contract for IPC between the service and the app, hosted over a named pipe (kernel-level ACL security; no TCP exposure). |
 | **Service.Contracts** | Shared assembly containing the WCF contract interface (`IModernWigiDashDisplayServiceContract`), DTOs (`FrameTimeSnapshotDto`, `SensorSnapshotDto`), data models, and the WCF client (`ModernWigiDashDisplayServiceClient`). No Hardware dependency — purely a contract library. |
 | **DetectServicePort** | Protocol-verified service discovery: probes known named pipe endpoints → WCF GetVersion handshake. An impostor pipe cannot hijack frames without speaking the contract. |
+| **ServiceRoutingState** | Owns the App↔service routing truth (App): whether the service is active, the consecutive-failure counting that flips it (default 2), and the throttled re-detect trigger (10s). Poll loops read `IsServiceActive` as their readiness guard and report failures here — a service that dies after a successful connect stops the loops within a couple of failures instead of hammering a faulted channel. |
+| **WcfPollLoop** | One parameterized WCF poll loop (App): owns its cancellation lifecycle, readiness guard, failure logging, and inter-tick delay. Three producers (touch 16ms, sensor 1s, frame-time 1s) are instances with injected probes and sample sinks. |
 | **Standby** | The display's idle state: the built-in vendor Welcome screen. Entered on every owner-exit path — app close (via the WCF Shutdown op, or the engine's Dispose in direct-USB mode) and service stop (`DisplayHardwareWorkerService.StopAsync`). After standby, heartbeats stop, so the display also sleeps on its own timeout. |
 
 ### Telemetry & Data Flow
 
 | Term | Definition |
 |------|-----------|
-| **LhmSensorStore** | Static in-process cache of hardware sensor readings from LibreHardwareMonitor. Written by MainWindow's sensor polling loop; read by `HardwareMonitorWidget`. `LastUpdate` timestamp enables staleness detection. |
-| **FrameTimeStore** | Static in-process cache of FPS/frame-time snapshots from the ETW reader. Written by MainWindow's frame-time polling loop; read by `FrameTimeWidget`. Same staleness semantics. |
+| **LhmSensorStore** | Static in-process cache of hardware sensor readings from LibreHardwareMonitor. Written by the service's sensor reader (producer timestamp preserved); read by `HardwareMonitorWidget` through `TryReadFresh` — the store owns the staleness decision, consumers cannot skip it. Same staleness semantics. |
+| **FrameTimeStore** | Static in-process cache of FPS/frame-time snapshots from the ETW reader. Written by the service's frame-time reader (producer timestamp preserved); read by `FrameTimeWidget` through `TryReadFresh`. Same staleness semantics. |
 | **FrameTimeReader** | Background service that captures ETW present events (DXGI/D3D9/DxgKrnl) and builds `FrameTimeSnapshotDto` records. |
 | **LhmSensorReader** | Background service that polls LibreHardwareMonitor for hardware readings (CPU/GPU temps, fan speeds, etc.) and builds `SensorSnapshotDto`. |
 | **UpdateFromDto** | Maps WCF DTOs to widget-side records on the store. Centralizes the DTO→render-model translation in the store layer. |
@@ -56,7 +59,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **Widget metadata** | `[WidgetMetadataAttribute]` defines the plugin ID, display name, category, and default grid size. Read by `WidgetPluginLoader` for catalog registration. |
 | **Widget property** | `[WidgetPropertyAttribute]` on a widget's public property defines the inspector UI (text/number/boolean/color/choice). Widgets implement `IWidgetPropertyOptionsProvider` for dynamic choice lists. |
 | **Widget action** | `IWidgetActionInvoker` / `IWidgetActionPresentationProvider` — widgets that expose executable actions (e.g., Twitch login, hotkey execution). |
-| **Inspector panel** | The right-side settings panel in MainWindow; populates UI from `[WidgetProperty]` attributes and calls `ApplyInspectorPropertyValue` to write values back. |
+| **Inspector panel** | The right-side settings panel in MainWindow; populates UI from `[WidgetProperty]` attributes and calls `ApplyInspectorPropertyValue` to write values back. The reflection→editor mapping is a pure `EditorDescription` model (no WPF, no dialogs); a thin WPF mapper renders it, and write-back funnels through the single `ApplyInspectorPropertyValue` seam. Dynamic choice lists resolve through `IWidgetPropertyOptionsProvider` — no widget-specific `typeof` checks. |
 | **TextRenderHelper** | Shared rendering utilities: text truncation with ellipsis, centered text drawing, title/subtitle placeholders, sparkline charts, SVG path caching. |
 | **PriceFeedManager** | Shared WebSocket-based price streaming for stock/crypto/FX tickers. Binance (crypto WebSocket), Finnhub (stock WebSocket), Yahoo Finance REST fallback, CoinGecko REST fallback. |
 
@@ -71,9 +74,10 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 | Term | Definition |
 |------|-----------|
-| **Hardware touch** | Physical touch from the display, polled by DisplayHardwareWorkerService, routed through a `Channel<DisplayTouchInput>` to MainWindow. |
+| **Hardware touch** | Physical touch from the display, polled by DisplayHardwareWorkerService, normalized once at the service transport seam and routed through a `Channel<TouchEventInfo>` to MainWindow. |
 | **Widget touch** | Local-coordinate touch events delivered to `IModernWidget.OnTouch()` after compositor hit-testing. |
 | **Gesture** | Input-sequence interpretation shared by the USB-direct, WCF, and mouse paths: one `GestureInterpreter` state machine (swipe 70/80 px for page nav, arrow-tap 60/964 edge zones × 200–400 y-band for page switch, tap for widget touch). The mouse is fed through the same Down/Move/Up vocabulary via `FeedMouseGesture`; edit-mode widget manipulation gates the machine in the mouse handlers (widget routing suppressed in edit mode, page actions still applied). |
+| **InputController** | The single input module (App) behind which the gesture machine, its outcome application, the routing veto, widget routing, and edit-mode manipulation decisions (drag/resize/icon-grab + snap-to-grid math) all live. Callers — mouse handlers, hardware touch, WCF touch — only feed `Down/Move/Up` coordinates + a suppression flag; page-switch UI work stays in MainWindow behind one navigation seam. The suppression flag is a property of the *source*: the mouse passes the desktop edit-mode flag (authoring input — presses manipulate), the physical display passes false (runtime input — hotkeys fire on the device even in edit mode). |
 
 ## Architecture Overview
 
@@ -125,7 +129,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 ### Data Flow
 
 1. **Render loop**: MainWindow tick → `SkiaFrameCompositor.Compose()` → `FrameEncoder.ConvertToRgb565()` → Channel → `DisplayHardwareWorkerService.RunFrameLoop()` → `IDisplayTransport.SendFrame()`
-2. **Touch flow**: `DisplayHardwareWorkerService.RunTouchPollLoop()` → `Channel<DisplayTouchInput>` → MainWindow → `SkiaFrameCompositor.RouteTouch()` → `IModernWidget.OnTouch()`
+2. **Touch flow**: `DisplayHardwareWorkerService.RunTouchPollLoop()` (normalizes raw byte → `TouchEventType`) → `Channel<TouchEventInfo>` → MainWindow → `SkiaFrameCompositor.RouteTouch()` → `IModernWidget.OnTouch()`
 3. **Sensor flow**: `LhmSensorReader` (BackgroundService) → `LhmSensorStore.Update()` (static cache) → `HardwareMonitorWidget.Render()` reads snapshot
 4. **Frame-time flow**: `FrameTimeReader` (ETW BackgroundService) → `FrameTimeStore.Update()` (static cache) → `FrameTimeWidget.Render()` reads snapshot
 

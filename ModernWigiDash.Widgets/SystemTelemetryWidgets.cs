@@ -46,8 +46,10 @@ public class HardwareMonitorWidget : ModernWidgetBase
         SKColor accent = SKColor.TryParse(AccentColorHex, out var parsed) ? parsed : new SKColor(255, 205, 133);
         SKColor text = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
 
-        LhmSnapshot snapshot = LhmSensorStore.ReadSnapshot();
-        if (!snapshot.IsConnected || !snapshot.IsFresh(TimeSpan.FromSeconds(10)))
+        // The store owns the staleness decision; a stale or disconnected
+        // snapshot renders the unavailable state instead of frozen data.
+        LhmSnapshot? snapshot = LhmSensorStore.TryReadFresh();
+        if (snapshot == null || !snapshot.IsConnected)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start the ModernWigiDash service to read hardware sensors", text);
             return;

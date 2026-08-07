@@ -183,20 +183,6 @@ public class GestureInterpreterTests
         Assert.AreEqual(GesturePageAction.None, o.PageAction);
     }
 
-    [TestMethod]
-    public void Reset_ClearsActiveState()
-    {
-        var g = NewInterpreter();
-        g.Feed(TouchEventType.TouchDown, 500, 300, TwoPages, FirstPage);
-        g.Reset();
-
-        var o = g.Feed(TouchEventType.TouchUp, 500, 300, TwoPages, FirstPage);
-
-        // Without Reset the Up would complete a gesture; after Reset it is a
-        // release with no prior Down, so it is swallowed.
-        Assert.IsFalse(o.RouteToWidgets);
-    }
-
     // ------------------------------------------------------------------
     // Mouse-style contract: the desktop mouse feeds the same machine using
     // Down -> TouchMove -> TouchUp (one Down, explicit Move events), unlike

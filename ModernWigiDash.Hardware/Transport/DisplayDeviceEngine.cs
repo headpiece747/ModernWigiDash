@@ -3,7 +3,6 @@
 // Licensed under the MIT license.
 // </copyright>
 
-using System.Threading.Channels;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 
@@ -12,11 +11,16 @@ namespace ModernWigiDash.Hardware.Transport;
 /// <summary>
 /// Unified hardware engine for the USB display device.
 /// Uses DisplayHidTransport for all USB communication - no vendor DLL dependencies.
-/// All state is instance-owned: each engine owns its transport, frame queue, and
-/// connection lifecycle. Callers that need one device per process create exactly
+/// All state is instance-owned: each engine owns its transport and connection
+/// lifecycle. Callers that need one device per process create exactly
 /// one engine (MainWindow does; the service does).
+///
+/// Frame delivery (encode → pool → coalesce → paced send) does NOT live here:
+/// the App binds a <see cref="FrameDelivery"/> instance to
+/// <see cref="SendFrameBytes"/> and the engine only owns connection, standby,
+/// and touch. One delivery policy, every transport.
 /// </summary>
-public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
+public sealed class DisplayDeviceEngine : IDisposable
 {
     // -- Constants --
     public const int ScreenWidth = DisplayProtocolConstants.FramebufferWidth;  // 1016
@@ -29,18 +33,6 @@ public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
     private bool _connecting; // Prevent concurrent connection attempts
     private bool _serviceActive; // Yielded to the ModernWigiDash service
     private readonly Lock _lock = new();
-
-    // -- Frame Processing --
-    private int _framesSent;
-    private CancellationTokenSource? _frameQueueCts;
-    private readonly Channel<SKBitmap> _frameChannel =
-        Channel.CreateBounded<SKBitmap>(new BoundedChannelOptions(5)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest
-        });
-    private DateTime _lastFrameSent = DateTime.MinValue;
-    private static readonly TimeSpan MinFrameInterval =
-        TimeSpan.FromMilliseconds(33); // ~30 FPS - device capability
 
     // -- Lifecycle State --
     private int _isDisposed;
@@ -74,10 +66,6 @@ public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
                 Log("Initial connection failed, will retry via reconnect timer");
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
-
-        // Start this engine's frame processing loop.
-        _frameQueueCts = new CancellationTokenSource();
-        _ = Task.Run(() => ProcessFrameQueueAsync(_frameQueueCts.Token));
 
         // Setup reconnection timer
         _reconnectTimer = new Timer(_ =>
@@ -248,25 +236,28 @@ public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
     }
 
     /// <summary>
-    /// Queues a frame buffer for delivery to the device display.
-    /// Uses a bounded channel to prevent frame queue buildup.
+    /// Sends an already-encoded RGB565 frame to the device. The frame delivery
+    /// policy (pooling, coalescing, pacing) lives in <see cref="FrameDelivery"/>;
+    /// this is the engine's plain transport seam.
     /// </summary>
-    /// <returns>True when the frame was queued; false when the engine is not
-    /// connected, disposed, or the bounded queue was full (frame dropped).</returns>
-    public bool SendFrameBuffer(SKBitmap frameBitmap)
+    /// <returns>True when the frame was written to the transport.</returns>
+    public bool SendFrameBytes(byte[] rgb565)
     {
-        if (Volatile.Read(ref _isDisposed) != 0 || !_connected || frameBitmap == null)
+        if (Volatile.Read(ref _isDisposed) != 0 || !_connected || rgb565 == null || rgb565.Length == 0)
             return false;
 
-        // Copy the frame to prevent disposal issues
-        SKBitmap copy = frameBitmap.Copy();
-        if (!_frameChannel.Writer.TryWrite(copy))
+        DisplayHidTransport? transport;
+        lock (_lock)
         {
-            copy.Dispose();
-            return false;
+            transport = _transport;
         }
 
-        return true;
+        if (transport == null)
+            return false;
+
+#pragma warning disable S6966 // Transport SendFrame is synchronous by design (ADR-0001)
+        return transport.SendFrame(rgb565);
+#pragma warning restore S6966
     }
 
     /// <summary>
@@ -275,79 +266,6 @@ public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
     public void SimulateTouch(float x, float y, TouchEventType eventType)
     {
         OnTouchEvent?.Invoke(new SKPoint(x, y), eventType);
-    }
-
-    /// <summary>
-    /// Background task that processes the frame queue and sends frames to the device.
-    /// Uses proper rate limiting with async delays.
-    /// </summary>
-    private async Task ProcessFrameQueueAsync(CancellationToken ct)
-    {
-        int framesRead = 0;
-
-        while (!ct.IsCancellationRequested)
-        {
-            SKBitmap? skFrame = null;
-            try
-            {
-                skFrame = await _frameChannel.Reader.ReadAsync(ct);
-                framesRead++;
-
-                if (framesRead <= 3 || framesRead % 300 == 0)
-                    Log($"[FrameQueue] Read frame #{framesRead}, connected={_connected}");
-
-                // Rate limiting - delay if too soon since last frame (don't drop the frame)
-                var elapsed = TimeProvider.System.GetUtcNow().UtcDateTime - _lastFrameSent;
-                if (elapsed < MinFrameInterval)
-                {
-                    await Task.Delay((int)(MinFrameInterval.TotalMilliseconds - elapsed.TotalMilliseconds));
-                }
-
-                // Snapshot connection state (minimize lock hold time)
-                bool connected;
-                DisplayHidTransport? transport;
-                lock (_lock)
-                {
-                    connected = _connected;
-                    transport = _transport;
-                }
-
-                if (!connected || transport == null)
-                    continue;
-
-                // Convert SKBitmap to RGB565 byte array (outside lock - expensive)
-                byte[] frameBytes = FrameEncoder.ConvertToRgb565(skFrame!);
-
-                // Send frame via transport (outside lock - may block on I/O)
-#pragma warning disable S6966 // Transport SendFrame is synchronous by design for frame pacing
-                bool success = transport.SendFrame(frameBytes);
-#pragma warning restore S6966
-
-                if (success)
-                {
-                    lock (_lock)
-                    {
-                        _framesSent++;
-                        _lastFrameSent = TimeProvider.System.GetUtcNow().UtcDateTime;
-                    }
-                    if (_framesSent <= 5 || _framesSent % 30 == 0)
-                        Log($"Frame #{_framesSent} sent successfully");
-                }
-                else
-                {
-                    Log($"Frame send failed at frame #{_framesSent + 1}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"[FrameQueue] Warning: {ex.Message}");
-                await Task.Delay(100);
-            }
-            finally
-            {
-                skFrame?.Dispose();
-            }
-        }
     }
 
     /// <summary>
@@ -391,12 +309,6 @@ public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
 
         _reconnectTimer.Dispose();
-
-        // Stop this engine's frame queue before the standby command so no frame
-        // write races the welcome-screen switch.
-        _frameQueueCts?.Cancel();
-        _frameQueueCts?.Dispose();
-        _frameQueueCts = null;
 
         // Direct-USB mode owns the device, so the app is responsible for putting
         // the display into standby when it exits. In WCF mode (_transport is

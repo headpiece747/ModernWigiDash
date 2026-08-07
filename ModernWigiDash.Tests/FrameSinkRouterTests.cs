@@ -1,4 +1,5 @@
 using ModernWigiDash.App.FrameSinks;
+using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
@@ -14,9 +15,9 @@ public class FrameSinkRouterTests
         using var router = new FrameSinkRouter(wcf, usb);
         using var frame = new SKBitmap(16, 16);
 
-        bool result = router.Send(frame);
+        FrameDeliveryResult result = router.Send(frame);
 
-        Assert.IsTrue(result);
+        Assert.AreEqual(FrameDeliveryResult.Queued, result);
         Assert.AreEqual(1, wcf.SentFrames);
         Assert.AreEqual(0, usb.SentFrames);
     }
@@ -29,26 +30,40 @@ public class FrameSinkRouterTests
         using var router = new FrameSinkRouter(wcf, usb);
         using var frame = new SKBitmap(16, 16);
 
-        bool result = router.Send(frame);
+        FrameDeliveryResult result = router.Send(frame);
 
-        Assert.IsTrue(result);
+        Assert.AreEqual(FrameDeliveryResult.Queued, result);
         Assert.AreEqual(0, wcf.SentFrames);
         Assert.AreEqual(1, usb.SentFrames);
     }
 
     [TestMethod]
-    public void Send_WhenNoSinkReady_ReturnsFalse()
+    public void Send_WhenNoSinkReady_ReturnsDropped()
     {
         var wcf = new FakeSink { IsReady = false };
         var usb = new FakeSink { IsReady = false };
         using var router = new FrameSinkRouter(wcf, usb);
         using var frame = new SKBitmap(16, 16);
 
-        bool result = router.Send(frame);
+        FrameDeliveryResult result = router.Send(frame);
 
-        Assert.IsFalse(result);
+        Assert.AreEqual(FrameDeliveryResult.Dropped, result);
         Assert.AreEqual(0, wcf.SentFrames);
         Assert.AreEqual(0, usb.SentFrames);
+    }
+
+    [TestMethod]
+    public void Send_WhenWcfSinkDrops_ResultIsTruthful()
+    {
+        var wcf = new FakeSink { IsReady = true, DropAll = true };
+        var usb = new FakeSink { IsReady = true };
+        using var router = new FrameSinkRouter(wcf, usb);
+        using var frame = new SKBitmap(16, 16);
+
+        FrameDeliveryResult result = router.Send(frame);
+
+        Assert.AreEqual(FrameDeliveryResult.Dropped, result, "A sink that drops must not report queued");
+        Assert.AreEqual(1, wcf.SentFrames);
     }
 
     [TestMethod]
@@ -109,13 +124,14 @@ public class FrameSinkRouterTests
     private sealed class FakeSink : IFrameSink
     {
         public bool IsReady { get; set; }
+        public bool DropAll { get; set; }
         public int SentFrames { get; private set; }
         public bool Disposed { get; private set; }
 
-        public bool SendFrame(SKBitmap frame)
+        public FrameDeliveryResult SendFrame(SKBitmap frame)
         {
             SentFrames++;
-            return IsReady;
+            return IsReady && !DropAll ? FrameDeliveryResult.Queued : FrameDeliveryResult.Dropped;
         }
 
         public void Dispose() => Disposed = true;

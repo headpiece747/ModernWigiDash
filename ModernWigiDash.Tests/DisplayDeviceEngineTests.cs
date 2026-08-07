@@ -59,13 +59,14 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
-    public void SendFrameBuffer_WhenDisconnected_IsNoOp()
+    public void SendFrameBytes_WhenDisconnected_IsNoOp()
     {
         using var engine = new DisplayDeviceEngine();
-        using var bitmap = new SKBitmap(16, 16, SKColorType.Rgba8888, SKAlphaType.Premul);
 
-        // Must not throw when the engine has no live connection.
-        engine.SendFrameBuffer(bitmap);
+        // Must not throw and must report failure when the engine has no live connection.
+        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
+        Assert.IsFalse(engine.SendFrameBytes([]));
+        Assert.IsFalse(engine.SendFrameBytes(null!));
     }
 
     [TestMethod]

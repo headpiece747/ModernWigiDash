@@ -97,4 +97,118 @@ public class TelemetryStoreMappingTests
 
         Assert.IsFalse(rec.IsAvailable);
     }
+
+    // ── producer timestamp preservation ─────────────────────
+
+    [TestMethod]
+    public void LhmSensorStore_UpdateFromDto_PreservesProducerTimestamp()
+    {
+        var producerTime = new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc);
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
+        {
+            IsConnected = true,
+            LastUpdate = producerTime,
+            Readings = []
+        });
+
+        Assert.AreEqual(producerTime, LhmSensorStore.ReadSnapshot().LastUpdate);
+    }
+
+    [TestMethod]
+    public void FrameTimeStore_UpdateFromDto_PreservesProducerTimestamp()
+    {
+        var producerTime = new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc);
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto { IsAvailable = true, LastUpdate = producerTime });
+
+        Assert.AreEqual(producerTime, FrameTimeStore.ReadSnapshot().LastUpdate);
+    }
+
+    [TestMethod]
+    public void LhmSensorStore_UpdateFromDto_WithoutProducerTimestamp_FallsBackToReceiveTime()
+    {
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto { IsConnected = true, Readings = [] });
+
+        Assert.IsTrue(LhmSensorStore.ReadSnapshot().IsFresh(TimeSpan.FromMinutes(1)));
+    }
+
+    // ── TryReadFresh: store-owned staleness ─────────────────
+
+    [TestMethod]
+    public void LhmSensorStore_TryReadFresh_FreshSnapshot_IsReturned()
+    {
+        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
+        {
+            IsConnected = true,
+            LastUpdate = clock.GetUtcNow().UtcDateTime.AddSeconds(-2),
+            Readings = []
+        });
+
+        LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+
+        Assert.IsNotNull(fresh);
+        Assert.IsTrue(fresh!.IsConnected);
+    }
+
+    [TestMethod]
+    public void LhmSensorStore_TryReadFresh_StaleSnapshot_ReturnsNull()
+    {
+        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
+        {
+            IsConnected = true,
+            LastUpdate = clock.GetUtcNow().UtcDateTime.AddSeconds(-30),
+            Readings = []
+        });
+
+        Assert.IsNull(LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock));
+    }
+
+    [TestMethod]
+    public void LhmSensorStore_TryReadFresh_DisconnectedButFresh_IsReturnedForWidgetToDecide()
+    {
+        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        LhmSensorStore.UpdateFromDto(null);
+
+        LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+
+        Assert.IsNotNull(fresh, "A null-DTO snapshot is stamped with the receive time — freshness ≠ connectivity");
+        Assert.IsFalse(fresh!.IsConnected, "The widget renders the unavailable state via IsConnected");
+    }
+
+    [TestMethod]
+    public void FrameTimeStore_TryReadFresh_StaleSnapshot_ReturnsNull()
+    {
+        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            LastUpdate = clock.GetUtcNow().UtcDateTime.AddSeconds(-30)
+        });
+
+        Assert.IsNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock));
+    }
+
+    [TestMethod]
+    public void FrameTimeStore_TryReadFresh_UnavailableButFresh_IsReturned()
+    {
+        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        {
+            IsAvailable = false,
+            LastUpdate = clock.GetUtcNow().UtcDateTime
+        });
+
+        FrameTimeSnapshotRecord? fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock);
+
+        Assert.IsNotNull(fresh);
+        Assert.IsFalse(fresh!.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
+    }
+
+    private sealed class TimeProviderFake : TimeProvider
+    {
+        private readonly DateTimeOffset _now;
+        public TimeProviderFake(DateTime now) => _now = new DateTimeOffset(now);
+        public override DateTimeOffset GetUtcNow() => _now;
+    }
 }

@@ -24,14 +24,17 @@ public partial class MainWindow
     /// </summary>
     /// <summary>
     /// Throttled retry of service routing when the engine yielded to a running
-    /// service but the initial WCF detection failed.
+    /// service but the initial WCF detection failed. Throttling lives in
+    /// <see cref="ServiceRouting.ServiceRoutingState"/> — this is the re-detect
+    /// trigger itself.
     /// </summary>
     private void TryRetryServiceRouting()
     {
-        if ((TimeProvider.System.GetUtcNow().UtcDateTime - _lastWcfRetry).TotalSeconds < 10) return;
-        _lastWcfRetry = TimeProvider.System.GetUtcNow().UtcDateTime;
         _ = InitializeWcfRoutingAsync();
     }
+
+    /// <summary>True when the WCF client is bound and the routing state is active.</summary>
+    private bool ServiceReady() => _wcfClient != null && _routingState.IsServiceActive;
 
     private async Task InitializeWcfRoutingAsync()
     {
@@ -51,124 +54,81 @@ public partial class MainWindow
                     // service is genuinely serving the contract.
                     string version = _wcfClient.GetVersion();
 
-                    _serviceActive = true;
+                    _routingState.MarkActive();
                     Log($"[WCF] Connected! Version: {version}, Endpoint: {pipeEndpoint}");
 
                     bool displayInit = _wcfClient.InitializeDisplay();
                     Log($"[WCF] Display initialization: {displayInit}");
 
-                    _wcfSink.SetSend(_wcfClient.SendFrame);
+                    _wcfSink.AttachSend(_wcfClient.SendFrame);
 
-                    StartTouchPolling();
-                    StartSensorPolling();
-                    StartFrameTimePolling();
+                    _touchPoll.Start();
+                    _sensorPoll.Start();
+                    _frameTimePoll.Start();
                 }
                 catch (Exception ex)
                 {
                     Log($"[WCF] Connected but GetVersion failed: {ex.Message}");
                     _wcfClient?.Dispose();
                     _wcfClient = null;
-                    _serviceActive = false;
-                    _wcfSink.SetSend(null);
+                    _routingState.MarkInactive();
+                    _wcfSink.AttachSend(null);
                 }
             }
             else
             {
                 Log("[WCF] No service detected. Using direct USB mode.");
-                _wcfSink.SetSend(null);
+                _wcfSink.AttachSend(null);
             }
         }
         catch (Exception ex)
         {
             Log($"[WCF] Detection failed ({ex.Message}). Using direct USB mode.");
-            _wcfSink.SetSend(null);
+            _wcfSink.AttachSend(null);
         }
     }
 
     /// <summary>
-    /// Starts polling for hardware touch input via WCF at 50ms intervals.
-    /// Runs on a background thread to avoid blocking the WPF UI.
-    /// Routes touch events to SkiaFrameCompositor and handles page swipe navigation.
+    /// One touch probe: polls the service for hardware touch and marshals a
+    /// non-null sample to the UI thread for widget routing.
     /// </summary>
-    private void StartTouchPolling()
+    private void TouchPollTick()
     {
-        if (_touchPollCts != null) return;
-
-        _touchPollCts = new CancellationTokenSource();
-        var ct = _touchPollCts.Token;
-
-        _ = Task.Run(async () =>
+        var touch = _wcfClient?.PollTouch();
+        if (touch != null)
         {
-            Log("[TOUCH] Touch polling started (16ms interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(500, ct);
-                        continue;
-                    }
-
-                    var touch = _wcfClient.PollTouch();
-                    if (touch != null)
-                    {
-                        await Dispatcher.BeginInvoke(() =>
-                        {
-                            ProcessHardwareTouch(touch);
-                        });
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Touch poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(16, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
+            Dispatcher.BeginInvoke(() => ProcessHardwareTouch(touch));
+        }
     }
 
     /// <summary>
-    /// Background loop that polls the service for the latest hardware sensor
-    /// snapshot (~1s) and caches it in <see cref="LhmSensorStore"/> so widgets
-    /// read it on the render thread without a WCF round-trip.
+    /// One sensor probe: fetches the hardware snapshot and caches it in
+    /// <see cref="LhmSensorStore"/> so widgets read it without a WCF round-trip.
     /// </summary>
-    private void StartSensorPolling()
+    private void SensorPollTick()
     {
-        if (_sensorPollCts != null) return;
+        var dto = _wcfClient?.GetSensorSnapshot();
+        LhmSensorStore.UpdateFromDto(dto);
+    }
 
-        _sensorPollCts = new CancellationTokenSource();
-        var ct = _sensorPollCts.Token;
-
-        _ = Task.Run(async () =>
+    /// <summary>
+    /// One frame-time probe: fetches the FPS/frame-time snapshot (targeting the
+    /// focused presenter's process) and caches it in <see cref="FrameTimeStore"/>.
+    /// </summary>
+    private void FrameTimePollTick()
+    {
+        // Track the foreground window's process so the widget shows the focused
+        // game's FPS. When the App itself (or nothing) is focused, pass -1 so
+        // the service returns the idle view instead of falling back to the most
+        // active presenter.
+        int preferredPid = GetForegroundProcessId();
+        if (preferredPid <= 0 || preferredPid == Environment.ProcessId)
         {
-            Log("[SENSOR] Sensor polling started (1s interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(1000, ct);
-                        continue;
-                    }
+            preferredPid = -1;
+        }
 
-                    var dto = _wcfClient.GetSensorSnapshot();
-                    LhmSensorStore.UpdateFromDto(dto);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Sensor poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(1000, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
+        var dto = _wcfClient?.GetFrameTimeSnapshot(preferredPid);
+        FrameTimeStore.UpdateFromDto(dto);
     }
 
     /// <summary>
@@ -195,98 +155,17 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Background loop that polls the service for the latest FPS / frame-time
-    /// snapshot (~1s) and caches it in <see cref="FrameTimeStore"/> so the
-    /// frame-time widget reads it on the render thread without a WCF round-trip.
-    /// </summary>
-    private void StartFrameTimePolling()
-    {
-        if (_frameTimePollCts != null) return;
-
-        _frameTimePollCts = new CancellationTokenSource();
-        var ct = _frameTimePollCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            Log("[FRAME] Frame-time polling started (1s interval via WCF, background thread)");
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    if (_wcfClient == null || !_serviceActive)
-                    {
-                        await Task.Delay(1000, ct);
-                        continue;
-                    }
-
-                    // Track the foreground window's process so the widget shows
-                    // the focused game's FPS. When the App itself (or nothing)
-                    // is focused, pass -1 so the service returns the idle view
-                    // instead of falling back to the most active presenter.
-                    int preferredPid = GetForegroundProcessId();
-                    if (preferredPid <= 0 || preferredPid == Environment.ProcessId)
-                    {
-                        preferredPid = -1;
-                    }
-
-                    var dto = _wcfClient.GetFrameTimeSnapshot(preferredPid);
-                    FrameTimeStore.UpdateFromDto(dto);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Frame-time poll failed: {ex.Message}");
-                }
-
-                try { await Task.Delay(1000, ct); }
-                catch (OperationCanceledException) { break; }
-            }
-        }, ct);
-    }
-    /// Handles page swipe navigation and routes to widget compositor.
-    /// Hardware touch protocol: None=0, Down=1 (contact+movement), Up=2 (release).
-    /// Intermediate movement points during a swipe are also sent as Down(1).
+    /// Routes a hardware touch sample from the WCF poll into the single input
+    /// controller. The type is already normalized to <see cref="TouchEventType"/>
+    /// at the service's transport seam — no vendor protocol bytes reach the App.
+    /// Display touches are runtime input: routing is never suppressed by the
+    /// desktop edit-mode veto (hotkeys fire on the device in edit mode too).
     /// </summary>
     private void ProcessHardwareTouch(TouchEventInfo touch)
     {
-        TouchEventType type = touch.Type switch
-        {
-            DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
-            DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
-            _ => TouchEventType.TouchMove
-        };
-
-        var outcome = _gestureInterpreter.Feed(type, touch.X, touch.Y, _profile.Pages.Count, _profile.ActivePageIndex);
-        ApplyGestureOutcome(outcome, touch.X, touch.Y, routeWidgets: true);
-    }
-
-    /// <summary>
-    /// Applies a gesture decision: performs page navigation, or routes the
-    /// touch sample to the widget compositor. Shared by the USB-direct and
-    /// WCF touch paths.
-    /// </summary>
-    /// <param name="routeWidgets">
-    /// When false, widget touch routing is suppressed (used by the mouse path
-    /// in edit mode); page actions are always applied. Hardware callers always
-    /// pass true to preserve their existing behavior.
-    /// </param>
-    private void ApplyGestureOutcome(Gestures.GestureOutcome outcome, float x, float y, bool routeWidgets)
-    {
-        switch (outcome.PageAction)
-        {
-            case Gestures.GesturePageAction.NextPage:
-                SwitchToPage(_profile.ActivePageIndex + 1);
-                return;
-            case Gestures.GesturePageAction.PrevPage:
-                SwitchToPage(_profile.ActivePageIndex - 1);
-                return;
-        }
-
-        if (outcome.RouteToWidgets && routeWidgets)
-        {
-            SkiaFrameCompositor.RouteTouch(_profile.ActivePage, x, y, outcome.WidgetTouchType);
-            SkiaCanvas.InvalidateVisual();
-        }
+        _inputController.Feed(touch.Type, touch.X, touch.Y,
+            suppressWidgetRouting: false,
+            _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
     }
 
 }
