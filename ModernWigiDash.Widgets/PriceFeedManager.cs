@@ -153,14 +153,14 @@ public sealed class PriceFeedManager : IDisposable
     public static string NormalizeFxKey(string symbol)
         => symbol.Trim().ToUpperInvariant().Replace("/", "", StringComparison.Ordinal);
 
-    public static AssetKind DetectAssetKind(string symbol, string assetType)
+    public static AssetKind DetectAssetKind(string symbol, string assetType) => assetType switch
     {
-        if (assetType == "Crypto") return AssetKind.Crypto;
-        if (assetType == "Stock") return AssetKind.Stock;
-        if (assetType == "FX Pair") return AssetKind.Fx;
-        if (TryParseFxPair(symbol, out _, out _)) return AssetKind.Fx;
-        return IsCrypto(symbol) ? AssetKind.Crypto : AssetKind.Stock;
-    }
+        "Crypto" => AssetKind.Crypto,
+        "Stock" => AssetKind.Stock,
+        "FX Pair" => AssetKind.Fx,
+        _ when TryParseFxPair(symbol, out _, out _) => AssetKind.Fx,
+        _ => IsCrypto(symbol) ? AssetKind.Crypto : AssetKind.Stock
+    };
 
     public void Subscribe(string symbol, AssetKind kind)
     {
