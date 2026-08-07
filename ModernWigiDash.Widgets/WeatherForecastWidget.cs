@@ -89,7 +89,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private readonly List<DailyForecastItem> _dailyForecasts = [];
     private readonly List<HourlyForecastItem> _hourlyForecasts = [];
-    private readonly object _forecastGate = new();
+    private readonly Lock _forecastGate = new();
     private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
     private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
     private SKRect _lastBounds;

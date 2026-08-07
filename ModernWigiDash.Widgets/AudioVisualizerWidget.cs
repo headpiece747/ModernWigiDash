@@ -26,7 +26,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
     private readonly float[] _smoothSpectrum = new float[64];
     private readonly float[] _waveform = new float[2048];
     private int _waveformHead = 0;
-    private readonly object _audioLock = new();
+    private readonly Lock _audioLock = new();
 
     // Capture is tied to rendering: it starts on the first Render (i.e. when
     // the widget's page becomes active) and stops when Render stops being

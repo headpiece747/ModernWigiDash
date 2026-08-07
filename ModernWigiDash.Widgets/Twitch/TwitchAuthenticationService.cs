@@ -8,7 +8,7 @@ internal sealed class TwitchSession
 
     private readonly TwitchTokenStore _tokenStore = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly object _stateGate = new();
+    private readonly Lock _stateGate = new();
 
     private TwitchTokenSet? _tokens;
     private TwitchAccount? _account;

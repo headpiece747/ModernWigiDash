@@ -43,7 +43,7 @@ public sealed class FrameTimeReader : BackgroundService
     private const int SparklineSamples = 120;
 
     private readonly ILogger<FrameTimeReader> _logger;
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly Dictionary<int, ProcessFrameState> _processes = new();
     private readonly Dictionary<int, string> _processNames = new();
 

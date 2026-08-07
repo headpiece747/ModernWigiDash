@@ -39,7 +39,7 @@ public sealed record FrameTimeSnapshotRecord(
 /// </summary>
 public static class FrameTimeStore
 {
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
     private static FrameTimeSnapshotRecord _current = FrameTimeSnapshotRecord.Unavailable();
 
     public static FrameTimeSnapshotRecord ReadSnapshot()

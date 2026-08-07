@@ -42,7 +42,7 @@ public sealed record LhmSnapshot(bool IsConnected, DateTime LastUpdate, IReadOnl
 /// </summary>
 public static class LhmSensorStore
 {
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
     private static LhmSnapshot _current = LhmSnapshot.Disconnected();
 
     public static LhmSnapshot ReadSnapshot()

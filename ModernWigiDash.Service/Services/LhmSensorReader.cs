@@ -12,7 +12,7 @@ public sealed class LhmSensorReader : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly Computer _computer;
     private readonly ILogger<LhmSensorReader> _logger;
     private SensorSnapshotDto _latest = new();

@@ -58,7 +58,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
 
-    private readonly object _messagesLock = new();
+    private readonly Lock _messagesLock = new();
     private readonly List<ChatMessage> _messages = new();
     private CancellationTokenSource? _cts;
     private ClientWebSocket? _socket;
