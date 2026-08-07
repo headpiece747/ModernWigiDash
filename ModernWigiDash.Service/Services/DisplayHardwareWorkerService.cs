@@ -22,6 +22,32 @@ public sealed class DisplayHardwareWorkerService(
 
     public long TotalFramesProcessed => Volatile.Read(ref _framesProcessed);
 
+    /// <summary>
+    /// Puts the display into standby before the host shuts the service down
+    /// (sc stop, machine shutdown, crash recovery). The transport is still
+    /// connected at this point — singletons are disposed after hosted services
+    /// stop. The welcome screen shows immediately; without the 5s ClearTimeout
+    /// heartbeats the display then sleeps on its own timeout.
+    /// </summary>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (transport.IsConnected)
+            {
+                bool standby = transport.GoToStandby();
+                LogToFile(standby ? "[STANDBY] Display set to standby on service stop"
+                                  : "[STANDBY] Standby command failed on service stop");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToFile($"[STANDBY] Standby on service stop failed: {ex.Message}");
+        }
+
+        await base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         LogToFile("Starting Display Hardware Worker Service...");

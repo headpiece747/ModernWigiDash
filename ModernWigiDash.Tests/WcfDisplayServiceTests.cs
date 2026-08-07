@@ -66,7 +66,8 @@ public class WcfDisplayServiceTests
         bool result = service.SendFrame(new FramePayload { Data = original });
 
         Assert.IsTrue(result);
-        Assert.IsTrue(reader.TryRead(out byte[] queued));
+        Assert.IsTrue(reader.TryRead(out byte[]? queued));
+        Assert.IsNotNull(queued);
         CollectionAssert.AreEqual(original, queued);
         // The queued copy must be independent of the caller's buffer.
         original[0] = 0xFF;
@@ -222,6 +223,29 @@ public class WcfDisplayServiceTests
 
         Assert.IsNotNull(attr);
         Assert.AreEqual("http://modernwigidash.service/2024", attr!.Namespace);
+    }
+
+    // ── Standby / Shutdown ─────────────────────────────────
+
+    [TestMethod]
+    public void Shutdown_WhenTransportDisconnected_ReturnsFalse_WithoutThrowing()
+    {
+        var service = CreateService(out _, out _);
+
+        bool result = service.Shutdown();
+
+        Assert.IsFalse(result, "Standby cannot succeed without a live device connection");
+    }
+
+    [TestMethod]
+    public void Shutdown_IsIdempotent_WithoutThrowing()
+    {
+        var service = CreateService(out _, out _);
+
+        _ = service.Shutdown();
+        bool second = service.Shutdown();
+
+        Assert.IsFalse(second);
     }
 
     private static T RoundTrip<T>(T value)

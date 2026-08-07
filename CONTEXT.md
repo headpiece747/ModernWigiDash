@@ -36,6 +36,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **WCF endpoint** | `net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc` — the CoreWCF service contract for IPC between the service and the app, hosted over a named pipe (kernel-level ACL security; no TCP exposure). |
 | **Service.Contracts** | Shared assembly containing the WCF contract interface (`IModernWigiDashDisplayServiceContract`), DTOs (`FrameTimeSnapshotDto`, `SensorSnapshotDto`), data models, and the WCF client (`ModernWigiDashDisplayServiceClient`). No Hardware dependency — purely a contract library. |
 | **DetectServicePort** | Protocol-verified service discovery: probes known named pipe endpoints → WCF GetVersion handshake. An impostor pipe cannot hijack frames without speaking the contract. |
+| **Standby** | The display's idle state: the built-in vendor Welcome screen. Entered on every owner-exit path — app close (via the WCF Shutdown op, or the engine's Dispose in direct-USB mode) and service stop (`DisplayHardwareWorkerService.StopAsync`). After standby, heartbeats stop, so the display also sleeps on its own timeout. |
 
 ### Telemetry & Data Flow
 

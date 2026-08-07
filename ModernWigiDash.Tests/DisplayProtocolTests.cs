@@ -34,6 +34,19 @@ public class DisplayProtocolTests
     }
 
     [TestMethod]
+    public void ScreenIds_RespectProtocolSpec()
+    {
+        Assert.AreEqual(0x01, DisplayProtocolConstants.ScreenWelcome);
+        Assert.AreEqual(0x20, DisplayProtocolConstants.ScreenBase0);
+        Assert.AreEqual(0x21, DisplayProtocolConstants.ScreenBase1);
+        Assert.AreEqual(0x22, DisplayProtocolConstants.ScreenBase2);
+        // GoToScreen derives the current page from the Base screen id.
+        Assert.AreEqual(0, DisplayProtocolConstants.ScreenBase0 - DisplayProtocolConstants.ScreenBase0);
+        Assert.AreEqual(1, DisplayProtocolConstants.ScreenBase1 - DisplayProtocolConstants.ScreenBase0);
+        Assert.AreEqual(2, DisplayProtocolConstants.ScreenBase2 - DisplayProtocolConstants.ScreenBase0);
+    }
+
+    [TestMethod]
     public void FrameEncoder_ExactSizeBitmap_ProducesValidRgb565()
     {
         int w = DisplayProtocolConstants.FramebufferWidth;

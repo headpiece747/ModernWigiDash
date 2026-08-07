@@ -31,7 +31,6 @@ public sealed class DisplayDeviceEngine : IDisposable
     private readonly Lock _lock = new();
 
     // -- Frame Processing --
-    private bool _frameQueueStarted;
     private int _framesSent;
     private CancellationTokenSource? _frameQueueCts;
     private readonly Channel<SKBitmap> _frameChannel =
@@ -77,7 +76,6 @@ public sealed class DisplayDeviceEngine : IDisposable
         }, TaskContinuationOptions.ExecuteSynchronously);
 
         // Start this engine's frame processing loop.
-        _frameQueueStarted = true;
         _frameQueueCts = new CancellationTokenSource();
         _ = Task.Run(() => ProcessFrameQueueAsync(_frameQueueCts.Token));
 
@@ -394,11 +392,25 @@ public sealed class DisplayDeviceEngine : IDisposable
 
         _reconnectTimer.Dispose();
 
-        // Stop this engine's frame queue.
+        // Stop this engine's frame queue before the standby command so no frame
+        // write races the welcome-screen switch.
         _frameQueueCts?.Cancel();
         _frameQueueCts?.Dispose();
         _frameQueueCts = null;
-        _frameQueueStarted = false;
+
+        // Direct-USB mode owns the device, so the app is responsible for putting
+        // the display into standby when it exits. In WCF mode (_transport is
+        // null because the service owns the device) the service handles standby
+        // via the Shutdown operation.
+        try
+        {
+            _transport?.GoToStandby();
+        }
+        catch (Exception ex)
+        {
+            Log($"[STANDBY] Standby failed during dispose: {ex.Message}");
+        }
+
         DisconnectInternal();
     }
 }

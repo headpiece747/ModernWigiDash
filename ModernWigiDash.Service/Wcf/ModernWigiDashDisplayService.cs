@@ -250,10 +250,13 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         try
         {
             AuditCall(nameof(Shutdown));
-            _logger.LogInformation("CoreWCF: Shutdown requested — resetting display to welcome screen");
-            bool cleared = _transport.ClearPage(0);
-            bool switched = _transport.GoToScreen(0x01);
-            return cleared && switched;
+            _logger.LogInformation("CoreWCF: Shutdown requested — putting display into standby");
+            bool standby = _transport.GoToStandby();
+            if (!standby)
+            {
+                LogToFile("[WCF] Shutdown: transport not connected; standby skipped");
+            }
+            return standby;
         }
         catch (Exception ex)
         {

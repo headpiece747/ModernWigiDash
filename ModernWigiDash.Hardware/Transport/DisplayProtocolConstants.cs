@@ -117,9 +117,29 @@ public static class DisplayProtocolConstants
     /// <summary>
     /// Vendor Command: Send UI Command / Go To Screen (0x70 = CMD_SEND_UI_CMD).
     /// wValue = screen command byte: (transition << 2) | screenId.
-    /// screenId: 0x01=Welcome, 0x20=Base0, 0x21=Base1, 0x22=Base2.
     /// </summary>
     public const byte CmdGoToScreen = 0x70;
+
+    /// <summary>
+    /// Built-in vendor Welcome screen — the display's idle/standby state.
+    /// Shown when the host software is not actively driving a Base screen.
+    /// </summary>
+    public const byte ScreenWelcome = 0x01;
+
+    /// <summary>
+    /// Base screen 0 (first app-driven page). screenId range: 0x20..0x22.
+    /// </summary>
+    public const byte ScreenBase0 = 0x20;
+
+    /// <summary>
+    /// Base screen 1 (second app-driven page).
+    /// </summary>
+    public const byte ScreenBase1 = 0x21;
+
+    /// <summary>
+    /// Base screen 2 (third app-driven page).
+    /// </summary>
+    public const byte ScreenBase2 = 0x22;
 
     /// <summary>
     /// Vendor Command: Widget Framebuffer Write (0x61 = CMD_SDRAM_WIDGET_WRITE).

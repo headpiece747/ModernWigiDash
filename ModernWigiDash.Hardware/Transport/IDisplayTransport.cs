@@ -82,4 +82,12 @@ public interface IDisplayTransport : IAsyncDisposable, IDisposable
     /// Sends the device initialization sequence (PING + blank frame + GoToScreen).
     /// </summary>
     bool SendInitCommands();
+
+    /// <summary>
+    /// Puts the display into standby: switches to the built-in vendor Welcome
+    /// screen. Heartbeats (<see cref="ClearTimeout"/>) must NOT be sent
+    /// afterwards — the display sleeps on its own timeout once the heartbeat
+    /// source stops. Returns false when not connected.
+    /// </summary>
+    bool GoToStandby();
 }

@@ -157,26 +157,24 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
         lock (_audioLock)
         {
-            using var path = new SKPath();
+            var builder = new SKPathBuilder();
             float stepX = (bounds.Width - pad * 2f) / (_waveform.Length - 1f);
-            bool first = true;
             for (int i = 0; i < _waveform.Length; i++)
             {
                 int idx = (_waveformHead + i) % _waveform.Length;
                 float v = Math.Clamp(_waveform[idx], -1f, 1f);
                 float x = bounds.Left + pad + i * stepX;
                 float y = midY - v * amp;
-                if (first)
+                if (i == 0)
                 {
-                    path.MoveTo(x, y);
-                    first = false;
+                    builder.MoveTo(x, y);
                 }
                 else
                 {
-                    path.LineTo(x, y);
+                    builder.LineTo(x, y);
                 }
             }
-            canvas.DrawPath(path, linePaint);
+            canvas.DrawPath(builder.Detach(), linePaint);
         }
     }
 

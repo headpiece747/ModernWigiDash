@@ -670,8 +670,24 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         {
             _logger.LogInformation("GoToScreen 0x{ScreenId:X2} (wValue=0x{WValue:X4})", screenId, wValue);
             // Update current page if switching to a Base screen
-            if (screenId >= 0x20 && screenId <= 0x22)
-                _currentPage = screenId - 0x20;
+            if (screenId >= DisplayProtocolConstants.ScreenBase0 && screenId <= DisplayProtocolConstants.ScreenBase2)
+                _currentPage = screenId - DisplayProtocolConstants.ScreenBase0;
+        }
+        return ok;
+    }
+
+    public bool GoToStandby()
+    {
+        if (!_isConnected)
+            return false;
+
+        // The built-in Welcome screen is the vendor standby state. Deliberately
+        // no ClearTimeout afterwards: once the heartbeat source (the service's
+        // touch poll loop) stops, the display sleeps on its own timeout.
+        bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome);
+        if (ok)
+        {
+            LogToFile("[STANDBY] Display set to standby (welcome screen)");
         }
         return ok;
     }

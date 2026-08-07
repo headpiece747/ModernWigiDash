@@ -93,35 +93,33 @@ internal static class TextRenderHelper
         if (samples.Count < 2) return;
 
         float span = area.Width / Math.Max(1, samples.Count - 1);
-        var line = new SKPath();
-        var fill = new SKPath();
-        bool first = true;
+        var lineBuilder = new SKPathBuilder();
+        var fillBuilder = new SKPathBuilder();
         for (int i = 0; i < samples.Count; i++)
         {
             float x = area.Left + i * span;
             float y = area.Bottom - (float)((samples[i] - lo) / (hi - lo)) * area.Height;
-            if (first)
+            if (i == 0)
             {
-                line.MoveTo(x, y);
-                fill.MoveTo(x, y);
-                first = false;
+                lineBuilder.MoveTo(x, y);
+                fillBuilder.MoveTo(x, y);
             }
             else
             {
-                line.LineTo(x, y);
-                fill.LineTo(x, y);
+                lineBuilder.LineTo(x, y);
+                fillBuilder.LineTo(x, y);
             }
         }
 
-        fill.LineTo(area.Right, area.Bottom);
-        fill.LineTo(area.Left, area.Bottom);
-        fill.Close();
+        fillBuilder.LineTo(area.Right, area.Bottom);
+        fillBuilder.LineTo(area.Left, area.Bottom);
+        fillBuilder.Close();
 
         using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
-        canvas.DrawPath(fill, fillPaint);
+        canvas.DrawPath(fillBuilder.Detach(), fillPaint);
 
         using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-        canvas.DrawPath(line, linePaint);
+        canvas.DrawPath(lineBuilder.Detach(), linePaint);
     }
 
     /// <summary>
