@@ -633,3 +633,4 @@ public sealed class FrameTimeReader : BackgroundService
         public long PresentCount { get; set; }
     }
 }
+#pragma warning restore CS0618

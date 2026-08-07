@@ -152,10 +152,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
             {
                 FrameEncoder.ConvertToRgb565(_compositor.FrameBuffer, ref _rgb565PoolBuffer);
                 // Copy into a pooled exact-size buffer (channel may hold it briefly)
+                byte[]? rgb565 = _rgb565PoolBuffer;
                 byte[]? frameCopy = _framePool.Acquire();
-                if (frameCopy != null)
+                if (rgb565 != null && frameCopy != null)
                 {
-                    Buffer.BlockCopy(_rgb565PoolBuffer, 0, frameCopy, 0, _rgb565PoolBuffer.Length);
+                    Buffer.BlockCopy(rgb565, 0, frameCopy, 0, rgb565.Length);
                     if (!_frameChannel.Writer.TryWrite(frameCopy))
                     {
                         // Channel full — frame dropped; return the buffer to the pool

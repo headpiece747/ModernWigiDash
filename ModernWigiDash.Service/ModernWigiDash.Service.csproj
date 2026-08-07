@@ -8,10 +8,11 @@
     <UserSecretsId>modernwigidash-service-debug</UserSecretsId>
   </PropertyGroup>
 
-  <!-- Debug configuration: enable detailed logging -->
+  <!-- Debug configuration: enable detailed logging + XML docs for IDE IntelliSense -->
   <PropertyGroup Condition="'$(Configuration)'=='Debug'">
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- slopwatch-ignore: SW005 CS1591 is expected: XML docs exist for IDE IntelliSense only; documenting every public member of a debug-only docs build is not a code-quality requirement. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 

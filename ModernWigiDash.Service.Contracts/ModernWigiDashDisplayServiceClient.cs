@@ -95,19 +95,22 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                 finally
                 {
                     try { ((ICommunicationObject?)client)?.Abort(); }
-                    catch (CommunicationObjectFaultedException)
+                    catch (CommunicationObjectFaultedException ex)
                     {
+                        System.Diagnostics.Debug.WriteLine($"[WCF-DETECT] Probe abort failed (faulted): {ex.Message}");
                         /* Expected: channel already faulted */
                     }
-                    catch (ObjectDisposedException)
+                    catch (ObjectDisposedException ex)
                     {
+                        System.Diagnostics.Debug.WriteLine($"[WCF-DETECT] Probe abort failed (disposed): {ex.Message}");
                         /* Expected: channel already disposed */
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Pipe not available — try next endpoint
+                // Pipe not available — try next endpoint (diagnostic only)
+                System.Diagnostics.Debug.WriteLine($"[WCF-DETECT] Pipe {pipeName} unavailable: {ex.GetType().Name}: {ex.Message}");
             }
         }
         return null;
