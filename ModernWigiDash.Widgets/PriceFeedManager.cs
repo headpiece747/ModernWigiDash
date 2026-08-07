@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Net.WebSockets;
 using System.Text;
@@ -36,7 +37,7 @@ public sealed class PriceFeedManager : IDisposable
         Finnhub
     }
 
-    private static readonly Dictionary<string, string> CryptoMap = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenDictionary<string, string> CryptoMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["bitcoin"] = "BTC", ["btc"] = "BTC",
         ["ethereum"] = "ETH", ["eth"] = "ETH",
@@ -85,9 +86,9 @@ public sealed class PriceFeedManager : IDisposable
         ["kaspa"] = "KAS", ["kas"] = "KAS",
         ["fantom"] = "FTM", ["ftm"] = "FTM",
         ["algorand"] = "ALGO", ["algo"] = "ALGO",
-    };
+    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> KnownCryptos = new(CryptoMap.Keys, StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> KnownCryptos = CryptoMap.Keys.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
@@ -487,7 +488,7 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private static readonly Dictionary<string, string> CoinGeckoIds = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenDictionary<string, string> CoinGeckoIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
         ["BTC"] = "bitcoin", ["ETH"] = "ethereum", ["SOL"] = "solana",
         ["DOGE"] = "dogecoin", ["ADA"] = "cardano", ["XRP"] = "ripple",
@@ -507,7 +508,7 @@ public sealed class PriceFeedManager : IDisposable
         ["IMX"] = "immutable-x", ["DYDX"] = "dydx",
         ["PENDLE"] = "pendle", ["KAS"] = "kaspa",
         ["FTM"] = "fantom", ["ALGO"] = "algorand",
-    };
+    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private async Task RunCryptoRestPollerAsync()
     {

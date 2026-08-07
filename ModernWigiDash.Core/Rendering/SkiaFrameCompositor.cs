@@ -53,13 +53,14 @@ public class SkiaFrameCompositor : IDisposable
                 canvas.DrawLine(0, y, 1016, y, gridPaint);
             }
         }
-
-        // 3. Render all placed widgets sorted by ZIndex (low to high)
-        var sortedWidgets = page.Widgets.OrderBy(w => w.ZIndex).ToList();
-        foreach (var widget in sortedWidgets)
+        // 3. Render all placed widgets sorted by ZIndex (low to high).
+        // Zero-alloc fast path: stack-allocated copy + insertion sort for the
+        // common small page (<= 32 widgets); LINQ fallback for oversized pages.
+        List<PlacedWidgetInstance> widgetList = page.Widgets;
+        void RenderOne(PlacedWidgetInstance widget)
         {
             if (widget.ActiveInstance == null)
-                continue;
+                return;
 
             int saveCount = canvas.Save();
             try
@@ -119,6 +120,7 @@ public class SkiaFrameCompositor : IDisposable
                     // Draw resize handle at bottom-right corner
                     using var handlePaint = new SKPaint
                     {
+
                         Color = new SKColor(59, 130, 246, 200),
                         Style = SKPaintStyle.Fill,
                         IsAntialias = true
@@ -141,13 +143,65 @@ public class SkiaFrameCompositor : IDisposable
             }
         }
 
+        if (widgetList.Count <= 32)
+        {
+            // Sort indices by ZIndex on the stack (widgets are reference types,
+            // so stackalloc holds int indices into the list instead).
+            Span<int> order = stackalloc int[widgetList.Count];
+            for (int i = 0; i < order.Length; i++)
+            {
+                order[i] = i;
+            }
+            InsertionSortByZIndex(order, widgetList);
+            foreach (int index in order)
+            {
+                RenderOne(widgetList[index]);
+            }
+        }
+        else
+        {
+            foreach (PlacedWidgetInstance widget in widgetList.OrderBy(w => w.ZIndex))
+            {
+                RenderOne(widget);
+            }
+        }
+
+    }
+
+    /// <summary>
+    /// Stable insertion sort of widget indices by ZIndex (low to high).
+    /// Widget counts per page are tiny, so quadratic worst case is fine and
+    /// this stays fully allocation-free on the stack-allocated index span.
+    /// </summary>
+    private static void InsertionSortByZIndex(Span<int> order, List<PlacedWidgetInstance> widgets)
+    {
+        for (int i = 1; i < order.Length; i++)
+        {
+            int current = order[i];
+            int j = i - 1;
+            while (j >= 0 && widgets[order[j]].ZIndex > widgets[current].ZIndex)
+            {
+                order[j + 1] = order[j];
+                j--;
+            }
+            order[j + 1] = current;
+        }
     }
 
     public static PlacedWidgetInstance? HitTest(PageLayout page, float pointX, float pointY)
     {
-        // Check top-most widgets first (highest ZIndex)
-        var sortedDesc = page.Widgets.OrderByDescending(w => w.ZIndex);
-        return sortedDesc.FirstOrDefault(w => w.ContainsPoint(pointX, pointY));
+        // Top-most widget (highest ZIndex) that contains the point — single
+        // pass, zero allocation (replaces OrderByDescending+FirstOrDefault).
+        PlacedWidgetInstance? best = null;
+        foreach (PlacedWidgetInstance widget in page.Widgets)
+        {
+            if (!widget.ContainsPoint(pointX, pointY)) continue;
+            if (best == null || widget.ZIndex > best.ZIndex)
+            {
+                best = widget;
+            }
+        }
+        return best;
     }
 
     public static void RouteTouch(PageLayout page, float pointX, float pointY, TouchEventType eventType)

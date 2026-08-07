@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
@@ -17,12 +18,12 @@ public static class ThemeManager
     /// Maps theme property names whose brush resource key does not equal the property name.
     /// All other properties map to a brush under the same name.
     /// </summary>
-    private static readonly Dictionary<string, string[]> BrushKeyMap = new()
+    private static readonly FrozenDictionary<string, string[]> BrushKeyMap = new Dictionary<string, string[]>
     {
-        ["Border"] = new[] { "BorderBrush" },
-        ["TextPrimary"] = new[] { "TextPrimary", "AccentBlue" },
-        ["TitleBar"] = new[] { "TitleBarBrush" }
-    };
+        ["Border"] = ["BorderBrush"],
+        ["TextPrimary"] = ["TextPrimary", "AccentBlue"],
+        ["TitleBar"] = ["TitleBarBrush"]
+    }.ToFrozenDictionary();
 
     public static void ApplyToApplication()
     {

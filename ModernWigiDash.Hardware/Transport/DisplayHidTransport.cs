@@ -9,6 +9,7 @@ using LibUsbDotNet.Main;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModernWigiDash.Sdk;
+using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Hardware.Transport;
 
@@ -591,7 +592,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             // Context is a shared singleton - don't dispose
         }
 
-    public bool SendFrame(ReadOnlySpan<byte> frameBuffer)
+    public bool SendFrame(ReadOnlyMemory<byte> frameBuffer)
     {
         if (!_isConnected)
         {
@@ -608,7 +609,21 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
         try
         {
-            byte[] frameArray = frameBuffer.ToArray();
+            // Zero-alloc fast path: the frame pipeline hands us byte[] buffers,
+            // so the memory is almost always an array segment already — reuse it
+            // instead of copying 1.2 MB per frame. Fall back to a copy only for
+            // genuine non-array memory.
+            byte[] frameArray;
+            if (!MemoryMarshal.TryGetArray(frameBuffer, out ArraySegment<byte> segment) ||
+                segment.Offset != 0 ||
+                segment.Count != frameBuffer.Length)
+            {
+                frameArray = frameBuffer.ToArray();
+            }
+            else
+            {
+                frameArray = segment.Array!;
+            }
 
             lock (_usbLock)
             {

@@ -87,6 +87,45 @@ internal static class TextRenderHelper
     /// <summary>
     /// Draws a line-plus-fill sparkline for <paramref name="samples"/> normalized
     /// into the <paramref name="lo"/>..<paramref name="hi"/> range inside <paramref name="area"/>.
+    /// Zero-allocation span overload for float histories (telemetry widgets).
+    /// </summary>
+    internal static void DrawSparkline(SKCanvas canvas, SKRect area, ReadOnlySpan<float> samples, float lo, float hi, SKColor accent)
+    {
+        if (samples.Length < 2) return;
+
+        float span = area.Width / Math.Max(1, samples.Length - 1);
+        var lineBuilder = new SKPathBuilder();
+        var fillBuilder = new SKPathBuilder();
+        for (int i = 0; i < samples.Length; i++)
+        {
+            float x = area.Left + i * span;
+            float y = area.Bottom - (samples[i] - lo) / (hi - lo) * area.Height;
+            if (i == 0)
+            {
+                lineBuilder.MoveTo(x, y);
+                fillBuilder.MoveTo(x, y);
+            }
+            else
+            {
+                lineBuilder.LineTo(x, y);
+                fillBuilder.LineTo(x, y);
+            }
+        }
+
+        fillBuilder.LineTo(area.Right, area.Bottom);
+        fillBuilder.LineTo(area.Left, area.Bottom);
+        fillBuilder.Close();
+
+        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
+        canvas.DrawPath(fillBuilder.Detach(), fillPaint);
+
+        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+        canvas.DrawPath(lineBuilder.Detach(), linePaint);
+    }
+
+    /// <summary>
+    /// Draws a line-plus-fill sparkline for <paramref name="samples"/> normalized
+    /// into the <paramref name="lo"/>..<paramref name="hi"/> range inside <paramref name="area"/>.
     /// </summary>
     internal static void DrawSparkline(SKCanvas canvas, SKRect area, IReadOnlyList<double> samples, double lo, double hi, SKColor accent)
     {

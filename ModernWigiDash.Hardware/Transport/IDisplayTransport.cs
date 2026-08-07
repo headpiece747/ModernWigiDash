@@ -46,11 +46,11 @@ public interface IDisplayTransport : IAsyncDisposable, IDisposable
     bool SetBrightness(byte brightnessPercent);
 
     /// <summary>
-    /// Streams a raw frame buffer payload span directly to the hardware display.
+    /// Streams a raw frame buffer payload to the hardware display.
     /// </summary>
-    /// <param name="frameBuffer">Raw RGB565 Little Endian pixel payload span.</param>
+    /// <param name="frameBuffer">Raw RGB565 Little Endian pixel payload.</param>
     /// <returns>True if frame framing and bulk transfer succeeded; otherwise, false.</returns>
-    bool SendFrame(ReadOnlySpan<byte> frameBuffer);
+    bool SendFrame(ReadOnlyMemory<byte> frameBuffer);
 
     /// <summary>
     /// Switches the display to the specified screen.

@@ -212,17 +212,34 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float graphBottom = bounds.Bottom - pad;
         var area = new SKRect(bounds.Left + pad, graphTop, bounds.Right - pad, graphBottom);
 
-        if (_history.Count >= 2)
+        int count = _history.Count;
+        if (count >= 2)
         {
-            float lo = Math.Min(_history.Min(), (float)reading.Min);
-            float hi = Math.Max(_history.Max(), (float)reading.Max);
+            // Zero-alloc: copy the float history onto the stack for the
+            // sparkline, computing min/max in the same single pass (replaces
+            // Cast<double>().ToList() + Min() + Max() per frame).
+            Span<float> samples = count <= HistoryCapacity
+                ? stackalloc float[count]
+                : new float[count];
+            float min = float.MaxValue;
+            float max = float.MinValue;
+            int i = 0;
+            foreach (float sample in _history)
+            {
+                samples[i++] = sample;
+                if (sample < min) min = sample;
+                if (sample > max) max = sample;
+            }
+
+            float lo = Math.Min(min, (float)reading.Min);
+            float hi = Math.Max(max, (float)reading.Max);
             if (hi - lo < 1e-6f)
             {
                 lo = value - 1f;
                 hi = value + 1f;
             }
 
-            TextRenderHelper.DrawSparkline(canvas, area, _history.Cast<double>().ToList(), lo, hi, accent);
+            TextRenderHelper.DrawSparkline(canvas, area, samples, lo, hi, accent);
         }
 
         string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);

@@ -24,20 +24,45 @@ public static class FrameTimeStatistics
     /// </summary>
     public static double Percentile(IEnumerable<double> values, double percentile)
     {
-        double[] sorted = values.OrderBy(v => v).ToArray();
-        if (sorted.Length == 0)
+        // Zero-alloc fast path: stack-allocated copy + in-place sort for the
+        // common small sample window (<= 512); LINQ fallback for larger sets.
+        if (values is ICollection<double> collection && collection.Count <= 512)
+        {
+            Span<double> sorted = stackalloc double[collection.Count];
+            int i = 0;
+            foreach (double v in values)
+            {
+                sorted[i++] = v;
+            }
+            if (sorted.Length == 0)
+            {
+                return 0;
+            }
+            if (sorted.Length == 1)
+            {
+                return sorted[0];
+            }
+
+            sorted.Sort();
+            double p = Math.Clamp(percentile, 0, 100) / 100.0;
+            int index = (int)Math.Ceiling(p * sorted.Length - 1e-9) - 1;
+            return sorted[Math.Clamp(index, 0, sorted.Length - 1)];
+        }
+
+        double[] fallback = values.OrderBy(v => v).ToArray();
+        if (fallback.Length == 0)
         {
             return 0;
         }
 
-        if (sorted.Length == 1)
+        if (fallback.Length == 1)
         {
-            return sorted[0];
+            return fallback[0];
         }
 
-        double p = Math.Clamp(percentile, 0, 100) / 100.0;
-        int index = (int)Math.Ceiling(p * sorted.Length - 1e-9) - 1;
-        return sorted[Math.Clamp(index, 0, sorted.Length - 1)];
+        double pFallback = Math.Clamp(percentile, 0, 100) / 100.0;
+        int indexFallback = (int)Math.Ceiling(pFallback * fallback.Length - 1e-9) - 1;
+        return fallback[Math.Clamp(indexFallback, 0, fallback.Length - 1)];
     }
 
     /// <summary>
