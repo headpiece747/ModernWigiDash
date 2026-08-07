@@ -88,6 +88,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private CancellationTokenSource? _frameSenderCts;
     private byte[]? _rgb565PoolBuffer;
 
+    // Exact-size frame buffers shared between the render tick and the sender
+    // loop, eliminating the per-frame 1.2 MB LOH allocation (was ~36 MB/s).
+    // In flight max: 2 in the channel + 1 being sent + 1 being filled = 4.
+    private readonly Sdk.FrameBufferPool _framePool = new(
+        DisplayProtocolConstants.FrameBufferSize, capacity: 6);
+
     // Touch polling via WCF (polls hardware touch at 50ms intervals, off UI thread)
     private CancellationTokenSource? _touchPollCts;
 
@@ -145,10 +151,18 @@ public partial class MainWindow : Window, IModernWigiDashContext
             if (_serviceActive && _wcfClient != null)
             {
                 FrameEncoder.ConvertToRgb565(_compositor.FrameBuffer, ref _rgb565PoolBuffer);
-                // Copy to channel — channel may hold the buffer briefly
-                byte[] frameCopy = new byte[_rgb565PoolBuffer!.Length];
-                Buffer.BlockCopy(_rgb565PoolBuffer, 0, frameCopy, 0, _rgb565PoolBuffer.Length);
-                _frameChannel.Writer.TryWrite(frameCopy);            }
+                // Copy into a pooled exact-size buffer (channel may hold it briefly)
+                byte[]? frameCopy = _framePool.Acquire();
+                if (frameCopy != null)
+                {
+                    Buffer.BlockCopy(_rgb565PoolBuffer, 0, frameCopy, 0, _rgb565PoolBuffer.Length);
+                    if (!_frameChannel.Writer.TryWrite(frameCopy))
+                    {
+                        // Channel full — frame dropped; return the buffer to the pool
+                        _framePool.Release(frameCopy);
+                    }
+                }
+            }
             else if (_usbDevice.IsConnected && !_usbDevice.IsSimulationMode)
             {
                 _usbDevice.SendFrameBuffer(_compositor.FrameBuffer);

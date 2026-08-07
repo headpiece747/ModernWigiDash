@@ -96,8 +96,9 @@ public partial class MainWindow
         {
             while (await reader.WaitToReadAsync(ct))
             {
-                // Drain all queued frames, keep only the latest
-                byte[]? latestFrame = ChannelFrameCoalescer.DrainToLatest(reader);
+                // Drain all queued frames, keep only the latest; return the
+                // dropped frames' pooled buffers to the pool.
+                byte[]? latestFrame = ChannelFrameCoalescer.DrainToLatest(reader, _framePool.Release);
 
                 if (latestFrame == null) continue;
 
@@ -111,6 +112,10 @@ public partial class MainWindow
                 catch (Exception ex)
                 {
                     Log($"[WCF] Frame send failed: {ex.Message}");
+                }
+                finally
+                {
+                    _framePool.Release(latestFrame);
                 }
             }
         }
