@@ -16,7 +16,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// connection lifecycle. Callers that need one device per process create exactly
 /// one engine (MainWindow does; the service does).
 /// </summary>
-public sealed class DisplayDeviceEngine : IDisposable
+public sealed class DisplayDeviceEngine : IDisposable, IFrameSendDevice
 {
     // -- Constants --
     public const int ScreenWidth = DisplayProtocolConstants.FramebufferWidth;  // 1016

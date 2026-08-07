@@ -16,6 +16,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **PlacedWidgetInstance** | A widget bound to a position on a page — holds coordinates, size, rotation, opacity, and the widget instance. |
 | **Profile** | The persisted set of pages, active page index, and widget placements. |
 | **Frame** | A pixel buffer (SKBitmap) composited by `SkiaFrameCompositor`, converted to RGB565, and streamed to the display over USB or WCF. |
+| **FrameSink** | A destination for composited frames. `IFrameSink` exposes `SendFrame(SKBitmap)` + `IsReady`; each sink owns the encode→pool→coalesce→deliver lifecycle for one transport (`WcfFrameSink`, `DirectUsbFrameSink`). `FrameSinkRouter` picks the first-ready sink per render tick and owns the WCF-retry trigger. |
 | **Render tick** | The 30 FPS `DispatcherTimer` in MainWindow that calls `Compositor.Compose()`, converts the frame to RGB565, and queues it for delivery. |
 
 ### Hardware / Transport
@@ -140,7 +141,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ### Testing
 
-- 134 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, WCF contract consistency, touch routing, widget property defaults, and price-feed lifecycle
+- 182 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, WCF contract consistency, touch routing, frame-sink routing/coalescing, widget property defaults, and price-feed lifecycle
 - `DisplayProtocolTests` — widget config layout + RGB565 encoding (BGRA framebuffer format)
 - `WcfClientServerConsistencyTests` — reflection-based contract drift guard (service implements all members, client wraps all operations)
 - `WcfDisplayServiceTests` — channel behavior, null reader fallback, frame queueing

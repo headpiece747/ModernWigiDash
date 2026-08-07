@@ -3,7 +3,6 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -12,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using ModernWigiDash.App.FrameSinks;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
@@ -78,21 +78,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly Gestures.HardwareGestureInterpreter _gestureInterpreter = new();
     private bool _isUpdatingInspector = false;
 
-    // Async frame pipeline — decouple UI render timer from WCF round-trip
-    private readonly Channel<byte[]> _frameChannel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(2)
-    {
-        SingleWriter = true,
-        SingleReader = true,
-        FullMode = BoundedChannelFullMode.DropOldest
-    });
-    private CancellationTokenSource? _frameSenderCts;
-    private byte[]? _rgb565PoolBuffer;
-
-    // Exact-size frame buffers shared between the render tick and the sender
-    // loop, eliminating the per-frame 1.2 MB LOH allocation (was ~36 MB/s).
-    // In flight max: 2 in the channel + 1 being sent + 1 being filled = 4.
-    private readonly Sdk.FrameBufferPool _framePool = new(
-        DisplayProtocolConstants.FrameBufferSize, capacity: 4);
+    // Async frame pipeline — decouple UI render timer from transport round-trips.
+    // Each sink owns its encode→pool→coalesce→deliver lifecycle; the router
+    // picks the first-ready sink (WCF service over direct USB) per render tick.
+    private readonly WcfFrameSink _wcfSink = new();
+    private readonly DirectUsbFrameSink _usbSink;
+    private readonly FrameSinkRouter _frameSinkRouter;
 
     // Touch polling via WCF (polls hardware touch at 50ms intervals, off UI thread)
     private CancellationTokenSource? _touchPollCts;
@@ -108,6 +99,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
         InitializeComponent();
         SourceInitialized += (_, _) => ApplyTheme();
         PreviewMouseDown += OnWindowPreviewMouseDown;
+
+        _usbSink = new DirectUsbFrameSink(_usbDevice);
+        _frameSinkRouter = new FrameSinkRouter(
+            _wcfSink,
+            _usbSink,
+            retryTrigger: TryRetryServiceRouting,
+            isHardwareActive: () => _usbDevice.IsHardwareActive);
 
         // Detect if Windows Service is running and initialize WCF client for frame routing.
         // Fire-and-forget async to avoid blocking the UI thread during port detection.
@@ -147,42 +145,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
             // too would double-advance widget history/animations per frame.
             SkiaCanvas.InvalidateVisual();
 
-            // Push frame to async channel (non-blocking, drop oldest if backlogged)
-            if (_serviceActive && _wcfClient != null)
-            {
-                FrameEncoder.ConvertToRgb565(_compositor.FrameBuffer, ref _rgb565PoolBuffer);
-                // Copy into a pooled exact-size buffer (channel may hold it briefly)
-                byte[]? rgb565 = _rgb565PoolBuffer;
-                byte[]? frameCopy = _framePool.Acquire();
-                if (rgb565 != null && frameCopy != null)
-                {
-                    Buffer.BlockCopy(rgb565, 0, frameCopy, 0, rgb565.Length);
-                    if (!_frameChannel.Writer.TryWrite(frameCopy))
-                    {
-                        // Channel full — frame dropped; return the buffer to the pool
-                        _framePool.Release(frameCopy);
-                    }
-                }
-            }
-            else if (_usbDevice.IsConnected && !_usbDevice.IsSimulationMode)
-            {
-                _usbDevice.SendFrameBuffer(_compositor.FrameBuffer);
-            }
-            else if (_usbDevice.IsHardwareActive && !_serviceActive)
-            {
-                // The engine yielded to a running service, but our one-shot WCF
-                // routing failed (e.g. the service was still starting). Retry
-                // detection (throttled) so frames don't get dropped forever.
-                TryRetryServiceRouting();
-            }
+            // Route frame to the first ready sink (WCF > direct USB). When no
+            // sink can route and the engine yielded to a service, the router
+            // triggers throttled WCF re-detection so frames aren't dropped forever.
+            _frameSinkRouter.Send(_compositor.FrameBuffer);
 
             UpdateUsbBadge();
         };
         _renderTimer.Start(); // Start the render loop immediately
-
-        // Start background frame sender (decouples WCF round-trip from render loop)
-        _frameSenderCts = new CancellationTokenSource();
-        _ = Task.Run(() => FrameSenderLoop(_frameSenderCts.Token));
 
         // 6. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
@@ -194,8 +164,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _sensorPollCts?.Dispose();
             _frameTimePollCts?.Cancel();
             _frameTimePollCts?.Dispose();
-            _frameSenderCts?.Cancel();
-            _frameSenderCts?.Dispose();
+            _frameSinkRouter.Dispose();
 
             // Reset display to standby (clear framebuffer + switch to welcome screen)
             try

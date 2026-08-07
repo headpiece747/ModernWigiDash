@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using System.Threading.Channels;
 using System.Windows;
 using ModernWigiDash.Hardware;
 using ModernWigiDash.Hardware.Transport;
@@ -58,6 +57,8 @@ public partial class MainWindow
                     bool displayInit = _wcfClient.InitializeDisplay();
                     Log($"[WCF] Display initialization: {displayInit}");
 
+                    _wcfSink.SetSend(_wcfClient.SendFrame);
+
                     StartTouchPolling();
                     StartSensorPolling();
                     StartFrameTimePolling();
@@ -68,61 +69,19 @@ public partial class MainWindow
                     _wcfClient?.Dispose();
                     _wcfClient = null;
                     _serviceActive = false;
+                    _wcfSink.SetSend(null);
                 }
             }
             else
             {
                 Log("[WCF] No service detected. Using direct USB mode.");
+                _wcfSink.SetSend(null);
             }
         }
         catch (Exception ex)
         {
             Log($"[WCF] Detection failed ({ex.Message}). Using direct USB mode.");
-        }
-    }
-
-    /// <summary>
-    /// Background loop that drains the frame channel and sends via WCF.
-    /// When multiple frames queue up (because WCF round-trip is slower than
-    /// the render timer), it drains all available frames and only sends the
-    /// latest one. This keeps the display showing real-time content instead
-    /// of replaying stale buffered frames.
-    /// </summary>
-    private async Task FrameSenderLoop(CancellationToken ct)
-    {
-        var reader = _frameChannel.Reader;
-        int sentCount = 0;
-        try
-        {
-            while (await reader.WaitToReadAsync(ct))
-            {
-                // Drain all queued frames, keep only the latest; return the
-                // dropped frames' pooled buffers to the pool.
-                byte[]? latestFrame = ChannelFrameCoalescer.DrainToLatest(reader, _framePool.Release);
-
-                if (latestFrame == null) continue;
-
-                try
-                {
-                    bool ok = _wcfClient?.SendFrame(latestFrame) == true;
-                    sentCount++;
-                    if (sentCount <= 5 || sentCount % 120 == 0)
-                        Log($"[WCF] Frame #{sentCount} sent ({latestFrame.Length} bytes) ok={ok}");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[WCF] Frame send failed: {ex.Message}");
-                }
-                finally
-                {
-                    _framePool.Release(latestFrame);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected: frame sender loop cancelled during shutdown
-            System.Diagnostics.Debug.WriteLine("Frame sender loop cancelled during shutdown");
+            _wcfSink.SetSend(null);
         }
     }
 
