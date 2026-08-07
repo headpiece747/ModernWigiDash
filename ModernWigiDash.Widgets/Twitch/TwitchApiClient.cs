@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace ModernWigiDash.Widgets.Twitch;
 
-internal sealed class TwitchApiClient
+internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = null)
 {
     private static readonly HttpClient SharedHttpClient = new()
     {
@@ -18,14 +18,8 @@ internal sealed class TwitchApiClient
     private static readonly Uri RevokeEndpoint = new("https://id.twitch.tv/oauth2/revoke");
     private static readonly Uri FollowedStreamsEndpoint = new("https://api.twitch.tv/helix/streams/followed");
 
-    private readonly string _clientId;
-    private readonly HttpClient _httpClient;
-
-    public TwitchApiClient(string clientId, HttpClient? httpClient = null)
-    {
-        _clientId = clientId.Trim();
-        _httpClient = httpClient ?? SharedHttpClient;
-    }
+    private readonly string _clientId = clientId.Trim();
+    private readonly HttpClient _httpClient = httpClient ?? SharedHttpClient;
 
     public async Task<TwitchDeviceAuthorization> StartDeviceAuthorizationAsync(CancellationToken cancellationToken)
     {
@@ -148,7 +142,7 @@ internal sealed class TwitchApiClient
         string userId,
         CancellationToken cancellationToken)
     {
-        var channels = new List<TwitchFollowedChannel>();
+        List<TwitchFollowedChannel> channels = [];
         string? cursor = null;
 
         do

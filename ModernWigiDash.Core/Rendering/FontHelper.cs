@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using SkiaSharp;
 
 namespace ModernWigiDash.Core.Rendering;
@@ -11,7 +12,7 @@ namespace ModernWigiDash.Core.Rendering;
 public static class FontHelper
 {
     private static readonly ConcurrentDictionary<(int Codepoint, SKFontStyle Style), SKTypeface> _fallbackCache = new();
-    private static readonly object _fontManagerLock = new();
+    private static readonly Lock _fontManagerLock = new();
 
     private static readonly Lazy<SKTypeface?> _geistTypeface = new(() =>
     {

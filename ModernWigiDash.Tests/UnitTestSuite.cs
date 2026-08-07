@@ -622,12 +622,12 @@ public class UnitTestSuite
     [TestMethod]
     public void HotkeyActions_SerializeAndRoundTrip()
     {
-        var actions = new List<HotkeyAction>
-        {
+        List<HotkeyAction> actions =
+        [
             new() { Kind = HotkeyActionKind.KeyChord, Value = "Ctrl+Shift+S", DelayMs = 50 },
             new() { Kind = HotkeyActionKind.Text, Value = "Hello", Repeat = 2 },
             new() { Kind = HotkeyActionKind.Delay, DelayMs = 250 }
-        };
+        ];
 
         string json = JsonSerializer.Serialize(actions);
         var roundTrip = JsonSerializer.Deserialize<List<HotkeyAction>>(json);
@@ -929,7 +929,7 @@ public class UnitTestSuite
             Low01PercentFps: 89.0,
             GpuBusyPercent: 92.0,
             CpuFrameTimeMs: 4.1,
-            RecentFrameTimesMs: new[] { 6.9, 7.0, 7.1, 6.8 });
+            RecentFrameTimesMs: [6.9, 7.0, 7.1, 6.8]);
 
         FrameTimeStore.Update(record);
         var read = FrameTimeStore.ReadSnapshot();

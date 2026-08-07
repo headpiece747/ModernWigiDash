@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using SkiaSharp;
 
 namespace ModernWigiDash.Core.Rendering;
@@ -9,7 +10,7 @@ namespace ModernWigiDash.Core.Rendering;
 /// </summary>
 public static class FontCatalog
 {
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
     private static string[]? _families;
     private static readonly ConcurrentDictionary<(string Family, SKFontStyle Style), SKTypeface> TypefaceCache = new();
 

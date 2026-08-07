@@ -8,34 +8,29 @@ namespace ModernWigiDash.Service.Services;
 /// Runs inside the LocalSystem service so no user elevation is required.
 /// Exposes the latest snapshot to WCF operations via <see cref="GetSnapshot"/>.
 /// </summary>
-public sealed class LhmSensorReader : BackgroundService
+public sealed class LhmSensorReader(
+    ILogger<LhmSensorReader> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly Lock _gate = new();
-    private readonly Computer _computer;
-    private readonly ILogger<LhmSensorReader> _logger;
-    private readonly TimeProvider _timeProvider;
-    private SensorSnapshotDto _latest = new();
-
-    public LhmSensorReader(ILogger<LhmSensorReader> logger, TimeProvider? timeProvider = null)
+    private readonly Computer _computer = new()
     {
-        _logger = logger;
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _computer = new Computer
-        {
-            IsCpuEnabled = true,
-            IsGpuEnabled = true,
-            IsMemoryEnabled = true,
-            IsMotherboardEnabled = true,
-            IsControllerEnabled = true,
-            IsNetworkEnabled = true,
-            IsStorageEnabled = true,
-            IsBatteryEnabled = true,
-            IsPowerMonitorEnabled = true,
-            IsPsuEnabled = true
-        };
-    }
+        IsCpuEnabled = true,
+        IsGpuEnabled = true,
+        IsMemoryEnabled = true,
+        IsMotherboardEnabled = true,
+        IsControllerEnabled = true,
+        IsNetworkEnabled = true,
+        IsStorageEnabled = true,
+        IsBatteryEnabled = true,
+        IsPowerMonitorEnabled = true,
+        IsPsuEnabled = true
+    };
+    private readonly ILogger<LhmSensorReader> _logger = logger;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private SensorSnapshotDto _latest = new();
 
     /// <summary>
     /// Get the latest sensor snapshot. Safe to call from multiple threads.

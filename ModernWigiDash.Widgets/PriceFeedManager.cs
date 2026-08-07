@@ -214,8 +214,7 @@ public sealed class PriceFeedManager : IDisposable
             if (ws == null || ws.State != WebSocketState.Open) return;
             object message = feed == WebSocketFeed.Finnhub
                 ? new { type = "subscribe", symbol = payload }
-                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
-            await SendJsonAsync(ws, message);
+                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };            await SendJsonAsync(ws, message);
         }
         catch
         {

@@ -56,7 +56,7 @@ public class FrameBufferPoolTests
     public void FullCycle_MultipleFrames_KeepsAllocatingFromPool()
     {
         var pool = new FrameBufferPool(bufferSize: 1024, capacity: 4);
-        var seen = new HashSet<byte[]>();
+        HashSet<byte[]> seen = [];
 
         for (int i = 0; i < 10; i++)
         {

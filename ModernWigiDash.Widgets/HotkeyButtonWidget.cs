@@ -150,7 +150,7 @@ internal static class HotkeyActionExecutor
     {
         var keys = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(ParseVirtualKey).ToArray();
-        if (keys.Length == 0) throw new ArgumentException("Enter a key or key chord.", nameof(text));
+        ArgumentOutOfRangeException.ThrowIfZero(keys.Length, nameof(text));
 
         try
         {
@@ -183,7 +183,7 @@ internal static class HotkeyActionExecutor
 
     private static void SendUnicodeText(string text)
     {
-        if (text.Length > 4096) throw new ArgumentException("Text action is limited to 4096 characters.", nameof(text));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, 4096, nameof(text));
         var inputs = new List<Input>(text.Length * 2);
         foreach (char character in text)
         {
@@ -221,7 +221,7 @@ internal static class HotkeyActionExecutor
 
     private static void Launch(string path, string arguments)
     {
-        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Launch path is required.", nameof(path));
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
         Process.Start(new ProcessStartInfo(path) { Arguments = arguments ?? "", UseShellExecute = true });
     }
 
