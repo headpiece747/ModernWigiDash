@@ -1,79 +1,213 @@
+<div align="center">
+
+<img src="ModernWigiDash.App/Resources/Logo/modernwigidashlogo.svg" alt="ModernWigiDash" width="200"/>
+
 # ModernWigiDash
 
-A .NET 10 (C# 14) desktop application and background service for USB display devices using native WinUSB transport.
+**A modern, open-source widget stack for the G.Skill WigiDash 7″ USB touch panel.**
+
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![C# 14](https://img.shields.io/badge/C%23-14-239120?style=flat-square&logo=sharp&logoColor=white)](https://learn.microsoft.com/en-us/dotnet/csharp/)
+[![Tests](https://img.shields.io/badge/tests-159%20passing-brightgreen?style=flat-square)](ModernWigiDash.Tests)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?style=flat-square&logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
+</div>
+
+ModernWigiDash replaces vendor dashboard software with a **decoupled Windows Background Service**, a **zero-allocation SkiaSharp frame compositor**, and an **extensible widget plugin architecture** — all built on .NET 10 with current C# idioms. Frames stream to the display over a kernel-secured **named pipe** and direct **USB HID / WinUSB** transport, with hardware telemetry, frame-time analytics, Twitch chat, media controls, and market tickers at your fingertips.
+
+---
+
+## Architecture
+
+ModernWigiDash is split into a client configuration UI and an autonomous background service to prevent frame drops and keep hardware communication reliable:
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          ModernWigiDash.App                              │
+│              (WPF Configuration UI · Layout Editor · Inspector)          │
+│                                                                           │
+│   ┌──────────────────┐   ┌──────────────────┐   ┌────────────────────┐   │
+│   │  WidgetPlugin    │   │  SkiaFrame       │   │  Gesture           │   │
+│   │  Loader          │   │  Compositor      │   │  Interpreter       │   │
+│   │  (catalog)       │   │  (30 FPS ·       │   │  (swipe / edge tap)│   │
+│   │                  │   │   zero-alloc)    │   │                    │   │
+│   └──────────────────┘   └──────────────────┘   └────────────────────┘   │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │  Named Pipe IPC (WCF · kernel ACL)
+                                   │  frames → · touch ← · telemetry ←
+┌──────────────────────────────────▼───────────────────────────────────────┐
+│                        ModernWigiDash.Service                            │
+│           (Windows Background Service · LocalSystem)                     │
+│                                                                           │
+│   ┌──────────────────────┐   ┌──────────────────────┐                    │
+│   │  LhmSensorReader     │   │  FrameTimeReader     │                    │
+│   │  (LibreHardwareMon)  │   │  (ETW present events)│                    │
+│   └──────────────────────┘   └──────────────────────┘                    │
+│   ┌───────────────────────────────────────────────────┐                  │
+│   │  DisplayHardwareWorkerService (frame + touch loop)│                  │
+│   └───────────────────────────────────────────────────┘                  │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │  Direct USB / HID Transport (WinUSB)
+┌──────────────────────────────────▼───────────────────────────────────────┐
+│                       G.Skill WigiDash 7″ Display                        │
+│                    (1024×600 panel · 1016×592 framebuffer)               │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Service-Driven Transport** — `ModernWigiDash.Service` runs independently as a Windows Service under **LocalSystem**, owning the USB device, capturing hardware telemetry (LibreHardwareMonitor) and ETW frame-time data, and streaming frames to the display even while the configuration UI is closed.
+- **High-Rate SkiaSharp Rendering** — the App composites at a steady **30 FPS** via `SkiaFrameCompositor`, using a pooled `FrameBufferPool` and zero-allocation hot paths (stack-allocated Z-order sorting, span-based sparklines, array-reuse frame delivery) to keep GC pressure minimal.
+- **Named Pipe IPC** — the App and Service communicate over a **WCF named-pipe contract** (`net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc`) with kernel-level ACL security — no TCP exposure, protocol-verified discovery, no impostor hijacking.
+- **Standby on Exit** — the display returns to its vendor Welcome screen and sleeps on its own timeout whenever the app closes or the service stops.
+
+---
+
+## Key Features
+
+| Area | Detail |
+| :--- | :--- |
+| **Hardware Abstraction** | Direct USB HID control via `DisplayHidTransport` — native WinUSB P/Invoke with LibUsbDotNet fallback |
+| **Hardware Telemetry** | Native sensor polling (LibreHardwareMonitor) for CPU, GPU, VRAM, RAM, and thermals — served to widgets over WCF |
+| **Frame-Time Analyst** | Real-time FPS and frame-time graphs from **ETW present-event capture** (DXGI / D3D9 / DxgKrnl — the same providers PresentMon uses) |
+| **Named Pipe Security** | Kernel-ACL transport, protocol-verified service discovery, no network exposure |
+| **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards |
+| **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
+| **Extensible Plugin SDK** | Build isolated C# widget assemblies targeting `ModernWigiDash.Sdk` |
+
+---
+
+## Included Widget Suite
+
+| Widget | Description |
+| :--- | :--- |
+| **System Telemetry** | Multi-gauge hardware readouts for CPU, GPU, VRAM, memory, and storage utilization |
+| **Frame-Time Analyst** | Live FPS graphs, frame-delay distributions, and 1% / 0.1% low tracking |
+| **Audio Visualizer** | Real-time multi-band spectrum and oscilloscope visualization from WASAPI loopback capture |
+| **Now Playing** | Windows System Media Transport Controls integration with album artwork and transport buttons |
+| **Twitch Chat & Stream** | Real-time channel chat viewer and live-channel status indicators |
+| **Hotkey Macros** | Customizable macro buttons with vector icon support |
+| **Market Ticker** | Real-time crypto, stock, and FX price feeds (Binance, Finnhub, Yahoo, CoinGecko) |
+| **Clock & Timers** | Analog/digital clocks, stopwatch, and countdown timer |
+| **Picture Viewer** | Static image and animated GIF playback |
+| **Weather Forecast** | Multi-day weather conditions with live refresh |
+
+---
+
+## Solution Layout
+
+| Project | Description |
+| :--- | :--- |
+| `ModernWigiDash.App` | WPF layout editor, theme customizer, inspector, and frame compositing host |
+| `ModernWigiDash.Service` | Windows Background Service: USB transport worker, sensor + frame-time readers, WCF host |
+| `ModernWigiDash.Service.Contracts` | WCF contract (`IModernWigiDashDisplayServiceContract`), DTOs, and typed client |
+| `ModernWigiDash.Hardware` | Low-level USB HID transport, RGB565 frame encoder, WinUSB P/Invoke, gesture interpreter |
+| `ModernWigiDash.Core` | Page-layout domain models, font catalog, SkiaSharp compositor, plugin loader |
+| `ModernWigiDash.Sdk` | Widget contracts (`IModernWidget`, `IModernWigiDashContext`), attributes, frame pooling |
+| `ModernWigiDash.Widgets` | Built-in widget implementations (telemetry, Twitch, media, tickers, system controls) |
+| `ModernWigiDash.Tests` | MSTest suite covering protocols, encoding, contracts, stores, and widget lifecycle |
+
+---
+
+## Requirements
+
+- **OS**: Windows 10 or Windows 11 (x64)
+- **Runtime**: .NET 10 SDK
+- **Hardware**: [G.Skill WigiDash](https://www.gskill.com/product/412/415/1702982997/WigiDash) 7″ USB touch panel (`USB\VID_28DA&PID_EF01`)
+- **Permissions**: Administrator is required to *install* the service; sensor access runs under the service's LocalSystem context
+
+---
 
 ## Quick Start
 
-**Prerequisites**: .NET 10 SDK, Windows 10+ (for native WinUSB).
+### 1. Build
 
-### Run the App (WPF Desktop)
+```powershell
+git clone https://github.com/headpiece747/ModernWigiDash.git
+cd ModernWigiDash
 
-Launches the dashboard editor with drag-and-drop widget layout:
+dotnet build ModernWigiDash.slnx -c Release
+```
+
+### 2. Run the Test Suite
+
+```powershell
+dotnet test ModernWigiDash.slnx -c Release
+```
+
+### 3. Install the Background Service
+
+Run PowerShell **as Administrator**:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+.\Install-ModernWigiDashService.ps1
+```
+
+Uninstall with `.\Install-ModernWigiDashService.ps1 -Uninstall`.
+
+### 4. Launch the App
 
 ```powershell
 dotnet run --project ModernWigiDash.App\ModernWigiDash.App.csproj
 ```
 
-### Run the Service (Background + USB)
+The app auto-connects to the running service over the named pipe. With no service installed, it falls back to **direct USB mode** (frames and touch work; service-only telemetry widgets show "unavailable").
 
-Runs the CoreWCF background service with USB device support over a named pipe (`net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc`):
-
-```powershell
-dotnet run --project ModernWigiDash.Service\ModernWigiDash.Service.csproj -- -test
-```
-
-The app connects to the service automatically when it's running on the same machine.
+---
 
 ## Twitch Widget
 
-The Twitch widget can authenticate without asking users to paste an OAuth token. It uses Twitch's Device Authorization Grant and keeps the access and refresh tokens encrypted in the current Windows user's local application data.
-
-To enable live followed-channel selection:
+The Twitch widget authenticates via Twitch's **Device Authorization Grant** — no OAuth token pasting. Access and refresh tokens are stored DPAPI-encrypted in the current user's local application data.
 
 1. Register a Twitch application at the [Twitch Developer Console](https://dev.twitch.tv/console).
-2. Use the application's public Client ID in the Twitch widget's **Twitch Client ID** setting, or set `MODERNWIGIDASH_TWITCH_CLIENT_ID` in the user's environment.
-3. Select **Log in with Twitch** in the widget inspector and authorize the requested `user:read:follows` permission in the browser.
-4. Select a live channel from the populated **Channel Name** list and keep **Auto Connect** enabled.
+2. Use the app's public Client ID in the widget's **Twitch Client ID** setting, or set `MODERNWIGIDASH_TWITCH_CLIENT_ID` in the user environment.
+3. Select **Log in with Twitch** in the widget inspector and authorize the requested `user:read:follows` permission.
+4. Pick a live channel from the populated **Channel Name** list and keep **Auto Connect** enabled.
 
-The Client ID is public and is not a user token or client secret. The widget continues to use anonymous, read-only IRC chat; it does not request chat-writing permissions. Twitch exposes followed live channels through `GET /helix/streams/followed` using `user:read:follows`, but does not provide a general API for listing every paid channel subscription.
+The Client ID is public and is not a user token or secret. The widget uses anonymous, read-only IRC chat and never requests chat-writing permissions.
 
-### Run Tests
+---
 
-```powershell
-dotnet test
+## Developing Custom Widgets (`ModernWigiDash.Sdk`)
+
+Custom widgets compile into assemblies referencing `ModernWigiDash.Sdk`, derive from `ModernWidgetBase`, and are discovered by the attribute-driven catalog:
+
+```csharp
+using ModernWigiDash.Sdk;
+using SkiaSharp;
+
+[WidgetMetadata(
+    "custom.clock",
+    "Minimal Clock",
+    Description = "A minimal amber digital clock.",
+    Author = "You",
+    Version = "1.0.0",
+    Category = "Utilities",
+    DefaultGridSize = GridSizePreset.Size2x1)]
+public class MinimalClockWidget : ModernWidgetBase
+{
+    public override void Render(SKCanvas canvas, SKRect bounds)
+    {
+        canvas.Clear(SKColors.Transparent);
+
+        using var paint = new SKPaint
+        {
+            Color = SKColor.Parse("#FFB000"), // Amber accent
+            TextSize = 26,
+            IsAntialias = true,
+            TextAlign = SKTextAlign.Center
+        };
+
+        string time = TimeProvider.System.GetLocalNow().ToString("HH:mm:ss");
+        canvas.DrawText(time, bounds.MidX, bounds.MidY + 8, paint);
+    }
+}
 ```
 
-### Build All
+Widgets also override `InitializeAsync(IModernWigiDashContext, CancellationToken)`, `OnTouch(SKPoint, TouchEventType)`, and `DisposeAsync()` from `ModernWidgetBase`. See `ModernWigiDash.Widgets` for full implementations.
 
-```powershell
-dotnet build ModernWigiDash.slnx
-```
-
-## Project Structure
-
-| Project | Description |
-| :--- | :--- |
-| **ModernWigiDash.Sdk** | Base interfaces, widget attributes, grid enums |
-| **ModernWigiDash.Core** | SkiaSharp frame compositor, profile/layout model, plugin loader |
-| **ModernWigiDash.Hardware** | Native USB transport layer (WinUSB bulk streaming) |
-| **ModernWigiDash.Widgets** | Built-in widgets (clock, weather, system telemetry, media) |
-| **ModernWigiDash.Service** | CoreWCF named-pipe background service, USB device manager |
-| **ModernWigiDash.App** | WPF desktop application with widget editor |
-| **ModernWigiDash.Tests** | MSTest suite |
-
-## Installing as a Windows Service
-
-For persistent background operation:
-
-```powershell
-# Run PowerShell as Administrator
-.\Install-ModernWigiDashService.ps1
-```
-
-```powershell
-.\Install-ModernWigiDashService.ps1 -Uninstall
-```
+---
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
