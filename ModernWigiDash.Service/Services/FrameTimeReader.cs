@@ -32,8 +32,12 @@ namespace ModernWigiDash.Service.Services;
 /// snapshots report <see cref="FrameTimeSnapshotDto.IsAvailable"/> = false and
 /// the rest of the service keeps running.
 /// </summary>
-public sealed class FrameTimeReader : BackgroundService
+public sealed class FrameTimeReader(
+    ILogger<FrameTimeReader> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     private static readonly Guid D3D9Provider = new("783ACA0A-790E-4D7F-8451-AA850511C6B9");
     private static readonly Guid DxgiProvider = new("CA11C036-0102-4A2D-A6AD-F03CFED5D3C9");
     private static readonly Guid DxgKrnlProvider = new("802EC45A-1E99-4B83-9920-87C98277BA9D");
@@ -42,8 +46,6 @@ public sealed class FrameTimeReader : BackgroundService
     private const int MaxSamplesPerProcess = 4096;
     private const int SparklineSamples = 120;
 
-    private readonly ILogger<FrameTimeReader> _logger;
-    private readonly TimeProvider _timeProvider;
     private readonly Lock _gate = new();
     private readonly Dictionary<int, ProcessFrameState> _processes = new();
     private readonly Dictionary<int, string> _processNames = new();
@@ -56,12 +58,6 @@ public sealed class FrameTimeReader : BackgroundService
     private bool _running;
     private string _error = string.Empty;
     private DateTime _lastUpdate = DateTime.MinValue;
-
-    public FrameTimeReader(ILogger<FrameTimeReader> logger, TimeProvider? timeProvider = null)
-    {
-        _logger = logger;
-        _timeProvider = timeProvider ?? TimeProvider.System;
-    }
 
     /// <summary>
     /// Get the latest frame-time snapshot. Safe to call from any thread.
@@ -123,13 +119,13 @@ public sealed class FrameTimeReader : BackgroundService
                 _lastUpdate = _timeProvider.GetUtcNow().UtcDateTime;
             }
 
-            _logger.LogInformation("FrameTimeReader: ETW capture session '{SessionName}' started.", sessionName);
+            logger.LogInformation("FrameTimeReader: ETW capture session '{SessionName}' started.", sessionName);
 
             await Task.Run(() => session.Source.Process(), stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogDebug("FrameTimeReader: ETW capture session cancelled (normal shutdown).");
+            logger.LogDebug("FrameTimeReader: ETW capture session cancelled (normal shutdown).");
             // Normal shutdown
         }
         catch (Exception ex)
@@ -138,7 +134,7 @@ public sealed class FrameTimeReader : BackgroundService
                 ? "ETW frame capture requires the service to run with admin/SYSTEM rights."
                 : ex.Message;
 
-            _logger.LogError(ex, "FrameTimeReader: ETW capture unavailable: {Message}", message);
+            logger.LogError(ex, "FrameTimeReader: ETW capture unavailable: {Message}", message);
             lock (_gate)
             {
                 _running = false;
@@ -164,7 +160,7 @@ public sealed class FrameTimeReader : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "FrameTimeReader: failed to enable provider {Provider}: {Message}", providerName, ex.Message);
+            logger.LogWarning(ex, "FrameTimeReader: failed to enable provider {Provider}: {Message}", providerName, ex.Message);
         }
     }
 
@@ -188,7 +184,7 @@ public sealed class FrameTimeReader : BackgroundService
         }
         catch (Exception)
         {
-            _logger.LogDebug("FrameTimeReader: dropped malformed ETW event.");
+            logger.LogDebug("FrameTimeReader: dropped malformed ETW event.");
             // A single malformed event must never break the capture loop.
         }
     }
