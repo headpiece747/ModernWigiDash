@@ -49,7 +49,10 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                 MaxBytesPerRead = 32 * 1024 * 1024,
                 MaxStringContentLength = 32 * 1024 * 1024
             },
-            SendTimeout = TimeSpan.FromSeconds(30),
+            // 5s send timeout (was 30s): every local IPC op completes in
+            // milliseconds, and each in-flight request holds a SendTimeout
+            // timer — 30s × ~90 ops/s kept ~1000 timers alive continuously.
+            SendTimeout = TimeSpan.FromSeconds(5),
             ReceiveTimeout = TimeSpan.FromSeconds(30)
         };
 

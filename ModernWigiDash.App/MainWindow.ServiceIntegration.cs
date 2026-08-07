@@ -140,7 +140,7 @@ public partial class MainWindow
 
         _ = Task.Run(async () =>
         {
-            Log("[TOUCH] Touch polling started (50ms interval via WCF, background thread)");
+            Log("[TOUCH] Touch polling started (16ms interval via WCF, background thread)");
             while (!ct.IsCancellationRequested)
             {
                 try
