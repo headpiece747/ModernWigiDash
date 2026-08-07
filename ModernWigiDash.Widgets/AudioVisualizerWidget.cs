@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ModernWigiDash.Sdk;
 using NAudio.Wave;
 using SkiaSharp;
@@ -27,10 +28,45 @@ public class AudioVisualizerWidget : ModernWidgetBase
     private int _waveformHead = 0;
     private readonly object _audioLock = new();
 
+    // Capture is tied to rendering: it starts on the first Render (i.e. when
+    // the widget's page becomes active) and stops when Render stops being
+    // called for a grace period (page switched away). WASAPI loopback capture
+    // would otherwise run forever in the background for a hidden widget.
+    private volatile bool _capturing;
+    private long _lastRenderTimestamp;
+
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken);
+        // Capture starts lazily on the first Render, not here.
+    }
+
+    private void EnsureLiveAudioCapture()
+    {
+        if (_capturing) return;
+
         StartLiveAudioCapture();
+        _capturing = true;
+    }
+
+    private void StopLiveAudioCapture()
+    {
+        if (!_capturing) return;
+
+        _capturing = false;
+        try
+        {
+            _audioCapture?.StopRecording();
+            _audioCapture?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Context?.LogError("Failed to stop WASAPI Audio Capture", ex);
+        }
+        finally
+        {
+            _audioCapture = null;
+        }
     }
 
     private void StartLiveAudioCapture()
@@ -40,6 +76,14 @@ public class AudioVisualizerWidget : ModernWidgetBase
             _audioCapture = new WasapiLoopbackCapture();
             _audioCapture.DataAvailable += (s, e) =>
             {
+                // Watchdog: when the widget is no longer rendered (page
+                // switched away), stop capture instead of running forever.
+                if (Stopwatch.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
+                {
+                    StopLiveAudioCapture();
+                    return;
+                }
+
                 lock (_audioLock)
                 {
                     int bytesPerSample = _audioCapture.WaveFormat.BitsPerSample / 8;
@@ -83,12 +127,17 @@ public class AudioVisualizerWidget : ModernWidgetBase
         }
         catch (Exception ex)
         {
+            _capturing = false;
             Context?.LogError("Failed to initialize WASAPI Audio Capture", ex);
         }
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        // Capture runs only while this widget is being rendered (active page).
+        EnsureLiveAudioCapture();
+        _lastRenderTimestamp = Stopwatch.GetTimestamp();
+
         SKColor barColor = SKColor.TryParse(PrimaryColorHex, out var parsed) ? parsed : new SKColor(255, 205, 133);
 
         lock (_audioLock)
@@ -210,8 +259,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
     public override ValueTask DisposeAsync()
     {
-        _audioCapture?.StopRecording();
-        _audioCapture?.Dispose();
+        StopLiveAudioCapture();
         return base.DisposeAsync();
     }
 }

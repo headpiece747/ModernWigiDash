@@ -92,7 +92,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // loop, eliminating the per-frame 1.2 MB LOH allocation (was ~36 MB/s).
     // In flight max: 2 in the channel + 1 being sent + 1 being filled = 4.
     private readonly Sdk.FrameBufferPool _framePool = new(
-        DisplayProtocolConstants.FrameBufferSize, capacity: 6);
+        DisplayProtocolConstants.FrameBufferSize, capacity: 4);
 
     // Touch polling via WCF (polls hardware touch at 50ms intervals, off UI thread)
     private CancellationTokenSource? _touchPollCts;
