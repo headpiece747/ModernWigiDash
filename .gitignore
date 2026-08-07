@@ -373,3 +373,7 @@ FodyWeavers.xsd
 /skills-lock.json
 /repomix-output.xml
 /scorecard.png
+
+# Runtime diagnostics artifacts (glider-trace / dotnet tools)
+.glider-trace/
+
