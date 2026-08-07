@@ -257,7 +257,7 @@ public partial class MainWindow
         };
 
         var outcome = _gestureInterpreter.Feed(type, touch.X, touch.Y, _profile.Pages.Count, _profile.ActivePageIndex);
-        ApplyGestureOutcome(outcome, touch.X, touch.Y);
+        ApplyGestureOutcome(outcome, touch.X, touch.Y, routeWidgets: true);
     }
 
     /// <summary>
@@ -265,7 +265,12 @@ public partial class MainWindow
     /// touch sample to the widget compositor. Shared by the USB-direct and
     /// WCF touch paths.
     /// </summary>
-    private void ApplyGestureOutcome(Gestures.GestureOutcome outcome, float x, float y)
+    /// <param name="routeWidgets">
+    /// When false, widget touch routing is suppressed (used by the mouse path
+    /// in edit mode); page actions are always applied. Hardware callers always
+    /// pass true to preserve their existing behavior.
+    /// </param>
+    private void ApplyGestureOutcome(Gestures.GestureOutcome outcome, float x, float y, bool routeWidgets)
     {
         switch (outcome.PageAction)
         {
@@ -277,7 +282,7 @@ public partial class MainWindow
                 return;
         }
 
-        if (outcome.RouteToWidgets)
+        if (outcome.RouteToWidgets && routeWidgets)
         {
             SkiaFrameCompositor.RouteTouch(_profile.ActivePage, x, y, outcome.WidgetTouchType);
             SkiaCanvas.InvalidateVisual();

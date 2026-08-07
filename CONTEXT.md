@@ -73,7 +73,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 |------|-----------|
 | **Hardware touch** | Physical touch from the display, polled by DisplayHardwareWorkerService, routed through a `Channel<DisplayTouchInput>` to MainWindow. |
 | **Widget touch** | Local-coordinate touch events delivered to `IModernWidget.OnTouch()` after compositor hit-testing. |
-| **Gesture** | Swipe (70px threshold) for page navigation, arrow-tap (60/964 edge zones) for page switch, widget tap for selection. Applied in both USB-direct and WCF paths. |
+| **Gesture** | Input-sequence interpretation shared by the USB-direct, WCF, and mouse paths: one `GestureInterpreter` state machine (swipe 70/80 px for page nav, arrow-tap 60/964 edge zones × 200–400 y-band for page switch, tap for widget touch). The mouse is fed through the same Down/Move/Up vocabulary via `FeedMouseGesture`; edit-mode widget manipulation gates the machine in the mouse handlers (widget routing suppressed in edit mode, page actions still applied). |
 
 ## Architecture Overview
 

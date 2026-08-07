@@ -3,7 +3,7 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.App.Gestures;
 
 /// <summary>
-/// Page-navigation action produced by <see cref="HardwareGestureInterpreter"/>.
+/// Page-navigation action produced by <see cref="GestureInterpreter"/>.
 /// </summary>
 public enum GesturePageAction
 {
@@ -13,7 +13,7 @@ public enum GesturePageAction
 }
 
 /// <summary>
-/// Result of feeding one hardware touch sample into the gesture interpreter.
+/// Result of feeding one input sample into the gesture interpreter.
 /// </summary>
 /// <param name="PageAction">Swipe/edge-tap navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
 /// <param name="RouteToWidgets">True when the sample should be forwarded to the widget compositor.</param>
@@ -28,15 +28,17 @@ public sealed record GestureOutcome(
     TouchEventType WidgetTouchType);
 
 /// <summary>
-/// Pure gesture state machine for hardware touch input on the WigiDash display.
-/// Owns the swipe/edge-tap/page-switch thresholds and the Down→Move remapping so
-/// both the USB-direct and WCF touch paths share one implementation.
+/// Pure gesture state machine shared by every input source on the WigiDash
+/// display. Owns the swipe/edge-tap/page-switch thresholds and the Down→Move
+/// remapping so the USB-direct touch path, the WCF touch path, and the desktop
+/// mouse all apply one canonical gesture vocabulary.
 ///
 /// Hardware protocol: the display reports Down(1) for initial contact AND
 /// intermediate movement points, and Up(2) for release — a single physical tap
-/// therefore yields one Down followed by repeated Up samples.
+/// therefore yields one Down followed by repeated Up samples. The mouse feeds
+/// the same normalized Down/Move/Up sequence.
 /// </summary>
-public sealed class HardwareGestureInterpreter
+public sealed class GestureInterpreter
 {
     public const float SwipeThresholdX = 70f;
     public const float SwipeToleranceY = 80f;
@@ -52,7 +54,17 @@ public sealed class HardwareGestureInterpreter
     private float _startY;
 
     /// <summary>
-    /// Feeds one hardware touch sample and returns the gesture decision.
+    /// True when the point falls in a left/right arrow-tap zone (the canonical
+    /// 60/964 edge columns within the 200–400 y-band). Exposes the zone so
+    /// callers and tests can query it without duplicating the constants.
+    /// </summary>
+    public bool IsInArrowTapZone(float x, float y)
+    {
+        return (x <= EdgeLeftX || x >= EdgeRightX) && y >= EdgeTopY && y <= EdgeBottomY;
+    }
+
+    /// <summary>
+    /// Feeds one input sample and returns the gesture decision.
     /// </summary>
     /// <param name="type">Normalized touch type (Down/Move/Up).</param>
     /// <param name="x">Touch X in display coordinates.</param>

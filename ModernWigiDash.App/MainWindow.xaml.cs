@@ -73,9 +73,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private Point _iconGrabOffset;
     private const float ResizeHandleSize = 14f;
     private Point _lastMousePos;
-    private float _swipeStartX;
-    private float _swipeStartY;
-    private readonly Gestures.HardwareGestureInterpreter _gestureInterpreter = new();
+    private readonly Gestures.GestureInterpreter _gestureInterpreter = new();
     private bool _isUpdatingInspector = false;
 
     // Async frame pipeline — decouple UI render timer from transport round-trips.
@@ -132,7 +130,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             Dispatcher.Invoke(() =>
             {
                 var outcome = _gestureInterpreter.Feed(touchType, point.X, point.Y, _profile.Pages.Count, _profile.ActivePageIndex);
-                ApplyGestureOutcome(outcome, point.X, point.Y);
+                ApplyGestureOutcome(outcome, point.X, point.Y, routeWidgets: true);
             });
         };
 
@@ -341,35 +339,31 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SelectWidget(null);
     }
 
+    /// <summary>
+    /// Feeds a mouse input sample through the shared gesture machine. The mouse
+    /// is expressed in the same Down/Move/Up vocabulary as hardware touch, so
+    /// swipes, arrow-taps, and widget touches all follow the canonical gesture
+    /// rules. Widget routing is suppressed while the canvas is in edit mode;
+    /// page actions are still applied.
+    /// </summary>
+    private void FeedMouseGesture(TouchEventType type, Point pos)
+    {
+        var outcome = _gestureInterpreter.Feed(type, (float)pos.X, (float)pos.Y, _profile.Pages.Count, _profile.ActivePageIndex);
+        ApplyGestureOutcome(outcome, (float)pos.X, (float)pos.Y, routeWidgets: !_compositor.IsEditMode);
+    }
+
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
         _isMouseDown = true;
         var pos = e.GetPosition(SkiaCanvas);
         _lastMousePos = pos;
-        _swipeStartX = (float)pos.X;
-        _swipeStartY = (float)pos.Y;
-
-        // Check if user clicked on side navigation arrows when multiple pages exist
-        if (_profile.Pages.Count > 1)
-        {
-            if (pos.X <= 50 && pos.Y >= 250 && pos.Y <= 350 && _profile.ActivePageIndex > 0)
-            {
-                SwitchToPage(_profile.ActivePageIndex - 1);
-                _isMouseDown = false;
-                return;
-            }
-            if (pos.X >= 974 && pos.Y >= 250 && pos.Y <= 350 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-            {
-                SwitchToPage(_profile.ActivePageIndex + 1);
-                _isMouseDown = false;
-                return;
-            }
-        }
 
         // Hit test against active widgets
         var hit = SkiaFrameCompositor.HitTest(_profile.ActivePage, (float)pos.X, (float)pos.Y);
         SelectWidget(hit);
 
+        // Edit-mode manipulation (resize / icon-drag / widget-drag) stays wholly
+        // in the mouse handlers and gates the gesture machine for this gesture.
         if (hit != null && _compositor.IsEditMode)
         {
             // Check if click is in the resize handle (bottom-right corner)
@@ -392,12 +386,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
             {
                 _isDraggingWidget = true;
             }
+            return;
         }
-        else if (hit != null && !_compositor.IsEditMode)
-        {
-            // Forward touch down
-            SkiaFrameCompositor.RouteTouch(_profile.ActivePage, (float)pos.X, (float)pos.Y, TouchEventType.TouchDown);
-        }
+
+        // Non-manipulating press feeds the shared gesture machine (page
+        // navigation + widget touch routing).
+        FeedMouseGesture(TouchEventType.TouchDown, pos);
     }
 
     private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
@@ -453,9 +447,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 }
             }
         }
-        else if (_selectedWidget != null && !_compositor.IsEditMode)
+        else
         {
-            SkiaFrameCompositor.RouteTouch(_profile.ActivePage, (float)pos.X, (float)pos.Y, TouchEventType.TouchMove);
+            FeedMouseGesture(TouchEventType.TouchMove, pos);
         }
     }
 
@@ -463,31 +457,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         var pos = e.GetPosition(SkiaCanvas);
 
-        // Check for horizontal swipe gesture left/right
-        float deltaX = (float)pos.X - _swipeStartX;
-        float deltaY = (float)pos.Y - _swipeStartY;
-
-        if (_profile.Pages.Count > 1 && !_isDraggingWidget && !_isDraggingIcon && Math.Abs(deltaX) > 80 && Math.Abs(deltaY) < 70)
+        // A manipulation gesture never reaches the gesture machine — it stays
+        // wholly in the mouse handlers (resize / drag / icon-drag).
+        if (!_isDraggingWidget && !_isResizingWidget && !_isDraggingIcon && _isMouseDown)
         {
-            if (deltaX < -80 && _profile.ActivePageIndex < _profile.Pages.Count - 1)
-            {
-                // Swiped Left -> Next Page
-                SwitchToPage(_profile.ActivePageIndex + 1);
-                _isMouseDown = false;
-                return;
-            }
-            else if (deltaX > 80 && _profile.ActivePageIndex > 0)
-            {
-                // Swiped Right -> Previous Page
-                SwitchToPage(_profile.ActivePageIndex - 1);
-                _isMouseDown = false;
-                return;
-            }
-        }
-
-        if (_selectedWidget != null && !_compositor.IsEditMode && _isMouseDown)
-        {
-            SkiaFrameCompositor.RouteTouch(_profile.ActivePage, (float)pos.X, (float)pos.Y, TouchEventType.TouchUp);
+            FeedMouseGesture(TouchEventType.TouchUp, pos);
         }
 
         if ((_isDraggingWidget || _isResizingWidget) && _selectedWidget != null && _profile.ActivePage.SnapToGrid)
