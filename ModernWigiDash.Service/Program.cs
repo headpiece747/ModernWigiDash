@@ -294,11 +294,15 @@ public static class Program
     {
         Console.WriteLine("Installing service...");
 
-        // Use sc.exe to create the service, matching vendor architecture
-        // Runs as LocalSystem for full device access (vendor uses ServiceAccount.LocalSystem)
-        // For framework-dependent projects, the binPath must be "dotnet <dll-path>"
-        // because Windows Services need an executable, not a DLL directly.
-        string serviceBinPath = $"dotnet \"{assemblyPath}\"";
+        // Run as LocalSystem for full device access (vendor uses ServiceAccount.LocalSystem).
+        // Prefer the SDK apphost executable: it gives the service its own process
+        // name (ModernWigiDash.Service) in Task Manager and makes
+        // Process.GetProcessesByName("ModernWigiDash.Service") work. Fall back to
+        // "dotnet <dll>" only when the apphost is absent (e.g. dll-only deploy).
+        string? exePath = Path.ChangeExtension(assemblyPath, ".exe");
+        string serviceBinPath = File.Exists(exePath)
+            ? $"\"{exePath}\""
+            : $"dotnet \"{assemblyPath}\"";
 
         // Only request elevation if not already running as admin.
         // When already elevated, Verb="runas" can cause nested UAC prompts that fail.
