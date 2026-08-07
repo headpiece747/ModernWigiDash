@@ -297,7 +297,7 @@ public sealed class DisplayDeviceEngine : IDisposable
                     Log($"[FrameQueue] Read frame #{framesRead}, connected={_connected}");
 
                 // Rate limiting - delay if too soon since last frame (don't drop the frame)
-                var elapsed = DateTime.Now - _lastFrameSent;
+                var elapsed = TimeProvider.System.GetUtcNow().UtcDateTime - _lastFrameSent;
                 if (elapsed < MinFrameInterval)
                 {
                     await Task.Delay((int)(MinFrameInterval.TotalMilliseconds - elapsed.TotalMilliseconds));
@@ -328,7 +328,7 @@ public sealed class DisplayDeviceEngine : IDisposable
                     lock (_lock)
                     {
                         _framesSent++;
-                        _lastFrameSent = DateTime.Now;
+                        _lastFrameSent = TimeProvider.System.GetUtcNow().UtcDateTime;
                     }
                     if (_framesSent <= 5 || _framesSent % 30 == 0)
                         Log($"Frame #{_framesSent} sent successfully");

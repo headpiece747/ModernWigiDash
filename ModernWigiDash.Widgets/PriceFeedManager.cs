@@ -25,7 +25,7 @@ public class PriceInfo
     public string FormattedPrice => $"{CurrencySymbol}{Price:N2}";
     public string FormattedChange => $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent:F2}%";
     public bool IsPositive => ChangePercent >= 0;
-    public bool IsStale => (DateTime.UtcNow - Timestamp).TotalSeconds > 60;
+    public bool IsStale => (TimeProvider.System.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > 60;
 }
 
 public sealed class PriceFeedManager : IDisposable
@@ -278,7 +278,7 @@ public sealed class PriceFeedManager : IDisposable
                         Price = price,
                         ChangePercent = change,
                         Source = "CoinGecko",
-                        Timestamp = DateTime.UtcNow
+                        Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
                     };
                 }
             }
@@ -299,7 +299,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = price,
                 ChangePercent = changePct,
                 Source = "Yahoo",
-                Timestamp = DateTime.UtcNow
+                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
             };
         }
     }
@@ -382,7 +382,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = c.GetDecimal(),
                 ChangePercent = dp.GetDecimal(),
                 Source = "Finnhub",
-                Timestamp = DateTime.UtcNow
+                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
             };
         }
     }
@@ -399,8 +399,8 @@ public sealed class PriceFeedManager : IDisposable
 
         string baseCurrency = key[..3];
         string quoteCurrency = key[3..];
-        string start = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string end = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string start = TimeProvider.System.GetUtcNow().UtcDateTime.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string end = TimeProvider.System.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
         if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
         {
@@ -409,7 +409,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = price,
                 ChangePercent = change,
                 Source = "Frankfurter",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime,
                 CurrencySymbol = ""
             };
         }
@@ -533,7 +533,7 @@ public sealed class PriceFeedManager : IDisposable
                                 Price = price,
                                 ChangePercent = change,
                                 Source = "BinanceUS",
-                                Timestamp = DateTime.UtcNow
+                                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
                             };
                         }
                     }
@@ -569,17 +569,17 @@ public sealed class PriceFeedManager : IDisposable
                     Price = price,
                     ChangePercent = change ?? 0,
                     Source = "CoinGecko",
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
                 }, (_, existing) =>
                 {
-                    if (existing.Source == "BinanceUS" && (DateTime.UtcNow - existing.Timestamp).TotalSeconds < 60)
+                    if (existing.Source == "BinanceUS" && (TimeProvider.System.GetUtcNow().UtcDateTime - existing.Timestamp).TotalSeconds < 60)
                         return existing;
                     return new PriceInfo
                     {
                         Price = price,
                         ChangePercent = change ?? existing.ChangePercent,
                         Source = "CoinGecko",
-                        Timestamp = DateTime.UtcNow
+                        Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
                     };
                 });
             }
@@ -620,7 +620,7 @@ public sealed class PriceFeedManager : IDisposable
                     Price = price,
                     ChangePercent = change,
                     Source = "Binance",
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
                 };
             }
         }
@@ -644,8 +644,8 @@ public sealed class PriceFeedManager : IDisposable
                 {
                     var s = trade.GetProperty("s").GetString() ?? "";
                     var p = trade.GetProperty("p").GetDecimal();
-                    _prices.AddOrUpdate(s, _ => new PriceInfo { Price = p, Source = "Finnhub", Timestamp = DateTime.UtcNow },
-                        (_, existing) => new PriceInfo { Price = p, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = DateTime.UtcNow });
+                    _prices.AddOrUpdate(s, _ => new PriceInfo { Price = p, Source = "Finnhub", Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime },
+                        (_, existing) => new PriceInfo { Price = p, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime });
                 }
             }
         }

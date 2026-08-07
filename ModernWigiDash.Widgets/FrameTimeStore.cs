@@ -29,7 +29,7 @@ public sealed record FrameTimeSnapshotRecord(
     /// polling (service disconnected or app suspending), so widgets should
     /// render their unavailable state instead of frozen data.
     /// </summary>
-    public bool IsFresh(TimeSpan maxAge) => LastUpdate != default && DateTime.UtcNow - LastUpdate <= maxAge;
+    public bool IsFresh(TimeSpan maxAge) => LastUpdate != default && TimeProvider.System.GetUtcNow().UtcDateTime - LastUpdate <= maxAge;
 }
 
 /// <summary>
@@ -54,7 +54,7 @@ public static class FrameTimeStore
     {
         lock (Gate)
         {
-            _current = snapshot with { LastUpdate = DateTime.UtcNow };
+            _current = snapshot with { LastUpdate = TimeProvider.System.GetUtcNow().UtcDateTime };
         }
     }
 

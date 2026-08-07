@@ -682,7 +682,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         if (_isFetching) return;
         if (StaticSnapshot && _lastFetchTime != DateTime.MinValue && !force) return;
-        if (!force && (DateTime.Now - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return;
+        if (!force && (TimeProvider.System.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return;
 
         _isFetching = true;
         try
@@ -781,7 +781,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
             }
 
-            _lastFetchTime = DateTime.Now;
+            _lastFetchTime = TimeProvider.System.GetUtcNow().UtcDateTime;
             _ = SaveCacheAsync();
             Context?.RequestRender();
         }
@@ -863,7 +863,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             _resolvedCityName = data.ResolvedCityName ?? "New York";
             _lat = data.Lat;
             _lon = data.Lon;
-            _lastFetchTime = DateTime.Now;
+            _lastFetchTime = TimeProvider.System.GetUtcNow().UtcDateTime;
             lock (_forecastGate)
             {
                 _dailyForecasts.Clear();

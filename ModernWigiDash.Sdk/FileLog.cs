@@ -15,7 +15,7 @@ public static class FileLog
     {
         try
         {
-            string line = $"[{DateTime.Now:HH:mm:ss.fff}] {(string.IsNullOrEmpty(prefix) ? "" : prefix + " ")}{message}";
+            string line = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {(string.IsNullOrEmpty(prefix) ? "" : prefix + " ")}{message}";
             using var fs = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
             using var sw = new StreamWriter(fs);
             sw.WriteLine(line);

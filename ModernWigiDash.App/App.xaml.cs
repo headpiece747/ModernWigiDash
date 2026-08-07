@@ -43,7 +43,7 @@ public partial class App : Application
 
     private static void LogCrash(Exception? ex)
     {
-        string msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] UNHANDLED EXCEPTION: {ex}{Environment.NewLine}";
+        string msg = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:yyyy-MM-dd HH:mm:ss}] UNHANDLED EXCEPTION: {ex}{Environment.NewLine}";
         Console.WriteLine(msg);
         try
         {

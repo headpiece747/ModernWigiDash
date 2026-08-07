@@ -11,7 +11,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
     public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
 
     private bool _isRunning = false;
-    private DateTime _startTime = DateTime.Now;
+    private DateTime _startTime = TimeProvider.System.GetUtcNow().UtcDateTime;
     private TimeSpan _elapsed = TimeSpan.Zero;
 
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
@@ -22,7 +22,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        var total = _isRunning ? _elapsed + (DateTime.Now - _startTime) : _elapsed;
+        var total = _isRunning ? _elapsed + (TimeProvider.System.GetUtcNow().UtcDateTime - _startTime) : _elapsed;
         string timeStr = $"{total.Minutes:D2}:{total.Seconds:D2}.{total.Milliseconds / 10:D2}";
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
         SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
@@ -52,12 +52,12 @@ public class StopwatchTimerWidget : ModernWidgetBase
         {
             if (_isRunning)
             {
-                _elapsed += DateTime.Now - _startTime;
+                _elapsed += TimeProvider.System.GetUtcNow().UtcDateTime - _startTime;
                 _isRunning = false;
             }
             else
             {
-                _startTime = DateTime.Now;
+                _startTime = TimeProvider.System.GetUtcNow().UtcDateTime;
                 _isRunning = true;
             }
             Context?.RequestRender();

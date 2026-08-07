@@ -13,8 +13,10 @@ public sealed class DisplayHardwareWorkerService(
     ChannelReader<byte[]> frameChannelReader,
     ChannelWriter<DisplayTouchInput> touchWriter,
     IDisplayTransport transport,
-    ILogger<DisplayHardwareWorkerService> logger) : BackgroundService
+    ILogger<DisplayHardwareWorkerService> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private long _framesProcessed;
 
     private static readonly TimeSpan FrameTimeout = TimeSpan.FromSeconds(5);
@@ -148,7 +150,7 @@ public sealed class DisplayHardwareWorkerService(
                         Type = t.Type,
                         X = t.X,
                         Y = t.Y,
-                        Timestamp = DateTime.UtcNow
+                        Timestamp = _timeProvider.GetUtcNow().UtcDateTime
                     };
 
                     touchWriter.TryWrite(evt);

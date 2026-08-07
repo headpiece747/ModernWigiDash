@@ -15,11 +15,13 @@ public sealed class LhmSensorReader : BackgroundService
     private readonly Lock _gate = new();
     private readonly Computer _computer;
     private readonly ILogger<LhmSensorReader> _logger;
+    private readonly TimeProvider _timeProvider;
     private SensorSnapshotDto _latest = new();
 
-    public LhmSensorReader(ILogger<LhmSensorReader> logger)
+    public LhmSensorReader(ILogger<LhmSensorReader> logger, TimeProvider? timeProvider = null)
     {
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _computer = new Computer
         {
             IsCpuEnabled = true,
@@ -61,7 +63,7 @@ public sealed class LhmSensorReader : BackgroundService
                 _latest = new SensorSnapshotDto
                 {
                     IsConnected = false,
-                    LastUpdate = DateTime.UtcNow,
+                    LastUpdate = _timeProvider.GetUtcNow().UtcDateTime,
                     Readings = []
                 };
             }
@@ -114,7 +116,7 @@ public sealed class LhmSensorReader : BackgroundService
     private static SensorSnapshotDto BuildSnapshot(IEnumerable<IHardware> hardware)
     {
         var readings = new List<SensorReadingDto>();
-        var now = DateTime.UtcNow;
+        var now = TimeProvider.System.GetUtcNow().UtcDateTime;
 
         foreach (var hardwareItem in hardware)
         {

@@ -32,7 +32,7 @@ public sealed record LhmSnapshot(bool IsConnected, DateTime LastUpdate, IReadOnl
     /// polling (service disconnected or app suspending), so widgets should
     /// render their unavailable state instead of frozen data.
     /// </summary>
-    public bool IsFresh(TimeSpan maxAge) => LastUpdate != DateTime.MinValue && DateTime.UtcNow - LastUpdate <= maxAge;
+    public bool IsFresh(TimeSpan maxAge) => LastUpdate != DateTime.MinValue && TimeProvider.System.GetUtcNow().UtcDateTime - LastUpdate <= maxAge;
 }
 
 /// <summary>
@@ -57,7 +57,7 @@ public static class LhmSensorStore
     {
         lock (Gate)
         {
-            _current = snapshot with { LastUpdate = DateTime.UtcNow };
+            _current = snapshot with { LastUpdate = TimeProvider.System.GetUtcNow().UtcDateTime };
         }
     }
 
@@ -81,7 +81,7 @@ public static class LhmSensorStore
 
         Update(new LhmSnapshot(
             dto?.IsConnected ?? false,
-            dto?.LastUpdate ?? DateTime.UtcNow,
+            dto?.LastUpdate ?? TimeProvider.System.GetUtcNow().UtcDateTime,
             readings));
     }
 

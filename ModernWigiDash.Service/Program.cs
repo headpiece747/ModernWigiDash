@@ -535,6 +535,9 @@ public static class Program
         // Hardware transport singleton
         builder.Services.AddSingleton<IDisplayTransport, DisplayHidTransport>();
 
+        // Injectable clock: DI classes receive TimeProvider (tests can substitute a fake).
+        builder.Services.AddSingleton(TimeProvider.System);
+
         // DisplayHardwareWorkerService as singleton so WCF service can inject it for frame stats
         builder.Services.AddSingleton<DisplayHardwareWorkerService>();
         builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DisplayHardwareWorkerService>());
@@ -599,7 +602,7 @@ public static class Program
                 pipeBinding, WcfServicePath);
         });
 
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] CoreWCF endpoint registered at {WcfEndpoint} -> {WcfServicePath}");
+        Console.WriteLine($"[{TimeProvider.System.GetLocalNow():HH:mm:ss}] CoreWCF endpoint registered at {WcfEndpoint} -> {WcfServicePath}");
 
         // Run the service (this blocks until shutdown)
         await app.RunAsync();

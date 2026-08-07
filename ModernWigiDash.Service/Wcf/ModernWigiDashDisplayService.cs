@@ -26,7 +26,8 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     private readonly LhmSensorReader? _lhmSensorReader;
     private readonly FrameTimeReader? _frameTimeReader;
     private readonly ILogger<ModernWigiDashDisplayService> _logger;
-    private readonly DateTime _startTime = DateTime.UtcNow;
+    private readonly TimeProvider _timeProvider;
+    private readonly DateTime _startTime;
     private static readonly string VersionString = typeof(ModernWigiDashDisplayService)
         .Assembly.GetName().Version?.ToString() ?? "1.0.0.0";
 
@@ -37,7 +38,8 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         ChannelReader<DisplayTouchInput> touchReader,
         ILogger<ModernWigiDashDisplayService> logger,
         LhmSensorReader? lhmSensorReader = null,
-        FrameTimeReader? frameTimeReader = null)
+        FrameTimeReader? frameTimeReader = null,
+        TimeProvider? timeProvider = null)
     {
         _transport = transport;
         _hardwareWorker = hardwareWorker;
@@ -46,6 +48,8 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         _lhmSensorReader = lhmSensorReader;
         _frameTimeReader = frameTimeReader;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _startTime = _timeProvider.GetUtcNow().UtcDateTime;
 
         LogToFile("[WCF] ModernWigiDashDisplayService constructor called");
         _logger.LogInformation("CoreWCF: ModernWigiDashDisplayService instantiated");
@@ -193,7 +197,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     {
         try
         {
-            var uptime = DateTime.UtcNow - _startTime;
+            var uptime = _timeProvider.GetUtcNow().UtcDateTime - _startTime;
             return new ServiceDiagnostics
             {
                 ServiceName = "ModernWigiDashService",
@@ -279,7 +283,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         catch (Exception ex)
         {
             _logger.LogError(ex, "CoreWCF: GetSensorSnapshot failed");
-            return new SensorSnapshotDto { IsConnected = false, LastUpdate = DateTime.UtcNow, Readings = [] };
+            return new SensorSnapshotDto { IsConnected = false, LastUpdate = _timeProvider.GetUtcNow().UtcDateTime, Readings = [] };
         }
     }
 
@@ -301,7 +305,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         catch (Exception ex)
         {
             _logger.LogError(ex, "CoreWCF: GetFrameTimeSnapshot failed");
-            return new FrameTimeSnapshotDto { IsAvailable = false, ErrorMessage = ex.Message, LastUpdate = DateTime.UtcNow };
+            return new FrameTimeSnapshotDto { IsAvailable = false, ErrorMessage = ex.Message, LastUpdate = _timeProvider.GetUtcNow().UtcDateTime };
         }
     }
 

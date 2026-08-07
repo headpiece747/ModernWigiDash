@@ -103,9 +103,9 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             Price = FormatPrice(info.Price, info.CurrencySymbol);
             ChangeBadge = info.FormattedChange;
         }
-        else if ((DateTime.Now - _lastFallback).TotalSeconds >= 15)
+        else if ((TimeProvider.System.GetUtcNow().UtcDateTime - _lastFallback).TotalSeconds >= 15)
         {
-            _lastFallback = DateTime.Now;
+            _lastFallback = TimeProvider.System.GetUtcNow().UtcDateTime;
             _ = FallbackFetchAsync();
         }
 

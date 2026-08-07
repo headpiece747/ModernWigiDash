@@ -43,6 +43,7 @@ public sealed class FrameTimeReader : BackgroundService
     private const int SparklineSamples = 120;
 
     private readonly ILogger<FrameTimeReader> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly Lock _gate = new();
     private readonly Dictionary<int, ProcessFrameState> _processes = new();
     private readonly Dictionary<int, string> _processNames = new();
@@ -56,9 +57,10 @@ public sealed class FrameTimeReader : BackgroundService
     private string _error = string.Empty;
     private DateTime _lastUpdate = DateTime.MinValue;
 
-    public FrameTimeReader(ILogger<FrameTimeReader> logger)
+    public FrameTimeReader(ILogger<FrameTimeReader> logger, TimeProvider? timeProvider = null)
     {
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -118,7 +120,7 @@ public sealed class FrameTimeReader : BackgroundService
             {
                 _running = true;
                 _error = string.Empty;
-                _lastUpdate = DateTime.UtcNow;
+                _lastUpdate = _timeProvider.GetUtcNow().UtcDateTime;
             }
 
             _logger.LogInformation("FrameTimeReader: ETW capture session '{SessionName}' started.", sessionName);
@@ -141,7 +143,7 @@ public sealed class FrameTimeReader : BackgroundService
             {
                 _running = false;
                 _error = message;
-                _lastUpdate = DateTime.UtcNow;
+                _lastUpdate = _timeProvider.GetUtcNow().UtcDateTime;
             }
         }
         finally
@@ -530,7 +532,7 @@ public sealed class FrameTimeReader : BackgroundService
             }
         }
 
-        _lastUpdate = DateTime.UtcNow;
+        _lastUpdate = _timeProvider.GetUtcNow().UtcDateTime;
         return new FrameTimeSnapshotDto
         {
             IsAvailable = true,

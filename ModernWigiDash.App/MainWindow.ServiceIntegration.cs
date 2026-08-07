@@ -29,8 +29,8 @@ public partial class MainWindow
     /// </summary>
     private void TryRetryServiceRouting()
     {
-        if ((DateTime.Now - _lastWcfRetry).TotalSeconds < 10) return;
-        _lastWcfRetry = DateTime.Now;
+        if ((TimeProvider.System.GetUtcNow().UtcDateTime - _lastWcfRetry).TotalSeconds < 10) return;
+        _lastWcfRetry = TimeProvider.System.GetUtcNow().UtcDateTime;
         _ = InitializeWcfRoutingAsync();
     }
 
