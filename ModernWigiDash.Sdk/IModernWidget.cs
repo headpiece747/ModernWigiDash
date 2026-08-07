@@ -27,7 +27,8 @@ public abstract class ModernWidgetBase : IModernWidget
 
     public virtual ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        Context = context ?? throw new ArgumentNullException(nameof(context));
+        ArgumentNullException.ThrowIfNull(context);
+        Context = context;
         return ValueTask.CompletedTask;
     }
 
