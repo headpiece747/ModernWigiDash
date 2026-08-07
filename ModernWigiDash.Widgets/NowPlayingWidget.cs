@@ -61,7 +61,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         public string AlbumArtist = "";
         public int TrackNumber;
         public int AlbumTrackCount;
-        public string[] Genres = System.Array.Empty<string>();
+        public string[] Genres = [];
         public GlobalSystemMediaTransportControlsSessionPlaybackStatus Status;
         public TimeSpan Position;
         public TimeSpan Duration;
@@ -175,7 +175,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                 AlbumArtist = Sanitize(props?.AlbumArtist, ""),
                 TrackNumber = props?.TrackNumber ?? 0,
                 AlbumTrackCount = props?.AlbumTrackCount ?? 0,
-                Genres = props?.Genres?.ToArray() ?? System.Array.Empty<string>(),
+                Genres = props?.Genres?.ToArray() ?? [],
                 Status = info?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed,
                 Position = timeline?.Position ?? TimeSpan.Zero,
                 Duration = timeline?.EndTime ?? TimeSpan.Zero,
@@ -452,7 +452,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private static string BuildMetaLine(MediaSnapshot snap)
     {
-        var parts = new List<string>();
+        List<string> parts = [];
         if (snap.TrackNumber > 0)
             parts.Add(snap.AlbumTrackCount > 0 ? $"Track {snap.TrackNumber}/{snap.AlbumTrackCount}" : $"Track {snap.TrackNumber}");
         if (snap.Genres.Length > 0)
@@ -884,7 +884,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             canvas.DrawBitmap(_albumArt, new SKRect(0, 0, 32, 32), HighQualitySampling);
             canvas.Flush();
 
-            var buckets = new Dictionary<int, (SKColor color, int count, float brightness)>();
+            Dictionary<int, (SKColor color, int count, float brightness)> buckets = [];
 
             for (int y = 0; y < sample.Height; y++)
             {

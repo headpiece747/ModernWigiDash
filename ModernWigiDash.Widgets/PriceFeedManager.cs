@@ -456,7 +456,7 @@ public sealed class PriceFeedManager : IDisposable
                 return false;
             }
 
-            var dates = new List<string>();
+            List<string> dates = [];
             var ratesByDate = new Dictionary<string, decimal>(StringComparer.Ordinal);
             foreach (var entry in rates.EnumerateObject())
             {

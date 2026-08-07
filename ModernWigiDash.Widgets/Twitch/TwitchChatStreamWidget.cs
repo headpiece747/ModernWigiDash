@@ -268,7 +268,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         Context.RequestRender();
 
         var buffer = new byte[8192];
-        var pending = new List<byte>();
+        List<byte> pending = [];
         while (!ct.IsCancellationRequested)
         {
             var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
@@ -431,7 +431,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private static List<string> WrapText(string text, SKFont font, float maxWidth)
     {
-        var result = new List<string>();
+        List<string> result = [];
         var current = new StringBuilder();
         foreach (var word in text.Split(' '))
         {

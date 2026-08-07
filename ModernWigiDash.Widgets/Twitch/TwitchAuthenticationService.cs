@@ -351,9 +351,17 @@ internal sealed class TwitchSession
             Environment.GetEnvironmentVariable("MODERNWIGIDASH_TWITCH_CLIENT_ID"),
             fallbackClientId);
 
-    private static string FirstNonEmpty(params string?[] values)
+    private static string FirstNonEmpty(params ReadOnlySpan<string?> values)
     {
-        string? value = values.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+        string? value = null;
+        foreach (string? candidate in values)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                value = candidate;
+                break;
+            }
+        }
         return value?.Trim() ?? "";
     }
 

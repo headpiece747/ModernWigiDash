@@ -133,7 +133,7 @@ public static class FontHelper
     /// </summary>
     public static List<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
     {
-        var runs = new List<(string Text, SKTypeface Typeface)>();
+        List<(string Text, SKTypeface Typeface)> runs = [];
         if (string.IsNullOrEmpty(text))
         {
             return runs;

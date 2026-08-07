@@ -893,7 +893,7 @@ public class UnitTestSuite
         Assert.AreEqual(20, FrameTimeStatistics.Percentile(values, 50));
         Assert.AreEqual(40, FrameTimeStatistics.Percentile(values, 99));
         Assert.AreEqual(40, FrameTimeStatistics.Percentile(values, 100));
-        Assert.AreEqual(0, FrameTimeStatistics.Percentile(Array.Empty<double>(), 99));
+        Assert.AreEqual(0, FrameTimeStatistics.Percentile([], 99));
     }
 
     [TestMethod]
@@ -953,11 +953,11 @@ public class UnitTestSuite
         unavailable.Render(canvas, bounds);
 
         var waiting = new FrameTimeWidget();
-        FrameTimeStore.Update(new FrameTimeSnapshotRecord(true, 0, "", 0, 0, 0, 0, 0, 0, Array.Empty<double>()));
+        FrameTimeStore.Update(new FrameTimeSnapshotRecord(true, 0, "", 0, 0, 0, 0, 0, 0, []));
         waiting.Render(canvas, bounds);
 
         var live = new FrameTimeWidget { AccentColorHex = "#22C55E" };
-        var samples = new List<double>();
+        List<double> samples = [];
         for (int i = 0; i < 240; i++)
         {
             samples.Add(6.5 + (i % 20) * 0.05);

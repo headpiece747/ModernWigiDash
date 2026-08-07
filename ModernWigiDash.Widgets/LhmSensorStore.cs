@@ -24,7 +24,7 @@ public sealed record LhmReading(
 /// </summary>
 public sealed record LhmSnapshot(bool IsConnected, DateTime LastUpdate, IReadOnlyList<LhmReading> Readings)
 {
-    public static LhmSnapshot Disconnected() => new(false, DateTime.MinValue, Array.Empty<LhmReading>());
+    public static LhmSnapshot Disconnected() => new(false, DateTime.MinValue, []);
 
     /// <summary>
     /// True when the snapshot was produced by an active polling loop within

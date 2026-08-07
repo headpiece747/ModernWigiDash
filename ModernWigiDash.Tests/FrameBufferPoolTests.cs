@@ -73,7 +73,7 @@ public class FrameBufferPoolTests
     public void DrainToLatest_WithDroppedHook_ReturnsAllButLast()
     {
         var channel = Channel.CreateUnbounded<string>();
-        var dropped = new List<string>();
+        List<string> dropped = [];
         channel.Writer.TryWrite("a");
         channel.Writer.TryWrite("b");
         channel.Writer.TryWrite("c");
@@ -88,7 +88,7 @@ public class FrameBufferPoolTests
     public void DrainToLatest_WithDroppedHook_EmptyChannel_NoCallbacks()
     {
         var channel = Channel.CreateUnbounded<string>();
-        var dropped = new List<string>();
+        List<string> dropped = [];
 
         string? latest = ChannelFrameCoalescer.DrainToLatest(channel.Reader, dropped.Add);
 

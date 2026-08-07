@@ -29,7 +29,7 @@ public class PictureAndGifWidget : ModernWidgetBase
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Placeholder icon and hint color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
-    private string[] _folderImages = Array.Empty<string>();
+    private string[] _folderImages = [];
     private int _imageIndex = 0;
     private SKBitmap? _staticBitmap;
     private SKCodec? _gifCodec;
@@ -137,7 +137,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         _staticBitmap?.Dispose();
         _staticBitmap = null;
         _gifFrameIndex = 0;
-        _folderImages = Array.Empty<string>();
+        _folderImages = [];
         _imageIndex = 0;
     }
 

@@ -63,7 +63,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         float padding = Math.Min(12f, bounds.Width * 0.04f);
         float textWidth = bounds.Width - padding * 2f;
 
-        var wrapped = new List<string>();
+        List<string> wrapped = [];
         foreach (string rawLine in (Text ?? "").Split('\n'))
         {
             wrapped.AddRange(WrapLine(rawLine, font, textWidth));
@@ -89,7 +89,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
     private static List<string> WrapLine(string text, SKFont font, float maxWidth)
     {
-        var result = new List<string>();
+        List<string> result = [];
         if (string.IsNullOrEmpty(text))
         {
             result.Add("");

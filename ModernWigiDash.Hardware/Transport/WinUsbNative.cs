@@ -372,7 +372,7 @@ internal sealed class WinUsbBulkDevice : IDisposable
         setup.Index = 0;
         setup.Length = (ushort)(data?.Length ?? 0);
 
-        byte[] buffer = data?.Length > 0 ? data : Array.Empty<byte>();
+        byte[] buffer = data?.Length > 0 ? data : [];
 
         return WinUsbNative.WinUsb_ControlTransfer(
             _interfaceHandle, setup, buffer, (uint)buffer.Length, out _, IntPtr.Zero);

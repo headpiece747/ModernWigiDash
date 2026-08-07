@@ -220,7 +220,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         bool hasForecast = ShowForecast && _dailyForecastSnapshot.Count > 0 && h >= 150f;
         float forecastH = hasForecast ? Math.Clamp(80f * sy, 45f, 160f) : 0f;
 
-        var metrics = new List<string>();
+        List<string> metrics = [];
         if (ShowFeelsLike) metrics.Add($"Feels: {FormatTemp(_feelsLikeC, tempUnit, true)}");
         if (ShowHumidity) metrics.Add($"Humidity: {_humidity:F0}%");
         if (ShowWind) metrics.Add($"Wind: {FormatSpeed(_windSpeedKmH, speedUnit)}");
@@ -742,7 +742,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
                     _humidity = hums[0].GetDouble();
 
-                var hourlyForecasts = new List<HourlyForecastItem>();
+                List<HourlyForecastItem> hourlyForecasts = [];
                 if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
                 {
                     int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
@@ -763,7 +763,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
                     _lowTempC = mins[0].GetDouble();
 
-                var dailyForecasts = new List<DailyForecastItem>();
+                List<DailyForecastItem> dailyForecasts = [];
                 if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
                 {
                     int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());

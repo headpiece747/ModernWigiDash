@@ -21,7 +21,7 @@ public sealed record FrameTimeSnapshotRecord(
     DateTime LastUpdate = default)
 {
     public static FrameTimeSnapshotRecord Unavailable() =>
-        new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, Array.Empty<double>());
+        new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, []);
 
     /// <summary>
     /// True when the snapshot was produced by an active polling loop within

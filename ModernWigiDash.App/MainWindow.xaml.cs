@@ -656,7 +656,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 double clientH = (content as FrameworkElement)?.ActualHeight ?? window.ActualHeight;
                 var tl = combo.TransformToAncestor(content).Transform(new Point(0, 0));
 
-                var placements = new List<CustomPopupPlacement>();
+                List<CustomPopupPlacement> placements = [];
                 if (clientH - (tl.Y + targetSize.Height) >= popupSize.Height)
                 {
                     placements.Add(new CustomPopupPlacement(new Point(0, targetSize.Height), PopupPrimaryAxis.Horizontal));

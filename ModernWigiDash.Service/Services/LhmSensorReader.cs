@@ -115,7 +115,7 @@ public sealed class LhmSensorReader : BackgroundService
 
     private static SensorSnapshotDto BuildSnapshot(IEnumerable<IHardware> hardware)
     {
-        var readings = new List<SensorReadingDto>();
+        List<SensorReadingDto> readings = [];
         var now = TimeProvider.System.GetUtcNow().UtcDateTime;
 
         foreach (var hardwareItem in hardware)
