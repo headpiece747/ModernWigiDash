@@ -34,9 +34,9 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 | Term | Definition |
 |------|-----------|
-| **Service** | A Windows Service (`ModernWigiDashService`) running as LocalSystem that owns the USB device, captures telemetry, and exposes a WCF endpoint. |
+| **Service** | A Windows Service (`ModernWigiDashService`) running as LocalSystem that owns the USB device, captures telemetry, and exposes a WCF endpoint. **Currently isolated** (ADR-0003, ADR-0004): kept in the repo but not used at runtime — its frame-time role moved to PresentMon Service, its sensor role moved to LibreHardwareService, and the app talks USB directly. Revisit if a future plan needs it. |
 | **WCF endpoint** | `net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc` — the CoreWCF service contract for IPC between the service and the app, hosted over a named pipe (kernel-level ACL security; no TCP exposure). |
-| **Service.Contracts** | Shared assembly containing the WCF contract interface (`IModernWigiDashDisplayServiceContract`), DTOs (`FrameTimeSnapshotDto`, `SensorSnapshotDto`), data models, and the WCF client (`ModernWigiDashDisplayServiceClient`). No Hardware dependency — purely a contract library. |
+| **Service.Contracts** | Shared assembly containing the WCF contract interface (`IModernWigiDashDisplayServiceContract`), DTOs (`FrameTimeSnapshotDto`, `SensorSnapshotDto`), data models, and the WCF client (`ModernWigiDashDisplayServiceClient`). No Hardware dependency — purely a contract library. No sensor operation remains (removed by ADR-0004). |
 | **DetectServicePort** | Protocol-verified service discovery: probes known named pipe endpoints → WCF GetVersion handshake. An impostor pipe cannot hijack frames without speaking the contract. |
 | **ProfileOps** | The pure profile-operations module (Core): page CRUD, widget placement/rehydration, and JSON export/import. MainWindow keeps only dialogs, selection, and refresh — the user-visible model mutations are testable through the module's interface. |
 | **ServiceRoutingState** | Owns the App↔service routing truth (App): whether the service is active, the consecutive-failure counting that flips it (default 2), and the throttled re-detect trigger (10s). Poll loops read `IsServiceActive` as their readiness guard and report failures here — a service that dies after a successful connect stops the loops within a couple of failures instead of hammering a faulted channel. |
@@ -47,11 +47,11 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 | Term | Definition |
 |------|-----------|
-| **LhmSensorStore** | Static in-process cache of hardware sensor readings from LibreHardwareMonitor. Written by the service's sensor reader (producer timestamp preserved); read by `HardwareMonitorWidget` through `TryReadFresh` — the store owns the staleness decision, consumers cannot skip it. Same staleness semantics. |
+| **LhmSensorStore** | Static in-process cache of hardware sensor readings from LibreHardwareService. Written by the App's shared-memory producer (`LhmSharedMemoryReader` → `UpdateFromDto`, producer timestamp preserved); read by `HardwareMonitorWidget` through `TryReadFresh` — the store owns the staleness decision, consumers cannot skip it. Same staleness semantics. |
 | **FrameTimeStore** | Static in-process cache of FPS/frame-time snapshots from the ETW reader. Written by the service's frame-time reader (producer timestamp preserved); read by `FrameTimeWidget` through `TryReadFresh`. Same staleness semantics. |
 | **FrameTimeReader** | Background service that captures ETW present events (DXGI/D3D9/DxgKrnl) and builds `FrameTimeSnapshotDto` records. |
-| **LhmSensorReader** | Background service that polls LibreHardwareMonitor for hardware readings (CPU/GPU temps, fan speeds, etc.) and builds `SensorSnapshotDto`. |
-| **UpdateFromDto** | Maps WCF DTOs to widget-side records on the store. Centralizes the DTO→render-model translation in the store layer. |
+| **LibreHardwareService producer** | The hardware-sensor source (ADR-0004). Replaces the deleted `LhmSensorReader`: LibreHardwareService (LocalSystem) owns the hardware polling and publishes readings to named shared-memory maps (`sensors`, `status`; `all-hardware` optional) guarded by named mutexes. The App's `LhmSharedMemoryReader` opens the maps by name, takes the mutex per read, parses the header (`MetaDataSize`, `UpdateInterval`, `LastUpdate`, `index-length/offset`, `index-format`, `data-length/offset`) and honors the declared index format (JSON or MessagePack — MessagePack-CSharp package). DataSensor records map 1:1 into `SensorSnapshotDto` (SensorId preserved; `Avg` dropped to 0 — LHS publishes value/min/max only; `UnitFor(SensorType)` replicated app-side) → `LhmSensorStore.UpdateFromDto` on the existing 1s `PollLoop` shape. Absent service ⇒ widget shows a graceful "LibreHardwareService not running" state. |
+| **UpdateFromDto** | Maps sensor DTOs to widget-side records on the store. Centralizes the DTO→render-model translation in the store layer. |
 
 ### Widgets
 
@@ -131,7 +131,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 1. **Render loop**: MainWindow tick → `SkiaFrameCompositor.Compose()` → `FrameEncoder.ConvertToRgb565()` → Channel → `DisplayHardwareWorkerService.RunFrameLoop()` → `IDisplayTransport.SendFrame()`
 2. **Touch flow**: `DisplayHardwareWorkerService.RunTouchPollLoop()` (normalizes raw byte → `TouchEventType`) → `Channel<TouchEventInfo>` → MainWindow → `SkiaFrameCompositor.RouteTouch()` → `IModernWidget.OnTouch()`
-3. **Sensor flow**: `LhmSensorReader` (BackgroundService) → `LhmSensorStore.Update()` (static cache) → `HardwareMonitorWidget.Render()` reads snapshot
+3. **Sensor flow**: `LhmSharedMemoryReader` (App, reads LibreHardwareService shared memory on the 1s `PollLoop` shape) → `LhmSensorStore.UpdateFromDto()` (static cache) → `HardwareMonitorWidget.Render()` reads snapshot
 4. **Frame-time flow**: `FrameTimeReader` (ETW BackgroundService) → `FrameTimeStore.Update()` (static cache) → `FrameTimeWidget.Render()` reads snapshot
 
 ### Key Design Decisions
@@ -163,3 +163,4 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | ADR | Decision | Rationale |
 |-----|----------|-----------|
 | [ADR-0001](docs/adr/0001-synchronous-transport-interface.md) | Synchronous transport interface | USB I/O is inherently blocking; fake async adds cognitive overhead and prevents compile-time detection of sync-over-async |
+| [ADR-0004](docs/adr/0004-librehardwareservice-shared-memory-for-sensors.md) | LibreHardwareService shared memory as hardware sensor source | Replaces the in-house WCF sensor reader; LHS's LocalSystem service + mutex-guarded shared-memory maps match the non-elevation and low-overhead goals with no custom hardware-polling code to maintain |
