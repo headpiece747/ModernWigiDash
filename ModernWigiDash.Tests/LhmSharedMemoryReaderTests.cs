@@ -2,7 +2,7 @@ using System.IO;
 using System.Text.Json;
 using MessagePack;
 using ModernWigiDash.App.LibreHardwareService;
-using ModernWigiDash.Service.Contracts;
+using ModernWigiDash.Sdk;
 using IndexEntry = ModernWigiDash.App.LibreHardwareService.LhmSharedMemoryReader.IndexEntry;
 using SensorBlock = ModernWigiDash.App.LibreHardwareService.LhmSharedMemoryReader.SensorBlock;
 

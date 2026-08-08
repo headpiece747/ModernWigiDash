@@ -1,4 +1,4 @@
-using ModernWigiDash.Service.Contracts;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -68,7 +68,7 @@ public class TelemetryStoreMappingTests
             FrameTimeMs = 6.92,
             Low1PercentFps = 90.1,
             Low01PercentFps = 60.2,
-            GpuBusyPercent = 45.3,
+            GpuBusyMs = 45.3,
             CpuFrameTimeMs = 3.1,
             RecentFrameTimesMs = [6.9, 7.0, 6.8]
         });
@@ -82,7 +82,7 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual(6.92, rec.FrameTimeMs);
         Assert.AreEqual(90.1, rec.Low1PercentFps);
         Assert.AreEqual(60.2, rec.Low01PercentFps);
-        Assert.AreEqual(45.3, rec.GpuBusyPercent);
+        Assert.AreEqual(45.3, rec.GpuBusyMs);
         Assert.AreEqual(3.1, rec.CpuFrameTimeMs);
         CollectionAssert.AreEqual(new[] { 6.9, 7.0, 6.8 }, rec.RecentFrameTimesMs.ToArray());
         Assert.IsTrue(rec.IsFresh(TimeSpan.FromSeconds(10)));

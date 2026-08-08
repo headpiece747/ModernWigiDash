@@ -31,7 +31,6 @@ public sealed class DisplayDeviceEngine : IDisposable
     private IDisplayTransport? _transport;
     private bool _connected;
     private bool _connecting; // Prevent concurrent connection attempts
-    private bool _serviceActive; // Yielded to the ModernWigiDash service
     private readonly Lock _lock = new();
 
     // -- Lifecycle State --
@@ -143,54 +142,6 @@ public sealed class DisplayDeviceEngine : IDisposable
             return true;
         }
 
-        // Yield hardware management if the ModernWigiDash service is active.
-        // Check both the Windows Service and any running service process.
-        try
-        {
-            using var sc = new System.ServiceProcess.ServiceController("ModernWigiDashService");
-            if (sc.Status == System.ServiceProcess.ServiceControllerStatus.Running)
-            {
-                if (!_serviceActive)
-                {
-                    Log("[TryConnectAsync] ModernWigiDashService Windows Service is running. Yielding USB hardware handle to service.");
-                    _serviceActive = true;
-                }
-                IsSimulationMode = false;
-                IsHardwareActive = true;
-                DeviceStatus = "🟢 Worker Service Active";
-                return true;
-            }
-        }
-        catch
-        {
-            // Service check failed (permissions, etc.) — fall through
-            System.Diagnostics.Debug.WriteLine("Service check failed; falling through to direct connection");
-        }
-
-        // Also check for a running service process (e.g. "-test" mode)
-        try
-        {
-            var svcProcesses = System.Diagnostics.Process.GetProcessesByName("ModernWigiDash.Service");
-            if (svcProcesses.Length > 0)
-            {
-                if (!_serviceActive)
-                {
-                    Log($"[TryConnectAsync] ModernWigiDash.Service process running (PID={svcProcesses[0].Id}). Yielding USB hardware handle to service.");
-                    _serviceActive = true;
-                }
-                foreach (var p in svcProcesses) p.Dispose();
-                IsSimulationMode = false;
-                IsHardwareActive = true;
-                DeviceStatus = "🟢 Worker Service Active";
-                return true;
-            }
-        }
-        catch
-        {
-            // Process check failed — fall through to direct connection
-            System.Diagnostics.Debug.WriteLine("Process check failed; falling through to direct connection");
-        }
-
         // Guard against concurrent connection attempts
         lock (_lock)
         {
@@ -222,7 +173,6 @@ public sealed class DisplayDeviceEngine : IDisposable
                         _transport = transport;
                         _connected = true;
                     }
-                    _serviceActive = false;
                     IsSimulationMode = false;
 
                     // Send device initialization sequence (PING + blank frame + GoToScreen)
@@ -265,7 +215,6 @@ public sealed class DisplayDeviceEngine : IDisposable
                     _transport = null;
                     _connected = false;
                 }
-                _serviceActive = false;
                 IsSimulationMode = true;
                 IsHardwareActive = false;
                 DeviceStatus = "🟡 Device Unavailable (Simulation Mode)";

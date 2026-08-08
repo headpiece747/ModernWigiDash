@@ -1,7 +1,7 @@
 using System.IO.MemoryMappedFiles;
 using System.Text.Json;
 using MessagePack;
-using ModernWigiDash.Service.Contracts;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.LibreHardwareService;
 

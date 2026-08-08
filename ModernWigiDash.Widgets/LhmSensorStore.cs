@@ -1,4 +1,4 @@
-using ModernWigiDash.Service.Contracts;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 

@@ -8,24 +8,24 @@
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?style=flat-square&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?style=flat-square&logo=sharp&logoColor=white)](https://learn.microsoft.com/en-us/dotnet/csharp/)
-[![Tests](https://img.shields.io/badge/tests-295%20passing-brightgreen?style=flat-square)](ModernWigiDash.Tests)
+[![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen?style=flat-square)](ModernWigiDash.Tests)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?style=flat-square&logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 </div>
 
-ModernWigiDash replaces vendor dashboard software with a **decoupled Windows Background Service**, a **zero-allocation SkiaSharp frame compositor**, and an **extensible widget plugin architecture** — all built on .NET 10 with current C# idioms. Frames stream to the display over a kernel-secured **named pipe** and direct **USB HID / WinUSB** transport, with hardware telemetry, frame-time analytics, Twitch chat, media controls, and market tickers at your fingertips.
+ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, and direct USB access — all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), Twitch chat, media controls, and market tickers at your fingertips.
 
 ---
 
 ## Architecture
 
-ModernWigiDash is split into a client configuration UI and an autonomous background service to prevent frame drops and keep hardware communication reliable:
+ModernWigiDash is a single WPF app that owns the USB display directly — no background service to install:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
 │                          ModernWigiDash.App                              │
-│              (WPF Configuration UI · Layout Editor · Inspector)          │
+│          (WPF Configuration UI · Layout Editor · Inspector)              │
 │                                                                           │
 │   ┌──────────────────┐   ┌──────────────────┐   ┌────────────────────┐   │
 │   │  WidgetPlugin    │   │  SkiaFrame       │   │  Gesture           │   │
@@ -33,32 +33,21 @@ ModernWigiDash is split into a client configuration UI and an autonomous backgro
 │   │  (catalog)       │   │  (30 FPS ·       │   │  (swipe / edge tap)│   │
 │   │                  │   │   zero-alloc)    │   │                    │   │
 │   └──────────────────┘   └──────────────────┘   └────────────────────┘   │
-└──────────────────────────────────┬───────────────────────────────────────┘
-                                   │  Named Pipe IPC (WCF · kernel ACL)
-                                   │  frames → · touch ← · telemetry ←
-┌──────────────────────────────────▼───────────────────────────────────────┐
-│                        ModernWigiDash.Service                            │
-│           (Windows Background Service · LocalSystem)                     │
 │                                                                           │
-│   ┌──────────────────────┐   ┌──────────────────────┐                    │
-│   │  LhmSensorReader     │   │  FrameTimeReader     │                    │
-│   │  (LibreHardwareMon)  │   │  (ETW present events)│                    │
-│   └──────────────────────┘   └──────────────────────┘                    │
-│   ┌───────────────────────────────────────────────────┐                  │
-│   │  DisplayHardwareWorkerService (frame + touch loop)│                  │
-│   └───────────────────────────────────────────────────┘                  │
+│   LhmSharedMemoryReader ── LHS shared memory ──► LibreHardwareService     │
+│   PresentMonFrameTimeProducer ── named pipe ──► PresentMon Service        │
 └──────────────────────────────────┬───────────────────────────────────────┘
                                    │  Direct USB / HID Transport (WinUSB)
+                                   │  frames → · touch ←
 ┌──────────────────────────────────▼───────────────────────────────────────┐
 │                       G.Skill WigiDash 7″ Display                        │
 │                    (1024×600 panel · 1016×592 framebuffer)               │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Service-Driven Transport** — `ModernWigiDash.Service` runs independently as a Windows Service under **LocalSystem**, owning the USB device, capturing hardware telemetry (LibreHardwareMonitor) and ETW frame-time data, and streaming frames to the display even while the configuration UI is closed.
+- **Direct-USB Transport** — the App owns the device via `DisplayDeviceEngine` / `DisplayHidTransport`: frames stream over bulk writes and touch is polled at 16 ms, normalized once through the shared `TouchReport.ToEventType` site. No elevation or service installation required.
 - **High-Rate SkiaSharp Rendering** — the App composites at a steady **30 FPS** via `SkiaFrameCompositor`, using a pooled `FrameBufferPool` and zero-allocation hot paths (stack-allocated Z-order sorting, span-based sparklines, array-reuse frame delivery) to keep GC pressure minimal.
-- **Named Pipe IPC** — the App and Service communicate over a **WCF named-pipe contract** (`net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc`) with kernel-level ACL security — no TCP exposure, protocol-verified discovery, per-process send rate limiting, a 3 MB message-size cap, and exclusive touch-consumer ownership. No impostor hijacking.
-- **Standby on Exit** — the display returns to its vendor Welcome screen and sleeps on its own timeout whenever the app closes or the service stops.
+- **Standby on Exit** — the display returns to its vendor Welcome screen and sleeps on its own timeout whenever the app closes.
 
 ---
 
@@ -67,9 +56,8 @@ ModernWigiDash is split into a client configuration UI and an autonomous backgro
 | Area | Detail |
 | :--- | :--- |
 | **Hardware Abstraction** | Direct USB HID control via `DisplayHidTransport` — native WinUSB P/Invoke with LibUsbDotNet fallback |
-| **Hardware Telemetry** | Native sensor polling (LibreHardwareMonitor) for CPU, GPU, VRAM, RAM, and thermals — served to widgets over WCF |
-| **Frame-Time Analyst** | Real-time FPS and frame-time graphs from **ETW present-event capture** (DXGI / D3D9 / DxgKrnl — the same providers PresentMon uses) |
-| **Named Pipe Security** | Kernel-ACL transport, protocol-verified discovery (GetVersion handshake), per-process send rate limiting, 3 MB message cap, exclusive touch-consumer ownership — no network exposure |
+| **Hardware Telemetry** | Live CPU, GPU, VRAM, RAM, and thermal readouts read from **LibreHardwareService's** shared-memory maps (ADR-0004) — no elevation required |
+| **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003) — the app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy |
 | **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards; loadable from `app_theme.json` |
 | **Profile Import / Export** | JSON profile round-trip with import sanitization — widget/page count caps, ActionCommand stripping, and path checks against malicious profiles |
 | **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
@@ -99,14 +87,12 @@ ModernWigiDash is split into a client configuration UI and an autonomous backgro
 
 | Project | Description |
 | :--- | :--- |
-| `ModernWigiDash.App` | WPF layout editor, theme customizer, inspector, and frame compositing host |
-| `ModernWigiDash.Service` | Windows Background Service: USB transport worker, sensor + frame-time readers, WCF host |
-| `ModernWigiDash.Service.Contracts` | WCF contract (`IModernWigiDashDisplayServiceContract`), DTOs, and typed client |
-| `ModernWigiDash.Hardware` | Low-level USB HID transport, RGB565 frame encoder, WinUSB P/Invoke, gesture interpreter |
+| `ModernWigiDash.App` | WPF layout editor, theme customizer, inspector, frame compositing host, and direct-USB engine owner |
+| `ModernWigiDash.Hardware` | Low-level USB HID transport, RGB565 frame encoder, WinUSB P/Invoke, touch report normalization, device engine |
 | `ModernWigiDash.Core` | Page-layout domain models, profile ops (page/widget CRUD, sanitized import/export), font catalog, SkiaSharp compositor, plugin loader |
-| `ModernWigiDash.Sdk` | Widget contracts (`IModernWidget`, `IModernWigiDashContext`), attributes, frame delivery/pooling, poll-loop primitives |
+| `ModernWigiDash.Sdk` | Widget contracts (`IModernWidget`, `IModernWigiDashContext`), attributes, frame delivery/pooling, poll-loop primitives, telemetry DTOs |
 | `ModernWigiDash.Widgets` | Built-in widget implementations (telemetry, Twitch, media, tickers, system controls) |
-| `ModernWigiDash.Tests` | MSTest suite (295 tests) covering protocols, encoding, contracts, stores, frame delivery, profile sanitization, and widget lifecycle |
+| `ModernWigiDash.Tests` | MSTest suite covering protocols, encoding, stores, frame delivery, profile sanitization, and widget lifecycle |
 
 ---
 
@@ -115,7 +101,7 @@ ModernWigiDash is split into a client configuration UI and an autonomous backgro
 - **OS**: Windows 10 or Windows 11 (x64)
 - **Runtime**: .NET 10 SDK
 - **Hardware**: [G.Skill WigiDash](https://www.gskill.com/product/412/415/1702982997/WigiDash) 7″ USB touch panel (`USB\VID_28DA&PID_EF01`)
-- **Permissions**: Administrator is required to *install* the service; sensor access runs under the service's LocalSystem context
+- **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors) and [PresentMon Service](https://github.com/microsoft/PresentMon) (frame-time analytics) — the app runs without them; the related widgets show an unavailable state
 
 ---
 
@@ -136,26 +122,13 @@ dotnet build ModernWigiDash.slnx -c Release
 dotnet test ModernWigiDash.slnx -c Release
 ```
 
-> Note: while the service is running it locks `ModernWigiDash.Service\bin\Release`, so a plain build/test can fail with file-copy errors. Use a temp output path instead: `dotnet test ModernWigiDash.slnx -c Release -p:BaseOutputPath=C:\Users\<you>\AppData\Local\Temp\wmd-build\ -nodeReuse:false`.
-
-### 3. Install the Background Service
-
-Run PowerShell **as Administrator**:
-
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
-.\Install-ModernWigiDashService.ps1
-```
-
-Uninstall with `.\Install-ModernWigiDashService.ps1 -Uninstall`.
-
-### 4. Launch the App
+### 3. Launch the App
 
 ```powershell
 dotnet run --project ModernWigiDash.App\ModernWigiDash.App.csproj
 ```
 
-The app auto-connects to the running service over the named pipe. With no service installed, it falls back to **direct USB mode** (frames and touch work; service-only telemetry widgets show "unavailable").
+The app connects to the display directly over USB — frames and touch work with no service installation. Hardware telemetry requires LibreHardwareService to be installed; frame-time widgets require PresentMon Service; both degrade gracefully to an "unavailable" state when absent.
 
 ---
 

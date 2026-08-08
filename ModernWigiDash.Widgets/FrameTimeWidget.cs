@@ -99,7 +99,7 @@ public class FrameTimeWidget : ModernWidgetBase
         FrameTimeSnapshotRecord? snapshot = FrameTimeStore.TryReadFresh();
         if (snapshot == null || !snapshot.IsAvailable)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Run the service with admin/SYSTEM rights", text);
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text);
             return;
         }
 
@@ -215,7 +215,7 @@ public class FrameTimeWidget : ModernWidgetBase
         _cachedMsText = $"{snapshot.FrameTimeMs:F1} ms";
         _cachedLow1 = $"{snapshot.Low1PercentFps:F0} FPS";
         _cachedLow01 = $"{snapshot.Low01PercentFps:F0} FPS";
-        _cachedGpu = $"{snapshot.GpuBusyPercent:F0}%";
+        _cachedGpu = $"{snapshot.GpuBusyMs:F1} ms";
         _cachedCpu = $"{snapshot.CpuFrameTimeMs:F1} ms";
     }
 

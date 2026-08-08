@@ -5,12 +5,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageVersion Include="CoreWCF.NetNamedPipe" Version="1.9.1" />
-    <PackageVersion Include="CoreWCF.Primitives" Version="1.9.1" />
     <PackageVersion Include="LibUsbDotNet" Version="3.0.224" />
     <PackageVersion Include="MessagePack" Version="3.1.8" />
-    <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.5" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="MSTest.TestAdapter" Version="4.3.3" />
@@ -20,10 +16,6 @@
     <PackageVersion Include="SkiaSharp.Views.WPF" Version="4.151.1" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.31.0.145097" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
-    <!-- Lift transitive System.ServiceModel.Primitives dependency off the vulnerable 10.0.0 (NU1903) -->
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
-    <PackageVersion Include="System.ServiceModel.NetNamedPipe" Version="10.0.652802" />
-    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.10" />
   </ItemGroup>
 
 </Project>

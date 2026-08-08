@@ -5,7 +5,6 @@
     <ProjectReference Include="..\ModernWigiDash.Hardware\ModernWigiDash.Hardware.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Widgets\ModernWigiDash.Widgets.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
-    <ProjectReference Include="..\ModernWigiDash.Service.Contracts\ModernWigiDash.Service.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

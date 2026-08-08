@@ -8,7 +8,6 @@
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" />
     <PackageReference Include="LibUsbDotNet" />
   </ItemGroup>
 

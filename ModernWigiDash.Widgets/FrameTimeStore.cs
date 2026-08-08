@@ -1,4 +1,4 @@
-using ModernWigiDash.Service.Contracts;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 
@@ -15,7 +15,7 @@ public sealed record FrameTimeSnapshotRecord(
     double FrameTimeMs,
     double Low1PercentFps,
     double Low01PercentFps,
-    double GpuBusyPercent,
+    double GpuBusyMs,
     double CpuFrameTimeMs,
     IReadOnlyList<double> RecentFrameTimesMs,
     DateTime LastUpdate = default)
@@ -97,7 +97,7 @@ public static class FrameTimeStore
             dto?.FrameTimeMs ?? 0,
             dto?.Low1PercentFps ?? 0,
             dto?.Low01PercentFps ?? 0,
-            dto?.GpuBusyPercent ?? 0,
+            dto?.GpuBusyMs ?? 0,
             dto?.CpuFrameTimeMs ?? 0,
             dto?.RecentFrameTimesMs ?? [],
             ProducerTimestamp(dto?.LastUpdate)));

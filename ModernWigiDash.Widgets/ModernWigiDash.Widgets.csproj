@@ -3,7 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Core\ModernWigiDash.Core.csproj" />
-    <ProjectReference Include="..\ModernWigiDash.Service.Contracts\ModernWigiDash.Service.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>
