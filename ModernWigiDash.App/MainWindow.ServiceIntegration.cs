@@ -73,7 +73,6 @@ public partial class MainWindow
                     Log($"[WCF] Touch consumer acquired: {touchOwned}");
 
                     _touchPoll.Start();
-                    _sensorPoll.Start();
                     _frameTimePoll.Start();
                 }
                 catch (Exception ex)
@@ -112,12 +111,13 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// One sensor probe: fetches the hardware snapshot and caches it in
-    /// <see cref="LhmSensorStore"/> so widgets read it without a WCF round-trip.
+    /// One LHS sensor probe (ADR-0004): reads the LibreHardwareService
+    /// shared-memory map and caches the snapshot in <see cref="LhmSensorStore"/>
+    /// so widgets read it without a WCF round-trip.
     /// </summary>
     private void SensorPollTick()
     {
-        var dto = _wcfClient?.GetSensorSnapshot();
+        var dto = _lhsReader.Poll();
         LhmSensorStore.UpdateFromDto(dto);
     }
 

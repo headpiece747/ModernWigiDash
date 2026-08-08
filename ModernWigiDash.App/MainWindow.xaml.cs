@@ -12,6 +12,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using ModernWigiDash.App.FrameSinks;
+using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
@@ -60,11 +61,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// </summary>
     private readonly ServiceRouting.ServiceRoutingState _routingState;
 
-    // WCF poll loops — one parameterized loop module per producer (touch,
-    // sensor, frame-time). Constructed in the ctor, started on connect.
+    // Poll loops — one parameterized loop module per producer. Only TOUCH is
+    // WCF-gated, started on connect; SENSOR and FRAMETIME are direct producers
+    // started immediately.
     private readonly Sdk.PollLoop _touchPoll;
     private readonly Sdk.PollLoop _sensorPoll;
     private readonly Sdk.PollLoop _frameTimePoll;
+
+    // LibreHardwareService sensor producer (ADR-0004) — reads the named
+    // shared-memory maps directly, independent of the WCF routing state.
+    private readonly LhmSharedMemoryReader _lhsReader = new();
 
     private ProfileLayout _profile = new();
     private PlacedWidgetInstance? _selectedWidget;
@@ -116,9 +122,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _touchPoll = new Sdk.PollLoop(
             "TOUCH", TimeSpan.FromMilliseconds(16), ServiceReady, TouchPollTick, _routingState.ReportFailure, msg => Log(msg));
         _sensorPoll = new Sdk.PollLoop(
-            "SENSOR", TimeSpan.FromSeconds(1), ServiceReady, SensorPollTick, _routingState.ReportFailure, msg => Log(msg));
+            "SENSOR", TimeSpan.FromSeconds(1), () => true, SensorPollTick, () => { }, msg => Log(msg));
         _frameTimePoll = new Sdk.PollLoop(
             "FRAME", TimeSpan.FromSeconds(1), ServiceReady, FrameTimePollTick, _routingState.ReportFailure, msg => Log(msg));
+        _sensorPoll.Start();
 
         // Detect if Windows Service is running and initialize WCF client for frame routing.
         // Fire-and-forget async to avoid blocking the UI thread during port detection.
