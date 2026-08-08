@@ -383,6 +383,15 @@ internal sealed class TwitchSession
 
     private static void TryOpenBrowser(Uri verificationUri, IModernWigiDashContext context)
     {
+        // Defense-in-depth: only shell-open trusted https URLs on twitch.tv so a
+        // tampered response cannot invoke file:/custom protocol handlers.
+        if (verificationUri.Scheme != Uri.UriSchemeHttps ||
+            !verificationUri.Host.EndsWith("twitch.tv", StringComparison.OrdinalIgnoreCase))
+        {
+            context.LogError($"Refusing to open non-Twitch authorization URL: {verificationUri}");
+            return;
+        }
+
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(verificationUri.AbsoluteUri) { UseShellExecute = true });

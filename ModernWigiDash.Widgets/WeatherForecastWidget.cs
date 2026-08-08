@@ -145,6 +145,23 @@ public class WeatherForecastWidget : ModernWidgetBase
         base.OnPropertyChanged(propertyName, newValue);
     }
 
+    private string _cachedAccentHex = "";
+    private SKColor _cachedAccentColor;
+
+    /// <summary>
+    /// Parses a hex color once per value change — the 30 FPS render tick must
+    /// not re-parse the same string every frame.
+    /// </summary>
+    private static SKColor ResolveCachedColor(ref string cachedHex, ref SKColor cachedColor, string hex, SKColor fallback)
+    {
+        if (cachedHex != hex)
+        {
+            cachedHex = hex;
+            cachedColor = SKColor.TryParse(hex, out var parsed) ? parsed : fallback;
+        }
+        return cachedColor;
+    }
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         _ = FetchLiveWeatherAsync();
@@ -159,7 +176,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
         }
 
-        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
+        SKColor accentColor = ResolveCachedColor(ref _cachedAccentHex, ref _cachedAccentColor, AccentColorHex, new SKColor(255, 205, 133));
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
@@ -326,116 +343,125 @@ public class WeatherForecastWidget : ModernWidgetBase
         canvas.DrawText(mainTempStr, rightX, tempBaseline, SKTextAlign.Left, tempFont, tempPaint);
         canvas.DrawText(desc, rightX, descBaseline, SKTextAlign.Left, descFont, descPaint);
 
-        // Render Metrics Pill Strip below hero area with zero overlap
-        if (hasMetrics)
-        {
-            float pillY = heroBottom + 4f * sy;
-            float pillHeight = metricsH;
-            float metricFontSize = Math.Clamp(13f * s, 8f, 24f);
-            using var metricFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, metricFontSize);
+        RenderMetricPills(canvas, bounds, metrics, hasMetrics, metricsH, heroBottom, textSecondary, sx, sy);
+        RenderForecastStrip(canvas, bounds, hasForecast, forecastH, accentColor, textPrimary, textSecondary, tempUnit, sx, sy);
+    }
 
-            float pillPadX = Math.Clamp(10f * s, 4f, 20f);
-            float pillGap = Math.Clamp(8f * s, 3f, 16f);
-            float totalPillsW = 0f;
-            float[] metricWidths = new float[metrics.Count];
+    private void RenderMetricPills(SKCanvas canvas, SKRect bounds, List<string> metrics, bool hasMetrics, float metricsH, float heroBottom, SKColor textSecondary, float sx, float sy)
+    {
+        if (!hasMetrics) return;
+
+        float s = Math.Min(sx, sy);
+        float w = bounds.Width;
+        float pillY = heroBottom + 4f * sy;
+        float pillHeight = metricsH;
+        float metricFontSize = Math.Clamp(13f * s, 8f, 24f);
+        using var metricFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, metricFontSize);
+
+        float pillPadX = Math.Clamp(10f * s, 4f, 20f);
+        float pillGap = Math.Clamp(8f * s, 3f, 16f);
+        float totalPillsW = 0f;
+        float[] metricWidths = new float[metrics.Count];
+        for (int i = 0; i < metrics.Count; i++)
+        {
+            metricWidths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
+            totalPillsW += metricWidths[i];
+        }
+        totalPillsW += (metrics.Count - 1) * pillGap;
+
+        // If pills exceed bounds width, scale down metric font size to fit inside card
+        if (totalPillsW > w)
+        {
+            float metricScale = Math.Max(0.6f, w / totalPillsW);
+            metricFontSize = Math.Max(7f, metricFontSize * metricScale);
+            metricFont.Size = metricFontSize;
+            pillPadX *= metricScale;
+            pillGap *= metricScale;
+
+            totalPillsW = 0f;
             for (int i = 0; i < metrics.Count; i++)
             {
                 metricWidths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
                 totalPillsW += metricWidths[i];
             }
             totalPillsW += (metrics.Count - 1) * pillGap;
-
-            // If pills exceed bounds width, scale down metric font size to fit inside card
-            if (totalPillsW > w)
-            {
-                float metricScale = Math.Max(0.6f, w / totalPillsW);
-                metricFontSize = Math.Max(7f, metricFontSize * metricScale);
-                metricFont.Size = metricFontSize;
-                pillPadX *= metricScale;
-                pillGap *= metricScale;
-
-                totalPillsW = 0f;
-                for (int i = 0; i < metrics.Count; i++)
-                {
-                    metricWidths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
-                    totalPillsW += metricWidths[i];
-                }
-                totalPillsW += (metrics.Count - 1) * pillGap;
-            }
-
-            float pillStartX = bounds.MidX - totalPillsW / 2f;
-            for (int i = 0; i < metrics.Count; i++)
-            {
-                SKRect pillRect = new(pillStartX, pillY, pillStartX + metricWidths[i], pillY + pillHeight);
-                using var pillBorder = new SKPaint { Color = new SKColor(255, 255, 255, 22), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
-                canvas.DrawRoundRect(pillRect, 8f * s, 8f * s, pillBorder);
-
-                using var metricPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
-                metricFont.GetFontMetrics(out var mMetrics);
-                float mBaseline = pillRect.MidY - (mMetrics.Ascent + mMetrics.Descent) / 2f;
-                canvas.DrawText(metrics[i], pillRect.MidX, mBaseline, SKTextAlign.Center, metricFont, metricPaint);
-                pillStartX += metricWidths[i] + pillGap;
-            }
         }
 
-        // Render Forecast Strip with exact visual bounding box horizontal centering for emoji icons
-        if (hasForecast)
+        float pillStartX = bounds.MidX - totalPillsW / 2f;
+        for (int i = 0; i < metrics.Count; i++)
         {
-            int count = Math.Min(_dailyForecastSnapshot.Count, 5);
-            float stripY = bounds.Bottom - forecastH;
-            SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
+            SKRect pillRect = new(pillStartX, pillY, pillStartX + metricWidths[i], pillY + pillHeight);
+            using var pillBorder = new SKPaint { Color = new SKColor(255, 255, 255, 22), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
+            canvas.DrawRoundRect(pillRect, 8f * s, 8f * s, pillBorder);
 
-            using var stripBorder = new SKPaint { Color = new SKColor(255, 255, 255, 18), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
-            canvas.DrawRoundRect(stripBounds, 12f * s, 12f * s, stripBorder);
+            using var metricPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
+            metricFont.GetFontMetrics(out var mMetrics);
+            float mBaseline = pillRect.MidY - (mMetrics.Ascent + mMetrics.Descent) / 2f;
+            canvas.DrawText(metrics[i], pillRect.MidX, mBaseline, SKTextAlign.Center, metricFont, metricPaint);
+            pillStartX += metricWidths[i] + pillGap;
+        }
+    }
 
-            float colWidth = w / count;
-            float dayFontSize = Math.Clamp(14f * s, 8f, 24f);
-            float dayIconFontSize = Math.Clamp(22f * s, 10f, 48f);
-            float rangeFontSize = Math.Clamp(12f * s, 7f, 22f);
+    private void RenderForecastStrip(SKCanvas canvas, SKRect bounds, bool hasForecast, float forecastH, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, float sx, float sy)
+    {
+        if (!hasForecast) return;
 
-            for (int i = 0; i < count; i++)
-            {
-                var day = _dailyForecastSnapshot[i];
-                var (dayIcon, _) = MapWmoCode(day.WeatherCode);
-                float colCx = bounds.Left + (i + 0.5f) * colWidth;
+        float s = Math.Min(sx, sy);
+        float w = bounds.Width;
+        int count = Math.Min(_dailyForecastSnapshot.Count, 5);
+        float stripY = bounds.Bottom - forecastH;
+        SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
 
-                using var dayFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, dayFontSize);
-                using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
-                float dayY = stripY + Math.Clamp(18f * s, 10f, 36f);
+        using var stripBorder = new SKPaint { Color = new SKColor(255, 255, 255, 18), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
+        canvas.DrawRoundRect(stripBounds, 12f * s, 12f * s, stripBorder);
 
-                dayFont.MeasureText(day.DayName, out var dayBounds);
-                float dayX = colCx - (dayBounds.Left + dayBounds.Width / 2f);
-                canvas.DrawText(day.DayName, dayX, dayY, SKTextAlign.Left, dayFont, dayPaint);
+        float colWidth = w / count;
+        float dayFontSize = Math.Clamp(14f * s, 8f, 24f);
+        float dayIconFontSize = Math.Clamp(22f * s, 10f, 48f);
+        float rangeFontSize = Math.Clamp(12f * s, 7f, 22f);
 
-                string rangeStr = $"{FormatTemp(day.MaxTempC, tempUnit, true)} / {FormatTemp(day.MinTempC, tempUnit, true)}";
-                using var rangeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, rangeFontSize);
-                using var rangePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
-                float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
+        for (int i = 0; i < count; i++)
+        {
+            var day = _dailyForecastSnapshot[i];
+            var (dayIcon, _) = MapWmoCode(day.WeatherCode);
+            float colCx = bounds.Left + (i + 0.5f) * colWidth;
 
-                rangeFont.MeasureText(rangeStr, out var rangeBounds);
-                float rangeX = colCx - (rangeBounds.Left + rangeBounds.Width / 2f);
-                canvas.DrawText(rangeStr, rangeX, rangeY, SKTextAlign.Left, rangeFont, rangePaint);
+            using var dayFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, dayFontSize);
+            using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
+            float dayY = stripY + Math.Clamp(18f * s, 10f, 36f);
 
-                using var dayIconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
-                using var dayIconPaint = new SKPaint { IsAntialias = true };
+            dayFont.MeasureText(day.DayName, out var dayBounds);
+            float dayX = colCx - (dayBounds.Left + dayBounds.Width / 2f);
+            canvas.DrawText(day.DayName, dayX, dayY, SKTextAlign.Left, dayFont, dayPaint);
 
-                // Calculate exact vertical center between Day Name and Temp Range baselines
-                dayFont.GetFontMetrics(out var dayMetrics);
-                rangeFont.GetFontMetrics(out var rangeMetrics);
-                dayIconFont.GetFontMetrics(out var dayIconMetrics);
+            string rangeStr = $"{FormatTemp(day.MaxTempC, tempUnit, true)} / {FormatTemp(day.MinTempC, tempUnit, true)}";
+            using var rangeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, rangeFontSize);
+            using var rangePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
+            float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
 
-                float dayBottomY = dayY + dayMetrics.Descent;
-                float rangeTopY = rangeY + rangeMetrics.Ascent;
-                float midGapY = (dayBottomY + rangeTopY) / 2f;
-                float dayIconBaseline = midGapY - (dayIconMetrics.Ascent + dayIconMetrics.Descent) / 2f;
+            rangeFont.MeasureText(rangeStr, out var rangeBounds);
+            float rangeX = colCx - (rangeBounds.Left + rangeBounds.Width / 2f);
+            canvas.DrawText(rangeStr, rangeX, rangeY, SKTextAlign.Left, rangeFont, rangePaint);
 
-                // Exact visual bounding box horizontal centering for emoji icon
-                dayIconFont.MeasureText(dayIcon, out var iconRect);
-                float iconVisualCenterX = iconRect.Left + (iconRect.Width / 2f);
-                float iconX = colCx - iconVisualCenterX;
+            using var dayIconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
+            using var dayIconPaint = new SKPaint { IsAntialias = true };
 
-                canvas.DrawText(dayIcon, iconX, dayIconBaseline, SKTextAlign.Left, dayIconFont, dayIconPaint);
-            }
+            // Calculate exact vertical center between Day Name and Temp Range baselines
+            dayFont.GetFontMetrics(out var dayMetrics);
+            rangeFont.GetFontMetrics(out var rangeMetrics);
+            dayIconFont.GetFontMetrics(out var dayIconMetrics);
+
+            float dayBottomY = dayY + dayMetrics.Descent;
+            float rangeTopY = rangeY + rangeMetrics.Ascent;
+            float midGapY = (dayBottomY + rangeTopY) / 2f;
+            float dayIconBaseline = midGapY - (dayIconMetrics.Ascent + dayIconMetrics.Descent) / 2f;
+
+            // Exact visual bounding box horizontal centering for emoji icon
+            dayIconFont.MeasureText(dayIcon, out var iconRect);
+            float iconVisualCenterX = iconRect.Left + (iconRect.Width / 2f);
+            float iconX = colCx - iconVisualCenterX;
+
+            canvas.DrawText(dayIcon, iconX, dayIconBaseline, SKTextAlign.Left, dayIconFont, dayIconPaint);
         }
     }
 
@@ -698,34 +724,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         {
             string currentQuery = $"{LocationType}_{Location}_{Latitude}_{Longitude}";
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
-            {
-                _lastLocationQuery = currentQuery;
-
-                if (double.TryParse(Latitude, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var latVal)
-                    && double.TryParse(Longitude, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lonVal))
-                {
-                    _lat = latVal;
-                    _lon = lonVal;
-                    _resolvedCityName = string.IsNullOrWhiteSpace(CustomLabel)
-                        ? $"{latVal.ToString("F2", CultureInfo.InvariantCulture)}, {lonVal.ToString("F2", CultureInfo.InvariantCulture)}"
-                        : CustomLabel;
-                }
-                else if (IsCoordinatePair(Location))
-                {
-                    string[] parts = Location.Split(',');
-                    _lat = double.Parse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture);
-                    _lon = double.Parse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
-                    _resolvedCityName = $"{_lat.Value.ToString("F2", CultureInfo.InvariantCulture)}, {_lon.Value.ToString("F2", CultureInfo.InvariantCulture)}";
-                }
-                else if (IsZipCode(Location))
-                {
-                    await GeocodeZipCodeAsync(Location.Trim()).ConfigureAwait(false);
-                }
-                else
-                {
-                    await GeocodeCityLocationAsync(Location).ConfigureAwait(false);
-                }
-            }
+                await ResolveCoordinatesAsync(currentQuery).ConfigureAwait(false);
 
             if (!_lat.HasValue) return;
 
@@ -734,63 +733,9 @@ public class WeatherForecastWidget : ModernWidgetBase
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("current_weather", out var currentWeather))
-            {
-                if (currentWeather.TryGetProperty("temperature", out var tempEl))
-                    _currentTempC = tempEl.GetDouble();
-                if (currentWeather.TryGetProperty("windspeed", out var windEl))
-                    _windSpeedKmH = windEl.GetDouble();
-                if (currentWeather.TryGetProperty("weathercode", out var codeEl))
-                    _weatherCode = codeEl.GetInt32();
-            }
-
-            if (root.TryGetProperty("hourly", out var hourly)
-                && hourly.TryGetProperty("temperature_2m", out var temps)
-                && temps.GetArrayLength() > 0)
-            {
-                _feelsLikeC = temps[0].GetDouble();
-
-                if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
-                    _humidity = hums[0].GetDouble();
-
-                List<HourlyForecastItem> hourlyForecasts = [];
-                if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
-                {
-                    int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
-                    for (int i = 0; i < Math.Min(hLen, 12); i++)
-                    {
-                        string timeStr = times[i].GetString() ?? "";
-                        string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
-                        hourlyForecasts.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), codes[i].GetInt32()));
-                    }
-                }
-                lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(hourlyForecasts); }
-            }
-
-            if (root.TryGetProperty("daily", out var daily))
-            {
-                if (daily.TryGetProperty("temperature_2m_max", out var maxes) && maxes.GetArrayLength() > 0)
-                    _highTempC = maxes[0].GetDouble();
-                if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
-                    _lowTempC = mins[0].GetDouble();
-
-                List<DailyForecastItem> dailyForecasts = [];
-                if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
-                {
-                    int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
-                    for (int i = 0; i < Math.Min(dLen, 7); i++)
-                    {
-                        string dateStr = dTimes[i].GetString() ?? "";
-                        string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
-                        dailyForecasts.Add(new DailyForecastItem(
-                            i == 0 ? "Today" : dayName,
-                            maxes[i].GetDouble(),
-                            mins[i].GetDouble(),
-                            dCodes[i].GetInt32()));
-                    }
-                }
-                lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
-            }
+            ParseCurrentWeather(root);
+            ParseHourlyForecast(root);
+            ParseDailyForecast(root);
 
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             _ = SaveCacheAsync();
@@ -804,6 +749,100 @@ public class WeatherForecastWidget : ModernWidgetBase
         {
             _isFetching = false;
         }
+    }
+
+    private async Task ResolveCoordinatesAsync(string currentQuery)
+    {
+        _lastLocationQuery = currentQuery;
+
+        if (double.TryParse(Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
+            && double.TryParse(Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal))
+        {
+            _lat = latVal;
+            _lon = lonVal;
+            _resolvedCityName = string.IsNullOrWhiteSpace(CustomLabel)
+                ? $"{latVal.ToString("F2", CultureInfo.InvariantCulture)}, {lonVal.ToString("F2", CultureInfo.InvariantCulture)}"
+                : CustomLabel;
+        }
+        else if (IsCoordinatePair(Location))
+        {
+            string[] parts = Location.Split(',');
+            _lat = double.Parse(parts[0].Trim(), CultureInfo.InvariantCulture);
+            _lon = double.Parse(parts[1].Trim(), CultureInfo.InvariantCulture);
+            _resolvedCityName = $"{_lat.Value.ToString("F2", CultureInfo.InvariantCulture)}, {_lon.Value.ToString("F2", CultureInfo.InvariantCulture)}";
+        }
+        else if (IsZipCode(Location))
+        {
+            await GeocodeZipCodeAsync(Location.Trim()).ConfigureAwait(false);
+        }
+        else
+        {
+            await GeocodeCityLocationAsync(Location).ConfigureAwait(false);
+        }
+    }
+
+    private void ParseCurrentWeather(JsonElement root)
+    {
+        if (!root.TryGetProperty("current_weather", out var currentWeather)) return;
+
+        if (currentWeather.TryGetProperty("temperature", out var tempEl))
+            _currentTempC = tempEl.GetDouble();
+        if (currentWeather.TryGetProperty("windspeed", out var windEl))
+            _windSpeedKmH = windEl.GetDouble();
+        if (currentWeather.TryGetProperty("weathercode", out var codeEl))
+            _weatherCode = codeEl.GetInt32();
+    }
+
+    private void ParseHourlyForecast(JsonElement root)
+    {
+        if (!root.TryGetProperty("hourly", out var hourly)
+            || !hourly.TryGetProperty("temperature_2m", out var temps)
+            || temps.GetArrayLength() <= 0) return;
+
+        _feelsLikeC = temps[0].GetDouble();
+
+        if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
+            _humidity = hums[0].GetDouble();
+
+        List<HourlyForecastItem> hourlyForecasts = [];
+        if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
+        {
+            int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
+            for (int i = 0; i < Math.Min(hLen, 12); i++)
+            {
+                string timeStr = times[i].GetString() ?? "";
+                string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
+                hourlyForecasts.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), codes[i].GetInt32()));
+            }
+        }
+        lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(hourlyForecasts); }
+    }
+
+    private void ParseDailyForecast(JsonElement root)
+    {
+        if (!root.TryGetProperty("daily", out var daily)) return;
+
+        if (daily.TryGetProperty("temperature_2m_max", out var maxes) && maxes.GetArrayLength() > 0)
+            _highTempC = maxes[0].GetDouble();
+        if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
+            _lowTempC = mins[0].GetDouble();
+
+        List<DailyForecastItem> dailyForecasts = [];
+        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
+        {
+            int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
+            for (int i = 0; i < Math.Min(dLen, 7); i++)
+            {
+                string dateStr = dTimes[i].GetString() ?? "";
+                string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
+                dailyForecasts.Add(new DailyForecastItem(
+                    i == 0 ? "Today" : dayName,
+                    maxes[i].GetDouble(),
+                    mins[i].GetDouble(),
+                    dCodes[i].GetInt32()));
+            }
+        }
+        lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
     }
 
     private async Task GeocodeCityLocationAsync(string query)
@@ -946,6 +985,6 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         public string TimeLabel { get; set; } = "";
         public double TempC { get; set; }
-        public         int WeatherCode { get; set; }
+        public int WeatherCode { get; set; }
     }
 }

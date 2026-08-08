@@ -32,6 +32,9 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     private DateTimeOffset _lastRecreate = DateTimeOffset.MinValue;
     private static readonly TimeSpan MinRecreateInterval = TimeSpan.FromSeconds(10);
 
+    /// <summary>Maximum accepted message size: a frame (~1.2 MB) plus slack.</summary>
+    private const int MaxMessageSize = 3 * 1024 * 1024;
+
     public static string DefaultEndpointAddress => "net.pipe://localhost/ModernWigiDashDisplayService/WigiDash.svc";
     private static readonly string[] KnownPipeEndpoints =
     [
@@ -45,13 +48,13 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
 
         var binding = new NetNamedPipeBinding(NetNamedPipeSecurityMode.Transport)
         {
-            MaxReceivedMessageSize = 32 * 1024 * 1024,
-            MaxBufferSize = 32 * 1024 * 1024,
+            MaxReceivedMessageSize = MaxMessageSize,
+            MaxBufferSize = MaxMessageSize,
             ReaderQuotas = new System.Xml.XmlDictionaryReaderQuotas
             {
-                MaxArrayLength = 32 * 1024 * 1024,
-                MaxBytesPerRead = 32 * 1024 * 1024,
-                MaxStringContentLength = 32 * 1024 * 1024
+                MaxArrayLength = MaxMessageSize,
+                MaxBytesPerRead = MaxMessageSize,
+                MaxStringContentLength = MaxMessageSize
             },
             // 5s send timeout (was 30s): every local IPC op completes in
             // milliseconds, and each in-flight request holds a SendTimeout
@@ -76,6 +79,10 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         // Protocol check: only a real ModernWigiDashDisplayService endpoint
         // answers GetVersion with a non-empty version string, so an impostor
         // pipe cannot hijack frame streaming without speaking the contract.
+        // Additionally pin the version to the contract assembly's version so a
+        // protocol-competent impostor of a different build is refused.
+        string? expectedVersion = typeof(IModernWigiDashDisplayServiceContract)
+            .Assembly.GetName().Version?.ToString();
         foreach (string pipeName in KnownPipeEndpoints)
         {
             try
@@ -91,7 +98,7 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
                 {
                     client = factory.CreateChannel();
                     string version = client.GetVersion();
-                    if (!string.IsNullOrEmpty(version))
+                    if (!string.IsNullOrEmpty(version) && version == expectedVersion)
                     {
                         return pipeName;
                     }
@@ -166,6 +173,12 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
     {
         ThrowIfDisposed();
         return ExecuteWithFaultRecovery<TouchEventInfo?>(() => _channel.PollTouch());
+    }
+
+    public bool AcquireTouchConsumer()
+    {
+        ThrowIfDisposed();
+        return ExecuteWithFaultRecovery(() => _channel.AcquireTouchConsumer());
     }
 
     public bool Shutdown()

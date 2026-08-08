@@ -341,27 +341,27 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 HandlePrivmsg(tags, trailing);
                 break;
             case "NOTICE":
-            {
-                var msg = trailing.TrimStart(':');
-                if (msg.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase) ||
-                    msg.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
                 {
-                    _status = StatusDisconnected;
-                    _statusDetail = "Login failed — check token & username";
-                    Context.LogError("Twitch login failed: " + msg);
+                    var msg = trailing.TrimStart(':');
+                    if (msg.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase) ||
+                        msg.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _status = StatusDisconnected;
+                        _statusDetail = "Login failed — check token & username";
+                        Context.LogError("Twitch login failed: " + msg);
+                    }
+                    else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _status = StatusConnected;
+                        _statusDetail = "LIVE";
+                        Context.RequestRender();
+                    }
+                    else
+                    {
+                        Context.LogInfo("Twitch notice: " + msg);
+                    }
+                    break;
                 }
-                else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
-                {
-                    _status = StatusConnected;
-                    _statusDetail = "LIVE";
-                    Context.RequestRender();
-                }
-                else
-                {
-                    Context.LogInfo("Twitch notice: " + msg);
-                }
-                break;
-            }
         }
     }
 

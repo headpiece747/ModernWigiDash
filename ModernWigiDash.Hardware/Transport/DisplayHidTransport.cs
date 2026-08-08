@@ -572,25 +572,25 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         _bulkWriter = null;
 
         if (_usbDevice != null)
+        {
+            try
             {
-                try
+                if (_usbDevice.IsOpen)
                 {
-                    if (_usbDevice.IsOpen)
-                    {
-                        _usbDevice.ReleaseInterface(0);
-                        _usbDevice.Close();
-                    }
+                    _usbDevice.ReleaseInterface(0);
+                    _usbDevice.Close();
                 }
-                catch (IOException)
-                {
-                    // USB device may already be disconnected
-                    System.Diagnostics.Debug.WriteLine("USB device release failed; device may already be disconnected");
-                }
-                _usbDevice = null;
             }
-
-            // Context is a shared singleton - don't dispose
+            catch (IOException)
+            {
+                // USB device may already be disconnected
+                System.Diagnostics.Debug.WriteLine("USB device release failed; device may already be disconnected");
+            }
+            _usbDevice = null;
         }
+
+        // Context is a shared singleton - don't dispose
+    }
 
     public bool SendFrame(ReadOnlyMemory<byte> frameBuffer)
     {

@@ -37,16 +37,16 @@ public class FrameSinkIntegrationTests
             send: send,
             isReady: isReady);
 
-    private static void WaitForCount(Func<int> count, int expected, string what)
+    private static async Task WaitForCountAsync(Func<int> count, int expected, string what)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (count() < expected && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+            await Task.Delay(5);
         Assert.AreEqual(expected, count(), what);
     }
 
     [TestMethod]
-    public void Router_WithRealDeliveries_RoutesToUsbWhileWcfUnbound_ThenSwitchesToWcfWhenBound()
+    public async Task Router_WithRealDeliveries_RoutesToUsbWhileWcfUnbound_ThenSwitchesToWcfWhenBound()
     {
         using var delivered = new ManualResetEventSlim(false);
         var usb = new UsbFake();
@@ -58,7 +58,7 @@ public class FrameSinkIntegrationTests
         // WCF not yet bound -> direct USB must receive the frame.
         FrameDeliveryResult firstResult = router.Send(redFrame);
         Assert.AreEqual(FrameDeliveryResult.Queued, firstResult, "Ready USB delivery must accept the frame");
-        WaitForCount(() => usb.SentFrames, 1, "USB delivery must deliver after routing");
+        await WaitForCountAsync(() => usb.SentFrames, 1, "USB delivery must deliver after routing");
 
         // Bind the WCF path (simulates the service connecting) -> routing flips.
         wcfDelivery.AttachSend(bytes =>
@@ -74,7 +74,7 @@ public class FrameSinkIntegrationTests
     }
 
     [TestMethod]
-    public void Router_WithRealDeliveries_WcfUnbind_FallsBackToUsb()
+    public async Task Router_WithRealDeliveries_WcfUnbind_FallsBackToUsb()
     {
         var usb = new UsbFake();
         using var wcfDelivery = CreateBitmapDelivery(_ => true);
@@ -87,7 +87,7 @@ public class FrameSinkIntegrationTests
         FrameDeliveryResult result = router.Send(redFrame);
 
         Assert.AreEqual(FrameDeliveryResult.Queued, result);
-        WaitForCount(() => usb.SentFrames, 1, "USB must take over once WCF is unbound");
+        await WaitForCountAsync(() => usb.SentFrames, 1, "USB must take over once WCF is unbound");
     }
 
     [TestMethod]
@@ -122,7 +122,7 @@ public class FrameSinkIntegrationTests
     }
 
     [TestMethod]
-    public void FrameDelivery_Backlog_CoalescesToLatestFrame()
+    public async Task FrameDelivery_Backlog_CoalescesToLatestFrame()
     {
         using var firstEntered = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
@@ -155,9 +155,7 @@ public class FrameSinkIntegrationTests
 
         // After the gate opens, the loop coalesces the backlog and delivers only
         // the latest (white). Wait for the second delivery.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (callCount < 2 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => callCount >= 2, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual(2, callCount, "First frame + one coalesced delivery, no replays of stale frames");
         Assert.IsNotNull(lastDelivered);

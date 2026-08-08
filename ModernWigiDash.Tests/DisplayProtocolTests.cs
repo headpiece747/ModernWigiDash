@@ -36,14 +36,19 @@ public class DisplayProtocolTests
     [TestMethod]
     public void ScreenIds_RespectProtocolSpec()
     {
-        Assert.AreEqual(0x01, DisplayProtocolConstants.ScreenWelcome);
-        Assert.AreEqual(0x20, DisplayProtocolConstants.ScreenBase0);
-        Assert.AreEqual(0x21, DisplayProtocolConstants.ScreenBase1);
-        Assert.AreEqual(0x22, DisplayProtocolConstants.ScreenBase2);
-        // GoToScreen derives the current page from the Base screen id.
-        Assert.AreEqual(0, DisplayProtocolConstants.ScreenBase0 - DisplayProtocolConstants.ScreenBase0);
+        // Regression guard: pin the vendor protocol screen ids. The analyzers
+        // constant-fold these pins (spurious always-true/always-false hints for
+        // byte-typed protocol constants), so they are disabled — the pins ARE
+        // the protocol contract.
+#pragma warning disable MSTEST0025, MSTEST0032
+        Assert.AreEqual((byte)0x01, DisplayProtocolConstants.ScreenWelcome);
+        Assert.AreEqual((byte)0x20, DisplayProtocolConstants.ScreenBase0);
+        Assert.AreEqual((byte)0x21, DisplayProtocolConstants.ScreenBase1);
+        Assert.AreEqual((byte)0x22, DisplayProtocolConstants.ScreenBase2);
+        // GoToScreen derives the current page from the Base screen id: the ids must stay contiguous.
         Assert.AreEqual(1, DisplayProtocolConstants.ScreenBase1 - DisplayProtocolConstants.ScreenBase0);
         Assert.AreEqual(2, DisplayProtocolConstants.ScreenBase2 - DisplayProtocolConstants.ScreenBase0);
+#pragma warning restore MSTEST0025, MSTEST0032
     }
 
     [TestMethod]

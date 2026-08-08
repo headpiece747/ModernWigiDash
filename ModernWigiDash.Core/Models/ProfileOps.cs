@@ -152,9 +152,17 @@ public static class ProfileOps
     public static string ExportJson(ProfileLayout profile)
         => JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
 
+    /// <summary>Max widgets a page may carry after an import (startup DoS cap).</summary>
+    private const int MaxWidgetsPerPage = 200;
+
     /// <summary>
     /// Deserializes a profile and rehydrates every placed widget so the loaded
     /// profile is immediately renderable. Returns null on parse failure.
+    ///
+    /// Imported profiles are UNTRUSTED input: before rehydration the profile is
+    /// sanitized — widget count is capped, action commands (process/keystroke
+    /// launch) are cleared, and image/icon paths are restricted to safe
+    /// relative paths.
     /// </summary>
     public static ProfileLayout? ImportJson(string json, WidgetPluginLoader loader, IModernWigiDashContext context)
     {
@@ -162,6 +170,8 @@ public static class ProfileOps
         {
             var loaded = JsonSerializer.Deserialize<ProfileLayout>(json);
             if (loaded == null) return null;
+
+            SanitizeImportedProfile(loaded);
 
             foreach (var page in loaded.Pages)
             {
@@ -176,5 +186,75 @@ public static class ProfileOps
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Applies the untrusted-import rules: page widget caps, background path
+    /// sanitization, and clearing action-command values (the Hotkey widget's
+    /// Launch/URL/keystroke execution must be re-entered by the user after
+    /// importing a foreign profile).
+    /// </summary>
+    private static void SanitizeImportedProfile(ProfileLayout profile)
+    {
+        if (!string.IsNullOrWhiteSpace(profile.ActivePage?.BackgroundImagePath))
+        {
+            profile.ActivePage.BackgroundImagePath = SafeRelativePath(profile.ActivePage.BackgroundImagePath);
+        }
+
+        foreach (var page in profile.Pages)
+        {
+            if (!string.IsNullOrWhiteSpace(page.BackgroundImagePath))
+            {
+                page.BackgroundImagePath = SafeRelativePath(page.BackgroundImagePath);
+            }
+
+            if (page.Widgets.Count > MaxWidgetsPerPage)
+            {
+                page.Widgets = page.Widgets.Take(MaxWidgetsPerPage).ToList();
+            }
+
+            foreach (var placed in page.Widgets)
+            {
+                SanitizeWidgetValues(placed);
+            }
+        }
+    }
+
+    private static void SanitizeWidgetValues(PlacedWidgetInstance placed)
+    {
+        // ActionCommand drives Process.Start / SendInput on the Hotkey widget
+        // (identified by its property names, widget-agnostically): a foreign
+        // profile must not silently arm command execution. PropertyValues hold
+        // JsonElement after deserialization — normalize before inspecting.
+        if (placed.PropertyValues.ContainsKey("ActionCommand") &&
+            placed.PropertyValues.ContainsKey("ActionType") &&
+            ConvertPropertyValue(placed.PropertyValues["ActionCommand"], typeof(string)) is string command &&
+            !string.IsNullOrWhiteSpace(command))
+        {
+            placed.PropertyValues["ActionCommand"] = "";
+        }
+
+        // Image/icon paths: rooted, UNC, or ..\ paths would read arbitrary
+        // local files; restrict imports to safe relative paths.
+        foreach (var key in PathPropertyKeys)
+        {
+            if (placed.PropertyValues.TryGetValue(key, out var value) &&
+                ConvertPropertyValue(value, typeof(string)) is string path)
+            {
+                placed.PropertyValues[key] = SafeRelativePath(path);
+            }
+        }
+    }
+
+    private static readonly string[] PathPropertyKeys =
+        ["IconFile", "ImagePath", "GifPath", "PicturePath", "BackgroundImagePath"];
+
+    private static string SafeRelativePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        if (Path.IsPathRooted(path)) return "";
+        if (path.StartsWith("\\\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return "";
+        if (path.Split('\\', '/').Any(segment => segment == "..")) return "";
+        return path;
     }
 }

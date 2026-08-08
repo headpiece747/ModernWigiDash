@@ -343,12 +343,20 @@ public class UnitTestSuite
 
         var w1 = new PlacedWidgetInstance
         {
-            X = 0, Y = 0, Width = 200, Height = 200, ZIndex = 1,
+            X = 0,
+            Y = 0,
+            Width = 200,
+            Height = 200,
+            ZIndex = 1,
             ActiveInstance = new DigitalAnalogClockWidget()
         };
         var w2 = new PlacedWidgetInstance
         {
-            X = 50, Y = 50, Width = 200, Height = 200, ZIndex = 2,
+            X = 50,
+            Y = 50,
+            Width = 200,
+            Height = 200,
+            ZIndex = 2,
             ActiveInstance = new DigitalAnalogClockWidget()
         };
 
@@ -365,18 +373,25 @@ public class UnitTestSuite
     {
         using var compositor = new SkiaFrameCompositor();
         var page = new PageLayout();
-        var target = new DigitalAnalogClockWidget();
+        var target = new WeatherForecastWidget();
         var placed = new PlacedWidgetInstance
         {
-            X = 100, Y = 50, Width = 200, Height = 200, ZIndex = 1,
+            X = 100,
+            Y = 50,
+            Width = 200,
+            Height = 200,
+            ZIndex = 1,
             ActiveInstance = target
         };
         page.Widgets.Add(placed);
 
-        // Touch at (150, 80) global = (50, 30) local to the widget.
-        SkiaFrameCompositor.RouteTouch(page, 150, 80, TouchEventType.TouchDown);
+        // Touch at (150, 80) global = (50, 30) local to the widget. The weather
+        // widget's top-left corner cycles LayoutMode on TouchUp, which proves
+        // the touch arrived in widget-local coordinates (a global-coordinate
+        // leak would hit a different zone or miss entirely).
+        SkiaFrameCompositor.RouteTouch(page, 150, 80, TouchEventType.TouchUp);
 
-        // No exception and no crash; delivery is best-effort into the widget.
+        Assert.AreEqual("Daily Forecast", target.LayoutMode, "The touch must reach the widget in local coordinates");
     }
 
     [TestMethod]
@@ -384,14 +399,21 @@ public class UnitTestSuite
     {
         using var compositor = new SkiaFrameCompositor();
         var page = new PageLayout();
+        var target = new WeatherForecastWidget();
         page.Widgets.Add(new PlacedWidgetInstance
         {
-            X = 0, Y = 0, Width = 100, Height = 100, ZIndex = 1,
-            ActiveInstance = new DigitalAnalogClockWidget()
+            X = 0,
+            Y = 0,
+            Width = 100,
+            Height = 100,
+            ZIndex = 1,
+            ActiveInstance = target
         });
 
-        // Point far outside every widget must not throw.
-        SkiaFrameCompositor.RouteTouch(page, 900, 500, TouchEventType.TouchDown);
+        // Point far outside every widget must not throw and must not be delivered.
+        SkiaFrameCompositor.RouteTouch(page, 900, 500, TouchEventType.TouchUp);
+
+        Assert.AreEqual("Detailed", target.LayoutMode, "A point outside every widget must not reach any widget");
     }
 
     [TestMethod]
@@ -400,6 +422,8 @@ public class UnitTestSuite
         var page = new PageLayout();
 
         SkiaFrameCompositor.RouteTouch(page, 10, 10, TouchEventType.TouchDown);
+
+        Assert.AreEqual(0, page.Widgets.Count, "Routing on an empty page must not mutate the page");
     }
 
     [TestMethod]
@@ -556,6 +580,10 @@ public class UnitTestSuite
         using var canvas = new SkiaSharp.SKCanvas(bitmap);
         var bounds = new SkiaSharp.SKRect(0, 0, 400, 300);
         widget.Render(canvas, bounds);
+
+        // The widget must paint its panel background — a fully transparent
+        // canvas would mean nothing was rendered.
+        Assert.AreNotEqual(0, bitmap.GetPixel(200, 150).Alpha, "The chat panel background must be painted");
     }
 
     [TestMethod]
@@ -666,7 +694,7 @@ public class UnitTestSuite
         {
             Assert.IsTrue(SvgIconLoader.TryGetPath(svg, out var path));
             Assert.IsNotNull(path);
-            Assert.IsFalse(path!.IsEmpty);
+            Assert.IsFalse(path.IsEmpty);
             var widget = new HotkeyButtonWidget { IconFile = svg };
             using var surface = SKSurface.Create(new SKImageInfo(200, 150));
             widget.Render(surface.Canvas, new SKRect(0, 0, 200, 150));
@@ -1078,5 +1106,9 @@ public class UnitTestSuite
         var bounds = new SKRect(0, 0, 400, 300);
         widget.AddTestChatMessageForTesting("GamerOne", "Hello world! 🔥 🎉 💬");
         widget.Render(canvas, bounds);
+
+        // The message render must paint the panel — a fully transparent canvas
+        // would mean the queued message was never drawn.
+        Assert.AreNotEqual(0, bitmap.GetPixel(200, 150).Alpha, "The chat panel must paint when messages are queued");
     }
 }

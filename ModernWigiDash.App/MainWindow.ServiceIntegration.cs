@@ -62,6 +62,11 @@ public partial class MainWindow
 
                     _wcfSink.AttachSend(_wcfClient.SendFrame);
 
+                    // Assert exclusive touch-channel ownership so a rogue local
+                    // process cannot drain touch events ahead of the App.
+                    bool touchOwned = _wcfClient.AcquireTouchConsumer();
+                    Log($"[WCF] Touch consumer acquired: {touchOwned}");
+
                     _touchPoll.Start();
                     _sensorPoll.Start();
                     _frameTimePoll.Start();

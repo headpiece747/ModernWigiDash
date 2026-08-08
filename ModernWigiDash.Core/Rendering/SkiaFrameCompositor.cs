@@ -1,4 +1,4 @@
-﻿using SkiaSharp;
+using SkiaSharp;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 
@@ -33,7 +33,7 @@ public class SkiaFrameCompositor : IDisposable
     public void Compose(PageLayout page, float fpsTelemetry = 60.0f, int pageIndex = 0, int pageCount = 1)
     {
         using var canvas = new SKCanvas(_frameBuffer);
-        
+
         // 1. Clear background with charcoal slate / page background color
         if (SKColor.TryParse(page.BackgroundHexColor, out var bgColor))
             canvas.Clear(bgColor);

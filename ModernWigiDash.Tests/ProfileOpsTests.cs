@@ -166,7 +166,7 @@ public class ProfileOpsTests
         Assert.IsTrue(first.PropertyValues.ContainsKey("Label"), "Imported PropertyValues survive the round-trip");
         Assert.IsNotNull(first.ActiveInstance, "Imported widgets must be rehydrated");
 
-        var rehydrated = (TestWidget)first.ActiveInstance!;
+        var rehydrated = (TestWidget)first.ActiveInstance;
         Assert.AreEqual("custom", rehydrated.Label, "Rehydration must apply custom property values");
         var secondInstance = (TestWidget)loaded.Pages[2].Widgets[0].ActiveInstance!;
         Assert.AreEqual("second page label", secondInstance.Label);
@@ -179,6 +179,79 @@ public class ProfileOpsTests
 
         Assert.IsNull(ProfileOps.ImportJson("{not json", loader, new FakeContext()));
         Assert.IsNull(ProfileOps.ImportJson("null", loader, new FakeContext()));
+    }
+
+    // ── untrusted-import sanitization ───────────────────────
+
+    [TestMethod]
+    public void ImportJson_UntrustedProfile_ClearsActionCommandsAndRootedPaths()
+    {
+        var loader = CreateLoader();
+        var context = new FakeContext();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ActionType"] = "Launch App";
+        placed.PropertyValues["ActionCommand"] = @"C:\Windows\System32\calc.exe";
+        placed.PropertyValues["IconFile"] = @"C:\absolute\icon.svg";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, context);
+
+        var imported = loaded!.Pages[1].Widgets[0];
+        Assert.AreEqual("", imported.PropertyValues["ActionCommand"], "Action commands must be cleared on import");
+        Assert.AreEqual("", imported.PropertyValues["IconFile"], "Rooted icon paths must be cleared on import");
+    }
+
+    [TestMethod]
+    public void ImportJson_PathTraversal_IsCleared()
+    {
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ImagePath"] = @"..\..\secret.png";
+        placed.PropertyValues["GifPath"] = @"\\server\share\evil.gif";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+
+        var imported = loaded!.Pages[1].Widgets[0];
+        Assert.AreEqual("", imported.PropertyValues["ImagePath"], "Traversal paths must be cleared");
+        Assert.AreEqual("", imported.PropertyValues["GifPath"], "UNC paths must be cleared");
+    }
+
+    [TestMethod]
+    public void ImportJson_OversizedPage_IsCapped()
+    {
+        var loader = CreateLoader();
+        var context = new FakeContext();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        for (int i = 0; i < 250; i++)
+        {
+            ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
+        }
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, context);
+
+        Assert.AreEqual(200, loaded!.Pages[1].Widgets.Count, "Imported pages must be capped to the widget limit");
+    }
+
+    [TestMethod]
+    public void ImportJson_OwnProfile_KeepsSafeRelativePaths()
+    {
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["IconFile"] = "icons/my-icon.svg";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+
+        Assert.AreEqual("icons/my-icon.svg", loaded!.Pages[1].Widgets[0].PropertyValues["IconFile"]);
     }
 
     [TestMethod]

@@ -1,4 +1,3 @@
-using ModernWigiDash.Hardware;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -11,9 +10,14 @@ public class DisplayDeviceEngineTests
     [TestMethod]
     public void Constants_MatchProtocolConstants()
     {
-        Assert.AreEqual(DisplayProtocolConstants.FramebufferWidth, DisplayDeviceEngine.ScreenWidth);
-        Assert.AreEqual(DisplayProtocolConstants.FramebufferHeight, DisplayDeviceEngine.ScreenHeight);
-        Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, DisplayDeviceEngine.FrameBufferSize);
+        // Regression guard: pin the hardware spec values (1016x592 framebuffer,
+        // RGB565 = 2 bytes per pixel). MSTEST0032 is disabled because constant
+        // pins are always-true by construction — they ARE the protocol contract.
+#pragma warning disable MSTEST0032
+        Assert.AreEqual(1016, DisplayDeviceEngine.ScreenWidth);
+        Assert.AreEqual(592, DisplayDeviceEngine.ScreenHeight);
+        Assert.AreEqual(1016 * 592 * 2, DisplayDeviceEngine.FrameBufferSize);
+#pragma warning restore MSTEST0032
     }
 
     [TestMethod]
@@ -24,6 +28,9 @@ public class DisplayDeviceEngineTests
         // attached (or the service running) it legitimately connects.
         var engine = new DisplayDeviceEngine();
         engine.Dispose();
+
+        // After dispose the engine must be inert: sends report failure, not throw.
+        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
     }
 
     [TestMethod]
@@ -76,5 +83,8 @@ public class DisplayDeviceEngineTests
         engine.Dispose();
         // Second dispose must not throw.
         engine.Dispose();
+
+        // The engine must stay inert after a second dispose — no throw, no send.
+        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
     }
 }

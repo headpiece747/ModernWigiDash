@@ -74,6 +74,14 @@ public interface IModernWigiDashDisplayServiceContract
     TouchEventInfo? PollTouch();
 
     /// <summary>
+    /// Asserts exclusive touch-channel consumption for the calling process.
+    /// First caller wins; returns false for later callers.
+    /// </summary>
+    [CoreWCF.OperationContract]
+    [System.ServiceModel.OperationContract]
+    bool AcquireTouchConsumer();
+
+    /// <summary>
     /// Reset display to standby: clear framebuffer and switch to the welcome screen.
     /// Called when the app closes so the display doesn't stay black.
     /// </summary>

@@ -104,7 +104,7 @@ public static partial class Program
             return;
         }
 
-                string command = args[0].ToLowerInvariant();
+        string command = args[0].ToLowerInvariant();
         string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
         try
@@ -254,7 +254,10 @@ public static partial class Program
         // default :5000 to avoid conflicts and keep the surface minimal.
         builder.WebHost.ConfigureKestrel(serverOptions =>
         {
-            serverOptions.Limits.MaxRequestBodySize = 32 * 1024 * 1024;
+            // Max message size: a frame (~1.2 MB) plus slack. The 32 MB default
+            // let a malicious local process flood the SYSTEM pipe with huge
+            // payloads before the per-frame cap in SendFrame rejects them.
+            serverOptions.Limits.MaxRequestBodySize = 3 * 1024 * 1024;
             // Ephemeral loopback port: ListenLocalhost rejects port 0, so bind
             // the loopback address explicitly.
             serverOptions.Listen(System.Net.IPAddress.Loopback, 0);

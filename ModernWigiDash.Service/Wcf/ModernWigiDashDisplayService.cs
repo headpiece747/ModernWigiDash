@@ -28,7 +28,23 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     private readonly ILogger<ModernWigiDashDisplayService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly DateTime _startTime;
-    private static readonly string VersionString = typeof(ModernWigiDashDisplayService)
+
+    // SendFrame rate limiting: bounds a malicious local process's ability to
+    // flood the pipe and starve the App's frames out of the shared queue.
+    private static readonly TimeSpan SendFrameWindow = TimeSpan.FromSeconds(1);
+    private const int MaxSendFramesPerWindow = 120;
+    private readonly Lock _sendRateLock = new();
+    private DateTime _sendWindowStart;
+    private int _sendWindowCount;
+
+    // Touch consumer ownership: the App asserts exclusive touch reading at
+    // startup so a rogue poller cannot drain the touch channel ahead of it.
+    private int _touchConsumerTaken;
+
+    // Version comes from the SHARED contract assembly so the App's
+    // DetectServicePortAsync can pin the handshake to it (impostor pipes of a
+    // different contract build are refused).
+    private static readonly string VersionString = typeof(IModernWigiDashDisplayServiceContract)
         .Assembly.GetName().Version?.ToString() ?? "1.0.0.0";
 
     public ModernWigiDashDisplayService(
@@ -156,7 +172,6 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     {
         try
         {
-            AuditCall(nameof(SendFrame));
             if (payload == null || payload.Data == null || payload.Data.Length == 0)
             {
                 _logger.LogWarning("CoreWCF: SendFrame received null or empty FramePayload");
@@ -172,9 +187,21 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
                 return false;
             }
 
+            // Bounded send rate: the legitimate client never exceeds ~30 fps, so
+            // anything above the cap is an attacker flooding the pipe (DoS /
+            // frame starvation via the shared DropOldest queue).
+            if (!AllowSendFrame())
+            {
+                LogToFile("[WCF] SendFrame rate limit exceeded — rejecting");
+                return false;
+            }
+
             // Push through the shared delivery module so the service hop obeys
             // the same DropOldest → drain-to-latest policy as every other hop.
-            bool queued = _frameDelivery.PushBytes(payload.Data.ToArray()) == ModernWigiDash.Sdk.FrameDeliveryResult.Queued;
+            // No defensive copy: the deserialized array is per-call garbage and
+            // FrameDelivery only queues the reference (halves service-side LOH
+            // churn at 30 FPS).
+            bool queued = _frameDelivery.PushBytes(payload.Data) == ModernWigiDash.Sdk.FrameDeliveryResult.Queued;
             if (!queued)
             {
                 _logger.LogWarning("CoreWCF: SendFrame rejected ({Size} bytes)", payload.Data.Length);
@@ -223,22 +250,50 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         return VersionString;
     }
 
+    /// <summary>
+    /// Asserts exclusive touch-channel consumption for this process (the App
+    /// calls this once at startup). First caller wins; a second acquisition is
+    /// refused and logged so input hijacking attempts are visible.
+    /// </summary>
+    public bool AcquireTouchConsumer()
+    {
+        bool acquired = Interlocked.CompareExchange(ref _touchConsumerTaken, 1, 0) == 0;
+        LogToFile(acquired
+            ? "[WCF] Touch consumer acquired by first caller"
+            : "[WCF] Touch consumer already claimed — refusing second acquisition");
+        return acquired;
+    }
+
     public TouchEventInfo? PollTouch()
     {
         try
         {
-            // The worker normalizes the raw protocol byte to TouchEventType at
-            // the transport seam, so this hop is a pure pass-through.
-            if (_touchReader.TryRead(out var touch))
+            // Only serve touch while a consumer has asserted ownership; without
+            // acquisition the channel could be drained by any poller.
+            if (_touchConsumerTaken == 0 || !_touchReader.TryRead(out var touch))
             {
-                return touch;
+                return null;
             }
-            return null;
+            return touch;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "CoreWCF: PollTouch failed");
             return null;
+        }
+    }
+
+    private bool AllowSendFrame()
+    {
+        lock (_sendRateLock)
+        {
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            if (now - _sendWindowStart >= SendFrameWindow)
+            {
+                _sendWindowStart = now;
+                _sendWindowCount = 0;
+            }
+            return ++_sendWindowCount <= MaxSendFramesPerWindow;
         }
     }
 

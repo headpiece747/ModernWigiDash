@@ -1,4 +1,7 @@
+using System.IO;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -64,10 +67,38 @@ internal sealed class TwitchTokenStore
         {
             File.WriteAllBytes(temporaryPath, protectedBytes);
             File.Move(temporaryPath, _tokenPath, overwrite: true);
+            RestrictToCurrentUser(_tokenPath);
         }
         finally
         {
             if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    /// <summary>
+    /// Hardens the token file ACL to the current user only. DPAPI CurrentUser
+    /// already prevents other users from unprotecting the ciphertext, but a
+    /// restrictive ACL also hides the ciphertext from same-user snooping tools.
+    /// Best-effort: ACL failures must not break login.
+    /// </summary>
+    private static void RestrictToCurrentUser(string path)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            var security = fileInfo.GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                WindowsIdentity.GetCurrent().User,
+                FileSystemRights.FullControl,
+                InheritanceFlags.None,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            fileInfo.SetAccessControl(security);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Twitch token ACL hardening failed (best-effort): {ex.Message}");
         }
     }
 

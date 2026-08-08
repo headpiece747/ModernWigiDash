@@ -74,7 +74,10 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     {
         int d = PriceDecimals switch
         {
-            "2" => 2, "4" => 4, "6" => 6, "8" => 8,
+            "2" => 2,
+            "4" => 4,
+            "6" => 6,
+            "8" => 8,
             _ => rawPrice >= 100 ? 2 : rawPrice >= 1 ? 4 : rawPrice >= 0.01m ? 6 : 8
         };
         return currencySymbol + rawPrice.ToString("N" + d);

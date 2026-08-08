@@ -28,8 +28,10 @@ public class HotkeyButtonWidgetTests
         public IReadOnlyList<HotkeyAction>? LastActions { get; private set; }
         public Func<Task>? OnExecute;
 
-        public Task Execute(IReadOnlyList<HotkeyAction> actions, CancellationToken ct)
+        public Task Execute(IReadOnlyList<HotkeyAction> actions, CancellationToken cancellationToken)
         {
+            // Mirrors the real executor: an in-flight cancellation aborts the macro.
+            cancellationToken.ThrowIfCancellationRequested();
             Calls++;
             LastActions = actions;
             return OnExecute?.Invoke() ?? Task.CompletedTask;
@@ -49,37 +51,35 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void OnTouch_TouchUp_ExecutesExactlyOneAction()
+    public async Task OnTouch_TouchUp_ExecutesExactlyOneAction()
     {
         var executor = new FakeExecutor();
         var widget = CreatePressedWidget(executor, new FakeContext());
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (executor.Calls == 0 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => executor.Calls > 0, TimeSpan.FromSeconds(2));
 
         Assert.AreEqual(1, executor.Calls);
         Assert.IsNotNull(executor.LastActions);
-        Assert.AreEqual(1, executor.LastActions!.Count);
+        Assert.AreEqual(1, executor.LastActions.Count);
         Assert.AreEqual("https://example.com", executor.LastActions[0].Value);
     }
 
     [TestMethod]
-    public void OnTouch_TouchDown_DoesNotExecute()
+    public async Task OnTouch_TouchDown_DoesNotExecute()
     {
         var executor = new FakeExecutor();
         var widget = CreatePressedWidget(executor, new FakeContext());
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchDown);
 
-        Thread.Sleep(100);
+        await Task.Delay(100);
         Assert.AreEqual(0, executor.Calls);
     }
 
     [TestMethod]
-    public void OnTouch_SecondPressWhileInFlight_IsGated()
+    public async Task OnTouch_SecondPressWhileInFlight_IsGated()
     {
         var executor = new FakeExecutor();
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -88,21 +88,19 @@ public class HotkeyButtonWidgetTests
 
         // First press blocks on the in-flight executor.
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (executor.Calls < 1 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => executor.Calls >= 1, TimeSpan.FromSeconds(2));
         Assert.AreEqual(1, executor.Calls);
 
         // Second press while the first is in flight must not queue another execution.
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
-        Thread.Sleep(100);
+        await Task.Delay(100);
         Assert.AreEqual(1, executor.Calls, "The action gate must block a second press while one is in flight");
 
         gate.SetResult();
     }
 
     [TestMethod]
-    public void OnTouch_LaunchActionWithEmptyCommand_IsSkippedAndLogged()
+    public async Task OnTouch_LaunchActionWithEmptyCommand_IsSkippedAndLogged()
     {
         var executor = new FakeExecutor();
         var context = new FakeContext();
@@ -112,16 +110,14 @@ public class HotkeyButtonWidgetTests
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (context.Errors.Count == 0 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => context.Errors.Count > 0, TimeSpan.FromSeconds(2));
 
         Assert.AreEqual(0, executor.Calls, "An empty launch command must not execute");
         Assert.IsTrue(context.Errors.Any(e => e.Contains("skipped")), "The skip must be surfaced via the context log");
     }
 
     [TestMethod]
-    public void OnTouch_ExecutorFailure_IsLoggedNotThrown()
+    public async Task OnTouch_ExecutorFailure_IsLoggedNotThrown()
     {
         var executor = new FakeExecutor();
         executor.OnExecute = () => Task.FromException(new InvalidOperationException("boom"));
@@ -131,9 +127,7 @@ public class HotkeyButtonWidgetTests
         // Must not throw out of OnTouch (the trigger is fire-and-forget).
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (context.Errors.Count == 0 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => context.Errors.Count > 0, TimeSpan.FromSeconds(2));
 
         Assert.IsTrue(context.Errors.Any(e => e.Contains("boom")), "Execution failure must surface through the context log");
     }

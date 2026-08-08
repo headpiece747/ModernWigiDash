@@ -11,6 +11,18 @@ namespace ModernWigiDash.Service;
 /// </summary>
 public static partial class Program
 {
+    /// <summary>
+    /// Absolute path to sc.exe. PATH/current-directory lookup would let a
+    /// planted binary run elevated with the service install (S4036).
+    /// </summary>
+    private static string ScExePath => Path.Combine(Environment.SystemDirectory, "sc.exe");
+
+    private static string ResolveDotnetPath()
+    {
+        string candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "dotnet.exe");
+        return File.Exists(candidate) ? candidate : "dotnet";
+    }
+
     private static async Task InstallServiceAsync(string assemblyPath)
     {
         Console.WriteLine("Installing service...");
@@ -23,7 +35,7 @@ public static partial class Program
         string? exePath = Path.ChangeExtension(assemblyPath, ".exe");
         string serviceBinPath = File.Exists(exePath)
             ? $"\"{exePath}\""
-            : $"dotnet \"{assemblyPath}\"";
+            : $"\"{ResolveDotnetPath()}\" \"{assemblyPath}\"";
 
         // Only request elevation if not already running as admin.
         // When already elevated, Verb="runas" can cause nested UAC prompts that fail.
@@ -33,7 +45,7 @@ public static partial class Program
 
         var psi = new ProcessStartInfo
         {
-            FileName = "sc.exe",
+            FileName = ScExePath,
             Arguments = $"create \"{ServiceName}\" binPath=\"{serviceBinPath}\" start=auto obj= \"LocalSystem\" displayname=\"{ServiceDisplayName}\"",
             RedirectStandardOutput = true,
             RedirectStandardError = true,

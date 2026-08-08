@@ -1078,10 +1078,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
     #endregion
 
 
+    private bool _lastUsbBadgeActive;
+
     private void UpdateUsbBadge()
     {
+        bool active = _usbDevice.IsHardwareActive;
+        if (active == _lastUsbBadgeActive) return; // state unchanged — skip the per-tick resource lookup
+        _lastUsbBadgeActive = active;
+
         var resources = Application.Current.Resources;
-        UsbStatusDot.Fill = (Brush)resources[_usbDevice.IsHardwareActive ? "AccentGreen" : "DangerBorder"];
+        UsbStatusDot.Fill = (Brush)resources[active ? "AccentGreen" : "DangerBorder"];
     }
 
     private void ApplyTheme()

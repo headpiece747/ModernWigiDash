@@ -189,7 +189,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Restore_WrongTestClientId_IsRefused()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, _, store, _) = CreateSession();
         var context = new FakeContext();
         store.Save(Token("other-client-id"));
 

@@ -147,7 +147,7 @@ public class TelemetryStoreMappingTests
         LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
 
         Assert.IsNotNull(fresh);
-        Assert.IsTrue(fresh!.IsConnected);
+        Assert.IsTrue(fresh.IsConnected);
     }
 
     [TestMethod]
@@ -173,7 +173,7 @@ public class TelemetryStoreMappingTests
         LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
 
         Assert.IsNotNull(fresh, "A null-DTO snapshot is stamped with the receive time — freshness ≠ connectivity");
-        Assert.IsFalse(fresh!.IsConnected, "The widget renders the unavailable state via IsConnected");
+        Assert.IsFalse(fresh.IsConnected, "The widget renders the unavailable state via IsConnected");
     }
 
     [TestMethod]
@@ -202,7 +202,7 @@ public class TelemetryStoreMappingTests
         FrameTimeSnapshotRecord? fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock);
 
         Assert.IsNotNull(fresh);
-        Assert.IsFalse(fresh!.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
+        Assert.IsFalse(fresh.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
     }
 
     private sealed class TimeProviderFake : TimeProvider

@@ -90,7 +90,7 @@ public class FrameDeliveryTests
     }
 
     [TestMethod]
-    public void Push_AfterDelivery_ReturnsBufferToPool()
+    public async Task Push_AfterDelivery_ReturnsBufferToPool()
     {
         using var delivered = new ManualResetEventSlim(false);
         var pool = new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1);
@@ -108,12 +108,11 @@ public class FrameDeliveryTests
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
 
         byte[]? buffer = null;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-        while (buffer == null && DateTime.UtcNow < deadline)
+        await TestWait.WaitUntilAsync(() =>
         {
             buffer = pool.Acquire();
-            if (buffer == null) Thread.Sleep(5);
-        }
+            return buffer != null;
+        }, TimeSpan.FromSeconds(2));
         Assert.IsNotNull(buffer, "Sender loop must release the buffer back to the pool after delivery");
         pool.Release(buffer);
     }
@@ -186,7 +185,7 @@ public class FrameDeliveryTests
     // ── coalescing: backlog drops stale frames ─────────────
 
     [TestMethod]
-    public void Backlog_CoalescesToLatestFrame()
+    public async Task Backlog_CoalescesToLatestFrame()
     {
         using var firstEntered = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
@@ -222,9 +221,7 @@ public class FrameDeliveryTests
 
         // After the gate opens, the loop coalesces the backlog and delivers
         // only the latest (white). Wait for the second delivery.
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (callCount < 2 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => callCount >= 2, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual(2, callCount, "First frame + one coalesced delivery, no replays of stale frames");
         Assert.IsNotNull(lastDelivered);
@@ -236,7 +233,7 @@ public class FrameDeliveryTests
     // ── pacing: min interval between sends ─────────────────
 
     [TestMethod]
-    public void Pacing_RespectsMinIntervalBetweenSends()
+    public async Task Pacing_RespectsMinIntervalBetweenSends()
     {
         var timestamps = new List<DateTime>();
         using var delivery = new FrameDelivery(
@@ -254,9 +251,7 @@ public class FrameDeliveryTests
         delivery.Push(frame);
         delivery.Push(frame);
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (timestamps.Count < 3 && DateTime.UtcNow < deadline)
-            Thread.Sleep(5);
+        await TestWait.WaitUntilAsync(() => timestamps.Count >= 3, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual(3, timestamps.Count, "All three frames must eventually be delivered");
         lock (timestamps)

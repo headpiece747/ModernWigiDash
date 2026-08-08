@@ -18,7 +18,7 @@ public interface IModernWidget : IAsyncDisposable
 public abstract class ModernWidgetBase : IModernWidget
 {
     public string InstanceId { get; set; } = Guid.NewGuid().ToString();
-    
+
     public virtual WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public virtual SKSize DefaultSize => new SKSize(408, 300); // 2x2 grid cell default
     public virtual SKSize MinimumSize => new SKSize(100, 50);

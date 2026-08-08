@@ -14,7 +14,7 @@ public class FrameBufferPoolTests
         byte[]? buffer = pool.Acquire();
 
         Assert.IsNotNull(buffer);
-        Assert.AreEqual(1202944, buffer!.Length);
+        Assert.AreEqual(1202944, buffer.Length);
     }
 
     [TestMethod]
@@ -45,6 +45,7 @@ public class FrameBufferPoolTests
     {
         var pool = new FrameBufferPool(bufferSize: 1024, capacity: 1);
         byte[]? first = pool.Acquire();
+        Assert.IsNotNull(first, "The pool must hand out its only buffer before the wrong-size release");
 
         pool.Release(new byte[512]);
 
@@ -62,8 +63,8 @@ public class FrameBufferPoolTests
         {
             byte[]? b = pool.Acquire();
             Assert.IsNotNull(b);
-            seen.Add(b!);
-            pool.Release(b!);
+            seen.Add(b);
+            pool.Release(b);
         }
 
         Assert.AreEqual(4, seen.Count, "The pool must never allocate more than its capacity");

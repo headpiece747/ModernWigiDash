@@ -115,7 +115,7 @@ public class ServiceRoutingTests
     }
 
     [TestMethod]
-    public void WcfPollLoop_WhenNotReady_DoesNotInvokeTick()
+    public async Task WcfPollLoop_WhenNotReady_DoesNotInvokeTick()
     {
         var ticks = 0;
         var loop = new PollLoop(
@@ -126,7 +126,7 @@ public class ServiceRoutingTests
             log: _ => { });
 
         loop.Start();
-        Thread.Sleep(200);
+        await Task.Delay(200);
         loop.Stop();
 
         Assert.AreEqual(0, ticks, "The loop must pause while not ready");
@@ -150,7 +150,7 @@ public class ServiceRoutingTests
     }
 
     [TestMethod]
-    public void WcfPollLoop_StartTwice_IsIdempotent()
+    public async Task WcfPollLoop_StartTwice_IsIdempotent()
     {
         int ticks = 0;
         var loop = new PollLoop(
@@ -162,7 +162,7 @@ public class ServiceRoutingTests
 
         loop.Start();
         loop.Start();
-        Thread.Sleep(100);
+        await Task.Delay(100);
         loop.Stop();
 
         Assert.IsTrue(ticks > 0, "The loop must run");

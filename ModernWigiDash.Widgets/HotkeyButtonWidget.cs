@@ -337,14 +337,13 @@ public class HotkeyButtonWidget : ModernWidgetBase
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
         SKColor iconColor = SKColor.TryParse(IconColorHex, out var parsedIcon) ? parsedIcon : SKColors.White;
 
-        var fillPaint = new SKPaint
-        {
-            Color = _isPressed ? btnColor.WithAlpha(180) : SKColors.Transparent,
-            IsAntialias = true
-        };
-
         if (_isPressed)
         {
+            using var fillPaint = new SKPaint
+            {
+                Color = btnColor.WithAlpha(180),
+                IsAntialias = true
+            };
             canvas.DrawRoundRect(bounds, 16f, 16f, fillPaint);
         }
 
@@ -435,8 +434,11 @@ public class HotkeyButtonWidget : ModernWidgetBase
     private async Task ExecuteActionsAsync()
     {
         if (!await _actionGate.WaitAsync(0).ConfigureAwait(false)) return;
-        _actionCts?.Cancel();
-        _actionCts?.Dispose();
+        if (_actionCts is { } prior)
+        {
+            await prior.CancelAsync().ConfigureAwait(false);
+            prior.Dispose();
+        }
         _actionCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {

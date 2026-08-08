@@ -50,7 +50,7 @@ public class WcfDisplayServiceTests
     }
 
     [TestMethod]
-    public void SendFrame_ValidPayload_QueuesCopyAndReturnsTrue()
+    public void SendFrame_ValidPayload_QueuesWithoutCopy()
     {
         var delivered = new List<byte[]>();
         using var signal = new ManualResetEventSlim(false);
@@ -73,9 +73,25 @@ public class WcfDisplayServiceTests
         lock (delivered) { queued = delivered.FirstOrDefault(); }
         Assert.IsNotNull(queued);
         CollectionAssert.AreEqual(original, queued);
-        // The queued copy must be independent of the caller's buffer.
-        original[0] = 0xFF;
-        Assert.AreEqual(0, queued[0]);
+        // Ownership contract: the service passes the deserialized array through
+        // without copying (it is per-call garbage) — the perf fix for the
+        // per-frame 1.2 MB LOH copy.
+        Assert.AreSame(original, queued, "The frame array must be passed through by reference, not copied");
+    }
+
+    [TestMethod]
+    public void SendFrame_RateLimit_RejectsBeyondPerSecondWindow()
+    {
+        var service = CreateService();
+        byte[] frame = new byte[64];
+
+        bool last = false;
+        for (int i = 0; i < 130; i++)
+        {
+            last = service.SendFrame(new FramePayload { Data = frame });
+        }
+
+        Assert.IsFalse(last, "SendFrame beyond the per-second window must be rejected");
     }
 
     [TestMethod]
@@ -142,6 +158,23 @@ public class WcfDisplayServiceTests
         var service = CreateService();
 
         Assert.IsNull(service.PollTouch());
+    }
+
+    [TestMethod]
+    public void AcquireTouchConsumer_FirstCallerWins()
+    {
+        var service = CreateService();
+
+        Assert.IsTrue(service.AcquireTouchConsumer(), "The first acquisition must succeed");
+        Assert.IsFalse(service.AcquireTouchConsumer(), "A second acquisition must be refused");
+    }
+
+    [TestMethod]
+    public void PollTouch_BeforeAcquisition_ReturnsNull()
+    {
+        var service = CreateService();
+
+        Assert.IsNull(service.PollTouch(), "Touch must not be served before a consumer asserts ownership");
     }
 
     // ── Data contracts ─────────────────────────────────────

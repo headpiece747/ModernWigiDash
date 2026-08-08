@@ -80,7 +80,7 @@ public sealed class FrameDelivery : IFrameSink
             FullMode = BoundedChannelFullMode.DropOldest
         });
         _cts = new CancellationTokenSource();
-        _ = Task.Run(() => SenderLoop(_cts.Token));
+        _ = Task.Run(() => SenderLoop(_cts.Token), _cts.Token);
     }
 
     /// <summary>
