@@ -7,6 +7,82 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class DisplayDeviceEngineTests
 {
+    // ── Touch type normalization (TouchReport.ToEventType) ────────────
+
+    [DataTestMethod]
+    [DataRow(DisplayProtocolConstants.TouchTypeDown, TouchEventType.TouchDown)]
+    [DataRow(DisplayProtocolConstants.TouchTypeUp, TouchEventType.TouchUp)]
+    [DataRow(DisplayProtocolConstants.TouchTypeNone, TouchEventType.TouchMove)]
+    [DataRow((byte)0xAA, TouchEventType.TouchMove)]
+    public void ToEventType_RawVendorByte_MapsToSdkVocabulary(byte raw, TouchEventType expected)
+    {
+        Assert.AreEqual(expected, TouchReport.ToEventType(raw));
+    }
+
+    // ── Direct-USB touch polling (engine touch loop tick) ─────────────
+
+    [TestMethod]
+    public void TouchPollTick_WithDownReport_RaisesOnTouchEventNormalized()
+    {
+        var fake = new FakeTransport { NextReport = new TouchReport
+        {
+            Type = DisplayProtocolConstants.TouchTypeDown,
+            X = 12,
+            Y = 34,
+            ScreenState = 0,
+            SleepState = false
+        } };
+        using var engine = new DisplayDeviceEngine(fake);
+        SKPoint? receivedPoint = null;
+        TouchEventType? receivedType = null;
+        engine.OnTouchEvent += (point, type) =>
+        {
+            receivedPoint = point;
+            receivedType = type;
+        };
+
+        engine.TouchPollTick();
+
+        Assert.IsNotNull(receivedPoint);
+        Assert.AreEqual(12f, receivedPoint.Value.X);
+        Assert.AreEqual(34f, receivedPoint.Value.Y);
+        Assert.AreEqual(TouchEventType.TouchDown, receivedType);
+    }
+
+    [TestMethod]
+    public void TouchPollTick_WithUpReport_RaisesTouchUp()
+    {
+        var fake = new FakeTransport { NextReport = new TouchReport
+        {
+            Type = DisplayProtocolConstants.TouchTypeUp,
+            X = 5,
+            Y = 6,
+            ScreenState = 0,
+            SleepState = false
+        } };
+        using var engine = new DisplayDeviceEngine(fake);
+        TouchEventType? receivedType = null;
+        engine.OnTouchEvent += (_, type) => receivedType = type;
+
+        engine.TouchPollTick();
+
+        Assert.AreEqual(TouchEventType.TouchUp, receivedType);
+    }
+
+    [TestMethod]
+    public void TouchPollTick_NoPendingReport_RaisesNothing()
+    {
+        var fake = new FakeTransport { NextReport = null };
+        using var engine = new DisplayDeviceEngine(fake);
+        int raised = 0;
+        engine.OnTouchEvent += (_, _) => raised++;
+
+        engine.TouchPollTick();
+
+        Assert.AreEqual(0, raised);
+    }
+
+    // ── Pre-existing engine tests ─────────────────────────────────────
     [TestMethod]
     public void Constants_MatchProtocolConstants()
     {
@@ -86,5 +162,30 @@ public class DisplayDeviceEngineTests
 
         // The engine must stay inert after a second dispose — no throw, no send.
         Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IDisplayTransport"/> fake: returns the canned
+    /// <see cref="NextReport"/> from <see cref="ReadTouch"/>, never connects.
+    /// </summary>
+    private sealed class FakeTransport : IDisplayTransport
+    {
+        public TouchReport? NextReport { get; set; }
+
+        public bool IsConnected => false;
+        public string DevicePath => "fake";
+
+        public bool Connect() => false;
+        public void Disconnect() { }
+        public bool SetBrightness(byte brightnessPercent) => false;
+        public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => false;
+        public bool GoToScreen(byte screenId, byte transition = 0) => false;
+        public bool ClearPage(byte page = 0) => false;
+        public bool ClearTimeout() => false;
+        public TouchReport? ReadTouch() => NextReport;
+        public bool SendInitCommands() => false;
+        public bool GoToStandby() => false;
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

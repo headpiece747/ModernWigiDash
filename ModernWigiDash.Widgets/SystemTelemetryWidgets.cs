@@ -5,13 +5,13 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("hardware_monitor", "Hardware Monitor", Description = "Show live hardware telemetry (temperature, load, fan, etc.) as a gauge, bar, or sparkline graph. Data is collected by the ModernWigiDash service via LibreHardwareMonitor, so no separate monitoring app is required.", Author = "ModernWigiDash", Version = "2.1.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
+[WidgetMetadata("hardware_monitor", "Hardware Monitor", Description = "Show live hardware telemetry (temperature, load, fan, etc.) as a gauge, bar, or sparkline graph. Data is read from LibreHardwareService's shared-memory maps, so the ModernWigiDash service is not involved.", Author = "ModernWigiDash", Version = "2.1.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
 public class HardwareMonitorWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
-    [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from the service", "")]
+    [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from LibreHardwareService", "")]
     public string SensorLabel { get; set; } = "";
 
     [WidgetProperty("Display Label", WidgetPropertyType.Text, "Override the label shown on the widget (leave empty to use the sensor name)", "")]
@@ -51,7 +51,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         LhmSnapshot? snapshot = LhmSensorStore.TryReadFresh();
         if (snapshot == null || !snapshot.IsConnected)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start the ModernWigiDash service to read hardware sensors", text);
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start LibreHardwareService to read hardware sensors", text);
             return;
         }
 

@@ -1,3 +1,5 @@
+using ModernWigiDash.Sdk;
+
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
@@ -10,4 +12,18 @@ public readonly record struct TouchReport
     public short Y { get; init; }
     public byte ScreenState { get; init; }
     public bool SleepState { get; init; }
+
+    /// <summary>
+    /// Maps the raw vendor protocol byte to the SDK touch vocabulary. This is
+    /// the single normalization site for hardware touch: the Service's WCF
+    /// seam and the App's direct-USB engine both delegate here, so the App
+    /// only ever sees <see cref="TouchEventType"/>. Protocol: None=0,
+    /// Down=1 (contact + movement), Up=2 (release).
+    /// </summary>
+    public static TouchEventType ToEventType(byte rawType) => rawType switch
+    {
+        DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
+        DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
+        _ => TouchEventType.TouchMove
+    };
 }

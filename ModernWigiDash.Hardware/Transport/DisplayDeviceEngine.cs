@@ -28,7 +28,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     public const int FrameBufferSize = DisplayProtocolConstants.FrameBufferSize; // 1,202,944 bytes (1016 * 592 * 2)
 
     // -- Connection State --
-    private DisplayHidTransport? _transport;
+    private IDisplayTransport? _transport;
     private bool _connected;
     private bool _connecting; // Prevent concurrent connection attempts
     private bool _serviceActive; // Yielded to the ModernWigiDash service
@@ -37,6 +37,13 @@ public sealed class DisplayDeviceEngine : IDisposable
     // -- Lifecycle State --
     private int _isDisposed;
     private readonly Timer _reconnectTimer;
+
+    // Direct-USB touch polling: the engine owns the transport in direct mode
+    // (the service is isolated per ADR-0003/0004), so it reads the touch
+    // report at the same 16ms cadence the service's loop used and normalizes
+    // it once via TouchReport.ToEventType. Idle while yielded to the service
+    // or in simulation mode — the WCF path owns touch in those states.
+    private readonly PollLoop _touchPoll;
 
     // -- Public Properties --
     public bool IsConnected => _connected;
@@ -53,6 +60,12 @@ public sealed class DisplayDeviceEngine : IDisposable
     public DisplayDeviceEngine()
     {
         Log("=== Display Hardware Engine Initializing ===");
+
+        // Direct-USB touch polling: active only while the engine owns the
+        // device (connected, not simulation). The loop is the same shape as
+        // the Service's touch loop — one loop module, every hop.
+        _touchPoll = CreateTouchPollLoop();
+        _touchPoll.Start();
 
         // Attempt initial connection (fire-and-forget with proper exception handling)
         _ = TryConnectAsync().ContinueWith(t =>
@@ -80,6 +93,41 @@ public sealed class DisplayDeviceEngine : IDisposable
                 _ = TryConnectAsync().ConfigureAwait(false);
             }
         }, null, 5000, 5000);
+    }
+
+    /// <summary>
+    /// Test seam: an engine bound to an injected transport, without auto-connect
+    /// or background loops. The touch poll loop is created but not started —
+    /// tests drive <see cref="TouchPollTick"/> directly.
+    /// </summary>
+    internal DisplayDeviceEngine(IDisplayTransport transport)
+    {
+        _transport = transport;
+        _connected = true;
+        IsSimulationMode = false;
+        _touchPoll = CreateTouchPollLoop();
+        _reconnectTimer = new Timer(_ => { }, null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    private PollLoop CreateTouchPollLoop() => new(
+        "TOUCH-DIRECT",
+        TimeSpan.FromMilliseconds(16),
+        ready: () => _connected && !IsSimulationMode,
+        tick: TouchPollTick,
+        onTickFailure: () => { },
+        log: msg => Log(msg));
+
+    /// <summary>
+    /// One direct-USB touch probe: reads the transport's pending report and
+    /// raises <see cref="OnTouchEvent"/> with the SDK-normalized type. This is
+    /// the App-side transport seam — vendor protocol bytes never leave it.
+    /// </summary>
+    internal void TouchPollTick()
+    {
+        if (_transport?.ReadTouch() is not TouchReport report)
+            return;
+
+        OnTouchEvent?.Invoke(new SKPoint(report.X, report.Y), TouchReport.ToEventType(report.Type));
     }
 
     /// <summary>
@@ -246,7 +294,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         if (Volatile.Read(ref _isDisposed) != 0 || !_connected || rgb565 == null || rgb565.Length == 0)
             return false;
 
-        DisplayHidTransport? transport;
+        IDisplayTransport? transport;
         lock (_lock)
         {
             transport = _transport;
@@ -273,7 +321,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// </summary>
     private void DisconnectInternal()
     {
-        DisplayHidTransport? oldTransport;
+        IDisplayTransport? oldTransport;
         lock (_lock)
         {
             _connected = false;
@@ -308,6 +356,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     {
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
 
+        _touchPoll.Dispose();
         _reconnectTimer.Dispose();
 
         // Direct-USB mode owns the device, so the app is responsible for putting

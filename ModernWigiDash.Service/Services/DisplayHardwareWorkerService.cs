@@ -117,17 +117,12 @@ public sealed class DisplayHardwareWorkerService(
     }
 
     /// <summary>
-    /// Maps the raw vendor protocol byte to the SDK touch vocabulary. This is
-    /// the single normalization site: the contract and the App only ever see
-    /// <see cref="TouchEventType"/>. Protocol: None=0, Down=1 (contact +
-    /// movement), Up=2 (release).
+    /// Maps the raw vendor protocol byte to the SDK touch vocabulary. Delegates
+    /// to <see cref="TouchReport.ToEventType"/> — the single normalization site
+    /// in the protocol layer, shared with the App's direct-USB engine. The
+    /// contract and the App only ever see <see cref="TouchEventType"/>.
     /// </summary>
-    public static TouchEventType NormalizeTouchType(byte raw) => raw switch
-    {
-        DisplayProtocolConstants.TouchTypeDown => TouchEventType.TouchDown,
-        DisplayProtocolConstants.TouchTypeUp => TouchEventType.TouchUp,
-        _ => TouchEventType.TouchMove
-    };
+    public static TouchEventType NormalizeTouchType(byte raw) => TouchReport.ToEventType(raw);
 
     private static void LogToFile(string msg) => FileLog.Write(msg);
 }
