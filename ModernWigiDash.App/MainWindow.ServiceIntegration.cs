@@ -115,9 +115,16 @@ public partial class MainWindow
     /// shared-memory map and caches the snapshot in <see cref="LhmSensorStore"/>
     /// so widgets read it without a WCF round-trip.
     /// </summary>
+    private string? _lastSensorError;
+
     private void SensorPollTick()
     {
         var dto = _lhsReader.Poll();
+        if (!ReferenceEquals(_lhsReader.LastError, _lastSensorError))
+        {
+            _lastSensorError = _lhsReader.LastError;
+            if (_lastSensorError != null) Log($"[SENSOR] {_lastSensorError}");
+        }
         LhmSensorStore.UpdateFromDto(dto);
     }
 
