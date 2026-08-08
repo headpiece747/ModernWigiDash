@@ -373,7 +373,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
 
         // Draw label and description first so the icon can render in front of them
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, labelSize);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, labelSize);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
         var textBounds = new SKRect();
         font.MeasureText(label, out textBounds, textPaint);
@@ -382,7 +382,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
 
         if (!string.IsNullOrWhiteSpace(Description))
         {
-            using var descriptionFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
+            var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
             using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
             descriptionFont.MeasureText(Description, out var descriptionBounds, descriptionPaint);
             canvas.DrawText(Description, bounds.MidX - descriptionBounds.Width / 2f,
@@ -399,7 +399,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
     private void DrawLabelOnly(SKCanvas canvas, SKRect bounds, string label, SKColor textColor, string description)
     {
         float fontSize = Math.Min(bounds.Width / 6f, bounds.Height / 5f);
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
 
         var textBounds = new SKRect();
@@ -408,7 +408,7 @@ public class HotkeyButtonWidget : ModernWidgetBase
 
         if (!string.IsNullOrWhiteSpace(description))
         {
-            using var descriptionFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
+            var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
             using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
             descriptionFont.MeasureText(description, out var descriptionBounds, descriptionPaint);
             canvas.DrawText(description, bounds.MidX - descriptionBounds.Width / 2f,

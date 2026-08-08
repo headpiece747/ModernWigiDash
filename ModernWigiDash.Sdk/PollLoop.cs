@@ -62,6 +62,9 @@ public sealed class PollLoop : IDisposable
 
     private async Task Loop(CancellationToken ct)
     {
+        // One timer for the loop's lifetime instead of a Task.Delay per tick
+        // (the 16ms touch poll would otherwise churn ~60 timers/sec).
+        using var timer = new PeriodicTimer(_interval);
         while (!ct.IsCancellationRequested)
         {
             try
@@ -85,7 +88,7 @@ public sealed class PollLoop : IDisposable
                 _onTickFailure();
             }
 
-            try { await Task.Delay(_interval, ct); }
+            try { await timer.WaitForNextTickAsync(ct); }
             catch (OperationCanceledException) { break; }
         }
     }

@@ -45,6 +45,11 @@ public partial class MainWindow
             if (pipeEndpoint != null)
             {
                 Log($"[WCF] Pipe {pipeEndpoint} detected, creating client...");
+
+                // Dispose any previous client first: a re-detect while the old
+                // channel is alive would strand its ChannelFactory, the 3MB
+                // BufferManager pool, and the pipe handle per reconnect cycle.
+                _wcfClient?.Dispose();
                 _wcfClient = new ModernWigiDashDisplayServiceClient(pipeEndpoint);
 
                 try

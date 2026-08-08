@@ -49,7 +49,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         string dateStr = now.ToString("dddd, MMMM dd, yyyy");
 
         float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
 
         var timeBounds = new SKRect();
@@ -62,14 +62,14 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
         if (!string.IsNullOrEmpty(amPmStr))
         {
-            using var amFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fontSize * 0.35f);
+            var amFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize * 0.35f);
             using var amPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawText(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), SKTextAlign.Left, amFont, amPaint);
         }
 
         if (ShowDate)
         {
-            using var dateFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, fontSize * 0.32f);
+            var dateFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize * 0.32f);
             using var datePaint = new SKPaint { Color = textColor, IsAntialias = true };
             var dateBounds = new SKRect();
             dateFont.MeasureText(dateStr, out dateBounds, datePaint);

@@ -186,11 +186,11 @@ public class PictureAndGifWidget : ModernWidgetBase
     private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
     {
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, 36f);
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 36f);
         using var iconPaint = new SKPaint { Color = textColor, IsAntialias = true };
         TextRenderHelper.DrawCenteredText(canvas, "🖼️", bounds.MidX, bounds.MidY - 10f, iconFont, iconPaint);
 
-        using var labelFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 12f);
+        var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
         using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
         TextRenderHelper.DrawCenteredText(canvas, "Click/Tap to Cycle Pictures", bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
     }

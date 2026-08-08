@@ -27,19 +27,14 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     private readonly FrameTimeReader? _frameTimeReader;
     private readonly ILogger<ModernWigiDashDisplayService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly ServiceCallState _callState;
     private readonly DateTime _startTime;
 
     // SendFrame rate limiting: bounds a malicious local process's ability to
     // flood the pipe and starve the App's frames out of the shared queue.
+    // Lives on the injected singleton — the service itself is PerCall.
     private static readonly TimeSpan SendFrameWindow = TimeSpan.FromSeconds(1);
     private const int MaxSendFramesPerWindow = 120;
-    private readonly Lock _sendRateLock = new();
-    private DateTime _sendWindowStart;
-    private int _sendWindowCount;
-
-    // Touch consumer ownership: the App asserts exclusive touch reading at
-    // startup so a rogue poller cannot drain the touch channel ahead of it.
-    private int _touchConsumerTaken;
 
     // Version comes from the SHARED contract assembly so the App's
     // DetectServicePortAsync can pin the handshake to it (impostor pipes of a
@@ -52,6 +47,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         FrameDelivery frameDelivery,
         ChannelReader<TouchEventInfo> touchReader,
         ILogger<ModernWigiDashDisplayService> logger,
+        ServiceCallState callState,
         LhmSensorReader? lhmSensorReader = null,
         FrameTimeReader? frameTimeReader = null,
         TimeProvider? timeProvider = null)
@@ -62,6 +58,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         _lhmSensorReader = lhmSensorReader;
         _frameTimeReader = frameTimeReader;
         _logger = logger;
+        _callState = callState;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _startTime = _timeProvider.GetUtcNow().UtcDateTime;
 
@@ -253,11 +250,12 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     /// <summary>
     /// Asserts exclusive touch-channel consumption for this process (the App
     /// calls this once at startup). First caller wins; a second acquisition is
-    /// refused and logged so input hijacking attempts are visible.
+    /// refused and logged so input hijacking attempts are visible. The flag
+    /// lives on the singleton — the service instance is PerCall.
     /// </summary>
     public bool AcquireTouchConsumer()
     {
-        bool acquired = Interlocked.CompareExchange(ref _touchConsumerTaken, 1, 0) == 0;
+        bool acquired = Interlocked.CompareExchange(ref _callState.TouchConsumerTaken, 1, 0) == 0;
         LogToFile(acquired
             ? "[WCF] Touch consumer acquired by first caller"
             : "[WCF] Touch consumer already claimed — refusing second acquisition");
@@ -270,7 +268,7 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         {
             // Only serve touch while a consumer has asserted ownership; without
             // acquisition the channel could be drained by any poller.
-            if (_touchConsumerTaken == 0 || !_touchReader.TryRead(out var touch))
+            if (Volatile.Read(ref _callState.TouchConsumerTaken) == 0 || !_touchReader.TryRead(out var touch))
             {
                 return null;
             }
@@ -285,15 +283,15 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
 
     private bool AllowSendFrame()
     {
-        lock (_sendRateLock)
+        lock (_callState.SendRateLock)
         {
             var now = _timeProvider.GetUtcNow().UtcDateTime;
-            if (now - _sendWindowStart >= SendFrameWindow)
+            if (now - _callState.SendWindowStart >= SendFrameWindow)
             {
-                _sendWindowStart = now;
-                _sendWindowCount = 0;
+                _callState.SendWindowStart = now;
+                _callState.SendWindowCount = 0;
             }
-            return ++_sendWindowCount <= MaxSendFramesPerWindow;
+            return ++_callState.SendWindowCount <= MaxSendFramesPerWindow;
         }
     }
 

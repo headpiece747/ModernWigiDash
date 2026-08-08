@@ -27,13 +27,13 @@ public class StopwatchTimerWidget : ModernWidgetBase
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
         SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
 
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, bounds.Width * 0.18f);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, bounds.Width * 0.18f);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
         var tb = new SKRect();
         font.MeasureText(timeStr, out tb, textPaint);
         canvas.DrawText(timeStr, bounds.MidX - (tb.Width / 2f), bounds.MidY - 5f, SKTextAlign.Left, font, textPaint);
 
-        using var subFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 11f);
+        var subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
         using var subPaint = new SKPaint { Color = accentColor, IsAntialias = true };
         string statusStr = _isRunning ? "TAP TO PAUSE" : "TAP TO START";
         var sb = new SKRect();

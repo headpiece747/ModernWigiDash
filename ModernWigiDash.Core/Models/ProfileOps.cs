@@ -155,6 +155,12 @@ public static class ProfileOps
     /// <summary>Max widgets a page may carry after an import (startup DoS cap).</summary>
     private const int MaxWidgetsPerPage = 200;
 
+    /// <summary>Max pages after an import (total-size DoS cap).</summary>
+    private const int MaxPagesPerProfile = 50;
+
+    /// <summary>Max widgets across the whole imported profile.</summary>
+    private const int MaxTotalWidgets = 1000;
+
     /// <summary>
     /// Deserializes a profile and rehydrates every placed widget so the loaded
     /// profile is immediately renderable. Returns null on parse failure.
@@ -201,6 +207,14 @@ public static class ProfileOps
             profile.ActivePage.BackgroundImagePath = SafeRelativePath(profile.ActivePage.BackgroundImagePath);
         }
 
+        if (profile.Pages.Count > MaxPagesPerProfile)
+        {
+            profile.Pages = profile.Pages.Take(MaxPagesPerProfile).ToList();
+        }
+
+        // Enforce per-page and total widget caps in one pass: later pages are
+        // emptied once the total budget is exhausted.
+        int total = 0;
         foreach (var page in profile.Pages)
         {
             if (!string.IsNullOrWhiteSpace(page.BackgroundImagePath))
@@ -208,27 +222,36 @@ public static class ProfileOps
                 page.BackgroundImagePath = SafeRelativePath(page.BackgroundImagePath);
             }
 
-            if (page.Widgets.Count > MaxWidgetsPerPage)
+            int remaining = MaxTotalWidgets - total;
+            if (remaining <= 0)
             {
-                page.Widgets = page.Widgets.Take(MaxWidgetsPerPage).ToList();
+                page.Widgets.Clear();
+                continue;
             }
 
-            foreach (var placed in page.Widgets)
+            int allowed = Math.Min(page.Widgets.Count, Math.Min(MaxWidgetsPerPage, remaining));
+            for (int i = 0; i < allowed; i++)
             {
-                SanitizeWidgetValues(placed);
+                SanitizeWidgetValues(page.Widgets[i]);
             }
+            if (page.Widgets.Count > allowed)
+            {
+                page.Widgets = page.Widgets.Take(allowed).ToList();
+            }
+            total += allowed;
         }
     }
 
     private static void SanitizeWidgetValues(PlacedWidgetInstance placed)
     {
         // ActionCommand drives Process.Start / SendInput on the Hotkey widget
-        // (identified by its property names, widget-agnostically): a foreign
-        // profile must not silently arm command execution. PropertyValues hold
+        // (identified by its property name, widget-agnostically): a foreign
+        // profile must not silently arm command execution. Cleared whenever
+        // present — ActionType is NOT required (it defaults to "Launch App",
+        // so omitting it in the profile is a valid bypass). PropertyValues hold
         // JsonElement after deserialization — normalize before inspecting.
-        if (placed.PropertyValues.ContainsKey("ActionCommand") &&
-            placed.PropertyValues.ContainsKey("ActionType") &&
-            ConvertPropertyValue(placed.PropertyValues["ActionCommand"], typeof(string)) is string command &&
+        if (placed.PropertyValues.TryGetValue("ActionCommand", out var raw) &&
+            ConvertPropertyValue(raw, typeof(string)) is string command &&
             !string.IsNullOrWhiteSpace(command))
         {
             placed.PropertyValues["ActionCommand"] = "";

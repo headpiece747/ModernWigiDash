@@ -146,23 +146,23 @@ public static class FontHelper
         for (int i = 0; i < text.Length; i += char.IsSurrogatePair(text, i) ? 2 : 1)
         {
             int codepoint = char.ConvertToUtf32(text, i);
-            string charStr = char.ConvertFromUtf32(codepoint);
+            var rune = new Rune(codepoint); // no intermediate heap string
             var tf = GetTypefaceForCodepoint(codepoint, style, preferred);
 
             if (currentTf == null)
             {
                 currentTf = tf;
-                currentRun.Append(charStr);
+                currentRun.Append(rune);
             }
             else if (currentTf.Handle == tf.Handle || currentTf.FamilyName == tf.FamilyName)
             {
-                currentRun.Append(charStr);
+                currentRun.Append(rune);
             }
             else
             {
                 runs.Add((currentRun.ToString(), currentTf));
                 currentRun.Clear();
-                currentRun.Append(charStr);
+                currentRun.Append(rune);
                 currentTf = tf;
             }
         }
@@ -191,8 +191,7 @@ public static class FontHelper
 
         foreach (var run in runs)
         {
-            using var font = new SKFont(run.Typeface, baseFont.Size);
-            ConfigureHighQualityFont(font);
+            var font = GetCachedFont(run.Typeface, baseFont.Size);
             totalWidth += font.MeasureText(run.Text);
         }
 
@@ -226,8 +225,7 @@ public static class FontHelper
         float currentX = x;
         foreach (var run in runs)
         {
-            using var font = new SKFont(run.Typeface, baseFont.Size);
-            ConfigureHighQualityFont(font);
+            var font = GetCachedFont(run.Typeface, baseFont.Size);
             canvas.DrawText(run.Text, currentX, y, SKTextAlign.Left, font, paint);
             currentX += font.MeasureText(run.Text);
         }
@@ -251,11 +249,7 @@ public static class FontHelper
     /// Creates a high-quality Geist SKFont (subpixel antialiasing + full hinting) for the requested size and style.
     /// </summary>
     public static SKFont CreateFont(string familyName, SKFontStyle style, float size)
-    {
-        var font = new SKFont(GetTypeface(familyName, style), size);
-        ConfigureHighQualityFont(font);
-        return font;
-    }
+        => CreateFont(GetTypeface(familyName, style), size);
 
     /// <summary>
     /// Creates a high-quality SKFont (subpixel antialiasing + full hinting) for the requested typeface and size.
@@ -266,6 +260,35 @@ public static class FontHelper
         ConfigureHighQualityFont(font);
         return font;
     }
+
+    /// <summary>
+    /// Returns a CACHED high-quality SKFont for (typeface, size). Widget renders
+    /// run at 30 FPS and sizes change only on resize, so per-render font
+    /// allocation is pure native churn (~10-20 SKFont objects per widget per
+    /// frame). Callers must NOT dispose the returned font.
+    /// </summary>
+    public static SKFont GetCachedFont(SKTypeface typeface, float size)
+    {
+        int sizeKey = (int)Math.Round(size * 2); // half-point resolution
+        // Key by the typeface HANDLE (stable — typefaces are cached for the
+        // process lifetime): the family name alone cannot distinguish
+        // Regular from Bold.
+        return CachedFonts.GetOrAdd(
+            (typeface.Handle.ToInt64(), sizeKey),
+            _ => CreateFont(typeface, size));
+    }
+
+    /// <summary>
+    /// Creates or returns the cached font for a family by name.
+    /// Callers must NOT dispose the returned font.
+    /// </summary>
+    public static SKFont GetCachedFont(string familyName, SKFontStyle style, float size)
+        => GetCachedFont(GetTypeface(familyName, style), size);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(long TypefaceHandle, int SizeKey), SKFont> CachedFonts = new();
+
+    /// <summary>Removes all cached fonts (called at shutdown; the process is exiting anyway).</summary>
+    internal static void ClearFontCache() => CachedFonts.Clear();
 
     /// <summary>
     /// Configures high-quality anti-aliasing, subpixel text positioning, and ClearType rendering flags on an SKFont instance.

@@ -53,4 +53,27 @@ public class ServiceHostSmokeTests
             provider.GetRequiredService<System.Threading.Channels.ChannelReader<TouchEventInfo>>(),
             provider.GetRequiredService<System.Threading.Channels.ChannelReader<TouchEventInfo>>());
     }
+
+    [TestMethod]
+    public void CreateBuilder_ServiceIsPerCallButStateIsSingleton()
+    {
+        using var app = Program.CreateBuilder([], isTestMode: true).Build();
+        var provider = app.Services;
+
+        // PerCall lifecycle regression: mutable cross-call state (rate limits,
+        // touch ownership) must live on the injected singleton, never on the
+        // per-request service instance — otherwise every guard is inert.
+        // Resolve through two scopes (a WCF call is one scope).
+        using (var scope1 = provider.CreateScope())
+        using (var scope2 = provider.CreateScope())
+        {
+            var first = scope1.ServiceProvider.GetRequiredService<ModernWigiDashDisplayService>();
+            var second = scope2.ServiceProvider.GetRequiredService<ModernWigiDashDisplayService>();
+            Assert.AreNotSame(first, second, "The service must be PerCall");
+
+            var state1 = scope1.ServiceProvider.GetRequiredService<ServiceCallState>();
+            var state2 = scope2.ServiceProvider.GetRequiredService<ServiceCallState>();
+            Assert.AreSame(state1, state2, "Call state must be a singleton shared by every request instance");
+        }
+    }
 }

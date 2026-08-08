@@ -312,13 +312,13 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     {
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, 64f * scale);
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 64f * scale);
         using var iconPaint = new SKPaint { Color = accent.WithAlpha(200), IsAntialias = true };
         var tb = new SKRect();
         iconFont.MeasureText("🎵", out tb, iconPaint);
         canvas.DrawText("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, SKTextAlign.Left, iconFont, iconPaint);
 
-        using var labelFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 22f * scale);
+        var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
         using var labelPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(180), IsAntialias = true };
         string hint = "No media playing — press play in any app";
         var lb = new SKRect();
@@ -332,7 +332,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         float pad = 24f * scale;
         string name = FriendlyAppName(snap.SourceAppId);
-        using var font = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 14f * scale);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
         using var textPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White), IsAntialias = true };
         float textW = font.MeasureText(name);
         float h = 26f * scale;
@@ -387,7 +387,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             using var fill = new SKPaint { Color = ParseColor(AccentColorHex, new SKColor(255, 205, 133)).WithAlpha(80), IsAntialias = true };
             canvas.DrawRoundRect(artRect, r, r, fill);
 
-            using var font = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, artSide * 0.45f);
+            var font = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, artSide * 0.45f);
             using var iconPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true };
             var tb = new SKRect();
             font.MeasureText("🎵", out tb, iconPaint);
@@ -412,10 +412,10 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor text = ParseColor(TextColorHex, SKColors.White);
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
-        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 40f * scale);
-        using var artistFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 28f * scale);
-        using var albumFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 22f * scale);
-        using var metaFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 18f * scale);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 40f * scale);
+        var artistFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 28f * scale);
+        var albumFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
+        var metaFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 18f * scale);
 
         using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
         using var artistPaint = new SKPaint { Color = text.WithAlpha(230), IsAntialias = true };
@@ -484,7 +484,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
         // Time labels above progress bar track
-        using var timeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 16f * scale);
+        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
         using var timePaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
         canvas.DrawText(FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, SKTextAlign.Left, timeFont, timePaint);
 
@@ -773,7 +773,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         if (repeatOne)
         {
-            using var numFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, r.Width * 0.24f);
+            var numFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, r.Width * 0.24f);
             using var numPaint = new SKPaint { Color = paint.Color, IsAntialias = true };
             numFont.MeasureText("1", out var nb, numPaint);
             canvas.DrawText("1", cx - nb.Width / 2f, cy + nb.Height / 3f, SKTextAlign.Left, numFont, numPaint);

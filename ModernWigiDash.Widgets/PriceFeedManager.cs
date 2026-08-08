@@ -134,7 +134,7 @@ public sealed class PriceFeedManager : IDisposable
 
     private ClientWebSocket? _binanceWs;
     private ClientWebSocket? _finnhubWs;
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
     private Task? _binanceTask;
     private Task? _finnhubTask;
     private Task? _stockRestTask;
@@ -198,6 +198,7 @@ public sealed class PriceFeedManager : IDisposable
 
     public void Subscribe(string symbol, AssetKind kind)
     {
+        EnsureActive();
         switch (kind)
         {
             case AssetKind.Crypto:
@@ -264,18 +265,58 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     public void Unsubscribe(string symbol, AssetKind kind)
     {
+        string key = ToFeedKey(symbol, kind);
         switch (kind)
         {
             case AssetKind.Crypto:
-                _subscribedCrypto.TryRemove(ToFeedKey(symbol, kind), out _);
+                _subscribedCrypto.TryRemove(key, out _);
                 break;
             case AssetKind.Fx:
-                _subscribedFx.TryRemove(NormalizeFxKey(symbol), out _);
+                _subscribedFx.TryRemove(key, out _);
                 break;
             default:
-                _subscribedStocks.TryRemove(symbol.ToUpper(), out _);
+                _subscribedStocks.TryRemove(key, out _);
                 break;
         }
+
+        // Prices for an unsubscribed symbol are stale by construction.
+        _prices.TryRemove(key, out _);
+
+        // Ref-counted shutdown: when the last subscriber leaves, stop the
+        // sockets and pollers so the static per-widget feed does not hold
+        // process-lifetime network handles.
+        if (_subscribedCrypto.IsEmpty && _subscribedStocks.IsEmpty && _subscribedFx.IsEmpty)
+        {
+            ShutdownLoops();
+        }
+    }
+
+    /// <summary>
+    /// Restarts a cancelled feed lifecycle (called before subscribing again
+    /// after the last subscriber previously triggered shutdown).
+    /// </summary>
+    private void EnsureActive()
+    {
+        if (_cts.IsCancellationRequested)
+        {
+            var replacement = new CancellationTokenSource();
+            Interlocked.Exchange(ref _cts, replacement);
+        }
+    }
+
+    /// <summary>Cancels the feed loops and closes the sockets when no subscribers remain.</summary>
+    private void ShutdownLoops()
+    {
+        _cts.Cancel();
+        try { _binanceWs?.Abort(); } catch { /* best-effort */ }
+        try { _finnhubWs?.Abort(); } catch { /* best-effort */ }
+        _binanceWs = null;
+        _finnhubWs = null;
+        _binanceTask = null;
+        _finnhubTask = null;
+        _stockRestTask = null;
+        _cryptoRestTask = null;
+        _fxRestTask = null;
     }
 
     public PriceInfo? GetPrice(string symbol, AssetKind kind)
@@ -377,7 +418,7 @@ public sealed class PriceFeedManager : IDisposable
         Action<ClientWebSocket> onConnected,
         Action onClosed)
     {
-        while (!_disposed)
+        while (!_disposed && !_cts.IsCancellationRequested)
         {
             var ws = new ClientWebSocket();
             try
@@ -387,7 +428,7 @@ public sealed class PriceFeedManager : IDisposable
                 await subscribe(ws);
                 await ReadLoopAsync(ws, parseMessage, _cts.Token);
             }
-            catch when (!_disposed)
+            catch when (!_disposed && !_cts.IsCancellationRequested)
             {
                 System.Diagnostics.Debug.WriteLine("WebSocket feed loop ended unexpectedly; reconnecting");
             }
@@ -396,7 +437,7 @@ public sealed class PriceFeedManager : IDisposable
                 onClosed();
                 ws.Dispose();
             }
-            if (!_disposed) await Task.Delay(5000);
+            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(5000);
         }
     }
 
@@ -750,6 +791,8 @@ public sealed class PriceFeedManager : IDisposable
         _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
+        try { _binanceWs?.Abort(); } catch { /* best-effort */ }
+        try { _finnhubWs?.Abort(); } catch { /* best-effort */ }
         _binanceWs?.Dispose();
         _finnhubWs?.Dispose();
         _http.Dispose();

@@ -154,6 +154,7 @@ public sealed class FrameTimeReader(
             {
                 _running = false;
                 _processes.Clear();
+                _processNames.Clear();
             }
         }
     }
@@ -581,8 +582,15 @@ public sealed class FrameTimeReader(
             return;
         }
 
-        int excess = samples.Count - MaxSamplesPerProcess;
-        samples.RemoveRange(0, excess);
+        // Chunked trim instead of RemoveRange(0, 1) per event: once the cap is
+        // hit, every present event previously memmoved ~65 KB (at 144 FPS that
+        // is ~9 MB/s on the ETW thread). Trim down to 75% capacity in one go.
+        int target = (MaxSamplesPerProcess * 3) / 4;
+        int excess = samples.Count - target;
+        if (excess > 0)
+        {
+            samples.RemoveRange(0, excess);
+        }
     }
 
     private static IEnumerable<double> Downsample(double[] values, int maxSamples)

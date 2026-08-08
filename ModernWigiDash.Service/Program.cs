@@ -182,15 +182,18 @@ public static partial class Program
         app.Map("/trace", () => "ModernWigiDash Service is running.");
 
         // Register CoreWCF endpoint over named pipes.
+        // Max message size: a frame (~1.2 MB) plus slack. The 32 MB default let
+        // a malicious local process push the SYSTEM service into multi-GB
+        // transient memory (each in-flight call may hold a full message).
         var pipeBinding = new NetNamedPipeBinding
         {
-            MaxReceivedMessageSize = 32 * 1024 * 1024,
-            MaxBufferSize = 32 * 1024 * 1024,
+            MaxReceivedMessageSize = MaxPipeMessageSize,
+            MaxBufferSize = MaxPipeMessageSize,
             ReaderQuotas = new System.Xml.XmlDictionaryReaderQuotas
             {
-                MaxArrayLength = 32 * 1024 * 1024,
-                MaxBytesPerRead = 32 * 1024 * 1024,
-                MaxStringContentLength = 32 * 1024 * 1024
+                MaxArrayLength = MaxPipeMessageSize,
+                MaxBytesPerRead = MaxPipeMessageSize,
+                MaxStringContentLength = MaxPipeMessageSize
             },
             Security = new NetNamedPipeSecurity
             {
@@ -218,6 +221,9 @@ public static partial class Program
         // Run the service (this blocks until shutdown)
         await app.RunAsync();
     }
+
+    /// <summary>Maximum accepted pipe message size: a frame (~1.2 MB) plus slack.</summary>
+    private const int MaxPipeMessageSize = 3 * 1024 * 1024;
 
     /// <summary>
     /// Builds the service composition root. Internal + InternalsVisibleTo so a
@@ -321,7 +327,10 @@ public static partial class Program
         // AddService<T>() registers the type in CoreWCF's pipeline.
         // CoreWCF resolves it from DI per-request (default InstanceContextMode.PerCall),
         // so the service type MUST also be in DI for CoreWCF to create instances.
-        // Scoped = one instance per WCF request (matches PerCall semantics).
+        // Scoped = one instance per WCF request (matches PerCall semantics);
+        // mutable cross-call state (rate limits, touch ownership) lives on the
+        // injected ServiceCallState singleton instead.
+        builder.Services.AddSingleton<ModernWigiDash.Service.Wcf.ServiceCallState>();
         builder.Services.AddScoped<ModernWigiDashDisplayService>();
 
         return builder;

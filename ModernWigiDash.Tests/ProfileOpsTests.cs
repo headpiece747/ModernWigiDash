@@ -204,6 +204,46 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void ImportJson_ActionCommandWithoutActionType_IsStillCleared()
+    {
+        // Regression: the old guard required BOTH ActionCommand and ActionType
+        // to be present. ActionType has a default, so a crafted profile with
+        // only ActionCommand slipped through to command execution.
+        var loader = CreateLoader();
+        var context = new FakeContext();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ActionCommand"] = "calc.exe";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, context);
+
+        var imported = loaded!.Pages[1].Widgets[0];
+        Assert.AreEqual("", imported.PropertyValues["ActionCommand"], "ActionCommand must be cleared even without ActionType");
+    }
+
+    [TestMethod]
+    public void ImportJson_ExcessiveWidgetCount_IsCapped()
+    {
+        var loader = CreateLoader();
+        var context = new FakeContext();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        for (int i = 0; i < 300; i++)
+        {
+            ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
+        }
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, context);
+
+        // Total cap (1000) exceeds the per-page cap (200): the page must be
+        // trimmed to the per-page limit, keeping the import bounded.
+        Assert.IsTrue(loaded!.Pages[1].Widgets.Count <= 200, "Page widget count must be capped on import");
+    }
+
+    [TestMethod]
     public void ImportJson_PathTraversal_IsCleared()
     {
         var loader = CreateLoader();

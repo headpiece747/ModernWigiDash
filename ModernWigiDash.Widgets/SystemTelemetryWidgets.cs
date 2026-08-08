@@ -112,7 +112,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
     private static void DrawHeader(SKCanvas canvas, SKRect bounds, string label, float pad, SKColor text)
     {
-        using var headerFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 22f);
+        var headerFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
         using var headerPaint = new SKPaint { Color = text, IsAntialias = true };
         canvas.DrawText(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, SKTextAlign.Left, headerFont, headerPaint);
     }
@@ -140,14 +140,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
         canvas.DrawPath(progressPath.Snapshot(), progressPaint);
 
         string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, gaugeSize * 0.2f);
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, gaugeSize * 0.2f);
         using var valPaint = new SKPaint { Color = text, IsAntialias = true };
         valFont.MeasureText(valStr, out var valBounds, valPaint);
         canvas.DrawText(valStr, cx - valBounds.Width / 2f, cy + valBounds.Height / 3f, SKTextAlign.Left, valFont, valPaint);
 
         if (!string.IsNullOrWhiteSpace(unit))
         {
-            using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 11f);
+            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
             using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             canvas.DrawText(unit, cx - valBounds.Width / 2f + valBounds.Width + 4f, cy + valBounds.Height / 3f, SKTextAlign.Left, unitFont, unitPaint);
         }
@@ -159,14 +159,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
         DrawHeader(canvas, bounds, label, pad, text);
 
         string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(bounds.Height * 0.22f, 22f, 48f));
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(bounds.Height * 0.22f, 22f, 48f));
         using var valPaint = new SKPaint { Color = text, IsAntialias = true };
         valFont.MeasureText(valStr, out var valBounds, valPaint);
         canvas.DrawText(valStr, bounds.MidX - valBounds.Width / 2f, bounds.MidY + 4f, SKTextAlign.Left, valFont, valPaint);
 
         if (!string.IsNullOrWhiteSpace(unit))
         {
-            using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 12f);
+            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 12f);
             using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             canvas.DrawText(unit, bounds.MidX - valBounds.Width / 2f + valBounds.Width + 5f, bounds.MidY + 4f, SKTextAlign.Left, unitFont, unitPaint);
         }
@@ -192,14 +192,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
         string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
         float valFontSize = Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f);
-        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, valFontSize);
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
         using var valPaint = new SKPaint { Color = text, IsAntialias = true };
         valFont.MeasureText(valStr, out var valBounds, valPaint);
         canvas.DrawText(valStr, bounds.MidX - valBounds.Width / 2f, bounds.MidY + 4f, SKTextAlign.Left, valFont, valPaint);
 
         if (!string.IsNullOrWhiteSpace(unit))
         {
-            using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 14f);
+            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f);
             using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             canvas.DrawText(unit, bounds.MidX - valBounds.Width / 2f + valBounds.Width + 6f, bounds.MidY + 4f, SKTextAlign.Left, unitFont, unitPaint);
         }
@@ -245,14 +245,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
 
         string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 22f);
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
         using var valPaint = new SKPaint { Color = accent, IsAntialias = true };
         valFont.MeasureText(valStr, out var valBounds, valPaint);
         canvas.DrawText(valStr, area.Right - valBounds.Width, area.Top + valFont.Size, SKTextAlign.Left, valFont, valPaint);
 
         if (!string.IsNullOrWhiteSpace(unit))
         {
-            using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, 11f);
+            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
             using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             canvas.DrawText(unit, area.Right - valBounds.Width + valBounds.Width + 4f, area.Top + valFont.Size, SKTextAlign.Left, unitFont, unitPaint);
         }

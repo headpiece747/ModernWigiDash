@@ -470,8 +470,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         float titleSize = (baseFontSize + 2f) * scale;
         float statusSize = 13f * scale;
 
-        using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, titleSize);
-        using var statusFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, statusSize);
+        var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, titleSize);
+        var statusFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, statusSize);
         using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
 
         float top = bounds.Top + pad;
@@ -512,7 +512,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         if (snapshot.Length == 0)
         {
-            using var emptyFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, msgSize);
+            var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
             using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
             var hint = _status switch
             {
@@ -527,8 +527,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         float cursor = contentBounds.Bottom;
 
-        using var userFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, userSize);
-        using var msgFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, msgSize);
+        var userFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, userSize);
+        var msgFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
         using var userPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         using var msgPaint = new SKPaint { Color = msgColor, IsAntialias = true };
 

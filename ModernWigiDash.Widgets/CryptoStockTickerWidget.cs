@@ -120,12 +120,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         float pad = 14f;
         float priceSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
 
-        using var symFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
+        var symFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
         using var symPaint = new SKPaint { Color = textColor, IsAntialias = true };
         string symbolText = TextRenderHelper.TruncateText(DisplayLabel, symFont, symPaint, bounds.Width - pad * 2f);
         canvas.DrawText(symbolText, pad, pad + priceSize * 0.8f, SKTextAlign.Left, symFont, symPaint);
 
-        using var priceFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
+        var priceFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
         using var pricePaint = new SKPaint { Color = textColor, IsAntialias = true };
         canvas.DrawText(Price, pad, bounds.MidY + priceSize * 0.35f, SKTextAlign.Left, priceFont, pricePaint);
 
@@ -133,7 +133,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         {
             // Stale prices render in a neutral gray with a freshness dot so the
             // last-known value is never mistaken for live data.
-            using var badgeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, priceSize);
+            var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
             using var badgePaint = new SKPaint
             {
                 Color = isStale ? textColor.WithAlpha(120) : (isPositive ? posColor : negColor),
@@ -149,11 +149,11 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
         float mainSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
 
-        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
         using var titlePaint = new SKPaint { Color = textColor, IsAntialias = true };
         TextRenderHelper.DrawCenteredText(canvas, "Enter a symbol", bounds.MidX, bounds.MidY - 4f, titleFont, titlePaint);
 
-        using var hintFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Max(mainSize * 0.4f, 11f));
+        var hintFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(mainSize * 0.4f, 11f));
         using var hintPaint = new SKPaint { Color = textColor.WithAlpha(160), IsAntialias = true };
         TextRenderHelper.DrawCenteredText(canvas, "e.g. BTC, ETH, AAPL, MSFT", bounds.MidX, bounds.MidY + 16f, hintFont, hintPaint);
     }

@@ -129,6 +129,26 @@ internal static class TextRenderHelper
     /// </summary>
     internal static void DrawSparkline(SKCanvas canvas, SKRect area, IReadOnlyList<double> samples, double lo, double hi, SKColor accent)
     {
+        BuildSparklinePaths(area, samples, lo, hi, out SKPath? line, out SKPath? fill);
+        if (line == null || fill == null) return;
+
+        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
+        canvas.DrawPath(fill, fillPaint);
+        fill.Dispose();
+
+        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+        canvas.DrawPath(line, linePaint);
+        line.Dispose();
+    }
+
+    /// <summary>
+    /// Builds the sparkline line + fill paths. Exposed so 30 FPS renderers can
+    /// cache the paths and rebuild them only when the samples change.
+    /// </summary>
+    internal static void BuildSparklinePaths(SKRect area, IReadOnlyList<double> samples, double lo, double hi, out SKPath? line, out SKPath? fill)
+    {
+        line = null;
+        fill = null;
         if (samples.Count < 2) return;
 
         float span = area.Width / Math.Max(1, samples.Count - 1);
@@ -154,11 +174,8 @@ internal static class TextRenderHelper
         fillBuilder.LineTo(area.Left, area.Bottom);
         fillBuilder.Close();
 
-        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
-        canvas.DrawPath(fillBuilder.Detach(), fillPaint);
-
-        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-        canvas.DrawPath(lineBuilder.Detach(), linePaint);
+        fill = fillBuilder.Detach();
+        line = lineBuilder.Detach();
     }
 
     /// <summary>

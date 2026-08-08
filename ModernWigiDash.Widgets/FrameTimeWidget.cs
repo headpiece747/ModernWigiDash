@@ -132,7 +132,7 @@ public class FrameTimeWidget : ModernWidgetBase
         if (!tiny && ShowProcess && !string.IsNullOrWhiteSpace(snapshot.ProcessName))
         {
             float procSize = Math.Clamp((contentBottom - contentTop) * 0.08f, 10f, 15f);
-            using var processFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, procSize);
+            var processFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, procSize);
             using var processPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             string process = TextRenderHelper.TruncateText(snapshot.ProcessName, processFont, bounds.Width - pad * 2f);
             canvas.DrawText(process, bounds.Right - pad - processFont.MeasureText(process), contentTop + procSize, SKTextAlign.Left, processFont, processPaint);
@@ -145,10 +145,13 @@ public class FrameTimeWidget : ModernWidgetBase
 
         // Big Hero FPS Value (Largest Font Size!)
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        using var fpsFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize);
+        var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
-        string fpsText = snapshot.Fps.ToString("F0", CultureInfo.InvariantCulture);
+        // The snapshot record is replaced ~1/s by the store, so the formatted
+        // strings are cached per snapshot instead of re-interpolated 30×/s.
+        RefreshCachedStrings(snapshot);
+        string fpsText = _cachedFpsText;
         fpsFont.MeasureText(fpsText, out var fpsBounds, fpsPaint);
 
         float fpsX = bounds.Left + pad;
@@ -157,14 +160,13 @@ public class FrameTimeWidget : ModernWidgetBase
 
         // "FPS" Label & Frame Time (ms) stacked next to big FPS number
         float unitX = fpsX + fpsBounds.Width + 10f;
-        using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
         canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
 
-        using var msFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
+        var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
         using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
-        string msText = $"{snapshot.FrameTimeMs:F1} ms";
-        canvas.DrawText(msText, unitX, fpsBaseline, SKTextAlign.Left, msFont, msPaint);
+        canvas.DrawText(_cachedMsText, unitX, fpsBaseline, SKTextAlign.Left, msFont, msPaint);
 
         // Secondary Metrics Grid (1% Low, 0.1% Low, GPU Busy, CPU Frame)
         // Auto-hides when container width is below 410px.
@@ -178,10 +180,10 @@ public class FrameTimeWidget : ModernWidgetBase
                 float metricValSize = Math.Clamp(gridH * 0.44f, 12f, 36f);
                 float metricLblSize = Math.Clamp(gridH * 0.28f, 9f, 20f);
 
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, gridTop, colWidth, gridH, "1% LOW", $"{snapshot.Low1PercentFps:F0} FPS", metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, gridTop, colWidth, gridH, "0.1% LOW", $"{snapshot.Low01PercentFps:F0} FPS", metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, gridTop, colWidth, gridH, "GPU BUSY", $"{snapshot.GpuBusyPercent:F0}%", metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, gridTop, colWidth, gridH, "CPU FRAME", $"{snapshot.CpuFrameTimeMs:F1} ms", metricValSize, metricLblSize, accent, text);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, gridTop, colWidth, gridH, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent, text);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, gridTop, colWidth, gridH, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent, text);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, gridTop, colWidth, gridH, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent, text);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, gridTop, colWidth, gridH, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent, text);
             }
         }
 
@@ -189,19 +191,81 @@ public class FrameTimeWidget : ModernWidgetBase
         if (showGraph)
         {
             SKRect graphArea = new SKRect(bounds.Left + pad, bounds.Bottom - pad - graphHeight, bounds.Right - pad, bounds.Bottom - pad);
-            DrawSparkline(canvas, graphArea, snapshot.RecentFrameTimesMs, accent);
+            DrawCachedSparkline(canvas, graphArea, snapshot.RecentFrameTimesMs, accent);
         }
+    }
+
+    private FrameTimeSnapshotRecord? _lastStringSnapshot;
+    private string _cachedFpsText = "";
+    private string _cachedMsText = "";
+    private string _cachedLow1 = "";
+    private string _cachedLow01 = "";
+    private string _cachedGpu = "";
+    private string _cachedCpu = "";
+
+    /// <summary>
+    /// Formats the snapshot strings once per snapshot instance (the store swaps
+    /// the record ~1/s) instead of per render at 30 FPS.
+    /// </summary>
+    private void RefreshCachedStrings(FrameTimeSnapshotRecord snapshot)
+    {
+        if (ReferenceEquals(snapshot, _lastStringSnapshot)) return;
+        _lastStringSnapshot = snapshot;
+        _cachedFpsText = snapshot.Fps.ToString("F0", CultureInfo.InvariantCulture);
+        _cachedMsText = $"{snapshot.FrameTimeMs:F1} ms";
+        _cachedLow1 = $"{snapshot.Low1PercentFps:F0} FPS";
+        _cachedLow01 = $"{snapshot.Low01PercentFps:F0} FPS";
+        _cachedGpu = $"{snapshot.GpuBusyPercent:F0}%";
+        _cachedCpu = $"{snapshot.CpuFrameTimeMs:F1} ms";
+    }
+
+    private IReadOnlyList<double>? _lastSparkSamples;
+    private SKPath? _sparkFill;
+    private SKPath? _sparkLine;
+
+    /// <summary>
+    /// The sparkline path is rebuilt only when the samples change (~1/s); the
+    /// render tick just draws the cached path.
+    /// </summary>
+    private void DrawCachedSparkline(SKCanvas canvas, SKRect area, IReadOnlyList<double> samples, SKColor accent)
+    {
+        if (!ReferenceEquals(samples, _lastSparkSamples))
+        {
+            _sparkFill?.Dispose();
+            _sparkLine?.Dispose();
+            _sparkFill = null;
+            _sparkLine = null;
+            _lastSparkSamples = samples;
+            if (samples.Count >= 2)
+            {
+                double lo = samples.Min();
+                double hi = samples.Max();
+                if (hi - lo < 0.001)
+                {
+                    lo -= 1;
+                    hi += 1;
+                }
+                TextRenderHelper.BuildSparklinePaths(area, samples, lo, hi, out _sparkLine, out _sparkFill);
+            }
+        }
+
+        if (_sparkLine == null || _sparkFill == null) return;
+
+        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
+        canvas.DrawPath(_sparkFill, fillPaint);
+        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+        canvas.DrawPath(_sparkLine, linePaint);
     }
 
     private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, float width, float height, string label, string value, float valSize, float lblSize, SKColor accent, SKColor text)
     {
-        using var valFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, valSize);
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valSize);
         using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         valFont.MeasureText(value, out var valBounds, valPaint);
         float valY = topY + valSize * 0.85f;
         canvas.DrawText(value, cx - valBounds.Width / 2f, valY, SKTextAlign.Left, valFont, valPaint);
 
-        using var lblFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, lblSize);
+        var lblFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, lblSize);
         using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
         lblFont.MeasureText(label, out var lblBounds, lblPaint);
         float lblY = valY + lblSize + 4f;
@@ -215,7 +279,7 @@ public class FrameTimeWidget : ModernWidgetBase
         float heroH = Math.Max(8f, bounds.Height - pad * 2f);
 
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        using var fpsFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize);
+        var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
         string fpsText = MonitorRefreshRateHz.Value.ToString(CultureInfo.InvariantCulture);
@@ -226,27 +290,14 @@ public class FrameTimeWidget : ModernWidgetBase
         canvas.DrawText(fpsText, fpsX, fpsBaseline, SKTextAlign.Left, fpsFont, fpsPaint);
 
         float unitX = fpsX + fpsBounds.Width + 10f;
-        using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
         canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
 
-        using var capFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, 13f);
+        var capFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f);
         using var capPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
         string cap = "MONITOR";
         canvas.DrawText(cap, bounds.Right - pad - capFont.MeasureText(cap), heroTop + 13f, SKTextAlign.Left, capFont, capPaint);
-    }
-
-    private static void DrawSparkline(SKCanvas canvas, SKRect area, IReadOnlyList<double> samples, SKColor accent)
-    {
-        double lo = samples.Min();
-        double hi = samples.Max();
-        if (hi - lo < 0.001)
-        {
-            lo -= 1;
-            hi += 1;
-        }
-
-        TextRenderHelper.DrawSparkline(canvas, area, samples, lo, hi, accent);
     }
 
     public override ValueTask DisposeAsync()

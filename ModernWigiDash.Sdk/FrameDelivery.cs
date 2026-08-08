@@ -219,6 +219,17 @@ public sealed class FrameDelivery : IFrameSink
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cts.Cancel();
+
+        // Return any pooled buffers still queued in the channel before the
+        // sender loop exits (they would otherwise be stranded at close).
+        while (_channel.Reader.TryRead(out var slot))
+        {
+            if (slot.IsPooled && _pool != null)
+            {
+                _pool.Release(slot.Buffer);
+            }
+        }
+
         _cts.Dispose();
         _send = null;
     }

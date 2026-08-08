@@ -14,9 +14,10 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class WcfDisplayServiceTests
 {
-    private static ModernWigiDashDisplayService CreateService(FrameDelivery? delivery = null)
+    private static ModernWigiDashDisplayService CreateService(FrameDelivery? delivery = null, ServiceCallState? callState = null)
     {
         delivery ??= new FrameDelivery(isReady: () => true);
+        callState ??= new ServiceCallState();
 
         var touchChannel = Channel.CreateUnbounded<TouchEventInfo>();
         var transport = new DisplayHidTransport(null);
@@ -24,7 +25,8 @@ public class WcfDisplayServiceTests
             transport,
             delivery,
             touchChannel.Reader,
-            NullLogger<ModernWigiDashDisplayService>.Instance);
+            NullLogger<ModernWigiDashDisplayService>.Instance,
+            callState);
     }
 
     // ── SendFrame ──────────────────────────────────────────

@@ -164,7 +164,12 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        _ = FetchLiveWeatherAsync();
+        // Kick the fetch only when it is due — the internal throttle would
+        // early-return anyway, but the call itself allocates a Task per frame.
+        if (!_isFetching && IsFetchDue())
+        {
+            _ = FetchLiveWeatherAsync();
+        }
 
         _lastBounds = bounds;
 
@@ -190,7 +195,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _resolvedCityName : CustomLabel;
         string headerDisplay = cityRaw.ToUpperInvariant();
         float locationFontSize = Math.Clamp(24f * s, 12f, 44f);
-        using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, locationFontSize);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, locationFontSize);
         using var titlePaint = new SKPaint { Color = textPrimary, IsAntialias = true };
 
         float headerTextY = bounds.Top + headerHeight * 0.65f;
@@ -207,7 +212,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         // Styled Unit Toggle Badge [°F] / [°C] (No background card)
         SKRect badgeRect = new(bounds.Right - pad - badgeWidth, bounds.Top + (headerHeight - badgeHeight) / 2f, bounds.Right - pad, bounds.Top + (headerHeight + badgeHeight) / 2f);
 
-        using var unitFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(17f * s, 10f, 30f));
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(17f * s, 10f, 30f));
         using var unitPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         float uW = unitFont.MeasureText(tempUnit);
         canvas.DrawText(tempUnit, badgeRect.MidX - uW / 2f, badgeRect.MidY + 4.5f * s, SKTextAlign.Left, unitFont, unitPaint);
@@ -266,15 +271,15 @@ public class WeatherForecastWidget : ModernWidgetBase
         float tempSize = Math.Clamp(heroHeight * 0.45f, 14f, 140f);
         float descSize = Math.Clamp(heroHeight * 0.18f, 9f, 45f);
 
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
         string mainTempStr = FormatTemp(_currentTempC, tempUnit);
-        using var tempFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, tempSize);
+        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
 
-        using var descFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, descSize);
+        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, descSize);
         using var descPaint = new SKPaint { Color = accentColor, IsAntialias = true };
 
         // Ensure vertical text stack (Temp + Condition) strictly fits inside heroHeight
@@ -356,7 +361,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         float pillY = heroBottom + 4f * sy;
         float pillHeight = metricsH;
         float metricFontSize = Math.Clamp(13f * s, 8f, 24f);
-        using var metricFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, metricFontSize);
+        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, metricFontSize);
 
         float pillPadX = Math.Clamp(10f * s, 4f, 20f);
         float pillGap = Math.Clamp(8f * s, 3f, 16f);
@@ -426,7 +431,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             var (dayIcon, _) = MapWmoCode(day.WeatherCode);
             float colCx = bounds.Left + (i + 0.5f) * colWidth;
 
-            using var dayFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, dayFontSize);
+            var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, dayFontSize);
             using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
             float dayY = stripY + Math.Clamp(18f * s, 10f, 36f);
 
@@ -435,7 +440,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             canvas.DrawText(day.DayName, dayX, dayY, SKTextAlign.Left, dayFont, dayPaint);
 
             string rangeStr = $"{FormatTemp(day.MaxTempC, tempUnit, true)} / {FormatTemp(day.MinTempC, tempUnit, true)}";
-            using var rangeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, rangeFontSize);
+            var rangeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, rangeFontSize);
             using var rangePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
             float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
 
@@ -443,7 +448,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             float rangeX = colCx - (rangeBounds.Left + rangeBounds.Width / 2f);
             canvas.DrawText(rangeStr, rangeX, rangeY, SKTextAlign.Left, rangeFont, rangePaint);
 
-            using var dayIconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
+            var dayIconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
             using var dayIconPaint = new SKPaint { IsAntialias = true };
 
             // Calculate exact vertical center between Day Name and Temp Range baselines
@@ -486,20 +491,20 @@ public class WeatherForecastWidget : ModernWidgetBase
 
             var (icon, desc) = MapWmoCode(day.WeatherCode);
 
-            using var dayFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
+            var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
             using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
             canvas.DrawText(day.DayName, rowRect.Left + 12f * sx, rowRect.MidY + 5f * sy, SKTextAlign.Left, dayFont, dayPaint);
 
-            using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(16f * s, 10f, 22f));
+            var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(16f * s, 10f, 22f));
             using var iconPaint = new SKPaint { IsAntialias = true };
             canvas.DrawText(icon, rowRect.Left + 80f * sx, rowRect.MidY + 6f * sy, SKTextAlign.Left, iconFont, iconPaint);
 
-            using var descFont = FontHelper.CreateFont("Geist", SKFontStyle.Normal, Math.Clamp(11f * s, 8f, 15f));
+            var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(11f * s, 8f, 15f));
             using var descPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
             canvas.DrawText(desc, rowRect.Left + 110f * sx, rowRect.MidY + 4f * sy, SKTextAlign.Left, descFont, descPaint);
 
             string highLowStr = $"High: {FormatTemp(day.MaxTempC, tempUnit)}  Low: {FormatTemp(day.MinTempC, tempUnit)}";
-            using var tempFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
+            var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
             using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawText(highLowStr, rowRect.Right - tempFont.MeasureText(highLowStr) - 12f * sx, rowRect.MidY + 4f * sy, SKTextAlign.Left, tempFont, tempPaint);
         }
@@ -526,16 +531,16 @@ public class WeatherForecastWidget : ModernWidgetBase
 
             var (icon, _) = MapWmoCode(item.WeatherCode);
 
-            using var timeFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
+            var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
             using var timePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
             canvas.DrawText(item.TimeLabel, colRect.MidX - (timeFont.MeasureText(item.TimeLabel) / 2f), colRect.Top + 22f * sy, SKTextAlign.Left, timeFont, timePaint);
 
-            using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(20f * s, 12f, 28f));
+            var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(20f * s, 12f, 28f));
             using var iconPaint = new SKPaint { IsAntialias = true };
             canvas.DrawText(icon, colRect.MidX - 12f * sx, colRect.MidY + 6f * sy, SKTextAlign.Left, iconFont, iconPaint);
 
             string tempStr = FormatTemp(item.TempC, tempUnit);
-            using var tempFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
+            var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
             using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawText(tempStr, colRect.MidX - (tempFont.MeasureText(tempStr) / 2f), colRect.Bottom - 14f * sy, SKTextAlign.Left, tempFont, tempPaint);
         }
@@ -552,16 +557,16 @@ public class WeatherForecastWidget : ModernWidgetBase
         float tempSize = Math.Clamp(64f * s, 28f, 84f);
         float descSize = Math.Clamp(24f * s, 12f, 32f);
 
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
         string mainTempStr = FormatTemp(_currentTempC, tempUnit);
-        using var tempFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, tempSize);
+        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         float tempW = tempFont.MeasureText(mainTempStr);
 
-        using var descFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, descSize);
+        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, descSize);
         using var descPaint = new SKPaint { Color = accentColor, IsAntialias = true };
         float descW = descFont.MeasureText(desc);
 
@@ -594,12 +599,12 @@ public class WeatherForecastWidget : ModernWidgetBase
         var (icon, _) = MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
 
-        using var iconFont = FontHelper.CreateFont("Segoe UI Emoji", SKFontStyle.Bold, Math.Clamp(26f * s, 14f, 32f));
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, Math.Clamp(26f * s, 14f, 32f));
         using var iconPaint = new SKPaint { IsAntialias = true };
         canvas.DrawText(icon, bounds.Left, bounds.MidY + 10f * sy, SKTextAlign.Left, iconFont, iconPaint);
 
         string mainTempStr = FormatTemp(_currentTempC, tempUnit);
-        using var tempFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, Math.Clamp(20f * s, 12f, 26f));
+        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(20f * s, 12f, 26f));
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         canvas.DrawText(mainTempStr, bounds.Left + 36f * sx, bounds.MidY + 8f * sy, SKTextAlign.Left, tempFont, tempPaint);
     }
@@ -711,6 +716,17 @@ public class WeatherForecastWidget : ModernWidgetBase
         if (parts.Length != 2) return false;
         return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
             && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+    }
+
+    /// <summary>
+    /// Cheap pre-check mirroring the fetch's own guards, so the render tick
+    /// never allocates a Task for a fetch that would early-return.
+    /// </summary>
+    private bool IsFetchDue()
+    {
+        if (StaticSnapshot && _lastFetchTime != DateTime.MinValue) return false;
+        if ((Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return false;
+        return true;
     }
 
     internal async Task FetchLiveWeatherAsync(bool force = false)

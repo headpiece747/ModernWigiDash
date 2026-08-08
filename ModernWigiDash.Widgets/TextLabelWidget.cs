@@ -57,7 +57,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         };
 
         float fontSize = Math.Max(6f, Math.Min(FontSize, bounds.Height / 2f));
-        using var font = FontHelper.CreateFont(FontCatalog.GetTypeface(FontFamily, SKFontStyle.Normal), fontSize);
+        var font = FontHelper.GetCachedFont(FontCatalog.GetTypeface(FontFamily, SKFontStyle.Normal), fontSize);
         using var paint = new SKPaint { Color = textColor, IsAntialias = true };
 
         float padding = Math.Min(12f, bounds.Width * 0.04f);
