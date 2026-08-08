@@ -32,11 +32,20 @@ public class PictureAndGifWidget : ModernWidgetBase
     private string[] _folderImages = [];
     private int _imageIndex = 0;
     private SKBitmap? _staticBitmap;
-    private SKCodec? _gifCodec;
     private SKBitmap[]? _gifFrames;
+    private long[]? _gifFrameDurationsMs;
     private int _gifFrameIndex;
     private long _gifNextFrameTick;
     private string _loadedPath = "";
+    private int _loadVersion;
+
+    // Media is decoded on a background thread and published atomically. The
+    // render thread may be drawing a bitmap at publish time, so replaced
+    // bitmaps are retired and disposed only on the UI render thread (start of
+    // Render) or widget teardown — never from the decode task (same
+    // use-after-free class as NowPlayingWidget's album art).
+    private readonly Lock _mediaLock = new();
+    private readonly List<SKBitmap> _retiredMedia = [];
 
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
@@ -49,29 +58,47 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        DisposeRetiredMedia();
+
         string? currentFile = GetActiveImageFile();
 
         if (!string.IsNullOrEmpty(currentFile) && File.Exists(currentFile))
         {
             if (currentFile != _loadedPath)
             {
-                LoadMedia(currentFile);
+                _loadedPath = currentFile;
+                StartMediaLoad(currentFile);
             }
 
-            if (_gifFrames is { Length: > 1 })
+            SKBitmap[]? frames;
+            SKBitmap? staticBitmap;
+            int frameIndex;
+            lock (_mediaLock)
             {
-                if (Environment.TickCount64 >= _gifNextFrameTick)
+                frames = _gifFrames;
+                staticBitmap = _staticBitmap;
+                frameIndex = _gifFrameIndex;
+
+                if (frames is { Length: > 1 } && Environment.TickCount64 >= _gifNextFrameTick)
                 {
-                    _gifFrameIndex = (_gifFrameIndex + 1) % _gifFrames.Length;
-                    _gifNextFrameTick = Environment.TickCount64 + GifFrameDurationMs(_gifFrameIndex);
+                    frameIndex = (_gifFrameIndex + 1) % frames.Length;
+                    _gifFrameIndex = frameIndex;
+                    _gifNextFrameTick = Environment.TickCount64 + FrameDurationMs(_gifFrameDurationsMs, frameIndex);
                 }
-                DrawImage(canvas, bounds, _gifFrames[_gifFrameIndex]);
+            }
+
+            if (frames is { Length: > 1 })
+            {
+                // frameIndex was computed against this array under the lock;
+                // even if a publish swaps _gifFrames now, the old array (and its
+                // bitmaps) stays alive until the next Render's dispose pass.
+                DrawImage(canvas, bounds, frames[frameIndex]);
                 return;
             }
 
-            if (_staticBitmap != null)
+            if (staticBitmap != null)
             {
-                DrawImage(canvas, bounds, _staticBitmap);
+                DrawImage(canvas, bounds, staticBitmap);
                 return;
             }
         }
@@ -79,77 +106,161 @@ public class PictureAndGifWidget : ModernWidgetBase
         DrawPlaceholder(canvas, bounds);
     }
 
-    private void LoadMedia(string path)
+    private void StartMediaLoad(string path)
     {
-        ResetMedia();
-        _loadedPath = path;
+        int version = ++_loadVersion;
+        _ = Task.Run(() => DecodeMediaAsync(path, version));
+    }
 
+    private async Task DecodeMediaAsync(string path, int version)
+    {
+        SKBitmap[]? frames = null;
+        long[]? durations = null;
+        SKBitmap? staticBitmap = null;
         try
         {
-            _gifCodec = SKCodec.Create(path);
-            if (_gifCodec != null && _gifCodec.FrameCount > 1)
+            // Snapshot the file bytes so no file handle outlives this task:
+            // decodes read from memory, the source file can be replaced or the
+            // tests can delete it without racing an open handle.
+            byte[] data = File.ReadAllBytes(path);
+            using var dataRef = SKData.CreateCopy(data);
+            using var codec = SKCodec.Create(dataRef);
+            if (codec != null && codec.FrameCount > 1)
             {
-                int frameCount = _gifCodec.FrameCount;
-                SKImageInfo info = _gifCodec.Info;
-                _gifFrames = new SKBitmap[frameCount];
+                int frameCount = codec.FrameCount;
+                SKImageInfo info = codec.Info;
+                frames = new SKBitmap[frameCount];
+                durations = new long[frameCount];
 
                 for (int i = 0; i < frameCount; i++)
                 {
                     var frame = new SKBitmap(info);
                     IntPtr pixels = frame.GetPixels();
                     var options = new SKCodecOptions { FrameIndex = i };
-                    if (_gifCodec.GetPixels(info, pixels, options) != SKCodecResult.Success)
+                    if (codec.GetPixels(info, pixels, options) != SKCodecResult.Success)
                     {
                         frame.Dispose();
                         frame = new SKBitmap(info);
                     }
-                    _gifFrames[i] = frame;
+                    frames[i] = frame;
+                    durations[i] = codec.FrameInfo[i].Duration > 0 ? codec.FrameInfo[i].Duration : 100L;
                 }
-
-                _gifFrameIndex = 0;
-                _gifNextFrameTick = Environment.TickCount64 + GifFrameDurationMs(0);
-                return;
             }
-
-            _gifCodec?.Dispose();
-            _gifCodec = null;
-            _staticBitmap = SKBitmap.Decode(path);
+            else
+            {
+                staticBitmap = SKBitmap.Decode(data);
+            }
         }
         catch
         {
-            ResetMedia();
+            DisposeAll(frames);
+            staticBitmap?.Dispose();
+            frames = null;
+            durations = null;
+            staticBitmap = null;
         }
+
+        if (version != _loadVersion || path != _loadedPath)
+        {
+            DisposeAll(frames);
+            staticBitmap?.Dispose();
+            return;
+        }
+
+        PublishMedia(path, frames, durations, staticBitmap);
+    }
+
+    /// <summary>
+    /// Atomically installs decoded media (from the background task) and retires
+    /// whatever the render thread might still be drawing.
+    /// </summary>
+    private void PublishMedia(string path, SKBitmap[]? gifFrames, long[]? durations, SKBitmap? staticBitmap)
+    {
+        lock (_mediaLock)
+        {
+            if (_gifFrames != null)
+            {
+                foreach (var frame in _gifFrames)
+                {
+                    _retiredMedia.Add(frame);
+                }
+            }
+            if (_staticBitmap != null)
+            {
+                _retiredMedia.Add(_staticBitmap);
+            }
+
+            _gifFrames = gifFrames;
+            _gifFrameDurationsMs = durations;
+            _staticBitmap = staticBitmap;
+            _gifFrameIndex = 0;
+            _gifNextFrameTick = Environment.TickCount64 + FrameDurationMs(durations, 0);
+        }
+
+        Context?.RequestRender();
     }
 
     private void ResetMedia()
     {
+        _loadVersion++;
         _loadedPath = "";
-        if (_gifFrames != null)
+        lock (_mediaLock)
         {
-            foreach (var frame in _gifFrames)
+            if (_gifFrames != null)
             {
-                frame.Dispose();
+                foreach (var frame in _gifFrames)
+                {
+                    _retiredMedia.Add(frame);
+                }
+                _gifFrames = null;
             }
-            _gifFrames = null;
+            if (_staticBitmap != null)
+            {
+                _retiredMedia.Add(_staticBitmap);
+                _staticBitmap = null;
+            }
+            _gifFrameDurationsMs = null;
+            _gifFrameIndex = 0;
         }
-        _gifCodec?.Dispose();
-        _gifCodec = null;
-        _staticBitmap?.Dispose();
-        _staticBitmap = null;
-        _gifFrameIndex = 0;
         _folderImages = [];
         _imageIndex = 0;
+
+        // UI thread (inspector property change / teardown): nothing is mid-draw
+        // right now, so dispose retired media promptly instead of waiting for
+        // the next render pass.
+        DisposeRetiredMedia();
     }
 
-    private long GifFrameDurationMs(int frameIndex)
+    /// <summary>
+    /// Disposes retired bitmaps. Called only on the UI render thread (start of
+    /// <see cref="Render"/>) or on widget teardown — never from the background
+    /// decode task — so a bitmap is never freed while the canvas could still be
+    /// drawing it.
+    /// </summary>
+    private void DisposeRetiredMedia()
     {
-        if (_gifCodec != null && frameIndex >= 0 && frameIndex < _gifCodec.FrameInfo.Length)
+        lock (_mediaLock)
         {
-            long ms = _gifCodec.FrameInfo[frameIndex].Duration;
-            if (ms > 0) return ms;
+            if (_retiredMedia.Count == 0) return;
+            foreach (var retired in _retiredMedia)
+            {
+                retired.Dispose();
+            }
+            _retiredMedia.Clear();
         }
-        return 100L;
     }
+
+    private static void DisposeAll(SKBitmap[]? frames)
+    {
+        if (frames == null) return;
+        foreach (var frame in frames)
+        {
+            frame?.Dispose();
+        }
+    }
+
+    private static long FrameDurationMs(long[]? durations, int frameIndex)
+        => durations is { Length: > 0 } ? durations[Math.Min(frameIndex, durations.Length - 1)] : 100L;
 
     private void DrawImage(SKCanvas canvas, SKRect bounds, SKBitmap bitmap)
     {

@@ -839,7 +839,10 @@ public class UnitTestSuite
         }
         finally
         {
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+            // The widget now decodes asynchronously; a decode task may still be
+            // reading the file when teardown runs, so tolerate a transient lock
+            // (also covers AV-scan file locks).
+            DeleteTempDirWithRetry(tempDir);
         }
     }
 
@@ -871,7 +874,23 @@ public class UnitTestSuite
         }
         finally
         {
-            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+            DeleteTempDirWithRetry(tempDir);
+        }
+    }
+
+    private static void DeleteTempDirWithRetry(string tempDir)
+    {
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+                return;
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 
