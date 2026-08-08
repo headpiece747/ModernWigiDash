@@ -20,7 +20,6 @@ public class ServiceHostSmokeTests
         Assert.IsNotNull(app.Services.GetRequiredService<FrameDelivery>());
         Assert.IsNotNull(app.Services.GetRequiredService<TimeProvider>());
         Assert.IsNotNull(app.Services.GetRequiredService<DisplayHardwareWorkerService>());
-        Assert.IsNotNull(app.Services.GetRequiredService<LhmSensorReader>());
         Assert.IsNotNull(app.Services.GetRequiredService<FrameTimeReader>());
         Assert.IsNotNull(app.Services.GetRequiredService<ModernWigiDashDisplayService>());
     }
@@ -35,7 +34,6 @@ public class ServiceHostSmokeTests
         // contract here is one instance per worker type, no duplicates.
         Assert.IsTrue(hosted.Length >= 3);
         Assert.IsTrue(hosted.OfType<DisplayHardwareWorkerService>().Count() == 1, "The hardware worker must register exactly once");
-        Assert.IsTrue(hosted.OfType<LhmSensorReader>().Count() == 1);
         Assert.IsTrue(hosted.OfType<FrameTimeReader>().Count() == 1);
     }
 

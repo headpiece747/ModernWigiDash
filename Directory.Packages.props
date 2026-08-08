@@ -7,7 +7,6 @@
   <ItemGroup>
     <PackageVersion Include="CoreWCF.NetNamedPipe" Version="1.9.1" />
     <PackageVersion Include="CoreWCF.Primitives" Version="1.9.1" />
-    <PackageVersion Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <PackageVersion Include="LibUsbDotNet" Version="3.0.224" />
     <PackageVersion Include="MessagePack" Version="3.1.8" />
     <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.5" />

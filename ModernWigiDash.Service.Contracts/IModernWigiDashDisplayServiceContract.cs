@@ -90,14 +90,6 @@ public interface IModernWigiDashDisplayServiceContract
     bool Shutdown();
 
     /// <summary>
-    /// Get the latest hardware sensor snapshot collected by the LibreHardwareMonitor
-    /// background worker running in the LocalSystem service context.
-    /// </summary>
-    [CoreWCF.OperationContract]
-    [System.ServiceModel.OperationContract]
-    SensorSnapshotDto GetSensorSnapshot();
-
-    /// <summary>
     /// Get the latest FPS / frame-time snapshot captured by the service's
     /// in-process ETW frame reader (Microsoft-Windows-DXGI / D3D9 / DxgKrnl).
     /// </summary>

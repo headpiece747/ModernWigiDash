@@ -23,7 +23,6 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
     private readonly IDisplayTransport _transport;
     private readonly FrameDelivery _frameDelivery;
     private readonly ChannelReader<TouchEventInfo> _touchReader;
-    private readonly LhmSensorReader? _lhmSensorReader;
     private readonly FrameTimeReader? _frameTimeReader;
     private readonly ILogger<ModernWigiDashDisplayService> _logger;
     private readonly TimeProvider _timeProvider;
@@ -48,14 +47,12 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         ChannelReader<TouchEventInfo> touchReader,
         ILogger<ModernWigiDashDisplayService> logger,
         ServiceCallState callState,
-        LhmSensorReader? lhmSensorReader = null,
         FrameTimeReader? frameTimeReader = null,
         TimeProvider? timeProvider = null)
     {
         _transport = transport;
         _frameDelivery = frameDelivery;
         _touchReader = touchReader;
-        _lhmSensorReader = lhmSensorReader;
         _frameTimeReader = frameTimeReader;
         _logger = logger;
         _callState = callState;
@@ -312,24 +309,6 @@ public class ModernWigiDashDisplayService : IModernWigiDashDisplayServiceContrac
         {
             _logger.LogError(ex, "CoreWCF: Shutdown failed");
             return false;
-        }
-    }
-
-    public SensorSnapshotDto GetSensorSnapshot()
-    {
-        try
-        {
-            var snapshot = _lhmSensorReader?.GetSnapshot() ?? new SensorSnapshotDto { IsConnected = false };
-            if (!snapshot.IsConnected)
-            {
-                LogToFile("[WCF] GetSensorSnapshot: LHM unavailable (needs admin/SYSTEM context)");
-            }
-            return snapshot;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "CoreWCF: GetSensorSnapshot failed");
-            return new SensorSnapshotDto { IsConnected = false, LastUpdate = _timeProvider.GetUtcNow().UtcDateTime, Readings = [] };
         }
     }
 

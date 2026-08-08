@@ -145,16 +145,6 @@ public class WcfDisplayServiceTests
     }
 
     [TestMethod]
-    public void GetSensorSnapshot_WithoutReader_ReturnsDisconnectedSnapshot()
-    {
-        var service = CreateService();
-
-        SensorSnapshotDto snapshot = service.GetSensorSnapshot();
-
-        Assert.IsFalse(snapshot.IsConnected);
-    }
-
-    [TestMethod]
     public void PollTouch_WithoutReader_ReturnsNull()
     {
         var service = CreateService();

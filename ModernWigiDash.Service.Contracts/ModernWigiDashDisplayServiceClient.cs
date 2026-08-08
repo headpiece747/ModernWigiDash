@@ -187,12 +187,6 @@ public sealed class ModernWigiDashDisplayServiceClient : IDisposable
         return ExecuteWithFaultRecovery(() => _channel.Shutdown());
     }
 
-    public SensorSnapshotDto GetSensorSnapshot()
-    {
-        ThrowIfDisposed();
-        return ExecuteWithFaultRecovery(() => _channel.GetSensorSnapshot());
-    }
-
     public FrameTimeSnapshotDto GetFrameTimeSnapshot(int preferredProcessId = 0)
     {
         ThrowIfDisposed();

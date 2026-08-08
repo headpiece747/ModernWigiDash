@@ -314,10 +314,6 @@ public static partial class Program
         builder.Services.AddSingleton<DisplayHardwareWorkerService>();
         builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DisplayHardwareWorkerService>());
 
-        // LhmSensorReader as singleton background worker polled by the WCF GetSensorSnapshot operation.
-        builder.Services.AddSingleton<LhmSensorReader>();
-        builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<LhmSensorReader>());
-
         // FrameTimeReader as singleton background worker polled by the WCF GetFrameTimeSnapshot
         // operation. Captures DXGI/D3D9/DxgKrnl ETW present events in-process (no external tool).
         builder.Services.AddSingleton<FrameTimeReader>();
