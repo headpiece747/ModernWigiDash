@@ -129,28 +129,41 @@ public class PictureAndGifWidget : ModernWidgetBase
             {
                 int frameCount = codec.FrameCount;
                 SKImageInfo info = codec.Info;
+
+                // Force RGBA8888 frame buffers: Skia composites frames with
+                // PriorFrame in RGBA regardless of the codec's native format,
+                // and writing 4 bytes/pixel into an Index8/palette-sized buffer
+                // (codec.Info's natural format for GIFs) overruns the heap.
+                SKImageInfo frameInfo = info.ColorType == SKColorType.Rgba8888
+                    ? info
+                    : info.WithColorType(SKColorType.Rgba8888);
                 frames = new SKBitmap[frameCount];
                 durations = new long[frameCount];
 
                 for (int i = 0; i < frameCount; i++)
                 {
-                    var frame = new SKBitmap(info);
-                    IntPtr pixels = frame.GetPixels();
+                    var frame = new SKBitmap(frameInfo);
 
                     // GIF frames are deltas: the codec needs the previous
                     // frame's pixels already in the destination to composite
                     // correctly. Without it, delta frames decode as mostly
                     // empty/black regions and the animation flashes black.
-                    var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
+                    //
+                    // NOTE: CopyTo REPLACES the destination's pixel buffer
+                    // (draws into a temp, then Swap), so GetPixels must read
+                    // frame.GetPixels() AFTER the copy — a pointer captured
+                    // beforehand dangles (the buffer is freed) and the codec
+                    // writes into freed memory (heap corruption 0xc0000374).
                     if (i > 0)
                     {
                         frames[i - 1].CopyTo(frame);
                     }
 
-                    if (codec.GetPixels(info, pixels, options) != SKCodecResult.Success)
+                    var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
+                    if (codec.GetPixels(frameInfo, frame.GetPixels(), options) != SKCodecResult.Success)
                     {
                         frame.Dispose();
-                        frame = new SKBitmap(info);
+                        frame = new SKBitmap(frameInfo);
                     }
                     frames[i] = frame;
                     durations[i] = codec.FrameInfo[i].Duration > 0 ? codec.FrameInfo[i].Duration : 100L;
