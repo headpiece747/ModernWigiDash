@@ -6,6 +6,7 @@
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         mc:Ignorable="d"
         Title="ModernWigiDash"
+        PreviewKeyDown="MainWindow_PreviewKeyDown"
         Icon="Resources/Logo/logo.ico"
         WindowState="Normal"
         WindowStartupLocation="CenterScreen"

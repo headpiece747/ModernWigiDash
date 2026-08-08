@@ -759,12 +759,32 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void BtnDeleteWidget_Click(object sender, RoutedEventArgs e)
     {
+        DeleteSelectedWidget();
+    }
+
+    /// <summary>Single delete path shared by the inspector button and the Delete/Back key.</summary>
+    private void DeleteSelectedWidget()
+    {
         if (_selectedWidget != null)
         {
             _profile.ActivePage.Widgets.Remove(_selectedWidget);
             SelectWidget(null);
             UpdateActiveCount();
             SkiaCanvas.InvalidateVisual();
+        }
+    }
+
+    /// <summary>
+    /// Delete/Back removes the selected widget — except while typing in an
+    /// inspector text box, where Backspace must edit the field, not delete.
+    /// </summary>
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if ((e.Key == Key.Delete || e.Key == Key.Back) &&
+            Keyboard.FocusedElement is not TextBox)
+        {
+            DeleteSelectedWidget();
+            e.Handled = true;
         }
     }
 
