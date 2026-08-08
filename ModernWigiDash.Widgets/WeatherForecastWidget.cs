@@ -710,6 +710,13 @@ public class WeatherForecastWidget : ModernWidgetBase
         return true;
     }
 
+    /// <summary>
+    /// Flattens user-provided strings before interpolation into log lines so
+    /// embedded newlines cannot inject fake log entries.
+    /// </summary>
+    private static string SanitizeLog(string value)
+        => value.Replace('\r', ' ').Replace('\n', ' ');
+
     private static bool IsCoordinatePair(string query)
     {
         string[] parts = query.Split(',');
@@ -879,7 +886,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         }
         catch (Exception ex)
         {
-            Context?.LogError($"Geocoding failed for '{query}': {ex.Message}", ex);
+            Context?.LogError($"Geocoding failed for '{SanitizeLog(query)}': {ex.Message}", ex);
         }
 
         _lat = 40.7128;
@@ -904,7 +911,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         }
         catch (Exception ex)
         {
-            Context?.LogError($"ZIP geocoding failed for '{zipCode}': {ex.Message}", ex);
+            Context?.LogError($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
         }
 
         await GeocodeCityLocationAsync(zipCode).ConfigureAwait(false);

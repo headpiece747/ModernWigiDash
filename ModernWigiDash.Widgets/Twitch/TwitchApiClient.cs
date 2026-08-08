@@ -180,8 +180,12 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
 
     public virtual async Task RevokeAsync(string accessToken, CancellationToken cancellationToken)
     {
-        string url = $"{RevokeEndpoint}?client_id={Uri.EscapeDataString(_clientId)}&token={Uri.EscapeDataString(accessToken)}";
-        using var response = await _httpClient.PostAsync(url, content: null, cancellationToken).ConfigureAwait(false);
+        using var content = new FormUrlEncodedContent(
+        [
+            new KeyValuePair<string, string>("client_id", _clientId),
+            new KeyValuePair<string, string>("token", accessToken)
+        ]);
+        using var response = await _httpClient.PostAsync(RevokeEndpoint, content, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 

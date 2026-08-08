@@ -406,7 +406,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         canvas.DrawRoundRect(new SKRect(artRect.Left + shadowOff, artRect.Top + shadowOff,
                                         artRect.Right + shadowOff, artRect.Bottom + shadowOff), r, r, shadow);
 
-        if (_albumArt is not null)
+        // Snapshot the artwork once: background SMTC refreshes can replace (or
+        // null) _albumArt between two reads, which would NRE the render mid-draw.
+        // The retired-list discipline guarantees the snapshot stays alive for
+        // this draw even if a refresh retires it right after.
+        var art = _albumArt;
+        if (art is not null)
         {
             canvas.Save();
             using (var clip = new SKPathBuilder())
@@ -414,7 +419,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                 clip.AddRoundRect(artRect, r, r);
                 using var path = clip.Snapshot();
                 canvas.ClipPath(path);
-                canvas.DrawBitmap(_albumArt, artRect, HighQualitySampling);
+                canvas.DrawBitmap(art, artRect, HighQualitySampling);
             }
             canvas.Restore();
         }
@@ -906,7 +911,10 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void ExtractBackgroundColor()
     {
-        if (_albumArt is null)
+        // Snapshot once: another SMTC refresh thread may retire the artwork
+        // between the null check and the draw.
+        var art = _albumArt;
+        if (art is null)
         {
             _bgColor = new SKColor(18, 18, 24);
             return;
@@ -917,7 +925,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             using var sample = new SKBitmap(32, 32, SKColorType.Rgba8888, SKAlphaType.Premul);
             using var canvas = new SKCanvas(sample);
             canvas.Clear();
-            canvas.DrawBitmap(_albumArt, new SKRect(0, 0, 32, 32), HighQualitySampling);
+            canvas.DrawBitmap(art, new SKRect(0, 0, 32, 32), HighQualitySampling);
             canvas.Flush();
 
             Dictionary<int, (SKColor color, int count, float brightness)> buckets = [];

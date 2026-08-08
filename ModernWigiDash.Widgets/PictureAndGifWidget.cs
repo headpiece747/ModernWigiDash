@@ -30,6 +30,7 @@ public class PictureAndGifWidget : ModernWidgetBase
     public string TextColorHex { get; set; } = "#FAFAFA";
 
     private string[] _folderImages = [];
+    private bool _folderScanned;
     private int _imageIndex = 0;
     private SKBitmap? _staticBitmap;
     private SKBitmap[]? _gifFrames;
@@ -123,10 +124,32 @@ public class PictureAndGifWidget : ModernWidgetBase
             // decodes read from memory, the source file can be replaced or the
             // tests can delete it without racing an open handle.
             byte[] data = File.ReadAllBytes(path);
+
+            // Decompression-bomb caps: refuse media whose raw byte size, frame
+            // count, or decoded pixel footprint would exhaust memory.
+            const int MaxFileBytes = 32 * 1024 * 1024;
+            const int MaxFrames = 256;
+            const long MaxPixelsPerFrame = 4096L * 4096;
+            const long MaxTotalFrameBytes = 512L * 1024 * 1024;
+
+            if (data.Length > MaxFileBytes)
+            {
+                Context?.LogError($"PictureAndGifWidget: refusing {data.Length} byte media (cap {MaxFileBytes} bytes)");
+                return;
+            }
+
             using var dataRef = SKData.CreateCopy(data);
             using var codec = SKCodec.Create(dataRef);
             if (codec != null && codec.FrameCount > 1)
             {
+                if (codec.FrameCount > MaxFrames ||
+                    (long)codec.Info.Width * codec.Info.Height > MaxPixelsPerFrame ||
+                    (long)codec.Info.Width * codec.Info.Height * codec.FrameCount * 4L > MaxTotalFrameBytes)
+                {
+                    Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height}x{codec.FrameCount} decode (cap {MaxFrames} frames, {MaxPixelsPerFrame} px/frame, {MaxTotalFrameBytes} total bytes)");
+                    return;
+                }
+
                 int frameCount = codec.FrameCount;
                 SKImageInfo info = codec.Info;
 
@@ -162,8 +185,20 @@ public class PictureAndGifWidget : ModernWidgetBase
                     var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
                     if (codec.GetPixels(frameInfo, frame.GetPixels(), options) != SKCodecResult.Success)
                     {
+                        // Never install a garbage buffer: the replacement was
+                        // never composited from the prior frame, so re-seed it
+                        // from the previous frame's pixels (or erase frame 0)
+                        // to keep the fallback deterministic.
                         frame.Dispose();
                         frame = new SKBitmap(frameInfo);
+                        if (i > 0)
+                        {
+                            frames[i - 1].CopyTo(frame);
+                        }
+                        else
+                        {
+                            frame.Erase(new SKColor(0, 0, 0, 0));
+                        }
                     }
                     frames[i] = frame;
                     durations[i] = codec.FrameInfo[i].Duration > 0 ? codec.FrameInfo[i].Duration : 100L;
@@ -171,7 +206,16 @@ public class PictureAndGifWidget : ModernWidgetBase
             }
             else
             {
-                staticBitmap = SKBitmap.Decode(data);
+                // Still image: probe the codec created above; only decode when
+                // the frame is within the per-frame pixel cap.
+                if (codec == null || (long)codec.Info.Width * codec.Info.Height <= MaxPixelsPerFrame)
+                {
+                    staticBitmap = SKBitmap.Decode(data);
+                }
+                else
+                {
+                    Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height} still image (cap {MaxPixelsPerFrame} px)");
+                }
             }
         }
         catch
@@ -246,6 +290,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             _gifFrameIndex = 0;
         }
         _folderImages = [];
+        _folderScanned = false;
         _imageIndex = 0;
 
         // UI thread (inspector property change / teardown): nothing is mid-draw
@@ -341,7 +386,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         if (!singleMode && Directory.Exists(ImagePath))
         {
-            if (_folderImages.Length == 0)
+            if (!_folderScanned)
             {
                 _folderImages = Directory.GetFiles(ImagePath, "*.*")
                     .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
@@ -349,6 +394,7 @@ public class PictureAndGifWidget : ModernWidgetBase
                                 f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
                                 f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
                     .ToArray();
+                _folderScanned = true;
             }
 
             if (_folderImages.Length > 0)

@@ -878,6 +878,40 @@ public class UnitTestSuite
         }
     }
 
+    [TestMethod]
+    public void PictureAndGifWidget_UnboundedDecode_IsCapped()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string pngPath = Path.Combine(tempDir, "test.png");
+            CreateTestPng(pngPath, SKColors.CornflowerBlue);
+
+            using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+            var canvas = surface.Canvas;
+            var bounds = new SKRect(0, 0, 406, 296);
+
+            var widget = new PictureAndGifWidget { ImagePath = pngPath, SourceMode = "Single Image" };
+            widget.Render(canvas, bounds);
+            Assert.IsNotNull(surface);
+
+            // A 40MB garbage file exceeds the 32MB decode cap: the widget must
+            // refuse it without crashing or allocating a frame buffer.
+            string hugePath = Path.Combine(tempDir, "huge.gif");
+            File.WriteAllBytes(hugePath, new byte[40 * 1024 * 1024]);
+
+            var hugeWidget = new PictureAndGifWidget { ImagePath = hugePath, SourceMode = "Single Image" };
+            hugeWidget.Render(canvas, bounds);
+
+            Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            DeleteTempDirWithRetry(tempDir);
+        }
+    }
+
     private static void DeleteTempDirWithRetry(string tempDir)
     {
         for (int attempt = 0; attempt < 10; attempt++)

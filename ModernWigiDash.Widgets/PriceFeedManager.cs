@@ -125,10 +125,10 @@ public sealed class PriceFeedManager : IDisposable
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
-    private readonly ConcurrentDictionary<string, byte> _subscribedCrypto = new();
-    private readonly ConcurrentDictionary<string, byte> _subscribedStocks = new();
-    private readonly ConcurrentDictionary<string, byte> _subscribedFx = new();
-    private readonly HttpClient _http = new();
+    internal readonly ConcurrentDictionary<string, byte> _subscribedCrypto = new();
+    internal readonly ConcurrentDictionary<string, byte> _subscribedStocks = new();
+    internal readonly ConcurrentDictionary<string, byte> _subscribedFx = new();
+    private readonly HttpClient _http;
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
 
@@ -143,7 +143,14 @@ public sealed class PriceFeedManager : IDisposable
     private bool _disposed;
 
     public PriceFeedManager(string? finnhubApiKey = null)
+        : this(new HttpClient(), finnhubApiKey)
     {
+    }
+
+    /// <summary>Internal constructor with an injectable HttpClient (test seam).</summary>
+    internal PriceFeedManager(HttpClient httpClient, string? finnhubApiKey = null)
+    {
+        _http = httpClient;
         // The Finnhub key must come from an explicit argument or the
         // FINNHUB_API_KEY environment variable — never from source control.
         _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "";
@@ -152,6 +159,45 @@ public sealed class PriceFeedManager : IDisposable
             FileLog.Write("[PRICE-FEED] FINNHUB_API_KEY not configured — stock WebSocket/REST feeds disabled. Set the FINNHUB_API_KEY environment variable or pass the key to the constructor. Yahoo Finance fallback still works.");
         }
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("ModernWigiDash/2.0");
+    }
+
+    /// <summary>
+    /// Accepts only well-formed ticker/pair symbols (ASCII letters, digits, and
+    /// '.', '-', ':' separators, up to 32 chars) so user-typed input can never
+    /// pollute feed URLs or subscription payloads.
+    /// </summary>
+    private static bool IsValidSymbol(string symbol) =>
+        symbol.Length is > 0 and <= 32 && symbol.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or ':');
+
+    /// <summary>FX pair keys are exactly six letters (e.g. "EURUSD").</summary>
+    private static bool IsValidFxKey(string key) =>
+        key.Length == 6 && key.All(char.IsAsciiLetter);
+
+    /// <summary>
+    /// Validates an FX subscription input: either the "XXX/YYY" pair form (both
+    /// halves and the shape checked by <see cref="TryParseFxPair"/>) or a bare
+    /// six-letter key. Returns the normalized key when valid.
+    /// </summary>
+    private static bool IsValidFxInput(string symbol, out string fxKey)
+    {
+        fxKey = "";
+        if (string.IsNullOrWhiteSpace(symbol)) return false;
+        if (symbol.Contains('/'))
+        {
+            if (!TryParseFxPair(symbol, out _, out _)) return false;
+        }
+        else if (!IsValidSymbol(symbol))
+        {
+            return false;
+        }
+        fxKey = NormalizeFxKey(symbol);
+        return IsValidFxKey(fxKey);
+    }
+
+    private static void LogInvalidSymbol(string? symbol)
+    {
+        string preview = symbol is null ? "<null>" : symbol.Length > 48 ? symbol[..48] + "…" : symbol;
+        System.Diagnostics.Debug.WriteLine($"Skipping invalid feed symbol '{preview}'");
     }
 
     public static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);
@@ -202,6 +248,11 @@ public sealed class PriceFeedManager : IDisposable
         switch (kind)
         {
             case AssetKind.Crypto:
+                if (!IsValidSymbol(symbol))
+                {
+                    LogInvalidSymbol(symbol);
+                    return;
+                }
                 var baseCoin = ToFeedKey(symbol, kind);
                 if (_subscribedCrypto.TryAdd(baseCoin, 0))
                 {
@@ -213,13 +264,22 @@ public sealed class PriceFeedManager : IDisposable
                 }
                 break;
             case AssetKind.Fx:
-                string fxKey = NormalizeFxKey(symbol);
+                if (!IsValidFxInput(symbol, out string fxKey))
+                {
+                    LogInvalidSymbol(symbol);
+                    return;
+                }
                 if (_subscribedFx.TryAdd(fxKey, 0))
                 {
                     _fxRestTask ??= RunFxRestPollerAsync();
                 }
                 break;
             default:
+                if (!IsValidSymbol(symbol))
+                {
+                    LogInvalidSymbol(symbol);
+                    return;
+                }
                 string stockSym = symbol.ToUpper();
                 if (_subscribedStocks.TryAdd(stockSym, 0))
                 {
@@ -360,6 +420,7 @@ public sealed class PriceFeedManager : IDisposable
         else if (kind == AssetKind.Stock)
         {
             string stockSym = symbol.ToUpper();
+            if (!IsValidSymbol(stockSym)) return;
             string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{stockSym}?interval=1d&range=1d";
             string json = await _http.GetStringAsync(url, _cts.Token);
             using var doc = JsonDocument.Parse(json);
@@ -446,6 +507,7 @@ public sealed class PriceFeedManager : IDisposable
 
     private async Task PollStockSymbolAsync(string sym)
     {
+        if (!IsValidSymbol(sym)) return;
         var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -466,7 +528,7 @@ public sealed class PriceFeedManager : IDisposable
 
     private async Task PollFxPairAsync(string key)
     {
-        if (key.Length != 6)
+        if (!IsValidFxKey(key))
         {
             return;
         }
