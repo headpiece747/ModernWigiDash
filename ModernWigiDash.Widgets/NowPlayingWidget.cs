@@ -37,6 +37,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private GlobalSystemMediaTransportControlsSession? _session;
     private MediaSnapshot? _snapshot;
     private SKBitmap? _albumArt;
+    private readonly Lock _artLock = new();
+    private readonly List<SKBitmap> _retiredArtwork = [];
     private string _artKey = "";
     private string _loadedArtworkKey = "";
     private string _loadingArtworkKey = "";
@@ -277,15 +279,49 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void DisposeArtwork()
     {
-        _albumArt?.Dispose();
-        _albumArt = null;
+        lock (_artLock)
+        {
+            if (_albumArt != null)
+            {
+                // Retire instead of disposing: SMTC refresh threads replace the
+                // artwork, and the 30 FPS render thread may be inside
+                // canvas.DrawBitmap(_albumArt) at this instant. Disposing the
+                // native pixel memory there crashes in sk_image_new_from_bitmap
+                // (0xc0000005) — disposal happens on the UI thread at the next
+                // Render pass (see DisposeRetiredArtwork), never from a
+                // background refresh.
+                _retiredArtwork.Add(_albumArt);
+                _albumArt = null;
+            }
+        }
         _loadedArtworkKey = "";
+    }
+
+    /// <summary>
+    /// Disposes artwork retired by <see cref="DisposeArtwork"/>. Called only on
+    /// the UI render thread (start of <see cref="Render"/>) or on widget
+    /// teardown — never from a background SMTC refresh — so a bitmap is never
+    /// freed while the canvas could still be drawing it.
+    /// </summary>
+    private void DisposeRetiredArtwork()
+    {
+        lock (_artLock)
+        {
+            if (_retiredArtwork.Count == 0) return;
+            foreach (var retired in _retiredArtwork)
+            {
+                retired.Dispose();
+            }
+            _retiredArtwork.Clear();
+        }
     }
 
     // ── Render ────────────────────────────────────────────────────────────
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        DisposeRetiredArtwork();
+
         float scale = Math.Min(bounds.Width / DesignWidth, bounds.Height / DesignHeight);
 
         // Background panel tinted by artwork-derived color
@@ -1046,6 +1082,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _session = null;
         _snapshot = null;
         DisposeArtwork();
+        DisposeRetiredArtwork();
 
         await base.DisposeAsync();
     }
