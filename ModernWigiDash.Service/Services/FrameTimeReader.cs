@@ -71,13 +71,19 @@ public sealed class FrameTimeReader(
     {
         lock (_gate)
         {
+            // The freshness contract: a snapshot is fresh while the reader is
+            // alive and answering polls — NOT while frames are presenting. The
+            // event-driven _lastUpdate freezes when no process presents, which
+            // would make every idle snapshot look stale. Stamp the production
+            // time here; BuildDto stamps its own.
+            var snapshotTime = _timeProvider.GetUtcNow().UtcDateTime;
             if (!_running)
             {
                 return new FrameTimeSnapshotDto
                 {
                     IsAvailable = false,
                     ErrorMessage = _error,
-                    LastUpdate = _lastUpdate
+                    LastUpdate = snapshotTime
                 };
             }
 
@@ -88,7 +94,7 @@ public sealed class FrameTimeReader(
                 {
                     IsAvailable = true,
                     ProcessId = 0,
-                    LastUpdate = _lastUpdate,
+                    LastUpdate = snapshotTime,
                     RecentFrameTimesMs = []
                 };
             }
