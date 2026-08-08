@@ -62,9 +62,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     // WCF poll loops — one parameterized loop module per producer (touch,
     // sensor, frame-time). Constructed in the ctor, started on connect.
-    private readonly ServiceRouting.WcfPollLoop _touchPoll;
-    private readonly ServiceRouting.WcfPollLoop _sensorPoll;
-    private readonly ServiceRouting.WcfPollLoop _frameTimePoll;
+    private readonly Sdk.PollLoop _touchPoll;
+    private readonly Sdk.PollLoop _sensorPoll;
+    private readonly Sdk.PollLoop _frameTimePoll;
 
     private ProfileLayout _profile = new();
     private PlacedWidgetInstance? _selectedWidget;
@@ -113,11 +113,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _routingState = new ServiceRouting.ServiceRoutingState(
             onReconnect: TryRetryServiceRouting,
             log: msg => Log(msg));
-        _touchPoll = new ServiceRouting.WcfPollLoop(
+        _touchPoll = new Sdk.PollLoop(
             "TOUCH", TimeSpan.FromMilliseconds(16), ServiceReady, TouchPollTick, _routingState.ReportFailure, msg => Log(msg));
-        _sensorPoll = new ServiceRouting.WcfPollLoop(
+        _sensorPoll = new Sdk.PollLoop(
             "SENSOR", TimeSpan.FromSeconds(1), ServiceReady, SensorPollTick, _routingState.ReportFailure, msg => Log(msg));
-        _frameTimePoll = new ServiceRouting.WcfPollLoop(
+        _frameTimePoll = new Sdk.PollLoop(
             "FRAME", TimeSpan.FromSeconds(1), ServiceReady, FrameTimePollTick, _routingState.ReportFailure, msg => Log(msg));
 
         // Detect if Windows Service is running and initialize WCF client for frame routing.
@@ -248,78 +248,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void PlaceWidgetOnCanvas(string pluginId, float x, float y, float width = -1, float height = -1)
     {
-        var placed = new PlacedWidgetInstance
-        {
-            PluginId = pluginId,
-            DisplayName = _loader.RegisteredPlugins.FirstOrDefault(p => p.PluginId == pluginId)?.DisplayName ?? pluginId,
-            X = x,
-            Y = y,
-            ZIndex = _profile.ActivePage.Widgets.Count + 1
-        };
+        var placed = ProfileOps.PlaceWidget(_profile, _loader, this, pluginId, x, y, width, height);
+        if (placed == null) return;
 
-        var instance = RehydrateWidget(placed);
-        if (instance == null) return;
-
-        placed.Width = width > 0 ? width : instance.DefaultSize.Width;
-        placed.Height = height > 0 ? height : instance.DefaultSize.Height;
-
-        _profile.ActivePage.Widgets.Add(placed);
         SelectWidget(placed);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
-    }
-
-    /// <summary>
-    /// Creates and initializes the active widget instance for a placed widget, then applies
-    /// the user-configured custom property values (surviving Export/Import round-trips).
-    /// </summary>
-    private IModernWidget? RehydrateWidget(PlacedWidgetInstance placed)
-    {
-        var instance = _loader.CreateInstance(placed.PluginId);
-        if (instance == null) return null;
-
-#pragma warning disable S6966 // Widget initialization must complete before placement — sync wrapper during startup
-        instance.InitializeAsync(this).GetAwaiter().GetResult();
-#pragma warning restore S6966
-
-        var type = instance.GetType();
-        foreach (var prop in type.GetProperties())
-        {
-            var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
-            if (attr == null) continue;
-            if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
-
-            object? value = ConvertPropertyValue(raw, prop.PropertyType);
-            if (value == null) continue;
-
-            try
-            {
-                prop.SetValue(instance, value);
-                instance.OnPropertyChanged(prop.Name, value);
-            }
-            catch
-            {
-                // Stored value is incompatible with the widget property type; ignore it
-                System.Diagnostics.Debug.WriteLine("Stored value incompatible with widget property type (ignored)");
-            }
-        }
-
-        placed.ActiveInstance = instance;
-        return instance;
-    }
-
-    private static object? ConvertPropertyValue(object? raw, Type targetType)
-    {
-        // Imported JSON dictionaries arrive as JsonElement values; deserialize them into the real type
-        if (raw is not JsonElement je) return raw;
-        try
-        {
-            return je.Deserialize(targetType);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     private void SelectWidget(PlacedWidgetInstance? widget)
@@ -963,7 +897,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         string? newName = PromptForText($"Rename Page", $"New name for '{page.PageName}':", page.PageName);
         if (string.IsNullOrWhiteSpace(newName)) return;
 
-        page.PageName = newName;
+        ProfileOps.RenamePage(page, newName);
         RebuildPageTabsUI();
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
@@ -1060,11 +994,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             if (res != MessageBoxResult.Yes) return;
         }
 
-        _profile.Pages.RemoveAt(index);
-        if (_profile.ActivePageIndex >= _profile.Pages.Count)
-        {
-            _profile.ActivePageIndex = _profile.Pages.Count - 1;
-        }
+        if (!ProfileOps.DeletePage(_profile, index)) return;
         RebuildPageTabsUI();
         SelectWidget(null);
         UpdateActiveCount();
@@ -1073,9 +1003,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
-        var newPage = new PageLayout { PageName = $"Page {_profile.Pages.Count + 1}" };
-        _profile.Pages.Add(newPage);
-        _profile.ActivePageIndex = _profile.Pages.Count - 1;
+        ProfileOps.AddPage(_profile);
         RebuildPageTabsUI();
         SelectWidget(null);
         UpdateActiveCount();
@@ -1105,7 +1033,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
         {
-            string json = JsonSerializer.Serialize(_profile, new JsonSerializerOptions { WriteIndented = true });
+            string json = ProfileOps.ExportJson(_profile);
             File.WriteAllText(dlg.FileName, json);
             MessageBox.Show("Profile exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
@@ -1119,15 +1047,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
             try
             {
                 string json = File.ReadAllText(dlg.FileName);
-                var loaded = JsonSerializer.Deserialize<ProfileLayout>(json);
+                var loaded = ProfileOps.ImportJson(json, _loader, this);
                 if (loaded != null)
                 {
                     _profile = loaded;
-                    foreach (var page in _profile.Pages)
-                    {
-                        foreach (var placed in page.Widgets)
-                            RehydrateWidget(placed);
-                    }
                     RebuildPageTabsUI();
                     SelectWidget(null);
                     UpdateActiveCount();
@@ -1145,7 +1068,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (MessageBox.Show("Are you sure you want to clear all widgets from the current page?", "Confirm Clear", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
         {
-            _profile.ActivePage.Widgets.Clear();
+            ProfileOps.ClearPage(_profile.ActivePage);
             SelectWidget(null);
             UpdateActiveCount();
             SkiaCanvas.InvalidateVisual();

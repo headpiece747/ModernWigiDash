@@ -9,18 +9,24 @@ internal sealed class TwitchTokenStore
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("ModernWigiDash.TwitchToken.v1");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private static string TokenPath => Path.Combine(
+    private static string DefaultTokenPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ModernWigiDash",
         "twitch-auth.bin");
+    private readonly string _tokenPath;
+
+    public TwitchTokenStore() : this(DefaultTokenPath) { }
+
+    /// <summary>Test seam: point the store at an isolated file path.</summary>
+    internal TwitchTokenStore(string tokenPath) => _tokenPath = tokenPath;
 
     public TwitchTokenSet? Load()
     {
         try
         {
-            if (!File.Exists(TokenPath)) return null;
+            if (!File.Exists(_tokenPath)) return null;
 
-            byte[] protectedBytes = File.ReadAllBytes(TokenPath);
+            byte[] protectedBytes = File.ReadAllBytes(_tokenPath);
             byte[] plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
             return JsonSerializer.Deserialize<TwitchTokenSet>(plaintext, JsonOptions);
         }
@@ -45,19 +51,19 @@ internal sealed class TwitchTokenStore
 
     public void Save(TwitchTokenSet tokenSet)
     {
-        string? directory = Path.GetDirectoryName(TokenPath);
+        string? directory = Path.GetDirectoryName(_tokenPath);
         if (string.IsNullOrWhiteSpace(directory))
             throw new InvalidOperationException("Unable to determine the Twitch token storage directory.");
 
         Directory.CreateDirectory(directory);
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(tokenSet, JsonOptions);
         byte[] protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
-        string temporaryPath = TokenPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        string temporaryPath = _tokenPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
 
         try
         {
             File.WriteAllBytes(temporaryPath, protectedBytes);
-            File.Move(temporaryPath, TokenPath, overwrite: true);
+            File.Move(temporaryPath, _tokenPath, overwrite: true);
         }
         finally
         {
@@ -69,7 +75,7 @@ internal sealed class TwitchTokenStore
     {
         try
         {
-            if (File.Exists(TokenPath)) File.Delete(TokenPath);
+            if (File.Exists(_tokenPath)) File.Delete(_tokenPath);
         }
         catch (IOException)
         {

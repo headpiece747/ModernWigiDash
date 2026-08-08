@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace ModernWigiDash.Widgets.Twitch;
 
-internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = null)
+internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
 {
     private static readonly HttpClient SharedHttpClient = new()
     {
@@ -21,7 +21,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
     private readonly string _clientId = clientId.Trim();
     private readonly HttpClient _httpClient = httpClient ?? SharedHttpClient;
 
-    public async Task<TwitchDeviceAuthorization> StartDeviceAuthorizationAsync(CancellationToken cancellationToken)
+    public virtual async Task<TwitchDeviceAuthorization> StartDeviceAuthorizationAsync(CancellationToken cancellationToken)
     {
         using var content = new FormUrlEncodedContent(
         [
@@ -47,7 +47,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
             Math.Max(1, payload.Interval));
     }
 
-    public async Task<TwitchTokenSet> PollDeviceTokenAsync(
+    public virtual async Task<TwitchTokenSet> PollDeviceTokenAsync(
         TwitchDeviceAuthorization deviceAuthorization,
         CancellationToken cancellationToken)
     {
@@ -94,7 +94,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
         throw new TwitchApiException(408, "The Twitch device authorization expired before it was completed.");
     }
 
-    public async Task<TwitchTokenSet> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
+    public virtual async Task<TwitchTokenSet> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
     {
         using var content = new FormUrlEncodedContent(
         [
@@ -115,7 +115,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
         return CreateTokenSet(payload, DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, payload.ExpiresIn)));
     }
 
-    public async Task<TwitchTokenValidation> ValidateAsync(string accessToken, CancellationToken cancellationToken)
+    public virtual async Task<TwitchTokenValidation> ValidateAsync(string accessToken, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, ValidationEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("OAuth", accessToken);
@@ -137,7 +137,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
             payload.Scopes ?? []);
     }
 
-    public async Task<IReadOnlyList<TwitchFollowedChannel>> GetFollowedLiveChannelsAsync(
+    public virtual async Task<IReadOnlyList<TwitchFollowedChannel>> GetFollowedLiveChannelsAsync(
         string accessToken,
         string userId,
         CancellationToken cancellationToken)
@@ -178,7 +178,7 @@ internal sealed class TwitchApiClient(string clientId, HttpClient? httpClient = 
             .ToArray();
     }
 
-    public async Task RevokeAsync(string accessToken, CancellationToken cancellationToken)
+    public virtual async Task RevokeAsync(string accessToken, CancellationToken cancellationToken)
     {
         string url = $"{RevokeEndpoint}?client_id={Uri.EscapeDataString(_clientId)}&token={Uri.EscapeDataString(accessToken)}";
         using var response = await _httpClient.PostAsync(url, content: null, cancellationToken).ConfigureAwait(false);

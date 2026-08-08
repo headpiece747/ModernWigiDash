@@ -1,16 +1,18 @@
 using System;
 
-namespace ModernWigiDash.App.ServiceRouting;
+namespace ModernWigiDash.Sdk;
 
 /// <summary>
-/// One parameterized WCF poll loop. Owns its cancellation lifecycle, the
-/// readiness guard, failure logging, and the inter-tick delay — the scaffold
-/// that used to be copied into StartTouchPolling / StartSensorPolling /
-/// StartFrameTimePolling. The probe is injected; the loop runs on a background
-/// thread and calls the sample sink there (the touch sink marshals to the UI
-/// thread itself).
+/// One parameterized poll loop. Owns its cancellation lifecycle, the readiness
+/// guard, failure logging, and the inter-tick delay — the scaffold both sides
+/// of the pipe used to copy by hand. The probe is injected; the loop runs on a
+/// background thread and calls the sample sink there (sinks that need another
+/// thread marshal themselves).
+///
+/// Used by the App's three WCF producers (touch/sensor/frame-time) and by the
+/// Service's touch+keepalive loop — one loop shape, every hop.
 /// </summary>
-public sealed class WcfPollLoop : IDisposable
+public sealed class PollLoop : IDisposable
 {
     private readonly string _name;
     private readonly TimeSpan _interval;
@@ -22,12 +24,12 @@ public sealed class WcfPollLoop : IDisposable
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
     /// <param name="interval">Delay between ticks.</param>
-    /// <param name="ready">True when the probe can run (service active). While
-    /// false the loop pauses at 500ms instead of hammering.</param>
+    /// <param name="ready">True when the probe can run. While false the loop
+    /// pauses at 500ms instead of hammering.</param>
     /// <param name="tick">One probe + sample sink; throws on failure.</param>
     /// <param name="onTickFailure">Failure observer (feeds readiness state).</param>
     /// <param name="log">Log sink.</param>
-    public WcfPollLoop(string name, TimeSpan interval, Func<bool> ready, Action tick, Action onTickFailure, Action<string> log)
+    public PollLoop(string name, TimeSpan interval, Func<bool> ready, Action tick, Action onTickFailure, Action<string> log)
     {
         _name = name;
         _interval = interval;
@@ -44,7 +46,7 @@ public sealed class WcfPollLoop : IDisposable
 
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
-        _log($"[WCF] {_name} polling started ({(int)_interval.TotalMilliseconds}ms via WCF, background thread)");
+        _log($"[{_name}] polling started ({(int)_interval.TotalMilliseconds}ms, background thread)");
         _ = Task.Run(() => Loop(ct), ct);
     }
 
@@ -79,7 +81,7 @@ public sealed class WcfPollLoop : IDisposable
             }
             catch (Exception ex)
             {
-                _log($"[WCF] {_name} poll failed: {ex.Message}");
+                _log($"[{_name}] poll failed: {ex.Message}");
                 _onTickFailure();
             }
 

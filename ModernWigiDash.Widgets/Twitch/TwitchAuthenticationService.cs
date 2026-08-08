@@ -6,7 +6,9 @@ internal sealed class TwitchSession
 {
     public static TwitchSession Shared { get; } = new();
 
-    private readonly TwitchTokenStore _tokenStore = new();
+    private readonly TwitchTokenStore _tokenStore;
+    private readonly Func<string, TwitchApiClient> _clientFactory;
+    private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _stateGate = new();
 
@@ -15,6 +17,20 @@ internal sealed class TwitchSession
     private IReadOnlyList<TwitchFollowedChannel> _followedChannels = [];
     private DateTimeOffset _lastValidatedAt;
     private CancellationTokenSource? _validationCts;
+
+    /// <summary>Production entry point used by the widgets (reflection-instantiated).</summary>
+    public TwitchSession()
+        : this(new TwitchTokenStore(), clientId => new TwitchApiClient(clientId), TimeProvider.System)
+    {
+    }
+
+    /// <summary>Test seam: injectable token store, client factory, and clock.</summary>
+    internal TwitchSession(TwitchTokenStore tokenStore, Func<string, TwitchApiClient> clientFactory, TimeProvider timeProvider)
+    {
+        _tokenStore = tokenStore;
+        _clientFactory = clientFactory;
+        _timeProvider = timeProvider;
+    }
 
     public IReadOnlyList<TwitchFollowedChannel> FollowedChannels
     {
@@ -67,7 +83,7 @@ internal sealed class TwitchSession
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var api = new TwitchApiClient(clientId);
+            var api = _clientFactory(clientId);
             TwitchDeviceAuthorization device = await api.StartDeviceAuthorizationAsync(cancellationToken).ConfigureAwait(false);
 
             context.ShowDeviceAuthorization("Twitch", device.VerificationUri, device.UserCode, device.ExpiresAt);
@@ -83,7 +99,7 @@ internal sealed class TwitchSession
                 token = token with
                 {
                     ClientId = clientId,
-                    ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, validation.ExpiresIn)),
+                    ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
                     Scopes = validation.Scopes
                 };
 
@@ -142,7 +158,7 @@ internal sealed class TwitchSession
             {
                 try
                 {
-                    await new TwitchApiClient(clientId).RevokeAsync(tokens.AccessToken, cancellationToken).ConfigureAwait(false);
+                    await _clientFactory(clientId).RevokeAsync(tokens.AccessToken, cancellationToken).ConfigureAwait(false);
                 }
                 catch (TwitchApiException)
                 {
@@ -171,7 +187,7 @@ internal sealed class TwitchSession
             account = _account ?? throw new InvalidOperationException("Twitch account information is unavailable.");
         }
 
-        var api = new TwitchApiClient(token.ClientId);
+        var api = _clientFactory(token.ClientId);
         try
         {
             var channels = await api.GetFollowedLiveChannelsAsync(token.AccessToken, account.UserId, cancellationToken).ConfigureAwait(false);
@@ -214,17 +230,17 @@ internal sealed class TwitchSession
         lock (_stateGate)
         {
             _tokens ??= stored;
-            if (!forceValidate && _account != null && DateTimeOffset.UtcNow - _lastValidatedAt < TimeSpan.FromHours(1))
+            if (!forceValidate && _account != null && _timeProvider.GetUtcNow() - _lastValidatedAt < TimeSpan.FromHours(1))
                 return true;
         }
 
-        var api = new TwitchApiClient(clientId);
+        var api = _clientFactory(clientId);
         try
         {
             TwitchTokenValidation validation = await api.ValidateAsync(stored.AccessToken, cancellationToken).ConfigureAwait(false);
             TwitchTokenSet validatedToken = stored with
             {
-                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, validation.ExpiresIn)),
+                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
                 Scopes = validation.Scopes
             };
             ApplyValidatedState(validatedToken, validation);
@@ -254,7 +270,7 @@ internal sealed class TwitchSession
             refreshed = refreshed with
             {
                 ClientId = current.ClientId,
-                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, validation.ExpiresIn)),
+                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
                 Scopes = validation.Scopes
             };
             ApplyValidatedState(refreshed, validation);
@@ -277,7 +293,7 @@ internal sealed class TwitchSession
         {
             _tokens = token;
             _account = new TwitchAccount(validation.UserId, validation.Login, validation.Login);
-            _lastValidatedAt = DateTimeOffset.UtcNow;
+            _lastValidatedAt = _timeProvider.GetUtcNow();
         }
     }
 

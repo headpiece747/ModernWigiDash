@@ -1,5 +1,6 @@
 using System.Threading;
 using ModernWigiDash.App.ServiceRouting;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 
@@ -100,7 +101,7 @@ public class ServiceRoutingTests
     public void WcfPollLoop_WhenReady_InvokesTick()
     {
         using var ticked = new ManualResetEventSlim(false);
-        var loop = new WcfPollLoop(
+        var loop = new PollLoop(
             "TEST", TimeSpan.FromMilliseconds(5),
             ready: () => true,
             tick: () => ticked.Set(),
@@ -117,7 +118,7 @@ public class ServiceRoutingTests
     public void WcfPollLoop_WhenNotReady_DoesNotInvokeTick()
     {
         var ticks = 0;
-        var loop = new WcfPollLoop(
+        var loop = new PollLoop(
             "TEST", TimeSpan.FromMilliseconds(5),
             ready: () => false,
             tick: () => ticks++,
@@ -135,7 +136,7 @@ public class ServiceRoutingTests
     public void WcfPollLoop_TickFailure_InvokesFailureObserver()
     {
         using var failed = new ManualResetEventSlim(false);
-        var loop = new WcfPollLoop(
+        var loop = new PollLoop(
             "TEST", TimeSpan.FromMilliseconds(5),
             ready: () => true,
             tick: () => throw new InvalidOperationException("boom"),
@@ -152,7 +153,7 @@ public class ServiceRoutingTests
     public void WcfPollLoop_StartTwice_IsIdempotent()
     {
         int ticks = 0;
-        var loop = new WcfPollLoop(
+        var loop = new PollLoop(
             "TEST", TimeSpan.FromMilliseconds(5),
             ready: () => true,
             tick: () => ticks++,

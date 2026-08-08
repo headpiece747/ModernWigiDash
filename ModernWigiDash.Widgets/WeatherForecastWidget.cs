@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -62,14 +63,22 @@ public class WeatherForecastWidget : ModernWidgetBase
     [WidgetProperty("Longitude", WidgetPropertyType.Text, "Override longitude (e.g. -74.0060). Leave empty to auto-resolve from Location.", "")]
     public string Longitude { get; set; } = "";
 
-    private readonly record struct DailyForecastItem(string DayName, double MaxTempC, double MinTempC, int WeatherCode);
-    private readonly record struct HourlyForecastItem(string TimeLabel, double TempC, int WeatherCode);
+    internal readonly record struct DailyForecastItem(string DayName, double MaxTempC, double MinTempC, int WeatherCode);
+    internal readonly record struct HourlyForecastItem(string TimeLabel, double TempC, int WeatherCode);
 
     private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(15),
         EnableMultipleHttp2Connections = true
     });
+
+    /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>Test seam: substitute HTTP transport for fetch tests (defaults to <see cref="SharedHttpClient"/>).</summary>
+    internal HttpClient? TestHttpClient { get; set; }
+
+    private HttpClient Http => TestHttpClient ?? SharedHttpClient;
 
     private DateTime _lastFetchTime = DateTime.MinValue;
     private volatile bool _isFetching;
@@ -87,8 +96,8 @@ public class WeatherForecastWidget : ModernWidgetBase
     private double _highTempC = 26.6;   // 80°F default
     private double _lowTempC = 20.5;    // 69°F default
 
-    private readonly List<DailyForecastItem> _dailyForecasts = [];
-    private readonly List<HourlyForecastItem> _hourlyForecasts = [];
+    internal readonly List<DailyForecastItem> _dailyForecasts = [];
+    internal readonly List<HourlyForecastItem> _hourlyForecasts = [];
     private readonly Lock _forecastGate = new();
     private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
     private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
@@ -150,7 +159,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
         }
 
-        SKColor accentColor = SKColors.White;
+        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
@@ -162,7 +171,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         // Prominent Location Name Header
         string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _resolvedCityName : CustomLabel;
-        string headerDisplay = cityRaw.ToUpper();
+        string headerDisplay = cityRaw.ToUpperInvariant();
         float locationFontSize = Math.Clamp(24f * s, 12f, 44f);
         using var titleFont = FontHelper.CreateFont("Geist", SKFontStyle.Bold, locationFontSize);
         using var titlePaint = new SKPaint { Color = textPrimary, IsAntialias = true };
@@ -201,7 +210,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
                 break;
             case "Compact":
-                RenderCompact(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
+                RenderCompact(canvas, contentBounds, textPrimary, tempUnit, sx, sy);
                 break;
             default:
                 RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
@@ -554,7 +563,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         canvas.DrawText(desc, rightX, descBaseline, SKTextAlign.Left, descFont, descPaint);
     }
 
-    private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
+    private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, string tempUnit, float sx, float sy)
     {
         var (icon, _) = MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
@@ -678,11 +687,11 @@ public class WeatherForecastWidget : ModernWidgetBase
             && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
     }
 
-    private async Task FetchLiveWeatherAsync(bool force = false)
+    internal async Task FetchLiveWeatherAsync(bool force = false)
     {
         if (_isFetching) return;
         if (StaticSnapshot && _lastFetchTime != DateTime.MinValue && !force) return;
-        if (!force && (TimeProvider.System.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return;
+        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return;
 
         _isFetching = true;
         try
@@ -697,14 +706,16 @@ public class WeatherForecastWidget : ModernWidgetBase
                 {
                     _lat = latVal;
                     _lon = lonVal;
-                    _resolvedCityName = string.IsNullOrWhiteSpace(CustomLabel) ? $"{latVal:F2}, {lonVal:F2}" : CustomLabel;
+                    _resolvedCityName = string.IsNullOrWhiteSpace(CustomLabel)
+                        ? $"{latVal.ToString("F2", CultureInfo.InvariantCulture)}, {lonVal.ToString("F2", CultureInfo.InvariantCulture)}"
+                        : CustomLabel;
                 }
                 else if (IsCoordinatePair(Location))
                 {
                     string[] parts = Location.Split(',');
                     _lat = double.Parse(parts[0].Trim(), System.Globalization.CultureInfo.InvariantCulture);
                     _lon = double.Parse(parts[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
-                    _resolvedCityName = $"{_lat:F2}, {_lon:F2}";
+                    _resolvedCityName = $"{_lat.Value.ToString("F2", CultureInfo.InvariantCulture)}, {_lon.Value.ToString("F2", CultureInfo.InvariantCulture)}";
                 }
                 else if (IsZipCode(Location))
                 {
@@ -719,7 +730,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             if (!_lat.HasValue) return;
 
             string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={_lat:F4}&longitude={_lon:F4}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&apparent_temperature=true&timezone=auto";
-            string json = await SharedHttpClient.GetStringAsync(forecastUrl).ConfigureAwait(false);
+            string json = await Http.GetStringAsync(forecastUrl).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -770,7 +781,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                     for (int i = 0; i < Math.Min(dLen, 7); i++)
                     {
                         string dateStr = dTimes[i].GetString() ?? "";
-                        string dayName = DateTime.TryParse(dateStr, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
+                        string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
                         dailyForecasts.Add(new DailyForecastItem(
                             i == 0 ? "Today" : dayName,
                             maxes[i].GetDouble(),
@@ -781,7 +792,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
             }
 
-            _lastFetchTime = TimeProvider.System.GetUtcNow().UtcDateTime;
+            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             _ = SaveCacheAsync();
             Context?.RequestRender();
         }
@@ -800,7 +811,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         try
         {
             string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=1&language=en&format=json";
-            string json = await SharedHttpClient.GetStringAsync(url).ConfigureAwait(false);
+            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
             {
@@ -826,7 +837,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         try
         {
             string url = $"https://api.zippopotam.us/us/{Uri.EscapeDataString(zipCode)}";
-            string json = await SharedHttpClient.GetStringAsync(url).ConfigureAwait(false);
+            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             _lat = root.GetProperty("latitude").GetDouble();
@@ -863,7 +874,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             _resolvedCityName = data.ResolvedCityName ?? "New York";
             _lat = data.Lat;
             _lon = data.Lon;
-            _lastFetchTime = TimeProvider.System.GetUtcNow().UtcDateTime;
+            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             lock (_forecastGate)
             {
                 _dailyForecasts.Clear();

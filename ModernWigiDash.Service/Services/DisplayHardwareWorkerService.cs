@@ -10,6 +10,8 @@ namespace ModernWigiDash.Service.Services;
 /// Worker service managing the physical USB display hardware connection and touch input.
 /// Frame delivery is owned by the shared <see cref="FrameDelivery"/> module: the WCF
 /// service pushes bytes in, and this worker's only frame role is exposing delivery stats.
+/// The touch+keepalive loop is a <see cref="PollLoop"/> registration — the same loop
+/// shape the App uses for its WCF producers.
 /// </summary>
 public sealed class DisplayHardwareWorkerService(
     ChannelWriter<TouchEventInfo> touchWriter,
@@ -19,8 +21,8 @@ public sealed class DisplayHardwareWorkerService(
     TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
-
-    private static readonly TimeSpan TouchPollInterval = TimeSpan.FromMilliseconds(16);
+    private PollLoop? _touchLoop;
+    private long _keepaliveDue;
 
     public long TotalFramesProcessed => frameDelivery.FramesSent;
 
@@ -33,6 +35,7 @@ public sealed class DisplayHardwareWorkerService(
     /// </summary>
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        _touchLoop?.Stop();
         try
         {
             if (transport.IsConnected)
@@ -63,56 +66,53 @@ public sealed class DisplayHardwareWorkerService(
             transport.SetBrightness(100);
         }
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var touchTask = RunTouchPollLoop(linkedCts.Token);
+        _keepaliveDue = Stopwatch.GetTimestamp();
+        _touchLoop = new PollLoop(
+            "TOUCH",
+            TimeSpan.FromMilliseconds(16),
+            ready: () => transport.IsConnected,
+            tick: TouchTick,
+            onTickFailure: () => { },
+            log: msg => LogToFile(msg));
+        _touchLoop.Start();
+        LogToFile("Touch poll loop started");
 
-        await Task.WhenAll(touchTask);
+        // Keep the hosted task alive until cancellation; the loop runs on its own task.
+        try
+        {
+            await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown
+        }
     }
 
-    private async Task RunTouchPollLoop(CancellationToken stoppingToken)
+    /// <summary>
+    /// One touch+keepalive tick: refreshes the display keepalive every 5s and
+    /// relays a raw touch report, normalized once at this transport seam.
+    /// </summary>
+    private void TouchTick()
     {
-        LogToFile("Touch poll loop started");
-        var keepaliveDue = Stopwatch.GetTimestamp();
-
-        while (!stoppingToken.IsCancellationRequested)
+        var now = Stopwatch.GetTimestamp();
+        if (Stopwatch.GetElapsedTime(_keepaliveDue).TotalSeconds >= 5)
         {
-            try
+            transport.ClearTimeout();
+            _keepaliveDue = now;
+        }
+
+        var touch = transport.ReadTouch();
+        if (touch is TouchReport t)
+        {
+            var evt = new TouchEventInfo
             {
-                if (!transport.IsConnected)
-                {
-                    await Task.Delay(500, stoppingToken);
-                    continue;
-                }
+                Type = NormalizeTouchType(t.Type),
+                X = t.X,
+                Y = t.Y,
+                TimestampUtcTicks = _timeProvider.GetUtcNow().UtcTicks
+            };
 
-                var now = Stopwatch.GetTimestamp();
-                if (Stopwatch.GetElapsedTime(keepaliveDue).TotalSeconds >= 5)
-                {
-                    transport.ClearTimeout();
-                    keepaliveDue = now;
-                }
-
-                var touch = transport.ReadTouch();
-                if (touch is TouchReport t)
-                {
-                    var evt = new TouchEventInfo
-                    {
-                        Type = NormalizeTouchType(t.Type),
-                        X = t.X,
-                        Y = t.Y,
-                        TimestampUtcTicks = _timeProvider.GetUtcNow().UtcTicks
-                    };
-
-                    touchWriter.TryWrite(evt);
-                }
-
-                await Task.Delay(TouchPollInterval, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception ex)
-            {
-                LogToFile($"Touch poll loop error: {ex.Message}");
-                await Task.Delay(100, stoppingToken);
-            }
+            touchWriter.TryWrite(evt);
         }
     }
 
