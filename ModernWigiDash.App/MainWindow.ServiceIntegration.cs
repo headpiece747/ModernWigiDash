@@ -120,7 +120,7 @@ public partial class MainWindow
     private void SensorPollTick()
     {
         var dto = _lhsReader.Poll();
-        if (!ReferenceEquals(_lhsReader.LastError, _lastSensorError))
+        if (_lhsReader.LastError != _lastSensorError)
         {
             _lastSensorError = _lhsReader.LastError;
             if (_lastSensorError != null) Log($"[SENSOR] {_lastSensorError}");
