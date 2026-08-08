@@ -460,12 +460,14 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         {
             for (int i = 0; i < numChunks; i++)
             {
-                int offset = i * chunkSize;
+                // Advance by the actually-transferred length, not the nominal
+                // chunk stride, so a short write doesn't skip a gap.
+                int offset = totalTransferred;
                 int remaining = totalBytes - offset;
                 int size = Math.Min(chunkSize, remaining);
 
                 Error error = _bulkWriter.Write(data, offset, size, 10000, out int transferLength);
-                if (error != Error.Success)
+                if (error != Error.Success || transferLength <= 0)
                 {
                     LogToFile($"[USB-BULK-ERR] Chunk {i}/{numChunks} failed: error={error} transferred={transferLength}");
                     return false;
@@ -486,6 +488,12 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private int _touchDiagCount;
     private int _bulkDiagCount;
 
+    // Reused per-call buffers: SendFrame (under _usbLock) and ReadTouch (16ms
+    // poll loop) are serialized by their callers, so these are never touched
+    // concurrently — no per-call allocation on the hot paths.
+    private readonly byte[] _frameHeader = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
+    private readonly byte[] _touchBuffer = new byte[DisplayProtocolConstants.TouchReportSize];
+
     public TouchReport? ReadTouch()
     {
         if (!_isConnected || _usbDevice == null)
@@ -497,7 +505,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
         try
         {
-            byte[] touchBuf = new byte[DisplayProtocolConstants.TouchReportSize];
+            byte[] touchBuf = _touchBuffer;
 
             bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf);
 
@@ -617,12 +625,13 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 // Writes directly to the currently displayed page.
                 int page = _currentPage;
 
-                byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-                BitConverter.GetBytes((uint)0).CopyTo(header, 0);
-                BitConverter.GetBytes((uint)frameArray.Length).CopyTo(header, 4);
+                // Reused header buffer: SendFrame is serialized by _usbLock, so
+                // no per-frame allocation on the 30 FPS path.
+                BitConverter.GetBytes((uint)0).CopyTo(_frameHeader, 0);
+                BitConverter.GetBytes((uint)frameArray.Length).CopyTo(_frameHeader, 4);
 
                 ushort wValue = (ushort)((page << 8) | 0);
-                if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header))
+                if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, _frameHeader))
                 {
                     Interlocked.Increment(ref _framesFailed);
                     return false;

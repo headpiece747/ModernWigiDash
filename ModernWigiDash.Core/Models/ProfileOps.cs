@@ -32,6 +32,10 @@ public static class ProfileOps
     public static bool DeletePage(ProfileLayout profile, int index)
     {
         if (index < 0 || index >= profile.Pages.Count || profile.Pages.Count <= 1) return false;
+        foreach (var placed in profile.Pages[index].Widgets)
+        {
+            DisposeWidgetInstance(placed);
+        }
         profile.Pages.RemoveAt(index);
         if (profile.ActivePageIndex >= profile.Pages.Count)
         {
@@ -47,8 +51,32 @@ public static class ProfileOps
         page.PageName = name;
     }
 
-    /// <summary>Clears every widget from the page.</summary>
-    public static void ClearPage(PageLayout page) => page.Widgets.Clear();
+    /// <summary>Clears every widget from the page, disposing active instances.</summary>
+    public static void ClearPage(PageLayout page)
+    {
+        foreach (var placed in page.Widgets)
+        {
+            DisposeWidgetInstance(placed);
+        }
+        page.Widgets.Clear();
+    }
+
+    /// <summary>
+    /// Disposes every active widget instance across all pages (timers, sockets,
+    /// and subscriptions must not outlive the profile they belong to). The page
+    /// structure is left intact — used before replacing a profile wholesale,
+    /// e.g. after an import.
+    /// </summary>
+    public static void DisposeProfile(ProfileLayout profile)
+    {
+        foreach (var page in profile.Pages)
+        {
+            foreach (var placed in page.Widgets)
+            {
+                DisposeWidgetInstance(placed);
+            }
+        }
+    }
 
     // ── placement & rehydration ─────────────────────────────
 
@@ -125,8 +153,29 @@ public static class ProfileOps
             }
         }
 
+        DisposeWidgetInstance(placed);
         placed.ActiveInstance = instance;
         return instance;
+    }
+
+    /// <summary>
+    /// Tears down a placed widget's active instance. Widget teardown (timers,
+    /// sockets, subscriptions) must never break profile operations, so failures
+    /// are swallowed. ProfileOps is a synchronous module (ADR-0001), so async
+    /// disposal is awaited synchronously.
+    /// </summary>
+    private static void DisposeWidgetInstance(PlacedWidgetInstance? placed)
+    {
+        if (placed?.ActiveInstance == null) return;
+        try
+        {
+            placed.ActiveInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Widget teardown must not break profile operations.
+        }
+        placed.ActiveInstance = null;
     }
 
     /// <summary>
@@ -248,8 +297,11 @@ public static class ProfileOps
         // (identified by its property name, widget-agnostically): a foreign
         // profile must not silently arm command execution. Cleared whenever
         // present — ActionType is NOT required (it defaults to "Launch App",
-        // so omitting it in the profile is a valid bypass). PropertyValues hold
-        // JsonElement after deserialization — normalize before inspecting.
+        // so omitting it in the profile is a valid bypass). ActionCommand is
+        // also Path-typed and listed in PathPropertyKeys, but this unconditional
+        // clear must run FIRST: the path rules alone would preserve a safe
+        // relative command. PropertyValues hold JsonElement after
+        // deserialization — normalize before inspecting.
         if (placed.PropertyValues.TryGetValue("ActionCommand", out var raw) &&
             ConvertPropertyValue(raw, typeof(string)) is string command &&
             !string.IsNullOrWhiteSpace(command))
@@ -269,8 +321,16 @@ public static class ProfileOps
         }
     }
 
-    private static readonly string[] PathPropertyKeys =
-        ["IconFile", "ImagePath", "GifPath", "PicturePath", "BackgroundImagePath"];
+    /// <summary>
+    /// Widget property names that carry filesystem paths. Must match the
+    /// widgets' <see cref="WidgetPropertyAttribute"/> declarations exactly —
+    /// ProfileSanitizerDriftTests reflects over the Widgets assembly and asserts
+    /// this set equals every <see cref="WidgetPropertyType.Path"/> property, so
+    /// a renamed path property fails the build instead of silently disarming
+    /// the import guard.
+    /// </summary>
+    internal static readonly string[] PathPropertyKeys =
+        ["ActionCommand", "IconFile", "ImagePath"];
 
     private static string SafeRelativePath(string path)
     {

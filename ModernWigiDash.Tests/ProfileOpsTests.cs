@@ -28,6 +28,21 @@ public class ProfileOpsTests
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
+    [WidgetMetadata("disposable_test_widget", "Disposable Test", DefaultGridSize = GridSizePreset.Size2x2)]
+    private sealed class DisposableTestWidget : ModernWidgetBase
+    {
+        public bool Disposed { get; private set; }
+
+        public override SKSize DefaultSize => new(406, 148);
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+        public override ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return base.DisposeAsync();
+        }
+    }
+
     private static WidgetPluginLoader CreateLoader()
     {
         var loader = new WidgetPluginLoader();
@@ -136,6 +151,59 @@ public class ProfileOpsTests
         Assert.AreEqual(148f, placed.Height);
         Assert.AreEqual(1, placed.ZIndex);
         Assert.IsNotNull(placed.ActiveInstance);
+    }
+
+    // ── disposal ────────────────────────────────────────────
+
+    [TestMethod]
+    public void RehydrateWidget_DisposesReplacedInstance()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(DisposableTestWidget));
+        var placed = new PlacedWidgetInstance { PluginId = "disposable_test_widget" };
+        var old = new DisposableTestWidget();
+        placed.ActiveInstance = old;
+
+        var instance = ProfileOps.RehydrateWidget(loader, new FakeContext(), placed);
+
+        Assert.IsNotNull(instance, "Rehydration must succeed");
+        Assert.IsTrue(old.Disposed, "Rehydration must dispose the instance it replaces");
+        Assert.AreSame(instance, placed.ActiveInstance, "The new instance must replace the disposed one");
+    }
+
+    [TestMethod]
+    public void ClearPage_DisposesWidgetInstances()
+    {
+        var page = new PageLayout();
+        var first = new DisposableTestWidget();
+        var second = new DisposableTestWidget();
+        page.Widgets.Add(new PlacedWidgetInstance { PluginId = "a", ActiveInstance = first });
+        page.Widgets.Add(new PlacedWidgetInstance { PluginId = "b", ActiveInstance = second });
+
+        ProfileOps.ClearPage(page);
+
+        Assert.AreEqual(0, page.Widgets.Count);
+        Assert.IsTrue(first.Disposed, "ClearPage must dispose every widget instance");
+        Assert.IsTrue(second.Disposed, "ClearPage must dispose every widget instance");
+    }
+
+    [TestMethod]
+    public void DisposeProfile_DisposesAllInstances()
+    {
+        var profile = new ProfileLayout();
+        var firstPage = profile.ActivePage;
+        var secondPage = ProfileOps.AddPage(profile, "Second");
+        var first = new DisposableTestWidget();
+        var second = new DisposableTestWidget();
+        firstPage.Widgets.Add(new PlacedWidgetInstance { PluginId = "a", ActiveInstance = first });
+        secondPage.Widgets.Add(new PlacedWidgetInstance { PluginId = "b", ActiveInstance = second });
+
+        ProfileOps.DisposeProfile(profile);
+
+        Assert.IsTrue(first.Disposed, "DisposeProfile must dispose instances on every page");
+        Assert.IsTrue(second.Disposed, "DisposeProfile must dispose instances on every page");
+        Assert.AreEqual(2, profile.Pages.Count, "Page structure is left intact");
+        Assert.AreEqual(1, profile.ActivePage.Widgets.Count, "Widgets stay in place; only instances are disposed");
     }
 
     // ── export / import round-trip ──────────────────────────
@@ -251,14 +319,14 @@ public class ProfileOpsTests
         ProfileOps.AddPage(profile, "Main");
         var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "profile_test_widget", 0, 0);
         placed!.PropertyValues["ImagePath"] = @"..\..\secret.png";
-        placed.PropertyValues["GifPath"] = @"\\server\share\evil.gif";
+        placed.PropertyValues["IconFile"] = @"\\server\share\evil.svg";
         string json = ProfileOps.ExportJson(profile);
 
         var loaded = ProfileOps.ImportJson(json, loader, new FakeContext());
 
         var imported = loaded!.Pages[1].Widgets[0];
         Assert.AreEqual("", imported.PropertyValues["ImagePath"], "Traversal paths must be cleared");
-        Assert.AreEqual("", imported.PropertyValues["GifPath"], "UNC paths must be cleared");
+        Assert.AreEqual("", imported.PropertyValues["IconFile"], "UNC paths must be cleared");
     }
 
     [TestMethod]

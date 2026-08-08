@@ -125,9 +125,9 @@ internal static class SetupApiNative
     /// <summary>
     /// SP_DEVICE_INTERFACE_DETAIL_DATA_W: cbSize + a 1-WCHAR path placeholder.
     /// <see cref="SpDeviceInterfaceData"/>'s CbSize must equal this struct's
-    /// marshaled size (8 on x64, 6 on x86) — NOT the queried requiredSize, which
-    /// includes the full device path and makes the call fail with
-    /// ERROR_INVALID_USER_BUFFER (1784).
+    /// marshaled size (Marshal.SizeOf — 8 on x64, 6 on x86), NOT the queried
+    /// requiredSize, which includes the full device path and makes the call
+    /// fail with ERROR_INVALID_USER_BUFFER (1784).
     /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct SpDeviceInterfaceDetailData

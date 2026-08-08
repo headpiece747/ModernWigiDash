@@ -11,8 +11,20 @@ namespace ModernWigiDash.Core.Rendering;
 /// </summary>
 public static class FontHelper
 {
-    private static readonly ConcurrentDictionary<(int Codepoint, SKFontStyle Style), SKTypeface> _fallbackCache = new();
+    private static readonly ConcurrentDictionary<(int Codepoint, SKFontStyle Style), Lazy<SKTypeface>> _fallbackCache = new();
+
+    // Dedupes MatchCharacter results so at most one native typeface per family is retained.
+    private static readonly ConcurrentDictionary<string, SKTypeface> _familyCache = new();
+
     private static readonly Lock _fontManagerLock = new();
+
+    /// <summary>
+    /// Memoized glyph presence per (typeface handle, codepoint). All typefaces here are
+    /// process-lifetime cached (Geist lazy, system fonts via the fallback cache), so a
+    /// typeface handle is never reused for a different font while its entries are live.
+    /// Bounded by a simple clear-on-overflow reset.
+    /// </summary>
+    private static readonly ConcurrentDictionary<(long TypefaceHandle, int Codepoint), bool> _glyphPresenceCache = new();
 
     private static readonly Lazy<SKTypeface?> _geistTypeface = new(() =>
     {
@@ -57,6 +69,23 @@ public static class FontHelper
     /// </summary>
     private static bool ContainsGlyphSafe(SKTypeface typeface, int codepoint)
     {
+        var key = (typeface.Handle.ToInt64(), codepoint);
+        if (_glyphPresenceCache.TryGetValue(key, out bool known))
+        {
+            return known;
+        }
+
+        bool result = ComputeGlyphPresence(typeface, codepoint);
+        if (_glyphPresenceCache.Count > 4096)
+        {
+            _glyphPresenceCache.Clear();
+        }
+        _glyphPresenceCache[key] = result;
+        return result;
+    }
+
+    private static bool ComputeGlyphPresence(SKTypeface typeface, int codepoint)
+    {
         try
         {
             using var font = new SKFont(typeface, 12f);
@@ -86,46 +115,76 @@ public static class FontHelper
             return geist;
         }
 
-        return _fallbackCache.GetOrAdd((codepoint, style), key =>
+        var key = (codepoint, style);
+        if (_fallbackCache.Count > 2048)
         {
-            var emoji = _segoeEmojiTypeface.Value;
-            if (emoji is { Handle: not 0 } && ContainsGlyphSafe(emoji, key.Codepoint))
-            {
-                return emoji;
-            }
+            _fallbackCache.Clear();
+        }
+        return _fallbackCache.GetOrAdd(key, k => new Lazy<SKTypeface>(() => ResolveFallback(k))).Value;
+    }
 
-            var symbol = _segoeSymbolTypeface.Value;
-            if (symbol is { Handle: not 0 } && ContainsGlyphSafe(symbol, key.Codepoint))
-            {
-                return symbol;
-            }
+    /// <summary>
+    /// Resolves a fallback typeface for a codepoint/style. Fallback order: Segoe UI Emoji →
+    /// Segoe UI Symbol → Segoe UI → system MatchCharacter → Default. MatchCharacter results are
+    /// deduped by family name so at most one native typeface per family is retained. The Lazy
+    /// wrapper makes a concurrent GetOrAdd double-run benign: only the stored Lazy is ever
+    /// evaluated (a discarded Lazy never materializes a typeface), and any duplicate native
+    /// typeface produced by MatchCharacter is disposed by <see cref="DedupeByFamily"/>.
+    /// </summary>
+    private static SKTypeface ResolveFallback((int Codepoint, SKFontStyle Style) key)
+    {
+        var emoji = _segoeEmojiTypeface.Value;
+        if (emoji is { Handle: not 0 } && ContainsGlyphSafe(emoji, key.Codepoint))
+        {
+            return emoji;
+        }
 
-            var segoe = _segoeUiTypeface.Value;
-            if (segoe is { Handle: not 0 } && ContainsGlyphSafe(segoe, key.Codepoint))
-            {
-                return segoe;
-            }
+        var symbol = _segoeSymbolTypeface.Value;
+        if (symbol is { Handle: not 0 } && ContainsGlyphSafe(symbol, key.Codepoint))
+        {
+            return symbol;
+        }
 
-            try
-            {
-                SKTypeface? matched;
-                lock (_fontManagerLock)
-                {
-                    matched = SKFontManager.Default.MatchCharacter(key.Codepoint);
-                }
-                if (matched is { Handle: not 0 })
-                {
-                    return matched;
-                }
-            }
-            catch
-            {
-                // Silently fall through to default typeface
-                System.Diagnostics.Debug.WriteLine("Font match failed, using default typeface");
-            }
+        var segoe = _segoeUiTypeface.Value;
+        if (segoe is { Handle: not 0 } && ContainsGlyphSafe(segoe, key.Codepoint))
+        {
+            return segoe;
+        }
 
-            return SKTypeface.Default;
-        });
+        try
+        {
+            SKTypeface? matched;
+            lock (_fontManagerLock)
+            {
+                matched = SKFontManager.Default.MatchCharacter(key.Codepoint);
+            }
+            if (matched is { Handle: not 0 })
+            {
+                return DedupeByFamily(matched);
+            }
+        }
+        catch
+        {
+            // Silently fall through to default typeface
+            System.Diagnostics.Debug.WriteLine("Font match failed, using default typeface");
+        }
+
+        return SKTypeface.Default;
+    }
+
+    /// <summary>
+    /// Returns a single cached typeface per family name, disposing any duplicate native
+    /// typeface from MatchCharacter (safe: the loser is never used or stored).
+    /// </summary>
+    private static SKTypeface DedupeByFamily(SKTypeface typeface)
+    {
+        var cached = _familyCache.GetOrAdd(typeface.FamilyName, typeface);
+        if (!ReferenceEquals(cached, typeface))
+        {
+            typeface.Dispose();
+            return cached;
+        }
+        return cached;
     }
 
     /// <summary>

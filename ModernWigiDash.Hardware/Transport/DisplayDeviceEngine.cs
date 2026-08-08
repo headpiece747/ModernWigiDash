@@ -29,7 +29,7 @@ public sealed class DisplayDeviceEngine : IDisposable
 
     // -- Connection State --
     private IDisplayTransport? _transport;
-    private bool _connected;
+    private volatile bool _connected;
     private bool _connecting; // Prevent concurrent connection attempts
     private readonly Lock _lock = new();
 
