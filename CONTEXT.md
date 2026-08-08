@@ -146,7 +146,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ### Testing
 
-- 182 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, WCF contract consistency, touch routing, frame-sink routing/coalescing, widget property defaults, and price-feed lifecycle
+- 295 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, WCF contract consistency, touch routing, frame-sink routing/coalescing, widget property defaults, price-feed lifecycle, profile-import sanitization caps, and WCF service-lifecycle (PerCall vs singleton state) regressions
 - `DisplayProtocolTests` — widget config layout + RGB565 encoding (BGRA framebuffer format)
 - `WcfClientServerConsistencyTests` — reflection-based contract drift guard (service implements all members, client wraps all operations)
 - `WcfDisplayServiceTests` — channel behavior, null reader fallback, frame queueing
