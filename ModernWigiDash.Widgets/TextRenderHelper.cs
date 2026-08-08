@@ -64,8 +64,8 @@ internal static class TextRenderHelper
     /// </summary>
     internal static void DrawCenteredText(SKCanvas canvas, string text, float centerX, float baselineY, SKFont font, SKPaint paint)
     {
-        float width = font.MeasureText(text, paint);
-        canvas.DrawText(text, centerX - width / 2f, baselineY, SKTextAlign.Left, font, paint);
+        float width = FontHelper.MeasureTextWithFallback(text, font);
+        canvas.DrawTextWithFallback(text, centerX - width / 2f, baselineY, font, paint);
     }
 
     /// <summary>

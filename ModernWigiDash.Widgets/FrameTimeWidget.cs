@@ -135,7 +135,7 @@ public class FrameTimeWidget : ModernWidgetBase
             var processFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, procSize);
             using var processPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
             string process = TextRenderHelper.TruncateText(snapshot.ProcessName, processFont, bounds.Width - pad * 2f);
-            canvas.DrawText(process, bounds.Right - pad - processFont.MeasureText(process), contentTop + procSize, SKTextAlign.Left, processFont, processPaint);
+            canvas.DrawTextWithFallback(process, bounds.Right - pad - FontHelper.MeasureTextWithFallback(process, processFont), contentTop + procSize, processFont, processPaint);
             heroTop = contentTop + procSize + 6f;
         }
 
@@ -156,17 +156,17 @@ public class FrameTimeWidget : ModernWidgetBase
 
         float fpsX = bounds.Left + pad;
         float fpsBaseline = heroTop + fpsFontSize * 0.82f;
-        canvas.DrawText(fpsText, fpsX, fpsBaseline, SKTextAlign.Left, fpsFont, fpsPaint);
+        canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, fpsPaint);
 
         // "FPS" Label & Frame Time (ms) stacked next to big FPS number
         float unitX = fpsX + fpsBounds.Width + 10f;
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
+        canvas.DrawTextWithFallback("FPS", unitX, heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
 
         var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
         using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
-        canvas.DrawText(_cachedMsText, unitX, fpsBaseline, SKTextAlign.Left, msFont, msPaint);
+        canvas.DrawTextWithFallback(_cachedMsText, unitX, fpsBaseline, msFont, msPaint);
 
         // Secondary Metrics Grid (1% Low, 0.1% Low, GPU Busy, CPU Frame)
         // Auto-hides when container width is below 410px.
@@ -263,13 +263,13 @@ public class FrameTimeWidget : ModernWidgetBase
         using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         valFont.MeasureText(value, out var valBounds, valPaint);
         float valY = topY + valSize * 0.85f;
-        canvas.DrawText(value, cx - valBounds.Width / 2f, valY, SKTextAlign.Left, valFont, valPaint);
+        canvas.DrawTextWithFallback(value, cx - valBounds.Width / 2f, valY, valFont, valPaint);
 
         var lblFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, lblSize);
         using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
         lblFont.MeasureText(label, out var lblBounds, lblPaint);
         float lblY = valY + lblSize + 4f;
-        canvas.DrawText(label, cx - lblBounds.Width / 2f, lblY, SKTextAlign.Left, lblFont, lblPaint);
+        canvas.DrawTextWithFallback(label, cx - lblBounds.Width / 2f, lblY, lblFont, lblPaint);
     }
 
     private static void DrawMonitorMode(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text)
@@ -287,17 +287,17 @@ public class FrameTimeWidget : ModernWidgetBase
 
         float fpsX = bounds.Left + pad;
         float fpsBaseline = heroTop + fpsFontSize * 0.82f;
-        canvas.DrawText(fpsText, fpsX, fpsBaseline, SKTextAlign.Left, fpsFont, fpsPaint);
+        canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, fpsPaint);
 
         float unitX = fpsX + fpsBounds.Width + 10f;
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawText("FPS", unitX, heroTop + fpsFontSize * 0.38f, SKTextAlign.Left, unitFont, unitPaint);
+        canvas.DrawTextWithFallback("FPS", unitX, heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
 
         var capFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f);
         using var capPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
         string cap = "MONITOR";
-        canvas.DrawText(cap, bounds.Right - pad - capFont.MeasureText(cap), heroTop + 13f, SKTextAlign.Left, capFont, capPaint);
+        canvas.DrawTextWithFallback(cap, bounds.Right - pad - FontHelper.MeasureTextWithFallback(cap, capFont), heroTop + 13f, capFont, capPaint);
     }
 
     public override ValueTask DisposeAsync()

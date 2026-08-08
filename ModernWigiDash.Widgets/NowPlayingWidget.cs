@@ -352,14 +352,14 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { Color = accent.WithAlpha(200), IsAntialias = true };
         var tb = new SKRect();
         iconFont.MeasureText("🎵", out tb, iconPaint);
-        canvas.DrawText("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, SKTextAlign.Left, iconFont, iconPaint);
+        canvas.DrawTextWithFallback("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, iconFont, iconPaint);
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
         using var labelPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(180), IsAntialias = true };
         string hint = "No media playing — press play in any app";
         var lb = new SKRect();
         labelFont.MeasureText(hint, out lb, labelPaint);
-        canvas.DrawText(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 30f * scale, SKTextAlign.Left, labelFont, labelPaint);
+        canvas.DrawTextWithFallback(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 30f * scale, labelFont, labelPaint);
     }
 
     private void DrawSourceBadge(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
@@ -370,7 +370,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         string name = FriendlyAppName(snap.SourceAppId);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
         using var textPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White), IsAntialias = true };
-        float textW = font.MeasureText(name);
+        float textW = FontHelper.MeasureTextWithFallback(name, font);
         float h = 26f * scale;
         float w = textW + 24f * scale;
 
@@ -388,7 +388,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         using var dot = new SKPaint { Color = snap.IsPlaying ? new SKColor(34, 197, 94) : new SKColor(239, 68, 68), IsAntialias = true };
         canvas.DrawCircle(x + 11f * scale, _badgeBtn.MidY, 3.5f * scale, dot);
 
-        canvas.DrawText(name, x + 18f * scale, _badgeBtn.MidY - font.Metrics.Top * 0.42f - 1f * scale, SKTextAlign.Left, font, textPaint);
+        canvas.DrawTextWithFallback(name, x + 18f * scale, _badgeBtn.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, textPaint);
     }
 
     private SKRect DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
@@ -427,7 +427,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             using var iconPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true };
             var tb = new SKRect();
             font.MeasureText("🎵", out tb, iconPaint);
-            canvas.DrawText("🎵", artRect.MidX - tb.MidX, artRect.MidY - tb.MidY, SKTextAlign.Left, font, iconPaint);
+            canvas.DrawTextWithFallback("🎵", artRect.MidX - tb.MidX, artRect.MidY - tb.MidY, font, iconPaint);
         }
 
         using var border = new SKPaint { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, StrokeWidth = 1f * scale, IsAntialias = true };
@@ -462,27 +462,27 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         float artistH = artistFont.Metrics.Bottom - artistFont.Metrics.Top;
         float albumH = albumFont.Metrics.Bottom - albumFont.Metrics.Top;
 
-        canvas.DrawText(TextRenderHelper.TruncateText(IsEmpty(snap.Title) ? "Unknown Title" : snap.Title, titleFont, textW),
-                        textX, textTop - titleFont.Metrics.Top, SKTextAlign.Left, titleFont, titlePaint);
+        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(IsEmpty(snap.Title) ? "Unknown Title" : snap.Title, titleFont, textW),
+                        textX, textTop - titleFont.Metrics.Top, titleFont, titlePaint);
 
         float currentY = textTop + titleH + 6f * scale;
 
         if (!IsEmpty(snap.Artist))
         {
-            canvas.DrawText(TextRenderHelper.TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, SKTextAlign.Left, artistFont, artistPaint);
+            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, artistFont, artistPaint);
             currentY += artistH + 5f * scale;
         }
 
         if (!IsEmpty(snap.Album))
         {
-            canvas.DrawText(TextRenderHelper.TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, SKTextAlign.Left, albumFont, albumPaint);
+            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, albumFont, albumPaint);
             currentY += albumH + 5f * scale;
         }
 
         string meta = BuildMetaLine(snap);
         if (!string.IsNullOrEmpty(meta))
         {
-            canvas.DrawText(meta, textX, currentY - metaFont.Metrics.Top, SKTextAlign.Left, metaFont, metaPaint);
+            canvas.DrawTextWithFallback(meta, textX, currentY - metaFont.Metrics.Top, metaFont, metaPaint);
         }
     }
 
@@ -522,17 +522,17 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
         using var timePaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
-        canvas.DrawText(FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, SKTextAlign.Left, timeFont, timePaint);
+        canvas.DrawTextWithFallback(FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, timePaint);
 
         string durStr = FormatTime(durSec);
         var db = new SKRect();
         timeFont.MeasureText(durStr, out db, timePaint);
-        canvas.DrawText(durStr, right - db.Width, timeY, SKTextAlign.Left, timeFont, timePaint);
+        canvas.DrawTextWithFallback(durStr, right - db.Width, timeY, timeFont, timePaint);
 
         if (Math.Abs(snap.PlaybackRate - 1.0) > 0.001)
         {
             string rate = $"{snap.PlaybackRate:0.0}×";
-            canvas.DrawText(rate, left + db.Width + 20f * scale, timeY, SKTextAlign.Left, timeFont, timePaint);
+            canvas.DrawTextWithFallback(rate, left + db.Width + 20f * scale, timeY, timeFont, timePaint);
         }
 
         // Background progress track
@@ -812,7 +812,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             var numFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, r.Width * 0.24f);
             using var numPaint = new SKPaint { Color = paint.Color, IsAntialias = true };
             numFont.MeasureText("1", out var nb, numPaint);
-            canvas.DrawText("1", cx - nb.Width / 2f, cy + nb.Height / 3f, SKTextAlign.Left, numFont, numPaint);
+            canvas.DrawTextWithFallback("1", cx - nb.Width / 2f, cy + nb.Height / 3f, numFont, numPaint);
         }
     }
 

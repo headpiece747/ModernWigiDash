@@ -122,7 +122,7 @@ public class SkiaFrameCompositor : IDisposable
                     var textBounds = new SKRect();
                     font.MeasureText(badgeText, out textBounds, textPaint);
                     canvas.DrawRect(0, -20, textBounds.Width + 10, 20, badgeBg);
-                    canvas.DrawText(badgeText, 5, -5, SKTextAlign.Left, font, textPaint);
+                    canvas.DrawTextWithFallback(badgeText, 5, -5, font, textPaint);
 
                     // Draw resize handle at bottom-right corner. The size is the
                     // single source of truth for the edit-mode resize affordance —

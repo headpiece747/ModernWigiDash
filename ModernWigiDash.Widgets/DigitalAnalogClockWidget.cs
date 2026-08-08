@@ -58,13 +58,13 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         float centerX = bounds.MidX;
         float centerY = ShowDate ? bounds.MidY - 10f : bounds.MidY + (timeBounds.Height / 3f);
 
-        canvas.DrawText(timeStr, centerX - (timeBounds.Width / 2f), centerY, SKTextAlign.Left, font, textPaint);
+        canvas.DrawTextWithFallback(timeStr, centerX - (timeBounds.Width / 2f), centerY, font, textPaint);
 
         if (!string.IsNullOrEmpty(amPmStr))
         {
             var amFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize * 0.35f);
             using var amPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-            canvas.DrawText(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), SKTextAlign.Left, amFont, amPaint);
+            canvas.DrawTextWithFallback(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), amFont, amPaint);
         }
 
         if (ShowDate)
@@ -73,7 +73,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
             using var datePaint = new SKPaint { Color = textColor, IsAntialias = true };
             var dateBounds = new SKRect();
             dateFont.MeasureText(dateStr, out dateBounds, datePaint);
-            canvas.DrawText(dateStr, centerX - (dateBounds.Width / 2f), centerY + (fontSize * 0.5f) + 10f, SKTextAlign.Left, dateFont, datePaint);
+            canvas.DrawTextWithFallback(dateStr, centerX - (dateBounds.Width / 2f), centerY + (fontSize * 0.5f) + 10f, dateFont, datePaint);
         }
     }
 

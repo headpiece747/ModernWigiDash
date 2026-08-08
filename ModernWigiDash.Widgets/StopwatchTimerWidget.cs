@@ -31,7 +31,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
         var tb = new SKRect();
         font.MeasureText(timeStr, out tb, textPaint);
-        canvas.DrawText(timeStr, bounds.MidX - (tb.Width / 2f), bounds.MidY - 5f, SKTextAlign.Left, font, textPaint);
+        canvas.DrawTextWithFallback(timeStr, bounds.MidX - (tb.Width / 2f), bounds.MidY - 5f, font, textPaint);
 
         var subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
         using var subPaint = new SKPaint { Color = accentColor, IsAntialias = true };
@@ -43,7 +43,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
         float dotY = bounds.Bottom - 16f - 4f;
         using var dotPaint = new SKPaint { Color = _isRunning ? new SKColor(239, 68, 68) : new SKColor(34, 197, 94), IsAntialias = true };
         canvas.DrawCircle(dotX, dotY, dotR, dotPaint);
-        canvas.DrawText(statusStr, bounds.MidX - (sb.Width / 2f), bounds.Bottom - 16f, SKTextAlign.Left, subFont, subPaint);
+        canvas.DrawTextWithFallback(statusStr, bounds.MidX - (sb.Width / 2f), bounds.Bottom - 16f, subFont, subPaint);
     }
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)

@@ -123,11 +123,11 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         var symFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
         using var symPaint = new SKPaint { Color = textColor, IsAntialias = true };
         string symbolText = TextRenderHelper.TruncateText(DisplayLabel, symFont, symPaint, bounds.Width - pad * 2f);
-        canvas.DrawText(symbolText, pad, pad + priceSize * 0.8f, SKTextAlign.Left, symFont, symPaint);
+        canvas.DrawTextWithFallback(symbolText, pad, pad + priceSize * 0.8f, symFont, symPaint);
 
         var priceFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
         using var pricePaint = new SKPaint { Color = textColor, IsAntialias = true };
-        canvas.DrawText(Price, pad, bounds.MidY + priceSize * 0.35f, SKTextAlign.Left, priceFont, pricePaint);
+        canvas.DrawTextWithFallback(Price, pad, bounds.MidY + priceSize * 0.35f, priceFont, pricePaint);
 
         if (ShowChange)
         {
@@ -140,7 +140,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
                 IsAntialias = true
             };
             string badgeText = isStale ? $"• {ChangeBadge}" : ChangeBadge;
-            canvas.DrawText(badgeText, pad, bounds.Bottom - pad, SKTextAlign.Left, badgeFont, badgePaint);
+            canvas.DrawTextWithFallback(badgeText, pad, bounds.Bottom - pad, badgeFont, badgePaint);
         }
     }
 

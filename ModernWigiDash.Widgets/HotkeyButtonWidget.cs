@@ -377,16 +377,16 @@ public class HotkeyButtonWidget : ModernWidgetBase
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
         var textBounds = new SKRect();
         font.MeasureText(label, out textBounds, textPaint);
-        canvas.DrawText(label, bounds.MidX - textBounds.Width / 2f,
-            bounds.Top + bounds.Height * 0.78f, SKTextAlign.Left, font, textPaint);
+        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f,
+            bounds.Top + bounds.Height * 0.78f, font, textPaint);
 
         if (!string.IsNullOrWhiteSpace(Description))
         {
             var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
             using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
             descriptionFont.MeasureText(Description, out var descriptionBounds, descriptionPaint);
-            canvas.DrawText(Description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), SKTextAlign.Left, descriptionFont, descriptionPaint);
+            canvas.DrawTextWithFallback(Description, bounds.MidX - descriptionBounds.Width / 2f,
+                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), descriptionFont, descriptionPaint);
         }
 
         // Icon drawn last so it stays in front of the text when overlapped
@@ -404,15 +404,15 @@ public class HotkeyButtonWidget : ModernWidgetBase
 
         var textBounds = new SKRect();
         font.MeasureText(label, out textBounds, textPaint);
-        canvas.DrawText(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, SKTextAlign.Left, font, textPaint);
+        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, font, textPaint);
 
         if (!string.IsNullOrWhiteSpace(description))
         {
             var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
             using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
             descriptionFont.MeasureText(description, out var descriptionBounds, descriptionPaint);
-            canvas.DrawText(description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(12f, fontSize * 0.65f), SKTextAlign.Left, descriptionFont, descriptionPaint);
+            canvas.DrawTextWithFallback(description, bounds.MidX - descriptionBounds.Width / 2f,
+                bounds.Bottom - Math.Max(12f, fontSize * 0.65f), descriptionFont, descriptionPaint);
         }
     }
 
