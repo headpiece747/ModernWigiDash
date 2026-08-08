@@ -10,19 +10,20 @@ namespace ModernWigiDash.Hardware.Transport;
 public static class FrameEncoder
 {
     /// <summary>
-    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian byte array.
-    /// Reuses a pooled buffer to reduce GC pressure at 60 FPS.
+    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian, writing into
+    /// the caller-provided destination buffer (which must hold at least the
+    /// display framebuffer payload). The 30 FPS pipeline encodes straight
+    /// into a pooled exact-size buffer, avoiding the extra copy.
     /// </summary>
-    public static void ConvertToRgb565(SKBitmap bitmap, ref byte[]? poolBuffer)
+    public static void ConvertToRgb565(SKBitmap bitmap, byte[] destination)
     {
         int width = DisplayProtocolConstants.FramebufferWidth;
         int height = DisplayProtocolConstants.FramebufferHeight;
         int frameSize = DisplayProtocolConstants.FrameBufferSize;
 
-        if (poolBuffer == null || poolBuffer.Length < frameSize)
-            poolBuffer = new byte[frameSize];
+        if (destination.Length < frameSize)
+            throw new ArgumentException($"Destination buffer must hold at least {frameSize} bytes (got {destination.Length}).", nameof(destination));
 
-        byte[] rgb565 = poolBuffer;
         int idx = 0;
 
         int srcWidth = bitmap.Width;
@@ -36,7 +37,7 @@ public static class FrameEncoder
                 unsafe
                 {
                     byte* srcPtr = (byte*)pixmap.GetPixels();
-                    fixed (byte* dstPtr = rgb565)
+                    fixed (byte* dstPtr = destination)
                     {
                         ushort* dstUshort = (ushort*)dstPtr;
                         int pixelCount = width * height;
@@ -63,10 +64,23 @@ public static class FrameEncoder
                 SKColor color = bitmap.GetPixel(srcX, srcY);
                 ushort rgb565Pixel = (ushort)(((color.Red >> 3) << 11) | ((color.Green >> 2) << 5) | (color.Blue >> 3));
 
-                rgb565[idx++] = (byte)(rgb565Pixel & 0xFF);
-                rgb565[idx++] = (byte)(rgb565Pixel >> 8);
+                destination[idx++] = (byte)(rgb565Pixel & 0xFF);
+                destination[idx++] = (byte)(rgb565Pixel >> 8);
             }
         }
+    }
+
+    /// <summary>
+    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian byte array.
+    /// Reuses a pooled buffer (allocating when undersized) to reduce GC
+    /// pressure at 60 FPS.
+    /// </summary>
+    public static void ConvertToRgb565(SKBitmap bitmap, ref byte[]? poolBuffer)
+    {
+        int frameSize = DisplayProtocolConstants.FrameBufferSize;
+        if (poolBuffer == null || poolBuffer.Length < frameSize)
+            poolBuffer = new byte[frameSize];
+        ConvertToRgb565(bitmap, poolBuffer);
     }
 
     /// <summary>

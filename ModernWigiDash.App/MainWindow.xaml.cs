@@ -142,13 +142,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _renderTimer.Interval = TimeSpan.FromMilliseconds(33.3); // 30 FPS
         _renderTimer.Tick += (s, e) =>
         {
-            // Composition happens once per paint in SkiaCanvas_PaintSurface;
-            // the timer only drives repaints and frame sends. Composing here
-            // too would double-advance widget history/animations per frame.
+            // Composition and the frame send happen once per paint in
+            // SkiaCanvas_PaintSurface (the buffer sent there is the freshly
+            // composed one — sending from here would be one paint stale);
+            // the timer only drives repaints.
             SkiaCanvas.InvalidateVisual();
-
-            // Send the frame through the direct-USB delivery pipeline.
-            _usbSink.SendFrame(_compositor.FrameBuffer);
 
             UpdateUsbBadge();
         };
@@ -162,6 +160,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _frameTimePoll.Stop();
             _presentMonProducer.Dispose();
             _usbSink.Dispose();
+            DisposeProfileWidgets(_profile);
 
             _deviceAuthorizationWindow?.Close();
             _compositor.Dispose();
@@ -243,7 +242,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         _compositor.Compose(_profile.ActivePage, 60.0f, _profile.ActivePageIndex, _profile.Pages.Count);
         e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, new SKSamplingOptions(SKFilterMode.Linear));
-        // Frame routing is handled by _renderTimer.Tick — do NOT send here to avoid double-sending.
+        // Send the freshly composed frame through the direct-USB pipeline.
+        // Paint fires after Compose + DrawBitmap, so the queued frame is the
+        // current one (the old timer-path send was one paint stale). The
+        // encode runs here on the UI thread (~1-3ms); Push just queues.
+        if (_usbSink != null)
+            _usbSink.SendFrame(_compositor.FrameBuffer);
     }
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -1038,6 +1042,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 var loaded = ProfileOps.ImportJson(json, _loader, this);
                 if (loaded != null)
                 {
+                    DisposeProfileWidgets(_profile);
                     _profile = loaded;
                     RebuildPageTabsUI();
                     SelectWidget(null);
@@ -1136,4 +1141,32 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     private static void Log(string msg) => FileLog.Write(msg);
+
+    /// <summary>
+    /// Disposes every placed widget instance in a profile (widgets are
+    /// <see cref="IAsyncDisposable"/>; the import/close paths are synchronous,
+    /// so the async disposal is blocked through). Individual failures are
+    /// logged and swallowed so one bad widget never aborts the profile swap.
+    /// </summary>
+    private void DisposeProfileWidgets(ProfileLayout profile)
+    {
+        if (profile == null) return;
+        foreach (var page in profile.Pages)
+        {
+            foreach (var placed in page.Widgets)
+            {
+                if (placed.ActiveInstance is IAsyncDisposable disposable)
+                {
+                    try
+                    {
+                        disposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[PROFILE] Widget '{placed.DisplayName}' dispose failed: {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
 }

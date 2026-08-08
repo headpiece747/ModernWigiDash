@@ -21,6 +21,7 @@ public sealed class PollLoop : IDisposable
     private readonly Action _onTickFailure;
     private readonly Action<string> _log;
     private CancellationTokenSource? _cts;
+    private string? _lastFailureMessage;
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
     /// <param name="interval">Delay between ticks.</param>
@@ -77,6 +78,7 @@ public sealed class PollLoop : IDisposable
                 }
 
                 _tick();
+                _lastFailureMessage = null;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -84,7 +86,12 @@ public sealed class PollLoop : IDisposable
             }
             catch (Exception ex)
             {
-                _log($"[{_name}] poll failed: {ex.Message}");
+                string message = ex.Message;
+                if (message != _lastFailureMessage)
+                {
+                    _lastFailureMessage = message;
+                    _log($"[{_name}] poll failed: {message}");
+                }
                 _onTickFailure();
             }
 

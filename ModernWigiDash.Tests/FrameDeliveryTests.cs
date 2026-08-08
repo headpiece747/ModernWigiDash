@@ -272,20 +272,30 @@ public class FrameDeliveryTests
     {
         bool ready = true;
         int sent = 0;
+        using var entered = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
             pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
             send: _ =>
             {
                 sent++;
+                entered.Set();
+                release.Wait();
                 return true;
             },
             isReady: () => ready);
+        using var bitmap = CreateFrameBitmap();
 
         Assert.IsTrue(delivery.IsReady);
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "Ready delivery must accept the frame");
+        Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the ready frame");
+
         ready = false;
         Assert.IsFalse(delivery.IsReady);
-        _ = sent; // sends are exercised by Push tests; readiness is the contract here
+        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "Not-ready delivery must drop the frame before encoding/queuing");
+        release.Set();
+        Assert.AreEqual(1, sent, "The dropped frame must never reach the transport seam");
     }
 
     private static SKBitmap CreateFrameBitmap()

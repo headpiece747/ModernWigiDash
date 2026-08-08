@@ -30,11 +30,12 @@ public sealed class FrameDelivery : IFrameSink
     private readonly TimeProvider _timeProvider;
     private readonly CancellationTokenSource _cts;
     private readonly Action<string>? _log;
+    private readonly Task _senderTask;
 
-    private byte[]? _workBuffer;
     private volatile Func<byte[], bool>? _send;
     private DateTimeOffset _lastSendStart;
     private long _sent;
+    private int _sentLogCount;
     private long _dropped;
     private int _disposed;
 
@@ -80,7 +81,7 @@ public sealed class FrameDelivery : IFrameSink
             FullMode = BoundedChannelFullMode.DropOldest
         });
         _cts = new CancellationTokenSource();
-        _ = Task.Run(() => SenderLoop(_cts.Token), _cts.Token);
+        _senderTask = Task.Run(() => SenderLoop(_cts.Token), _cts.Token);
     }
 
     /// <summary>
@@ -104,14 +105,12 @@ public sealed class FrameDelivery : IFrameSink
     /// </summary>
     public void AttachSend(Func<byte[], bool>? send) => _send = send;
 
-    /// <summary>Encodes a composited frame into a pooled buffer and queues it.</summary>
+    /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
     {
         if (_encoder == null || _pool == null || _send == null || frame == null)
             return FrameDeliveryResult.Dropped;
-
-        _encoder.Encode(frame, ref _workBuffer);
-        if (_workBuffer == null)
+        if (_isReady?.Invoke() == false)
             return FrameDeliveryResult.Dropped;
 
         byte[]? buffer = _pool.Acquire();
@@ -121,7 +120,16 @@ public sealed class FrameDelivery : IFrameSink
             return FrameDeliveryResult.Dropped;
         }
 
-        Buffer.BlockCopy(_workBuffer, 0, buffer, 0, Math.Min(_workBuffer.Length, buffer.Length));
+        try
+        {
+            _encoder.Encode(frame, buffer);
+        }
+        catch
+        {
+            _pool.Release(buffer);
+            throw;
+        }
+
         return Queue(new FrameSlot(buffer, IsPooled: true));
     }
 
@@ -178,7 +186,11 @@ public sealed class FrameDelivery : IFrameSink
                     if (ok)
                     {
                         Interlocked.Increment(ref _sent);
-                        _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
+                        // Per-frame success log would grow unbounded at ~30/s;
+                        // mirror DisplayHidTransport's % 60 diagnostic cadence.
+                        // (Drops are counted in DroppedCount, not logged.)
+                        if (Interlocked.Increment(ref _sentLogCount) % 60 == 0)
+                            _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
                     }
                     else
                     {
@@ -233,6 +245,23 @@ public sealed class FrameDelivery : IFrameSink
             {
                 _pool.Release(slot.Buffer);
             }
+        }
+
+        // Join the sender loop with a bounded wait: a send is a synchronous
+        // USB write with up to a 30s timeout, so never block close on it —
+        // but do give a clean loop exit the chance to release its in-flight
+        // slot before the transport is disposed underneath it.
+        try
+        {
+            _senderTask.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: the loop exited via cancellation.
+        }
+        catch (AggregateException)
+        {
+            // The loop faulted after cancellation; nothing left to join.
         }
 
         _cts.Dispose();

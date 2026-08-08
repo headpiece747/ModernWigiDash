@@ -10,6 +10,6 @@ namespace ModernWigiDash.Hardware.Transport;
 public sealed class SkiaRgb565Encoder : IRgb565Encoder
 {
     /// <inheritdoc />
-    public void Encode(SKBitmap bitmap, ref byte[]? workBuffer)
-        => FrameEncoder.ConvertToRgb565(bitmap, ref workBuffer);
+    public void Encode(SKBitmap bitmap, byte[] destination)
+        => FrameEncoder.ConvertToRgb565(bitmap, destination);
 }

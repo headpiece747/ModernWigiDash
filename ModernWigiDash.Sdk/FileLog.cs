@@ -13,6 +13,11 @@ namespace ModernWigiDash.Sdk;
 /// cycles measured ~90 file handles per second across the pipe. Flushes are
 /// cadence-based (8 KB or 250 ms) instead of per line, so the send path never
 /// pays a syscall per frame.
+///
+/// The file is rotated when it exceeds 5 MB: the current file is moved to
+/// <c>display_device.log.1</c> (an existing backup is replaced) and a fresh
+/// file is started. The size check runs on a write cadence (every 100 writes),
+/// not per write, so the send path does not stat the file every frame.
 /// </summary>
 public static class FileLog
 {
@@ -22,9 +27,19 @@ public static class FileLog
     private static int _bufferedBytes;
     private static long _lastFlushTicks;
     private static bool _reportedFailure;
+    private static bool _reportedRotationFailure;
+    private static int _writesSinceRotationCheck;
 
     private const int FlushThresholdBytes = 8 * 1024;
+    private const int RotationCapBytes = 5 * 1024 * 1024;
+    private const int RotationCheckIntervalWrites = 100;
     private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// Path of the display log. Defaults to <c>display_device.log</c> next to
+    /// the executable; overridable so tests can point at a temp path.
+    /// </summary>
+    public static string LogPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "display_device.log");
 
     /// <summary>
     /// Writes one line to the shared display log. Never throws: logging is
@@ -37,6 +52,12 @@ public static class FileLog
         {
             try
             {
+                if (++_writesSinceRotationCheck >= RotationCheckIntervalWrites)
+                {
+                    _writesSinceRotationCheck = 0;
+                    TryRotateIfNeeded();
+                }
+
                 _writer ??= OpenWriter();
                 _writer.WriteLine(line);
                 _bufferedBytes += line.Length + 2;
@@ -66,10 +87,48 @@ public static class FileLog
 
     private static StreamWriter OpenWriter()
     {
+        // An oversized file from a previous run is rotated here too (once, at
+        // open) so the file is never appended past the cap from a fresh start.
+        TryRotateIfNeeded();
+
         _stream = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
         var writer = new StreamWriter(_stream);
         _lastFlushTicks = Stopwatch.GetTimestamp();
         return writer;
+    }
+
+    /// <summary>
+    /// If the current log file exceeds the rotation cap, closes the writer
+    /// (flushing any buffered lines), moves the file to <c>.1</c>, and leaves
+    /// the writer closed so the next write opens a fresh file. Best-effort:
+    /// a locked file just keeps appending past the cap.
+    /// </summary>
+    private static void TryRotateIfNeeded()
+    {
+        var current = new FileInfo(LogPath);
+        if (!current.Exists || current.Length < RotationCapBytes) return;
+
+        try
+        {
+            _writer?.Flush();
+            _writer?.Dispose();
+            _writer = null;
+            _stream = null;
+            _bufferedBytes = 0;
+
+            string rotatedPath = LogPath + ".1";
+            if (File.Exists(rotatedPath))
+                File.Delete(rotatedPath);
+            File.Move(LogPath, rotatedPath);
+        }
+        catch (IOException)
+        {
+            ReportRotationFailure();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ReportRotationFailure();
+        }
     }
 
     /// <summary>Drops the stream so the next write reopens (file deleted mid-run etc.).</summary>
@@ -88,6 +147,10 @@ public static class FileLog
         System.Diagnostics.Debug.WriteLine("FileLog: display_device.log write failed (locked or unavailable)");
     }
 
-    private static readonly string LogPath =
-        Path.Combine(AppContext.BaseDirectory, "display_device.log");
+    private static void ReportRotationFailure()
+    {
+        if (_reportedRotationFailure) return;
+        _reportedRotationFailure = true;
+        System.Diagnostics.Debug.WriteLine("FileLog: display_device.log rotation failed (file locked or unavailable)");
+    }
 }
