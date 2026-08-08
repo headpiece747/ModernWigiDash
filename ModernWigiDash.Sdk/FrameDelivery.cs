@@ -33,7 +33,7 @@ public sealed class FrameDelivery : IFrameSink
 
     private byte[]? _workBuffer;
     private volatile Func<byte[], bool>? _send;
-    private DateTimeOffset _lastSend;
+    private DateTimeOffset _lastSendStart;
     private long _sent;
     private long _dropped;
     private int _disposed;
@@ -152,12 +152,16 @@ public sealed class FrameDelivery : IFrameSink
 
                 if (latest == null) continue;
 
-                var elapsed = _timeProvider.GetUtcNow() - _lastSend;
-                if (elapsed < _minInterval)
+                // Pace from the START of the previous send: the interval caps
+                // the frame rate, so a slow transport must not be charged the
+                // full interval on top of its own write time.
+                var now = _timeProvider.GetUtcNow();
+                var sinceLastStart = now - _lastSendStart;
+                if (sinceLastStart < _minInterval)
                 {
                     try
                     {
-                        await Task.Delay(_minInterval - elapsed, ct);
+                        await Task.Delay(_minInterval - sinceLastStart, ct);
                     }
                     catch (OperationCanceledException)
                     {
@@ -166,12 +170,13 @@ public sealed class FrameDelivery : IFrameSink
                     }
                 }
 
+                _lastSendStart = _timeProvider.GetUtcNow();
+
                 try
                 {
                     bool ok = _send?.Invoke(latest.Buffer) == true;
                     if (ok)
                     {
-                        _lastSend = _timeProvider.GetUtcNow();
                         Interlocked.Increment(ref _sent);
                         _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
                     }

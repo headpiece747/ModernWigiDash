@@ -122,6 +122,20 @@ internal static class SetupApiNative
         public IntPtr Reserved;
     }
 
+    /// <summary>
+    /// SP_DEVICE_INTERFACE_DETAIL_DATA_W: cbSize + a 1-WCHAR path placeholder.
+    /// <see cref="SpDeviceInterfaceData"/>'s CbSize must equal this struct's
+    /// marshaled size (8 on x64, 6 on x86) — NOT the queried requiredSize, which
+    /// includes the full device path and makes the call fail with
+    /// ERROR_INVALID_USER_BUFFER (1784).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SpDeviceInterfaceDetailData
+    {
+        public uint CbSize;
+        public char DevicePath;
+    }
+
     [DllImport(SetupApiDll, SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr SetupDiGetClassDevsW(
         ref NativeGuid ClassGuid, string? Enumerator, IntPtr HwndParent, uint Flags);
@@ -231,12 +245,14 @@ internal sealed class WinUsbBulkDevice : IDisposable
                 try
                 {
                     // SP_DEVICE_INTERFACE_DETAIL_DATA_W layout:
-                    //   DWORD cbSize (4 bytes) — must equal the full struct size
+                    //   DWORD cbSize (4 bytes) — must equal sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W)
                     //   WCHAR DevicePath[requiredSize - 4] — variable-length null-terminated string
-                    // Microsoft docs: "cbSize must be set to sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA)
-                    //   - sizeof(TCHAR) + (size of the device path string, in TCHARs)"
-                    // For Unicode: cbSize = 4 + (pathChars * 2) = requiredSize
-                    Marshal.WriteInt32(detailBuffer, (int)requiredSize);
+                    // Microsoft docs: "cbSize must be set to sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W)" —
+                    // the struct size WITHOUT the path (8 on x64, 6 on x86). Setting it to
+                    // requiredSize (the full buffer, 160 here) fails with ERROR_INVALID_USER_BUFFER (1784).
+                    int detailCbSize = Marshal.SizeOf<SetupApiNative.SpDeviceInterfaceDetailData>();
+                    Log($"SetupDiGetDeviceInterfaceDetailW: cbSize={detailCbSize} requiredSize={requiredSize} buffer={requiredSize}");
+                    Marshal.WriteInt32(detailBuffer, detailCbSize);
 
                     if (!SetupApiNative.SetupDiGetDeviceInterfaceDetailW(
                         deviceInfo, ref ifaceData, detailBuffer, requiredSize, out _, IntPtr.Zero))
@@ -339,14 +355,21 @@ internal sealed class WinUsbBulkDevice : IDisposable
             return false;
 
         GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
+        long elapsedMs = 0;
         try
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             bool ok = WinUsbNative.WinUsb_WritePipe(
                 _interfaceHandle, pipeId,
                 handle.AddrOfPinnedObject(),
                 (uint)data.Length,
                 out uint bytesTransferred,
                 IntPtr.Zero); // Synchronous (no OVERLAPPED)
+            sw.Stop();
+            elapsedMs = sw.ElapsedMilliseconds;
+
+            if (_bulkDiagCount++ % 30 == 0)
+                Log($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
             transferred = (int)bytesTransferred;
             return ok;
@@ -356,6 +379,8 @@ internal sealed class WinUsbBulkDevice : IDisposable
             handle.Free();
         }
     }
+
+    private int _bulkDiagCount;
 
     /// <summary>
     /// Control OUT transfer (vendor command).

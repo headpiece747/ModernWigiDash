@@ -443,32 +443,16 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             }
         }
 
-        // Fallback to LibUsbDotNet — try single unchunked write first,
-        // fall back to chunked if the device rejects large single transfers.
+        // Fallback to LibUsbDotNet — the legacy libusb driver stalls on
+        // multi-megabyte single transfers (10s timeout for partial data), so
+        // always write in bounded chunks sized for the driver's throughput.
         if (_bulkWriter == null) return false;
 
         int totalBytes = data.Length;
-        const int chunkSize = 4096;
-
-        try
-        {
-            // Try single unchunked write first
-            Error error = _bulkWriter.Write(data, 0, totalBytes, 10000, out int singleTransferred);
-            if (error == Error.Success && singleTransferred == totalBytes)
-            {
-                return true;
-            }
-
-            LogToFile($"[USB-BULK-LIBUSB] Single write returned error={error} transferred={singleTransferred}/{totalBytes}, falling back to chunked");
-        }
-        catch (Exception ex)
-        {
-            LogToFile($"[USB-BULK-LIBUSB] Single write exception: {ex.Message}, falling back to chunked");
-        }
-
-        // Chunked fallback
+        const int chunkSize = 262144;
         int numChunks = (totalBytes + chunkSize - 1) / chunkSize;
-        LogToFile($"[USB-BULK-LIBUSB] Chunked write: {totalBytes} bytes in {numChunks} chunks");
+        if (_bulkDiagCount++ % 60 == 0)
+            LogToFile($"[USB-BULK-LIBUSB] Chunked write: {totalBytes} bytes in {numChunks} chunks");
 
         int totalTransferred = 0;
 
@@ -500,6 +484,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     }
 
     private int _touchDiagCount;
+    private int _bulkDiagCount;
 
     public TouchReport? ReadTouch()
     {
