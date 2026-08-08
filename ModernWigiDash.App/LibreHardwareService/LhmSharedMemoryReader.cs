@@ -222,7 +222,12 @@ public sealed class LhmSharedMemoryReader
     private SensorSnapshotDto Disconnected(string error)
     {
         LastError = error;
-        return DisconnectedSnapshot();
+        return new SensorSnapshotDto
+        {
+            IsConnected = false,
+            LastUpdate = DateTime.UtcNow,
+            Readings = [],
+        };
     }
 
     private static SensorSnapshotDto DisconnectedSnapshot() => new()
