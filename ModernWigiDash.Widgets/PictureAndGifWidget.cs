@@ -136,7 +136,17 @@ public class PictureAndGifWidget : ModernWidgetBase
                 {
                     var frame = new SKBitmap(info);
                     IntPtr pixels = frame.GetPixels();
-                    var options = new SKCodecOptions { FrameIndex = i };
+
+                    // GIF frames are deltas: the codec needs the previous
+                    // frame's pixels already in the destination to composite
+                    // correctly. Without it, delta frames decode as mostly
+                    // empty/black regions and the animation flashes black.
+                    var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
+                    if (i > 0)
+                    {
+                        frames[i - 1].CopyTo(frame);
+                    }
+
                     if (codec.GetPixels(info, pixels, options) != SKCodecResult.Success)
                     {
                         frame.Dispose();
