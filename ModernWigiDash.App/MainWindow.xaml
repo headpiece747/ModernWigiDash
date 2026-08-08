@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         mc:Ignorable="d"
-        Title="ModernWigiDash - Next-Generation .NET 10"
+        Title="ModernWigiDash"
         Icon="Resources/Logo/logo.ico"
         WindowState="Normal"
         WindowStartupLocation="CenterScreen"
@@ -39,25 +39,9 @@
                            VerticalAlignment="Top" Margin="0,0,24,0"/>
                     <StackPanel VerticalAlignment="Top">
                         <TextBlock Text="MODERN WIGIDASH" FontSize="16" FontWeight="Bold" Foreground="White"/>
-                        <TextBlock Text="Free-Form Canvas &amp; Dynamic Engine" FontSize="11" Foreground="{DynamicResource AccentBlue}"/>
+                        <TextBlock Text="Free-Form Canvas" FontSize="11" Foreground="{DynamicResource AccentBlue}"/>
                     </StackPanel>
                 </StackPanel>
-
-                <!-- Center Page Tabs -->
-                <Grid Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" CornerRadius="12" Padding="4,4" VerticalAlignment="Center">
-                        <ScrollViewer x:Name="ScrollerPageTabs" HorizontalScrollBarVisibility="Auto" 
-                                      VerticalScrollBarVisibility="Disabled" MaxWidth="800"
-                                      MouseWheel="ScrollerPageTabs_MouseWheel">
-                            <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
-                        </ScrollViewer>
-                    </Border>
-                    <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>
-                </Grid>
 
                 <!-- Right Mode Toggles & USB Badge -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -130,11 +114,12 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="36"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,0">
                     <Grid>
-                        <TextBlock Text="🖥️ LIVE WIGIDASH PREVIEW (1016 x 592 • 30 FPS)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+                        <TextBlock Text="🖥️ LIVE WIGIDASH PREVIEW (1016 x 592)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
                         <TextBlock Text="💡 Tip: Drag widgets freely or toggle Snap to Grid!" FontSize="11" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
@@ -150,6 +135,23 @@
                                     MouseDown="SkiaCanvas_MouseDown"
                                     MouseMove="SkiaCanvas_MouseMove"
                                     MouseUp="SkiaCanvas_MouseUp"/>
+                </Border>
+
+                <!-- Page tabs: relocated from the top header to under the canvas -->
+                <Border Grid.Row="2" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ScrollViewer x:Name="ScrollerPageTabs" Grid.Column="0" HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled" MaxWidth="900"
+                                      HorizontalAlignment="Center"
+                                      MouseWheel="ScrollerPageTabs_MouseWheel">
+                            <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
+                        </ScrollViewer>
+                        <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>
+                    </Grid>
                 </Border>
             </Grid>
 
@@ -259,7 +261,6 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="TxtStatusTelemetry" Text=".NET 10 | Rendering: 30 FPS | Canvas: 1016 x 592" FontSize="11" Foreground="White" Margin="0,0,16,0"/>
                     <TextBlock x:Name="TxtActiveCount" Text="Active Widgets: 0" FontSize="11" Foreground="{DynamicResource AccentGreen}"/>
                 </StackPanel>
 
