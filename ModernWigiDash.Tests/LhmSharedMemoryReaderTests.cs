@@ -155,6 +155,56 @@ public class LhmSharedMemoryReaderTests
     }
 
     [TestMethod]
+    public void TryParse_IndexExceedingMaxSensorEntries_ReturnsDisconnected()
+    {
+        List<IndexEntry> entries = [];
+        for (int i = 0; i <= LhmSharedMemoryReader.MaxSensorEntries; i++)
+        {
+            entries.Add(new IndexEntry
+            {
+                Identifier = $"/sensor/{i}",
+                Offset = 0,
+                Size = 0,
+                SensorName = $"Sensor {i}",
+                SensorType = "Temperature",
+                HardwareName = "CPU",
+            });
+        }
+
+        byte[] map = BuildMap(JsonIndexFormat, entries, []);
+
+        SensorSnapshotDto dto = LhmSharedMemoryReader.TryParse(map);
+
+        Assert.IsFalse(dto.IsConnected);
+        Assert.AreEqual(0, dto.Readings.Count);
+    }
+
+    [TestMethod]
+    public void TryParse_EntryBlockSizeExceedingMaxSensorBlockBytes_ReturnsDisconnected()
+    {
+        List<IndexEntry> entries =
+        [
+            new()
+            {
+                Identifier = "/cpu/0/temperature/oversized",
+                Offset = 0,
+                Size = LhmSharedMemoryReader.MaxSensorBlockBytes + 1,
+                SensorName = "Oversized Block",
+                SensorType = "Temperature",
+                HardwareName = "CPU",
+            },
+        ];
+        byte[] data = new byte[LhmSharedMemoryReader.MaxSensorBlockBytes + 1];
+
+        byte[] map = BuildMap(JsonIndexFormat, entries, data);
+
+        SensorSnapshotDto dto = LhmSharedMemoryReader.TryParse(map);
+
+        Assert.IsFalse(dto.IsConnected);
+        Assert.AreEqual(0, dto.Readings.Count);
+    }
+
+    [TestMethod]
     public void UnitFor_SensorTypeStrings_ReturnsExpectedUnits()
     {
         Dictionary<string, string> expected = new()
@@ -211,7 +261,11 @@ public class LhmSharedMemoryReaderTests
             stream.WriteByte(0);
         }
 
-        byte[] dataBytes = stream.ToArray();
+        return BuildMap(indexFormat, entries, stream.ToArray());
+    }
+
+    private static byte[] BuildMap(int indexFormat, List<IndexEntry> entries, byte[] dataBytes)
+    {
         byte[] indexBytes = indexFormat switch
         {
             JsonIndexFormat => JsonSerializer.SerializeToUtf8Bytes(entries, CamelCase),

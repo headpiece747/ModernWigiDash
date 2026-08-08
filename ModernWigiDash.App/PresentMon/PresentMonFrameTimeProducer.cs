@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using ModernWigiDash.Sdk;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.PresentMon;
 
@@ -76,8 +75,13 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             _trackedPid = pid;
         }
 
-        var sample = _native.PollDynamic(pid);
-        if (sample is null)
+        var poll = _native.PollDynamic(pid);
+        if (IsSessionLost(poll.Status))
+        {
+            ResetSession();
+            return Unavailable("PresentMon Service connection lost; reconnecting.", now);
+        }
+        if (poll.Sample is null)
         {
             return Idle(now);
         }
@@ -90,12 +94,12 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             LastUpdate = now,
             ProcessId = pid,
             ProcessName = _processNameProvider(pid) ?? string.Empty,
-            Fps = sample.Fps,
-            FrameTimeMs = sample.Fps > 0 ? 1000.0 / sample.Fps : 0,
-            Low1PercentFps = sample.Low1PercentFps,
+            Fps = poll.Sample.Fps,
+            FrameTimeMs = poll.Sample.Fps > 0 ? 1000.0 / poll.Sample.Fps : 0,
+            Low1PercentFps = poll.Sample.Low1PercentFps,
             Low01PercentFps = FrameTimeStatistics.Low01PercentFps(_recentFrameTimes),
-            GpuBusyMs = sample.GpuBusyMs,
-            CpuFrameTimeMs = sample.CpuFrameTimeMs,
+            GpuBusyMs = poll.Sample.GpuBusyMs,
+            CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
             RecentFrameTimesMs = new List<double>(_recentFrameTimes),
         };
     }
@@ -119,6 +123,23 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         {
             _recentFrameTimes.RemoveRange(0, _recentFrameTimes.Count - MaxSparklineSamples);
         }
+    }
+
+    /// <summary>Statuses that mean the session or pipe to the PresentMon Service
+    /// is gone (service restarted, pipe broken) — the session must be torn down
+    /// and re-established on the next poll tick. A benign "no data yet" poll is
+    /// <see cref="PmStatus.Success"/> with a null sample and must NOT reset.</summary>
+    private static bool IsSessionLost(PmStatus status) =>
+        status is PmStatus.SessionNotOpen or PmStatus.PipeError or PmStatus.ServiceError;
+
+    /// <summary>Drops the dead session so the next poll re-runs the
+    /// open/track sequence. Tracking is re-applied because the fresh session
+    /// has no tracking state.</summary>
+    private void ResetSession()
+    {
+        _sessionOpen = false;
+        _trackedPid = -1;
+        _native.CloseSession();
     }
 
     private static FrameTimeSnapshotDto Unavailable(string? reason, DateTime now) => new()

@@ -1,6 +1,5 @@
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.Sdk;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 
@@ -14,6 +13,7 @@ public class PresentMonFrameTimeProducerTests
         public bool OpenSessionResult { get; set; } = true;
         public bool TrackProcessResult { get; set; } = true;
         public PresentMonDynamicSample? PollResult { get; set; }
+        public PmStatus PollStatus { get; set; } = PmStatus.Success;
         public IReadOnlyList<double> FrameTimes { get; set; } = [];
 
         public int OpenSessionCalls { get; private set; }
@@ -36,10 +36,11 @@ public class PresentMonFrameTimeProducerTests
             return TrackProcessResult;
         }
 
-        public PresentMonDynamicSample? PollDynamic(int processId)
+        public PresentMonPollResult PollDynamic(int processId)
         {
             PolledProcessIds.Add(processId);
-            return PollResult;
+            return new PresentMonPollResult(
+                PollStatus == PmStatus.Success ? PollResult : null, PollStatus);
         }
 
         public IReadOnlyList<double> DrainFrameTimes(int processId) => FrameTimes;
@@ -235,5 +236,60 @@ public class PresentMonFrameTimeProducerTests
         producer.Dispose();
 
         Assert.IsTrue(native.Disposed);
+    }
+
+    [TestMethod]
+    public void Poll_SessionLost_ResetsSessionAndReturnsUnavailableDto()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321);
+
+        Assert.IsTrue(producer.Poll().IsAvailable);
+
+        native.PollStatus = PmStatus.SessionNotOpen;
+        var dto = producer.Poll();
+
+        Assert.IsFalse(dto.IsAvailable, "a dead session must surface as unavailable, not idle");
+        Assert.IsTrue(dto.ErrorMessage.Length > 0, "the transient loss must carry a message while reconnecting");
+        Assert.AreEqual(1, native.CloseSessionCalls, "the dead session handle must be closed");
+        Assert.AreEqual(1, native.OpenSessionCalls, "re-opening happens on the next tick, not in a tight loop");
+    }
+
+    [TestMethod]
+    public void Poll_SessionLostThenServiceReturns_ReestablishesSessionAndData()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321);
+
+        Assert.IsTrue(producer.Poll().IsAvailable);
+
+        native.PollStatus = PmStatus.SessionNotOpen;
+        Assert.IsFalse(producer.Poll().IsAvailable);
+
+        native.PollStatus = PmStatus.Success;
+        var recovered = producer.Poll();
+
+        Assert.IsTrue(recovered.IsAvailable, "the producer must recover once the service is back");
+        Assert.AreEqual(4321, recovered.ProcessId);
+        Assert.AreEqual(143.2, recovered.Fps, 0.001);
+        Assert.AreEqual(2, native.OpenSessionCalls, "session must be re-opened after the service restart");
+        CollectionAssert.AreEqual(new[] { 4321, 4321 }, native.TrackedProcessIds, "tracking must be re-applied on the fresh session");
+    }
+
+    [TestMethod]
+    public void Poll_NonSessionFailureStatus_DoesNotResetSession()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321);
+
+        producer.Poll();
+
+        native.PollStatus = PmStatus.InvalidPid;
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.IsAvailable, "a non-session failure is not a session loss");
+        Assert.AreEqual(-1, dto.ProcessId);
+        Assert.AreEqual(0, native.CloseSessionCalls, "the session must survive non-session failures");
+        Assert.AreEqual(1, native.OpenSessionCalls);
     }
 }

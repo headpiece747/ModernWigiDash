@@ -12,6 +12,15 @@ public sealed record PresentMonDynamicSample(
     double CpuFrameTimeMs);
 
 /// <summary>
+/// One dynamic-query poll's outcome: the sample (null when the process has no
+/// data yet or the poll failed) plus the raw PresentMon status, so callers can
+/// tell a benign "no data yet" poll from a dead session
+/// (<see cref="PmStatus.SessionNotOpen"/>, <see cref="PmStatus.PipeError"/>,
+/// <see cref="PmStatus.ServiceError"/>).
+/// </summary>
+public sealed record PresentMonPollResult(PresentMonDynamicSample? Sample, PmStatus Status);
+
+/// <summary>
 /// The seam between the PresentMon producer and the runtime-loaded
 /// <c>PresentMonAPI2.dll</c>. PresentMon is not installed in every dev
 /// environment, so every native call lives behind this interface and the real
@@ -39,8 +48,9 @@ public interface IPresentMonNative : IDisposable
     bool TrackProcess(int processId);
 
     /// <summary>Polls the dynamic query for the process, returning the first
-    /// swap chain's stats, or null when the process has no data yet.</summary>
-    PresentMonDynamicSample? PollDynamic(int processId);
+    /// swap chain's stats plus the service status. Sample is null when the
+    /// process has no data yet (Success status) or when the poll failed.</summary>
+    PresentMonPollResult PollDynamic(int processId);
 
     /// <summary>Drains and consumes pending per-frame frame times (ms) for the
     /// process from the frame-query queue.</summary>

@@ -39,6 +39,12 @@ public sealed class LhmSharedMemoryReader
     internal const int IndexFormatJson = 1;
     internal const int IndexFormatMessagePack = 2;
 
+    // Attacker-claimed map/index caps: any local process can pre-create the map
+    // before the LHS service starts, so header-declared sizes are untrusted.
+    internal const int MaxSensorEntries = 5000;
+    internal const int MaxSensorBlockBytes = 64 * 1024;
+
+    private const int MaxCopyBytes = 128 * 1024 * 1024;
     private static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
     private static readonly JsonSerializerOptions SensorJsonOptions = new()
@@ -62,6 +68,7 @@ public sealed class LhmSharedMemoryReader
         {
             using Mutex mutex = Mutex.OpenExisting(SensorsMutexName);
             bool acquired = false;
+            byte[] mapBytes;
             try
             {
                 try
@@ -78,12 +85,7 @@ public sealed class LhmSharedMemoryReader
 
                 using MemoryMappedFile map = MemoryMappedFile.OpenExisting(SensorsMapName, MemoryMappedFileRights.Read);
                 using MemoryMappedViewAccessor accessor = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-                SensorSnapshotDto dto = TryParse(CopyMapBytes(accessor));
-                if (!dto.IsConnected)
-                    return Disconnected("LHS sensors map unreadable or malformed");
-
-                LastError = null;
-                return dto;
+                mapBytes = CopyMapBytes(accessor);
             }
             finally
             {
@@ -99,6 +101,15 @@ public sealed class LhmSharedMemoryReader
                     }
                 }
             }
+
+            // Parse outside the mutex: only the consistency-preserving copy needs
+            // the writer's lock, never the (potentially slow) parse.
+            SensorSnapshotDto dto = TryParse(mapBytes);
+            if (!dto.IsConnected)
+                return Disconnected("LHS sensors map unreadable or malformed");
+
+            LastError = null;
+            return dto;
         }
         catch (Exception ex)
         {
@@ -150,11 +161,15 @@ public sealed class LhmSharedMemoryReader
             };
             if (entries is null)
                 return DisconnectedSnapshot();
+            if (entries.Count > MaxSensorEntries)
+                return DisconnectedSnapshot();
 
             List<SensorReadingDto> readings = new(entries.Count);
             foreach (IndexEntry entry in entries)
             {
                 if (entry.Offset < 0 || entry.Size < 0 || (long)entry.Offset + entry.Size > dataLength)
+                    return DisconnectedSnapshot();
+                if (entry.Size > MaxSensorBlockBytes)
                     return DisconnectedSnapshot();
 
                 byte[] json = mapBytes.AsSpan(dataOffset + entry.Offset, entry.Size).ToArray();
@@ -238,12 +253,17 @@ public sealed class LhmSharedMemoryReader
 
     /// <summary>
     /// Bounded copy of the map: reads the header first to size the copy
-    /// (dataOffset + dataLength), so a 64MB map is never copied whole.
+    /// (dataOffset + dataLength), so a 64MB map is never copied whole, and
+    /// clamps every copy stage to <see cref="MaxCopyBytes"/> because the
+    /// header-declared sizes are attacker-controlled. A clamped short copy is
+    /// rejected by <see cref="TryParse"/>'s bounds checks.
     /// Bounds/format validation is left to <see cref="TryParse"/>.
     /// </summary>
     private static byte[] CopyMapBytes(MemoryMappedViewAccessor accessor)
     {
         long capacity = accessor.Capacity;
+        // The header read is bounded by the accessor's capacity (a read past
+        // capacity throws), so the first FixedHeaderSize bytes are always safe.
         int prefix = (int)Math.Min(capacity, FixedHeaderSize);
         byte[] buffer = new byte[prefix];
         if (prefix > 0)
@@ -256,6 +276,8 @@ public sealed class LhmSharedMemoryReader
         long msb = 4L + metaDataSize;
         if (msb < 0 || msb + FieldsBlockSize > capacity)
             return buffer;
+        if (msb + FieldsBlockSize > MaxCopyBytes)
+            return buffer; // claimed metadata block unreachable within the copy cap — malformed
 
         if (msb + FieldsBlockSize > buffer.Length)
             buffer = CopyRange(accessor, buffer, (int)(msb + FieldsBlockSize));
@@ -266,6 +288,7 @@ public sealed class LhmSharedMemoryReader
         long total = (long)dataOffset + dataLength;
         if (total <= buffer.Length)
             return buffer;
+        total = Math.Min(total, MaxCopyBytes);
         total = Math.Min(total, capacity);
         if (total > buffer.Length)
             buffer = CopyRange(accessor, buffer, (int)total);

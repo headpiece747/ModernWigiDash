@@ -14,36 +14,6 @@ namespace ModernWigiDash.App.PresentMon;
 /// </summary>
 public sealed class PresentMonNative : IPresentMonNative
 {
-    // PresentMon status codes (PresentMonAPI.h — success is zero, first in
-    // enum; the rest are positional, NOT named-assigned).
-    internal enum PmStatus
-    {
-        Success = 0,
-        Failure = 1,
-        BadArgument = 2,
-        BadHandle = 3,
-        ServiceError = 4,
-        InvalidEtlFile = 5,
-        InvalidPid = 6,
-        AlreadyTrackingProcess = 7,
-        UnableToCreateNsm = 8,
-        InvalidAdapterId = 9,
-        OutOfRange = 10,
-        InsufficientBuffer = 11,
-        PipeError = 12,
-        SessionNotOpen = 13,
-        MiddlewareMissingPath = 14,
-        NonexistentFilePath = 15,
-        MiddlewareInvalidSignature = 16,
-        MiddlewareMissingEndpoint = 17,
-        MiddlewareVersionLow = 18,
-        MiddlewareVersionHigh = 19,
-        MiddlewareServiceMismatch = 20,
-        QueryMalformed = 21,
-        ModeMismatch = 22,
-        FeatureDisabled = 23,
-    }
-
     // PM_METRIC / PM_STAT values as laid out in PresentMonAPI.h v2.5.1.
     private const uint MetricCpuFrameTime = 8;
     private const uint MetricPresentedFps = 12;
@@ -207,12 +177,12 @@ public sealed class PresentMonNative : IPresentMonNative
         return status == PmStatus.Success || status == PmStatus.AlreadyTrackingProcess;
     }
 
-    public PresentMonDynamicSample? PollDynamic(int processId)
+    public PresentMonPollResult PollDynamic(int processId)
     {
         if (_session == IntPtr.Zero || _dynamicQuery == IntPtr.Zero
             || PollDynamicQueryFn is null || _dynamicElements is null)
         {
-            return null;
+            return new PresentMonPollResult(null, PmStatus.Success);
         }
 
         // Swap-chain count is unknown up front; start generous and grow on
@@ -232,9 +202,16 @@ public sealed class PresentMonNative : IPresentMonNative
                 capacity *= 2;
                 continue;
             }
-            if (status != PmStatus.Success || numSwapChains == 0)
+            if (status != PmStatus.Success)
             {
-                return null;
+                // A session-level failure (SessionNotOpen / PipeError /
+                // ServiceError) means the service restarted or the pipe broke —
+                // the caller must re-establish the session.
+                return new PresentMonPollResult(null, status);
+            }
+            if (numSwapChains == 0)
+            {
+                return new PresentMonPollResult(null, PmStatus.Success);
             }
 
             var sample = new PresentMonDynamicSample(
@@ -242,7 +219,7 @@ public sealed class PresentMonNative : IPresentMonNative
                 Low1PercentFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[1]),
                 GpuBusyMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
                 CpuFrameTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[3]));
-            return sample;
+            return new PresentMonPollResult(sample, PmStatus.Success);
         }
     }
 
