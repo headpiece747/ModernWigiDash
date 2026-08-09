@@ -354,7 +354,7 @@ public static class InspectorPanelRenderer
         {
             return new TextBlock
             {
-                Text = "No sensors detected. Start the ModernWigiDash service, then reopen settings to pick a sensor.",
+                Text = "No sensors detected. Start LibreHardwareService, then reopen settings to pick a sensor.",
                 FontSize = 11,
                 Foreground = callbacks.TryFindResource("TextSecondary") as Brush ?? Brushes.White,
                 TextWrapping = TextWrapping.Wrap

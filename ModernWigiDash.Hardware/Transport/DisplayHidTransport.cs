@@ -32,7 +32,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
     private volatile bool _isConnected;
     private int _isDisposed;
-    private long _framesSent;
     private long _framesFailed;
     private readonly Lock _usbLock = new();
 
@@ -42,9 +41,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private int _currentPage;
 
     public bool IsConnected => _isConnected;
-    public long FramesSent => Volatile.Read(ref _framesSent);
     public long FramesFailed => Volatile.Read(ref _framesFailed);
-    public int CurrentPage => _currentPage;
 
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
@@ -506,7 +503,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                 }
             }
 
-            Interlocked.Increment(ref _framesSent);
             return true;
         }
         catch (Exception ex)

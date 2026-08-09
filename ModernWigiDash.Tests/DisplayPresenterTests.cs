@@ -50,22 +50,26 @@ public class DisplayPresenterTests
         presenter.Send(frame);
 
         Assert.AreEqual(0, sent, "Not-ready presenter must never call the transport");
-        Assert.AreEqual(0, presenter.FramesSent);
         Assert.IsFalse(presenter.IsReady);
     }
 
     [TestMethod]
-    public async Task FramesSent_CountsDeliveredFrames()
+    public async Task Send_DeliversFrameToTransport()
     {
+        int sent = 0;
         using var presenter = new DisplayPresenter(
-            send: _ => true,
+            send: bytes =>
+            {
+                sent++;
+                return true;
+            },
             isReady: () => true);
         using var frame = CreateFrame();
 
         presenter.Send(frame);
 
-        await TestWait.WaitUntilAsync(() => presenter.FramesSent > 0, TimeSpan.FromSeconds(5));
-        Assert.AreEqual(1, presenter.FramesSent);
+        await TestWait.WaitUntilAsync(() => sent > 0, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, sent);
     }
 
     [TestMethod]
@@ -87,6 +91,5 @@ public class DisplayPresenterTests
         presenter.Send(frame); // dead pipeline — must drop before encoding/queuing
 
         Assert.AreEqual(0, sent, "Nothing may reach the transport after dispose");
-        Assert.AreEqual(0, presenter.FramesSent);
     }
 }

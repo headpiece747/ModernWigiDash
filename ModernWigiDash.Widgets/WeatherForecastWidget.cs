@@ -602,24 +602,22 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         if (localPoint.Y < 44f * sy && localPoint.X > b.Width - 64f * sx)
         {
-            UnitSystem = UnitSystem.StartsWith("Fahrenheit", StringComparison.OrdinalIgnoreCase)
+            SetProperty(nameof(UnitSystem), UnitSystem.StartsWith("Fahrenheit", StringComparison.OrdinalIgnoreCase)
                 ? "Celsius (°C, km/h)"
-                : "Fahrenheit (°F, mph)";
-            Context?.RequestRender();
+                : "Fahrenheit (°F, mph)");
             return;
         }
 
         if (localPoint.Y < 44f * sy && localPoint.X < 140f * sx)
         {
-            LayoutMode = LayoutMode switch
+            SetProperty(nameof(LayoutMode), LayoutMode switch
             {
                 "Detailed" => "Daily Forecast",
                 "Daily Forecast" => "Hourly Forecast",
                 "Hourly Forecast" => "Current Only",
                 "Current Only" => "Compact",
                 _ => "Detailed"
-            };
-            Context?.RequestRender();
+            });
             return;
         }
 

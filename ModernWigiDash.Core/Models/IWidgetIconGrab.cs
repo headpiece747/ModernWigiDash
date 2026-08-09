@@ -21,8 +21,9 @@ public interface IWidgetIconGrab
     /// <summary>
     /// Applies a grab-move: derives the new icon offsets from the pointer
     /// position and the grab anchor (the offset between the grab point and the
-    /// icon center at grab start), updates widget state and the placed
-    /// instance's PropertyValues, and returns true when the offsets changed.
+    /// icon center at grab start), updates widget state (through
+    /// <see cref="ModernWidgetBase.SetProperty"/>, so PropertyValues
+    /// persistence is included), and returns true when the offsets changed.
     /// </summary>
     bool ApplyGrabMove(PlacedWidgetInstance placed, float localX, float localY, float grabOffsetX, float grabOffsetY);
 }

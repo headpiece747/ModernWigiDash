@@ -335,6 +335,10 @@ public class InputControllerTests
         var hotkey = new HotkeyButtonWidget { Icon = iconName };
         var controller = new InputController();
         var widget = PlaceWidget(0, 0, 406, 148, hotkey);
+        // ApplyGrabMove persists through SetProperty → context, so the widget
+        // needs a context that resolves the owning placed instance.
+        var context = new PersistingContext(widget);
+        hotkey.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
         controller.Begin(widget, widget, 203, 46, editMode: true);
 
         bool consumed = controller.Move(widget, 253, 76, editMode: true, out bool changed);
@@ -346,6 +350,26 @@ public class InputControllerTests
         Assert.IsTrue(widget.PropertyValues.ContainsKey("IconOffsetX"), "PropertyValues must persist the offset");
         controller.End(widget, editMode: true, snapToGrid: true, out bool iconMoved);
         Assert.IsTrue(iconMoved);
+    }
+
+    /// <summary>Context that resolves the owning placed instance — the
+    /// companion to ModernWidgetBase.SetProperty (like MainWindow's).</summary>
+    private sealed class PersistingContext(PlacedWidgetInstance placed) : IModernWigiDashContext
+    {
+        public void LogInfo(string message) { }
+        public void LogError(string message, Exception? ex = null) { }
+        public void RequestRender() { }
+        public void RequestInspectorRefresh() { }
+        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
+        public void CloseDeviceAuthorization() { }
+
+        public void PersistProperty(object widget, string propertyName, object? value)
+        {
+            if (ReferenceEquals(placed.ActiveInstance, widget))
+            {
+                placed.PropertyValues[propertyName] = value;
+            }
+        }
     }
 
     [TestMethod]

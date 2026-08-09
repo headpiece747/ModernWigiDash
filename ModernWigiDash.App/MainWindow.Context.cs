@@ -34,5 +34,25 @@ public partial class MainWindow
     public void CloseDeviceAuthorization()
         => _dialogHost.CloseDeviceAuthorization();
 
+    /// <summary>
+    /// Resolves the placed instance that owns <paramref name="widget"/> (by
+    /// identity) and persists the property into its PropertyValues — the
+    /// companion write to <see cref="ModernWidgetBase.SetProperty"/> so widget
+    /// runtime toggles survive Export→Import. A small linear scan over the
+    /// profile; property changes are user-frequency, not per-frame.
+    /// </summary>
+    public void PersistProperty(object widget, string propertyName, object? value)
+    {
+        foreach (var page in _profile.Pages)
+        {
+            foreach (var placed in page.Widgets)
+            {
+                if (!ReferenceEquals(placed.ActiveInstance, widget)) continue;
+                placed.PropertyValues[propertyName] = value;
+                return;
+            }
+        }
+    }
+
     #endregion
 }

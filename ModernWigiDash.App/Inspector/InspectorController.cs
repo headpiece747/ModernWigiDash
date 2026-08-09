@@ -67,14 +67,16 @@ public sealed class InspectorController
     private readonly DialogHost _dialogHost;
     private bool _isUpdatingInspector = false;
 
-    public InspectorController(InspectorControllerHost host)
+    /// <param name="host">The window's wiring holder.</param>
+    /// <param name="dialogHost">The window's single DialogHost instance. The
+    /// inspector must not build its own — DialogHost is stateful (it owns the
+    /// device-authorization window), and two instances for one owner would
+    /// silently never show that window.</param>
+    public InspectorController(InspectorControllerHost host, DialogHost dialogHost)
     {
         _host = host;
-        _dialogHost = new DialogHost(host.Owner, host.TryFindResource, LogError);
+        _dialogHost = dialogHost;
     }
-
-    private static void LogError(string message, Exception? ex)
-        => FileLog.Write($"[Display ERROR] {message}{(ex != null ? $": {ex}" : "")}");
 
     /// <summary>Rebuilds the panel for the currently selected widget (or the empty state).</summary>
     public void Refresh()

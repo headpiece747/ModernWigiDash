@@ -1,6 +1,9 @@
+using System.Net;
+using System.Net.Http;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Sdk;
+using ModernWigiDash.Widgets;
 using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
@@ -28,6 +31,28 @@ public class ProfileOpsTests
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
+    /// <summary>A widget that toggles its own property via SetProperty on touch — the
+    /// WeatherForecastWidget OnTouch shape. The property is [WidgetProperty] with
+    /// a public setter, exactly like rehydration requires.</summary>
+    [WidgetMetadata("toggle_test_widget", "Toggle Test")]
+    private sealed class ToggleWidget : ModernWidgetBase
+    {
+        [WidgetProperty("Mode", WidgetPropertyType.Text, defaultValue: "A")]
+        public string Mode { get; set; } = "A";
+
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+        public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
+            => SetProperty(nameof(Mode), Mode == "A" ? "B" : "A");
+    }
+
+    [WidgetMetadata("fullscreen_test_widget", "Fullscreen Test")]
+    private sealed class FullScreenTestWidget : ModernWidgetBase
+    {
+        public override SKSize DefaultSize => new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+    }
+
     [WidgetMetadata("disposable_test_widget", "Disposable Test", DefaultGridSize = GridSizePreset.Size2x2)]
     private sealed class DisposableTestWidget : ModernWidgetBase
     {
@@ -48,6 +73,34 @@ public class ProfileOpsTests
         var loader = new WidgetPluginLoader();
         loader.RegisterBuiltInPlugin(typeof(TestWidget));
         return loader;
+    }
+
+    /// <summary>
+    /// Context that resolves the owning placed instance like MainWindow does —
+    /// the companion to ModernWidgetBase.SetProperty. Test hosts use the
+    /// interface's default no-op; this one makes persistence observable.
+    /// </summary>
+    private sealed class PersistingContext(ProfileLayout profile) : IModernWigiDashContext
+    {
+        public void LogInfo(string message) { }
+        public void LogError(string message, Exception? ex = null) { }
+        public void RequestRender() { }
+        public void RequestInspectorRefresh() { }
+        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
+        public void CloseDeviceAuthorization() { }
+
+        public void PersistProperty(object widget, string propertyName, object? value)
+        {
+            foreach (var page in profile.Pages)
+            {
+                foreach (var placed in page.Widgets)
+                {
+                    if (!ReferenceEquals(placed.ActiveInstance, widget)) continue;
+                    placed.PropertyValues[propertyName] = value;
+                    return;
+                }
+            }
+        }
     }
 
     private static ProfileLayout CreateProfile(WidgetPluginLoader loader, FakeContext context)
@@ -143,6 +196,113 @@ public class ProfileOpsTests
         Assert.IsNotNull(loaded);
         Assert.AreEqual(1, loaded.Pages.Count, "The sanitizer must guarantee at least one page");
         Assert.AreEqual(loaded.Pages[0], loaded.ActivePage, "ActivePage must never be an orphan");
+    }
+
+    // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
+
+    [TestMethod]
+    public void SetProperty_WritesInstanceAndPropertyValues()
+    {
+        var profile = new ProfileLayout();
+        var context = new PersistingContext(profile);
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(ToggleWidget));
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "toggle_test_widget", 0, 0, 406, 148)!;
+        var widget = (ToggleWidget)placed.ActiveInstance!;
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+
+        widget.OnTouch(default, TouchEventType.TouchUp);
+
+        Assert.AreEqual("B", widget.Mode, "SetProperty must update the instance");
+        Assert.AreEqual("B", placed.PropertyValues["Mode"], "SetProperty must persist the companion PropertyValues entry");
+    }
+
+    [TestMethod]
+    public void SetProperty_Toggle_SurvivesExportImport()
+    {
+        var profile = new ProfileLayout();
+        var context = new PersistingContext(profile);
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(ToggleWidget));
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "toggle_test_widget", 0, 0, 406, 148)!;
+        var widget = (ToggleWidget)placed.ActiveInstance!;
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+        widget.OnTouch(default, TouchEventType.TouchUp);
+
+        string json = ProfileOps.ExportJson(profile);
+        var reloaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+
+        var reloadedWidget = reloaded!.ActivePage.Widgets.Single().ActiveInstance as ToggleWidget;
+        Assert.IsNotNull(reloadedWidget);
+        Assert.AreEqual("B", reloadedWidget.Mode, "A SetProperty toggle must survive Export→Import");
+    }
+
+    [TestMethod]
+    public void WeatherWidget_OnTouchUnitToggle_SurvivesExportImport()
+    {
+        // Regression guard for the confirmed bug: WeatherForecastWidget.OnTouch
+        // mutated UnitSystem/LayoutMode without writing PropertyValues, so the
+        // toggles silently vanished on Export→Import.
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(WeatherForecastWidget));
+        var profile = new ProfileLayout();
+        var context = new PersistingContext(profile);
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "weather_forecast", 0, 0, 1016, 592)!;
+        var widget = (WeatherForecastWidget)placed.ActiveInstance!;
+        widget.TestHttpClient = new HttpClient(new StubJsonHandler("{}"));
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+
+        string initial = widget.UnitSystem;
+        widget.OnTouch(new SKPoint(980, 20), TouchEventType.TouchUp); // unit toggle zone (top-right)
+
+        Assert.AreNotEqual(initial, widget.UnitSystem, "The touch toggle must switch the unit system");
+        Assert.IsTrue(placed.PropertyValues.ContainsKey(nameof(WeatherForecastWidget.UnitSystem)),
+            "The OnTouch toggle must persist to PropertyValues");
+
+        string json = ProfileOps.ExportJson(profile);
+        var reloaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+
+        var reloadedWidget = reloaded!.ActivePage.Widgets.Single().ActiveInstance as WeatherForecastWidget;
+        Assert.IsNotNull(reloadedWidget);
+        Assert.AreEqual(widget.UnitSystem, reloadedWidget.UnitSystem, "The unit toggle must survive Export→Import");
+    }
+
+    [TestMethod]
+    public void PlaceCentered_FullScreenWidget_GoesToOrigin()
+    {
+        var profile = new ProfileLayout();
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(FullScreenTestWidget));
+
+        var placed = ProfileOps.PlaceCentered(profile, loader, new FakeContext(), "fullscreen_test_widget");
+
+        Assert.IsNotNull(placed);
+        Assert.AreEqual(0f, placed.X);
+        Assert.AreEqual(0f, placed.Y);
+        Assert.AreEqual(DisplayGeometry.FramebufferWidth, placed.Width);
+        Assert.AreEqual(DisplayGeometry.FramebufferHeight, placed.Height);
+    }
+
+    [TestMethod]
+    public void PlaceCentered_SmallWidget_CentersOnGrid()
+    {
+        var profile = new ProfileLayout();
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(TestWidget)); // 406 x 148
+
+        var placed = ProfileOps.PlaceCentered(profile, loader, new FakeContext(), "profile_test_widget");
+
+        Assert.IsNotNull(placed);
+        float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
+        float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+        Assert.AreEqual(cx - 406f / 2, placed.X);
+        Assert.AreEqual(cy - 148f / 2, placed.Y);
+    }
+
+    private sealed class StubJsonHandler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) });
     }
 
     [TestMethod]

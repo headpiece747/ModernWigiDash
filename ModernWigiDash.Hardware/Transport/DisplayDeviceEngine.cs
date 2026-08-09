@@ -92,8 +92,11 @@ public sealed class DisplayDeviceEngine : IDisposable
 
         _touchPoll.Start();
 
-        // Attempt initial connection (fire-and-forget with proper exception handling)
-        _ = TryConnectAsync().ContinueWith(t =>
+        // The transport is deliberately synchronous (ADR-0001), so the initial
+        // connect (WinUSB probe + init, ~100-150ms) must run off the calling
+        // thread — Start() is invoked from the window ctor on the UI thread.
+        // ReconnectTick below already runs on the Timer thread.
+        _ = Task.Run(TryConnectAsync).ContinueWith(t =>
         {
             if (t.IsFaulted)
             {

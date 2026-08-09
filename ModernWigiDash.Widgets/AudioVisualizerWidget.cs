@@ -21,19 +21,23 @@ public class AudioVisualizerWidget : ModernWidgetBase
     [WidgetProperty("Primary Color", WidgetPropertyType.Color, "Color for high spectrum peaks", "#F59E0B")]
     public string PrimaryColorHex { get; set; } = "#F59E0B";
 
-    private WasapiLoopbackCapture? _audioCapture;
-    private readonly float[] _fftSpectrum = new float[64];
-    private readonly float[] _smoothSpectrum = new float[64];
-    private readonly float[] _waveform = new float[2048];
-    private int _waveformHead = 0;
+    private IAudioCaptureSource? _captureSource;
+    private readonly AudioSpectrumAnalyzer _analyzer = new();
     private readonly Lock _audioLock = new();
+
+    /// <summary>
+    /// Test seam for the capture source. Defaults to the WASAPI loopback
+    /// adapter; tests inject an in-memory source so the render/capture
+    /// interplay and the DSP are drivable without audio hardware.
+    /// </summary>
+    internal Func<IAudioCaptureSource> CaptureSourceFactory { get; set; } = () => new WasapiLoopbackCaptureSource();
 
     // Capture is tied to rendering: it starts on the first Render (i.e. when
     // the widget's page becomes active) and stops when Render stops being
     // called for a grace period (page switched away). WASAPI loopback capture
     // would otherwise run forever in the background for a hidden widget.
     private volatile bool _capturing;
-    private long _lastRenderTimestamp;
+    private long _lastRenderTimestamp = Stopwatch.GetTimestamp();
 
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
@@ -54,18 +58,16 @@ public class AudioVisualizerWidget : ModernWidgetBase
         if (!_capturing) return;
 
         _capturing = false;
+        IAudioCaptureSource? source = _captureSource;
+        _captureSource = null;
         try
         {
-            _audioCapture?.StopRecording();
-            _audioCapture?.Dispose();
+            if (source != null) source.SamplesAvailable -= OnSamplesAvailable;
+            source?.Dispose();
         }
         catch (Exception ex)
         {
-            Context?.LogError("Failed to stop WASAPI Audio Capture", ex);
-        }
-        finally
-        {
-            _audioCapture = null;
+            Context?.LogError("Failed to stop audio capture", ex);
         }
     }
 
@@ -73,79 +75,52 @@ public class AudioVisualizerWidget : ModernWidgetBase
     {
         try
         {
-            _audioCapture = new WasapiLoopbackCapture();
-            _audioCapture.DataAvailable += (s, e) =>
-            {
-                // Watchdog: when the widget is no longer rendered (page
-                // switched away), stop capture instead of running forever.
-                if (Stopwatch.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
-                {
-                    StopLiveAudioCapture();
-                    return;
-                }
-
-                lock (_audioLock)
-                {
-                    int bytesPerSample = _audioCapture.WaveFormat.BitsPerSample / 8;
-                    int sampleCount = e.BytesRecorded / bytesPerSample;
-                    int bars = (int)Math.Clamp(BarCount, 8, 64);
-
-                    if (sampleCount <= 0) return;
-
-                    int samplesPerBar = Math.Max(1, sampleCount / bars);
-
-                    for (int i = 0; i < bars; i++)
-                    {
-                        float barSum = 0f;
-                        for (int j = 0; j < samplesPerBar; j++)
-                        {
-                            int index = (i * samplesPerBar + j) * bytesPerSample;
-                            if (index + 4 <= e.BytesRecorded)
-                            {
-                                float sample = BitConverter.ToSingle(e.Buffer, index);
-                                barSum += Math.Abs(sample);
-                            }
-                        }
-
-                        float val = Math.Clamp((barSum / samplesPerBar) * 8.0f, 0.05f, 1f);
-                        _fftSpectrum[i] = val;
-                    }
-
-                    // Capture raw samples into a ring buffer for oscilloscope rendering
-                    for (int j = 0; j < sampleCount; j++)
-                    {
-                        int index = j * bytesPerSample;
-                        if (index + 4 <= e.BytesRecorded)
-                        {
-                            _waveform[_waveformHead] = BitConverter.ToSingle(e.Buffer, index);
-                            _waveformHead = (_waveformHead + 1) % _waveform.Length;
-                        }
-                    }
-                }
-            };
-            _audioCapture.StartRecording();
+            IAudioCaptureSource source = CaptureSourceFactory();
+            source.SamplesAvailable += OnSamplesAvailable;
+            source.Start();
+            _captureSource = source;
         }
         catch (Exception ex)
         {
-            _capturing = false;
-            Context?.LogError("Failed to initialize WASAPI Audio Capture", ex);
+            _captureSource?.Dispose();
+            _captureSource = null;
+            Context?.LogError("Failed to initialize audio capture", ex);
+        }
+    }
+
+    private void OnSamplesAvailable(float[] samples)
+    {
+        // Watchdog: when the widget is no longer rendered (page switched
+        // away), stop capture instead of running forever. _lastRenderTimestamp
+        // is primed before capture starts, so the first callback cannot kill a
+        // fresh capture (the old code left it at 0 — elapsed-since-epoch
+        // always exceeded the grace period).
+        if (Stopwatch.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
+        {
+            StopLiveAudioCapture();
+            return;
+        }
+
+        lock (_audioLock)
+        {
+            _analyzer.Analyze(samples, (int)BarCount);
         }
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Capture runs only while this widget is being rendered (active page).
-        EnsureLiveAudioCapture();
+        // Prime the watchdog timestamp BEFORE capture starts, so the first
+        // DataAvailable callback can never measure elapsed-since-epoch and
+        // kill a fresh capture.
         _lastRenderTimestamp = Stopwatch.GetTimestamp();
+        EnsureLiveAudioCapture();
 
         SKColor barColor = SKColor.TryParse(PrimaryColorHex, out var parsed) ? parsed : new SKColor(255, 205, 133);
 
         lock (_audioLock)
         {
-            for (int i = 0; i < _smoothSpectrum.Length; i++)
-            {
-                _smoothSpectrum[i] = _smoothSpectrum[i] * 0.60f + _fftSpectrum[i] * 0.40f;
-            }
+            _analyzer.Smooth();
         }
 
         switch (VisualizerStyle)
@@ -171,20 +146,24 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float barWidth = (availableWidth - ((bars - 1) * barSpacing)) / bars;
         float maxBarHeight = bounds.Height - (pad * 2);
 
-        for (int i = 0; i < bars; i++)
+        lock (_audioLock)
         {
-            float val = _smoothSpectrum[i];
-            float h = val * maxBarHeight;
-            float x = pad + i * (barWidth + barSpacing);
-            float y = bounds.Bottom - pad - h;
-
-            var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
-            using var barPaint = new SKPaint
+            ReadOnlySpan<float> spectrum = _analyzer.Spectrum;
+            for (int i = 0; i < bars; i++)
             {
-                Color = barColor,
-                IsAntialias = true
-            };
-            canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
+                float val = spectrum[i];
+                float h = val * maxBarHeight;
+                float x = pad + i * (barWidth + barSpacing);
+                float y = bounds.Bottom - pad - h;
+
+                var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
+                using var barPaint = new SKPaint
+                {
+                    Color = barColor,
+                    IsAntialias = true
+                };
+                canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
+            }
         }
     }
 
@@ -207,11 +186,10 @@ public class AudioVisualizerWidget : ModernWidgetBase
         lock (_audioLock)
         {
             var builder = new SKPathBuilder();
-            float stepX = (bounds.Width - pad * 2f) / (_waveform.Length - 1f);
-            for (int i = 0; i < _waveform.Length; i++)
+            float stepX = (bounds.Width - pad * 2f) / (_analyzer.WaveformLength - 1f);
+            for (int i = 0; i < _analyzer.WaveformLength; i++)
             {
-                int idx = (_waveformHead + i) % _waveform.Length;
-                float v = Math.Clamp(_waveform[idx], -1f, 1f);
+                float v = _analyzer.GetWaveform(i);
                 float x = bounds.Left + pad + i * stepX;
                 float y = midY - v * amp;
                 if (i == 0)
@@ -232,7 +210,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float cx = bounds.MidX;
         float cy = bounds.MidY;
         float maxR = Math.Min(bounds.Width, bounds.Height) * 0.42f;
-        int n = _smoothSpectrum.Length;
+        int n = _analyzer.BarCount;
 
         using var linePaint = new SKPaint
         {
@@ -245,9 +223,10 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
         lock (_audioLock)
         {
+            ReadOnlySpan<float> spectrum = _analyzer.Spectrum;
             for (int i = 0; i < n; i++)
             {
-                float v = _smoothSpectrum[i];
+                float v = spectrum[i];
                 float angle = (i / (float)n) * MathF.Tau;
                 float dirX = MathF.Cos(angle);
                 float dirY = MathF.Sin(angle);

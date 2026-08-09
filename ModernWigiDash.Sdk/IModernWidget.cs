@@ -45,6 +45,23 @@ public abstract class ModernWidgetBase : IModernWidget
         Context?.RequestRender();
     }
 
+    /// <summary>
+    /// The single write path for widget properties that must survive
+    /// Export→Import: sets the instance property, raises
+    /// <see cref="OnPropertyChanged"/>, and persists the value into the owning
+    /// placed instance's PropertyValues via the context. Every mutation path
+    /// (inspector write-back, icon-grab moves, widget OnTouch toggles) routes
+    /// through this or the inspector's equivalent, so the instance ↔
+    /// PropertyValues invariant has exactly one owner instead of being spread
+    /// across modules with the occasional violation.
+    /// </summary>
+    protected void SetProperty(string propertyName, object? value)
+    {
+        GetType().GetProperty(propertyName)?.SetValue(this, value);
+        OnPropertyChanged(propertyName, value);
+        Context?.PersistProperty(this, propertyName, value);
+    }
+
     public virtual ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;

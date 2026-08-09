@@ -141,6 +141,33 @@ public static class ProfileOps
     }
 
     /// <summary>
+    /// Places a widget at its natural position: full-screen widgets at the
+    /// origin, smaller ones centered on the grid. The center is rounded to the
+    /// snap-to-grid cells; the widget itself is not re-snapped (a 2-cell
+    /// widget cannot be both centered and cell-aligned — centering wins, as it
+    /// did when the window owned this math).
+    /// </summary>
+    public static PlacedWidgetInstance? PlaceCentered(
+        ProfileLayout profile,
+        WidgetPluginLoader loader,
+        IModernWigiDashContext context,
+        string pluginId)
+    {
+        var instance = loader.CreateInstance(pluginId);
+        if (instance == null) return null;
+
+        var size = instance.DefaultSize;
+        if (size.Width >= DisplayGeometry.FramebufferWidth - 10 || size.Height >= DisplayGeometry.FramebufferHeight - 10)
+        {
+            return PlaceWidget(profile, loader, context, pluginId, 0, 0);
+        }
+
+        float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
+        float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+        return PlaceWidget(profile, loader, context, pluginId, cx - size.Width / 2, cy - size.Height / 2);
+    }
+
+    /// <summary>
     /// Creates and initializes the active widget instance for a placed widget,
     /// then applies the user-configured custom property values (surviving
     /// Export/Import round-trips).

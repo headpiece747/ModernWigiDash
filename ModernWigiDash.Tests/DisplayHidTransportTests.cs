@@ -83,7 +83,6 @@ public class DisplayHidTransportTests
         bool ok = transport.SendFrame(frame);
 
         Assert.IsTrue(ok);
-        Assert.AreEqual(1, transport.FramesSent);
         var header = backend.ControlCalls.Single(c => c.Request == DisplayProtocolConstants.CmdFrameHeader);
         Assert.AreEqual("out", header.Direction);
         Assert.AreEqual(0, header.WValue); // page 0, widget 0

@@ -121,7 +121,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
 
         // 2. Populate Catalog UI (sorted alphabetically by display name)
-        ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
+        RefreshCatalog();
 
         // 3. Build the host modules (input, inspector, dialog host) BEFORE the
         // starter profile. Widget InitializeAsync runs synchronously inside
@@ -134,6 +134,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _inputController = new Input.InputController(
             navigateTo: SwitchToPage,
             requestRender: () => SkiaCanvas.InvalidateVisual());
+
+        // One stateful DialogHost for the whole window: the inspector receives
+        // this instance (it must never build its own — a second instance could
+        // never show the device-authorization window it owns).
+        _dialogHost = new DialogHost(this, TryFindResource, LogError);
 
         _inspector = new Inspector.InspectorController(new Inspector.InspectorControllerHost(
             owner: this,
@@ -151,9 +156,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             customProperties: PanelCustomProperties,
             tryFindResource: TryFindResource,
             getSelectedWidget: () => _selectedWidget,
-            requestCanvasRender: () => SkiaCanvas.InvalidateVisual()));
-
-        _dialogHost = new DialogHost(this, TryFindResource, LogError);
+            requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
+            _dialogHost);
 
         // 4. Setup Default Profile Layout with 3 cool starter widgets
         _starterProfile = new StarterProfile(_loader, this);
@@ -207,16 +211,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _inspector.Refresh();
 
         _wired = true;
-    }
-
-    private void PlaceWidgetOnCanvas(string pluginId, float x, float y, float width = -1, float height = -1)
-    {
-        var placed = ProfileOps.PlaceWidget(_profile, _loader, this, pluginId, x, y, width, height);
-        if (placed == null) return;
-
-        SelectWidget(placed);
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
     }
 
     private void SelectWidget(PlacedWidgetInstance? widget)
@@ -389,63 +383,53 @@ public partial class MainWindow : Window, IModernWigiDashContext
             ScrollerPageTabs.HorizontalOffset - e.Delta);
     }
 
-    private void TxtSearchCatalog_TextChanged(object sender, TextChangedEventArgs e)
+    private void TxtSearchCatalog_TextChanged(object sender, TextChangedEventArgs e) => RefreshCatalog();
+
+    /// <summary>One catalog sort, three call sites: the initial fill, the
+    /// filter box, and the empty-query reset all render through this.</summary>
+    private void RefreshCatalog()
     {
         string query = TxtSearchCatalog.Text.Trim();
-        if (string.IsNullOrEmpty(query))
+        IEnumerable<PluginInfo> source = _loader.RegisteredPlugins;
+        if (!string.IsNullOrEmpty(query))
         {
-            ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
+            source = source.Where(p =>
+                p.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                p.Category.Contains(query, StringComparison.OrdinalIgnoreCase));
         }
-        else
-        {
-            ListCatalog.ItemsSource = _loader.RegisteredPlugins
-                .Where(p => p.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                            p.Category.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(p => p.DisplayName).ToList();
-        }
+        ListCatalog.ItemsSource = source.OrderBy(p => p.DisplayName).ToList();
     }
 
     private void BtnPlaceWidget_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string pluginId)
         {
-            var instance = _loader.CreateInstance(pluginId);
-            if (instance == null) return;
+            var placed = ProfileOps.PlaceCentered(_profile, _loader, this, pluginId);
+            if (placed == null) return;
 
-            var sz = instance.DefaultSize;
-            // Full-screen widgets go to origin; smaller ones center on the grid
-            if (sz.Width >= DisplayGeometry.FramebufferWidth - 10 || sz.Height >= DisplayGeometry.FramebufferHeight - 10)
-            {
-                PlaceWidgetOnCanvas(pluginId, 0, 0);
-            }
-            else
-            {
-                float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-                float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
-                PlaceWidgetOnCanvas(pluginId, cx - sz.Width / 2, cy - sz.Height / 2);
-            }
+            SelectWidget(placed);
+            UpdateActiveCount();
+            SkiaCanvas.InvalidateVisual();
         }
     }
 
     private void RebuildPageTabsUI()
     {
         PanelPageTabs.Children.Clear();
-        for (int i = 0; i < _profile.Pages.Count; i++)
+        foreach (var tab in PageTabsViewModel.Build(_profile))
         {
-            int pageIndex = i;
-            var page = _profile.Pages[i];
-            bool isActive = (pageIndex == _profile.ActivePageIndex);
-            bool canDelete = _profile.Pages.Count > 1;
+            bool isActive = tab.IsActive;
+            bool canDelete = tab.CanDelete;
 
             var container = new Grid { Margin = new Thickness(3, 0, 3, 0) };
 
             var btn = new Button
             {
-                Content = $"📄 {page.PageName}",
+                Content = $"📄 {tab.PageName}",
                 Padding = new Thickness(14, 6, canDelete ? 56 : 42, 6),
                 Style = isActive ? (Style)FindResource("AccentButton") : (Style)FindResource(typeof(Button))
             };
-            btn.Click += (s, e) => SwitchToPage(pageIndex);
+            btn.Click += (s, e) => SwitchToPage(tab.Index);
             container.Children.Add(btn);
 
             var renameBtn = new Button
@@ -464,7 +448,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 Margin = new Thickness(0, 0, canDelete ? 24 : 4, 0),
                 Cursor = Cursors.Hand
             };
-            renameBtn.Click += (s, e) => RenamePage(pageIndex);
+            renameBtn.Click += (s, e) => RenamePage(tab.Index);
             container.Children.Add(renameBtn);
 
             if (canDelete)
@@ -484,7 +468,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     Margin = new Thickness(0, 0, 4, 0),
                     Cursor = Cursors.Hand
                 };
-                closeBtn.Click += (s, e) => DeletePage(pageIndex);
+                closeBtn.Click += (s, e) => DeletePage(tab.Index);
                 container.Children.Add(closeBtn);
             }
 
@@ -611,16 +595,21 @@ public partial class MainWindow : Window, IModernWigiDashContext
     #endregion
 
 
-    private bool _lastUsbBadgeActive;
+    private string _lastUsbBadgeBrush = "";
 
     private void UpdateUsbBadge()
     {
-        bool active = _usbDevice.State == ConnectionState.Connected;
-        if (active == _lastUsbBadgeActive) return; // state unchanged — skip the per-tick resource lookup
-        _lastUsbBadgeActive = active;
+        string brushKey = _usbDevice.State switch
+        {
+            ConnectionState.Connected => "AccentGreen",
+            ConnectionState.Simulated => "AccentRed", // amber — running without the device
+            _ => "DangerBorder"
+        };
+        if (brushKey == _lastUsbBadgeBrush) return; // state unchanged — skip the per-tick resource lookup
+        _lastUsbBadgeBrush = brushKey;
 
         var resources = Application.Current.Resources;
-        UsbStatusDot.Fill = (Brush)resources[active ? "AccentGreen" : "DangerBorder"];
+        UsbStatusDot.Fill = (Brush)resources[brushKey];
     }
 
     private void ApplyTheme()

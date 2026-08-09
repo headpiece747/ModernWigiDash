@@ -60,8 +60,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private readonly Lock _messagesLock = new();
     private readonly List<ChatMessage> _messages = new();
     private CancellationTokenSource? _cts;
-    private IWebSocketFeed? _socket;
-    private Task? _ircTask;
+    private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
     private volatile int _status;
     private volatile string _statusDetail = "";
@@ -197,72 +196,47 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     {
         _cts?.Cancel();
         _cts?.Dispose();
-        _cts = new CancellationTokenSource();
+        _cts = new CancellationTokenSource(); // PONG token
         lock (_messagesLock) _messages.Clear();
-        _status = StatusConnecting;
-        _statusDetail = "";
-        Context.RequestRender();
-        _ircTask = Task.Run(() => RunIrcLoopAsync(_cts.Token), _cts.Token);
-    }
-
-    private void StopConnection()
-    {
-        _cts?.Cancel();
-        _socket?.Abort();
-        _status = StatusDisconnected;
-        _statusDetail = "";
-        Context.RequestRender();
-    }
-
-    private async Task RunIrcLoopAsync(CancellationToken ct)
-    {
-        var backoff = TimeSpan.FromSeconds(1);
-        while (!ct.IsCancellationRequested && !_disposed)
-        {
-            bool faulted = false;
-            try
-            {
-                await ConnectAndReadAsync(ct);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                faulted = true;
-                Context.LogError("Twitch IRC error", ex);
-            }
-
-            if (!AutoConnect || ct.IsCancellationRequested || _disposed) break;
-
-            _status = StatusDisconnected;
-            _statusDetail = "Reconnecting…";
-            Context.RequestRender();
-
-            // Reset the backoff after a healthy (non-exception) cycle so a
-            // brief blip reconnects fast; only repeated failures escalate.
-            backoff = faulted
-                ? TimeSpan.FromSeconds(Math.Min(backoff.TotalSeconds * 2, 30))
-                : TimeSpan.FromSeconds(1);
-            try { await Task.Delay(backoff, ct); }
-            catch (OperationCanceledException) { break; }
-        }
-        _status = StatusDisconnected;
-        _statusDetail = "";
-        Context.RequestRender();
-    }
-
-    private async Task ConnectAndReadAsync(CancellationToken ct)
-    {
-        using var feed = FeedFactory();
-        _socket = feed;
         _status = StatusConnecting;
         _statusDetail = "Connecting…";
         Context.RequestRender();
 
-        await feed.ConnectAsync(IrcEndpoint, ct);
+        // The IRC loop is a FeedLoop: connect → handshake → read messages →
+        // exponential backoff reconnect, driven through the feed seam.
+        _feedLoop?.Dispose();
+        _feedLoop = new FeedLoop(
+            IrcEndpoint,
+            FeedFactory,
+            ConnectIrcAsync,
+            DispatchIncomingMessage,
+            new ExponentialBackoffReconnectPolicy(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)),
+            onCycleEnded: _ => SetReconnectingStatus(),
+            onStopped: () =>
+            {
+                _status = StatusDisconnected;
+                _statusDetail = "";
+                Context.RequestRender();
+            },
+            continueAfterCycle: () => AutoConnect && !_disposed,
+            onError: ex => Context.LogError("Twitch IRC error", ex));
+        _feedLoop.Start();
+    }
 
+    private void StopConnection()
+    {
+        _feedLoop?.Dispose();
+        _feedLoop = null;
+        _cts?.Cancel();
+        _status = StatusDisconnected;
+        _statusDetail = "";
+        Context.RequestRender();
+    }
+
+    /// <summary>Runs after the feed connected: the anonymous IRC handshake and
+    /// the "Joining #channel" status.</summary>
+    private async Task ConnectIrcAsync(IWebSocketFeed feed, CancellationToken ct)
+    {
         var channel = NormalizeChannel(ChannelName);
         string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString();
         string pass = AnonymousPass;
@@ -275,14 +249,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _status = StatusConnecting;
         _statusDetail = "Joining #" + channel + "…";
         Context.RequestRender();
+    }
 
-        // The feed reassembles fragments; each await returns one complete
-        // IRC message or null when the socket closed.
-        string? message;
-        while ((message = await feed.ReceiveTextAsync(ct)) is not null)
-        {
-            DispatchIncomingMessage(message);
-        }
+    private void SetReconnectingStatus()
+    {
+        _status = StatusDisconnected;
+        _statusDetail = "Reconnecting…";
+        Context.RequestRender();
     }
 
     private static Task SendIrcLineAsync(IWebSocketFeed socket, string line, CancellationToken ct)
@@ -300,7 +273,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     {
         if (line.StartsWith("PING", StringComparison.Ordinal))
         {
-            var sock = _socket;
+            var sock = _feedLoop?.Current;
             if (sock != null)
             {
                 CancellationToken token = _cts?.Token ?? CancellationToken.None;
@@ -568,14 +541,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override async ValueTask DisposeAsync()
     {
         _disposed = true;
+        _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
+        _feedLoop = null;
         if (_cts is { } cts) await cts.CancelAsync();
-        _socket?.Abort();
-        try { if (_ircTask != null) await _ircTask; }
-        catch
-        {
-            System.Diagnostics.Debug.WriteLine("IRC connection task already ended during disposal (cancelled/disposed)");
-            /* connection task was already cancelled/disposed */
-        }
         _cts?.Dispose();
         await base.DisposeAsync();
     }

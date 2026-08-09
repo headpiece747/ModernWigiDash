@@ -32,7 +32,7 @@ public sealed class PriceFeedManager : IDisposable
     /// <summary>Canonical base coin for a crypto alias plus its CoinGecko API id.</summary>
     internal sealed record CryptoAlias(string Symbol, string CoinGeckoId);
 
-    internal enum WebSocketFeed
+    internal enum FeedKind
     {
         Binance,
         Finnhub
@@ -147,13 +147,11 @@ public sealed class PriceFeedManager : IDisposable
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
 
-    private IWebSocketFeed? _binanceFeed;
-    private IWebSocketFeed? _finnhubFeed;
-    private readonly Func<WebSocketFeed, IWebSocketFeed> _feedFactory;
+    private readonly Func<FeedKind, IWebSocketFeed> _feedFactory;
     private readonly TimeSpan _reconnectDelay;
     private CancellationTokenSource _cts = new();
-    private Task? _binanceTask;
-    private Task? _finnhubTask;
+    private FeedLoop? _binanceLoop;
+    private FeedLoop? _finnhubLoop;
     private Task? _stockRestTask;
     private Task? _cryptoRestTask;
     private Task? _fxRestTask;
@@ -183,7 +181,7 @@ public sealed class PriceFeedManager : IDisposable
     internal PriceFeedManager(
         HttpClient httpClient,
         string? finnhubApiKey = null,
-        Func<WebSocketFeed, IWebSocketFeed>? feedFactory = null,
+        Func<FeedKind, IWebSocketFeed>? feedFactory = null,
         TimeSpan? reconnectDelay = null)
     {
         _http = httpClient;
@@ -299,11 +297,12 @@ public sealed class PriceFeedManager : IDisposable
                 var baseCoin = ToFeedKey(symbol, kind);
                 if (_subscribedCrypto.TryAdd(baseCoin, 0))
                 {
-                    _binanceTask ??= RunBinanceLoopAsync();
+                    _binanceLoop ??= CreateBinanceLoop();
+                    _binanceLoop.Start();
                     _cryptoRestTask ??= RunCryptoRestPollerAsync();
                     // Push an incremental subscribe so symbols added after the
                     // socket connected still receive real-time ticks.
-                    _ = SendWsSubscribeAsync(WebSocketFeed.Binance, $"{baseCoin.ToLower()}usdt@ticker");
+                    _ = SendWsSubscribeAsync(FeedKind.Binance, $"{baseCoin.ToLower()}usdt@ticker");
                 }
                 break;
             case AssetKind.Fx:
@@ -328,9 +327,10 @@ public sealed class PriceFeedManager : IDisposable
                 // Yahoo Finance fallback in FetchFallbackAsync still does.
                 if (_subscribedStocks.TryAdd(stockSym, 0) && !string.IsNullOrEmpty(_finnhubKey))
                 {
-                    _finnhubTask ??= RunFinnhubLoopAsync();
+                    _finnhubLoop ??= CreateFinnhubLoop();
+                    _finnhubLoop.Start();
                     _stockRestTask ??= RunStockRestPollerAsync();
-                    _ = SendWsSubscribeAsync(WebSocketFeed.Finnhub, stockSym);
+                    _ = SendWsSubscribeAsync(FeedKind.Finnhub, stockSym);
                 }
                 break;
         }
@@ -340,13 +340,13 @@ public sealed class PriceFeedManager : IDisposable
     /// Sends an incremental WebSocket subscription for a symbol added after the
     /// feed socket was already connected. No-op when the socket is not open.
     /// </summary>
-    private async Task SendWsSubscribeAsync(WebSocketFeed feed, string payload)
+    private async Task SendWsSubscribeAsync(FeedKind feed, string payload)
     {
         try
         {
-            IWebSocketFeed? ws = feed == WebSocketFeed.Finnhub ? _finnhubFeed : _binanceFeed;
+            IWebSocketFeed? ws = feed == FeedKind.Finnhub ? _finnhubLoop?.Current : _binanceLoop?.Current;
             if (ws == null || !ws.IsOpen) return;
-            object message = feed == WebSocketFeed.Finnhub
+            object message = feed == FeedKind.Finnhub
                 ? new { type = "subscribe", symbol = payload }
                 : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
             await ws.SendTextAsync(JsonSerializer.Serialize(message), _cts.Token);
@@ -409,12 +409,10 @@ public sealed class PriceFeedManager : IDisposable
     private void ShutdownLoops()
     {
         _cts.Cancel();
-        try { _binanceFeed?.Abort(); } catch { /* best-effort */ }
-        try { _finnhubFeed?.Abort(); } catch { /* best-effort */ }
-        _binanceFeed = null;
-        _finnhubFeed = null;
-        _binanceTask = null;
-        _finnhubTask = null;
+        _binanceLoop?.Dispose();
+        _finnhubLoop?.Dispose();
+        _binanceLoop = null;
+        _finnhubLoop = null;
         _stockRestTask = null;
         _cryptoRestTask = null;
         _fxRestTask = null;
@@ -479,77 +477,23 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private async Task RunBinanceLoopAsync()
-        => await RunWebSocketLoopAsync(
-            WebSocketFeed.Binance,
-            "wss://stream.binance.us:9443/ws",
-            feed => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }), _cts.Token),
-            ParseBinanceTicker,
-            feed => _binanceFeed = feed,
-            () => _binanceFeed = null);
+    private FeedLoop CreateBinanceLoop() => new(
+        new Uri("wss://stream.binance.us:9443/ws"),
+        () => _feedFactory(FeedKind.Binance),
+        (feed, ct) => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }), ct),
+        ParseBinanceTicker,
+        new FixedReconnectPolicy(_reconnectDelay));
 
-    private async Task RunFinnhubLoopAsync()
-    {
-        if (string.IsNullOrEmpty(_finnhubKey))
+    private FeedLoop CreateFinnhubLoop() => new(
+        new Uri($"wss://ws.finnhub.io?token={_finnhubKey}"),
+        () => _feedFactory(FeedKind.Finnhub),
+        async (feed, ct) =>
         {
-            FileLog.Write("[PRICE-FEED] Finnhub WebSocket feed skipped: FINNHUB_API_KEY not configured.");
-            return;
-        }
-
-        await RunWebSocketLoopAsync(
-            WebSocketFeed.Finnhub,
-            $"wss://ws.finnhub.io?token={_finnhubKey}",
-            async feed =>
-            {
-                foreach (var sym in _subscribedStocks.Keys)
-                    await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), _cts.Token);
-            },
-            ParseFinnhubMessage,
-            feed => _finnhubFeed = feed,
-            () => _finnhubFeed = null);
-    }
-
-    /// <summary>
-    /// Shared WebSocket feed loop: connect, subscribe, read until closed, then
-    /// reconnect after a delay. The per-feed differences (URI, subscription
-    /// payload, message parser) are supplied as delegates; the socket itself
-    /// comes from the feed factory seam, so tests drive the loop with an
-    /// in-memory feed.
-    /// </summary>
-    private async Task RunWebSocketLoopAsync(
-        WebSocketFeed feedKind,
-        string uri,
-        Func<IWebSocketFeed, Task> subscribe,
-        Action<string> parseMessage,
-        Action<IWebSocketFeed> onConnected,
-        Action onClosed)
-    {
-        while (!_disposed && !_cts.IsCancellationRequested)
-        {
-            IWebSocketFeed feed = _feedFactory(feedKind);
-            try
-            {
-                onConnected(feed);
-                await feed.ConnectAsync(new Uri(uri), _cts.Token);
-                await subscribe(feed);
-                string? message;
-                while ((message = await feed.ReceiveTextAsync(_cts.Token)) is not null)
-                {
-                    parseMessage(message);
-                }
-            }
-            catch when (!_disposed && !_cts.IsCancellationRequested)
-            {
-                System.Diagnostics.Debug.WriteLine("WebSocket feed loop ended unexpectedly; reconnecting");
-            }
-            finally
-            {
-                onClosed();
-                feed.Dispose();
-            }
-            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(_reconnectDelay, _cts.Token);
-        }
-    }
+            foreach (var sym in _subscribedStocks.Keys)
+                await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), ct);
+        },
+        ParseFinnhubMessage,
+        new FixedReconnectPolicy(_reconnectDelay));
 
     private async Task RunStockRestPollerAsync()
         => await RunRestPollLoopAsync(_stockRestInterval, _subscribedStocks.Keys, PollStockSymbolAsync);
@@ -825,10 +769,8 @@ public sealed class PriceFeedManager : IDisposable
         _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
-        try { _binanceFeed?.Abort(); } catch { /* best-effort */ }
-        try { _finnhubFeed?.Abort(); } catch { /* best-effort */ }
-        _binanceFeed?.Dispose();
-        _finnhubFeed?.Dispose();
+        _binanceLoop?.Dispose();
+        _finnhubLoop?.Dispose();
         // The manager never owns its HttpClient: the default instance shares
         // the static process-wide client, so disposing it here would kill every
         // other feed manager's socket reuse (the latent cross-widget break).

@@ -363,12 +363,10 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         if (newX == IconOffsetX && newY == IconOffsetY)
             return false;
 
-        IconOffsetX = newX;
-        IconOffsetY = newY;
-        OnPropertyChanged(nameof(IconOffsetX), newX);
-        OnPropertyChanged(nameof(IconOffsetY), newY);
-        placed.PropertyValues[nameof(IconOffsetX)] = newX;
-        placed.PropertyValues[nameof(IconOffsetY)] = newY;
+        // SetProperty covers instance + OnPropertyChanged + PropertyValues
+        // persistence — one write path for properties that must survive export.
+        SetProperty(nameof(IconOffsetX), newX);
+        SetProperty(nameof(IconOffsetY), newY);
         return true;
     }
 
