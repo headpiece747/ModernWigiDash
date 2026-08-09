@@ -13,7 +13,7 @@ public class TwitchApiTests
     public async Task StartDeviceAuthorization_SendsPublicClientAndFollowScope()
     {
         string? requestBody = null;
-        using var client = new HttpClient(new StubHandler(request =>
+        using var client = new HttpClient(new StubHttpHandler(request =>
         {
             requestBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
             return JsonResponse("""
@@ -41,7 +41,7 @@ public class TwitchApiTests
     public async Task GetFollowedLiveChannels_FollowsPaginationAndSortsDisplayNames()
     {
         int requestCount = 0;
-        using var client = new HttpClient(new StubHandler(request =>
+        using var client = new HttpClient(new StubHttpHandler(request =>
         {
             requestCount++;
             if (requestCount == 1)
@@ -91,9 +91,5 @@ public class TwitchApiTests
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
-    }
+
 }

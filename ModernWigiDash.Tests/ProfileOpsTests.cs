@@ -11,15 +11,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class ProfileOpsTests
 {
-    private sealed class FakeContext : IModernWigiDashContext
-    {
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-    }
 
     [WidgetMetadata("profile_test_widget", "Profile Test", DefaultGridSize = GridSizePreset.Size2x2)]
     private sealed class TestWidget : ModernWidgetBase
@@ -75,35 +66,8 @@ public class ProfileOpsTests
         return loader;
     }
 
-    /// <summary>
-    /// Context that resolves the owning placed instance like MainWindow does —
-    /// the companion to ModernWidgetBase.SetProperty. Test hosts use the
-    /// interface's default no-op; this one makes persistence observable.
-    /// </summary>
-    private sealed class PersistingContext(ProfileLayout profile) : IModernWigiDashContext
-    {
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
 
-        public void PersistProperty(object widget, string propertyName, object? value)
-        {
-            foreach (var page in profile.Pages)
-            {
-                foreach (var placed in page.Widgets)
-                {
-                    if (!ReferenceEquals(placed.ActiveInstance, widget)) continue;
-                    placed.PropertyValues[propertyName] = value;
-                    return;
-                }
-            }
-        }
-    }
-
-    private static ProfileLayout CreateProfile(WidgetPluginLoader loader, FakeContext context)
+    private static ProfileLayout CreateProfile(WidgetPluginLoader loader, TestContext context)
     {
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
@@ -191,7 +155,7 @@ public class ProfileOpsTests
     {
         // A profile with zero pages would hand ActivePage an orphan page not
         // in Pages — the sanitizer must repair the import.
-        var loaded = ProfileOps.ImportJson("""{"profileId":"x","pages":[]}""", CreateLoader(), new FakeContext());
+        var loaded = ProfileOps.ImportJson("""{"profileId":"x","pages":[]}""", CreateLoader(), new TestContext());
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual(1, loaded.Pages.Count, "The sanitizer must guarantee at least one page");
@@ -230,7 +194,7 @@ public class ProfileOpsTests
         widget.OnTouch(default, TouchEventType.TouchUp);
 
         string json = ProfileOps.ExportJson(profile);
-        var reloaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+        var reloaded = ProfileOps.ImportJson(json, loader, new TestContext());
 
         var reloadedWidget = reloaded!.ActivePage.Widgets.Single().ActiveInstance as ToggleWidget;
         Assert.IsNotNull(reloadedWidget);
@@ -249,7 +213,7 @@ public class ProfileOpsTests
         var context = new PersistingContext(profile);
         var placed = ProfileOps.PlaceWidget(profile, loader, context, "weather_forecast", 0, 0, 1016, 592)!;
         var widget = (WeatherForecastWidget)placed.ActiveInstance!;
-        widget.TestHttpClient = new HttpClient(new StubJsonHandler("{}"));
+        widget.TestHttpClient = new HttpClient(new StubHttpHandler("{}"));
         widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
 
         string initial = widget.UnitSystem;
@@ -260,7 +224,7 @@ public class ProfileOpsTests
             "The OnTouch toggle must persist to PropertyValues");
 
         string json = ProfileOps.ExportJson(profile);
-        var reloaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+        var reloaded = ProfileOps.ImportJson(json, loader, new TestContext());
 
         var reloadedWidget = reloaded!.ActivePage.Widgets.Single().ActiveInstance as WeatherForecastWidget;
         Assert.IsNotNull(reloadedWidget);
@@ -274,7 +238,7 @@ public class ProfileOpsTests
         var loader = new WidgetPluginLoader();
         loader.RegisterBuiltInPlugin(typeof(FullScreenTestWidget));
 
-        var placed = ProfileOps.PlaceCentered(profile, loader, new FakeContext(), "fullscreen_test_widget");
+        var placed = ProfileOps.PlaceCentered(profile, loader, new TestContext(), "fullscreen_test_widget");
 
         Assert.IsNotNull(placed);
         Assert.AreEqual(0f, placed.X);
@@ -290,7 +254,7 @@ public class ProfileOpsTests
         var loader = new WidgetPluginLoader();
         loader.RegisterBuiltInPlugin(typeof(TestWidget)); // 406 x 148
 
-        var placed = ProfileOps.PlaceCentered(profile, loader, new FakeContext(), "profile_test_widget");
+        var placed = ProfileOps.PlaceCentered(profile, loader, new TestContext(), "profile_test_widget");
 
         Assert.IsNotNull(placed);
         float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
@@ -299,11 +263,6 @@ public class ProfileOpsTests
         Assert.AreEqual(cy - 148f / 2, placed.Y);
     }
 
-    private sealed class StubJsonHandler(string body) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) });
-    }
 
     [TestMethod]
     public void RenamePage_BlankName_IsIgnored()
@@ -321,7 +280,7 @@ public class ProfileOpsTests
     [TestMethod]
     public void ClearPage_EmptiesWidgets()
     {
-        var profile = CreateProfile(CreateLoader(), new FakeContext());
+        var profile = CreateProfile(CreateLoader(), new TestContext());
 
         ProfileOps.ClearPage(profile.ActivePage);
 
@@ -337,7 +296,7 @@ public class ProfileOpsTests
         ProfileOps.AddPage(profile);
         var loader = CreateLoader();
 
-        var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "no_such_plugin", 0, 0);
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "no_such_plugin", 0, 0);
 
         Assert.IsNull(placed);
         Assert.AreEqual(0, profile.ActivePage.Widgets.Count);
@@ -346,7 +305,7 @@ public class ProfileOpsTests
     [TestMethod]
     public void PlaceWidget_AssignsSizeZIndexAndInstance()
     {
-        var profile = CreateProfile(CreateLoader(), new FakeContext());
+        var profile = CreateProfile(CreateLoader(), new TestContext());
 
         var placed = profile.ActivePage.Widgets.Single();
 
@@ -368,7 +327,7 @@ public class ProfileOpsTests
         var old = new DisposableTestWidget();
         placed.ActiveInstance = old;
 
-        var instance = ProfileOps.RehydrateWidget(loader, new FakeContext(), placed);
+        var instance = ProfileOps.RehydrateWidget(loader, new TestContext(), placed);
 
         Assert.IsNotNull(instance, "Rehydration must succeed");
         Assert.IsTrue(old.Disposed, "Rehydration must dispose the instance it replaces");
@@ -445,7 +404,7 @@ public class ProfileOpsTests
     public void ExportImport_RoundTripsPagesPlacementsAndPropertyValues()
     {
         var loader = CreateLoader();
-        var context = new FakeContext();
+        var context = new TestContext();
         var profile = CreateProfile(loader, context);
         ProfileOps.AddPage(profile, "Second");
         var second = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 100, 200, 203, 148);
@@ -478,8 +437,8 @@ public class ProfileOpsTests
     {
         var loader = CreateLoader();
 
-        Assert.IsNull(ProfileOps.ImportJson("{not json", loader, new FakeContext()));
-        Assert.IsNull(ProfileOps.ImportJson("null", loader, new FakeContext()));
+        Assert.IsNull(ProfileOps.ImportJson("{not json", loader, new TestContext()));
+        Assert.IsNull(ProfileOps.ImportJson("null", loader, new TestContext()));
     }
 
     // ── untrusted-import sanitization ───────────────────────
@@ -488,7 +447,7 @@ public class ProfileOpsTests
     public void ImportJson_UntrustedProfile_ClearsActionCommandsAndRootedPaths()
     {
         var loader = CreateLoader();
-        var context = new FakeContext();
+        var context = new TestContext();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
         var placed = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
@@ -511,7 +470,7 @@ public class ProfileOpsTests
         // to be present. ActionType has a default, so a crafted profile with
         // only ActionCommand slipped through to command execution.
         var loader = CreateLoader();
-        var context = new FakeContext();
+        var context = new TestContext();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
         var placed = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
@@ -528,7 +487,7 @@ public class ProfileOpsTests
     public void ImportJson_ExcessiveWidgetCount_IsCapped()
     {
         var loader = CreateLoader();
-        var context = new FakeContext();
+        var context = new TestContext();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
         for (int i = 0; i < 300; i++)
@@ -550,12 +509,12 @@ public class ProfileOpsTests
         var loader = CreateLoader();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
-        var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "profile_test_widget", 0, 0);
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
         placed!.PropertyValues["ImagePath"] = @"..\..\secret.png";
         placed.PropertyValues["IconFile"] = @"\\server\share\evil.svg";
         string json = ProfileOps.ExportJson(profile);
 
-        var loaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
 
         var imported = loaded!.Pages[1].Widgets[0];
         Assert.AreEqual("", imported.PropertyValues["ImagePath"], "Traversal paths must be cleared");
@@ -566,7 +525,7 @@ public class ProfileOpsTests
     public void ImportJson_OversizedPage_IsCapped()
     {
         var loader = CreateLoader();
-        var context = new FakeContext();
+        var context = new TestContext();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
         for (int i = 0; i < 250; i++)
@@ -586,11 +545,11 @@ public class ProfileOpsTests
         var loader = CreateLoader();
         var profile = new ProfileLayout();
         ProfileOps.AddPage(profile, "Main");
-        var placed = ProfileOps.PlaceWidget(profile, loader, new FakeContext(), "profile_test_widget", 0, 0);
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
         placed!.PropertyValues["IconFile"] = "icons/my-icon.svg";
         string json = ProfileOps.ExportJson(profile);
 
-        var loaded = ProfileOps.ImportJson(json, loader, new FakeContext());
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
 
         Assert.AreEqual("icons/my-icon.svg", loaded!.Pages[1].Widgets[0].PropertyValues["IconFile"]);
     }

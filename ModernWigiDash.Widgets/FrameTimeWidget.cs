@@ -14,7 +14,7 @@ namespace ModernWigiDash.Widgets;
 /// tool such as PresentMon, MSI Afterburner, or RTSS needs to be running.
 /// When no DirectX app is focused, the monitor's refresh rate is shown.
 /// </summary>
-[WidgetMetadata("frame_time", "FPS / Frame Time", Description = "Live FPS, frame time, 1% low, 0.1% low, GPU busy, and CPU frame time for the most active game. Captured in-process via Windows ETW (DXGI/D3D9/DxgKrnl) by the service — no external tool required.", Author = "ModernWigiDash", Version = "1.0.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
+[WidgetMetadata("frame_time", "FPS / Frame Time", Description = "Live FPS, frame time, 1% low, 0.1% low, GPU busy, and CPU frame time for the most active game, captured via the PresentMon Service (ADR-0003).", Author = "ModernWigiDash", Version = "1.0.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
 public class FrameTimeWidget : ModernWidgetBase
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;

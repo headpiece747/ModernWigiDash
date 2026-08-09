@@ -39,7 +39,7 @@ public sealed class PriceFeedManager : IDisposable
     }
 
     /// <summary>
-    /// One crypto symbol table: user-facing alias â†’ canonical base coin + the
+    /// One crypto symbol table: user-facing alias → canonical base coin + the
     /// CoinGecko API id used by the REST fallback. A single table makes a
     /// symbol with a working live feed but a missing fallback id
     /// unrepresentable — the fallback can never silently lose a coin.
@@ -248,7 +248,7 @@ public sealed class PriceFeedManager : IDisposable
 
     /// <summary>
     /// Maps a user-entered symbol to the canonical feed key for an asset kind:
-    /// crypto aliases resolve to the base coin (e.g. "bitcoin" â†’ "BTC"), FX
+    /// crypto aliases resolve to the base coin (e.g. "bitcoin" → "BTC"), FX
     /// pairs to "EURUSD", everything else to the upper-cased symbol.
     /// </summary>
     public static string ToFeedKey(string symbol, AssetKind kind) => kind switch

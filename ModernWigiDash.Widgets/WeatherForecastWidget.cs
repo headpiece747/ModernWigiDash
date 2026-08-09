@@ -91,7 +91,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     private SKRect _lastBounds;
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
-    private Timer? _refreshTimer;
+    private PollLoop? _refreshPoll;
     private CancellationTokenSource? _pollCts;
 
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
@@ -99,15 +99,22 @@ public class WeatherForecastWidget : ModernWidgetBase
         base.InitializeAsync(context, cancellationToken);
         _ = LoadCachedWeatherAsync();
         _pollCts = new CancellationTokenSource();
-        _refreshTimer = new Timer(async _ => await FetchLiveWeatherAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(15));
+        // The 15-min refresh rides the repo's one loop shape (the old code
+        // used the last raw System.Threading.Timer: fire-and-forget async
+        // callback, no readiness guard, no failure logging).
+        _refreshPoll = new PollLoop(
+            "WEATHER", TimeSpan.FromMinutes(15), () => true,
+            WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
+        _refreshPoll.Start();
         _ = FetchLiveWeatherAsync();
         return ValueTask.CompletedTask;
     }
 
+    private void WeatherRefreshTick() => _ = FetchLiveWeatherAsync();
+
     public override async ValueTask DisposeAsync()
     {
-        if (_refreshTimer != null)
-            await _refreshTimer.DisposeAsync();
+        _refreshPoll?.Dispose();
         if (_pollCts != null)
         {
             await _pollCts.CancelAsync();
@@ -126,29 +133,12 @@ public class WeatherForecastWidget : ModernWidgetBase
         base.OnPropertyChanged(propertyName, newValue);
     }
 
-    private string _cachedAccentHex = "";
-    private SKColor _cachedAccentColor;
-
-    /// <summary>
-    /// Parses a hex color once per value change — the 30 FPS render tick must
-    /// not re-parse the same string every frame.
-    /// </summary>
-    private static SKColor ResolveCachedColor(ref string cachedHex, ref SKColor cachedColor, string hex, SKColor fallback)
-    {
-        if (cachedHex != hex)
-        {
-            cachedHex = hex;
-            cachedColor = SKColor.TryParse(hex, out var parsed) ? parsed : fallback;
-        }
-        return cachedColor;
-    }
-
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Kick the fetch only when the static-snapshot rule allows; the
         // client's atomic claim decides throttling/in-flight (a check-then-set
-        // here would race the 15-min refresh timer).
-        if (!(StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue))
+        // here would race the 15-min refresh loop).
+        if (!IsStaticSnapshotBlocking)
         {
             _ = FetchLiveWeatherAsync();
         }
@@ -163,7 +153,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
         }
 
-        SKColor accentColor = ResolveCachedColor(ref _cachedAccentHex, ref _cachedAccentColor, AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
@@ -629,9 +619,14 @@ public class WeatherForecastWidget : ModernWidgetBase
     /// Fetches live weather through the client's atomic fetch claim — the
     /// in-flight/throttle decision is the client's, single-sourced.
     /// </summary>
+    /// <summary>The static-snapshot rule, single-sourced: while a static
+    /// snapshot is showing, non-forced fetches are blocked (the client's
+    /// atomic claim handles throttling).</summary>
+    private bool IsStaticSnapshotBlocking => StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue;
+
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
-        if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue && !force) return;
+        if (IsStaticSnapshotBlocking && !force) return;
 
         var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
         if (snapshot is null) return;

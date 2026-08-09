@@ -14,55 +14,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class TwitchChatStreamLoopTests
 {
-    private sealed class FakeFeed : IWebSocketFeed
-    {
-        private readonly Queue<string> _incoming = new();
-        public List<string> Sent { get; } = [];
-        public bool IsOpen { get; set; } = true;
-        public int ConnectCount { get; private set; }
-        public Exception? ConnectError { get; set; }
-
-        public void QueueMessage(string message) => _incoming.Enqueue(message);
-
-        public Task ConnectAsync(Uri uri, CancellationToken ct)
-        {
-            ConnectCount++;
-            return ConnectError is null ? Task.CompletedTask : Task.FromException(ConnectError);
-        }
-
-        public Task SendTextAsync(string payload, CancellationToken ct)
-        {
-            Sent.Add(payload);
-            return Task.CompletedTask;
-        }
-
-        public Task<string?> ReceiveTextAsync(CancellationToken ct)
-            => Task.FromResult(_incoming.Count > 0 ? _incoming.Dequeue() : null);
-
-        public void Abort() => IsOpen = false;
-        public void Dispose() { }
-    }
-
-    private sealed class FakeContext : IModernWigiDashContext
-    {
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 3000)
-    {
-        long deadline = Environment.TickCount64 + timeoutMs;
-        while (!condition() && Environment.TickCount64 < deadline)
-        {
-            await Task.Delay(20);
-        }
-        Assert.IsTrue(condition(), "Condition was not met within timeout");
-    }
-
     [TestMethod]
     public async Task IrcLoop_SendsHandshakeAndParsesPrivmsg()
     {
@@ -71,9 +22,9 @@ public class TwitchChatStreamLoopTests
         feed.QueueMessage(":user!user@user.tmi.twitch.tv PRIVMSG #test :hello world\r\n");
         var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
         widget.FeedFactory = () => feed;
-        await widget.InitializeAsync(new FakeContext(), CancellationToken.None);
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
 
-        await WaitUntilAsync(() => widget.MessageCountForTest >= 1);
+        await TestWait.WaitUntilAsync(() => widget.MessageCountForTest >= 1, TimeSpan.FromSeconds(3));
 
         Assert.IsTrue(feed.Sent.Any(s => s.StartsWith("CAP REQ", StringComparison.Ordinal)), "CAP handshake must be sent");
         Assert.IsTrue(feed.Sent.Any(s => s.StartsWith("PASS ", StringComparison.Ordinal)), "PASS must be sent");
@@ -90,15 +41,15 @@ public class TwitchChatStreamLoopTests
         var feed = new FakeFeed { ConnectError = new IOException("socket fault") };
         var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
         widget.FeedFactory = () => feed;
-        await widget.InitializeAsync(new FakeContext(), CancellationToken.None);
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
 
         // The first connect attempt faults; clear the fault so the next
         // attempt (after the 2s backoff) connects and processes messages.
-        await WaitUntilAsync(() => feed.ConnectCount >= 1);
+        await TestWait.WaitUntilAsync(() => feed.ConnectCount >= 1, TimeSpan.FromSeconds(3));
         feed.ConnectError = null;
         feed.QueueMessage(":tmi.twitch.tv ROOMSTATE #test\r\n");
         feed.QueueMessage(":user!user@user.tmi.twitch.tv PRIVMSG #test :recovered\r\n");
-        await WaitUntilAsync(() => widget.MessageCountForTest >= 1, timeoutMs: 8000);
+        await TestWait.WaitUntilAsync(() => widget.MessageCountForTest >= 1, TimeSpan.FromSeconds(8));
 
         Assert.IsTrue(feed.ConnectCount >= 2, "A failed connect must trigger a reconnect attempt");
         Assert.AreEqual(1, widget.MessageCountForTest);

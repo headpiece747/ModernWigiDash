@@ -9,20 +9,6 @@ public class TwitchSessionTests
 {
     private const string TestClientId = "test-client-id";
 
-    private sealed class FakeContext : IModernWigiDashContext
-    {
-        public int AuthShown { get; private set; }
-        public int AuthClosed { get; private set; }
-        public List<string> Errors { get; } = [];
-
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) => Errors.Add(message);
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) => AuthShown++;
-        public void CloseDeviceAuthorization() => AuthClosed++;
-    }
-
     private sealed class FakeClient : TwitchApiClient
     {
         public TwitchTokenValidation? ValidationResult;
@@ -94,7 +80,7 @@ public class TwitchSessionTests
     public async Task Restore_WithStoredToken_ValidatesAndLoadsChannels()
     {
         var (session, client, store, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         store.Save(Token());
         client.Channels = [new TwitchFollowedChannel("b1", "streamer", "Streamer")];
 
@@ -110,7 +96,7 @@ public class TwitchSessionTests
     public async Task Restore_UnauthorizedToken_RefreshesAndAuthenticates()
     {
         var (session, client, store, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         store.Save(Token());
         client.ValidationUnauthorized = true;
         client.RefreshedToken = Token(accessToken: "refreshed-access");
@@ -127,7 +113,7 @@ public class TwitchSessionTests
     public async Task Restore_RefreshRejected_ClearsStateAndStore()
     {
         var (session, client, store, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         store.Save(Token());
         client.ValidationUnauthorized = true;
         client.RefreshRejected = true;
@@ -143,7 +129,7 @@ public class TwitchSessionTests
     public async Task Login_DeviceFlow_AuthenticatesAndClosesAuthDialog()
     {
         var (session, client, _, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
         client.Channels = [new TwitchFollowedChannel("b1", "streamer", "Streamer")];
@@ -160,7 +146,7 @@ public class TwitchSessionTests
     public async Task Login_TestClientIdMismatch_Throws()
     {
         var (session, client, _, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
         client.ValidationResult = Validation("different-client-id");
@@ -174,7 +160,7 @@ public class TwitchSessionTests
     public async Task Logout_RevokesTokenAndClearsState()
     {
         var (session, client, store, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
         await session.LoginAsync(TestClientId, context, CancellationToken.None);
@@ -190,7 +176,7 @@ public class TwitchSessionTests
     public async Task Restore_WrongTestClientId_IsRefused()
     {
         var (session, _, store, _) = CreateSession();
-        var context = new FakeContext();
+        var context = new TestContext();
         store.Save(Token("other-client-id"));
 
         bool ok = await session.RestoreAsync(TestClientId, context, CancellationToken.None);

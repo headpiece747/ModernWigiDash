@@ -21,8 +21,10 @@ public sealed class TelemetryProducers : IDisposable
     private readonly PollLoop _frameTimePoll;
     private readonly Action<string> _log;
 
-    private string? _lastSensorError;
-    private string? _lastFrameTimeError;
+    // Message-change dedup for the two error surfaces — one rule, two uses
+    // (the old code mirrored the same comparison in both tick bodies).
+    private readonly LogOnChange _sensorErrors = new();
+    private readonly LogOnChange _frameTimeErrors = new();
 
     /// <param name="presentMonNative">The runtime-loaded PresentMon interop
     /// (injected so tests never load the real DLL).</param>
@@ -61,11 +63,8 @@ public sealed class TelemetryProducers : IDisposable
     internal void SensorPollTick()
     {
         var dto = _lhsReader.Poll();
-        if (_lhsReader.LastError != _lastSensorError)
-        {
-            _lastSensorError = _lhsReader.LastError;
-            if (_lastSensorError != null) _log($"[SENSOR] {_lastSensorError}");
-        }
+        string? error = _lhsReader.LastError;
+        if (_sensorErrors.Changed(error) && error != null) _log($"[SENSOR] {error}");
         LhmSensorStore.UpdateFromDto(dto);
     }
 
@@ -78,17 +77,10 @@ public sealed class TelemetryProducers : IDisposable
         var dto = _presentMonProducer.Poll();
         // Surface capture-health failures (service ETW dead) alongside the
         // unavailable state, once per message change.
-        if (!dto.IsAvailable || !dto.CaptureHealthy)
+        string? error = !dto.IsAvailable || !dto.CaptureHealthy ? dto.ErrorMessage : null;
+        if (_frameTimeErrors.Changed(error) && error != null)
         {
-            if (dto.ErrorMessage != _lastFrameTimeError)
-            {
-                _lastFrameTimeError = dto.ErrorMessage;
-                _log($"[FRAMETIME] frame capture unavailable: {dto.ErrorMessage}");
-            }
-        }
-        else
-        {
-            _lastFrameTimeError = null;
+            _log($"[FRAMETIME] frame capture unavailable: {error}");
         }
 
         FrameTimeStore.UpdateFromDto(dto);

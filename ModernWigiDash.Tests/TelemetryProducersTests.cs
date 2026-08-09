@@ -1,5 +1,4 @@
 using ModernWigiDash.App;
-using ModernWigiDash.App.PresentMon;
 
 namespace ModernWigiDash.Tests;
 
@@ -11,17 +10,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class TelemetryProducersTests
 {
-    private sealed class StubPresentMonNative : IPresentMonNative
-    {
-        public bool IsAvailable => false;
-        public string? UnavailableReason => "stub (test)";
-        public bool OpenSession() => false;
-        public void CloseSession() { }
-        public bool TrackProcess(int processId) => false;
-        public PresentMonPollResult PollDynamic(int processId) => new(null, PmStatus.Success);
-        public IReadOnlyList<double> DrainFrameTimes(int processId) => [];
-        public void Dispose() { }
-    }
 
     [TestMethod]
     public void Start_Stop_Dispose_IsSafe()

@@ -13,34 +13,9 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class CryptoStockTickerWidgetTests
 {
-    private sealed class StubHttpHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
-    }
-
-    private sealed class FakeFeed : IWebSocketFeed
-    {
-        public bool IsOpen => true;
-        public Task ConnectAsync(Uri uri, CancellationToken ct) => Task.CompletedTask;
-        public Task SendTextAsync(string payload, CancellationToken ct) => Task.CompletedTask;
-        public Task<string?> ReceiveTextAsync(CancellationToken ct) => Task.FromResult<string?>(null);
-        public void Abort() { }
-        public void Dispose() { }
-    }
-
-    private sealed class StubContext : IModernWigiDashContext
-    {
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-    }
 
     private static PriceFeedManager CreateOfflineFeed() => new(
-        new HttpClient(new StubHttpHandler()),
+        new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
         "test-key",
         feedFactory: _ => new FakeFeed(),
         reconnectDelay: TimeSpan.FromMilliseconds(10));
@@ -51,7 +26,7 @@ public class CryptoStockTickerWidgetTests
         var feed = CreateOfflineFeed();
         var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed };
 
-        await widget.InitializeAsync(new StubContext());
+        await widget.InitializeAsync(new TestContext());
 
         Assert.IsTrue(feed._subscribedCrypto.ContainsKey("BTC"), "Init must subscribe the symbol");
         await widget.DisposeAsync();
@@ -62,7 +37,7 @@ public class CryptoStockTickerWidgetTests
     {
         var feed = CreateOfflineFeed();
         var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed };
-        await widget.InitializeAsync(new StubContext());
+        await widget.InitializeAsync(new TestContext());
 
         widget.Symbol = "ETH";
         widget.OnPropertyChanged(nameof(CryptoStockTickerWidget.Symbol), "ETH");
@@ -77,7 +52,7 @@ public class CryptoStockTickerWidgetTests
     {
         var feed = CreateOfflineFeed();
         var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed };
-        await widget.InitializeAsync(new StubContext());
+        await widget.InitializeAsync(new TestContext());
 
         // Render a symbol that was never subscribed through the lifecycle —
         // a pure draw must not mutate feed state.
@@ -94,10 +69,31 @@ public class CryptoStockTickerWidgetTests
     {
         var feed = CreateOfflineFeed();
         var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed };
-        await widget.InitializeAsync(new StubContext());
+        await widget.InitializeAsync(new TestContext());
 
         await widget.DisposeAsync();
 
         Assert.IsFalse(feed._subscribedCrypto.ContainsKey("BTC"), "Dispose must stop polling the symbol");
+    }
+
+    [TestMethod]
+    public void CryptoStockTickerWidget_FxPair_RendersWithoutExceptions()
+    {
+        var widget = new CryptoStockTickerWidget { Symbol = "EUR/USD" };
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void CryptoStockTickerWidget_EmptySymbol_RendersPlaceholderWithoutExceptions()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        var widget = new CryptoStockTickerWidget { Symbol = "   " };
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+
+        Assert.IsNotNull(surface);
     }
 }

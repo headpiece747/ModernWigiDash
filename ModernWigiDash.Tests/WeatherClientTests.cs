@@ -57,10 +57,10 @@ public class WeatherClientTests
     private static HttpResponseMessage Respond(HttpRequestMessage request)
     {
         string url = request.RequestUri?.AbsoluteUri ?? "";
-        if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHandler.Ok(SampleGeocode);
-        if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHandler.Ok(SampleZip);
-        if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHandler.Ok(SampleForecast);
-        return StubHandler.NotFound();
+        if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
+        if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleZip);
+        if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+        return StubHttpHandler.NotFound();
     }
 
     [ClassCleanup]
@@ -72,7 +72,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_CoordinatePair_ParsesFullSnapshot()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
@@ -98,7 +98,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_CityGeocode_ResolvesViaGeocodingApi()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
@@ -113,7 +113,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_ZipGeocode_ResolvesViaZippopotam()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10001", null, null, null));
@@ -128,10 +128,10 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_GeocodeFailure_FallsBackToDefaultCoordinates()
     {
-        var stub = new StubHandler(request =>
+        var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                ? StubHandler.Ok(SampleForecast)
-                : StubHandler.NotFound());
+                ? StubHttpHandler.Ok(SampleForecast)
+                : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
@@ -145,7 +145,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_ExplicitLatLonOverride_SkipsGeocoding()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "New York", "40.1", "-75.2", null));
@@ -160,7 +160,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_Throttle_UsesInjectedClock()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock);
 
@@ -186,7 +186,7 @@ public class WeatherClientTests
         var client = CreateClient(stub);
 
         var inFlight = client.FetchCurrentAsync(CoordinateLocation);
-        await WaitUntilAsync(() => stub.Calls == 1);
+        await TestWait.WaitUntilAsync(() => stub.Calls == 1, TimeSpan.FromSeconds(5));
 
         var second = await client.FetchCurrentAsync(CoordinateLocation);
         Assert.IsNull(second, "A fetch while one is already in flight must be skipped");
@@ -200,7 +200,7 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_FetchFailure_ReturnsNullAndRecovers()
     {
         bool fail = true;
-        var stub = new StubHandler(_ => fail ? StubHandler.NotFound() : StubHandler.Ok(SampleForecast));
+        var stub = new StubHttpHandler(_ => fail ? StubHttpHandler.NotFound() : StubHttpHandler.Ok(SampleForecast));
         var client = CreateClient(stub);
 
         var failed = await client.FetchCurrentAsync(CoordinateLocation);
@@ -215,7 +215,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task InvalidateLocation_ResetsThrottle_SoNextFetchRuns()
     {
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock);
 
@@ -232,13 +232,13 @@ public class WeatherClientTests
     public async Task LoadCacheAsync_RoundTrips_FetchedSnapshot()
     {
         string dir = NewTempDir();
-        var stub = new StubHandler(Respond);
+        var stub = new StubHttpHandler(Respond);
         var writer = CreateClient(stub, cacheDirectory: dir);
 
         var fetched = await writer.FetchCurrentAsync(CoordinateLocation);
         Assert.IsNotNull(fetched);
 
-        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
         var loaded = await reader.LoadCacheAsync();
 
         Assert.IsNotNull(loaded);
@@ -254,7 +254,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task LoadCacheAsync_NoCacheFile_ReturnsNull()
     {
-        var client = new WeatherClient(NewTempDir(), "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
+        var client = new WeatherClient(NewTempDir(), "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
 
         var loaded = await client.LoadCacheAsync();
 
@@ -267,11 +267,11 @@ public class WeatherClientTests
         string dir = NewTempDir();
         try
         {
-            var stub = new StubHandler(Respond);
+            var stub = new StubHttpHandler(Respond);
             var writer = CreateClient(stub, cacheDirectory: dir);
             await writer.FetchCurrentAsync(CoordinateLocation);
 
-            var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
+            var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
             // The freshly written cache file can land a moment after
             // FetchCurrentAsync returns (async flush / AV scanner), so wait
             // for it before asserting it exists — same retry pattern as the
@@ -299,22 +299,6 @@ public class WeatherClientTests
         }
     }
 
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly Func<HttpRequestMessage, HttpResponseMessage> _respond;
-        public int Calls { get; private set; }
-
-        public StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) => _respond = respond;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            return Task.FromResult(_respond(request));
-        }
-
-        public static HttpResponseMessage Ok(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body) };
-        public static HttpResponseMessage NotFound() => new(HttpStatusCode.NotFound);
-    }
 
     /// <summary>Async handler that parks the request until the gate completes.</summary>
     private sealed class BlockingHandler : HttpMessageHandler
@@ -343,12 +327,5 @@ public class WeatherClientTests
         public FakeClock(DateTimeOffset start) => _now = start;
         public void Advance(TimeSpan delta) => _now += delta;
         public override DateTimeOffset GetUtcNow() => _now;
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> condition)
-    {
-        for (int i = 0; i < 200 && !condition(); i++)
-            await Task.Delay(10);
-        Assert.IsTrue(condition(), "Condition was not met within the wait budget");
     }
 }

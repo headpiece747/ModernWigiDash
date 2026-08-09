@@ -36,16 +36,6 @@ public class AudioVisualizerWidgetTests
         public void Dispose() => Stop();
     }
 
-    private sealed class FakeContext : IModernWigiDashContext
-    {
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-    }
-
     private static SKCanvas CreateCanvas()
     {
         var surface = SKSurface.Create(new SKImageInfo(406, 296));
@@ -57,7 +47,7 @@ public class AudioVisualizerWidgetTests
     {
         var source = new FakeCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
-        await widget.InitializeAsync(new FakeContext());
+        await widget.InitializeAsync(new TestContext());
 
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
 
@@ -71,7 +61,7 @@ public class AudioVisualizerWidgetTests
     {
         var source = new FakeCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
-        await widget.InitializeAsync(new FakeContext());
+        await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
 
         // Sample blocks arrive on the capture thread — here the test thread.
@@ -98,12 +88,29 @@ public class AudioVisualizerWidgetTests
         // an immediately-emitted block must be consumed, not stop capture.
         var source = new FakeCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
-        await widget.InitializeAsync(new FakeContext());
+        await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
 
         source.Emit(Enumerable.Repeat(0.25f, 512).ToArray());
 
         Assert.IsTrue(source.IsCapturing, "A fresh capture must not be killed by its first sample block");
         await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public void AudioVisualizerWidget_Render_AllStyles_ExecuteWithoutExceptions()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var canvas = surface.Canvas;
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        string[] styles = ["Neon Bars", "Oscilloscope Wave", "Radial Pulse"];
+        foreach (var style in styles)
+        {
+            var widget = new AudioVisualizerWidget { VisualizerStyle = style };
+            widget.Render(canvas, bounds);
+        }
+
+        Assert.IsNotNull(surface);
     }
 }

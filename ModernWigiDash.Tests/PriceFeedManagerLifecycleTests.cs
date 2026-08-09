@@ -13,19 +13,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class PriceFeedManagerLifecycleTests
 {
-    private sealed class StubHandler(string body) : HttpMessageHandler
-    {
-        public int Calls { get; private set; }
-        public List<string> RequestUrls { get; } = [];
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            RequestUrls.Add(request.RequestUri?.ToString() ?? "");
-            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) };
-            return Task.FromResult(response);
-        }
-    }
     [TestMethod]
     public void GetPrice_ReturnsNull_WhenNoFeedData()
     {
@@ -73,7 +60,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public async Task FetchFallbackAsync_InvalidStockSymbol_DoesNotCallHttp()
     {
-        var stub = new StubHandler("{}");
+        var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
         await feed.FetchFallbackAsync("AAPL&x=1", AssetKind.Stock);
@@ -84,7 +71,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public async Task FetchFallbackAsync_OverlongOrEmptySymbol_DoesNotCallHttp()
     {
-        var stub = new StubHandler("{}");
+        var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
         await feed.FetchFallbackAsync(new string('A', 100), AssetKind.Stock);
@@ -96,7 +83,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public async Task FetchFallbackAsync_ValidStockSymbol_StillCallsHttp()
     {
-        var stub = new StubHandler("""{"chart":{"result":[{"meta":{"regularMarketPrice":150.5,"chartPreviousClose":148.0}}]}}""");
+        var stub = new StubHttpHandler("""{"chart":{"result":[{"meta":{"regularMarketPrice":150.5,"chartPreviousClose":148.0}}]}}""");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
         await feed.FetchFallbackAsync("AAPL", AssetKind.Stock);
@@ -108,7 +95,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public void Subscribe_InvalidStockSymbol_NotAddedToSubscriptionSet()
     {
-        using var feed = new PriceFeedManager(new HttpClient(new StubHandler("{}")), "test-key");
+        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), "test-key");
 
         feed.Subscribe("AAPL&x=1", AssetKind.Stock);
         feed.Subscribe(new string('A', 100), AssetKind.Stock);
@@ -120,7 +107,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public void Subscribe_InvalidFxPair_NotAddedToSubscriptionSet()
     {
-        using var feed = new PriceFeedManager(new HttpClient(new StubHandler("{}")), "test-key");
+        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), "test-key");
 
         feed.Subscribe("EUR/U", AssetKind.Fx);
         feed.Subscribe("E/U", AssetKind.Fx);
@@ -132,7 +119,7 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public void Subscribe_ValidSymbols_StillEnterSubscriptionSets()
     {
-        using var feed = new PriceFeedManager(new HttpClient(new StubHandler("{}")), "test-key");
+        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), "test-key");
 
         feed.Subscribe("AAPL", AssetKind.Stock);
         feed.Subscribe("EUR/USD", AssetKind.Fx);
@@ -150,7 +137,7 @@ public class PriceFeedManagerLifecycleTests
         // Two widgets on one symbol hold two claims — one widget's
         // unsubscribe (symbol change / dispose) must not kill the other
         // widget's live subscription.
-        using var feed = new PriceFeedManager(new HttpClient(new StubHandler("{}")), "test-key");
+        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), "test-key");
 
         feed.Subscribe("BTC", AssetKind.Crypto);
         feed.Subscribe("BTC", AssetKind.Crypto); // second widget, same symbol

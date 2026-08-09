@@ -18,6 +18,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **Frame** | A pixel buffer (SKBitmap) composited by `SkiaFrameCompositor`, converted to RGB565, and streamed to the display over USB. |
 | **FrameSink** | A destination for composited frames. `IFrameSink` exposes `SendFrame(SKBitmap)` + `IsReady`, returning a truthful `FrameDeliveryResult`. The App binds one `FrameDelivery` instance to the direct-USB engine (the WCF sink and `FrameSinkRouter` were removed with the Service, ADR-0005). |
 | **FrameDelivery** | The single frame-delivery policy module (Sdk): bounded DropOldest channel → drain-to-latest → paced send, owning encode, pooled exact-size buffers, and drop accounting. One entry point feeds the policy: `Push(SKBitmap)` (encode + pool); a `FrameDelivery.Create` factory makes the required encode/pool/send seams unrepresentable at production bind sites (the ctor remains for tests exercising unconfigured readiness). The App's direct-USB sink is its one runtime instance; pacing defaults to 33ms, the USB engine's device-capability rate. Drop counting lives inside the module. |
+| **DisplayGeometry** | The WigiDash framebuffer geometry (Sdk) — the single source of truth for the active pixel area (1016×592, 2 bytes/pixel, payload size). Hardware's `DisplayProtocolConstants` aliases these values and Core's compositor derives its buffer from them, so the pixel area can never drift between projects. |
 | **Render tick** | The 30 FPS `DispatcherTimer` in MainWindow that calls `Compositor.Compose()`, converts the frame to RGB565, and queues it for delivery. |
 
 ### Hardware / Transport
@@ -58,6 +59,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | **FrameTimeStore** | Static in-process cache of FPS/frame-time snapshots. A facade over `StaticTelemetryStore<FrameTimeSnapshotRecord>` (Sdk) with the same shape as `LhmSensorStore`. Written by the PresentMon producer (see below) via `FrameTimeStore.UpdateFromDto` (producer timestamp preserved); read by `FrameTimeWidget` through `TryReadFresh`. |
 | **StaticTelemetryStore** | The shared store-facade base (Sdk): owns one `TelemetryStore<TRecord>` instance bound to the domain's empty value and staleness window, exposing read/freshness/update/reset. `LhmSensorStore` and `FrameTimeStore` wrap one instance each — the staleness policy and its test surface are declared exactly once. |
 | **PresentMon producer** | The frame-time source (ADR-0003). Replaces the deleted `FrameTimeReader`: the app connects to PresentMon Service (`pmOpenSession`, non-elevated), resolves a target PID (preferred foreground window, else most-active presenter), calls `pmStartTrackingProcess`, and polls a rolling 1s dynamic query (`PM_METRIC_PRESENTED_FPS` AVG/P99/P01, `CPU_FRAME_TIME`, `GPU_TIME`, `GPU_BUSY`, `APPLICATION`) on the existing 1s `PollLoop` shape. Results map into `FrameTimeSnapshotDto` → `FrameTimeStore.Update`. Loads `PresentMonAPI2.dll` from the service SDK dir at runtime — never ships its own copy (client↔service binary protocol isn't backward-guaranteed, issue #383). Absent service ⇒ widget shows a graceful "PresentMon not installed" state. |
+| **TrackedTargetResolver** | The PresentMon tracking-target selection (App/PresentMon): which process to track — the preferred foreground window, else the most-active presenter — with injected foreground/children probes (real user32/toolhelp adapters, test fakes) so resolution is drivable without real processes. |
 | **LibreHardwareService producer** | The hardware-sensor source (ADR-0004). Replaces the deleted `LhmSensorReader`: LibreHardwareService (LocalSystem) owns the hardware polling and publishes readings to named shared-memory maps (`sensors`, `status`; `all-hardware` optional) guarded by named mutexes. The App's `LhmSharedMemoryReader` opens the maps by name, takes the mutex per read, parses the header (`MetaDataSize`, `UpdateInterval`, `LastUpdate`, `index-length/offset`, `index-format`, `data-length/offset`) and honors the declared index format (JSON or MessagePack — MessagePack-CSharp package). DataSensor records map 1:1 into `SensorSnapshotDto` (SensorId preserved; `Avg` dropped to 0 — LHS publishes value/min/max only; `UnitFor(SensorType)` replicated app-side) → `LhmSensorStore.UpdateFromDto` on the existing 1s `PollLoop` shape. Absent service ⇒ widget shows a graceful "LibreHardwareService not running" state. |
 | **UpdateFromDto** | Maps sensor DTOs to widget-side records on the store. Centralizes the DTO→render-model translation in the store layer. |
 
@@ -114,7 +116,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ┌─────────────────────────────────────────────────────────┐
 │  ModernWigiDash.Widgets                                 │
-│  15+ widget implementations                             │
+│  12 widget implementations                              │
 │  Stores (LhmSensorStore, FrameTimeStore)                │
 │  PriceFeedManager, Twitch, TextRenderHelper              │
 └─────────────────────────────────────────────────────────┘
@@ -152,7 +154,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ### Testing
 
-- 488 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, touch routing/normalization, frame delivery/coalescing, widget property defaults + persistence round-trips, price-feed lifecycle and WebSocket-seam behavior, transport policy through the ITransferBackend seam, FramePump cadence, IRC-loop behavior through the feed seam, audio DSP + capture lifecycle, icon-grab geometry, page-tab rules, telemetry-producer ticks, cached color parsing, stopwatch timing, feed subscription lifecycle, profile-import sanitization caps, and present-mon blob parsing
+- 492 unit tests covering protocol framing, RGB565 encoding, DTO mapping, telemetry store freshness, touch routing/normalization, frame delivery/coalescing, widget property defaults + persistence round-trips, price-feed lifecycle and WebSocket-seam behavior, transport policy through the ITransferBackend seam, FramePump cadence, IRC-loop behavior through the feed seam, audio DSP + capture lifecycle, icon-grab geometry, page-tab rules, telemetry-producer ticks, cached color parsing, stopwatch timing, feed subscription lifecycle, log-cadence and log-on-change rules, profile-import sanitization caps, and present-mon blob parsing
 - `DisplayProtocolTests` — widget config layout + RGB565 encoding (BGRA framebuffer format)
 - `DisplayDeviceEngineTests` — direct-USB touch polling (normalized events, null-report skip), touch type normalization, protocol constants, dispose safety
 - `LhmSharedMemoryReaderTests` — LHS map parsing (JSON + MessagePack index), unit table, malformed-input fallbacks
@@ -165,6 +167,8 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 - `DisplayHidTransportTests` — transport policy (init sequence, frame framing, touch parsing) through the ITransferBackend seam
 - `FramePumpTests` — 30 FPS cadence wiring on a live STA/Dispatcher
 - `TwitchChatStreamLoopTests` — IRC loop behavior (handshake, reconnect backoff, PRIVMSG parsing) through the feed seam
+- `FontAndTextTests` / `GriddyIconsTests` / `HotkeyActionTests` — subject files split out of the old UnitTestSuite grab-bag (the suite now holds the remaining core-infrastructure tests; widget tests live with their widgets)
+- Shared test doubles in `TestDoubles.cs` — one `TestContext` / `FakeFeed` / `StubHttpHandler` / `StubPresentMonNative` per seam instead of a per-file copy
 
 ## Architecture Decisions
 

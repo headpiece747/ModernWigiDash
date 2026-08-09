@@ -25,7 +25,7 @@ public class StopwatchTimerWidgetTests
     {
         var clock = new MutableTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
-        widget.InitializeAsync(new StubContext()).AsTask().GetAwaiter().GetResult();
+        widget.InitializeAsync(new TestContext()).AsTask().GetAwaiter().GetResult();
 
         widget.OnTouch(default, TouchEventType.TouchDown); // start
         clock.UtcNowValue += TimeSpan.FromSeconds(5);
@@ -73,13 +73,4 @@ public class StopwatchTimerWidgetTests
         Assert.IsTrue(widget.ElapsedForTest >= TimeSpan.FromSeconds(1), "A running stopwatch must have accrued the elapsed time");
     }
 
-    private sealed class StubContext : IModernWigiDashContext
-    {
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-    }
 }

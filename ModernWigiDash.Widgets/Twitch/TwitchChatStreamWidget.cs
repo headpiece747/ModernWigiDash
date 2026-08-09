@@ -16,9 +16,14 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private const string AnonymousPass = "SCHMOOPIIE";
     private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
 
-    private const int StatusDisconnected = 0;
-    private const int StatusConnecting = 1;
-    private const int StatusConnected = 2;
+    /// <summary>The chat connection state — an enum so the render switches are
+    /// exhaustive and illegal states are unrepresentable.</summary>
+    private enum ChatStatus
+    {
+        Disconnected,
+        Connecting,
+        Connected
+    }
 
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
@@ -62,7 +67,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private CancellationTokenSource? _cts;
     private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
-    private volatile int _status;
+    private volatile ChatStatus _status;
     private volatile string _statusDetail = "";
     private volatile bool _disposed;
 
@@ -188,7 +193,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
-        if (_status == StatusConnected) StopConnection();
+        if (_status == ChatStatus.Connected) StopConnection();
         else StartConnection();
     }
 
@@ -198,7 +203,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _cts?.Dispose();
         _cts = new CancellationTokenSource(); // PONG token
         lock (_messagesLock) _messages.Clear();
-        _status = StatusConnecting;
+        _status = ChatStatus.Connecting;
         _statusDetail = "Connecting…";
         Context.RequestRender();
 
@@ -214,7 +219,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             onCycleEnded: _ => SetReconnectingStatus(),
             onStopped: () =>
             {
-                _status = StatusDisconnected;
+                _status = ChatStatus.Disconnected;
                 _statusDetail = "";
                 Context.RequestRender();
             },
@@ -228,7 +233,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _feedLoop?.Dispose();
         _feedLoop = null;
         _cts?.Cancel();
-        _status = StatusDisconnected;
+        _status = ChatStatus.Disconnected;
         _statusDetail = "";
         Context.RequestRender();
     }
@@ -246,14 +251,14 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         await SendIrcLineAsync(feed, "NICK " + nick, ct);
         await SendIrcLineAsync(feed, "JOIN #" + channel, ct);
 
-        _status = StatusConnecting;
+        _status = ChatStatus.Connecting;
         _statusDetail = "Joining #" + channel + "…";
         Context.RequestRender();
     }
 
     private void SetReconnectingStatus()
     {
-        _status = StatusDisconnected;
+        _status = ChatStatus.Disconnected;
         _statusDetail = "Reconnecting…";
         Context.RequestRender();
     }
@@ -307,7 +312,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         switch (command)
         {
             case "ROOMSTATE":
-                _status = StatusConnected;
+                _status = ChatStatus.Connected;
                 _statusDetail = "LIVE";
                 Context.RequestRender();
                 break;
@@ -320,13 +325,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                     if (msg.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase) ||
                         msg.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
                     {
-                        _status = StatusDisconnected;
+                        _status = ChatStatus.Disconnected;
                         _statusDetail = "Login failed — check token & username";
                         Context.LogError("Twitch login failed: " + msg);
                     }
                     else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
                     {
-                        _status = StatusConnected;
+                        _status = ChatStatus.Connected;
                         _statusDetail = "LIVE";
                         Context.RequestRender();
                     }
@@ -464,12 +469,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         string statusText = _status switch
         {
-            StatusConnected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
-            StatusConnecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
-            _ => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
+            ChatStatus.Connected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
+            ChatStatus.Connecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
+            ChatStatus.Disconnected => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
         };
 
-        var statusColor = _status == StatusConnected
+        var statusColor = _status == ChatStatus.Connected
             ? new SKColor(0x10, 0xB9, 0x81)
             : SKColors.White;
         using var statusPaint = new SKPaint { Color = statusColor, IsAntialias = true };
@@ -500,9 +505,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
             var hint = _status switch
             {
-                StatusConnected => "Waiting for chat…",
-                StatusDisconnected when !AutoConnect => "Tap to connect",
-                _ => "Waiting for connection…"
+                ChatStatus.Connected => "Waiting for chat…",
+                ChatStatus.Disconnected when !AutoConnect => "Tap to connect",
+                ChatStatus.Disconnected => "Waiting for connection…",
+                ChatStatus.Connecting => "Waiting for connection…"
             };
             canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
             canvas.Restore();

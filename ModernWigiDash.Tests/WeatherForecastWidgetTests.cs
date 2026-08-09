@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using ModernWigiDash.Widgets;
+using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
@@ -27,25 +28,11 @@ public class WeatherForecastWidgetTests
     }
     """;
 
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        private readonly string _body;
-        public int Calls { get; private set; }
-
-        public StubHandler(string body) => _body = body;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) };
-            return Task.FromResult(response);
-        }
-    }
 
     [TestMethod]
     public async Task FetchLiveWeather_Forecast_WithStubClient_ParsesIntoForecasts()
     {
-        var stub = new StubHandler(SampleForecast);
+        var stub = new StubHttpHandler(SampleForecast);
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub) };
 
         await widget.FetchLiveWeatherAsync(force: true);
@@ -58,7 +45,7 @@ public class WeatherForecastWidgetTests
     [TestMethod]
     public async Task FetchLiveWeather_Throttle_UsesInjectedClock()
     {
-        var stub = new StubHandler(SampleForecast);
+        var stub = new StubHttpHandler(SampleForecast);
         var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Clock = clock };
 
@@ -93,5 +80,90 @@ public class WeatherForecastWidgetTests
         public FakeClock(DateTimeOffset start) => _now = start;
         public void Advance(TimeSpan delta) => _now += delta;
         public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    [TestMethod]
+    public void WeatherForecastWidget_DefaultsAndProperties_InitializeCorrectly()
+    {
+        var widget = new WeatherForecastWidget();
+
+        Assert.AreEqual("New York", widget.Location);
+        Assert.AreEqual("Fixed Location", widget.LocationType);
+        Assert.AreEqual("Detailed", widget.LayoutMode);
+        Assert.AreEqual("Fahrenheit (°F, mph)", widget.UnitSystem);
+        Assert.AreEqual("#F59E0B", widget.AccentColorHex);
+        Assert.IsTrue(widget.ShowHumidity);
+        Assert.IsTrue(widget.ShowWind);
+        Assert.IsTrue(widget.ShowFeelsLike);
+        Assert.IsTrue(widget.ShowHighLow);
+        Assert.IsFalse(widget.StaticSnapshot);
+
+        // Property Change resets geocode cache flag
+        widget.Location = "Tokyo";
+        Assert.AreEqual("Tokyo", widget.Location);
+    }
+
+    [TestMethod]
+    public void WeatherForecastWidget_TouchInteractivity_CyclesLayoutAndUnits()
+    {
+        var widget = new WeatherForecastWidget();
+        Assert.AreEqual("Detailed", widget.LayoutMode);
+
+        // Touch top-left (Layout cycle)
+        widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Daily Forecast", widget.LayoutMode);
+
+        widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Hourly Forecast", widget.LayoutMode);
+
+        widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Current Only", widget.LayoutMode);
+
+        widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Compact", widget.LayoutMode);
+
+        widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Detailed", widget.LayoutMode);
+
+        // Touch top-right (Unit switch)
+        widget.OnTouch(new SKPoint(widget.DefaultSize.Width - 20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Celsius (°C, km/h)", widget.UnitSystem);
+
+        widget.OnTouch(new SKPoint(widget.DefaultSize.Width - 20f, 15f), TouchEventType.TouchUp);
+        Assert.AreEqual("Fahrenheit (°F, mph)", widget.UnitSystem);
+    }
+
+    [TestMethod]
+    public void WeatherForecastWidget_Rendering_ExecutesWithoutExceptions()
+    {
+        var widget = new WeatherForecastWidget();
+        using var surface = SKSurface.Create(new SKImageInfo(400, 300));
+        var canvas = surface.Canvas;
+        var bounds = new SKRect(0, 0, 400, 300);
+
+        string[] modes = ["Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact"];
+        foreach (var mode in modes)
+        {
+            widget.LayoutMode = mode;
+            widget.Render(canvas, bounds);
+        }
+
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void WeatherForecastWidget_SmallGridSizeScaling_ExecutesWithoutExceptions()
+    {
+        var widget = new WeatherForecastWidget();
+        using var surface = SKSurface.Create(new SKImageInfo(200, 160));
+        var canvas = surface.Canvas;
+
+        SKSize[] smallSizes = [new(200, 160), new(150, 120), new(120, 90)];
+        foreach (var size in smallSizes)
+        {
+            widget.Render(canvas, new SKRect(0, 0, size.Width, size.Height));
+        }
+
+        Assert.IsNotNull(surface);
     }
 }
