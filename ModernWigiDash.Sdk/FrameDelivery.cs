@@ -196,11 +196,7 @@ public sealed class FrameDelivery : IDisposable
                     else
                     {
                         Interlocked.Increment(ref _sendFailed);
-                        // Log the first failure and every 60th after — the same
-                        // cadence as the success log — so a dead bus cannot
-                        // spam the log at ~30 lines/s.
-                        if (Interlocked.Increment(ref _sendFailLogCount) == 1
-                            || Volatile.Read(ref _sendFailLogCount) % 60 == 0)
+                        if (ShouldLogSendFailure())
                         {
                             _log?.Invoke($"[FrameDelivery] Send failed (buffer={latest.Buffer.Length} bytes)");
                         }
@@ -209,8 +205,7 @@ public sealed class FrameDelivery : IDisposable
                 catch (Exception ex)
                 {
                     Interlocked.Increment(ref _sendFailed);
-                    if (Interlocked.Increment(ref _sendFailLogCount) == 1
-                        || Volatile.Read(ref _sendFailLogCount) % 60 == 0)
+                    if (ShouldLogSendFailure())
                     {
                         _log?.Invoke($"[FrameDelivery] Send exception: {ex.Message}");
                     }
@@ -225,6 +220,17 @@ public sealed class FrameDelivery : IDisposable
         {
             // Expected: sender loop cancelled during shutdown
         }
+    }
+
+    /// <summary>
+    /// True when this send failure should be logged: the first one, then every
+    /// 60th — the same cadence as the success log — so a dead bus cannot spam
+    /// the log at ~30 lines/s.
+    /// </summary>
+    private bool ShouldLogSendFailure()
+    {
+        int count = Interlocked.Increment(ref _sendFailLogCount);
+        return count == 1 || count % 60 == 0;
     }
 
     private void ReleaseSlot(FrameSlot slot, bool dropped)
