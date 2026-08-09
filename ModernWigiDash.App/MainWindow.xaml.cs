@@ -208,6 +208,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
         PlaceWidgetOnCanvas("twitch_chat", 0, 0, 406, 592);
         PlaceWidgetOnCanvas("picture_viewer", 406, 0, 610, 592);
 
+        // ── Page 5: Hardware Monitor (2x2 sensor dashboard) ──
+        pageIndex = _profile.Pages.Count;
+        var hardwarePage = new PageLayout { PageName = "Hardware Monitor" };
+        _profile.Pages.Add(hardwarePage);
+        _profile.ActivePageIndex = pageIndex;
+        PlaceWidgetOnCanvas("hardware_monitor", 0, 0, 508, 296);
+        PlaceWidgetOnCanvas("hardware_monitor", 508, 0, 508, 296);
+        PlaceWidgetOnCanvas("hardware_monitor", 0, 296, 508, 296);
+        PlaceWidgetOnCanvas("hardware_monitor", 508, 296, 508, 296);
+
         _profile.ActivePageIndex = 0;
     }
 
