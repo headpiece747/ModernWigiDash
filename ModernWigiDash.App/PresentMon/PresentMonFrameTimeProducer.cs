@@ -5,10 +5,12 @@ namespace ModernWigiDash.App.PresentMon;
 
 /// <summary>
 /// The App-side frame-time producer (ADR-0003). Polls the PresentMon Service
-/// through the <see cref="IPresentMonNative"/> seam, tracks the foreground
-/// process, and maps the dynamic-query + frame-query results into a
-/// <see cref="FrameTimeSnapshotDto"/> that MainWindow's poll tick feeds to
-/// <c>FrameTimeStore.UpdateFromDto</c>. PresentMon is a direct App↔service
+/// through the <see cref="IPresentMonNative"/> seam, resolves the tracking
+/// target via <see cref="TrackedTargetResolver"/> (the foreground process
+/// expanded to its descendant tree — multi-process apps present from child
+/// GPU/renderer processes), and maps the dynamic-query + frame-query results
+/// into a <see cref="FrameTimeSnapshotDto"/> that MainWindow's poll tick feeds
+/// to <c>FrameTimeStore.UpdateFromDto</c>. PresentMon is a direct App↔service
 /// connection — it is independent of the WCF service routing.
 /// </summary>
 public sealed class PresentMonFrameTimeProducer : IDisposable
@@ -17,7 +19,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     internal const int MaxSparklineSamples = 240;
 
     private readonly IPresentMonNative _native;
-    private readonly Func<int> _foregroundPidProvider;
+    private readonly TrackedTargetResolver _resolver;
     private readonly Func<int, string?> _processNameProvider;
     private readonly TimeProvider _timeProvider;
     private readonly List<double> _recentFrameTimes = [];
@@ -27,19 +29,19 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
 
     public PresentMonFrameTimeProducer(
         IPresentMonNative native,
-        Func<int> foregroundPidProvider,
+        TrackedTargetResolver resolver,
         Func<int, string?>? processNameProvider = null,
         TimeProvider? timeProvider = null)
     {
         _native = native;
-        _foregroundPidProvider = foregroundPidProvider;
+        _resolver = resolver;
         _processNameProvider = processNameProvider ?? DefaultProcessName;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
     /// Produces one frame-time snapshot. The DTO is never null: availability
-    /// failures, an absent foreground window, and "no data yet" all yield a
+    /// failures, an empty candidate set, and "no data yet" all yield a
     /// well-formed snapshot the widget can render (unavailable, or idle in
     /// monitor-refresh mode with <see cref="FrameTimeSnapshotDto.ProcessId"/> = -1).
     /// </summary>
@@ -53,9 +55,13 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         }
 
         // Skip our own process — its render loop presents to the WigiDash
-        // window and would dominate the "foreground app" FPS readout.
-        int pid = _foregroundPidProvider();
-        if (pid <= 0 || pid == Environment.ProcessId)
+        // window and would dominate the "foreground app" FPS readout. The
+        // resolver already excludes it; filtering here keeps the producer
+        // robust to whatever the seam returns.
+        List<int> candidates = _resolver.ResolveCandidates()
+            .Where(pid => pid > 0 && !TrackedTargetResolver.IsOwnProcess(pid))
+            .ToList();
+        if (candidates.Count == 0)
         {
             return Idle(now);
         }
@@ -66,42 +72,48 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         }
         _sessionOpen = true;
 
-        if (_trackedPid != pid)
+        // Multi-process apps (Chrome/Edge/Electron) present from child GPU or
+        // renderer processes, so poll the whole descendant tree. TrackProcess
+        // is idempotent at the native seam (AlreadyTrackingProcess tolerated);
+        // the first candidate that actually has data reports.
+        foreach (int pid in candidates)
         {
             if (!_native.TrackProcess(pid))
             {
-                return Idle(now);
+                continue;
             }
+
+            var poll = _native.PollDynamic(pid);
+            if (IsSessionLost(poll.Status))
+            {
+                ResetSession();
+                return Unavailable("PresentMon Service connection lost; reconnecting.", now);
+            }
+            if (poll.Sample is null)
+            {
+                continue;
+            }
+
             _trackedPid = pid;
+            AppendFrameTimes(_native.DrainFrameTimes(pid));
+
+            return new FrameTimeSnapshotDto
+            {
+                IsAvailable = true,
+                LastUpdate = now,
+                ProcessId = pid,
+                ProcessName = _processNameProvider(pid) ?? string.Empty,
+                Fps = poll.Sample.Fps,
+                FrameTimeMs = poll.Sample.Fps > 0 ? 1000.0 / poll.Sample.Fps : 0,
+                Low1PercentFps = poll.Sample.Low1PercentFps,
+                Low01PercentFps = FrameTimeStatistics.Low01PercentFps(_recentFrameTimes),
+                GpuBusyMs = poll.Sample.GpuBusyMs,
+                CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
+                RecentFrameTimesMs = new List<double>(_recentFrameTimes),
+            };
         }
 
-        var poll = _native.PollDynamic(pid);
-        if (IsSessionLost(poll.Status))
-        {
-            ResetSession();
-            return Unavailable("PresentMon Service connection lost; reconnecting.", now);
-        }
-        if (poll.Sample is null)
-        {
-            return Idle(now);
-        }
-
-        AppendFrameTimes(_native.DrainFrameTimes(pid));
-
-        return new FrameTimeSnapshotDto
-        {
-            IsAvailable = true,
-            LastUpdate = now,
-            ProcessId = pid,
-            ProcessName = _processNameProvider(pid) ?? string.Empty,
-            Fps = poll.Sample.Fps,
-            FrameTimeMs = poll.Sample.Fps > 0 ? 1000.0 / poll.Sample.Fps : 0,
-            Low1PercentFps = poll.Sample.Low1PercentFps,
-            Low01PercentFps = FrameTimeStatistics.Low01PercentFps(_recentFrameTimes),
-            GpuBusyMs = poll.Sample.GpuBusyMs,
-            CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
-            RecentFrameTimesMs = new List<double>(_recentFrameTimes),
-        };
+        return Idle(now);
     }
 
     public void Dispose()

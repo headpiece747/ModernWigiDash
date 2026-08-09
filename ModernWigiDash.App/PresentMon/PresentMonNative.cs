@@ -5,12 +5,13 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.App.PresentMon;
 
 /// <summary>
-/// Runtime-loaded PresentMon API v3.4 interop (ADR-0003). Loads
+/// Runtime-loaded PresentMon API v3 interop (ADR-0003). Loads
 /// <c>PresentMonAPI2.dll</c> from the PresentMon SDK install directory at
 /// runtime — never ships its own copy, because the client↔service binary
 /// protocol isn't backward-guaranteed (issue #383). All function pointers are
-/// resolved at load time; a missing library or missing export marks the seam
-/// unavailable and the producer degrades to the widget's graceful state.
+/// resolved at load time; a missing library, missing export, or a non-v3 API
+/// generation (checked via <c>pmGetApiVersion</c>) marks the seam unavailable
+/// and the producer degrades to the widget's graceful state.
 /// </summary>
 public sealed class PresentMonNative : IPresentMonNative
 {
@@ -66,6 +67,9 @@ public sealed class PresentMonNative : IPresentMonNative
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate PmStatus PmFreeFrameQuery(IntPtr handle);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate PmStatus PmGetApiVersion(out int major, out int minor, out int patch);
+
     private static readonly IntPtr? Library;
     private static readonly PmOpenSession? OpenSessionFn;
     private static readonly PmCloseSession? CloseSessionFn;
@@ -76,6 +80,7 @@ public sealed class PresentMonNative : IPresentMonNative
     private static readonly PmRegisterFrameQuery? RegisterFrameQueryFn;
     private static readonly PmConsumeFrames? ConsumeFramesFn;
     private static readonly PmFreeFrameQuery? FreeFrameQueryFn;
+    private static readonly PmGetApiVersion? GetApiVersionFn;
     private static readonly string? LoadFailureReason;
 
     private IntPtr _session;
@@ -102,13 +107,23 @@ public sealed class PresentMonNative : IPresentMonNative
             RegisterFrameQueryFn = Resolve<PmRegisterFrameQuery>(lib, "pmRegisterFrameQuery");
             ConsumeFramesFn = Resolve<PmConsumeFrames>(lib, "pmConsumeFrames");
             FreeFrameQueryFn = Resolve<PmFreeFrameQuery>(lib, "pmFreeFrameQuery");
+            GetApiVersionFn = Resolve<PmGetApiVersion>(lib, "pmGetApiVersion");
 
             bool anyMissing = OpenSessionFn is null || CloseSessionFn is null || StartTrackingFn is null
                 || RegisterDynamicQueryFn is null || FreeDynamicQueryFn is null || PollDynamicQueryFn is null
-                || RegisterFrameQueryFn is null || ConsumeFramesFn is null || FreeFrameQueryFn is null;
+                || RegisterFrameQueryFn is null || ConsumeFramesFn is null || FreeFrameQueryFn is null
+                || GetApiVersionFn is null;
             if (anyMissing)
             {
                 LoadFailureReason = "PresentMonAPI2.dll is missing required exports (incompatible version).";
+            }
+            // The PmStatus enum and PM_QUERY_ELEMENT layout this code targets
+            // are v3-shaped; the file version (3.0.3) is the service protocol
+            // version — require the API generation, not a patch match.
+            else if (GetApiVersionFn!(out int major, out int minor, out int patch) != PmStatus.Success
+                || major != 3)
+            {
+                LoadFailureReason = $"PresentMonAPI2.dll version {major}.{minor}.{patch} is not supported (v3.x required).";
             }
         }
     }

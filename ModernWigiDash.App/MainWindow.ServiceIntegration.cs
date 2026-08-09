@@ -1,4 +1,3 @@
-using System;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
@@ -53,22 +52,5 @@ public partial class MainWindow
         }
 
         FrameTimeStore.UpdateFromDto(dto);
-    }
-
-    /// <summary>
-    /// PID of the current foreground window's process (preferred PresentMon
-    /// tracking target), or 0 when no foreground window is available.
-    /// </summary>
-    private static int GetForegroundProcessId()
-    {
-        IntPtr hwnd = GetForegroundWindow();
-        if (hwnd == IntPtr.Zero)
-        {
-            return 0;
-        }
-
-        uint pid;
-        GetWindowThreadProcessId(hwnd, out pid);
-        return (int)pid;
     }
 }

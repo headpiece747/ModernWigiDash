@@ -15,6 +15,8 @@ public class PresentMonFrameTimeProducerTests
         public PresentMonDynamicSample? PollResult { get; set; }
         public PmStatus PollStatus { get; set; } = PmStatus.Success;
         public IReadOnlyList<double> FrameTimes { get; set; } = [];
+        public Func<int, bool>? TrackHandler { get; set; }
+        public Func<int, PresentMonPollResult>? PollHandler { get; set; }
 
         public int OpenSessionCalls { get; private set; }
         public int CloseSessionCalls { get; private set; }
@@ -33,12 +35,16 @@ public class PresentMonFrameTimeProducerTests
         public bool TrackProcess(int processId)
         {
             TrackedProcessIds.Add(processId);
-            return TrackProcessResult;
+            return TrackHandler is null ? TrackProcessResult : TrackHandler(processId);
         }
 
         public PresentMonPollResult PollDynamic(int processId)
         {
             PolledProcessIds.Add(processId);
+            if (PollHandler is not null)
+            {
+                return PollHandler(processId);
+            }
             return new PresentMonPollResult(
                 PollStatus == PmStatus.Success ? PollResult : null, PollStatus);
         }
@@ -60,11 +66,12 @@ public class PresentMonFrameTimeProducerTests
     private static PresentMonFrameTimeProducer CreateProducer(
         FakePresentMonNative native,
         int foregroundPid,
+        Func<int, IReadOnlyList<int>>? childrenProvider = null,
         Func<int, string>? nameProvider = null)
     {
         return new PresentMonFrameTimeProducer(
             native,
-            () => foregroundPid,
+            new TrackedTargetResolver(() => foregroundPid, childrenProvider ?? (_ => [])),
             nameProvider ?? (_ => "game.exe"));
     }
 
@@ -160,7 +167,10 @@ public class PresentMonFrameTimeProducerTests
     {
         int pid = 100;
         var native = AvailableNative();
-        var producer = new PresentMonFrameTimeProducer(native, () => pid, _ => "game.exe");
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
 
         producer.Poll();
 
@@ -214,7 +224,7 @@ public class PresentMonFrameTimeProducerTests
     }
 
     [TestMethod]
-    public void Poll_OpenSessionOnce_AcrossMultiplePolls()
+    public void Poll_OpenSessionOnce_ReappliesTrackingEachPoll()
     {
         var native = AvailableNative();
         var producer = CreateProducer(native, 4321);
@@ -224,7 +234,8 @@ public class PresentMonFrameTimeProducerTests
         producer.Poll();
 
         Assert.AreEqual(1, native.OpenSessionCalls);
-        Assert.AreEqual(1, native.TrackedProcessIds.Count, "same pid must be tracked only once");
+        CollectionAssert.AreEqual(new[] { 4321, 4321, 4321 }, native.TrackedProcessIds,
+            "tracking is re-applied per poll; TrackProcess is idempotent at the native seam");
     }
 
     [TestMethod]
@@ -273,7 +284,8 @@ public class PresentMonFrameTimeProducerTests
         Assert.AreEqual(4321, recovered.ProcessId);
         Assert.AreEqual(143.2, recovered.Fps, 0.001);
         Assert.AreEqual(2, native.OpenSessionCalls, "session must be re-opened after the service restart");
-        CollectionAssert.AreEqual(new[] { 4321, 4321 }, native.TrackedProcessIds, "tracking must be re-applied on the fresh session");
+        CollectionAssert.AreEqual(new[] { 4321, 4321, 4321 }, native.TrackedProcessIds,
+            "tracking is re-applied per poll on the fresh session (idempotent at the native seam)");
     }
 
     [TestMethod]
@@ -291,5 +303,85 @@ public class PresentMonFrameTimeProducerTests
         Assert.AreEqual(-1, dto.ProcessId);
         Assert.AreEqual(0, native.CloseSessionCalls, "the session must survive non-session failures");
         Assert.AreEqual(1, native.OpenSessionCalls);
+    }
+
+    [TestMethod]
+    public void Poll_RootNoDataButDescendantHasData_ReportsDescendant()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322] : []);
+        native.PollHandler = pid => new PresentMonPollResult(
+            pid == 4322 ? new PresentMonDynamicSample(143.2, 110.4, 0.93, 4.05) : null,
+            PmStatus.Success);
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.AreEqual(4322, dto.ProcessId,
+            "the reporting pid must be the descendant that actually presents");
+        Assert.AreEqual("game.exe", dto.ProcessName);
+        Assert.AreEqual(143.2, dto.Fps, 0.001);
+        CollectionAssert.AreEqual(new[] { 4321, 4322 }, native.PolledProcessIds,
+            "the whole tree must be polled in order until a sample arrives");
+        CollectionAssert.AreEqual(new[] { 4321, 4322 }, native.TrackedProcessIds,
+            "every candidate must be tracked so its data can arrive on a later tick");
+    }
+
+    [TestMethod]
+    public void Poll_NoCandidateHasData_ReturnsIdle()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322] : []);
+        native.PollResult = null;
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.AreEqual(-1, dto.ProcessId);
+        CollectionAssert.AreEqual(new[] { 4321, 4322 }, native.PolledProcessIds,
+            "every candidate must be polled before giving up");
+        CollectionAssert.AreEqual(new[] { 4321, 4322 }, native.TrackedProcessIds);
+    }
+
+    [TestMethod]
+    public void Poll_SessionLostMidLoop_ResetsAndStopsPolling()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322] : []);
+        native.PollHandler = pid => new PresentMonPollResult(
+            null, pid == 4321 ? PmStatus.SessionNotOpen : PmStatus.Success);
+
+        var dto = producer.Poll();
+
+        Assert.IsFalse(dto.IsAvailable, "a dead session mid-loop must surface as unavailable, not idle");
+        Assert.AreEqual(1, native.CloseSessionCalls, "the dead session handle must be closed");
+        CollectionAssert.AreEqual(new[] { 4321 }, native.PolledProcessIds,
+            "polling must stop immediately on a session loss — no further candidates");
+    }
+
+    [TestMethod]
+    public void Poll_OwnProcessInCandidates_Skipped()
+    {
+        int ownPid = Environment.ProcessId;
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [ownPid, 4322] : []);
+
+        var dto = producer.Poll();
+
+        Assert.AreEqual(4321, dto.ProcessId, "the own process must be skipped, the root still reports");
+        CollectionAssert.DoesNotContain(native.PolledProcessIds, ownPid);
+        CollectionAssert.DoesNotContain(native.TrackedProcessIds, ownPid);
+    }
+
+    [TestMethod]
+    public void Poll_TrackFailureOnRoot_FallsThroughToDescendant()
+    {
+        var native = AvailableNative();
+        native.TrackHandler = pid => pid != 4321;
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322] : []);
+
+        var dto = producer.Poll();
+
+        Assert.AreEqual(4322, dto.ProcessId, "a candidate tracking rejected must be skipped, not fatal");
     }
 }
