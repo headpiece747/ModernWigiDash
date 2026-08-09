@@ -142,8 +142,23 @@ public sealed class PriceFeedManager : IDisposable
     private Task? _fxRestTask;
     private bool _disposed;
 
+    /// <summary>
+    /// One long-lived client shared by every feed manager. Widgets are
+    /// reflection-instantiated (parameterless ctor) so no DI/IHttpClientFactory
+    /// is available — a shared client reuses sockets instead of creating one
+    /// HttpClient per instance.
+    /// </summary>
+    private static readonly HttpClient SharedHttpClient = CreateSharedHttpClient();
+
+    private static HttpClient CreateSharedHttpClient()
+    {
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ModernWigiDash/2.0");
+        return client;
+    }
+
     public PriceFeedManager(string? finnhubApiKey = null)
-        : this(new HttpClient(), finnhubApiKey)
+        : this(SharedHttpClient, finnhubApiKey)
     {
     }
 
@@ -158,7 +173,8 @@ public sealed class PriceFeedManager : IDisposable
         {
             FileLog.Write("[PRICE-FEED] FINNHUB_API_KEY not configured — stock WebSocket/REST feeds disabled. Set the FINNHUB_API_KEY environment variable or pass the key to the constructor. Yahoo Finance fallback still works.");
         }
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("ModernWigiDash/2.0");
+        // Idempotent across instances that share a client (the static default).
+        _http.DefaultRequestHeaders.UserAgent.TryParseAdd("ModernWigiDash/2.0");
     }
 
     /// <summary>
