@@ -303,10 +303,18 @@ public partial class MainWindow : Window, IModernWigiDashContext
     #region Inspector event forwarding (logic lives in Inspector.InspectorController)
 
     private void Transform_Changed(object sender, TextChangedEventArgs e)
-        => _inspector.TransformChanged(sender, e);
+    {
+        if (_inspector is null) return; // XAML init can raise these before the ctor assigns the controller
+        _inspector.TransformChanged(sender, e);
+    }
 
     private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        => _inspector.OpacityChanged(sender, e);
+    {
+        // The opacity slider's initial Value fires during InitializeComponent,
+        // before _inspector exists — must not NRE the window construction.
+        if (_inspector is null) return;
+        _inspector.OpacityChanged(sender, e);
+    }
 
     #endregion
 
