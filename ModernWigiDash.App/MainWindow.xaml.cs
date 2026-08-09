@@ -218,6 +218,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
         PlaceWidgetOnCanvas("hardware_monitor", 0, 296, 508, 296);
         PlaceWidgetOnCanvas("hardware_monitor", 508, 296, 508, 296);
 
+        // ── Page 6: FPS / Frame Time (hero + 4 metric cards) ──
+        pageIndex = _profile.Pages.Count;
+        var frameTimePage = new PageLayout { PageName = "FPS / Frame Time" };
+        _profile.Pages.Add(frameTimePage);
+        _profile.ActivePageIndex = pageIndex;
+        PlaceWidgetOnCanvas("frame_time", 0, 0, 508, 296);
+        PlaceWidgetOnCanvas("frame_time", 508, 0, 508, 296);
+        PlaceWidgetOnCanvas("frame_time", 0, 296, 508, 296);
+        PlaceWidgetOnCanvas("frame_time", 508, 296, 508, 296);
+
         _profile.ActivePageIndex = 0;
     }
 
