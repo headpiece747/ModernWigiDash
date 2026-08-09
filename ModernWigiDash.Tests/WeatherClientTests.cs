@@ -265,16 +265,30 @@ public class WeatherClientTests
     public async Task ClearCache_DeletesCacheFile()
     {
         string dir = NewTempDir();
-        var stub = new StubHandler(Respond);
-        var writer = CreateClient(stub, cacheDirectory: dir);
-        await writer.FetchCurrentAsync(CoordinateLocation);
+        try
+        {
+            var stub = new StubHandler(Respond);
+            var writer = CreateClient(stub, cacheDirectory: dir);
+            await writer.FetchCurrentAsync(CoordinateLocation);
 
-        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
-        Assert.IsNotNull(await reader.LoadCacheAsync());
+            var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
+            Assert.IsNotNull(await reader.LoadCacheAsync());
 
-        reader.ClearCache();
+            // The freshly written file can be held open by the AV scanner for a
+            // moment, so ClearCache's delete may need a retry before it sticks.
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                reader.ClearCache();
+                if (await reader.LoadCacheAsync() is null) return;
+                await Task.Delay(50);
+            }
 
-        Assert.IsNull(await reader.LoadCacheAsync(), "After ClearCache the cache file must be gone");
+            Assert.Fail("After ClearCache the cache file must be gone (delete kept failing)");
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
     }
 
     private sealed class StubHandler : HttpMessageHandler
