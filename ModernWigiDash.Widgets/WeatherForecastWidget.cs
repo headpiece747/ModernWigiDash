@@ -1,9 +1,8 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
@@ -63,30 +62,18 @@ public class WeatherForecastWidget : ModernWidgetBase
     [WidgetProperty("Longitude", WidgetPropertyType.Text, "Override longitude (e.g. -74.0060). Leave empty to auto-resolve from Location.", "")]
     public string Longitude { get; set; } = "";
 
-    internal readonly record struct DailyForecastItem(string DayName, double MaxTempC, double MinTempC, int WeatherCode);
-    internal readonly record struct HourlyForecastItem(string TimeLabel, double TempC, int WeatherCode);
+    private readonly WeatherClient _client;
 
-    private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
+    public WeatherForecastWidget()
     {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(15),
-        EnableMultipleHttp2Connections = true
-    });
+        _client = new WeatherClient(CacheDir, $"weather_{InstanceId}.json", logError: (message, exception) => Context?.LogError(message, exception));
+    }
 
-    /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps.</summary>
-    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+    /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
+    internal TimeProvider Clock { get => _client.Clock; set => _client.Clock = value; }
 
-    /// <summary>Test seam: substitute HTTP transport for fetch tests (defaults to <see cref="SharedHttpClient"/>).</summary>
-    internal HttpClient? TestHttpClient { get; set; }
-
-    private HttpClient Http => TestHttpClient ?? SharedHttpClient;
-
-    private DateTime _lastFetchTime = DateTime.MinValue;
-    private volatile bool _isFetching;
-    private string _lastLocationQuery = "";
-
-    private double? _lat;
-    private double? _lon;
-    private string _resolvedCityName = "New York";
+    /// <summary>Test seam: substitute HTTP transport for fetch tests (forwards to the client).</summary>
+    internal HttpClient? TestHttpClient { get => _client.TestHttpClient; set => _client.TestHttpClient = value; }
 
     private double _currentTempC = 25.0; // 77°F default
     private double _feelsLikeC = 22.2;  // 72°F default
@@ -106,13 +93,11 @@ public class WeatherForecastWidget : ModernWidgetBase
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
     private Timer? _refreshTimer;
     private CancellationTokenSource? _pollCts;
-    private string CachePath => Path.Combine(CacheDir, $"weather_{InstanceId}.json");
 
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
-        Directory.CreateDirectory(CacheDir);
-        _ = LoadCacheAsync();
+        _ = LoadCachedWeatherAsync();
         _pollCts = new CancellationTokenSource();
         _refreshTimer = new Timer(async _ => await FetchLiveWeatherAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromMinutes(15));
         _ = FetchLiveWeatherAsync();
@@ -137,9 +122,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude))
         {
-            _lat = null;
-            _lon = null;
-            _lastFetchTime = DateTime.MinValue;
+            _client.InvalidateLocation();
             _ = FetchLiveWeatherAsync(force: true);
         }
         base.OnPropertyChanged(propertyName, newValue);
@@ -166,7 +149,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         // Kick the fetch only when it is due — the internal throttle would
         // early-return anyway, but the call itself allocates a Task per frame.
-        if (!_isFetching && IsFetchDue())
+        if (IsFetchDue())
         {
             _ = FetchLiveWeatherAsync();
         }
@@ -192,7 +175,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         float headerHeight = Math.Clamp(44f * sy, 24f, 90f);
 
         // Prominent Location Name Header
-        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _resolvedCityName : CustomLabel;
+        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _client.ResolvedCityName : CustomLabel;
         string headerDisplay = cityRaw.ToUpperInvariant();
         float locationFontSize = Math.Clamp(24f * s, 12f, 44f);
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, locationFontSize);
@@ -201,7 +184,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         float headerTextY = bounds.Top + headerHeight * 0.65f;
 
         // Auto-truncate city name to guarantee header text fits without overlapping badge
-        var (tempUnit, speedUnit) = ParseUnitSystem(UnitSystem);
+        var (tempUnit, speedUnit) = WeatherClient.ParseUnitSystem(UnitSystem);
         float badgeWidth = Math.Clamp(54f * s, 30f, 100f);
         float badgeHeight = Math.Clamp(26f * sy, 16f, 50f);
         float maxTitleW = Math.Max(30f, bounds.Width - pad * 2f - badgeWidth);
@@ -242,7 +225,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
     {
-        var (icon, desc) = MapWmoCode(_weatherCode);
+        var (icon, desc) = WeatherClient.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
         float w = bounds.Width;
         float h = bounds.Height;
@@ -252,10 +235,10 @@ public class WeatherForecastWidget : ModernWidgetBase
         float forecastH = hasForecast ? Math.Clamp(80f * sy, 45f, 160f) : 0f;
 
         List<string> metrics = [];
-        if (ShowFeelsLike) metrics.Add($"Feels: {FormatTemp(_feelsLikeC, tempUnit, true)}");
+        if (ShowFeelsLike) metrics.Add($"Feels: {WeatherClient.FormatTemp(_feelsLikeC, tempUnit, true)}");
         if (ShowHumidity) metrics.Add($"Humidity: {_humidity:F0}%");
-        if (ShowWind) metrics.Add($"Wind: {FormatSpeed(_windSpeedKmH, speedUnit)}");
-        if (ShowHighLow) metrics.Add($"H:{FormatTemp(_highTempC, tempUnit, true)} L:{FormatTemp(_lowTempC, tempUnit, true)}");
+        if (ShowWind) metrics.Add($"Wind: {WeatherClient.FormatSpeed(_windSpeedKmH, speedUnit)}");
+        if (ShowHighLow) metrics.Add($"H:{WeatherClient.FormatTemp(_highTempC, tempUnit, true)} L:{WeatherClient.FormatTemp(_lowTempC, tempUnit, true)}");
 
         // Show metrics pill strip only if container height is at least 150px physical units
         bool hasMetrics = metrics.Count > 0 && h >= 150f;
@@ -275,7 +258,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
-        string mainTempStr = FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = WeatherClient.FormatTemp(_currentTempC, tempUnit);
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
 
@@ -428,7 +411,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         for (int i = 0; i < count; i++)
         {
             var day = _dailyForecastSnapshot[i];
-            var (dayIcon, _) = MapWmoCode(day.WeatherCode);
+            var (dayIcon, _) = WeatherClient.MapWmoCode(day.WeatherCode);
             float colCx = bounds.Left + (i + 0.5f) * colWidth;
 
             var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, dayFontSize);
@@ -439,7 +422,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             float dayX = colCx - (dayBounds.Left + dayBounds.Width / 2f);
             canvas.DrawTextWithFallback(day.DayName, dayX, dayY, dayFont, dayPaint);
 
-            string rangeStr = $"{FormatTemp(day.MaxTempC, tempUnit, true)} / {FormatTemp(day.MinTempC, tempUnit, true)}";
+            string rangeStr = $"{WeatherClient.FormatTemp(day.MaxTempC, tempUnit, true)} / {WeatherClient.FormatTemp(day.MinTempC, tempUnit, true)}";
             var rangeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, rangeFontSize);
             using var rangePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
             float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
@@ -489,7 +472,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, rowBg);
             canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, rowBorder);
 
-            var (icon, desc) = MapWmoCode(day.WeatherCode);
+            var (icon, desc) = WeatherClient.MapWmoCode(day.WeatherCode);
 
             var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
             using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
@@ -503,7 +486,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             using var descPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
             canvas.DrawTextWithFallback(desc, rowRect.Left + 110f * sx, rowRect.MidY + 4f * sy, descFont, descPaint);
 
-            string highLowStr = $"High: {FormatTemp(day.MaxTempC, tempUnit)}  Low: {FormatTemp(day.MinTempC, tempUnit)}";
+            string highLowStr = $"High: {WeatherClient.FormatTemp(day.MaxTempC, tempUnit)}  Low: {WeatherClient.FormatTemp(day.MinTempC, tempUnit)}";
             var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
             using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawTextWithFallback(highLowStr, rowRect.Right - FontHelper.MeasureTextWithFallback(highLowStr, tempFont) - 12f * sx, rowRect.MidY + 4f * sy, tempFont, tempPaint);
@@ -529,7 +512,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             canvas.DrawRoundRect(colRect, 8f * s, 8f * s, colBg);
             canvas.DrawRoundRect(colRect, 8f * s, 8f * s, colBorder);
 
-            var (icon, _) = MapWmoCode(item.WeatherCode);
+            var (icon, _) = WeatherClient.MapWmoCode(item.WeatherCode);
 
             var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
             using var timePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
@@ -539,7 +522,7 @@ public class WeatherForecastWidget : ModernWidgetBase
             using var iconPaint = new SKPaint { IsAntialias = true };
             canvas.DrawTextWithFallback(icon, colRect.MidX - 12f * sx, colRect.MidY + 6f * sy, iconFont, iconPaint);
 
-            string tempStr = FormatTemp(item.TempC, tempUnit);
+            string tempStr = WeatherClient.FormatTemp(item.TempC, tempUnit);
             var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
             using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
             canvas.DrawTextWithFallback(tempStr, colRect.MidX - (FontHelper.MeasureTextWithFallback(tempStr, tempFont) / 2f), colRect.Bottom - 14f * sy, tempFont, tempPaint);
@@ -548,7 +531,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
     {
-        var (icon, desc) = MapWmoCode(_weatherCode);
+        var (icon, desc) = WeatherClient.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
         float midY = bounds.MidY;
         float midX = bounds.MidX;
@@ -561,7 +544,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
-        string mainTempStr = FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = WeatherClient.FormatTemp(_currentTempC, tempUnit);
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         float tempW = tempFont.MeasureText(mainTempStr);
@@ -596,38 +579,17 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, string tempUnit, float sx, float sy)
     {
-        var (icon, _) = MapWmoCode(_weatherCode);
+        var (icon, _) = WeatherClient.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, Math.Clamp(26f * s, 14f, 32f));
         using var iconPaint = new SKPaint { IsAntialias = true };
         canvas.DrawTextWithFallback(icon, bounds.Left, bounds.MidY + 10f * sy, iconFont, iconPaint);
 
-        string mainTempStr = FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = WeatherClient.FormatTemp(_currentTempC, tempUnit);
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(20f * s, 12f, 26f));
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         canvas.DrawTextWithFallback(mainTempStr, bounds.Left + 36f * sx, bounds.MidY + 8f * sy, tempFont, tempPaint);
-    }
-
-    private static (string Icon, string Description) MapWmoCode(int code)
-    {
-        return code switch
-        {
-            0 => ("☀️", "Clear Sky"),
-            1 => ("🌤️", "Mainly Clear"),
-            2 => ("⛅", "Partly Cloudy"),
-            3 => ("☁️", "Overcast"),
-            45 or 48 => ("🌫️", "Foggy"),
-            51 or 53 or 55 => ("🌧️", "Drizzle"),
-            56 or 57 => ("🌧️❄️", "Freezing Drizzle"),
-            61 or 63 or 65 => ("🌧️", "Rainy"),
-            66 or 67 => ("🌧️❄️", "Freezing Rain"),
-            71 or 73 or 75 or 77 => ("❄️", "Snowy"),
-            80 or 81 or 82 => ("🌦️", "Rain Showers"),
-            85 or 86 => ("🌨️", "Snow Showers"),
-            95 or 96 or 99 => ("🌩️", "Thunderstorm"),
-            _ => ("☀️", "Fair")
-        };
     }
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
@@ -666,348 +628,52 @@ public class WeatherForecastWidget : ModernWidgetBase
         _ = FetchLiveWeatherAsync(force: true);
     }
 
-    private static (string tempUnit, string speedUnit) ParseUnitSystem(string unitSystem)
-    {
-        return unitSystem switch
-        {
-            "Fahrenheit (°F, mph)" => ("°F", "mph"),
-            "Celsius (°C, km/h)" or "" or null => ("°C", "km/h"),
-            "Celsius (°C, mph)" => ("°C", "mph"),
-            "Celsius (°C, m/s)" => ("°C", "m/s"),
-            "Kelvin (K, m/s)" => ("K", "m/s"),
-            _ => ("°C", "km/h"),
-        };
-    }
-
-    private static string FormatTemp(double tempC, string tempUnit, bool shortFormat = false)
-    {
-        return tempUnit switch
-        {
-            "°F" => shortFormat ? $"{(tempC * 9.0 / 5.0 + 32.0):F0}°" : $"{(tempC * 9.0 / 5.0 + 32.0):F0}°F",
-            "K" => $"{tempC + 273.15:F0} K",
-            _ => shortFormat ? $"{tempC:F0}°" : $"{tempC:F1}°C",
-        };
-    }
-
-    private static string FormatSpeed(double kmh, string speedUnit)
-    {
-        return speedUnit switch
-        {
-            "mph" => $"{(kmh * 0.621371):F0} mph",
-            "m/s" => $"{(kmh / 3.6):F0} m/s",
-            _ => $"{kmh:F0} km/h",
-        };
-    }
-
-    private static bool IsZipCode(string query)
-    {
-        string trimmed = query.Trim();
-        if (trimmed.Length != 5) return false;
-        foreach (char c in trimmed)
-        {
-            if (!char.IsDigit(c)) return false;
-        }
-        return true;
-    }
-
     /// <summary>
-    /// Flattens user-provided strings before interpolation into log lines so
-    /// embedded newlines cannot inject fake log entries.
-    /// </summary>
-    private static string SanitizeLog(string value)
-        => value.Replace('\r', ' ').Replace('\n', ' ');
-
-    private static bool IsCoordinatePair(string query)
-    {
-        string[] parts = query.Split(',');
-        if (parts.Length != 2) return false;
-        return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
-            && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
-    }
-
-    /// <summary>
-    /// Cheap pre-check mirroring the fetch's own guards, so the render tick
+    /// Cheap pre-check mirroring the client's own guards, so the render tick
     /// never allocates a Task for a fetch that would early-return.
     /// </summary>
     private bool IsFetchDue()
     {
-        if (StaticSnapshot && _lastFetchTime != DateTime.MinValue) return false;
-        if ((Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return false;
-        return true;
+        if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue) return false;
+        return _client.IsFetchDue();
     }
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
-        if (_isFetching) return;
-        if (StaticSnapshot && _lastFetchTime != DateTime.MinValue && !force) return;
-        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return;
+        if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue && !force) return;
 
-        _isFetching = true;
-        try
-        {
-            string currentQuery = $"{LocationType}_{Location}_{Latitude}_{Longitude}";
-            if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
-                await ResolveCoordinatesAsync(currentQuery).ConfigureAwait(false);
+        var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force).ConfigureAwait(false);
+        if (snapshot is null) return;
 
-            if (!_lat.HasValue) return;
-
-            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={_lat:F4}&longitude={_lon:F4}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&apparent_temperature=true&timezone=auto";
-            string json = await Http.GetStringAsync(forecastUrl).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            ParseCurrentWeather(root);
-            ParseHourlyForecast(root);
-            ParseDailyForecast(root);
-
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            _ = SaveCacheAsync();
-            Context?.RequestRender();
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Weather fetch failed: {ex.Message}", ex);
-        }
-        finally
-        {
-            _isFetching = false;
-        }
+        ApplySnapshot(snapshot);
+        Context?.RequestRender();
     }
 
-    private async Task ResolveCoordinatesAsync(string currentQuery)
-    {
-        _lastLocationQuery = currentQuery;
+    private WeatherLocation BuildLocation()
+        => new(LocationType, Location, Latitude, Longitude, CustomLabel);
 
-        if (double.TryParse(Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
-            && double.TryParse(Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal))
-        {
-            _lat = latVal;
-            _lon = lonVal;
-            _resolvedCityName = string.IsNullOrWhiteSpace(CustomLabel)
-                ? $"{latVal.ToString("F2", CultureInfo.InvariantCulture)}, {lonVal.ToString("F2", CultureInfo.InvariantCulture)}"
-                : CustomLabel;
-        }
-        else if (IsCoordinatePair(Location))
-        {
-            string[] parts = Location.Split(',');
-            _lat = double.Parse(parts[0].Trim(), CultureInfo.InvariantCulture);
-            _lon = double.Parse(parts[1].Trim(), CultureInfo.InvariantCulture);
-            _resolvedCityName = $"{_lat.Value.ToString("F2", CultureInfo.InvariantCulture)}, {_lon.Value.ToString("F2", CultureInfo.InvariantCulture)}";
-        }
-        else if (IsZipCode(Location))
-        {
-            await GeocodeZipCodeAsync(Location.Trim()).ConfigureAwait(false);
-        }
-        else
-        {
-            await GeocodeCityLocationAsync(Location).ConfigureAwait(false);
-        }
+    /// <summary>
+    /// Applies a fetched/cached snapshot to the render fields, keeping the
+    /// "response omitted this section → keep the previous value" semantics.
+    /// </summary>
+    private void ApplySnapshot(WeatherSnapshot snapshot)
+    {
+        if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
+        if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
+        if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
+        if (snapshot.WindSpeedKmH is not null) _windSpeedKmH = snapshot.WindSpeedKmH.Value;
+        if (snapshot.WeatherCode is not null) _weatherCode = snapshot.WeatherCode.Value;
+        if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
+        if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
+        if (snapshot.DailyForecasts is not null)
+            lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(snapshot.DailyForecasts); }
+        if (snapshot.HourlyForecasts is not null)
+            lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(snapshot.HourlyForecasts); }
     }
 
-    private void ParseCurrentWeather(JsonElement root)
+    private async Task LoadCachedWeatherAsync()
     {
-        if (!root.TryGetProperty("current_weather", out var currentWeather)) return;
-
-        if (currentWeather.TryGetProperty("temperature", out var tempEl))
-            _currentTempC = tempEl.GetDouble();
-        if (currentWeather.TryGetProperty("windspeed", out var windEl))
-            _windSpeedKmH = windEl.GetDouble();
-        if (currentWeather.TryGetProperty("weathercode", out var codeEl))
-            _weatherCode = codeEl.GetInt32();
-    }
-
-    private void ParseHourlyForecast(JsonElement root)
-    {
-        if (!root.TryGetProperty("hourly", out var hourly)
-            || !hourly.TryGetProperty("temperature_2m", out var temps)
-            || temps.GetArrayLength() <= 0) return;
-
-        _feelsLikeC = temps[0].GetDouble();
-
-        if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
-            _humidity = hums[0].GetDouble();
-
-        List<HourlyForecastItem> hourlyForecasts = [];
-        if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
-        {
-            int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
-            for (int i = 0; i < Math.Min(hLen, 12); i++)
-            {
-                string timeStr = times[i].GetString() ?? "";
-                string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
-                hourlyForecasts.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), codes[i].GetInt32()));
-            }
-        }
-        lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(hourlyForecasts); }
-    }
-
-    private void ParseDailyForecast(JsonElement root)
-    {
-        if (!root.TryGetProperty("daily", out var daily)) return;
-
-        if (daily.TryGetProperty("temperature_2m_max", out var maxes) && maxes.GetArrayLength() > 0)
-            _highTempC = maxes[0].GetDouble();
-        if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
-            _lowTempC = mins[0].GetDouble();
-
-        List<DailyForecastItem> dailyForecasts = [];
-        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
-        {
-            int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
-            for (int i = 0; i < Math.Min(dLen, 7); i++)
-            {
-                string dateStr = dTimes[i].GetString() ?? "";
-                string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
-                dailyForecasts.Add(new DailyForecastItem(
-                    i == 0 ? "Today" : dayName,
-                    maxes[i].GetDouble(),
-                    mins[i].GetDouble(),
-                    dCodes[i].GetInt32()));
-            }
-        }
-        lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(dailyForecasts); }
-    }
-
-    private async Task GeocodeCityLocationAsync(string query)
-    {
-        try
-        {
-            string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=1&language=en&format=json";
-            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
-            {
-                var first = results[0];
-                _lat = first.GetProperty("latitude").GetDouble();
-                _lon = first.GetProperty("longitude").GetDouble();
-                _resolvedCityName = first.TryGetProperty("name", out var n) ? n.GetString() ?? query : query;
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Geocoding failed for '{SanitizeLog(query)}': {ex.Message}", ex);
-        }
-
-        _lat = 40.7128;
-        _lon = -74.0060;
-        _resolvedCityName = string.IsNullOrWhiteSpace(query) ? "New York" : query;
-    }
-
-    private async Task GeocodeZipCodeAsync(string zipCode)
-    {
-        try
-        {
-            string url = $"https://api.zippopotam.us/us/{Uri.EscapeDataString(zipCode)}";
-            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            _lat = root.GetProperty("latitude").GetDouble();
-            _lon = root.GetProperty("longitude").GetDouble();
-            string city = root.TryGetProperty("place name", out var place) ? place.GetString() ?? "" : "";
-            string state = root.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
-            _resolvedCityName = string.IsNullOrWhiteSpace(state) ? city : $"{city}, {state}";
-            return;
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
-        }
-
-        await GeocodeCityLocationAsync(zipCode).ConfigureAwait(false);
-    }
-
-    private async Task LoadCacheAsync()
-    {
-        try
-        {
-            string path = CachePath;
-            if (!File.Exists(path)) return;
-            string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
-            var data = JsonSerializer.Deserialize<WeatherCacheData>(json);
-            if (data == null) return;
-            _currentTempC = data.CurrentTempC;
-            _feelsLikeC = data.FeelsLikeC;
-            _humidity = data.Humidity;
-            _windSpeedKmH = data.WindSpeedKmH;
-            _weatherCode = data.WeatherCode;
-            _highTempC = data.HighTempC;
-            _lowTempC = data.LowTempC;
-            _resolvedCityName = data.ResolvedCityName ?? "New York";
-            _lat = data.Lat;
-            _lon = data.Lon;
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            lock (_forecastGate)
-            {
-                _dailyForecasts.Clear();
-                _dailyForecasts.AddRange(data.DailyForecasts.Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)));
-                _hourlyForecasts.Clear();
-                _hourlyForecasts.AddRange(data.HourlyForecasts.Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)));
-            }
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Weather cache load failed: {ex.Message}", ex);
-        }
-    }
-
-    private async Task SaveCacheAsync()
-    {
-        try
-        {
-            Directory.CreateDirectory(CacheDir);
-            var data = new WeatherCacheData
-            {
-                CurrentTempC = _currentTempC,
-                FeelsLikeC = _feelsLikeC,
-                Humidity = _humidity,
-                WindSpeedKmH = _windSpeedKmH,
-                WeatherCode = _weatherCode,
-                HighTempC = _highTempC,
-                LowTempC = _lowTempC,
-                ResolvedCityName = _resolvedCityName,
-                Lat = _lat,
-                Lon = _lon,
-                DailyForecasts = _dailyForecasts.Select(d => new DailyForecastData { DayName = d.DayName, MaxTempC = d.MaxTempC, MinTempC = d.MinTempC, WeatherCode = d.WeatherCode }).ToList(),
-                HourlyForecasts = _hourlyForecasts.Select(h => new HourlyForecastData { TimeLabel = h.TimeLabel, TempC = h.TempC, WeatherCode = h.WeatherCode }).ToList()
-            };
-            string json = JsonSerializer.Serialize(data);
-            await File.WriteAllTextAsync(CachePath, json).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Weather cache save failed: {ex.Message}", ex);
-        }
-    }
-
-    private sealed class WeatherCacheData
-    {
-        public double CurrentTempC { get; set; }
-        public double FeelsLikeC { get; set; }
-        public double Humidity { get; set; }
-        public double WindSpeedKmH { get; set; }
-        public int WeatherCode { get; set; }
-        public double HighTempC { get; set; }
-        public double LowTempC { get; set; }
-        public string? ResolvedCityName { get; set; }
-        public double? Lat { get; set; }
-        public double? Lon { get; set; }
-        public List<DailyForecastData> DailyForecasts { get; set; } = [];
-        public List<HourlyForecastData> HourlyForecasts { get; set; } = [];
-    }
-
-    private sealed class DailyForecastData
-    {
-        public string DayName { get; set; } = "";
-        public double MaxTempC { get; set; }
-        public double MinTempC { get; set; }
-        public int WeatherCode { get; set; }
-    }
-
-    private sealed class HourlyForecastData
-    {
-        public string TimeLabel { get; set; } = "";
-        public double TempC { get; set; }
-        public int WeatherCode { get; set; }
+        var cached = await _client.LoadCacheAsync().ConfigureAwait(false);
+        if (cached is not null) ApplySnapshot(cached);
     }
 }
