@@ -3,11 +3,12 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// A single hardware sensor reading collected by the service via LibreHardwareMonitor.
-/// Identity: <see cref="SensorId"/> is the stable machine key (matches
-/// <c>SensorReadingDto.SensorId</c>); <see cref="Label"/> is the human-facing
-/// "<c>HardwareName: SensorName</c>" string used by the widget picker. Lookups
-/// may match on either, but SensorId is the canonical key.
+/// A single hardware sensor reading read from LibreHardwareService's
+/// shared-memory maps (ADR-0004). Identity: <see cref="SensorId"/> is the
+/// stable machine key (matches <c>SensorReadingDto.SensorId</c>);
+/// <see cref="Label"/> is the human-facing "<c>HardwareName: SensorName</c>"
+/// string used by the widget picker. Lookups may match on either, but
+/// SensorId is the canonical key.
 /// </summary>
 public sealed record LhmReading(
     string SensorId,
