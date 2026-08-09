@@ -68,7 +68,21 @@ public sealed class PresentMonNative : IPresentMonNative
     private delegate PmStatus PmFreeFrameQuery(IntPtr handle);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate PmStatus PmGetApiVersion(out int major, out int minor, out int patch);
+    private delegate PmStatus PmGetApiVersion(out PmVersion version);
+
+    /// <summary>
+    /// Mirror of the PresentMon PM_VERSION struct (uint16 major/minor/patch).
+    /// The API fills a struct, NOT three separate fields — marshaling it as
+    /// three ints misreads the alignment and the version check fails (the
+    /// widget then shows "Install the PresentMon Service").
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PmVersion
+    {
+        public ushort Major;
+        public ushort Minor;
+        public ushort Patch;
+    }
 
     private static readonly IntPtr? Library;
     private static readonly PmOpenSession? OpenSessionFn;
@@ -120,10 +134,10 @@ public sealed class PresentMonNative : IPresentMonNative
             // The PmStatus enum and PM_QUERY_ELEMENT layout this code targets
             // are v3-shaped; the file version (3.0.3) is the service protocol
             // version — require the API generation, not a patch match.
-            else if (GetApiVersionFn!(out int major, out int minor, out int patch) != PmStatus.Success
-                || major != 3)
+            else if (GetApiVersionFn!(out PmVersion version) != PmStatus.Success
+                || version.Major != 3)
             {
-                LoadFailureReason = $"PresentMonAPI2.dll version {major}.{minor}.{patch} is not supported (v3.x required).";
+                LoadFailureReason = $"PresentMonAPI2.dll version {version.Major}.{version.Minor}.{version.Patch} is not supported (v3.x required).";
             }
         }
     }
