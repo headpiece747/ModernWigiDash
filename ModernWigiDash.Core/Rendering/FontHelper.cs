@@ -13,10 +13,16 @@ public static class FontHelper
 {
     private static readonly ConcurrentDictionary<(int Codepoint, SKFontStyle Style), Lazy<SKTypeface>> _fallbackCache = new();
 
-    // Dedupes MatchCharacter results so at most one native typeface per family is retained.
-    private static readonly ConcurrentDictionary<string, SKTypeface> _familyCache = new();
+    // One native typeface per (family, style): serves direct family resolution (GetTypeface)
+    // and dedupes MatchCharacter results so duplicate native typefaces for the same key are
+    // disposed. The Lazy wrapper makes a concurrent GetOrAdd double-run benign — only the
+    // stored Lazy is ever evaluated, so at most one native typeface per key is materialized.
+    private static readonly ConcurrentDictionary<(string Family, SKFontStyle Style), Lazy<SKTypeface>> _typefaceCache = new();
 
     private static readonly Lock _fontManagerLock = new();
+
+    private static readonly Lock _familyListLock = new();
+    private static string[]? _families;
 
     /// <summary>
     /// Memoized glyph presence per (typeface handle, codepoint). All typefaces here are
@@ -59,6 +65,28 @@ public static class FontHelper
     /// Gets the loaded Geist Variable SKTypeface instance.
     /// </summary>
     public static SKTypeface GeistTypeface => _geistTypeface.Value ?? SKTypeface.Default;
+
+    /// <summary>
+    /// Returns the installed system font family list with "Geist" first, deduped
+    /// case-insensitively and cached once.
+    /// </summary>
+    public static string[] GetAllFamilies()
+    {
+        if (_families != null) return _families;
+        lock (_familyListLock)
+        {
+            if (_families == null)
+            {
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                List<string> list = [];
+                if (seen.Add("Geist"))
+                    list.Add("Geist");
+                list.AddRange(SKFontManager.Default.FontFamilies.Where(family => !string.IsNullOrWhiteSpace(family) && seen.Add(family)));
+                _families = list.ToArray();
+            }
+        }
+        return _families;
+    }
 
     private static readonly Lazy<SKTypeface> _segoeEmojiTypeface = new(() => SKTypeface.FromFamilyName("Segoe UI Emoji") ?? SKTypeface.Default);
     private static readonly Lazy<SKTypeface> _segoeSymbolTypeface = new(() => SKTypeface.FromFamilyName("Segoe UI Symbol") ?? SKTypeface.Default);
@@ -160,7 +188,7 @@ public static class FontHelper
             }
             if (matched is { Handle: not 0 })
             {
-                return DedupeByFamily(matched);
+                return DedupeByFamily(matched, key.Style);
             }
         }
         catch
@@ -173,12 +201,13 @@ public static class FontHelper
     }
 
     /// <summary>
-    /// Returns a single cached typeface per family name, disposing any duplicate native
+    /// Returns a single cached typeface per (family, style), disposing any duplicate native
     /// typeface from MatchCharacter (safe: the loser is never used or stored).
     /// </summary>
-    private static SKTypeface DedupeByFamily(SKTypeface typeface)
+    private static SKTypeface DedupeByFamily(SKTypeface typeface, SKFontStyle style)
     {
-        var cached = _familyCache.GetOrAdd(typeface.FamilyName, typeface);
+        var lazy = _typefaceCache.GetOrAdd((typeface.FamilyName, style), _ => new Lazy<SKTypeface>(typeface));
+        var cached = lazy.Value;
         if (!ReferenceEquals(cached, typeface))
         {
             typeface.Dispose();
@@ -301,7 +330,28 @@ public static class FontHelper
             return _geistTypeface.Value ?? SKTypeface.FromFamilyName("Geist", style) ?? SKTypeface.FromFamilyName("Segoe UI", style) ?? SKTypeface.Default;
         }
 
-        return FontCatalog.GetTypeface(familyName, style);
+        return _typefaceCache.GetOrAdd((familyName, style), key => new Lazy<SKTypeface>(() => ResolveDirectTypeface(key))).Value;
+    }
+
+    /// <summary>
+    /// Resolves a typeface for (family, style) from the font manager, falling back to the
+    /// app font (Geist) when the family is unknown or the lookup fails. Runs once per key,
+    /// inside the <see cref="_typefaceCache"/> Lazy.
+    /// </summary>
+    private static SKTypeface ResolveDirectTypeface((string Family, SKFontStyle Style) key)
+    {
+        try
+        {
+            SKTypeface? tf = SKTypeface.FromFamilyName(key.Family, key.Style);
+            if (tf is { Handle: not 0 }) return tf;
+        }
+        catch
+        {
+            // Fall through to the app font below.
+            System.Diagnostics.Debug.WriteLine("Typeface lookup failed, falling back to app font");
+        }
+
+        return GeistTypeface;
     }
 
     /// <summary>
