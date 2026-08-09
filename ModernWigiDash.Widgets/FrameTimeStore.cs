@@ -22,27 +22,14 @@ public sealed record FrameTimeSnapshotRecord(
 {
     public static FrameTimeSnapshotRecord Unavailable() =>
         new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, []);
-
-    /// <summary>
-    /// True when the snapshot was produced by an active polling loop within
-    /// <paramref name="maxAge"/> — measured against the producer timestamp, so
-    /// cross-machine clock skew does not affect the decision. A stale snapshot
-    /// means the App stopped polling (service disconnected or app suspending),
-    /// so widgets should render their unavailable state instead of frozen data.
-    /// </summary>
-    public bool IsFresh(TimeSpan maxAge, TimeProvider? timeProvider = null)
-    {
-        var now = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
-        return LastUpdate != default && now - LastUpdate <= maxAge;
-    }
 }
 
 /// <summary>
-/// In-process cache of the latest frame-time snapshot fetched from the service
-/// over WCF. The App's polling loop calls <see cref="Update"/>; widgets read the
-/// cached snapshot on the render thread without touching WCF. The store owns
-/// the staleness decision — consumers ask <see cref="TryReadFresh"/> and cannot
-/// skip the check.
+/// In-process cache of the latest frame-time snapshot polled from the
+/// PresentMon Service (ADR-0003). The App's polling loop calls
+/// <see cref="Update"/>; widgets read the cached snapshot on the render
+/// thread. The store owns the staleness decision — consumers ask
+/// <see cref="TryReadFresh"/> and cannot skip the check.
 /// </summary>
 public static class FrameTimeStore
 {
@@ -63,19 +50,17 @@ public static class FrameTimeStore
         => Store.TryReadFresh(maxAge, timeProvider);
 
     /// <summary>
-    /// Stores a snapshot. The producer timestamp is preserved — <see cref="UpdateFromDto"/>
-    /// is responsible for providing it (falling back to the receive time when
-    /// the producer did not stamp one).
+    /// Stores a snapshot. A default/empty producer timestamp is resolved to the
+    /// store's receive time.
     /// </summary>
     public static void Update(FrameTimeSnapshotRecord snapshot) => Store.Update(snapshot, snapshot.LastUpdate);
 
     /// <summary>
-    /// Maps a service frame-time DTO into the widget-side record and caches it.
+    /// Maps a PresentMon frame-time DTO into the widget-side record and caches it.
     /// Keeps the DTO-to-render-model mapping owned by the store.
     /// </summary>
     public static void UpdateFromDto(FrameTimeSnapshotDto? dto)
     {
-        var timestamp = ProducerTimestamp(dto?.LastUpdate);
         Store.Update(new FrameTimeSnapshotRecord(
             dto?.IsAvailable ?? false,
             dto?.ProcessId ?? 0,
@@ -87,14 +72,12 @@ public static class FrameTimeStore
             dto?.GpuBusyMs ?? 0,
             dto?.CpuFrameTimeMs ?? 0,
             dto?.RecentFrameTimesMs ?? [],
-            timestamp), timestamp);
+            dto?.LastUpdate ?? default),
+            dto?.LastUpdate ?? default);
     }
 
     /// <summary>
     /// Resets the cache to the unavailable state. Intended for test isolation.
     /// </summary>
     public static void Reset() => Store.Reset();
-
-    private static DateTime ProducerTimestamp(DateTime? producer)
-        => producer is { } ts && ts != default ? ts : TimeProvider.System.GetUtcNow().UtcDateTime;
 }

@@ -8,7 +8,6 @@ public class PageLayout
     public string BackgroundImagePath { get; set; } = string.Empty;
 
     public bool SnapToGrid { get; set; } = true;
-    public float GridSpacingPx { get; set => field = Math.Clamp(value, 5f, 100f); } = 25f;
 
     public List<PlacedWidgetInstance> Widgets { get; set; } = [];
 }

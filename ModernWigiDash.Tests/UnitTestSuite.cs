@@ -15,16 +15,14 @@ namespace ModernWigiDash.Tests;
 public class UnitTestSuite
 {
     [TestMethod]
-    public void PageLayout_FieldProperties_EnforceDefaultsAndTrim()
+    public void PageLayout_PageName_EnforcesTrim()
     {
         var page = new PageLayout
         {
-            PageName = "   My Dashboard   ",
-            GridSpacingPx = 150f
+            PageName = "   My Dashboard   "
         };
 
         Assert.AreEqual("My Dashboard", page.PageName);
-        Assert.AreEqual(100f, page.GridSpacingPx, "GridSpacingPx should be clamped to 100f max");
     }
 
     [TestMethod]

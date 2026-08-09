@@ -18,6 +18,7 @@ public sealed class EditOverlay : IDisposable
     /// </summary>
     public const float ResizeHandleSize = 14f;
 
+    // Borrowed process-lifetime typeface — never disposed here.
     private readonly SKTypeface _uiTypeface = FontHelper.GeistTypeface;
 
     /// <summary>
@@ -114,7 +115,8 @@ public sealed class EditOverlay : IDisposable
         if (_disposed) return;
         if (disposing)
         {
-            _uiTypeface.Dispose();
+            // No owned native resources: _uiTypeface is a borrowed
+            // process-lifetime typeface — never disposed here.
         }
         _disposed = true;
     }

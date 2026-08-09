@@ -74,14 +74,15 @@ public class TelemetryStoreTests
     }
 
     [TestMethod]
-    public void Update_EmptyProducerTimestamp_IsNeverFresh()
+    public void Update_DefaultProducerTimestamp_StampsReceiveTime()
     {
         var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
-        var store = CreateStore(TimeSpan.FromSeconds(10));
+        var store = CreateStore(TimeSpan.FromSeconds(10), clock);
 
         store.Update(new SampleSnapshot(true, default, []), default);
 
-        Assert.IsNull(store.TryReadFresh(null, clock));
+        Assert.IsNotNull(store.TryReadFresh(null, clock),
+            "A default producer timestamp is resolved to the store's receive time");
     }
 
     [TestMethod]

@@ -42,7 +42,7 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual("cpu-temp", snap.Readings[0].SensorId);
         Assert.AreEqual("Mainboard: CPU Package", snap.Readings[0].Label);
         Assert.AreEqual(55.5, snap.Readings[0].Value);
-        Assert.IsTrue(snap.IsFresh(TimeSpan.FromSeconds(10)));
+        Assert.IsNotNull(LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10)));
     }
 
     [TestMethod]
@@ -85,7 +85,7 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual(45.3, rec.GpuBusyMs);
         Assert.AreEqual(3.1, rec.CpuFrameTimeMs);
         CollectionAssert.AreEqual(new[] { 6.9, 7.0, 6.8 }, rec.RecentFrameTimesMs.ToArray());
-        Assert.IsTrue(rec.IsFresh(TimeSpan.FromSeconds(10)));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10)));
     }
 
     [TestMethod]
@@ -124,11 +124,12 @@ public class TelemetryStoreMappingTests
     }
 
     [TestMethod]
-    public void LhmSensorStore_UpdateFromDto_WithoutProducerTimestamp_FallsBackToReceiveTime()
+    public void LhmSensorStore_UpdateFromDto_WithoutProducerTimestamp_StoreStampsReceiveTime()
     {
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto { IsConnected = true, Readings = [] });
 
-        Assert.IsTrue(LhmSensorStore.ReadSnapshot().IsFresh(TimeSpan.FromMinutes(1)));
+        Assert.IsNotNull(LhmSensorStore.TryReadFresh(TimeSpan.FromMinutes(1)),
+            "A DTO without a producer timestamp must still read as fresh — the store stamps the receive time");
     }
 
     // ── TryReadFresh: store-owned staleness ─────────────────

@@ -25,27 +25,14 @@ public sealed record LhmReading(
 public sealed record LhmSnapshot(bool IsConnected, DateTime LastUpdate, IReadOnlyList<LhmReading> Readings)
 {
     public static LhmSnapshot Disconnected() => new(false, DateTime.MinValue, []);
-
-    /// <summary>
-    /// True when the snapshot was produced by an active polling loop within
-    /// <paramref name="maxAge"/> — measured against the producer timestamp, so
-    /// cross-machine clock skew does not affect the decision. A stale snapshot
-    /// means the App stopped polling (service disconnected or app suspending),
-    /// so widgets should render their unavailable state instead of frozen data.
-    /// </summary>
-    public bool IsFresh(TimeSpan maxAge, TimeProvider? timeProvider = null)
-    {
-        var now = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
-        return LastUpdate != DateTime.MinValue && now - LastUpdate <= maxAge;
-    }
 }
 
 /// <summary>
-/// In-process cache of the latest hardware sensor snapshot fetched from the
-/// service over WCF. The App's polling loop calls <see cref="Update"/>; widgets
-/// read the cached snapshot on the render thread without touching WCF. The
-/// store owns the staleness decision — consumers ask <see cref="TryReadFresh"/>
-/// and cannot skip the check.
+/// In-process cache of the latest hardware sensor snapshot read from the
+/// LibreHardwareService shared-memory maps (ADR-0004). The App's polling loop
+/// calls <see cref="Update"/>; widgets read the cached snapshot on the render
+/// thread. The store owns the staleness decision — consumers ask
+/// <see cref="TryReadFresh"/> and cannot skip the check.
 /// </summary>
 public static class LhmSensorStore
 {
@@ -66,19 +53,18 @@ public static class LhmSensorStore
         => Store.TryReadFresh(maxAge, timeProvider);
 
     /// <summary>
-    /// Stores a snapshot. The producer timestamp is preserved — <see cref="UpdateFromDto"/>
-    /// is responsible for providing it (falling back to the receive time when
-    /// the producer did not stamp one).
+    /// Stores a snapshot. A default/empty producer timestamp is resolved to the
+    /// store's receive time.
     /// </summary>
     public static void Update(LhmSnapshot snapshot) => Store.Update(snapshot, snapshot.LastUpdate);
 
     /// <summary>
-    /// Maps a service sensor snapshot DTO into the widget-side snapshot and
-    /// caches it. Keeps the DTO-to-render-model mapping owned by the store.
+    /// Maps a LibreHardwareService sensor snapshot DTO into the widget-side
+    /// snapshot and caches it. Keeps the DTO-to-render-model mapping owned by
+    /// the store.
     /// </summary>
     public static void UpdateFromDto(SensorSnapshotDto? dto)
     {
-        var timestamp = ProducerTimestamp(dto?.LastUpdate);
         var readings = dto?.Readings
             .Select(r => new LhmReading(
                 r.SensorId,
@@ -93,15 +79,13 @@ public static class LhmSensorStore
 
         Store.Update(new LhmSnapshot(
             dto?.IsConnected ?? false,
-            timestamp,
-            readings), timestamp);
+            dto?.LastUpdate ?? default,
+            readings),
+            dto?.LastUpdate ?? default);
     }
 
     /// <summary>
     /// Resets the cache to the disconnected state. Intended for test isolation.
     /// </summary>
     public static void Reset() => Store.Reset();
-
-    private static DateTime ProducerTimestamp(DateTime? producer)
-        => producer is { } ts && ts != default ? ts : TimeProvider.System.GetUtcNow().UtcDateTime;
 }

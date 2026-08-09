@@ -9,12 +9,13 @@ namespace ModernWigiDash.Sdk;
 /// <see cref="TryReadFresh"/> and cannot skip the check.
 ///
 /// Freshness is measured against the <em>producer timestamp</em> passed to
-/// <see cref="Update"/> (never the receive time), so cross-machine clock skew
-/// does not affect the decision. A stale snapshot means the producer stopped
-/// polling (service disconnected or app suspending), so widgets should render
-/// their unavailable state instead of frozen data. A default/empty producer
-/// timestamp is treated as "never fresh", so a store that was never updated
-/// (or was reset) reads as stale.
+/// <see cref="Update"/>, so cross-machine clock skew does not affect the
+/// decision. A default/empty producer timestamp is resolved to the store's
+/// receive time before storing; a store that was never updated (or was reset)
+/// reads as stale because its stored timestamp is <c>default</c>. A stale
+/// snapshot means the producer stopped polling (service disconnected or app
+/// suspending), so widgets should render their unavailable state instead of
+/// frozen data.
 ///
 /// Domain stores (e.g. <c>LhmSensorStore</c>, <c>FrameTimeStore</c>) wrap one
 /// instance per record shape and own the DTO-to-record mapping; the per-domain
@@ -58,16 +59,17 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
     }
 
     /// <summary>
-    /// Stores a snapshot. The producer timestamp is preserved — the caller is
-    /// responsible for providing it (falling back to the receive time when the
-    /// producer did not stamp one).
+    /// Stores a snapshot. The producer timestamp is preserved, except a
+    /// default/empty timestamp, which is resolved to the store's receive time.
     /// </summary>
     public void Update(TRecord record, DateTime producerTimestamp)
     {
         lock (_gate)
         {
             _current = record;
-            _lastProducerTimestamp = producerTimestamp;
+            _lastProducerTimestamp = producerTimestamp == default
+                ? _timeProvider.GetUtcNow().UtcDateTime
+                : producerTimestamp;
         }
     }
 
