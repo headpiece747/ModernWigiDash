@@ -35,8 +35,10 @@ public static class InspectorModelBuilder
 
             // IconFile is a hidden companion of the Icon editor (the picker
             // writes it through the browse seam); it never gets its own row.
-            if (prop.DeclaringType == typeof(HotkeyButtonWidget) &&
-                prop.Name == nameof(HotkeyButtonWidget.IconFile))
+            // Widgets declare this via IWidgetEditorProvider — no widget-type
+            // branches here.
+            if (instance is IWidgetEditorProvider editorProvider &&
+                editorProvider.GetEditorKind(prop) == EditorKind.IconPicker)
                 continue;
 
             result.Add(new EditorDescription(

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -278,7 +279,7 @@ internal static class HotkeyActionExecutor
 }
 
 [WidgetMetadata("hotkey_button", "Hotkey", Description = "Interactive touch button executing macros, shortcuts, or application launches.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
-public class HotkeyButtonWidget : ModernWidgetBase
+public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
@@ -490,6 +491,28 @@ public class HotkeyButtonWidget : ModernWidgetBase
     /// </summary>
     public static bool IsLaunchOrUrlAction(string actionType)
         => actionType is "Launch App" or "Open URL";
+
+    // ── IWidgetEditorProvider: special inspector editors ────────────────────
+    // The inspector renderer discovers these through the interface instead of
+    // branching on the widget type (no concrete-widget typeof checks).
+
+    public EditorKind? GetEditorKind(PropertyInfo property)
+    {
+        if (property.Name == nameof(IconFile)) return EditorKind.IconPicker;
+        if (property.Name == nameof(ActionCommand)) return EditorKind.ActionCommand;
+        return null;
+    }
+
+    public PropertyInfo? GetIconFileCompanion(PropertyInfo iconProperty)
+        => iconProperty.Name == nameof(Icon)
+            ? typeof(HotkeyButtonWidget).GetProperty(nameof(IconFile))
+            : null;
+
+    public string? ActionCommandVisibilityChoicePropertyName => nameof(ActionType);
+
+    public bool IsActionCommandVisible(string? actionTypeValue)
+        => actionTypeValue != null && IsLaunchOrUrlAction(actionTypeValue);
+
 
     public override async ValueTask DisposeAsync()
     {

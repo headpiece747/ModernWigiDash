@@ -24,8 +24,8 @@ public sealed class InspectorCallbacks
     /// <summary>Writes an inspector value back into the widget and profile (host-side side effect).</summary>
     public required Action<PropertyInfo?, object> ApplyInspectorPropertyValue { get; init; }
 
-    /// <summary>Opens the icon picker for a hotkey button widget.</summary>
-    public required Action<PropertyInfo, HotkeyButtonWidget, TextBox> ShowIconSelectorPopup { get; init; }
+    /// <summary>Opens the icon picker for a property with an <see cref="EditorKind.IconPicker"/> editor.</summary>
+    public required Action<PropertyInfo, IWidgetEditorProvider, TextBox> ShowIconSelectorPopup { get; init; }
 
     /// <summary>Keeps a ComboBox dropdown inside the window's client area.</summary>
     public required Action<ComboBox> AttachDropdownWithinWindow { get; init; }
@@ -42,6 +42,8 @@ public sealed class InspectorCallbacks
 /// pure <see cref="InspectorModelBuilder"/>) into editor controls. All value
 /// changes call <see cref="InspectorCallbacks.ApplyInspectorPropertyValue"/>
 /// — one seam for every property type — and dialogs live behind the callbacks.
+/// Widgets that need special editors implement <see cref="IWidgetEditorProvider"/>
+/// (icon pickers, action-command paths); the renderer never branches on widget types.
 /// </summary>
 public static class InspectorPanelRenderer
 {
@@ -60,6 +62,7 @@ public static class InspectorPanelRenderer
     {
         ComboBox? actionTypeCombo = null;
         StackPanel? actionCommandPanel = null;
+        var provider = widget.ActiveInstance as IWidgetEditorProvider;
 
         foreach (var desc in descriptions)
         {
@@ -82,7 +85,7 @@ public static class InspectorPanelRenderer
             {
                 case WidgetPropertyType.Choice when desc.Options.Count > 0:
                     var combo = BuildChoiceCombo(desc, isUpdatingInspector, callbacks);
-                    if (desc.Property.Name == nameof(HotkeyButtonWidget.ActionType)) actionTypeCombo = combo;
+                    if (provider?.ActionCommandVisibilityChoicePropertyName == desc.Property.Name) actionTypeCombo = combo;
                     propPanel.Children.Add(combo);
                     break;
                 case WidgetPropertyType.Font:
@@ -95,8 +98,15 @@ public static class InspectorPanelRenderer
                     propPanel.Children.Add(BuildBooleanEditor(desc, callbacks));
                     break;
                 case WidgetPropertyType.Path:
-                    propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks));
-                    if (desc.Property.Name == nameof(HotkeyButtonWidget.ActionCommand)) actionCommandPanel = propPanel;
+                    if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
+                    {
+                        propPanel.Children.Add(BuildActionCommandEditor(desc, isUpdatingInspector, callbacks));
+                        actionCommandPanel = propPanel;
+                    }
+                    else
+                    {
+                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks));
+                    }
                     break;
                 case WidgetPropertyType.SensorSelector:
                     propPanel.Children.Add(BuildSensorSelector(desc, isUpdatingInspector, callbacks));
@@ -110,15 +120,14 @@ public static class InspectorPanelRenderer
             target.Add(propPanel);
         }
 
-        if (actionTypeCombo != null && actionCommandPanel != null)
+        if (actionTypeCombo != null && actionCommandPanel != null && provider != null)
         {
             void UpdateActionCommandVisibility()
             {
                 string? selected = actionTypeCombo.SelectedValue?.ToString();
-                actionCommandPanel.Visibility =
-                    selected != null && HotkeyButtonWidget.IsLaunchOrUrlAction(selected)
-                        ? Visibility.Visible
-                        : Visibility.Collapsed;
+                actionCommandPanel.Visibility = provider.IsActionCommandVisible(selected)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
             }
             actionTypeCombo.SelectionChanged += (_, _) => UpdateActionCommandVisibility();
             UpdateActionCommandVisibility();
@@ -202,29 +211,37 @@ public static class InspectorPanelRenderer
         return combo;
     }
 
+    /// <summary>
+    /// Icon picker row. The widget's <see cref="IWidgetEditorProvider"/> supplies
+    /// the companion file-path property (cleared whenever the named icon changes)
+    /// and the popup host; a widget without a provider gets a plain text editor.
+    /// </summary>
     private static UIElement BuildIconEditor(PlacedWidgetInstance widget, EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
     {
         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        PropertyInfo? iconFileProp = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.IconFile));
+        var provider = widget.ActiveInstance as IWidgetEditorProvider;
+        PropertyInfo? iconFileProp = provider?.GetIconFileCompanion(desc.Property);
         string seed = desc.CurrentValue?.ToString() ?? "";
         if (string.IsNullOrEmpty(seed)
-            && widget.ActiveInstance is HotkeyButtonWidget hotkeySeed
-            && !string.IsNullOrEmpty(hotkeySeed.IconFile))
+            && iconFileProp != null
+            && widget.ActiveInstance != null
+            && iconFileProp.GetValue(widget.ActiveInstance) is string companionSeed
+            && !string.IsNullOrEmpty(companionSeed))
         {
-            seed = hotkeySeed.IconFile;
+            seed = companionSeed;
         }
         var box = new TextBox { Text = seed };
         var btnBrowse = new Button { Content = "Browse\u2026", Padding = new Thickness(8, 2, 8, 2) };
         DockPanel.SetDock(btnBrowse, Dock.Right);
         btnBrowse.Click += (_, _) =>
         {
-            if (widget.ActiveInstance is not HotkeyButtonWidget hotkey) return;
-            callbacks.ShowIconSelectorPopup(desc.Property, hotkey, box);
+            if (provider == null) return;
+            callbacks.ShowIconSelectorPopup(desc.Property, provider, box);
         };
         box.TextChanged += (_, _) =>
         {
             if (isUpdatingInspector()) return;
-            callbacks.ApplyInspectorPropertyValue(iconFileProp, "");
+            if (iconFileProp != null) callbacks.ApplyInspectorPropertyValue(iconFileProp, "");
             callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
         };
         row.Children.Add(btnBrowse);
@@ -245,11 +262,9 @@ public static class InspectorPanelRenderer
         return chk;
     }
 
-    private static UIElement BuildPathEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    /// <summary>Path editor for an action command (executable/file/folder picker, any file type).</summary>
+    private static UIElement BuildActionCommandEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
     {
-        bool isHotkeyCommand = desc.Property.DeclaringType == typeof(HotkeyButtonWidget) &&
-            desc.Property.Name == nameof(HotkeyButtonWidget.ActionCommand);
-
         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
         txt.TextChanged += (_, _) =>
@@ -267,7 +282,7 @@ public static class InspectorPanelRenderer
         DockPanel.SetDock(btnFolder, Dock.Right);
         btnFolder.Click += (_, _) =>
         {
-            string? folder = callbacks.BrowseFolder(isHotkeyCommand ? "Select action folder" : "Select image folder");
+            string? folder = callbacks.BrowseFolder("Select action folder");
             if (!string.IsNullOrEmpty(folder)) txt.Text = folder;
         };
 
@@ -280,11 +295,50 @@ public static class InspectorPanelRenderer
         DockPanel.SetDock(btnFile, Dock.Right);
         btnFile.Click += (_, _) =>
         {
-            string? file = callbacks.BrowseFile(
-                isHotkeyCommand ? "Select action file or executable" : "Select image file",
-                isHotkeyCommand
-                    ? "Programs and files (*.*)|*.*"
-                    : "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*");
+            string? file = callbacks.BrowseFile("Select action file or executable", "Programs and files (*.*)|*.*");
+            if (!string.IsNullOrEmpty(file)) txt.Text = file;
+        };
+
+        row.Children.Add(btnFile);
+        row.Children.Add(btnFolder);
+        row.Children.Add(txt);
+        return row;
+    }
+
+    /// <summary>Path editor for a plain file/image path (image-file picker).</summary>
+    private static UIElement BuildPathEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+        var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
+        txt.TextChanged += (_, _) =>
+        {
+            if (isUpdatingInspector()) return;
+            callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
+        };
+
+        var btnFolder = new Button
+        {
+            Content = "Folder\u2026",
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        DockPanel.SetDock(btnFolder, Dock.Right);
+        btnFolder.Click += (_, _) =>
+        {
+            string? folder = callbacks.BrowseFolder("Select image folder");
+            if (!string.IsNullOrEmpty(folder)) txt.Text = folder;
+        };
+
+        var btnFile = new Button
+        {
+            Content = "File\u2026",
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        DockPanel.SetDock(btnFile, Dock.Right);
+        btnFile.Click += (_, _) =>
+        {
+            string? file = callbacks.BrowseFile("Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*");
             if (!string.IsNullOrEmpty(file)) txt.Text = file;
         };
 
