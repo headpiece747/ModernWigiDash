@@ -13,7 +13,7 @@ public partial class MainWindow
     /// <summary>
     /// One LHS sensor probe (ADR-0004): reads the LibreHardwareService
     /// shared-memory map and caches the snapshot in <see cref="LhmSensorStore"/>
-    /// so widgets read it without a WCF round-trip.
+    /// so widgets read it without a service round-trip.
     /// </summary>
     private string? _lastSensorError;
 

@@ -4,7 +4,7 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// A point-in-time snapshot of the live FPS / frame-time telemetry captured by
-/// the service via in-process ETW (DXGI / D3D9 / DxgKrnl present events).
+/// the PresentMon Service (ADR-0003).
 /// Frame times are in milliseconds; FPS values are 1000 / frame time.
 /// </summary>
 public sealed record FrameTimeSnapshotRecord(

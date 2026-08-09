@@ -1,14 +1,19 @@
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
+using Microsoft.Win32;
 using ModernWigiDash.Core.Theming;
+using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;
 
 /// <summary>
 /// Small host dialogs the window used to own inline: the text prompt (page
-/// rename) and the device-authorization window (Twitch device login). Owns the
-/// authorization window's lifetime tracking; the window just forwards calls.
+/// rename), the device-authorization window (Twitch device login), and the
+/// inspector's icon picker. Owns the authorization window's lifetime tracking;
+/// the window just forwards calls.
 /// </summary>
 public sealed class DialogHost
 {
@@ -86,6 +91,179 @@ public sealed class DialogHost
         };
         btnCancel.Click += (_, _) => dialog.DialogResult = false;
 
+        dialog.ShowDialog();
+        return result;
+    }
+
+    /// <summary>
+    /// Modal icon picker for an inspector icon property: a searchable Griddy
+    /// icon grid plus a custom-SVG browse button (copied into the icons folder).
+    /// Reflection-agnostic — it receives the current value (named icon or
+    /// custom file path) and returns the chosen value; the caller owns the
+    /// write-back. Returns null when cancelled.
+    /// </summary>
+    public string? ShowIconPicker(string title, string currentValue)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 520,
+            Height = 620,
+            Owner = _owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = _tryFindResource("BgPanel") as Brush ?? _tryFindResource("PanelBackground") as Brush ?? Brushes.Black,
+            Foreground = Brushes.White
+        };
+        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+
+        var root = new Grid { Margin = new Thickness(16) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var search = new TextBox { ToolTip = "Search icons by name", Margin = new Thickness(0, 0, 0, 8) };
+        Grid.SetRow(search, 0);
+        root.Children.Add(search);
+
+        var browseSvg = new Button
+        {
+            Content = "Browse SVG\u2026",
+            Padding = new Thickness(8, 4, 8, 4),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var chip = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = _tryFindResource("TextSecondary") as Brush ?? Brushes.Gray,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var browseRow = new StackPanel { Orientation = Orientation.Horizontal };
+        browseRow.Children.Add(browseSvg);
+        browseRow.Children.Add(chip);
+        Grid.SetRow(browseRow, 1);
+        root.Children.Add(browseRow);
+
+        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 8, 0, 0) };
+        var grid = new WrapPanel { ItemWidth = 40, ItemHeight = 40 };
+        scroll.Content = grid;
+        Grid.SetRow(scroll, 2);
+        root.Children.Add(scroll);
+
+        var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var selectedName = new TextBlock
+        {
+            FontSize = 12,
+            Foreground = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 12, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var select = new Button
+        {
+            Content = "Select",
+            Padding = new Thickness(14, 5, 14, 5),
+            Style = _tryFindResource("AccentButton") as Style
+        };
+        Grid.SetColumn(selectedName, 0);
+        Grid.SetColumn(select, 1);
+        footer.Children.Add(selectedName);
+        footer.Children.Add(select);
+        Grid.SetRow(footer, 3);
+        root.Children.Add(footer);
+
+        var accentBrush = _tryFindResource("AccentRed") as Brush ?? Brushes.Red;
+        string chosen = currentValue ?? "";
+        void UpdateSelected(string name)
+        {
+            chosen = name;
+            selectedName.Text = name;
+        }
+
+        void RenderGrid()
+        {
+            grid.Children.Clear();
+            string filter = search.Text?.Trim() ?? "";
+            var names = string.IsNullOrEmpty(filter)
+                ? GriddyIcons.Names
+                : GriddyIcons.Names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (var name in names)
+            {
+                var cell = new Button
+                {
+                    Width = 36,
+                    Height = 36,
+                    Margin = new Thickness(2),
+                    Padding = new Thickness(0),
+                    Tag = name,
+                    ToolTip = name,
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = Brushes.Transparent
+                };
+                if (GriddyIcons.TryGetPathData(name, out string? pathData))
+                {
+                    try
+                    {
+                        cell.Content = new Path
+                        {
+                            Width = 22,
+                            Height = 22,
+                            Stretch = Stretch.Uniform,
+                            Fill = Brushes.White,
+                            Data = Geometry.Parse(pathData)
+                        };
+                    }
+                    catch
+                    {
+                        cell.Content = null;
+                    }
+                }
+                if (name.Equals(chosen, StringComparison.OrdinalIgnoreCase))
+                    cell.BorderBrush = accentBrush;
+                cell.Click += (_, _) =>
+                {
+                    UpdateSelected(name);
+                    foreach (var child in grid.Children.OfType<Button>())
+                        child.BorderBrush = Brushes.Transparent;
+                    cell.BorderBrush = accentBrush;
+                };
+                grid.Children.Add(cell);
+            }
+        }
+
+        search.TextChanged += (_, _) => RenderGrid();
+
+        browseSvg.Click += (_, _) =>
+        {
+            var dlg = new OpenFileDialog { Title = "Select an SVG icon", Filter = "SVG files (*.svg)|*.svg" };
+            if (dlg.ShowDialog() != true) return;
+            if (!SvgIconLoader.TryGetPath(dlg.FileName, out _))
+            {
+                MessageBox.Show(dialog, "Only single-path SVG icons are supported.", "Unsupported SVG", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            string relative = SvgIconLoader.CopyToIcons(dlg.FileName);
+            chip.Text = $"Custom: {relative}";
+            UpdateSelected(relative);
+        };
+
+        string? result = null;
+        select.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(chosen)) return;
+            result = chosen;
+            dialog.DialogResult = true;
+        };
+
+        if (!string.IsNullOrWhiteSpace(currentValue) && !GriddyIcons.Contains(currentValue))
+            chip.Text = $"Custom: {currentValue}";
+        selectedName.Text = currentValue ?? "";
+        RenderGrid();
+        dialog.Content = root;
         dialog.ShowDialog();
         return result;
     }

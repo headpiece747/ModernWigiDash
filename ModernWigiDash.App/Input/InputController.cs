@@ -28,7 +28,7 @@ public enum ManipulationKind
 ///  • edit-mode manipulation — the drag/resize/icon-grab decision and the
 ///    move/snap-to-grid math that used to live in MainWindow's mouse handlers.
 ///
-/// Callers — mouse handlers, hardware touch, WCF touch — only feed
+/// Callers — mouse handlers and hardware touch — only feed
 /// Down/Move/Up coordinates plus an edit-mode flag and the page state. All
 /// page-switch UI work (tab rebuild, selection, canvas refresh) stays in
 /// MainWindow behind the <paramref name="navigateTo"/> seam.

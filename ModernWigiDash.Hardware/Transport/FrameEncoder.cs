@@ -5,7 +5,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// <summary>
 /// Single owner of frame encoding from an <see cref="SKBitmap"/> to the device's
 /// RGB565 little-endian pixel payload. Used by both the direct (USB) and the
-/// WCF frame paths so pixel encoding cannot drift between components.
+/// frame paths so pixel encoding cannot drift between components.
 /// </summary>
 public static class FrameEncoder
 {

@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,7 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using Microsoft.Win32;
 using ModernWigiDash.Core.Models;
-using ModernWigiDash.Core.Theming;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Inspector;
@@ -56,19 +54,27 @@ public sealed class InspectorControllerHost(
 /// <summary>
 /// The right-side property inspector: panel refresh, transform write-backs,
 /// property-value application (the single write-back seam the renderer uses),
-/// the icon picker dialog, and the dropdown-clamp hack. Owns the
-/// <c>isUpdatingInspector</c> guard that suppresses change events while the
-/// panel is rebuilt. The window keeps selection and wiring only.
+/// and the dropdown-clamp hack. Owns the <c>isUpdatingInspector</c> guard that
+/// suppresses change events while the panel is rebuilt. Value rules (parsing,
+/// clamping, conversion, formatting) live in <see cref="InspectorValuePolicy"/>;
+/// the icon picker dialog lives in <see cref="DialogHost"/>. The window keeps
+/// selection and wiring only.
 /// </summary>
 public sealed class InspectorController
 {
     private readonly InspectorControllerHost _host;
+    private readonly InspectorValuePolicy _policy = new();
+    private readonly DialogHost _dialogHost;
     private bool _isUpdatingInspector = false;
 
     public InspectorController(InspectorControllerHost host)
     {
         _host = host;
+        _dialogHost = new DialogHost(host.Owner, host.TryFindResource, LogError);
     }
+
+    private static void LogError(string message, Exception? ex)
+        => FileLog.Write($"[Display ERROR] {message}{(ex != null ? $": {ex}" : "")}");
 
     /// <summary>Rebuilds the panel for the currently selected widget (or the empty state).</summary>
     public void Refresh()
@@ -89,14 +95,14 @@ public sealed class InspectorController
 
             _host.NameText.Text = selected.DisplayName;
 
-            _host.PosX.Text = $"{selected.X:F0}";
-            _host.PosY.Text = $"{selected.Y:F0}";
-            _host.WidthText.Text = $"{selected.Width:F0}";
-            _host.HeightText.Text = $"{selected.Height:F0}";
-            _host.ZIndexText.Text = $"{selected.ZIndex}";
-            _host.RotationText.Text = $"{selected.Rotation:F0}";
+            _host.PosX.Text = _policy.FormatTransformValue(selected.X);
+            _host.PosY.Text = _policy.FormatTransformValue(selected.Y);
+            _host.WidthText.Text = _policy.FormatTransformValue(selected.Width);
+            _host.HeightText.Text = _policy.FormatTransformValue(selected.Height);
+            _host.ZIndexText.Text = _policy.FormatValue(selected.ZIndex);
+            _host.RotationText.Text = _policy.FormatTransformValue(selected.Rotation);
             _host.OpacitySlider.Value = selected.Opacity;
-            _host.OpacityValueText.Text = $"{(int)(selected.Opacity * 100)}%";
+            _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
 
             // Build dynamic custom property editors for the widget
             _host.CustomProperties.Children.Clear();
@@ -140,10 +146,10 @@ public sealed class InspectorController
         _isUpdatingInspector = true;
         try
         {
-            _host.PosX.Text = $"{selected.X:F0}";
-            _host.PosY.Text = $"{selected.Y:F0}";
-            _host.WidthText.Text = $"{selected.Width:F0}";
-            _host.HeightText.Text = $"{selected.Height:F0}";
+            _host.PosX.Text = _policy.FormatTransformValue(selected.X);
+            _host.PosY.Text = _policy.FormatTransformValue(selected.Y);
+            _host.WidthText.Text = _policy.FormatTransformValue(selected.Width);
+            _host.HeightText.Text = _policy.FormatTransformValue(selected.Height);
         }
         finally
         {
@@ -165,17 +171,10 @@ public sealed class InspectorController
         // TextBox input arrives as string; convert to the property's CLR type
         // so a Number/Color/etc. property is never silently dropped by a
         // SetValue type mismatch.
-        if (value is string str && prop.PropertyType != typeof(string))
+        if (value is string str)
         {
-            try
-            {
-                converted = TypeDescriptor.GetConverter(prop.PropertyType).ConvertFromInvariantString(str);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Inspector value '{str}' not convertible to {prop.PropertyType.Name} for {prop.Name}: {ex.Message}");
-                return;
-            }
+            if (!_policy.TryConvertStringToType(prop, str, out object? convertedValue)) return;
+            converted = convertedValue;
         }
 
         prop.SetValue(selected.ActiveInstance, converted);
@@ -189,12 +188,12 @@ public sealed class InspectorController
         var selected = _host.GetSelectedWidget();
         if (_isUpdatingInspector || selected == null) return;
 
-        if (float.TryParse(_host.PosX.Text, out float x)) selected.X = x;
-        if (float.TryParse(_host.PosY.Text, out float y)) selected.Y = y;
-        if (float.TryParse(_host.WidthText.Text, out float w) && w > 20) selected.Width = w;
-        if (float.TryParse(_host.HeightText.Text, out float h) && h > 20) selected.Height = h;
-        if (int.TryParse(_host.ZIndexText.Text, out int z)) selected.ZIndex = z;
-        if (float.TryParse(_host.RotationText.Text, out float r)) selected.Rotation = r % 360;
+        if (_policy.TryParsePosition(_host.PosX.Text, out float x)) selected.X = x;
+        if (_policy.TryParsePosition(_host.PosY.Text, out float y)) selected.Y = y;
+        if (_policy.TryParseSize(_host.WidthText.Text, out float w)) selected.Width = w;
+        if (_policy.TryParseSize(_host.HeightText.Text, out float h)) selected.Height = h;
+        if (_policy.TryParseZIndex(_host.ZIndexText.Text, out int z)) selected.ZIndex = z;
+        if (_policy.TryParseRotation(_host.RotationText.Text, out float r)) selected.Rotation = r;
 
         _host.RequestCanvasRender();
     }
@@ -203,18 +202,20 @@ public sealed class InspectorController
     public void OpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         var selected = _host.GetSelectedWidget();
-        if (selected != null && _host.OpacityValueText != null)
-        {
-            selected.Opacity = (float)_host.OpacitySlider.Value;
-            _host.OpacityValueText.Text = $"{(int)(selected.Opacity * 100)}%";
-            _host.RequestCanvasRender();
-        }
+        if (selected == null) return;
+
+        selected.Opacity = _policy.ClampOpacity((float)_host.OpacitySlider.Value);
+        _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
+        _host.RequestCanvasRender();
     }
 
     /// <summary>
-    /// Icon picker dialog for an <see cref="EditorKind.IconPicker"/> property.
-    /// Reads/writes the widget's properties via reflection on the provider
-    /// (the provider IS the widget instance) — no concrete widget type needed.
+    /// Icon picker entry for an <see cref="EditorKind.IconPicker"/> property.
+    /// Reads the current icon/file values from the provider (the provider IS
+    /// the widget instance — no concrete widget type needed), shows the picker
+    /// via <see cref="DialogHost.ShowIconPicker"/>, and writes the chosen value
+    /// back through <see cref="ApplyPropertyValue"/>, keeping the companion
+    /// file property and the named icon mutually exclusive.
     /// </summary>
     public void ShowIconSelectorPopup(PropertyInfo iconProp, IWidgetEditorProvider provider, TextBox box)
     {
@@ -222,197 +223,30 @@ public sealed class InspectorController
         string? currentIconFile = iconFileProp?.GetValue(provider) as string;
         string? currentIcon = iconProp.GetValue(provider) as string;
 
-        var dialog = new Window
+        string current = !string.IsNullOrWhiteSpace(currentIconFile) ? currentIconFile : currentIcon ?? "";
+        string? chosen = _dialogHost.ShowIconPicker("Select Icon", current);
+        if (string.IsNullOrWhiteSpace(chosen)) return;
+
+        if (GriddyIcons.Contains(chosen))
         {
-            Title = "Select Icon",
-            Width = 520,
-            Height = 620,
-            Owner = _host.Owner,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Brush("BgPanel", Brush("PanelBackground", Brushes.Black)),
-            Foreground = Brushes.White
-        };
-        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
-
-        var root = new Grid { Margin = new Thickness(16) };
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        var search = new TextBox { ToolTip = "Search icons by name", Margin = new Thickness(0, 0, 0, 8) };
-        Grid.SetRow(search, 0);
-        root.Children.Add(search);
-
-        var browseSvg = new Button
-        {
-            Content = "Browse SVG\u2026",
-            Padding = new Thickness(8, 4, 8, 4),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(0, 0, 8, 0)
-        };
-        var chip = new TextBlock
-        {
-            FontSize = 11,
-            Foreground = Brush("TextSecondary", Brushes.Gray),
-            VerticalAlignment = VerticalAlignment.Center,
-            TextWrapping = TextWrapping.Wrap
-        };
-        var browseRow = new StackPanel { Orientation = Orientation.Horizontal };
-        browseRow.Children.Add(browseSvg);
-        browseRow.Children.Add(chip);
-        Grid.SetRow(browseRow, 1);
-        root.Children.Add(browseRow);
-
-        var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 8, 0, 0) };
-        var grid = new WrapPanel { ItemWidth = 40, ItemHeight = 40 };
-        scroll.Content = grid;
-        Grid.SetRow(scroll, 2);
-        root.Children.Add(scroll);
-
-        var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var selectedName = new TextBlock
-        {
-            FontSize = 12,
-            Foreground = Brushes.White,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 12, 0),
-            TextTrimming = TextTrimming.CharacterEllipsis
-        };
-        var select = new Button
-        {
-            Content = "Select",
-            Padding = new Thickness(14, 5, 14, 5),
-            Style = _host.TryFindResource("AccentButton") as Style
-        };
-        Grid.SetColumn(selectedName, 0);
-        Grid.SetColumn(select, 1);
-        footer.Children.Add(selectedName);
-        footer.Children.Add(select);
-        Grid.SetRow(footer, 3);
-        root.Children.Add(footer);
-
-        string chosen = "";
-        void UpdateSelected(string name)
-        {
-            chosen = name;
-            selectedName.Text = name;
-        }
-
-        void RenderGrid()
-        {
-            grid.Children.Clear();
-            string filter = search.Text?.Trim() ?? "";
-            var names = string.IsNullOrEmpty(filter)
-                ? GriddyIcons.Names
-                : GriddyIcons.Names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
-            foreach (var name in names)
-            {
-                var cell = new Button
-                {
-                    Width = 36,
-                    Height = 36,
-                    Margin = new Thickness(2),
-                    Padding = new Thickness(0),
-                    Tag = name,
-                    ToolTip = name,
-                    BorderThickness = new Thickness(1),
-                    BorderBrush = Brushes.Transparent
-                };
-                if (GriddyIcons.TryGetPathData(name, out string? pathData))
-                {
-                    try
-                    {
-                        cell.Content = new System.Windows.Shapes.Path
-                        {
-                            Width = 22,
-                            Height = 22,
-                            Stretch = Stretch.Uniform,
-                            Fill = Brushes.White,
-                            Data = Geometry.Parse(pathData)
-                        };
-                    }
-                    catch
-                    {
-                        cell.Content = null;
-                    }
-                }
-                if (name.Equals(chosen, StringComparison.OrdinalIgnoreCase))
-                    cell.BorderBrush = Brush("AccentRed", Brushes.Red);
-                cell.Click += (_, _) =>
-                {
-                    UpdateSelected(name);
-                    foreach (var child in grid.Children.OfType<Button>())
-                        child.BorderBrush = Brushes.Transparent;
-                    cell.BorderBrush = Brush("AccentRed", Brushes.Red);
-                };
-                grid.Children.Add(cell);
-            }
-        }
-
-        search.TextChanged += (_, _) => RenderGrid();
-
-        browseSvg.Click += (_, _) =>
-        {
-            var dlg = new OpenFileDialog { Title = "Select an SVG icon", Filter = "SVG files (*.svg)|*.svg" };
-            if (dlg.ShowDialog() != true) return;
-            if (!SvgIconLoader.TryGetPath(dlg.FileName, out _))
-            {
-                MessageBox.Show(dialog, "Only single-path SVG icons are supported.", "Unsupported SVG", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-            string relative = SvgIconLoader.CopyToIcons(dlg.FileName);
-            ApplyPropertyValue(iconFileProp, relative);
-            ApplyPropertyValue(iconProp, "");
-            chip.Text = $"Custom: {relative}";
-            _isUpdatingInspector = true;
-            try
-            {
-                box.Text = relative;
-            }
-            finally
-            {
-                _isUpdatingInspector = false;
-            }
-            UpdateSelected(relative);
-        };
-
-        select.Click += (_, _) =>
-        {
-            if (string.IsNullOrWhiteSpace(chosen)) return;
-            if (GriddyIcons.Contains(chosen))
-            {
-                ApplyPropertyValue(iconFileProp, "");
-                ApplyPropertyValue(iconProp, chosen);
-                _isUpdatingInspector = true;
-                try
-                {
-                    box.Text = chosen;
-                }
-                finally
-                {
-                    _isUpdatingInspector = false;
-                }
-            }
-            dialog.DialogResult = true;
-        };
-
-        if (!string.IsNullOrWhiteSpace(currentIconFile))
-        {
-            chip.Text = $"Custom: {currentIconFile}";
-            chosen = currentIconFile;
-            selectedName.Text = currentIconFile;
+            ApplyPropertyValue(iconFileProp, "");
+            ApplyPropertyValue(iconProp, chosen);
         }
         else
         {
-            chosen = currentIcon ?? "";
-            selectedName.Text = currentIcon ?? "";
+            ApplyPropertyValue(iconFileProp, chosen);
+            ApplyPropertyValue(iconProp, "");
         }
-        RenderGrid();
-        dialog.Content = root;
-        dialog.ShowDialog();
+
+        _isUpdatingInspector = true;
+        try
+        {
+            box.Text = chosen;
+        }
+        finally
+        {
+            _isUpdatingInspector = false;
+        }
     }
 
     /// <summary>
@@ -484,7 +318,4 @@ public sealed class InspectorController
         }
         return null;
     }
-
-    private Brush Brush(string name, Brush fallback)
-        => _host.TryFindResource(name) as Brush ?? fallback;
 }

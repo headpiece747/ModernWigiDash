@@ -9,8 +9,9 @@ namespace ModernWigiDash.Sdk;
 /// those arrays land on the large-object heap and drove ~36 MB/s of LOH churn
 /// and a sustained gen-2 GC storm. This pool keeps a small ring of exact-size
 /// buffers instead: the render tick acquires, the frame sender releases.
-/// Buffers are exact-size (no ArrayPool slack), which the WCF SOAP byte[]
-/// serializer requires.
+/// Buffers are exact-size (no ArrayPool slack) because the display's RGB565
+/// framebuffer payload is fixed-size — every buffer matches the encoder's
+/// output exactly, so nothing is reallocated between acquire and release.
 /// </summary>
 public sealed class FrameBufferPool
 {

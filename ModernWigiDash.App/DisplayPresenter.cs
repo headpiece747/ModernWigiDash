@@ -30,7 +30,7 @@ public sealed class DisplayPresenter : IDisposable
     public long FramesSent => _delivery.FramesSent;
 
     /// <summary>Queues the freshly composed frame for encode→coalesce→pace→send.</summary>
-    public void Send(SKBitmap frame) => _delivery.SendFrame(frame);
+    public void Send(SKBitmap frame) => _delivery.Push(frame);
 
     public void Dispose() => _delivery.Dispose();
 }

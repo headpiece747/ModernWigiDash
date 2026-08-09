@@ -33,17 +33,23 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // producers started immediately.
     private readonly Sdk.PollLoop _sensorPoll;
     // PresentMon frame-time producer (ADR-0003) — polls the PresentMon
-    // Service directly, independent of the WCF routing state.
+    // Service directly, independent of service routing.
     private readonly PresentMonNative _presentMonNative = new();
     private readonly PresentMonFrameTimeProducer _presentMonProducer;
     private readonly Sdk.PollLoop _frameTimePoll;
 
     // LibreHardwareService sensor producer (ADR-0004) — reads the named
-    // shared-memory maps directly, independent of the WCF routing state.
+    // shared-memory maps directly, independent of service routing.
     private readonly LhmSharedMemoryReader _lhsReader = new();
 
     private ProfileLayout _profile;
     private PlacedWidgetInstance? _selectedWidget;
+
+    // XAML-fired events can arrive during InitializeComponent, before the ctor
+    // assigns the modules they forward to (e.g. the opacity slider's initial
+    // ValueChanged). Guarded handlers no-op until this is set, as the last
+    // ctor statement.
+    private bool _wired;
 
 #pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
@@ -179,6 +185,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
         UpdateUsbBadge();
         UpdateActiveCount();
         _inspector.Refresh();
+
+        _wired = true;
     }
 
     private void PlaceWidgetOnCanvas(string pluginId, float x, float y, float width = -1, float height = -1)
@@ -202,6 +210,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private void UpdateActiveCount()
     {
         TxtActiveCount.Text = $"Active Widgets: {_profile.ActivePage.Widgets.Count}";
+    }
+
+    /// <summary>Clears the widget selection and refreshes the count and canvas.</summary>
+    private void ClearSelectionAndRefresh()
+    {
+        SelectWidget(null);
+        UpdateActiveCount();
+        SkiaCanvas.InvalidateVisual();
     }
 
     #region Skia Canvas Rendering & Mouse Interaction
@@ -304,15 +320,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void Transform_Changed(object sender, TextChangedEventArgs e)
     {
-        if (_inspector is null) return; // XAML init can raise these before the ctor assigns the controller
+        if (!_wired) return;
         _inspector.TransformChanged(sender, e);
     }
 
     private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        // The opacity slider's initial Value fires during InitializeComponent,
-        // before _inspector exists — must not NRE the window construction.
-        if (_inspector is null) return;
+        if (!_wired) return;
         _inspector.OpacityChanged(sender, e);
     }
 
@@ -331,9 +345,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_selectedWidget != null)
         {
             _profile.ActivePage.Widgets.Remove(_selectedWidget);
-            SelectWidget(null);
-            UpdateActiveCount();
-            SkiaCanvas.InvalidateVisual();
+            ClearSelectionAndRefresh();
         }
     }
 
@@ -401,7 +413,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void RebuildPageTabsUI()
     {
-        if (PanelPageTabs == null) return;
         PanelPageTabs.Children.Clear();
         for (int i = 0; i < _profile.Pages.Count; i++)
         {
@@ -464,11 +475,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
             PanelPageTabs.Children.Add(container);
         }
 
-        // Auto-scroll to active tab
-        if (PanelPageTabs.Children.Count > _profile.ActivePageIndex &&
-            PanelPageTabs.Children[_profile.ActivePageIndex] is FrameworkElement activeTab)
+        ScrollToPage(_profile.ActivePageIndex);
+    }
+
+    /// <summary>Brings the page tab at the given index into view.</summary>
+    private void ScrollToPage(int index)
+    {
+        if (PanelPageTabs.Children.Count > index &&
+            PanelPageTabs.Children[index] is FrameworkElement targetTab)
         {
-            activeTab.BringIntoView();
+            targetTab.BringIntoView();
         }
     }
 
@@ -492,16 +508,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _profile.ActivePageIndex = index;
         RebuildPageTabsUI();
 
-        // Auto-scroll to the newly active tab
-        if (PanelPageTabs.Children.Count > index &&
-            PanelPageTabs.Children[index] is FrameworkElement targetTab)
-        {
-            targetTab.BringIntoView();
-        }
+        ScrollToPage(index);
 
-        SelectWidget(null);
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
+        ClearSelectionAndRefresh();
     }
 
     private void DeletePage(int index)
@@ -516,36 +525,28 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
         RebuildPageTabsUI();
-        SelectWidget(null);
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
+        ClearSelectionAndRefresh();
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
         RebuildPageTabsUI();
-        SelectWidget(null);
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
+        ClearSelectionAndRefresh();
     }
 
     private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
     {
-        if (_profile != null && ChkSnapToGrid != null)
-        {
-            _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
-            SkiaCanvas?.InvalidateVisual();
-        }
+        if (!_wired) return;
+        _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
+        SkiaCanvas.InvalidateVisual();
     }
 
     private void ChkEditMode_Changed(object sender, RoutedEventArgs e)
     {
-        if (_compositor != null && ChkEditMode != null)
-        {
-            _compositor.IsEditMode = ChkEditMode.IsChecked == true;
-            SkiaCanvas?.InvalidateVisual();
-        }
+        if (!_wired) return;
+        _compositor.IsEditMode = ChkEditMode.IsChecked == true;
+        SkiaCanvas.InvalidateVisual();
     }
 
     private void BtnExport_Click(object sender, RoutedEventArgs e)
@@ -573,9 +574,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     ProfileOps.DisposeProfile(_profile);
                     _profile = loaded;
                     RebuildPageTabsUI();
-                    SelectWidget(null);
-                    UpdateActiveCount();
-                    SkiaCanvas.InvalidateVisual();
+                    ClearSelectionAndRefresh();
                 }
             }
             catch (Exception ex)
@@ -590,9 +589,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (MessageBox.Show("Are you sure you want to clear all widgets from the current page?", "Confirm Clear", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
         {
             ProfileOps.ClearPage(_profile.ActivePage);
-            SelectWidget(null);
-            UpdateActiveCount();
-            SkiaCanvas.InvalidateVisual();
+            ClearSelectionAndRefresh();
         }
     }
 

@@ -41,7 +41,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     // (the service is isolated per ADR-0003/0004), so it reads the touch
     // report at the same 16ms cadence the service's loop used and normalizes
     // it once via TouchReport.ToEventType. Idle while yielded to the service
-    // or in simulation mode — the WCF path owns touch in those states.
+    // or in simulation mode — the direct-USB loop is the only touch owner.
     private readonly PollLoop _touchPoll;
 
     // -- Public Properties --
@@ -309,9 +309,9 @@ public sealed class DisplayDeviceEngine : IDisposable
         _reconnectTimer.Dispose();
 
         // Direct-USB mode owns the device, so the app is responsible for putting
-        // the display into standby when it exits. In WCF mode (_transport is
-        // null because the service owns the device) the service handles standby
-        // via the Shutdown operation.
+        // the display into standby when it exits. When the transport is null
+        // (no device attached), there is nothing to put to standby — the
+        // display sleeps on its own timeout once heartbeats stop.
         try
         {
             _transport?.GoToStandby();

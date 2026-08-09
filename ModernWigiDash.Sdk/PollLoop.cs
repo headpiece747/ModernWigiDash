@@ -9,8 +9,9 @@ namespace ModernWigiDash.Sdk;
 /// background thread and calls the sample sink there (sinks that need another
 /// thread marshal themselves).
 ///
-/// Used by the App's three WCF producers (touch/sensor/frame-time) and by the
-/// Service's touch+keepalive loop — one loop shape, every hop.
+/// Used by the App's two 1s direct producers (LibreHardwareService sensors,
+/// PresentMon frame-time) and by the DisplayDeviceEngine's 16ms direct-USB
+/// touch loop — one loop shape, every hop.
 /// </summary>
 public sealed class PollLoop : IDisposable
 {

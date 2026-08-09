@@ -15,7 +15,7 @@ public readonly record struct TouchReport
 
     /// <summary>
     /// Maps the raw vendor protocol byte to the SDK touch vocabulary. This is
-    /// the single normalization site for hardware touch: the Service's WCF
+    /// the single normalization site for hardware touch: the App's direct-USB
     /// seam and the App's direct-USB engine both delegate here, so the App
     /// only ever sees <see cref="TouchEventType"/>. Protocol: None=0,
     /// Down=1 (contact + movement), Up=2 (release).

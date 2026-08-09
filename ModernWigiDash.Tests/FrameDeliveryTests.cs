@@ -19,30 +19,20 @@ public class FrameDeliveryTests
     }
 
     [TestMethod]
-    public void SendFrame_WhenNoSendAttached_ReturnsDropped()
+    public void Push_WhenNoSendAttached_ReturnsDropped()
     {
         using var delivery = new FrameDelivery();
         using var bitmap = CreateFrameBitmap();
 
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.SendFrame(bitmap));
+        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
     }
 
     [TestMethod]
-    public void IsReady_AfterAttachSend_IsTrue()
+    public void IsReady_WhenSendProvidedInCtor_IsTrue()
     {
         using var delivery = new FrameDelivery(send: _ => true);
 
         Assert.IsTrue(delivery.IsReady);
-    }
-
-    [TestMethod]
-    public void IsReady_AfterAttachSendNull_IsFalse()
-    {
-        using var delivery = new FrameDelivery(send: _ => true);
-
-        delivery.AttachSend(null);
-
-        Assert.IsFalse(delivery.IsReady);
     }
 
     [TestMethod]
@@ -151,35 +141,6 @@ public class FrameDeliveryTests
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery2.Push(bitmap));
         Assert.AreEqual(1, delivery2.DroppedCount);
         release.Set();
-    }
-
-    // ── PushBytes: byte-level entry (service hop) ──────────
-
-    [TestMethod]
-    public void PushBytes_EmptyFrame_ReturnsDropped()
-    {
-        using var delivery = new FrameDelivery(send: _ => true);
-
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.PushBytes([]));
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.PushBytes(null!));
-    }
-
-    [TestMethod]
-    public void PushBytes_WithSend_Delivers()
-    {
-        using var delivered = new ManualResetEventSlim(false);
-        byte[]? received = null;
-        using var delivery = new FrameDelivery(send: bytes =>
-        {
-            received = bytes;
-            delivered.Set();
-            return true;
-        });
-
-        byte[] frame = new byte[64];
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.PushBytes(frame));
-        Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)));
-        Assert.AreSame(frame, received, "Byte-level push must not copy — the array is owned by the pipeline");
     }
 
     // ── coalescing: backlog drops stale frames ─────────────

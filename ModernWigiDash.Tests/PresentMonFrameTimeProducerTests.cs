@@ -398,7 +398,7 @@ public class PresentMonFrameTimeProducerTests
         }
 
         Assert.IsNotNull(dto);
-        Assert.IsTrue(dto.IsAvailable, "the service is reachable � availability stays true");
+        Assert.IsTrue(dto.IsAvailable, "the service is reachable � availability stays true");
         Assert.IsFalse(dto.CaptureHealthy, "no present data for the whole grace window must flag the capture");
         StringAssert.Contains(dto.ErrorMessage, "not producing present data");
         Assert.AreEqual(-1, dto.ProcessId);
@@ -453,5 +453,120 @@ public class PresentMonFrameTimeProducerTests
 
         Assert.IsNotNull(dto);
         Assert.IsTrue(dto.CaptureHealthy, "desktop/own-window idle must never flag the capture");
+    }
+
+    [TestMethod]
+    public void Poll_IdleBetweenTargets_ResetsGraceCounter()
+    {
+        int foregroundPid = 4321;
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => foregroundPid, _ => []),
+            _ => "game.exe");
+
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.IsTrue(producer.Poll().CaptureHealthy, "startup empty polls must be healthy");
+        }
+
+        foregroundPid = 0; // target closes — idle between targets
+        for (int i = 0; i < 3; i++)
+        {
+            Assert.IsTrue(producer.Poll().CaptureHealthy, "idle polls must not count toward the grace window");
+        }
+
+        foregroundPid = 4321; // new target appears
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 9; i++)
+        {
+            dto = producer.Poll();
+            Assert.IsNotNull(dto);
+            Assert.IsTrue(dto.CaptureHealthy, $"poll {i + 1} after the idle gap must still be healthy");
+        }
+
+        dto = producer.Poll();
+        Assert.IsNotNull(dto);
+        Assert.IsFalse(dto.CaptureHealthy,
+            "the full grace window must re-apply after an idle gap, not a leaked remainder of the previous target");
+    }
+
+    [TestMethod]
+    public void Poll_AllCandidatesTrackRejected_ReturnsIdleWithoutCounting()
+    {
+        var native = AvailableNative();
+        native.TrackHandler = _ => false;
+        var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322, 4323] : []);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 15; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsNotNull(dto);
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.AreEqual(-1, dto.ProcessId, "an unwatchable target set is an idle-style outcome");
+        Assert.IsTrue(dto.CaptureHealthy, "track rejections must never count toward a dead capture");
+        Assert.AreEqual(0, native.PolledProcessIds.Count, "nothing is polled when every track attempt is rejected");
+    }
+
+    [TestMethod]
+    public void Poll_TrackRejectedCandidate_NotCountedAsEmptyData()
+    {
+        IReadOnlyList<int> children = [];
+        var native = AvailableNative();
+        native.TrackHandler = _ => false; // every candidate rejected
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => 4321, _ => children),
+            _ => "game.exe");
+
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.IsTrue(producer.Poll().CaptureHealthy,
+                $"poll {i + 1}: a fully rejected candidate set must never consume the grace window");
+        }
+
+        children = [4322]; // a second candidate appears that tracking accepts
+        native.TrackHandler = pid => pid != 4321;
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 9; i++)
+        {
+            dto = producer.Poll();
+            Assert.IsNotNull(dto);
+            Assert.IsTrue(dto.CaptureHealthy,
+                $"poll {i + 1}: only the tracked polls count — 9 of them are inside the grace window");
+        }
+
+        dto = producer.Poll();
+        Assert.IsNotNull(dto);
+        Assert.IsFalse(dto.CaptureHealthy,
+            "exactly the tracked-empty polls count — the rejected candidate must not shorten the grace");
+        CollectionAssert.DoesNotContain(native.PolledProcessIds, 4321, "a rejected candidate is never polled");
+    }
+
+    [TestMethod]
+    public void Poll_CaptureDeadBoundary_HealthyAtNineEmptyPollsDeadAtTen()
+    {
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 4321);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 9; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsNotNull(dto);
+        Assert.IsTrue(dto.CaptureHealthy, "9 tracked-but-empty polls are inside the grace window");
+
+        dto = producer.Poll();
+        Assert.IsNotNull(dto);
+        Assert.IsFalse(dto.CaptureHealthy, "the 10th tracked-but-empty poll crosses the boundary");
     }
 }

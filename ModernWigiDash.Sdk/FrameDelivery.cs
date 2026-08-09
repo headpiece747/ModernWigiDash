@@ -4,23 +4,19 @@ using SkiaSharp;
 namespace ModernWigiDash.Sdk;
 
 /// <summary>
-/// The single frame-delivery policy module. Every transport hop — App WCF
-/// sink, App direct-USB engine, Service <c>RunFrameLoop</c> — is an instance
-/// of this module, so a backlog behaves identically in every mode:
+/// The single frame-delivery policy module. The App binds one instance to the
+/// direct-USB engine, so a backlog behaves identically in every mode:
 ///
 /// bounded DropOldest channel → drain-to-latest (stale frames dropped, never
 /// replayed) → paced send (default 33ms) → pooled buffers released.
 ///
-/// Two entry points feed one policy: <see cref="Push"/> (composited bitmap;
-/// encodes into a pooled exact-size buffer via the injected encoder) and
-/// <see cref="PushBytes"/> (already-encoded bytes, e.g. the service hop that
-/// receives frames over the pipe). Drop accounting is visible through
-/// <see cref="DroppedCount"/>; the send seam is attached with
-/// <see cref="AttachSend"/>.
+/// One entry point feeds the policy: <see cref="Push"/> (composited bitmap;
+/// encodes into a pooled exact-size buffer via the injected encoder). Drop
+/// accounting is visible through <see cref="DroppedCount"/>.
 /// </summary>
-public sealed class FrameDelivery : IFrameSink
+public sealed class FrameDelivery : IDisposable
 {
-    private sealed record FrameSlot(byte[] Buffer, bool IsPooled);
+    private sealed record FrameSlot(byte[] Buffer);
 
     private readonly Channel<FrameSlot> _channel;
     private readonly FrameBufferPool? _pool;
@@ -32,7 +28,7 @@ public sealed class FrameDelivery : IFrameSink
     private readonly Action<string>? _log;
     private readonly Task _senderTask;
 
-    private volatile Func<byte[], bool>? _send;
+    private readonly Func<byte[], bool>? _send;
     private DateTimeOffset _lastSendStart;
     private long _sent;
     private int _sentLogCount;
@@ -40,13 +36,11 @@ public sealed class FrameDelivery : IFrameSink
     private int _disposed;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
-    /// reusable work buffer. Required for <see cref="Push"/>; null is valid
-    /// for byte-level instances (e.g. the service hop).</param>
+    /// reusable work buffer. Required for <see cref="Push"/>.</param>
     /// <param name="pool">Exact-size buffer pool. Required when
-    /// <paramref name="encoder"/> is provided; the pool's buffers are the WCF
-    /// serializer's exact-size requirement.</param>
-    /// <param name="send">Initial send seam; can be rebound at runtime with
-    /// <see cref="AttachSend"/> (null detaches).</param>
+    /// <paramref name="encoder"/> is provided.</param>
+    /// <param name="send">Send seam to the transport, bound once at
+    /// construction.</param>
     /// <param name="isReady">Optional readiness predicate. Defaults to "a send
     /// seam is attached".</param>
     /// <param name="minInterval">Minimum interval between transport sends
@@ -99,12 +93,6 @@ public sealed class FrameDelivery : IFrameSink
     /// </summary>
     public long DroppedCount => Interlocked.Read(ref _dropped);
 
-    /// <summary>
-    /// Binds (or unbinds, with null) the transport send seam. Called when the
-    /// service connects or faults; a null send makes the delivery not ready.
-    /// </summary>
-    public void AttachSend(Func<byte[], bool>? send) => _send = send;
-
     /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
     {
@@ -130,19 +118,8 @@ public sealed class FrameDelivery : IFrameSink
             throw;
         }
 
-        return Queue(new FrameSlot(buffer, IsPooled: true));
+        return Queue(new FrameSlot(buffer));
     }
-
-    /// <summary>Queues an already-encoded frame (e.g. the service hop).</summary>
-    public FrameDeliveryResult PushBytes(byte[] frame)
-    {
-        if (_send == null || frame == null || frame.Length == 0)
-            return FrameDeliveryResult.Dropped;
-        return Queue(new FrameSlot(frame, IsPooled: false));
-    }
-
-    /// <inheritdoc />
-    public FrameDeliveryResult SendFrame(SKBitmap frame) => Push(frame);
 
     /// <summary>
     /// Drains the channel, keeps only the latest frame (returning every stale
@@ -221,7 +198,7 @@ public sealed class FrameDelivery : IFrameSink
         {
             Interlocked.Increment(ref _dropped);
         }
-        if (slot.IsPooled && _pool != null)
+        if (_pool != null)
         {
             _pool.Release(slot.Buffer);
         }
@@ -243,7 +220,7 @@ public sealed class FrameDelivery : IFrameSink
         // sender loop exits (they would otherwise be stranded at close).
         while (_channel.Reader.TryRead(out var slot))
         {
-            if (slot.IsPooled && _pool != null)
+            if (_pool != null)
             {
                 _pool.Release(slot.Buffer);
             }
@@ -269,6 +246,5 @@ public sealed class FrameDelivery : IFrameSink
         }
 
         _cts.Dispose();
-        _send = null;
     }
 }

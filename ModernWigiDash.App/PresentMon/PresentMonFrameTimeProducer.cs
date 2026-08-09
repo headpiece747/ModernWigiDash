@@ -11,7 +11,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// GPU/renderer processes), and maps the dynamic-query + frame-query results
 /// into a <see cref="FrameTimeSnapshotDto"/> that MainWindow's poll tick feeds
 /// to <c>FrameTimeStore.UpdateFromDto</c>. PresentMon is a direct App↔service
-/// connection — it is independent of the WCF service routing.
+/// connection — it is independent of any service routing.
 /// </summary>
 public sealed class PresentMonFrameTimeProducer : IDisposable
 {
@@ -19,8 +19,10 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     internal const int MaxSparklineSamples = 240;
 
     /// <summary>
-    /// Consecutive polls with a candidate set but no present data anywhere
-    /// before the capture is declared unhealthy. ~10s at the 1s poll cadence.
+    /// Consecutive polls where at least one candidate tracked successfully but
+    /// no present data arrived, before the capture is declared unhealthy. ~10s
+    /// at the 1s poll cadence. Idle polls (no candidates) and track rejections
+    /// never count toward this window.
     /// </summary>
     private const int CaptureHealthGracePolls = 10;
 
@@ -69,6 +71,10 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             .ToList();
         if (candidates.Count == 0)
         {
+            // Desktop/own-window idle must never count toward a dead capture —
+            // the grace window belongs to a specific target, not to the gaps
+            // between targets.
+            _emptyDataPolls = 0;
             return Idle(now);
         }
 
@@ -85,12 +91,19 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         // is idempotent at the native seam (AlreadyTrackingProcess tolerated);
         // the first candidate that actually has data reports.
 #pragma warning restore S125
+        bool anyCandidateTracked = false;
         foreach (int pid in candidates)
         {
             if (!_native.TrackProcess(pid))
             {
+                // A rejected track attempt is not empty data — skip the
+                // candidate without counting it. The grace window resets only
+                // when the whole poll ends with nothing tracked (below); a
+                // mixed poll still counts once via its successfully tracked
+                // candidate.
                 continue;
             }
+            anyCandidateTracked = true;
 
             var poll = _native.PollDynamic(pid);
             if (IsSessionLost(poll.Status))
@@ -123,10 +136,22 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             };
         }
 
-        // No candidate produced data this poll. The session is up and a target
-        // exists, so after a grace period this means the service's ETW capture
-        // is not producing present events — surface it instead of silently
-        // presenting monitor-refresh mode as real FPS.
+        if (!anyCandidateTracked)
+        {
+            // Every candidate's track attempt was rejected — nothing is being
+            // watched this poll. That is an idle-style outcome: a healthy
+            // service that refuses tracking must never surface "capture
+            // inactive". It neither counts toward a dead capture nor preserves
+            // a partially spent grace window — the tracked-empty streak broke.
+            _emptyDataPolls = 0;
+            return Idle(now);
+        }
+
+        // At least one candidate tracked successfully but no present data
+        // arrived this poll. The session is up and a target exists, so after a
+        // grace period this means the service's ETW capture is not producing
+        // present events — surface it instead of silently presenting
+        // monitor-refresh mode as real FPS.
         if (++_emptyDataPolls >= CaptureHealthGracePolls)
         {
             return CaptureDead(now);

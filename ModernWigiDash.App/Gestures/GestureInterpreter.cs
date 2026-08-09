@@ -30,7 +30,7 @@ public sealed record GestureOutcome(
 /// <summary>
 /// Pure gesture state machine shared by every input source on the WigiDash
 /// display. Owns the swipe/edge-tap/page-switch thresholds and the Down→Move
-/// remapping so the USB-direct touch path, the WCF touch path, and the desktop
+/// remapping so the USB-direct touch path and the desktop
 /// mouse all apply one canonical gesture vocabulary.
 ///
 /// Hardware protocol: the display reports Down(1) for initial contact AND

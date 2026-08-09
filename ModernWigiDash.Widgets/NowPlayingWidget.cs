@@ -1,6 +1,5 @@
 using Windows.Media;
 using Windows.Media.Control;
-using Windows.Storage.Streams;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 using ModernWigiDash.Core.Rendering;
@@ -34,13 +33,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     // ── SMTC state (all mutated on the UI thread) ─────────────────────────
     private MediaSessionMonitor? _mediaMonitor;
-    private SKBitmap? _albumArt;
-    private readonly RetiredBitmapSet _artRetirement = new();
-    private string _artKey = "";
-    private string _loadedArtworkKey = "";
-    private string _loadingArtworkKey = "";
-    private SKColor _bgColor = new(18, 18, 24);
-    private int _artLoadVersion;
+    private ArtworkLoader? _artworkLoader;
     private SKPoint? _touchDownPoint;
     private bool _disposed;
 
@@ -55,6 +48,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
+        _artworkLoader = new ArtworkLoader(Context.LogError);
+        _artworkLoader.ArtworkChanged += OnArtworkChanged;
         _mediaMonitor = new MediaSessionMonitor(Context.LogError);
         _mediaMonitor.SnapshotChanged += OnMediaSnapshotChanged;
         _ = _mediaMonitor.InitializeAsync();
@@ -62,122 +57,33 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// Reacts to monitor snapshot updates: clears the artwork pipeline when the
-    /// session is lost, otherwise reloads album art when the track's art key
-    /// changes. Version-token/stale-guard semantics live in the monitor; the
-    /// artwork key guards (_artKey/_loadedArtworkKey/_loadingArtworkKey) are
-    /// unchanged.
+    /// Forwards snapshot updates to the <see cref="ArtworkLoader"/>, which owns
+    /// key-change detection, the reload decision, the load pipeline, and the
+    /// retire-and-publish discipline. The loader raises <see cref="ArtworkLoader.ArtworkChanged"/>
+    /// after each completed load (success, skipped, or failed), so render
+    /// requests land at the same point the old inline pipeline produced them.
     /// </summary>
     private void OnMediaSnapshotChanged(MediaSessionUpdate? update)
     {
-        if (update is null)
-        {
-            DisposeArtwork();
-            _bgColor = new SKColor(18, 18, 24);
-            Context?.RequestRender();
-            return;
-        }
-
-        bool trackChanged = update.ArtKey != _artKey;
-        bool artworkBecameAvailable = update.Thumbnail is not null &&
-            _loadedArtworkKey != update.ArtKey && _loadingArtworkKey != update.ArtKey;
-        if (trackChanged || artworkBecameAvailable)
-        {
-            _artKey = update.ArtKey;
-            _ = RefreshArtworkAsync(update.Thumbnail, update.ArtKey);
-        }
-        else
-        {
-            Context?.RequestRender();
-        }
+        _artworkLoader?.NotifySnapshotChanged(update);
     }
 
-    private async Task RefreshArtworkAsync(IRandomAccessStreamReference? thumbnail, string artKey)
+    private void OnArtworkChanged(ArtworkLoaded? artwork)
     {
-        await LoadArtworkAsync(thumbnail, artKey);
         Context?.RequestRender();
-    }
-
-    private async Task LoadArtworkAsync(IRandomAccessStreamReference? thumbnail, string artKey)
-    {
-        int version = ++_artLoadVersion;
-        DisposeArtwork();
-
-        if (thumbnail is null)
-        {
-            _bgColor = new SKColor(18, 18, 24);
-            return;
-        }
-
-        _loadingArtworkKey = artKey;
-        try
-        {
-            using var stream = await thumbnail.OpenReadAsync();
-            if (_disposed || version != _artLoadVersion || artKey != _artKey) return;
-
-            ulong size = stream.Size;
-            if (size == 0 || size > 10UL * 1024 * 1024)
-            {
-                _bgColor = new SKColor(18, 18, 24);
-                return;
-            }
-
-            byte[] data = new byte[(int)size];
-            using (var reader = new DataReader(stream.GetInputStreamAt(0)))
-            {
-                await reader.LoadAsync((uint)size);
-                reader.ReadBytes(data);
-            }
-
-            if (_disposed || version != _artLoadVersion || artKey != _artKey) return;
-
-            var decoded = await Task.Run(() => SKBitmap.Decode(data));
-            if (_disposed || version != _artLoadVersion || artKey != _artKey)
-            {
-                decoded?.Dispose();
-                return;
-            }
-
-            _albumArt = decoded;
-            ExtractBackgroundColor();
-            _loadedArtworkKey = artKey;
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Album art decode failed: {ex.Message}", ex);
-            _bgColor = new SKColor(18, 18, 24);
-        }
-        finally
-        {
-            if (_loadingArtworkKey == artKey)
-                _loadingArtworkKey = "";
-        }
-    }
-
-    private void DisposeArtwork()
-    {
-        // Retire instead of disposing: SMTC refresh threads replace the
-        // artwork, and the 30 FPS render thread may be inside
-        // canvas.DrawBitmap(_albumArt) at this instant. Disposing the
-        // native pixel memory there crashes in sk_image_new_from_bitmap
-        // (0xc0000005) — disposal happens on the UI thread at the next
-        // Render pass (_artRetirement.DisposeRetired), never from a
-        // background refresh.
-        _artRetirement.Retire(_albumArt);
-        _albumArt = null;
-        _loadedArtworkKey = "";
     }
 
     // ── Render ────────────────────────────────────────────────────────────
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        _artRetirement.DisposeRetired();
+        _artworkLoader?.DisposeRetired();
 
         float scale = Math.Min(bounds.Width / DesignWidth, bounds.Height / DesignHeight);
 
         // Background panel tinted by artwork-derived color
-        var bgColor = BlendToward(_bgColor, new SKColor(18, 18, 24), 0.25f);
+        var artState = _artworkLoader?.Current;
+        var bgColor = BlendToward(artState?.BackgroundColor ?? new SKColor(18, 18, 24), new SKColor(18, 18, 24), 0.25f);
         using var bg = new SKPaint { Color = bgColor, IsAntialias = true };
         canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, bg);
 
@@ -259,10 +165,10 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                                         artRect.Right + shadowOff, artRect.Bottom + shadowOff), r, r, shadow);
 
         // Snapshot the artwork once: background SMTC refreshes can replace (or
-        // null) _albumArt between two reads, which would NRE the render mid-draw.
-        // The retired-list discipline guarantees the snapshot stays alive for
-        // this draw even if a refresh retires it right after.
-        var art = _albumArt;
+        // null) the published artwork between two reads, which would NRE the
+        // render mid-draw. The retired-list discipline guarantees the snapshot
+        // stays alive for this draw even if a refresh retires it right after.
+        var art = _artworkLoader?.Current.Bitmap;
         if (art is not null)
         {
             canvas.Save();
@@ -739,117 +645,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
     }
 
-    // ── Color extraction (from artwork) ───────────────────────────────────
-
-    private void ExtractBackgroundColor()
-    {
-        // Snapshot once: another SMTC refresh thread may retire the artwork
-        // between the null check and the draw.
-        var art = _albumArt;
-        if (art is null)
-        {
-            _bgColor = new SKColor(18, 18, 24);
-            return;
-        }
-
-        try
-        {
-            using var sample = new SKBitmap(32, 32, SKColorType.Rgba8888, SKAlphaType.Premul);
-            using var canvas = new SKCanvas(sample);
-            canvas.Clear();
-            canvas.DrawBitmap(art, new SKRect(0, 0, 32, 32), HighQualitySampling);
-            canvas.Flush();
-
-            Dictionary<int, (SKColor color, int count, float brightness)> buckets = [];
-
-            for (int y = 0; y < sample.Height; y++)
-            {
-                for (int x = 0; x < sample.Width; x++)
-                {
-                    SKColor px = sample.GetPixel(x, y);
-                    float max = Math.Max(Math.Max(px.Red, px.Green), px.Blue);
-                    float brightness = max / 255f;
-
-                    if (brightness < 0.10f || brightness > 0.92f) continue;
-
-                    int qR = (px.Red / 16) * 16;
-                    int qG = (px.Green / 16) * 16;
-                    int qB = (px.Blue / 16) * 16;
-                    int key = (qR << 16) | (qG << 8) | qB;
-
-                    if (buckets.TryGetValue(key, out var existing))
-                    {
-                        if (brightness > existing.brightness)
-                            buckets[key] = (px, existing.count + 1, brightness);
-                        else
-                            buckets[key] = (existing.color, existing.count + 1, existing.brightness);
-                    }
-                    else
-                    {
-                        buckets[key] = (px, 1, brightness);
-                    }
-                }
-            }
-
-            if (buckets.Count == 0)
-            {
-                _bgColor = sample.GetPixel(16, 16);
-                return;
-            }
-
-            var colorful = buckets.Values
-                .Where(b =>
-                {
-                    float min = Math.Min(Math.Min(b.color.Red, b.color.Green), b.color.Blue);
-                    float max = Math.Max(Math.Max(b.color.Red, b.color.Green), b.color.Blue);
-                    float sat = max > 0 ? (max - min) / max : 0;
-                    float br = max / 255f;
-                    return sat >= 0.22f && br >= 0.18f && br <= 0.85f;
-                })
-                .ToList();
-
-            SKColor selected;
-            if (colorful.Count > 0)
-            {
-                selected = colorful
-                    .OrderByDescending(b =>
-                    {
-                        float min = Math.Min(Math.Min(b.color.Red, b.color.Green), b.color.Blue);
-                        float max = Math.Max(Math.Max(b.color.Red, b.color.Green), b.color.Blue);
-                        float sat = max > 0 ? (max - min) / max : 0;
-                        float br = max / 255f;
-                        return br * (0.5f + 0.5f * sat) * (1.0f + Math.Min(0.5f, b.count / 50.0f));
-                    })
-                    .First()
-                    .color;
-            }
-            else
-            {
-                selected = buckets.Values
-                    .OrderByDescending(b => b.brightness)
-                    .ThenByDescending(b => b.count)
-                    .First()
-                    .color;
-            }
-
-            float selBright = Math.Max(Math.Max(selected.Red, selected.Green), selected.Blue) / 255f;
-            if (selBright > 0.65f)
-            {
-                float factor = 0.65f / selBright;
-                selected = new SKColor(
-                    (byte)Math.Clamp(selected.Red * factor, 0, 255),
-                    (byte)Math.Clamp(selected.Green * factor, 0, 255),
-                    (byte)Math.Clamp(selected.Blue * factor, 0, 255));
-            }
-
-            _bgColor = selected;
-        }
-        catch
-        {
-            _bgColor = new SKColor(18, 18, 24);
-        }
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private static SKColor BlendToward(SKColor from, SKColor to, float amount)
@@ -911,8 +706,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             await _mediaMonitor.DisposeAsync();
             _mediaMonitor = null;
         }
-        DisposeArtwork();
-        _artRetirement.DisposeAll();
+        if (_artworkLoader is not null)
+        {
+            _artworkLoader.ArtworkChanged -= OnArtworkChanged;
+            _artworkLoader.DisposeAll();
+            _artworkLoader = null;
+        }
 
         await base.DisposeAsync();
     }
