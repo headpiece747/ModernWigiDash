@@ -71,11 +71,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly Input.InputController _inputController;
     private bool _isUpdatingInspector = false;
 
-    // Async frame pipeline — decouple UI render timer from transport round-trips.
-    // One FrameDelivery instance (the single encode→pool→coalesce policy) with
-    // the 33ms pacing the engine's USB writes used; the app talks USB directly
-    // now that the Windows Service is gone (ADR-0005).
-    private readonly FrameDelivery _usbSink;
+    // Frame presentation — decouple the UI render timer from transport
+    // round-trips: one DisplayPresenter (a FrameDelivery with the single
+    // encode→pool→coalesce→pace policy and the 33ms pacing the engine's USB
+    // writes used) bound to the direct-USB engine (ADR-0005).
+    private readonly DisplayPresenter _presenter;
 
     public MainWindow()
     {
@@ -83,12 +83,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SourceInitialized += (_, _) => ApplyTheme();
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
-        _usbSink = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
-            send: _usbDevice.SendFrameBytes,
-            isReady: () => _usbDevice.IsConnected && !_usbDevice.IsSimulationMode,
-            log: msg => FileLog.Write("[HW] " + msg));
+        _presenter = new DisplayPresenter(
+            _usbDevice.SendFrameBytes,
+            () => _usbDevice.IsConnected && !_usbDevice.IsSimulationMode,
+            msg => FileLog.Write("[HW] " + msg));
 
         // One poll loop per direct producer.
         _sensorPoll = new Sdk.PollLoop(
@@ -159,7 +157,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _sensorPoll.Stop();
             _frameTimePoll.Stop();
             _presentMonProducer.Dispose();
-            _usbSink.Dispose();
+            _presenter.Dispose();
             DisposeProfileWidgets(_profile);
 
             _deviceAuthorizationWindow?.Close();
@@ -240,14 +238,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
     {
-        _compositor.Compose(_profile.ActivePage, 60.0f, _profile.ActivePageIndex, _profile.Pages.Count);
+        _compositor.Compose(_profile.ActivePage);
         e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, new SKSamplingOptions(SKFilterMode.Linear));
         // Send the freshly composed frame through the direct-USB pipeline.
         // Paint fires after Compose + DrawBitmap, so the queued frame is the
         // current one (the old timer-path send was one paint stale). The
-        // encode runs here on the UI thread (~1-3ms); Push just queues.
-        if (_usbSink != null)
-            _usbSink.SendFrame(_compositor.FrameBuffer);
+        // encode runs here on the UI thread (~1-3ms); Send just queues.
+        _presenter.Send(_compositor.FrameBuffer);
     }
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
