@@ -34,6 +34,7 @@ public static class FrameEncoder
             using var pixmap = bitmap.PeekPixels();
             if (pixmap != null && pixmap.GetPixels() != IntPtr.Zero)
             {
+#pragma warning disable S6640 // zero-alloc encode fast path
                 unsafe
                 {
                     byte* srcPtr = (byte*)pixmap.GetPixels();
@@ -50,6 +51,7 @@ public static class FrameEncoder
                         }
                     }
                 }
+#pragma warning restore S6640
                 return;
             }
         }

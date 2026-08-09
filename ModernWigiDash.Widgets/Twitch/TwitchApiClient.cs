@@ -242,7 +242,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
     }
 }
 
-internal sealed class TwitchApiException(int statusCode, string message) : Exception(message)
+public sealed class TwitchApiException(int statusCode, string message) : Exception(message)
 {
     public int StatusCode { get; } = statusCode;
     public bool IsUnauthorized => StatusCode == 401;

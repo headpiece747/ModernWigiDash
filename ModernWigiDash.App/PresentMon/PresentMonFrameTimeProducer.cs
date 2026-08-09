@@ -31,7 +31,6 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     private readonly List<double> _recentFrameTimes = [];
 
     private bool _sessionOpen;
-    private int _trackedPid = -1;
     private int _emptyDataPolls;
 
     public PresentMonFrameTimeProducer(
@@ -80,10 +79,12 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         }
         _sessionOpen = true;
 
+#pragma warning disable S125 // documentation of TrackProcess semantics, not commented-out code
         // Multi-process apps (Chrome/Edge/Electron) present from child GPU or
         // renderer processes, so poll the whole descendant tree. TrackProcess
         // is idempotent at the native seam (AlreadyTrackingProcess tolerated);
         // the first candidate that actually has data reports.
+#pragma warning restore S125
         foreach (int pid in candidates)
         {
             if (!_native.TrackProcess(pid))
@@ -104,7 +105,6 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             }
 
             _emptyDataPolls = 0;
-            _trackedPid = pid;
             AppendFrameTimes(_native.DrainFrameTimes(pid));
 
             return new FrameTimeSnapshotDto
@@ -169,7 +169,6 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     private void ResetSession()
     {
         _sessionOpen = false;
-        _trackedPid = -1;
         _native.CloseSession();
     }
 

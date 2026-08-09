@@ -22,7 +22,9 @@ namespace ModernWigiDash.Sdk;
 public static class FileLog
 {
     private static readonly Lock Gate = new();
+#pragma warning disable S1450 // field: the writer's stream is held for the log's lifetime (flush cadence), not per-call.
     private static FileStream? _stream;
+#pragma warning restore S1450
     private static StreamWriter? _writer;
     private static int _bufferedBytes;
     private static long _lastFlushTicks;

@@ -41,7 +41,7 @@ public static class FrameTimeStore
         FrameTimeSnapshotRecord.Unavailable(),
         defaultMaxAge: DefaultMaxAge);
 
-    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.Current;
+    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.Current ?? FrameTimeSnapshotRecord.Unavailable();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The

@@ -138,9 +138,12 @@ public sealed class WeatherClient
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
                 await ResolveCoordinatesAsync(location, currentQuery).ConfigureAwait(false);
 
-            if (!_lat.HasValue) return null;
+            if (!_lat.HasValue || !_lon.HasValue) return null;
 
-            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={_lat:F4}&longitude={_lon:F4}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&apparent_temperature=true&timezone=auto";
+            double lat = _lat.Value;
+            double lon = _lon.Value;
+
+            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat:F4}&longitude={lon:F4}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&apparent_temperature=true&timezone=auto";
             string json = await Http.GetStringAsync(forecastUrl, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -150,7 +153,7 @@ public sealed class WeatherClient
             var (highTempC, lowTempC, dailyForecasts) = ParseDailyForecast(root);
             var snapshot = new WeatherSnapshot(
                 tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
-                dailyForecasts, hourlyForecasts, _resolvedCityName, _lat.Value, _lon.Value);
+                dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon);
 
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             _ = SaveCacheAsync(snapshot);
@@ -336,7 +339,7 @@ public sealed class WeatherClient
         if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
             lowTempC = mins[0].GetDouble();
 
-        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out var maxes2))
+        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out _))
         {
             int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
             List<DailyForecastItem> items = [];
@@ -407,12 +410,7 @@ public sealed class WeatherClient
     private static bool IsZipCode(string query)
     {
         string trimmed = query.Trim();
-        if (trimmed.Length != 5) return false;
-        foreach (char c in trimmed)
-        {
-            if (!char.IsDigit(c)) return false;
-        }
-        return true;
+        return trimmed.Length == 5 && trimmed.All(char.IsDigit);
     }
 
     /// <summary>

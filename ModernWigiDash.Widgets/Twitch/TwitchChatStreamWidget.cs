@@ -147,7 +147,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private async Task RunTwitchActionAsync(string propertyName)
     {
-        if (!await _authActionGate.WaitAsync(0).ConfigureAwait(false)) return;
+        // Zero-timeout try-acquire: returns immediately, so there is no wait to
+        // cancel; the IRC/_authActionGate tokens are unrelated to this gate.
+        if (!await _authActionGate.WaitAsync(0, CancellationToken.None).ConfigureAwait(false)) return;
 
         try
         {
@@ -193,7 +195,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _status = StatusConnecting;
         _statusDetail = "";
         Context.RequestRender();
-        _ircTask = Task.Run(() => RunIrcLoopAsync(_cts.Token));
+        _ircTask = Task.Run(() => RunIrcLoopAsync(_cts.Token), _cts.Token);
     }
 
     private void StopConnection()
@@ -303,15 +305,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             var sock = _socket;
             if (sock != null)
             {
+                CancellationToken token = _cts?.Token ?? CancellationToken.None;
                 _ = Task.Run(async () =>
                 {
-                    try { await SendIrcLineAsync(sock, "PONG :tmi.twitch.tv", _cts?.Token ?? CancellationToken.None); }
+                    try { await SendIrcLineAsync(sock, "PONG :tmi.twitch.tv", token); }
                     catch
                     {
                         System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
                         /* socket closed / cancelled during shutdown */
                     }
-                });
+                }, token);
             }
             return;
         }

@@ -106,10 +106,8 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     public override async ValueTask DisposeAsync()
     {
-        if (_refreshTimer is IAsyncDisposable asyncTimer)
-            await asyncTimer.DisposeAsync();
-        else
-            _refreshTimer?.Dispose();
+        if (_refreshTimer != null)
+            await _refreshTimer.DisposeAsync();
         if (_pollCts != null)
         {
             await _pollCts.CancelAsync();
@@ -206,13 +204,13 @@ public class WeatherForecastWidget : ModernWidgetBase
         switch (LayoutMode)
         {
             case "Daily Forecast":
-                RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
+                RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, sx, sy);
                 break;
             case "Hourly Forecast":
-                RenderHourlyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
+                RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, tempUnit, sx, sy);
                 break;
             case "Current Only":
-                RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
+                RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, tempUnit, sx, sy);
                 break;
             case "Compact":
                 RenderCompact(canvas, contentBounds, textPrimary, tempUnit, sx, sy);
@@ -453,7 +451,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         }
     }
 
-    private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
+    private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, float sx, float sy)
     {
         int count = Math.Min(_dailyForecastSnapshot.Count, 5);
         if (count == 0) return;
@@ -493,7 +491,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         }
     }
 
-    private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
+    private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, string tempUnit, float sx, float sy)
     {
         int count = Math.Min(_hourlyForecastSnapshot.Count, 6);
         if (count == 0) return;
@@ -529,7 +527,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         }
     }
 
-    private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
+    private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, string tempUnit, float sx, float sy)
     {
         var (icon, desc) = WeatherClient.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
@@ -642,7 +640,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue && !force) return;
 
-        var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force).ConfigureAwait(false);
+        var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
         if (snapshot is null) return;
 
         ApplySnapshot(snapshot);

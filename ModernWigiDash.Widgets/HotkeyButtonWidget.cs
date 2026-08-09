@@ -151,7 +151,7 @@ internal static class HotkeyActionExecutor
     {
         var keys = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(ParseVirtualKey).ToArray();
-        ArgumentOutOfRangeException.ThrowIfZero(keys.Length, nameof(text));
+        ArgumentOutOfRangeException.ThrowIfZero(keys.Length);
 
         try
         {
@@ -184,7 +184,7 @@ internal static class HotkeyActionExecutor
 
     private static void SendUnicodeText(string text)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, 4096, nameof(text));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, 4096);
         var inputs = new List<Input>(text.Length * 2);
         foreach (char character in text)
         {
@@ -209,7 +209,19 @@ internal static class HotkeyActionExecutor
 
     private static void SendMouseWheel(string direction)
     {
-        int amount = int.TryParse(direction, out int value) ? value : direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase) ? -120 : 120;
+        int amount;
+        if (int.TryParse(direction, out int value))
+        {
+            amount = value;
+        }
+        else if (direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase))
+        {
+            amount = -120;
+        }
+        else
+        {
+            amount = 120;
+        }
         SendMouse(MouseWheel, unchecked((uint)amount));
     }
 
@@ -434,7 +446,9 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
 
     private async Task ExecuteActionsAsync()
     {
-        if (!await _actionGate.WaitAsync(0).ConfigureAwait(false)) return;
+        // Zero-timeout try-acquire: returns immediately, so there is no wait to
+        // cancel; the per-run _actionCts is created after the gate is taken.
+        if (!await _actionGate.WaitAsync(0, CancellationToken.None).ConfigureAwait(false)) return;
         if (_actionCts is { } prior)
         {
             await prior.CancelAsync().ConfigureAwait(false);
@@ -516,8 +530,11 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
 
     public override async ValueTask DisposeAsync()
     {
-        _actionCts?.Cancel();
-        _actionCts?.Dispose();
+        if (_actionCts is { } cts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
         _actionGate.Dispose();
         await base.DisposeAsync();
     }

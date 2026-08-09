@@ -243,7 +243,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(name, x + 18f * scale, _badgeBtn.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, textPaint);
     }
 
-    private SKRect DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
+    private void DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
     {
         float pad = 24f * scale;
         // Equal spacing pad from top, left, and bottom
@@ -289,7 +289,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         using var border = new SKPaint { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, StrokeWidth = 1f * scale, IsAntialias = true };
         canvas.DrawRoundRect(artRect, r, r, border);
-        return artRect;
     }
 
     private void DrawTextInfo(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
@@ -440,21 +439,21 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
         // Shuffle (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _shuffleBtn, scale, snap.CanShuffle, snap.Shuffle, accent, text, DrawShuffleIcon);
+        DrawCleanButton(canvas, _shuffleBtn, snap.CanShuffle, snap.Shuffle, accent, text, DrawShuffleIcon);
 
         // Prev (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _prevBtn, scale, snap.CanPrev, false, accent, text, DrawPrevIcon);
+        DrawCleanButton(canvas, _prevBtn, snap.CanPrev, false, accent, text, DrawPrevIcon);
 
         // Play / Pause (Hero Glowing Accent Button)
         bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;
-        DrawHeroPlayButton(canvas, _ppBtn, scale, canPp, snap.IsPlaying, accent, text);
+        DrawHeroPlayButton(canvas, _ppBtn, scale, canPp, snap.IsPlaying, accent);
 
         // Next (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _nextBtn, scale, snap.CanNext, false, accent, text, DrawNextIcon);
+        DrawCleanButton(canvas, _nextBtn, snap.CanNext, false, accent, text, DrawNextIcon);
 
         // Repeat (Clean icon button without glass circle)
         bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
-        DrawCleanButton(canvas, _repeatBtn, scale, snap.CanRepeat, repeatActive, accent, text,
+        DrawCleanButton(canvas, _repeatBtn, snap.CanRepeat, repeatActive, accent, text,
             (c, r, p) => DrawRepeatIcon(c, r, p, snap.Repeat == MediaPlaybackAutoRepeatMode.Track));
     }
 
@@ -467,14 +466,16 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         return Math.Max(0f, Math.Min(bounds.Height - pad * 2f, widthLimit));
     }
 
-    private static void DrawCleanButton(SKCanvas canvas, SKRect r, float scale, bool enabled, bool active, SKColor accent, SKColor text, Action<SKCanvas, SKRect, SKPaint> drawIcon)
+    private static void DrawCleanButton(SKCanvas canvas, SKRect r, bool enabled, bool active, SKColor accent, SKColor text, Action<SKCanvas, SKRect, SKPaint> drawIcon)
     {
-        SKColor iconColor = active ? accent : text.WithAlpha(enabled ? (byte)240 : (byte)70);
+        SKColor iconColor;
+        if (active) iconColor = accent;
+        else iconColor = text.WithAlpha(enabled ? (byte)240 : (byte)70);
         using var iconPaint = new SKPaint { Color = iconColor, IsAntialias = true };
         drawIcon(canvas, r, iconPaint);
     }
 
-    private static void DrawHeroPlayButton(SKCanvas canvas, SKRect r, float scale, bool enabled, bool isPlaying, SKColor accent, SKColor text)
+    private static void DrawHeroPlayButton(SKCanvas canvas, SKRect r, float scale, bool enabled, bool isPlaying, SKColor accent)
     {
         // Hero Play button: Solid accent fill circular button
         using var btnBg = new SKPaint

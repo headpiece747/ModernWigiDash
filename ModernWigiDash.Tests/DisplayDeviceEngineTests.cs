@@ -9,7 +9,7 @@ public class DisplayDeviceEngineTests
 {
     // ── Touch type normalization (TouchReport.ToEventType) ────────────
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(DisplayProtocolConstants.TouchTypeDown, TouchEventType.TouchDown)]
     [DataRow(DisplayProtocolConstants.TouchTypeUp, TouchEventType.TouchUp)]
     [DataRow(DisplayProtocolConstants.TouchTypeNone, TouchEventType.TouchMove)]

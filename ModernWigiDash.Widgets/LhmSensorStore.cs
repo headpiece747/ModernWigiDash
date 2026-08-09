@@ -44,7 +44,7 @@ public static class LhmSensorStore
         LhmSnapshot.Disconnected(),
         defaultMaxAge: DefaultMaxAge);
 
-    public static LhmSnapshot ReadSnapshot() => Store.Current;
+    public static LhmSnapshot ReadSnapshot() => Store.Current ?? LhmSnapshot.Disconnected();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The

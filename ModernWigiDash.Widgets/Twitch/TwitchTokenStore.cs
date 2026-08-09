@@ -85,11 +85,20 @@ internal sealed class TwitchTokenStore
     {
         try
         {
+            using var currentIdentity = WindowsIdentity.GetCurrent();
+            SecurityIdentifier? user = currentIdentity?.User;
+            if (user is null)
+            {
+                // No resolvable user SID — ACL hardening can't proceed, but the
+                // DPAPI-protected ciphertext is still safe. Skip best-effort.
+                return;
+            }
+
             var fileInfo = new FileInfo(path);
             var security = fileInfo.GetAccessControl();
             security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
             security.AddAccessRule(new FileSystemAccessRule(
-                WindowsIdentity.GetCurrent().User,
+                user,
                 FileSystemRights.FullControl,
                 InheritanceFlags.None,
                 PropagationFlags.None,

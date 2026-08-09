@@ -337,7 +337,7 @@ public static class ProfileOps
         if (string.IsNullOrWhiteSpace(path)) return "";
         if (Path.IsPathRooted(path)) return "";
         if (path.StartsWith("\\\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return "";
-        if (path.Split('\\', '/').Any(segment => segment == "..")) return "";
+        if (path.Split(['\\', '/'], StringSplitOptions.None).Any(segment => segment == "..")) return "";
         return path;
     }
 }

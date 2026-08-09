@@ -257,9 +257,5 @@ public class HardwareMonitorWidget : ModernWidgetBase
             canvas.DrawTextWithFallback(unit, area.Right - valBounds.Width + valBounds.Width + 4f, area.Top + valFont.Size, unitFont, unitPaint);
         }
     }
-    public override ValueTask DisposeAsync()
-    {
-        return base.DisposeAsync();
-    }
 }
 

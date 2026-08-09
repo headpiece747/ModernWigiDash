@@ -56,7 +56,6 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     }
 
     private AssetKind AssetKindValue => PriceFeedManager.DetectAssetKind(Symbol, AssetType);
-    private bool IsCryptoAsset => AssetKindValue == AssetKind.Crypto;
     private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
 
     private string DisplayLabel
@@ -78,7 +77,10 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             "4" => 4,
             "6" => 6,
             "8" => 8,
-            _ => rawPrice >= 100 ? 2 : rawPrice >= 1 ? 4 : rawPrice >= 0.01m ? 6 : 8
+            _ when rawPrice >= 100 => 2,
+            _ when rawPrice >= 1 => 4,
+            _ when rawPrice >= 0.01m => 6,
+            _ => 8
         };
         return currencySymbol + rawPrice.ToString("N" + d);
     }
@@ -133,10 +135,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         {
             // Stale prices render in a neutral gray with a freshness dot so the
             // last-known value is never mistaken for live data.
+            SKColor badgeColor = isPositive ? posColor : negColor;
+            if (isStale) badgeColor = textColor.WithAlpha(120);
             var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
             using var badgePaint = new SKPaint
             {
-                Color = isStale ? textColor.WithAlpha(120) : (isPositive ? posColor : negColor),
+                Color = badgeColor,
                 IsAntialias = true
             };
             string badgeText = isStale ? $"• {ChangeBadge}" : ChangeBadge;

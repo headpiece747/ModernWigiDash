@@ -196,7 +196,10 @@ public sealed class PriceFeedManager : IDisposable
 
     private static void LogInvalidSymbol(string? symbol)
     {
-        string preview = symbol is null ? "<null>" : symbol.Length > 48 ? symbol[..48] + "…" : symbol;
+        string preview;
+        if (symbol is null) preview = "<null>";
+        else if (symbol.Length > 48) preview = symbol[..48] + "…";
+        else preview = symbol;
         System.Diagnostics.Debug.WriteLine($"Skipping invalid feed symbol '{preview}'");
     }
 
@@ -216,7 +219,8 @@ public sealed class PriceFeedManager : IDisposable
         _ => symbol.ToUpper()
     };
 
-    private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled);
+    // Timeout guards the match against catastrophic backtracking on hostile input.
+    private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     public static bool TryParseFxPair(string symbol, out string baseCurrency, out string quoteCurrency)
     {
@@ -281,16 +285,13 @@ public sealed class PriceFeedManager : IDisposable
                     return;
                 }
                 string stockSym = symbol.ToUpper();
-                if (_subscribedStocks.TryAdd(stockSym, 0))
+                // Without a Finnhub key the WS/REST stock feeds cannot work; the
+                // Yahoo Finance fallback in FetchFallbackAsync still does.
+                if (_subscribedStocks.TryAdd(stockSym, 0) && !string.IsNullOrEmpty(_finnhubKey))
                 {
-                    // Without a Finnhub key the WS/REST stock feeds cannot work;
-                    // the Yahoo Finance fallback in FetchFallbackAsync still does.
-                    if (!string.IsNullOrEmpty(_finnhubKey))
-                    {
-                        _finnhubTask ??= RunFinnhubLoopAsync();
-                        _stockRestTask ??= RunStockRestPollerAsync();
-                        _ = SendWsSubscribeAsync(WebSocketFeed.Finnhub, stockSym);
-                    }
+                    _finnhubTask ??= RunFinnhubLoopAsync();
+                    _stockRestTask ??= RunStockRestPollerAsync();
+                    _ = SendWsSubscribeAsync(WebSocketFeed.Finnhub, stockSym);
                 }
                 break;
         }
@@ -399,22 +400,21 @@ public sealed class PriceFeedManager : IDisposable
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
             string json = await _http.GetStringAsync(url, _cts.Token);
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty(geckoId, out var coinEl))
+            if (doc.RootElement.TryGetProperty(geckoId, out var coinEl)
+                && coinEl.TryGetProperty("usd", out var usdEl)
+                && usdEl.ValueKind != JsonValueKind.Null)
             {
-                if (coinEl.TryGetProperty("usd", out var usdEl) && usdEl.ValueKind != JsonValueKind.Null)
+                decimal price = usdEl.GetDecimal();
+                decimal change = coinEl.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null
+                    ? changeEl.GetDecimal()
+                    : 0m;
+                _prices[baseCoin] = new PriceInfo
                 {
-                    decimal price = usdEl.GetDecimal();
-                    decimal change = coinEl.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null
-                        ? changeEl.GetDecimal()
-                        : 0m;
-                    _prices[baseCoin] = new PriceInfo
-                    {
-                        Price = price,
-                        ChangePercent = change,
-                        Source = "CoinGecko",
-                        Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
-                    };
-                }
+                    Price = price,
+                    ChangePercent = change,
+                    Source = "CoinGecko",
+                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                };
             }
         }
         else if (kind == AssetKind.Stock)
@@ -498,7 +498,7 @@ public sealed class PriceFeedManager : IDisposable
                 onClosed();
                 ws.Dispose();
             }
-            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(5000);
+            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(5000, _cts.Token);
         }
     }
 

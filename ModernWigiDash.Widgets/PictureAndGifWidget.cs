@@ -125,7 +125,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             // Snapshot the file bytes so no file handle outlives this task:
             // decodes read from memory, the source file can be replaced or the
             // tests can delete it without racing an open handle.
-            byte[] data = File.ReadAllBytes(path);
+            byte[] data = await File.ReadAllBytesAsync(path);
 
             // Decompression-bomb caps: refuse media whose raw byte size, frame
             // count, or decoded pixel footprint would exhaust memory.
@@ -236,14 +236,14 @@ public class PictureAndGifWidget : ModernWidgetBase
             return;
         }
 
-        PublishMedia(path, frames, durations, staticBitmap);
+        PublishMedia(frames, durations, staticBitmap);
     }
 
     /// <summary>
     /// Atomically installs decoded media (from the background task) and retires
     /// whatever the render thread might still be drawing.
     /// </summary>
-    private void PublishMedia(string path, SKBitmap[]? gifFrames, long[]? durations, SKBitmap? staticBitmap)
+    private void PublishMedia(SKBitmap[]? gifFrames, long[]? durations, SKBitmap? staticBitmap)
     {
         lock (_mediaLock)
         {

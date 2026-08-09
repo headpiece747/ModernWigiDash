@@ -186,9 +186,11 @@ public sealed class FrameDelivery : IFrameSink
                     if (ok)
                     {
                         Interlocked.Increment(ref _sent);
+#pragma warning disable S125 // log-cadence documentation, not commented-out code
                         // Per-frame success log would grow unbounded at ~30/s;
                         // mirror DisplayHidTransport's % 60 diagnostic cadence.
                         // (Drops are counted in DroppedCount, not logged.)
+#pragma warning restore S125
                         if (Interlocked.Increment(ref _sentLogCount) % 60 == 0)
                             _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
                     }
@@ -250,10 +252,12 @@ public sealed class FrameDelivery : IFrameSink
         // Join the sender loop with a bounded wait: a send is a synchronous
         // USB write with up to a 30s timeout, so never block close on it —
         // but do give a clean loop exit the chance to release its in-flight
-        // slot before the transport is disposed underneath it.
+        // slot before the transport is disposed underneath it. The token is
+        // already cancelled above, so passing it would abort the join
+        // immediately — the bounded wait is the whole point.
         try
         {
-            _senderTask.Wait(TimeSpan.FromSeconds(1));
+            _senderTask.Wait(TimeSpan.FromSeconds(1), CancellationToken.None);
         }
         catch (OperationCanceledException)
         {

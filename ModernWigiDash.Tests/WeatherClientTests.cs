@@ -164,7 +164,8 @@ public class WeatherClientTests
         var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock);
 
-        var first = await client.FetchCurrentAsync(CoordinateLocation, force: true);
+        // Seed the throttle window (result intentionally unused).
+        await client.FetchCurrentAsync(CoordinateLocation, force: true);
         int afterFirst = stub.Calls;
 
         var throttled = await client.FetchCurrentAsync(CoordinateLocation);

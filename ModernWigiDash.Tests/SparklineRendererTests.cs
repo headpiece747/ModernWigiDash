@@ -104,5 +104,7 @@ public class SparklineRendererTests
         double[] samples = [1.0, 2.0];
 
         TextRenderHelper.DrawSparkline(canvas, Area, samples, 0.0, 3.0, SKColors.Orange);
+
+        Assert.IsNotNull(bitmap);
     }
 }

@@ -30,7 +30,7 @@ public class FrameTimeWidget : ModernWidgetBase
     public bool ShowProcess { get; set; } = true;
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool EnumDisplaySettingsW(string? lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+    private static extern bool EnumDisplaySettingsW(string? lpszDeviceName, int iModeNum, ref DevMode lpDevMode);
 
     private const int EnumCurrentSettings = -1;
 
@@ -38,7 +38,7 @@ public class FrameTimeWidget : ModernWidgetBase
     {
         try
         {
-            var mode = new DEVMODE { dmSize = (short)Marshal.SizeOf<DEVMODE>() };
+            var mode = new DevMode { dmSize = (short)Marshal.SizeOf<DevMode>() };
             if (EnumDisplaySettingsW(null, EnumCurrentSettings, ref mode) && mode.dmDisplayFrequency > 0)
             {
                 return mode.dmDisplayFrequency;
@@ -53,7 +53,7 @@ public class FrameTimeWidget : ModernWidgetBase
     });
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DEVMODE
+    private struct DevMode
     {
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string dmDeviceName;
@@ -186,10 +186,10 @@ public class FrameTimeWidget : ModernWidgetBase
                 float metricValSize = Math.Clamp(gridH * 0.44f, 12f, 36f);
                 float metricLblSize = Math.Clamp(gridH * 0.28f, 9f, 20f);
 
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, gridTop, colWidth, gridH, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, gridTop, colWidth, gridH, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, gridTop, colWidth, gridH, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent, text);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, gridTop, colWidth, gridH, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent, text);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, gridTop, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, gridTop, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, gridTop, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, gridTop, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent);
             }
         }
 
@@ -263,7 +263,7 @@ public class FrameTimeWidget : ModernWidgetBase
         canvas.DrawPath(_sparkLine, linePaint);
     }
 
-    private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, float width, float height, string label, string value, float valSize, float lblSize, SKColor accent, SKColor text)
+    private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, string label, string value, float valSize, float lblSize, SKColor accent)
     {
         var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valSize);
         using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
@@ -304,10 +304,5 @@ public class FrameTimeWidget : ModernWidgetBase
         using var capPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
         string cap = "MONITOR";
         canvas.DrawTextWithFallback(cap, bounds.Right - pad - FontHelper.MeasureTextWithFallback(cap, capFont), heroTop + 13f, capFont, capPaint);
-    }
-
-    public override ValueTask DisposeAsync()
-    {
-        return base.DisposeAsync();
     }
 }

@@ -45,9 +45,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private ProfileLayout _profile;
     private PlacedWidgetInstance? _selectedWidget;
 
+#pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
     // application, and edit-mode manipulation decisions live in InputController;
     // MainWindow only tracks button state and drives UI refresh.
+#pragma warning restore S125
     private bool _isMouseDown = false;
     private readonly Input.InputController _inputController;
 
@@ -146,10 +148,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _renderTimer.Interval = TimeSpan.FromMilliseconds(33.3); // 30 FPS
         _renderTimer.Tick += (s, e) =>
         {
+#pragma warning disable S125 // paint-pipeline documentation, not commented-out code
             // Composition and the frame send happen once per paint in
             // SkiaCanvas_PaintSurface (the buffer sent there is the freshly
             // composed one — sending from here would be one paint stale);
             // the timer only drives repaints.
+#pragma warning restore S125
             SkiaCanvas.InvalidateVisual();
 
             UpdateUsbBadge();

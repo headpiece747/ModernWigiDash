@@ -308,7 +308,7 @@ internal sealed class TwitchSession
 
         _validationCts = new CancellationTokenSource();
         CancellationTokenSource monitorCts = _validationCts;
-        _ = Task.Run(() => ValidationLoopAsync(context, monitorCts.Token));
+        _ = Task.Run(() => ValidationLoopAsync(context, monitorCts.Token), monitorCts.Token);
     }
 
     private async Task ValidationLoopAsync(IModernWigiDashContext context, CancellationToken cancellationToken)

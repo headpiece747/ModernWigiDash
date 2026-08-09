@@ -8,7 +8,9 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public static class GriddyIcons
 {
-    public static IReadOnlyCollection<string> Names => GriddyIconPaths.Map.Keys.ToArray();
+    // The underlying dictionary is immutable (IReadOnlyDictionary); its key
+    // collection is exposed without copying and is read-only to callers.
+    public static IReadOnlyCollection<string> Names => (IReadOnlyCollection<string>)GriddyIconPaths.Map.Keys;
 
     public static bool Contains(string name)
         => !string.IsNullOrWhiteSpace(name) && GriddyIconPaths.Map.ContainsKey(name.Trim());
