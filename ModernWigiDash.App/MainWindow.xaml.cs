@@ -354,7 +354,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (_selectedWidget != null)
         {
-            _profile.ActivePage.Widgets.Remove(_selectedWidget);
+            ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
             ClearSelectionAndRefresh();
         }
     }

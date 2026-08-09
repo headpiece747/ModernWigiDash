@@ -62,6 +62,19 @@ public static class ProfileOps
     }
 
     /// <summary>
+    /// Removes one placed widget from its page, disposing its active instance —
+    /// the single-widget teardown path, the counterpart of <see cref="ClearPage"/>
+    /// and <see cref="DeletePage"/>. Returns true when the widget was found and
+    /// removed; a widget not present on the page is left untouched.
+    /// </summary>
+    public static bool RemoveWidget(PageLayout page, PlacedWidgetInstance placed)
+    {
+        if (page == null || placed == null || !page.Widgets.Remove(placed)) return false;
+        DisposeWidgetInstance(placed);
+        return true;
+    }
+
+    /// <summary>
     /// Disposes every active widget instance across all pages (timers, sockets,
     /// and subscriptions must not outlive the profile they belong to). The page
     /// structure is left intact — used before replacing a profile wholesale,

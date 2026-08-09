@@ -206,6 +206,35 @@ public class ProfileOpsTests
         Assert.AreEqual(1, profile.ActivePage.Widgets.Count, "Widgets stay in place; only instances are disposed");
     }
 
+    [TestMethod]
+    public void RemoveWidget_RemovesFromPageAndDisposes()
+    {
+        var page = new PageLayout();
+        var widget = new DisposableTestWidget();
+        var placed = new PlacedWidgetInstance { PluginId = "a", ActiveInstance = widget };
+        page.Widgets.Add(placed);
+
+        var removed = ProfileOps.RemoveWidget(page, placed);
+
+        Assert.IsTrue(removed, "The widget on the page must be reported as removed");
+        Assert.AreEqual(0, page.Widgets.Count);
+        Assert.IsTrue(widget.Disposed, "RemoveWidget must dispose the active instance");
+    }
+
+    [TestMethod]
+    public void RemoveWidget_WidgetNotOnPage_ReturnsFalseAndDoesNotDispose()
+    {
+        var page = new PageLayout();
+        var widget = new DisposableTestWidget();
+        var placed = new PlacedWidgetInstance { PluginId = "a", ActiveInstance = widget };
+
+        var removed = ProfileOps.RemoveWidget(page, placed);
+
+        Assert.IsFalse(removed, "A widget absent from the page must not be reported as removed");
+        Assert.IsFalse(widget.Disposed, "A widget we never owned must not be disposed");
+        Assert.AreEqual(0, page.Widgets.Count);
+    }
+
     // ── export / import round-trip ──────────────────────────
 
     [TestMethod]
