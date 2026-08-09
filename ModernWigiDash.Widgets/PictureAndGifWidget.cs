@@ -42,11 +42,13 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     // Media is decoded on a background thread and published atomically. The
     // render thread may be drawing a bitmap at publish time, so replaced
-    // bitmaps are retired and disposed only on the UI render thread (start of
-    // Render) or widget teardown — never from the decode task (same
-    // use-after-free class as NowPlayingWidget's album art).
+    // bitmaps are retired via _mediaRetirement and disposed only on the UI
+    // render thread (start of Render) or widget teardown — never from the
+    // decode task. _mediaLock guards the field swaps below (frames array,
+    // frame index, static bitmap); the retirement list itself lives inside
+    // RetiredBitmapSet.
     private readonly Lock _mediaLock = new();
-    private readonly List<SKBitmap> _retiredMedia = [];
+    private readonly RetiredBitmapSet _mediaRetirement = new();
 
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
@@ -59,7 +61,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        DisposeRetiredMedia();
+        _mediaRetirement.DisposeRetired();
 
         string? currentFile = GetActiveImageFile();
 
@@ -245,17 +247,8 @@ public class PictureAndGifWidget : ModernWidgetBase
     {
         lock (_mediaLock)
         {
-            if (_gifFrames != null)
-            {
-                foreach (var frame in _gifFrames)
-                {
-                    _retiredMedia.Add(frame);
-                }
-            }
-            if (_staticBitmap != null)
-            {
-                _retiredMedia.Add(_staticBitmap);
-            }
+            _mediaRetirement.RetireAll(_gifFrames);
+            _mediaRetirement.Retire(_staticBitmap);
 
             _gifFrames = gifFrames;
             _gifFrameDurationsMs = durations;
@@ -273,19 +266,10 @@ public class PictureAndGifWidget : ModernWidgetBase
         _loadedPath = "";
         lock (_mediaLock)
         {
-            if (_gifFrames != null)
-            {
-                foreach (var frame in _gifFrames)
-                {
-                    _retiredMedia.Add(frame);
-                }
-                _gifFrames = null;
-            }
-            if (_staticBitmap != null)
-            {
-                _retiredMedia.Add(_staticBitmap);
-                _staticBitmap = null;
-            }
+            _mediaRetirement.RetireAll(_gifFrames);
+            _gifFrames = null;
+            _mediaRetirement.Retire(_staticBitmap);
+            _staticBitmap = null;
             _gifFrameDurationsMs = null;
             _gifFrameIndex = 0;
         }
@@ -296,26 +280,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         // UI thread (inspector property change / teardown): nothing is mid-draw
         // right now, so dispose retired media promptly instead of waiting for
         // the next render pass.
-        DisposeRetiredMedia();
-    }
-
-    /// <summary>
-    /// Disposes retired bitmaps. Called only on the UI render thread (start of
-    /// <see cref="Render"/>) or on widget teardown — never from the background
-    /// decode task — so a bitmap is never freed while the canvas could still be
-    /// drawing it.
-    /// </summary>
-    private void DisposeRetiredMedia()
-    {
-        lock (_mediaLock)
-        {
-            if (_retiredMedia.Count == 0) return;
-            foreach (var retired in _retiredMedia)
-            {
-                retired.Dispose();
-            }
-            _retiredMedia.Clear();
-        }
+        _mediaRetirement.DisposeRetired();
     }
 
     private static void DisposeAll(SKBitmap[]? frames)
@@ -423,6 +388,7 @@ public class PictureAndGifWidget : ModernWidgetBase
     public override ValueTask DisposeAsync()
     {
         ResetMedia();
+        _mediaRetirement.DisposeAll();
         return base.DisposeAsync();
     }
 }

@@ -8,13 +8,14 @@ public class SkiaFrameCompositor : IDisposable
 {
     /// <summary>
     /// Size of the edit-mode resize handle, in canvas pixels. Single source of
-    /// truth for the affordance: drawn here, hit-tested by the App's
-    /// <c>InputController</c> against this constant.
+    /// truth for the affordance: drawn by <see cref="EditOverlay"/>, hit-tested
+    /// by the App's <c>InputController</c> against this constant. Forwarded so
+    /// the value lives only in the overlay module.
     /// </summary>
-    public const float ResizeHandleSize = 14f;
+    public const float ResizeHandleSize = EditOverlay.ResizeHandleSize;
 
     private readonly SKBitmap _frameBuffer = new(1016, 592);
-    private readonly SKTypeface _uiTypeface = FontHelper.GeistTypeface;
+    private readonly EditOverlay _editOverlay = new();
     private bool _isEditMode = true;
     private PlacedWidgetInstance? _selectedWidget;
 
@@ -30,7 +31,7 @@ public class SkiaFrameCompositor : IDisposable
         set => _selectedWidget = value;
     }
 
-    public void Compose(PageLayout page, float fpsTelemetry = 60.0f, int pageIndex = 0, int pageCount = 1)
+    public void Compose(PageLayout page)
     {
         using var canvas = new SKCanvas(_frameBuffer);
 
@@ -40,26 +41,9 @@ public class SkiaFrameCompositor : IDisposable
         else
             canvas.Clear(new SKColor(27, 41, 48)); // #1B2930
 
-        // 2. Draw Grid Lines if SnapToGrid and Edit Mode are enabled
-        if (_isEditMode && page.SnapToGrid)
-        {
-            using var gridPaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, 12),
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 1f
-            };
-
-            // Classic 5x4 cell grid lines or custom spacing
-            for (int x = 0; x <= 1016; x += (int)GridSizeExtensions.CellWidth)
-            {
-                canvas.DrawLine(x, 0, x, 592, gridPaint);
-            }
-            for (int y = 0; y <= 592; y += (int)GridSizeExtensions.CellHeight)
-            {
-                canvas.DrawLine(0, y, 1016, y, gridPaint);
-            }
-        }
+        // 2. Draw Grid Lines if SnapToGrid and Edit Mode are enabled (the
+        //    authoring chrome lives in EditOverlay)
+        _editOverlay.DrawGrid(canvas, page, _isEditMode);
         // 3. Render all placed widgets sorted by ZIndex (low to high).
         // Zero-alloc fast path: stack-allocated copy + insertion sort for the
         // common small page (<= 32 widgets); LINQ fallback for oversized pages.
@@ -98,53 +82,9 @@ public class SkiaFrameCompositor : IDisposable
                     canvas.Restore();
                 }
 
-                // If in Edit Mode, draw selection bounding box & handles on the selected widget
-                if (_isEditMode && widget == _selectedWidget)
-                {
-                    using var selectionPaint = new SKPaint
-                    {
-                        Color = new SKColor(59, 130, 246), // #3B82F6 vibrant blue
-                        Style = SKPaintStyle.Stroke,
-                        StrokeWidth = 2.5f,
-                        IsAntialias = true
-                    };
-                    canvas.DrawRect(bounds, selectionPaint);
-
-                    // Draw ZIndex / Name badge at top left
-                    using var badgeBg = new SKPaint { Color = new SKColor(59, 130, 246, 220) };
-                    using var textPaint = new SKPaint
-                    {
-                        Color = SKColors.White,
-                        IsAntialias = true
-                    };
-                    using var font = FontHelper.CreateFont(_uiTypeface, 12f);
-                    string badgeText = $"{widget.DisplayName} (Z: {widget.ZIndex})";
-                    var textBounds = new SKRect();
-                    font.MeasureText(badgeText, out textBounds, textPaint);
-                    canvas.DrawRect(0, -20, textBounds.Width + 10, 20, badgeBg);
-                    canvas.DrawTextWithFallback(badgeText, 5, -5, font, textPaint);
-
-                    // Draw resize handle at bottom-right corner. The size is the
-                    // single source of truth for the edit-mode resize affordance —
-                    // the App's InputController hit-tests against this constant.
-                    using var handlePaint = new SKPaint
-                    {
-
-                        Color = new SKColor(59, 130, 246, 200),
-                        Style = SKPaintStyle.Fill,
-                        IsAntialias = true
-                    };
-                    float hs = ResizeHandleSize;
-                    canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, handlePaint);
-                    using var handleStroke = new SKPaint
-                    {
-                        Color = SKColors.White,
-                        Style = SKPaintStyle.Stroke,
-                        StrokeWidth = 1.5f,
-                        IsAntialias = true
-                    };
-                    canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, handleStroke);
-                }
+                // If in Edit Mode, draw the selection bounding box & handles on
+                // the selected widget (authoring chrome lives in EditOverlay)
+                _editOverlay.DrawSelection(canvas, widget, _isEditMode, widget == _selectedWidget);
             }
             finally
             {
@@ -237,7 +177,7 @@ public class SkiaFrameCompositor : IDisposable
         if (disposing)
         {
             _frameBuffer.Dispose();
-            _uiTypeface.Dispose();
+            _editOverlay.Dispose();
         }
         _disposed = true;
     }
