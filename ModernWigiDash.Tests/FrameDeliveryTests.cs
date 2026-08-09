@@ -189,6 +189,8 @@ public class FrameDeliveryTests
         Assert.AreEqual(0xFF, lastDelivered[0], "Coalesced frame must be the latest (white) — byte 0");
         Assert.AreEqual(0xFF, lastDelivered[1], "Coalesced frame must be the latest (white) — byte 1");
         Assert.IsTrue(delivery.DroppedCount > 0, "Stale buffered frames must count as dropped");
+        Assert.IsTrue(delivery.DroppedCoalescedCount > 0, "Stale frames are coalescer drops");
+        Assert.AreEqual(0, delivery.DroppedPoolCount, "The pool held buffers — none of these drops were pool exhaustion");
     }
 
     // ── pacing: min interval between sends ─────────────────
@@ -257,6 +259,85 @@ public class FrameDeliveryTests
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "Not-ready delivery must drop the frame before encoding/queuing");
         release.Set();
         Assert.AreEqual(1, sent, "The dropped frame must never reach the transport seam");
+    }
+
+    // ── send-failure accounting: a broken pipe is not silence ──
+
+    [TestMethod]
+    public async Task SendFailure_CountsFailedAndNotSent()
+    {
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
+            send: _ => false);
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        await TestWait.WaitUntilAsync(() => delivery.SendFailedCount > 0, TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, delivery.SendFailedCount);
+        Assert.AreEqual(0, delivery.FramesSent, "A failed send is not a successful send");
+        Assert.AreEqual(0, delivery.DroppedCount, "A send failure reached the transport seam — it is not a drop");
+    }
+
+    [TestMethod]
+    public async Task SendException_CountsAsSendFailed()
+    {
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
+            send: _ => throw new InvalidOperationException("boom"));
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        await TestWait.WaitUntilAsync(() => delivery.SendFailedCount > 0, TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, delivery.SendFailedCount);
+        Assert.AreEqual(0, delivery.FramesSent);
+    }
+
+    [TestMethod]
+    public async Task SendFailure_LogsFirstFailureOnce()
+    {
+        var logs = new List<string>();
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
+            send: _ => false,
+            log: logs.Add);
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        await TestWait.WaitUntilAsync(() => delivery.SendFailedCount > 0, TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, logs.Count, "The first send failure must be logged exactly once");
+        StringAssert.Contains(logs[0], "Send failed");
+    }
+
+    [TestMethod]
+    public void PoolExhaustion_CountsAsPoolDropNotCoalescerDrop()
+    {
+        using var blocker = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
+            send: _ =>
+            {
+                blocker.Set();
+                release.Wait();
+                return true;
+            });
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
+
+        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+        release.Set();
+
+        Assert.AreEqual(1, delivery.DroppedPoolCount);
+        Assert.AreEqual(0, delivery.DroppedCoalescedCount, "Pool exhaustion is not a coalescer drop");
     }
 
     private static SKBitmap CreateFrameBitmap()

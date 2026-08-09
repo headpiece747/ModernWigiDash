@@ -11,8 +11,10 @@ namespace ModernWigiDash.Sdk;
 /// replayed) → paced send (default 33ms) → pooled buffers released.
 ///
 /// One entry point feeds the policy: <see cref="Push"/> (composited bitmap;
-/// encodes into a pooled exact-size buffer via the injected encoder). Drop
-/// accounting is visible through <see cref="DroppedCount"/>.
+/// encodes into a pooled exact-size buffer via the injected encoder). Verdict
+/// accounting is visible through <see cref="DroppedCount"/> (split into pool
+/// exhaustion vs. coalescer drops) and <see cref="SendFailedCount"/> — a dead
+/// pipe shows as send failures, never as silent success or drops.
 /// </summary>
 public sealed class FrameDelivery : IDisposable
 {
@@ -33,6 +35,10 @@ public sealed class FrameDelivery : IDisposable
     private long _sent;
     private int _sentLogCount;
     private long _dropped;
+    private long _droppedPool;
+    private long _droppedCoalesced;
+    private long _sendFailed;
+    private int _sendFailLogCount;
     private int _disposed;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
@@ -89,9 +95,24 @@ public sealed class FrameDelivery : IDisposable
 
     /// <summary>
     /// Frames rejected by the pipeline (pool exhausted, no encoder) plus stale
-    /// buffered frames dropped by the coalescer during a backlog.
+    /// buffered frames dropped by the coalescer during a backlog. The two drop
+    /// sources are also visible separately via <see cref="DroppedPoolCount"/>
+    /// and <see cref="DroppedCoalescedCount"/>.
     /// </summary>
     public long DroppedCount => Interlocked.Read(ref _dropped);
+
+    /// <summary>Frames dropped at push time because the buffer pool was
+    /// exhausted — backlog pressure, the producer outran the sender.</summary>
+    public long DroppedPoolCount => Interlocked.Read(ref _droppedPool);
+
+    /// <summary>Stale buffered frames the coalescer discarded while draining a
+    /// backlog (drain-to-latest replays only the newest frame).</summary>
+    public long DroppedCoalescedCount => Interlocked.Read(ref _droppedCoalesced);
+
+    /// <summary>Frames handed to the transport seam that failed to send (the
+    /// seam returned false or threw). A broken pipe accumulates here, not in
+    /// <see cref="FramesSent"/> and not in the drop counters.</summary>
+    public long SendFailedCount => Interlocked.Read(ref _sendFailed);
 
     /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
@@ -105,6 +126,7 @@ public sealed class FrameDelivery : IDisposable
         if (buffer == null)
         {
             Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _droppedPool);
             return FrameDeliveryResult.Dropped;
         }
 
@@ -173,12 +195,25 @@ public sealed class FrameDelivery : IDisposable
                     }
                     else
                     {
-                        _log?.Invoke($"[FrameDelivery] Send failed (buffer={latest.Buffer.Length} bytes)");
+                        Interlocked.Increment(ref _sendFailed);
+                        // Log the first failure and every 60th after — the same
+                        // cadence as the success log — so a dead bus cannot
+                        // spam the log at ~30 lines/s.
+                        if (Interlocked.Increment(ref _sendFailLogCount) == 1
+                            || Volatile.Read(ref _sendFailLogCount) % 60 == 0)
+                        {
+                            _log?.Invoke($"[FrameDelivery] Send failed (buffer={latest.Buffer.Length} bytes)");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _log?.Invoke($"[FrameDelivery] Send exception: {ex.Message}");
+                    Interlocked.Increment(ref _sendFailed);
+                    if (Interlocked.Increment(ref _sendFailLogCount) == 1
+                        || Volatile.Read(ref _sendFailLogCount) % 60 == 0)
+                    {
+                        _log?.Invoke($"[FrameDelivery] Send exception: {ex.Message}");
+                    }
                 }
                 finally
                 {
@@ -197,6 +232,7 @@ public sealed class FrameDelivery : IDisposable
         if (dropped)
         {
             Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _droppedCoalesced);
         }
         if (_pool != null)
         {
