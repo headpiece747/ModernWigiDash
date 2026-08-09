@@ -49,39 +49,25 @@ public static class FrameTimeStore
     /// <summary>Default staleness window for frame-time data (~1s poll cadence).</summary>
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(5);
 
-    private static readonly Lock Gate = new();
-    private static FrameTimeSnapshotRecord _current = FrameTimeSnapshotRecord.Unavailable();
+    private static readonly TelemetryStore<FrameTimeSnapshotRecord> Store = new(
+        FrameTimeSnapshotRecord.Unavailable(),
+        defaultMaxAge: DefaultMaxAge);
 
-    public static FrameTimeSnapshotRecord ReadSnapshot()
-    {
-        lock (Gate)
-        {
-            return _current;
-        }
-    }
+    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.Current;
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
     /// freshness decision uses the producer timestamp with an injectable clock.
     /// </summary>
     public static FrameTimeSnapshotRecord? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
-    {
-        var snapshot = ReadSnapshot();
-        return snapshot.IsFresh(maxAge ?? DefaultMaxAge, timeProvider) ? snapshot : null;
-    }
+        => Store.TryReadFresh(maxAge, timeProvider);
 
     /// <summary>
     /// Stores a snapshot. The producer timestamp is preserved — <see cref="UpdateFromDto"/>
     /// is responsible for providing it (falling back to the receive time when
     /// the producer did not stamp one).
     /// </summary>
-    public static void Update(FrameTimeSnapshotRecord snapshot)
-    {
-        lock (Gate)
-        {
-            _current = snapshot;
-        }
-    }
+    public static void Update(FrameTimeSnapshotRecord snapshot) => Store.Update(snapshot, snapshot.LastUpdate);
 
     /// <summary>
     /// Maps a service frame-time DTO into the widget-side record and caches it.
@@ -89,7 +75,8 @@ public static class FrameTimeStore
     /// </summary>
     public static void UpdateFromDto(FrameTimeSnapshotDto? dto)
     {
-        Update(new FrameTimeSnapshotRecord(
+        var timestamp = ProducerTimestamp(dto?.LastUpdate);
+        Store.Update(new FrameTimeSnapshotRecord(
             dto?.IsAvailable ?? false,
             dto?.ProcessId ?? 0,
             dto?.ProcessName ?? string.Empty,
@@ -100,19 +87,13 @@ public static class FrameTimeStore
             dto?.GpuBusyMs ?? 0,
             dto?.CpuFrameTimeMs ?? 0,
             dto?.RecentFrameTimesMs ?? [],
-            ProducerTimestamp(dto?.LastUpdate)));
+            timestamp), timestamp);
     }
 
     /// <summary>
     /// Resets the cache to the unavailable state. Intended for test isolation.
     /// </summary>
-    public static void Reset()
-    {
-        lock (Gate)
-        {
-            _current = FrameTimeSnapshotRecord.Unavailable();
-        }
-    }
+    public static void Reset() => Store.Reset();
 
     private static DateTime ProducerTimestamp(DateTime? producer)
         => producer is { } ts && ts != default ? ts : TimeProvider.System.GetUtcNow().UtcDateTime;

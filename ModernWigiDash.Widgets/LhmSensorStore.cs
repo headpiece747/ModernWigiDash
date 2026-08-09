@@ -52,39 +52,25 @@ public static class LhmSensorStore
     /// <summary>Default staleness window for sensor data (~1s poll cadence).</summary>
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(10);
 
-    private static readonly Lock Gate = new();
-    private static LhmSnapshot _current = LhmSnapshot.Disconnected();
+    private static readonly TelemetryStore<LhmSnapshot> Store = new(
+        LhmSnapshot.Disconnected(),
+        defaultMaxAge: DefaultMaxAge);
 
-    public static LhmSnapshot ReadSnapshot()
-    {
-        lock (Gate)
-        {
-            return _current;
-        }
-    }
+    public static LhmSnapshot ReadSnapshot() => Store.Current;
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
     /// freshness decision uses the producer timestamp with an injectable clock.
     /// </summary>
     public static LhmSnapshot? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
-    {
-        var snapshot = ReadSnapshot();
-        return snapshot.IsFresh(maxAge ?? DefaultMaxAge, timeProvider) ? snapshot : null;
-    }
+        => Store.TryReadFresh(maxAge, timeProvider);
 
     /// <summary>
     /// Stores a snapshot. The producer timestamp is preserved — <see cref="UpdateFromDto"/>
     /// is responsible for providing it (falling back to the receive time when
     /// the producer did not stamp one).
     /// </summary>
-    public static void Update(LhmSnapshot snapshot)
-    {
-        lock (Gate)
-        {
-            _current = snapshot;
-        }
-    }
+    public static void Update(LhmSnapshot snapshot) => Store.Update(snapshot, snapshot.LastUpdate);
 
     /// <summary>
     /// Maps a service sensor snapshot DTO into the widget-side snapshot and
@@ -92,6 +78,7 @@ public static class LhmSensorStore
     /// </summary>
     public static void UpdateFromDto(SensorSnapshotDto? dto)
     {
+        var timestamp = ProducerTimestamp(dto?.LastUpdate);
         var readings = dto?.Readings
             .Select(r => new LhmReading(
                 r.SensorId,
@@ -104,22 +91,16 @@ public static class LhmSensorStore
                 r.Avg))
             .ToList() ?? [];
 
-        Update(new LhmSnapshot(
+        Store.Update(new LhmSnapshot(
             dto?.IsConnected ?? false,
-            ProducerTimestamp(dto?.LastUpdate),
-            readings));
+            timestamp,
+            readings), timestamp);
     }
 
     /// <summary>
     /// Resets the cache to the disconnected state. Intended for test isolation.
     /// </summary>
-    public static void Reset()
-    {
-        lock (Gate)
-        {
-            _current = LhmSnapshot.Disconnected();
-        }
-    }
+    public static void Reset() => Store.Reset();
 
     private static DateTime ProducerTimestamp(DateTime? producer)
         => producer is { } ts && ts != default ? ts : TimeProvider.System.GetUtcNow().UtcDateTime;
