@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Threading;
 using System.Windows;
 using ModernWigiDash.App;
+using ModernWigiDash.App.PresentMon;
 using AppClass = ModernWigiDash.App.App;
 
 namespace ModernWigiDash.Tests;
@@ -22,7 +23,7 @@ public class MainWindowConstructionTests
     {
         var (title, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow();
+            var window = new MainWindow(new StubPresentMonNative());
             string title = window.Title;
             try
             {
@@ -44,7 +45,7 @@ public class MainWindowConstructionTests
     {
         var (_, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow();
+            var window = new MainWindow(new StubPresentMonNative());
             try
             {
                 window.Close();
@@ -57,6 +58,23 @@ public class MainWindowConstructionTests
         });
 
         Assert.IsNull(error, error?.ToString());
+    }
+
+    /// <summary>
+    /// The window's FRAMETIME PollLoop probes PresentMonNative on its first
+    /// tick. A fake keeps the real PresentMonAPI2.dll (and its load-time side
+    /// effects) entirely out of the test host.
+    /// </summary>
+    private sealed class StubPresentMonNative : IPresentMonNative
+    {
+        public bool IsAvailable => false;
+        public string? UnavailableReason => "stub (test)";
+        public bool OpenSession() => false;
+        public void CloseSession() { }
+        public bool TrackProcess(int processId) => false;
+        public PresentMonPollResult PollDynamic(int processId) => new(null, PmStatus.Success);
+        public IReadOnlyList<double> DrainFrameTimes(int processId) => [];
+        public void Dispose() { }
     }
 
     /// <summary>

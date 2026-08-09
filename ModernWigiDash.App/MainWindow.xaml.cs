@@ -33,8 +33,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // producers started immediately.
     private readonly Sdk.PollLoop _sensorPoll;
     // PresentMon frame-time producer (ADR-0003) — polls the PresentMon
-    // Service directly, independent of service routing.
-    private readonly PresentMonNative _presentMonNative = new();
+    // Service directly, independent of service routing. Injected so the
+    // window can be constructed with a fake in tests (no real DLL load).
+    private readonly IPresentMonNative _presentMonNative;
     private readonly PresentMonFrameTimeProducer _presentMonProducer;
     private readonly Sdk.PollLoop _frameTimePoll;
 
@@ -72,7 +73,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly StarterProfile _starterProfile;
 
     public MainWindow()
+        : this(new PresentMonNative())
     {
+    }
+
+    /// <summary>Test seam: the native PresentMon interop is injected so window
+    /// construction never loads the real DLL in the test host.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative)
+    {
+        _presentMonNative = presentMonNative;
+
         InitializeComponent();
         SourceInitialized += (_, _) => ApplyTheme();
         PreviewMouseDown += OnWindowPreviewMouseDown;
