@@ -63,7 +63,7 @@ public sealed class WeatherClient
     private readonly Action<string, Exception?>? _logError;
 
     private DateTime _lastFetchTime = DateTime.MinValue;
-    private volatile bool _isFetching;
+    private int _fetchClaim; // 1 = a fetch is in flight (see TryBeginFetch)
     private string _lastLocationQuery = "";
 
     private double? _lat;
@@ -99,15 +99,23 @@ public sealed class WeatherClient
     }
 
     /// <summary>
-    /// True when a non-forced fetch would be throttled or is already in flight.
-    /// The render tick checks this before allocating a fetch Task.
+    /// Atomically claims a fetch slot: true when a fetch may start (not
+    /// already in flight and, unless forced, not throttled). The in-flight
+    /// guard is Interlocked — the render tick, the refresh timer, and OnTouch
+    /// can race, and a check-then-set would let two of them through.
     /// </summary>
-    internal bool IsFetchDue()
+    internal bool TryBeginFetch(bool force = false)
     {
-        if (_isFetching) return false;
-        if ((Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return false;
+        if (Interlocked.CompareExchange(ref _fetchClaim, 1, 0) != 0) return false;
+        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue)
+        {
+            Interlocked.Exchange(ref _fetchClaim, 0);
+            return false;
+        }
         return true;
     }
+
+    private void EndFetch() => Interlocked.Exchange(ref _fetchClaim, 0);
 
     /// <summary>
     /// Resets resolved coordinates and the throttle so the next fetch
@@ -128,10 +136,8 @@ public sealed class WeatherClient
     /// </summary>
     public async Task<WeatherSnapshot?> FetchCurrentAsync(WeatherLocation location, bool force = false, CancellationToken cancellationToken = default)
     {
-        if (_isFetching) return null;
-        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue) return null;
+        if (!TryBeginFetch(force)) return null;
 
-        _isFetching = true;
         try
         {
             string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}";
@@ -166,7 +172,7 @@ public sealed class WeatherClient
         }
         finally
         {
-            _isFetching = false;
+            EndFetch();
         }
     }
 
@@ -209,8 +215,9 @@ public sealed class WeatherClient
         }
     }
 
-    /// <summary>Deletes the disk cache file (if present).</summary>
-    public void ClearCache()
+    /// <summary>Deletes the disk cache (internal test seam — production never
+    /// clears the cache at runtime).</summary>
+    internal void ClearCache()
     {
         try
         {

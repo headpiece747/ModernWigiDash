@@ -95,6 +95,109 @@ public sealed class DialogHost
         return result;
     }
 
+    /// <summary>Themed confirm dialog: true when the user confirmed, false on cancel.</summary>
+    public bool Confirm(string title, string message)
+    {
+        var dialog = CreateMessageDialog(title, message, isConfirm: true);
+        bool confirmed = false;
+        WireMessageButton(dialog, () => confirmed = true);
+        dialog.ShowDialog();
+        return confirmed;
+    }
+
+    /// <summary>Themed info dialog (single OK button).</summary>
+    public void Info(string title, string message)
+    {
+        var dialog = CreateMessageDialog(title, message, isConfirm: false);
+        WireMessageButton(dialog, () => { });
+        dialog.ShowDialog();
+    }
+
+    /// <summary>Themed error dialog (single OK button). The body intentionally
+    /// mirrors <see cref="Info"/> — the kind is expressed by the caller's
+    /// title; the dialog chrome is identical.</summary>
+#pragma warning disable S4144 // Info and Error share the chrome by design
+    public void Error(string title, string message)
+    {
+        var dialog = CreateMessageDialog(title, message, isConfirm: false);
+        WireMessageButton(dialog, () => { });
+        dialog.ShowDialog();
+    }
+#pragma warning restore S4144
+
+    /// <summary>Builds the themed message-dialog shell: the message block and
+    /// an OK button (plus a Cancel button for confirmations). The button
+    /// actions are wired by <see cref="WireMessageButton"/>.</summary>
+    private Window CreateMessageDialog(string title, string message, bool isConfirm)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 380,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = _owner,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
+            FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
+        };
+        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+
+        var root = new Grid { Margin = new Thickness(16) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var messageBlock = new TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Foreground = _tryFindResource("TextPrimary") as Brush ?? Brushes.White
+        };
+        root.Children.Add(messageBlock);
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0)
+        };
+        Grid.SetRow(buttons, 1);
+
+        if (isConfirm)
+        {
+            var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+            btnCancel.Click += (_, _) => dialog.DialogResult = false;
+            buttons.Children.Add(btnCancel);
+        }
+
+        var btnOk = new Button { Content = "OK", Style = _tryFindResource("AccentButton") as Style, IsDefault = true };
+        btnOk.Click += (_, _) => dialog.DialogResult = true;
+        buttons.Children.Add(btnOk);
+        root.Children.Add(buttons);
+
+        dialog.Content = root;
+        return dialog;
+    }
+
+    /// <summary>Attaches the confirm action to the dialog's OK button (the
+    /// button labels are fixed in <see cref="CreateMessageDialog"/>).</summary>
+    private static void WireMessageButton(Window dialog, Action onConfirm)
+    {
+        if (dialog.Content is not Grid root || root.Children.Count < 2 || root.Children[1] is not StackPanel buttons)
+            return;
+
+        foreach (var child in buttons.Children)
+        {
+            if (child is Button btn && btn.Content as string == "OK")
+            {
+                btn.Click += (_, _) => onConfirm();
+                return;
+            }
+        }
+    }
+
     /// <summary>
     /// Modal icon picker for an inspector icon property: a searchable Griddy
     /// icon grid plus a custom-SVG browse button (copied into the icons folder).

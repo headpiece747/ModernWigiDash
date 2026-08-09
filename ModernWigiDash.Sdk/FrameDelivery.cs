@@ -33,12 +33,10 @@ public sealed class FrameDelivery : IDisposable
     private readonly Func<byte[], bool>? _send;
     private DateTimeOffset _lastSendStart;
     private long _sent;
-    private int _sentLogCount;
     private long _dropped;
     private long _droppedPool;
     private long _droppedCoalesced;
     private long _sendFailed;
-    private int _sendFailLogCount;
     private int _disposed;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
@@ -114,7 +112,6 @@ public sealed class FrameDelivery : IDisposable
     /// </summary>
     public bool IsReady => _isReady?.Invoke() ?? _send != null;
 
-    /// <summary>Frames successfully handed to the transport.</summary>
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
     /// of frame accounting — the transport no longer counts.</summary>
@@ -214,16 +211,16 @@ public sealed class FrameDelivery : IDisposable
                         Interlocked.Increment(ref _sent);
 #pragma warning disable S125 // log-cadence documentation, not commented-out code
                         // Per-frame success log would grow unbounded at ~30/s;
-                        // mirror DisplayHidTransport's % 60 diagnostic cadence.
+                        // every-60th cadence keeps it bounded.
                         // (Drops are counted in DroppedCount, not logged.)
 #pragma warning restore S125
-                        if (Interlocked.Increment(ref _sentLogCount) % 60 == 0)
+                        if (_sentLog.Due())
                             _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
                     }
                     else
                     {
                         Interlocked.Increment(ref _sendFailed);
-                        if (ShouldLogSendFailure())
+                        if (_sendFailLog.Due())
                         {
                             _log?.Invoke($"[FrameDelivery] Send failed (buffer={latest.Buffer.Length} bytes)");
                         }
@@ -232,7 +229,7 @@ public sealed class FrameDelivery : IDisposable
                 catch (Exception ex)
                 {
                     Interlocked.Increment(ref _sendFailed);
-                    if (ShouldLogSendFailure())
+                    if (_sendFailLog.Due())
                     {
                         _log?.Invoke($"[FrameDelivery] Send exception: {ex.Message}");
                     }
@@ -250,15 +247,12 @@ public sealed class FrameDelivery : IDisposable
     }
 
     /// <summary>
-    /// True when this send failure should be logged: the first one, then every
-    /// 60th — the same cadence as the success log — so a dead bus cannot spam
-    /// the log at ~30 lines/s.
+    /// Log cadences: success logs every 60th frame; failure logs the first
+    /// occurrence and then every 60th — a dead bus cannot spam the log at
+    /// ~30 lines/s.
     /// </summary>
-    private bool ShouldLogSendFailure()
-    {
-        int count = Interlocked.Increment(ref _sendFailLogCount);
-        return count == 1 || count % 60 == 0;
-    }
+    private readonly LogCadence _sentLog = new(60);
+    private readonly LogCadence _sendFailLog = new(60, logFirst: true);
 
     private void ReleaseSlot(FrameSlot slot, bool dropped)
     {

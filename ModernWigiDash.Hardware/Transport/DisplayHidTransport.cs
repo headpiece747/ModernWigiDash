@@ -368,7 +368,13 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private bool WriteBulkData(byte[] data)
         => _backend?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
 
-    private int _touchDiagCount;
+    // Diagnostic cadences: the two %20 touch-diag sites share one counter
+    // (they are mutually exclusive branches), the Raw dump is every 200th.
+    // Note: the raw-dump cadence counts success-path calls only (every 200th
+    // successful read) — the old single shared counter made it positional in
+    // total ReadTouch calls; steady states are identical.
+    private readonly LogCadence _touchDiagLog = new(20);
+    private readonly LogCadence _touchDiagRawLog = new(200);
 
     // Reused per-call buffers: SendFrame (under _usbLock) and ReadTouch (16ms
     // poll loop) are serialized by their callers, so these are never touched
@@ -380,7 +386,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     {
         if (_backend is not { IsOpen: true })
         {
-            if (_touchDiagCount++ % 20 == 0)
+            if (_touchDiagLog.Due())
                 LogToFile($"[TOUCH-DIAG] Not connected: isConnected={_isConnected}");
             return null;
         }
@@ -393,7 +399,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
             if (!ok)
             {
-                if (_touchDiagCount++ % 20 == 0)
+                if (_touchDiagLog.Due())
                     LogToFile($"[TOUCH-DIAG] ControlIn FAILED");
                 return null;
             }
@@ -402,7 +408,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             short x = BitConverter.ToInt16(touchBuf, 2);
             short y = BitConverter.ToInt16(touchBuf, 4);
 
-            if (_touchDiagCount++ % 200 == 0)
+            if (_touchDiagRawLog.Due())
                 LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y}");
 
             if (type == DisplayProtocolConstants.TouchTypeNone)

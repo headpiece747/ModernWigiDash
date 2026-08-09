@@ -40,8 +40,8 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor bgColor = SKColor.TryParse(BackgroundHex, out var parsedBg) ? parsedBg : SKColors.Transparent;
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
+        SKColor bgColor = ColorOf(BackgroundHex, SKColors.Transparent);
 
         if (bgColor.Alpha > 0)
         {

@@ -329,7 +329,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
     {
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 36f);
         using var iconPaint = new SKPaint { Color = textColor, IsAntialias = true };
         TextRenderHelper.DrawCenteredText(canvas, "🖼️", bounds.MidX, bounds.MidY - 10f, iconFont, iconPaint);

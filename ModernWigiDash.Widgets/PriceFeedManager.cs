@@ -140,9 +140,11 @@ public sealed class PriceFeedManager : IDisposable
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
-    internal readonly ConcurrentDictionary<string, byte> _subscribedCrypto = new();
-    internal readonly ConcurrentDictionary<string, byte> _subscribedStocks = new();
-    internal readonly ConcurrentDictionary<string, byte> _subscribedFx = new();
+    // Subscriber claim counts: N widgets on one symbol hold N claims, so one
+    // widget's unsubscribe only releases when the last claim leaves.
+    internal readonly ConcurrentDictionary<string, int> _subscribedCrypto = new();
+    internal readonly ConcurrentDictionary<string, int> _subscribedStocks = new();
+    internal readonly ConcurrentDictionary<string, int> _subscribedFx = new();
     private readonly HttpClient _http;
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
@@ -295,7 +297,10 @@ public sealed class PriceFeedManager : IDisposable
                     return;
                 }
                 var baseCoin = ToFeedKey(symbol, kind);
-                if (_subscribedCrypto.TryAdd(baseCoin, 0))
+                // Ref-counted: the shared manager keys subscriptions by symbol,
+                // so N widgets on one symbol hold N claims — one widget's
+                // symbol change must not kill another's live feed.
+                if (_subscribedCrypto.AddOrUpdate(baseCoin, 1, (_, count) => count + 1) == 1)
                 {
                     _binanceLoop ??= CreateBinanceLoop();
                     _binanceLoop.Start();
@@ -311,7 +316,7 @@ public sealed class PriceFeedManager : IDisposable
                     LogInvalidSymbol(symbol);
                     return;
                 }
-                if (_subscribedFx.TryAdd(fxKey, 0))
+                if (_subscribedFx.AddOrUpdate(fxKey, 1, (_, count) => count + 1) == 1)
                 {
                     _fxRestTask ??= RunFxRestPollerAsync();
                 }
@@ -325,7 +330,8 @@ public sealed class PriceFeedManager : IDisposable
                 string stockSym = symbol.ToUpper();
                 // Without a Finnhub key the WS/REST stock feeds cannot work; the
                 // Yahoo Finance fallback in FetchFallbackAsync still does.
-                if (_subscribedStocks.TryAdd(stockSym, 0) && !string.IsNullOrEmpty(_finnhubKey))
+                if (_subscribedStocks.AddOrUpdate(stockSym, 1, (_, count) => count + 1) == 1
+                    && !string.IsNullOrEmpty(_finnhubKey))
                 {
                     _finnhubLoop ??= CreateFinnhubLoop();
                     _finnhubLoop.Start();
@@ -361,27 +367,27 @@ public sealed class PriceFeedManager : IDisposable
 
     /// <summary>
     /// Stops polling for <paramref name="symbol"/> (e.g. after the widget was
-    /// removed from the canvas). The underlying loops keep running while any
+    /// removed from the canvas). Ref-counted: only the last subscriber removes
+    /// the key, so one widget's unsubscribe never kills another widget's live
+    /// feed on the same symbol. The underlying loops keep running while any
     /// symbol remains subscribed, and stop entirely when the last one leaves.
     /// </summary>
     public void Unsubscribe(string symbol, AssetKind kind)
     {
         string key = ToFeedKey(symbol, kind);
-        switch (kind)
+        bool fullyReleased = kind switch
         {
-            case AssetKind.Crypto:
-                _subscribedCrypto.TryRemove(key, out _);
-                break;
-            case AssetKind.Fx:
-                _subscribedFx.TryRemove(key, out _);
-                break;
-            default:
-                _subscribedStocks.TryRemove(key, out _);
-                break;
-        }
+            AssetKind.Crypto => ReleaseSubscription(_subscribedCrypto, key),
+            AssetKind.Fx => ReleaseSubscription(_subscribedFx, key),
+            _ => ReleaseSubscription(_subscribedStocks, key),
+        };
 
-        // Prices for an unsubscribed symbol are stale by construction.
-        _prices.TryRemove(key, out _);
+        // Prices for a fully-released symbol are stale by construction; a
+        // symbol with remaining subscribers keeps its cached price.
+        if (fullyReleased)
+        {
+            _prices.TryRemove(key, out _);
+        }
 
         // Ref-counted shutdown: when the last subscriber leaves, stop the
         // sockets and pollers so the static per-widget feed does not hold
@@ -390,6 +396,17 @@ public sealed class PriceFeedManager : IDisposable
         {
             ShutdownLoops();
         }
+    }
+
+    /// <summary>Releases one subscriber claim; true when the LAST claim was
+    /// released (the key is removed) — a symbol with remaining subscribers
+    /// keeps its key and cached price.</summary>
+    private static bool ReleaseSubscription(ConcurrentDictionary<string, int> subscriptions, string key)
+    {
+        if (!subscriptions.TryGetValue(key, out int count)) return false;
+        if (count <= 1) return subscriptions.TryRemove(key, out _);
+        subscriptions.AddOrUpdate(key, count - 1, (_, current) => current - 1);
+        return false;
     }
 
     /// <summary>

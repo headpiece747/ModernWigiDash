@@ -657,8 +657,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             from.Alpha);
     }
 
-    private static SKColor ParseColor(string hex, SKColor fallback)
-        => SKColor.TryParse(hex, out var parsed) ? parsed : fallback;
+    private SKColor ParseColor(string hex, SKColor fallback)
+        => ColorOf(hex, fallback);
 
     private static string FriendlyAppName(string appId)
     {

@@ -142,4 +142,27 @@ public class PriceFeedManagerLifecycleTests
         Assert.IsTrue(feed._subscribedFx.ContainsKey("EURUSD"), "A valid FX pair must be subscribed as its normalized key");
         Assert.IsTrue(feed._subscribedCrypto.ContainsKey("BTC"), "A valid crypto symbol must be subscribed");
     }
+
+    [TestMethod]
+    public void Subscriptions_AreRefCounted_OneUnsubscribeDoesNotKillCoSubscriber()
+    {
+        // Regression guard: the shared manager keys subscriptions by symbol.
+        // Two widgets on one symbol hold two claims — one widget's
+        // unsubscribe (symbol change / dispose) must not kill the other
+        // widget's live subscription.
+        using var feed = new PriceFeedManager(new HttpClient(new StubHandler("{}")), "test-key");
+
+        feed.Subscribe("BTC", AssetKind.Crypto);
+        feed.Subscribe("BTC", AssetKind.Crypto); // second widget, same symbol
+
+        feed.Unsubscribe("BTC", AssetKind.Crypto); // first widget leaves
+
+        Assert.IsTrue(feed._subscribedCrypto.ContainsKey("BTC"),
+            "A co-subscriber must keep the symbol subscribed after one widget unsubscribes");
+
+        feed.Unsubscribe("BTC", AssetKind.Crypto); // last widget leaves
+
+        Assert.IsFalse(feed._subscribedCrypto.ContainsKey("BTC"),
+            "The last unsubscribe must release the symbol");
+    }
 }

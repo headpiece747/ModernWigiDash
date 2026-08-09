@@ -39,17 +39,64 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     [WidgetProperty("Negative Color", WidgetPropertyType.Color, "Downward change badge color", "#EF4444")]
     public string NegativeColorHex { get; set; } = "#EF4444";
 
-    private static readonly PriceFeedManager _feed = new();
+    /// <summary>One process-wide manager shared by every ticker widget (the
+    /// default). Tests inject a manager with a fake feed/HttpClient.</summary>
+    internal PriceFeedManager Feed { get; set; } = SharedFeed;
+
+    private static readonly PriceFeedManager SharedFeed = new();
     private string? _lastSubscribedSymbol;
     private AssetKind _lastSubscribedKind = AssetKind.Stock;
     private DateTime _lastFallback = DateTime.MinValue;
+
+    /// <summary>Test seam for the fallback-fetch throttle.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    {
+        base.InitializeAsync(context, cancellationToken);
+        UpdateSubscription();
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Re-subscribes when the feed identity (Symbol / AssetType) changes —
+    /// inspector writes funnel through OnPropertyChanged, so Render stays a
+    /// pure draw (the old code subscribed as a draw side effect at 30 FPS).
+    /// </summary>
+    public override void OnPropertyChanged(string propertyName, object? newValue)
+    {
+        base.OnPropertyChanged(propertyName, newValue);
+        if (propertyName is nameof(Symbol) or nameof(AssetType))
+        {
+            UpdateSubscription();
+        }
+    }
+
+    private void UpdateSubscription()
+    {
+        AssetKind kind = AssetKindValue;
+        if (_lastSubscribedSymbol == Symbol && _lastSubscribedKind == kind) return;
+
+        if (_lastSubscribedSymbol != null)
+        {
+            Feed.Unsubscribe(_lastSubscribedSymbol, _lastSubscribedKind);
+        }
+        // A blank symbol never subscribes (and never triggers the shared
+        // manager's shutdown on dispose).
+        _lastSubscribedSymbol = string.IsNullOrWhiteSpace(Symbol) ? null : Symbol;
+        _lastSubscribedKind = kind;
+        if (string.IsNullOrWhiteSpace(Symbol)) return;
+
+        Feed.Subscribe(Symbol, kind);
+        _ = FallbackFetchAsync(); // seed the first price; the live feed takes over
+    }
 
     public override async ValueTask DisposeAsync()
     {
         // Stop polling this widget's symbol once it is removed from the canvas.
         if (_lastSubscribedSymbol != null)
         {
-            _feed.Unsubscribe(_lastSubscribedSymbol, _lastSubscribedKind);
+            Feed.Unsubscribe(_lastSubscribedSymbol, _lastSubscribedKind);
             _lastSubscribedSymbol = null;
         }
         await base.DisposeAsync();
@@ -94,30 +141,25 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         }
 
         AssetKind kind = AssetKindValue;
-        if (_lastSubscribedSymbol != Symbol || _lastSubscribedKind != kind)
-        {
-            _lastSubscribedSymbol = Symbol;
-            _lastSubscribedKind = kind;
-            _feed.Subscribe(Symbol, kind);
-        }
-
-        var info = _feed.GetPrice(Symbol, kind);
+        var info = Feed.GetPrice(Symbol, kind);
         bool isStale = info?.IsStale ?? true;
         if (info != null)
         {
             Price = FormatPrice(info.Price, info.CurrencySymbol);
             ChangeBadge = info.FormattedChange;
         }
-        else if ((TimeProvider.System.GetUtcNow().UtcDateTime - _lastFallback).TotalSeconds >= 15)
+        else if ((Clock.GetUtcNow().UtcDateTime - _lastFallback).TotalSeconds >= 15)
         {
-            _lastFallback = TimeProvider.System.GetUtcNow().UtcDateTime;
+            // Read-side freshness policy: seed/re-seed the price when the live
+            // feed has nothing yet, at most once per 15s.
+            _lastFallback = Clock.GetUtcNow().UtcDateTime;
             _ = FallbackFetchAsync();
         }
 
         bool isPositive = info?.IsPositive ?? ChangeBadge.StartsWith('+');
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor posColor = SKColor.TryParse(PositiveColorHex, out var parsedPos) ? parsedPos : new SKColor(34, 197, 94);
-        SKColor negColor = SKColor.TryParse(NegativeColorHex, out var parsedNeg) ? parsedNeg : new SKColor(239, 68, 68);
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
+        SKColor posColor = ColorOf(PositiveColorHex, new SKColor(34, 197, 94));
+        SKColor negColor = ColorOf(NegativeColorHex, new SKColor(239, 68, 68));
 
         float pad = 14f;
         float priceSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
@@ -150,7 +192,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
     {
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         float mainSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
 
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
@@ -167,9 +209,9 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         try
         {
             if (IsFxAsset) return;
-            await _feed.FetchFallbackAsync(Symbol, AssetKindValue);
+            await Feed.FetchFallbackAsync(Symbol, AssetKindValue);
 
-            var info = _feed.GetPrice(Symbol, AssetKindValue);
+            var info = Feed.GetPrice(Symbol, AssetKindValue);
             if (info != null)
             {
                 Price = FormatPrice(info.Price, info.CurrencySymbol);

@@ -29,8 +29,8 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var now = TimeProvider.System.GetLocalNow().LocalDateTime;
-        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsed) ? parsed : new SKColor(135, 0, 0);
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
+        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(135, 0, 0));
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
 
         if (ClockMode == "Analog")
         {

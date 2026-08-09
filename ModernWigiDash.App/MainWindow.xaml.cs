@@ -30,20 +30,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
     private readonly FramePump _framePump;
 
-    // Poll loops — one parameterized loop module per producer: SENSOR (LHS
-    // shared memory, ADR-0004) and FRAMETIME (PresentMon, ADR-0003) are direct
-    // producers started immediately.
-    private readonly Sdk.PollLoop _sensorPoll;
-    // PresentMon frame-time producer (ADR-0003) — polls the PresentMon
-    // Service directly, independent of service routing. Injected so the
-    // window can be constructed with a fake in tests (no real DLL load).
+    /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
+    /// Injected PresentMon interop so the window can be constructed with a
+    /// fake in tests (no real DLL load).</summary>
     private readonly IPresentMonNative _presentMonNative;
-    private readonly PresentMonFrameTimeProducer _presentMonProducer;
-    private readonly Sdk.PollLoop _frameTimePoll;
-
-    // LibreHardwareService sensor producer (ADR-0004) — reads the named
-    // shared-memory maps directly, independent of service routing.
-    private readonly LhmSharedMemoryReader _lhsReader = new();
+    private readonly TelemetryProducers _telemetry;
 
     private ProfileLayout _profile;
     private PlacedWidgetInstance? _selectedWidget;
@@ -98,19 +89,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
             () => _usbDevice.State == ConnectionState.Connected,
             msg => FileLog.Write("[HW] " + msg));
 
-        // One poll loop per direct producer.
-        _sensorPoll = new Sdk.PollLoop(
-            "SENSOR", TimeSpan.FromSeconds(1), () => true, SensorPollTick, () => { }, msg => Log(msg));
-
-        // PresentMon frame-time poll (ADR-0003): direct, started immediately,
-        // gated only on the runtime-loaded API library being available. The
-        // producer owns its tracking-target resolution (foreground process +
-        // descendants) and process-name lookup.
-        _presentMonProducer = new PresentMonFrameTimeProducer(_presentMonNative, new TrackedTargetResolver());
-        _frameTimePoll = new Sdk.PollLoop(
-            "FRAMETIME", TimeSpan.FromSeconds(1), () => _presentMonNative.IsAvailable, FrameTimePollTick, () => { }, msg => Log(msg));
-        _frameTimePoll.Start();
-        _sensorPoll.Start();
+        // One poll loop per direct producer, owned by the telemetry module:
+        // SENSOR (LHS shared memory, ADR-0004) and FRAMETIME (PresentMon,
+        // ADR-0003) start immediately and stop on close.
+        _telemetry = new TelemetryProducers(_presentMonNative, Log);
+        _telemetry.Start();
 
         // The engine's Start() above fires the initial connect.
         // Do NOT block the UI thread waiting for USB — the render timer will
@@ -194,9 +177,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             _framePump.Stop();
             _framePump.Dispose();
-            _sensorPoll.Stop();
-            _frameTimePoll.Stop();
-            _presentMonProducer.Dispose();
+            _telemetry.Dispose();
             _presenter.Dispose();
             ProfileOps.DisposeProfile(_profile);
 
@@ -516,11 +497,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (_profile.Pages.Count <= 1) return;
         var targetPage = _profile.Pages[index];
-        if (targetPage.Widgets.Count > 0)
-        {
-            var res = MessageBox.Show($"Are you sure you want to delete '{targetPage.PageName}' containing {targetPage.Widgets.Count} widget(s)?", "Delete Page", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (res != MessageBoxResult.Yes) return;
-        }
+        if (targetPage.Widgets.Count > 0 && !_dialogHost.Confirm("Delete Page", $"Are you sure you want to delete '{targetPage.PageName}' containing {targetPage.Widgets.Count} widget(s)?"))
+            return;
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
         RebuildPageTabsUI();
@@ -555,7 +533,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             string json = ProfileOps.ExportJson(_profile);
             File.WriteAllText(dlg.FileName, json);
-            MessageBox.Show("Profile exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogHost.Info("Export Complete", "Profile exported successfully!");
         }
     }
 
@@ -578,14 +556,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error importing profile: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
             }
         }
     }
 
     private void BtnClear_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show("Are you sure you want to clear all widgets from the current page?", "Confirm Clear", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+        if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
             ProfileOps.ClearPage(_profile.ActivePage);
             ClearSelectionAndRefresh();

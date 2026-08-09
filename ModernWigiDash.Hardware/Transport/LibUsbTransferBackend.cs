@@ -19,7 +19,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
 
     private readonly IUsbDevice _device;
     private readonly UsbEndpointWriter _writer;
-    private int _bulkDiagCount;
+    private readonly LogCadence _bulkDiagLog = new(60);
 
     public LibUsbTransferBackend(IUsbDevice device, UsbEndpointWriter writer)
     {
@@ -81,7 +81,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
 
         int totalBytes = data.Length;
         int numChunks = (totalBytes + BulkChunkSize - 1) / BulkChunkSize;
-        if (_bulkDiagCount++ % 60 == 0)
+        if (_bulkDiagLog.Due())
             FileLog.Write($"[USB-BULK-LIBUSB] Chunked write: {totalBytes} bytes in {numChunks} chunks");
 
         int totalTransferred = 0;

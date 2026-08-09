@@ -12,7 +12,6 @@ namespace ModernWigiDash.Sdk;
 public sealed class StaticTelemetryStore<TRecord> where TRecord : class
 {
     private readonly TelemetryStore<TRecord> _store;
-    private readonly TRecord _emptyValue;
 
     /// <param name="emptyValue">The record a freshly reset store exposes
     /// (e.g. the disconnected/unavailable sentinel of the domain).</param>
@@ -22,12 +21,13 @@ public sealed class StaticTelemetryStore<TRecord> where TRecord : class
     /// when no per-call clock is supplied.</param>
     public StaticTelemetryStore(TRecord emptyValue, TimeSpan defaultMaxAge, TimeProvider? timeProvider = null)
     {
-        _emptyValue = emptyValue;
         _store = new TelemetryStore<TRecord>(emptyValue, defaultMaxAge, timeProvider);
     }
 
-    /// <summary>Returns the cached snapshot, or the domain's empty value when none was ever stored.</summary>
-    public TRecord ReadSnapshot() => _store.Current ?? _emptyValue;
+    /// <summary>Returns the cached snapshot (never null — the store is
+    /// initialized to the domain's empty value and Update only assigns
+    /// non-null records).</summary>
+    public TRecord ReadSnapshot() => _store.Current!;
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The

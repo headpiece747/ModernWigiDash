@@ -61,10 +61,17 @@ internal sealed class FeedLoop : IDisposable
     private Task? _task;
     private int _disposed;
 
+    private IWebSocketFeed? _current;
+
     /// <summary>The live feed of the current cycle (null between cycles) — used
     /// by consumers for best-effort out-of-band sends (e.g. incremental
-    /// subscriptions, IRC PONG).</summary>
-    public IWebSocketFeed? Current { get; private set; }
+    /// subscriptions, IRC PONG). Written on the loop thread, read from caller
+    /// threads, hence the volatile backing field.</summary>
+    public IWebSocketFeed? Current
+    {
+        get => Volatile.Read(ref _current);
+        private set => Volatile.Write(ref _current, value);
+    }
 
     public FeedLoop(
         Uri uri,

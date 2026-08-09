@@ -14,18 +14,26 @@ public class StopwatchTimerWidget : ModernWidgetBase
     private DateTime _startTime = TimeProvider.System.GetUtcNow().UtcDateTime;
     private TimeSpan _elapsed = TimeSpan.Zero;
 
+    /// <summary>Test seam — the timing math is otherwise untestable.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Status label color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
+    private DateTime Now => Clock.GetUtcNow().UtcDateTime;
+
+    /// <summary>Internal test accessor for the accumulated elapsed time.</summary>
+    internal TimeSpan ElapsedForTest => _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        var total = _isRunning ? _elapsed + (TimeProvider.System.GetUtcNow().UtcDateTime - _startTime) : _elapsed;
+        var total = _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
         string timeStr = $"{total.Minutes:D2}:{total.Seconds:D2}.{total.Milliseconds / 10:D2}";
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor accentColor = SKColor.TryParse(AccentColorHex, out var parsedAccent) ? parsedAccent : SKColors.White;
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
+        SKColor accentColor = ColorOf(AccentColorHex, SKColors.White);
 
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, bounds.Width * 0.18f);
         using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
@@ -52,12 +60,12 @@ public class StopwatchTimerWidget : ModernWidgetBase
         {
             if (_isRunning)
             {
-                _elapsed += TimeProvider.System.GetUtcNow().UtcDateTime - _startTime;
+                _elapsed += Now - _startTime;
                 _isRunning = false;
             }
             else
             {
-                _startTime = TimeProvider.System.GetUtcNow().UtcDateTime;
+                _startTime = Now;
                 _isRunning = true;
             }
             Context?.RequestRender();

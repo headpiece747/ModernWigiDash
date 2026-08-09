@@ -145,9 +145,10 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        // Kick the fetch only when it is due — the internal throttle would
-        // early-return anyway, but the call itself allocates a Task per frame.
-        if (IsFetchDue())
+        // Kick the fetch only when the static-snapshot rule allows; the
+        // client's atomic claim decides throttling/in-flight (a check-then-set
+        // here would race the 15-min refresh timer).
+        if (!(StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue))
         {
             _ = FetchLiveWeatherAsync();
         }
@@ -625,15 +626,9 @@ public class WeatherForecastWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// Cheap pre-check mirroring the client's own guards, so the render tick
-    /// never allocates a Task for a fetch that would early-return.
+    /// Fetches live weather through the client's atomic fetch claim — the
+    /// in-flight/throttle decision is the client's, single-sourced.
     /// </summary>
-    private bool IsFetchDue()
-    {
-        if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue) return false;
-        return _client.IsFetchDue();
-    }
-
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
         if (StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue && !force) return;

@@ -414,9 +414,9 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        SKColor btnColor = SKColor.TryParse(ButtonColorHex, out var parsed) ? parsed : new SKColor(135, 0, 0);
-        SKColor textColor = SKColor.TryParse(TextColorHex, out var parsedText) ? parsedText : SKColors.White;
-        SKColor iconColor = SKColor.TryParse(IconColorHex, out var parsedIcon) ? parsedIcon : SKColors.White;
+        SKColor btnColor = ColorOf(ButtonColorHex, new SKColor(135, 0, 0));
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
+        SKColor iconColor = ColorOf(IconColorHex, SKColors.White);
 
         if (_isPressed)
         {

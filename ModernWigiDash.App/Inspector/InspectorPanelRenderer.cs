@@ -100,12 +100,14 @@ public static class InspectorPanelRenderer
                 case WidgetPropertyType.Path:
                     if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
                     {
-                        propPanel.Children.Add(BuildActionCommandEditor(desc, isUpdatingInspector, callbacks));
+                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks,
+                            "Select action folder", "Select action file or executable", "Programs and files (*.*)|*.*"));
                         actionCommandPanel = propPanel;
                     }
                     else
                     {
-                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks));
+                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks,
+                            "Select image folder", "Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*"));
                     }
                     break;
                 case WidgetPropertyType.SensorSelector:
@@ -262,8 +264,10 @@ public static class InspectorPanelRenderer
         return chk;
     }
 
-    /// <summary>Path editor for an action command (executable/file/folder picker, any file type).</summary>
-    private static UIElement BuildActionCommandEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    /// <summary>Path editor: text box with Folder/File pickers. The action
+    /// command and image-path editors differ only in the dialog title and file
+    /// filter — one parameterized builder instead of two ~40-line copies.</summary>
+    private static UIElement BuildPathEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks, string folderTitle, string fileTitle, string fileFilter)
     {
         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
@@ -282,7 +286,7 @@ public static class InspectorPanelRenderer
         DockPanel.SetDock(btnFolder, Dock.Right);
         btnFolder.Click += (_, _) =>
         {
-            string? folder = callbacks.BrowseFolder("Select action folder");
+            string? folder = callbacks.BrowseFolder(folderTitle);
             if (!string.IsNullOrEmpty(folder)) txt.Text = folder;
         };
 
@@ -295,50 +299,7 @@ public static class InspectorPanelRenderer
         DockPanel.SetDock(btnFile, Dock.Right);
         btnFile.Click += (_, _) =>
         {
-            string? file = callbacks.BrowseFile("Select action file or executable", "Programs and files (*.*)|*.*");
-            if (!string.IsNullOrEmpty(file)) txt.Text = file;
-        };
-
-        row.Children.Add(btnFile);
-        row.Children.Add(btnFolder);
-        row.Children.Add(txt);
-        return row;
-    }
-
-    /// <summary>Path editor for a plain file/image path (image-file picker).</summary>
-    private static UIElement BuildPathEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
-    {
-        var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
-        txt.TextChanged += (_, _) =>
-        {
-            if (isUpdatingInspector()) return;
-            callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
-        };
-
-        var btnFolder = new Button
-        {
-            Content = "Folder\u2026",
-            Padding = new Thickness(8, 2, 8, 2),
-            Margin = new Thickness(4, 0, 0, 0)
-        };
-        DockPanel.SetDock(btnFolder, Dock.Right);
-        btnFolder.Click += (_, _) =>
-        {
-            string? folder = callbacks.BrowseFolder("Select image folder");
-            if (!string.IsNullOrEmpty(folder)) txt.Text = folder;
-        };
-
-        var btnFile = new Button
-        {
-            Content = "File\u2026",
-            Padding = new Thickness(8, 2, 8, 2),
-            Margin = new Thickness(4, 0, 0, 0)
-        };
-        DockPanel.SetDock(btnFile, Dock.Right);
-        btnFile.Click += (_, _) =>
-        {
-            string? file = callbacks.BrowseFile("Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*");
+            string? file = callbacks.BrowseFile(fileTitle, fileFilter);
             if (!string.IsNullOrEmpty(file)) txt.Text = file;
         };
 

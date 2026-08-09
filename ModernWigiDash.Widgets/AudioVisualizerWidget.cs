@@ -116,7 +116,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         _lastRenderTimestamp = Stopwatch.GetTimestamp();
         EnsureLiveAudioCapture();
 
-        SKColor barColor = SKColor.TryParse(PrimaryColorHex, out var parsed) ? parsed : new SKColor(255, 205, 133);
+        SKColor barColor = ColorOf(PrimaryColorHex, new SKColor(255, 205, 133));
 
         lock (_audioLock)
         {

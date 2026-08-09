@@ -442,9 +442,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
         if (float.IsNaN(scale) || scale <= 0) scale = 1f;
 
-        var bg = SKColor.TryParse(BackgroundHex, out var parsedBg) ? parsedBg : new SKColor(15, 17, 23, 235);
-        var headerColor = SKColor.TryParse(HeaderColorHex, out var parsedHeader) ? parsedHeader : SKColors.White;
-        var msgColor = SKColor.TryParse(MessageColorHex, out var parsedMsg) ? parsedMsg : new SKColor(248, 250, 252);
+        var bg = ColorOf(BackgroundHex, new SKColor(15, 17, 23, 235));
+        var headerColor = ColorOf(HeaderColorHex, SKColors.White);
+        var msgColor = ColorOf(MessageColorHex, new SKColor(248, 250, 252));
 
         using var bgPaint = new SKPaint { Color = bg, IsAntialias = true };
         canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, bgPaint);
