@@ -18,6 +18,12 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// <summary>Sparkline sample cap — mirrors the widget's test window of 240 samples.</summary>
     internal const int MaxSparklineSamples = 240;
 
+    /// <summary>
+    /// Consecutive polls with a candidate set but no present data anywhere
+    /// before the capture is declared unhealthy. ~10s at the 1s poll cadence.
+    /// </summary>
+    private const int CaptureHealthGracePolls = 10;
+
     private readonly IPresentMonNative _native;
     private readonly TrackedTargetResolver _resolver;
     private readonly Func<int, string?> _processNameProvider;
@@ -26,6 +32,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
 
     private bool _sessionOpen;
     private int _trackedPid = -1;
+    private int _emptyDataPolls;
 
     public PresentMonFrameTimeProducer(
         IPresentMonNative native,
@@ -68,6 +75,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
 
         if (!_sessionOpen && !_native.OpenSession())
         {
+            _emptyDataPolls = 0;
             return Unavailable(_native.UnavailableReason, now);
         }
         _sessionOpen = true;
@@ -86,6 +94,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             var poll = _native.PollDynamic(pid);
             if (IsSessionLost(poll.Status))
             {
+                _emptyDataPolls = 0;
                 ResetSession();
                 return Unavailable("PresentMon Service connection lost; reconnecting.", now);
             }
@@ -94,6 +103,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
                 continue;
             }
 
+            _emptyDataPolls = 0;
             _trackedPid = pid;
             AppendFrameTimes(_native.DrainFrameTimes(pid));
 
@@ -111,6 +121,15 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
                 CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
                 RecentFrameTimesMs = new List<double>(_recentFrameTimes),
             };
+        }
+
+        // No candidate produced data this poll. The session is up and a target
+        // exists, so after a grace period this means the service's ETW capture
+        // is not producing present events — surface it instead of silently
+        // presenting monitor-refresh mode as real FPS.
+        if (++_emptyDataPolls >= CaptureHealthGracePolls)
+        {
+            return CaptureDead(now);
         }
 
         return Idle(now);
@@ -164,6 +183,22 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     private static FrameTimeSnapshotDto Idle(DateTime now) => new()
     {
         IsAvailable = true,
+        ProcessId = -1,
+        LastUpdate = now,
+    };
+
+    /// <summary>
+    /// Session is up, a target exists, but no present data has arrived for the
+    /// whole grace window — the service's ETW capture is not producing events.
+    /// The DTO stays "available" (the service is reachable) but flags the
+    /// capture unhealthy so the widget can say so instead of showing
+    /// monitor-refresh mode as real FPS.
+    /// </summary>
+    private static FrameTimeSnapshotDto CaptureDead(DateTime now) => new()
+    {
+        IsAvailable = true,
+        CaptureHealthy = false,
+        ErrorMessage = "PresentMon capture is not producing present data (service ETW capture inactive).",
         ProcessId = -1,
         LastUpdate = now,
     };

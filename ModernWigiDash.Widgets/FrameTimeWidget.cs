@@ -103,6 +103,12 @@ public class FrameTimeWidget : ModernWidgetBase
             return;
         }
 
+        if (!snapshot.CaptureHealthy)
+        {
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "PresentMon capture inactive", "The service is not producing present data", text);
+            return;
+        }
+
         if (snapshot.ProcessId <= 0)
         {
             // No process targeted (desktop / static window focused, or the App

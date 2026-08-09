@@ -16,6 +16,14 @@ public class FrameTimeSnapshotDto
     public bool IsAvailable { get; set; }
 
     /// <summary>
+    /// Whether the capture pipeline is producing present data. False when the
+    /// service session is open but no process yields present events for a grace
+    /// period (service-side ETW capture dead) — distinct from
+    /// <see cref="IsAvailable"/>, which only says the service is reachable.
+    /// </summary>
+    public bool CaptureHealthy { get; set; } = true;
+
+    /// <summary>
     /// Human-readable reason when <see cref="IsAvailable"/> is false.
     /// </summary>
     public string ErrorMessage { get; set; } = string.Empty;

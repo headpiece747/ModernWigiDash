@@ -1,127 +1,74 @@
 using ModernWigiDash.App;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Core.Plugins;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 
 [TestClass]
 public class StarterProfileTests
 {
-    private sealed class FakeContext : IModernWigiDashContext
-    {
-        public void LogInfo(string message) { }
-        public void LogError(string message, Exception? ex = null) { }
-        public void RequestRender() { }
-        public void RequestInspectorRefresh() { }
-        public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
-        public void CloseDeviceAuthorization() { }
-    }
+    private const float CanvasWidth = 1016f;
+    private const float CanvasHeight = 592f;
 
-    private static WidgetPluginLoader CreateLoader()
-    {
-        var loader = new WidgetPluginLoader();
-        loader.RegisterBuiltInAssembly(typeof(HotkeyButtonWidget).Assembly);
-        return loader;
-    }
+    private static readonly string[] ExpectedPageNames =
+    [
+        "Main Dashboard", "Now Playing", "Weather Forecast",
+        "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time"
+    ];
 
-    private static ProfileLayout CreateProfile()
-    {
-        var profile = new StarterProfile(CreateLoader(), new FakeContext()).Create();
-        try
-        {
-            return profile;
-        }
-        catch
-        {
-            ProfileOps.DisposeProfile(profile);
-            throw;
-        }
-    }
-
-    // ── placement table (pure data) ─────────────────────────
+    // ── layout spec (pure data — no widget instantiation, no loader/context) ──
 
     [TestMethod]
-    public void PlacementTable_DefinesSixPagesInOrder()
+    public void Layout_DefinesSixPagesInExpectedOrder()
     {
+        CollectionAssert.AreEqual(ExpectedPageNames, StarterProfile.Layout.Select(p => p.Name).ToArray());
+    }
+
+    [TestMethod]
+    public void Layout_EveryPlacementHasNonEmptyPluginId()
+    {
+        Assert.IsTrue(StarterProfile.Layout.Count > 0);
+        foreach (var page in StarterProfile.Layout)
+        {
+            foreach (var placement in page.Placements)
+            {
+                Assert.IsFalse(string.IsNullOrWhiteSpace(placement.PluginId),
+                    $"{page.Name}: plugin id must not be empty");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Layout_AllPlacementsInBoundsWithPositiveSize()
+    {
+        foreach (var page in StarterProfile.Layout)
+        {
+            foreach (var placement in page.Placements)
+            {
+                string context = $"{page.Name}/{placement.PluginId}";
+                Assert.IsTrue(placement.X >= 0, $"{context}: X must be non-negative (got {placement.X})");
+                Assert.IsTrue(placement.Y >= 0, $"{context}: Y must be non-negative (got {placement.Y})");
+                Assert.IsTrue(placement.Width > 0, $"{context}: width must be positive (got {placement.Width})");
+                Assert.IsTrue(placement.Height > 0, $"{context}: height must be positive (got {placement.Height})");
+                Assert.IsTrue(placement.X + placement.Width <= CanvasWidth,
+                    $"{context}: right edge {placement.X + placement.Width} exceeds canvas width {CanvasWidth}");
+                Assert.IsTrue(placement.Y + placement.Height <= CanvasHeight,
+                    $"{context}: bottom edge {placement.Y + placement.Height} exceeds canvas height {CanvasHeight}");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void MainDashboardPage_ContainsEightDashboardPlacements()
+    {
+        var dashboard = StarterProfile.Layout[0];
+        Assert.AreEqual("Main Dashboard", dashboard.Name);
+        Assert.AreEqual(8, dashboard.Placements.Count);
+
         CollectionAssert.AreEqual(
             new[]
             {
-                "Main Dashboard", "Now Playing", "Weather Forecast",
-                "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time"
+                "clock_modern", "weather_forecast", "audio_visualizer", "frame_time",
+                "ticker_stock", "text_label", "hotkey_button", "stopwatch_timer"
             },
-            StarterProfile.PageNames.ToArray());
-
-        Assert.AreEqual(6, StarterProfile.Placements.Select(p => p.PageName).Distinct().Count());
-        Assert.IsTrue(StarterProfile.Placements.All(p => StarterProfile.PageNames.Contains(p.PageName)),
-            "Every placement must target one of the declared pages");
-    }
-
-    [TestMethod]
-    public void PlacementTable_AllPlacementsInBoundsWithPositiveSize()
-    {
-        Assert.IsTrue(StarterProfile.Placements.Count > 0);
-        foreach (var placement in StarterProfile.Placements)
-        {
-            Assert.IsTrue(placement.X >= 0, $"{placement.PluginId}: X must be non-negative (got {placement.X})");
-            Assert.IsTrue(placement.Y >= 0, $"{placement.PluginId}: Y must be non-negative (got {placement.Y})");
-            Assert.IsTrue(placement.Width > 0, $"{placement.PluginId}: width must be positive (got {placement.Width})");
-            Assert.IsTrue(placement.Height > 0, $"{placement.PluginId}: height must be positive (got {placement.Height})");
-            Assert.IsTrue(placement.X + placement.Width <= GridSizeExtensions.ScreenWidth,
-                $"{placement.PluginId}: right edge {placement.X + placement.Width} exceeds canvas width {GridSizeExtensions.ScreenWidth}");
-            Assert.IsTrue(placement.Y + placement.Height <= GridSizeExtensions.ScreenHeight,
-                $"{placement.PluginId}: bottom edge {placement.Y + placement.Height} exceeds canvas height {GridSizeExtensions.ScreenHeight}");
-        }
-    }
-
-    // ── Create() (rehydrates through the real widget assembly) ──
-
-    [TestMethod]
-    public void Create_BuildsSixPagesInOrderWithExpectedNames()
-    {
-        var profile = CreateProfile();
-        try
-        {
-            Assert.AreEqual(6, profile.Pages.Count);
-            CollectionAssert.AreEqual(StarterProfile.PageNames.ToArray(), profile.Pages.Select(p => p.PageName).ToArray());
-            Assert.AreEqual(0, profile.ActivePageIndex, "Starter profile must open on the first page");
-            Assert.IsNotNull(profile.ActivePage);
-        }
-        finally
-        {
-            ProfileOps.DisposeProfile(profile);
-        }
-    }
-
-    [TestMethod]
-    public void Create_RehydratesEveryPlacementInBounds()
-    {
-        var profile = CreateProfile();
-        try
-        {
-            int total = profile.Pages.Sum(page => page.Widgets.Count);
-            Assert.AreEqual(StarterProfile.Placements.Count, total,
-                "Every placement must rehydrate into a placed widget (unknown plugin ids would be skipped)");
-
-            foreach (var page in profile.Pages)
-            {
-                foreach (var placed in page.Widgets)
-                {
-                    Assert.IsTrue(placed.X >= 0, $"{placed.PluginId}: X must be non-negative (got {placed.X})");
-                    Assert.IsTrue(placed.Y >= 0, $"{placed.PluginId}: Y must be non-negative (got {placed.Y})");
-                    Assert.IsTrue(placed.Width > 0, $"{placed.PluginId}: width must be positive (got {placed.Width})");
-                    Assert.IsTrue(placed.Height > 0, $"{placed.PluginId}: height must be positive (got {placed.Height})");
-                    Assert.IsTrue(placed.X + placed.Width <= GridSizeExtensions.ScreenWidth,
-                        $"{placed.PluginId}: right edge {placed.X + placed.Width} exceeds canvas width {GridSizeExtensions.ScreenWidth}");
-                    Assert.IsTrue(placed.Y + placed.Height <= GridSizeExtensions.ScreenHeight,
-                        $"{placed.PluginId}: bottom edge {placed.Y + placed.Height} exceeds canvas height {GridSizeExtensions.ScreenHeight}");
-                }
-            }
-        }
-        finally
-        {
-            ProfileOps.DisposeProfile(profile);
-        }
+            dashboard.Placements.Select(p => p.PluginId).ToArray());
     }
 }

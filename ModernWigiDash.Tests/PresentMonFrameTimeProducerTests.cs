@@ -384,4 +384,74 @@ public class PresentMonFrameTimeProducerTests
 
         Assert.AreEqual(4322, dto.ProcessId, "a candidate tracking rejected must be skipped, not fatal");
     }
+    [TestMethod]
+    public void Poll_NoDataForGracePeriod_FlagsCaptureUnhealthy()
+    {
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 4321);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 10; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsNotNull(dto);
+        Assert.IsTrue(dto.IsAvailable, "the service is reachable — availability stays true");
+        Assert.IsFalse(dto.CaptureHealthy, "no present data for the whole grace window must flag the capture");
+        StringAssert.Contains(dto.ErrorMessage, "not producing present data");
+        Assert.AreEqual(-1, dto.ProcessId);
+    }
+
+    [TestMethod]
+    public void Poll_BeforeGracePeriod_StaysIdleHealthy()
+    {
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 4321);
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.CaptureHealthy, "a few empty polls are normal startup/static-window behavior");
+        Assert.AreEqual(-1, dto.ProcessId);
+    }
+
+    [TestMethod]
+    public void Poll_DataArrivesAfterUnhealthy_Recovers()
+    {
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 4321);
+
+        for (int i = 0; i < 10; i++)
+        {
+            producer.Poll();
+        }
+
+        native.PollHandler = _ => new PresentMonPollResult(
+            new PresentMonDynamicSample(120.0, 100.0, 0.5, 3.0), PmStatus.Success);
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.CaptureHealthy, "a real sample must restore the healthy state");
+        Assert.AreEqual(120.0, dto.Fps, 0.001);
+        Assert.AreEqual(4321, dto.ProcessId);
+    }
+
+    [TestMethod]
+    public void Poll_IdleWithNoCandidates_DoesNotCountTowardUnhealthy()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 0); // no foreground window
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < 20; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsNotNull(dto);
+        Assert.IsTrue(dto.CaptureHealthy, "desktop/own-window idle must never flag the capture");
+    }
 }

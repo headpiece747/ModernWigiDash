@@ -18,7 +18,8 @@ public sealed record FrameTimeSnapshotRecord(
     double GpuBusyMs,
     double CpuFrameTimeMs,
     IReadOnlyList<double> RecentFrameTimesMs,
-    DateTime LastUpdate = default)
+    DateTime LastUpdate = default,
+    bool CaptureHealthy = true)
 {
     public static FrameTimeSnapshotRecord Unavailable() =>
         new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, []);
@@ -72,7 +73,8 @@ public static class FrameTimeStore
             dto?.GpuBusyMs ?? 0,
             dto?.CpuFrameTimeMs ?? 0,
             dto?.RecentFrameTimesMs ?? [],
-            dto?.LastUpdate ?? default),
+            dto?.LastUpdate ?? default,
+            dto?.CaptureHealthy ?? true),
             dto?.LastUpdate ?? default);
     }
 

@@ -37,7 +37,9 @@ public partial class MainWindow
     private void FrameTimePollTick()
     {
         var dto = _presentMonProducer.Poll();
-        if (!dto.IsAvailable)
+        // Surface capture-health failures (service ETW dead) alongside the
+        // unavailable state, once per message change.
+        if (!dto.IsAvailable || !dto.CaptureHealthy)
         {
             // The widget cannot render the reason — surface it once per change.
             if (dto.ErrorMessage != _lastFrameTimeError)
