@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using ModernWigiDash.Core.Models;
+using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
@@ -291,7 +292,7 @@ internal static class HotkeyActionExecutor
 }
 
 [WidgetMetadata("hotkey_button", "Hotkey", Description = "Interactive touch button executing macros, shortcuts, or application launches.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
-public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
+public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab
 {
     public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
@@ -332,6 +333,75 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
     [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
     public int IconOffsetY { get; set; } = 0;
 
+    // ── IWidgetIconGrab: the input module never needs to know this widget
+    // type. The icon geometry (0.62f max ratio, 0.4f auto-size, 0.31f anchor)
+    // lives exactly here, in the widget that draws the icon — Render, hit
+    // testing, and grab-move math all derive from one helper.
+
+    public bool IsPointOverIcon(float width, float height, float localX, float localY)
+    {
+        if (!ComputeIconGeometry(width, height, out var center, out float half))
+            return false;
+
+        float dx = localX - center.X;
+        float dy = localY - center.Y;
+        return dx * dx + dy * dy <= half * half;
+    }
+
+    public bool TryGetIconCenter(float width, float height, out SKPoint center, out float half)
+        => ComputeIconGeometry(width, height, out center, out half);
+
+    public bool ApplyGrabMove(PlacedWidgetInstance placed, float localX, float localY, float grabOffsetX, float grabOffsetY)
+    {
+        if (!ComputeIconGeometry(placed.Width, placed.Height, out _, out float half))
+            return false;
+
+        float cx = Math.Clamp(localX + grabOffsetX, half, placed.Width - half);
+        float cy = Math.Clamp(localY + grabOffsetY, half, placed.Height - half);
+        int newX = (int)Math.Round(cx - placed.Width / 2f);
+        int newY = (int)Math.Round(cy - placed.Height * 0.31f);
+        if (newX == IconOffsetX && newY == IconOffsetY)
+            return false;
+
+        IconOffsetX = newX;
+        IconOffsetY = newY;
+        OnPropertyChanged(nameof(IconOffsetX), newX);
+        OnPropertyChanged(nameof(IconOffsetY), newY);
+        placed.PropertyValues[nameof(IconOffsetX)] = newX;
+        placed.PropertyValues[nameof(IconOffsetY)] = newY;
+        return true;
+    }
+
+    /// <summary>Icon center and half-size for the given bounds; false when no icon is drawn.</summary>
+    private bool ComputeIconGeometry(float width, float height, out SKPoint center, out float half)
+    {
+        bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
+        bool hasIcon = useCustomFile
+            ? SvgIconLoader.TryGetPath(IconFile, out _)
+            : !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
+        if (!hasIcon)
+        {
+            center = default;
+            half = 0f;
+            return false;
+        }
+
+        float maxIconSize = Math.Min(width, height * 0.62f);
+        float iconSize = IconSize > 0 ? IconSize : Math.Min(width, height) * 0.4f;
+        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
+        half = iconSize / 2f;
+        if (half <= 0f)
+        {
+            center = default;
+            return false;
+        }
+
+        center = new SKPoint(
+            Math.Clamp(width / 2f + IconOffsetX, half, width - half),
+            Math.Clamp(height * 0.31f + IconOffsetY, half, height - half));
+        return true;
+    }
+
     private bool _isPressed = false;
     private readonly SemaphoreSlim _actionGate = new(1, 1);
     private CancellationTokenSource? _actionCts;
@@ -362,27 +432,18 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider
 
         string label = ButtonLabel;
 
-        float maxIconSize = Math.Min(bounds.Width, bounds.Height * 0.62f);
-        float iconSize = IconSize > 0 ? IconSize : Math.Min(bounds.Width, bounds.Height) * 0.4f;
-        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
-        float half = iconSize / 2f;
-        var iconCenter = new SKPoint(
-            Math.Clamp(bounds.MidX + IconOffsetX, bounds.Left + half, bounds.Right - half),
-            Math.Clamp(bounds.Top + bounds.Height * 0.31f + IconOffsetY, bounds.Top + half, bounds.Bottom - half));
-
         bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
-        SKPath? resolvedPath = null;
-        bool hasIcon = useCustomFile
-            ? SvgIconLoader.TryGetPath(IconFile, out resolvedPath) && resolvedPath != null
-            : !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
-
-        if (!hasIcon)
+        if (!ComputeIconGeometry(bounds.Width, bounds.Height, out var iconCenter, out float half))
         {
             if (useCustomFile)
                 Context?.LogError($"Hotkey custom icon file not found or unsupported: {IconFile}");
             DrawLabelOnly(canvas, bounds, label, textColor, Description);
             return;
         }
+        float iconSize = half * 2f;
+        SKPath? resolvedPath = null;
+        if (useCustomFile)
+            SvgIconLoader.TryGetPath(IconFile, out resolvedPath);
 
         // Draw label and description first so the icon can render in front of them
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);

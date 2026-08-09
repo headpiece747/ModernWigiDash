@@ -7,12 +7,15 @@
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
-/// Defines the transport contract for streaming raw frame buffers and issuing
-/// hardware control commands to the USB display device. The underlying USB I/O
-/// (WinUSB/LibUsbDotNet control transfers and bulk writes) is synchronous and
-/// blocking, so the contract is synchronous: async wrappers over blocking I/O
-/// would be fake async and force sync-over-async bridges at the callers.
-/// Executed entirely in user mode without requiring Administrator/UAC elevation or background services.
+/// The transport contract as the app actually uses it: stream raw frame
+/// buffers, read touch reports, and put the display into standby. The
+/// protocol-completeness commands (init sequence, page setup, brightness) are
+/// implementation details behind the seam — every member here has a production
+/// caller, so test fakes stay small and honest.
+/// The underlying USB I/O (WinUSB/LibUsbDotNet control transfers and bulk
+/// writes) is synchronous and blocking, so the contract is synchronous: async
+/// wrappers over blocking I/O would be fake async and force sync-over-async
+/// bridges at the callers.
 /// </summary>
 public interface IDisplayTransport : IAsyncDisposable, IDisposable
 {
@@ -22,28 +25,11 @@ public interface IDisplayTransport : IAsyncDisposable, IDisposable
     bool IsConnected { get; }
 
     /// <summary>
-    /// Gets the resolved device interface path (WinUSB) or a transport label
-    /// (LibUsbDotNet), or "Disconnected" when no device is connected.
-    /// </summary>
-    string DevicePath { get; }
-
-    /// <summary>
-    /// Connects to the USB display hardware via WinUSB setup API.
+    /// Connects to the USB display hardware (WinUSB first, LibUsbDotNet
+    /// fallback) and runs the initialization sequence.
     /// </summary>
     /// <returns>True if connection and hardware initialization succeeded; otherwise, false.</returns>
     bool Connect();
-
-    /// <summary>
-    /// Disconnects from the hardware device and releases all WinUSB pipe handles.
-    /// </summary>
-    void Disconnect();
-
-    /// <summary>
-    /// Sets the physical display brightness percentage (0 to 100%).
-    /// </summary>
-    /// <param name="brightnessPercent">Brightness level between 0 and 100.</param>
-    /// <returns>True if the vendor command succeeded; otherwise, false.</returns>
-    bool SetBrightness(byte brightnessPercent);
 
     /// <summary>
     /// Streams a raw frame buffer payload to the hardware display.
@@ -53,41 +39,15 @@ public interface IDisplayTransport : IAsyncDisposable, IDisposable
     bool SendFrame(ReadOnlyMemory<byte> frameBuffer);
 
     /// <summary>
-    /// Switches the display to the specified screen.
-    /// </summary>
-    /// <param name="screenId">Screen ID: 0x01=Welcome, 0x20=Base0, 0x21=Base1, 0x22=Base2.</param>
-    /// <param name="transition">Transition effect (0=none).</param>
-    /// <returns>True if the command succeeded; otherwise, false.</returns>
-    bool GoToScreen(byte screenId, byte transition = 0);
-
-    /// <summary>
-    /// Clears the screen configuration for the specified page.
-    /// </summary>
-    /// <param name="page">Page number to clear (0-2).</param>
-    /// <returns>True if the command succeeded; otherwise, false.</returns>
-    bool ClearPage(byte page = 0);
-
-    /// <summary>
-    /// Clears the display timeout/heartbeat.
-    /// </summary>
-    /// <returns>True if the command succeeded; otherwise, false.</returns>
-    bool ClearTimeout();
-
-    /// <summary>
     /// Reads the latest touch report from the display, or null when none is pending.
     /// </summary>
     TouchReport? ReadTouch();
 
     /// <summary>
-    /// Sends the device initialization sequence (PING + blank frame + GoToScreen).
-    /// </summary>
-    bool SendInitCommands();
-
-    /// <summary>
     /// Puts the display into standby: switches to the built-in vendor Welcome
-    /// screen. Heartbeats (<see cref="ClearTimeout"/>) must NOT be sent
-    /// afterwards — the display sleeps on its own timeout once the heartbeat
-    /// source stops. Returns false when not connected.
+    /// screen. No heartbeats are sent afterwards — the display sleeps on its
+    /// own timeout once the heartbeat source stops. Returns false when not
+    /// connected.
     /// </summary>
     bool GoToStandby();
 }

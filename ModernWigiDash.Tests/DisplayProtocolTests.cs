@@ -62,7 +62,8 @@ public class DisplayProtocolTests
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(SKColors.Red); // B=0 G=0 R=255 -> RGB565 0xF800
 
-        byte[] rgb565 = FrameEncoder.ConvertToRgb565(bitmap);
+        byte[] rgb565 = new byte[DisplayProtocolConstants.FrameBufferSize];
+        FrameEncoder.ConvertToRgb565(bitmap, rgb565);
 
         Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, rgb565.Length);
         // Little-endian 0xF800 = 0x00 0xF8
@@ -85,10 +86,30 @@ public class DisplayProtocolTests
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(new SKColor(0, 255, 0)); // B=0 G=255 R=0 -> RGB565 0x07E0
 
-        byte[] rgb565 = FrameEncoder.ConvertToRgb565(bitmap);
+        byte[] rgb565 = new byte[DisplayProtocolConstants.FrameBufferSize];
+        FrameEncoder.ConvertToRgb565(bitmap, rgb565);
 
         Assert.AreEqual(0xE0, rgb565[0]);
         Assert.AreEqual(0x07, rgb565[1]);
+    }
+
+    [TestMethod]
+    public void WinUsbDeviceOpen_RequiresOverlappedFlag()
+    {
+        // Regression guard: WinUsb_Initialize fails with ERROR_INVALID_HANDLE
+        // (error 6) when the CreateFileW handle was not opened with
+        // FILE_FLAG_OVERLAPPED (Microsoft WinUsb_Initialize docs). The transport
+        // must pass both FILE_ATTRIBUTE_NORMAL and FILE_FLAG_OVERLAPPED when
+        // opening the device path — a plain normal handle makes the direct
+        // WinUSB path fall back to LibUsbDotNet at runtime.
+        // These assertions intentionally compare compile-time constants (the
+        // constants ARE the pinned contract) — the MSTEST0032 "always true"
+        // warning is the analyzer noting exactly that. Suppress: a change to
+        // either constant still fails this test on recompile.
+#pragma warning disable MSTEST0032
+        Assert.AreEqual(0x80u, SetupApiNative.FileAttributeNormal);
+        Assert.AreEqual(0x40000000u, SetupApiNative.FileFlagOverlapped);
+#pragma warning restore MSTEST0032
     }
 
     [TestMethod]
@@ -100,7 +121,8 @@ public class DisplayProtocolTests
         using var canvas = new SKCanvas(bitmap);
         canvas.Clear(SKColors.White);
 
-        byte[] rgb565 = FrameEncoder.ConvertToRgb565(bitmap);
+        byte[] rgb565 = new byte[DisplayProtocolConstants.FrameBufferSize];
+        FrameEncoder.ConvertToRgb565(bitmap, rgb565);
 
         Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, rgb565.Length);
     }

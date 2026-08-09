@@ -37,11 +37,11 @@ public static class FrameTimeStore
     /// <summary>Default staleness window for frame-time data (~1s poll cadence).</summary>
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(5);
 
-    private static readonly TelemetryStore<FrameTimeSnapshotRecord> Store = new(
+    private static readonly StaticTelemetryStore<FrameTimeSnapshotRecord> Store = new(
         FrameTimeSnapshotRecord.Unavailable(),
         defaultMaxAge: DefaultMaxAge);
 
-    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.Current ?? FrameTimeSnapshotRecord.Unavailable();
+    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.ReadSnapshot();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
@@ -61,22 +61,21 @@ public static class FrameTimeStore
     /// Keeps the DTO-to-render-model mapping owned by the store.
     /// </summary>
     public static void UpdateFromDto(FrameTimeSnapshotDto? dto)
-    {
-        Store.Update(new FrameTimeSnapshotRecord(
-            dto?.IsAvailable ?? false,
-            dto?.ProcessId ?? 0,
-            dto?.ProcessName ?? string.Empty,
-            dto?.Fps ?? 0,
-            dto?.FrameTimeMs ?? 0,
-            dto?.Low1PercentFps ?? 0,
-            dto?.Low01PercentFps ?? 0,
-            dto?.GpuBusyMs ?? 0,
-            dto?.CpuFrameTimeMs ?? 0,
-            dto?.RecentFrameTimesMs ?? [],
-            dto?.LastUpdate ?? default,
-            dto?.CaptureHealthy ?? true),
+        => Store.Update(
+            new FrameTimeSnapshotRecord(
+                dto?.IsAvailable ?? false,
+                dto?.ProcessId ?? 0,
+                dto?.ProcessName ?? string.Empty,
+                dto?.Fps ?? 0,
+                dto?.FrameTimeMs ?? 0,
+                dto?.Low1PercentFps ?? 0,
+                dto?.Low01PercentFps ?? 0,
+                dto?.GpuBusyMs ?? 0,
+                dto?.CpuFrameTimeMs ?? 0,
+                dto?.RecentFrameTimesMs ?? [],
+                dto?.LastUpdate ?? default,
+                dto?.CaptureHealthy ?? true),
             dto?.LastUpdate ?? default);
-    }
 
     /// <summary>
     /// Resets the cache to the unavailable state. Intended for test isolation.

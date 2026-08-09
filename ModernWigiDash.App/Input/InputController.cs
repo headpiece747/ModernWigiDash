@@ -3,7 +3,6 @@ using ModernWigiDash.App.Gestures;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 using SkiaSharp;
 
 namespace ModernWigiDash.App.Input;
@@ -134,13 +133,22 @@ public sealed class InputController
         {
             _manipulation = ManipulationKind.Resize;
         }
-        else if (hit.ActiveInstance is HotkeyButtonWidget hotkeyWidget &&
-                 IsPointOverWidgetIcon(hotkeyWidget, hit.Width, hit.Height,
-                     x - hit.X, y - hit.Y))
+        else if (hit.ActiveInstance is IWidgetIconGrab grab)
         {
-            _manipulation = ManipulationKind.IconGrab;
-            if (TryGetWidgetIconCenter(hotkeyWidget, hit.Width, hit.Height, out var iconCenter, out _))
-                _iconGrabOffset = new Point(iconCenter.X - (x - hit.X), iconCenter.Y - (y - hit.Y));
+            // Hit-test in the widget's rotated-local space — the same geometry
+            // its icon is drawn in (ToLocalPoint is the render-transform
+            // inverse), so a rotated icon's grab region matches its footprint.
+            SKPoint local = hit.ToLocalPoint(x, y);
+            if (grab.IsPointOverIcon(hit.Width, hit.Height, local.X, local.Y))
+            {
+                _manipulation = ManipulationKind.IconGrab;
+                if (grab.TryGetIconCenter(hit.Width, hit.Height, out var iconCenter, out _))
+                    _iconGrabOffset = new Point(iconCenter.X - local.X, iconCenter.Y - local.Y);
+            }
+            else
+            {
+                _manipulation = ManipulationKind.Drag;
+            }
         }
         else
         {
@@ -180,8 +188,8 @@ public sealed class InputController
                 changed = true;
                 return true;
 
-            case ManipulationKind.IconGrab when widget.ActiveInstance is HotkeyButtonWidget iconHotkey:
-                changed = ApplyIconGrabMove(iconHotkey, widget, x, y);
+            case ManipulationKind.IconGrab when widget.ActiveInstance is IWidgetIconGrab grab:
+                changed = ApplyIconGrabMove(grab, widget, x, y);
                 return true;
 
             default:
@@ -218,64 +226,15 @@ public sealed class InputController
         return wasManipulating;
     }
 
-    private bool ApplyIconGrabMove(HotkeyButtonWidget hotkey, PlacedWidgetInstance widget, float x, float y)
+    private bool ApplyIconGrabMove(IWidgetIconGrab grab, PlacedWidgetInstance widget, float x, float y)
     {
-        float localX = x - widget.X;
-        float localY = y - widget.Y;
-        if (!TryGetWidgetIconCenter(hotkey, widget.Width, widget.Height, out _, out float half))
-            return false;
-
-        float cx = Math.Clamp(localX + (float)_iconGrabOffset.X, half, widget.Width - half);
-        float cy = Math.Clamp(localY + (float)_iconGrabOffset.Y, half, widget.Height - half);
-        int newX = (int)Math.Round(cx - widget.Width / 2f);
-        int newY = (int)Math.Round(cy - widget.Height * 0.31f);
-        if (newX == hotkey.IconOffsetX && newY == hotkey.IconOffsetY)
+        // Pointer in the widget's rotated-local space, consistent with the
+        // grab offset captured in Begin.
+        SKPoint local = widget.ToLocalPoint(x, y);
+        if (!grab.ApplyGrabMove(widget, local.X, local.Y, (float)_iconGrabOffset.X, (float)_iconGrabOffset.Y))
             return false;
 
         _iconGrabMoved = true;
-        hotkey.IconOffsetX = newX;
-        hotkey.IconOffsetY = newY;
-        hotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetX), newX);
-        hotkey.OnPropertyChanged(nameof(HotkeyButtonWidget.IconOffsetY), newY);
-        widget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetX)] = newX;
-        widget.PropertyValues[nameof(HotkeyButtonWidget.IconOffsetY)] = newY;
         return true;
-    }
-
-    private static bool TryGetWidgetIconCenter(HotkeyButtonWidget hotkey, float width, float height, out SKPoint center, out float half)
-    {
-        float maxIconSize = Math.Min(width, height * 0.62f);
-        float iconSize = hotkey.IconSize > 0 ? hotkey.IconSize : Math.Min(width, height) * 0.4f;
-        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
-        half = iconSize / 2f;
-        if (half <= 0f)
-        {
-            center = default;
-            return false;
-        }
-        center = new SKPoint(
-            Math.Clamp(width / 2f + hotkey.IconOffsetX, half, width - half),
-            Math.Clamp(height * 0.31f + hotkey.IconOffsetY, half, height - half));
-        return true;
-    }
-
-    private static bool IsPointOverWidgetIcon(HotkeyButtonWidget hotkey, float width, float height, float localX, float localY)
-    {
-        if (string.IsNullOrWhiteSpace(hotkey.IconFile))
-        {
-            if (string.IsNullOrWhiteSpace(hotkey.Icon) || !GriddyIcons.Contains(hotkey.Icon))
-                return false;
-        }
-        else if (!SvgIconLoader.TryGetPath(hotkey.IconFile, out _))
-        {
-            return false;
-        }
-
-        if (!TryGetWidgetIconCenter(hotkey, width, height, out var center, out float half))
-            return false;
-
-        float dx = localX - center.X;
-        float dy = localY - center.Y;
-        return dx * dx + dy * dy <= half * half;
     }
 }

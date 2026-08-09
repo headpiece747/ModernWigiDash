@@ -51,6 +51,19 @@ public static class ProfileOps
         page.PageName = name;
     }
 
+    /// <summary>
+    /// Switches the profile's active page. Returns false when the index is out
+    /// of range — the single place page navigation validates, so callers (the
+    /// window, the input controller's navigation seam) never index a missing
+    /// page.
+    /// </summary>
+    public static bool SetActivePageIndex(ProfileLayout profile, int index)
+    {
+        if (index < 0 || index >= profile.Pages.Count) return false;
+        profile.ActivePageIndex = index;
+        return true;
+    }
+
     /// <summary>Clears every widget from the page, disposing active instances.</summary>
     public static void ClearPage(PageLayout page)
     {
@@ -264,6 +277,15 @@ public static class ProfileOps
     /// </summary>
     private static void SanitizeImportedProfile(ProfileLayout profile)
     {
+        // A profile with zero pages cannot exist at runtime (the ctor creates
+        // one, DeletePage refuses the last) — an imported JSON with an empty
+        // pages array must be repaired here, or ActivePage hands out an orphan
+        // page that is not part of the profile.
+        if (profile.Pages.Count == 0)
+        {
+            profile.Pages.Add(new PageLayout());
+        }
+
         if (!string.IsNullOrWhiteSpace(profile.ActivePage?.BackgroundImagePath))
         {
             profile.ActivePage.BackgroundImagePath = SafeRelativePath(profile.ActivePage.BackgroundImagePath);

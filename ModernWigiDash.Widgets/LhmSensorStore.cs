@@ -40,11 +40,11 @@ public static class LhmSensorStore
     /// <summary>Default staleness window for sensor data (~1s poll cadence).</summary>
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(10);
 
-    private static readonly TelemetryStore<LhmSnapshot> Store = new(
+    private static readonly StaticTelemetryStore<LhmSnapshot> Store = new(
         LhmSnapshot.Disconnected(),
         defaultMaxAge: DefaultMaxAge);
 
-    public static LhmSnapshot ReadSnapshot() => Store.Current ?? LhmSnapshot.Disconnected();
+    public static LhmSnapshot ReadSnapshot() => Store.ReadSnapshot();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
@@ -78,10 +78,11 @@ public static class LhmSensorStore
                 r.Avg))
             .ToList() ?? [];
 
-        Store.Update(new LhmSnapshot(
-            dto?.IsConnected ?? false,
-            dto?.LastUpdate ?? default,
-            readings),
+        Store.Update(
+            new LhmSnapshot(
+                dto?.IsConnected ?? false,
+                dto?.LastUpdate ?? default,
+                readings),
             dto?.LastUpdate ?? default);
     }
 

@@ -102,6 +102,50 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void SetActivePageIndex_ValidIndex_Switches()
+    {
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "A");
+
+        Assert.IsTrue(ProfileOps.SetActivePageIndex(profile, 1));
+        Assert.AreEqual(1, profile.ActivePageIndex);
+    }
+
+    [TestMethod]
+    public void SetActivePageIndex_OutOfRange_IsRefused()
+    {
+        var profile = new ProfileLayout();
+
+        Assert.IsFalse(ProfileOps.SetActivePageIndex(profile, -1));
+        Assert.IsFalse(ProfileOps.SetActivePageIndex(profile, profile.Pages.Count));
+        Assert.AreEqual(0, profile.ActivePageIndex, "A refused switch must leave the active page untouched");
+    }
+
+    [TestMethod]
+    public void ActivePageIndex_ClampsToPageRange()
+    {
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "A");
+        ProfileOps.AddPage(profile, "B");
+
+        profile.ActivePageIndex = 99;
+        Assert.AreEqual(2, profile.ActivePageIndex, "The index must clamp to the last page, never past it");
+        Assert.AreEqual(profile.Pages[2], profile.ActivePage, "ActivePage must resolve to a page that is part of the profile");
+    }
+
+    [TestMethod]
+    public void ImportJson_EmptyPagesArray_IsRepairedWithOnePage()
+    {
+        // A profile with zero pages would hand ActivePage an orphan page not
+        // in Pages — the sanitizer must repair the import.
+        var loaded = ProfileOps.ImportJson("""{"profileId":"x","pages":[]}""", CreateLoader(), new FakeContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(1, loaded.Pages.Count, "The sanitizer must guarantee at least one page");
+        Assert.AreEqual(loaded.Pages[0], loaded.ActivePage, "ActivePage must never be an orphan");
+    }
+
+    [TestMethod]
     public void RenamePage_BlankName_IsIgnored()
     {
         var profile = new ProfileLayout();

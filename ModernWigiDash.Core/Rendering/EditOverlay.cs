@@ -37,13 +37,13 @@ public sealed class EditOverlay : IDisposable
         };
 
         // Classic 5x4 cell grid lines or custom spacing
-        for (int x = 0; x <= 1016; x += (int)GridSizeExtensions.CellWidth)
+        for (int x = 0; x <= DisplayGeometry.FramebufferWidth; x += (int)GridSizeExtensions.CellWidth)
         {
-            canvas.DrawLine(x, 0, x, 592, gridPaint);
+            canvas.DrawLine(x, 0, x, DisplayGeometry.FramebufferHeight, gridPaint);
         }
-        for (int y = 0; y <= 592; y += (int)GridSizeExtensions.CellHeight)
+        for (int y = 0; y <= DisplayGeometry.FramebufferHeight; y += (int)GridSizeExtensions.CellHeight)
         {
-            canvas.DrawLine(0, y, 1016, y, gridPaint);
+            canvas.DrawLine(0, y, DisplayGeometry.FramebufferWidth, y, gridPaint);
         }
     }
 

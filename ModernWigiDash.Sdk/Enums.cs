@@ -43,10 +43,12 @@ public enum GridSizePreset
 
 public static class GridSizeExtensions
 {
-    public const float ScreenWidth = 1016f;
-    public const float ScreenHeight = 592f;
-    public const float CellWidth = 203.2f;
-    public const float CellHeight = 148f;
+    // Cell size derived from the single framebuffer geometry source:
+    // 5 columns x 4 rows. Note the GridSizePreset table uses nominal integer
+    // cells (203) for widget default sizes; the exact 203.2 is what
+    // snap-to-grid needs to tile the 1016 px width without drift.
+    public const float CellWidth = DisplayGeometry.FramebufferWidth / 5f;
+    public const float CellHeight = DisplayGeometry.FramebufferHeight / 4f;
 
     public static SKSize ToSize(this GridSizePreset preset)
     {

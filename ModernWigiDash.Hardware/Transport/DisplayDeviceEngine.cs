@@ -22,14 +22,9 @@ namespace ModernWigiDash.Hardware.Transport;
 /// </summary>
 public sealed class DisplayDeviceEngine : IDisposable
 {
-    // -- Constants --
-    public const int ScreenWidth = DisplayProtocolConstants.FramebufferWidth;  // 1016
-    public const int ScreenHeight = DisplayProtocolConstants.FramebufferHeight; // 592
-    public const int FrameBufferSize = DisplayProtocolConstants.FrameBufferSize; // 1,202,944 bytes (1016 * 592 * 2)
-
     // -- Connection State --
     private IDisplayTransport? _transport;
-    private volatile bool _connected;
+    private volatile ConnectionState _state = ConnectionState.Disconnected;
     private bool _connecting; // Prevent concurrent connection attempts
     private readonly Lock _lock = new();
 
@@ -44,17 +39,18 @@ public sealed class DisplayDeviceEngine : IDisposable
     // or in simulation mode — the direct-USB loop is the only touch owner.
     private readonly PollLoop _touchPoll;
 
-    // -- Public Properties --
-    public bool IsConnected => _connected;
-    public bool IsHardwareActive { get; private set; }
-    public bool IsSimulationMode { get; private set; } = true;
-    public string DeviceStatus { get; private set; } = "🟡 Initializing...";
+    // -- Public State --
+    /// <summary>The single connection truth — see <see cref="ConnectionState"/>.</summary>
+    public ConnectionState State { get => _state; private set => _state = value; }
 
     // -- Events --
     public event Action<SKPoint, TouchEventType>? OnTouchEvent;
 
     /// <summary>
-    /// Initializes a new instance of the device engine.
+    /// Creates the engine. The constructor is deliberately inert: no connect
+    /// attempt, no background loops — construction must never reach for
+    /// hardware (window field initializers, test hosts). Call <see cref="Start"/>
+    /// to begin connection and touch polling.
     /// </summary>
     public DisplayDeviceEngine()
     {
@@ -64,6 +60,36 @@ public sealed class DisplayDeviceEngine : IDisposable
         // device (connected, not simulation). The loop is the same shape as
         // the Service's touch loop — one loop module, every hop.
         _touchPoll = CreateTouchPollLoop();
+
+        // Reconnect timer is created but disarmed until Start().
+        _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// Test seam: an engine bound to an injected transport, without auto-connect
+    /// or background loops. The touch poll loop is created but not started —
+    /// tests drive <see cref="TouchPollTick"/> directly (or call
+    /// <see cref="Start"/> to exercise the loop wiring).
+    /// </summary>
+    internal DisplayDeviceEngine(IDisplayTransport transport)
+    {
+        _transport = transport;
+        State = ConnectionState.Connected;
+        _touchPoll = CreateTouchPollLoop();
+        _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// Starts the engine's background work: the 16ms touch poll, the initial
+    /// connection attempt, and the 5s reconnect timer. Called once by the
+    /// window after construction; calling it again is harmless (the poll
+    /// loop, the connection gate, and the timer are each guarded) but not
+    /// required.
+    /// </summary>
+    public void Start()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+
         _touchPoll.Start();
 
         // Attempt initial connection (fire-and-forget with proper exception handling)
@@ -79,39 +105,33 @@ public sealed class DisplayDeviceEngine : IDisposable
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
 
-        // Setup reconnection timer
-        _reconnectTimer = new Timer(_ =>
-        {
-            bool shouldReconnect;
-            lock (_lock)
-            {
-                shouldReconnect = Volatile.Read(ref _isDisposed) == 0 && !_connected && !_connecting;
-            }
-            if (shouldReconnect)
-            {
-                _ = TryConnectAsync().ConfigureAwait(false);
-            }
-        }, null, 5000, 5000);
+        _reconnectTimer.Change(5000, 5000);
     }
 
-    /// <summary>
-    /// Test seam: an engine bound to an injected transport, without auto-connect
-    /// or background loops. The touch poll loop is created but not started —
-    /// tests drive <see cref="TouchPollTick"/> directly.
-    /// </summary>
-    internal DisplayDeviceEngine(IDisplayTransport transport)
+#pragma warning disable S1172 // timer callback signature requires the state parameter
+    private void ReconnectTick(object? _)
     {
-        _transport = transport;
-        _connected = true;
-        IsSimulationMode = false;
-        _touchPoll = CreateTouchPollLoop();
-        _reconnectTimer = new Timer(_ => { }, null, Timeout.Infinite, Timeout.Infinite);
+        bool shouldReconnect;
+        lock (_lock)
+        {
+            shouldReconnect = Volatile.Read(ref _isDisposed) == 0
+                && State != ConnectionState.Connected
+                && !_connecting;
+        }
+        if (!shouldReconnect) return;
+
+        _ = TryConnectAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+                Log($"[Reconnect] Connection attempt faulted: {t.Exception?.GetBaseException().Message}");
+        }, TaskContinuationOptions.ExecuteSynchronously);
     }
+#pragma warning restore S1172
 
     private PollLoop CreateTouchPollLoop() => new(
         "TOUCH-DIRECT",
         TimeSpan.FromMilliseconds(16),
-        ready: () => _connected && !IsSimulationMode,
+        ready: () => State == ConnectionState.Connected,
         tick: TouchPollTick,
         onTickFailure: () => { },
         log: msg => Log(msg));
@@ -136,7 +156,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     public async Task<bool> TryConnectAsync()
     {
         // Fast-path: already connected
-        if (_connected)
+        if (State == ConnectionState.Connected)
         {
             Log("[TryConnectAsync] Already connected, skipping");
             return true;
@@ -147,14 +167,16 @@ public sealed class DisplayDeviceEngine : IDisposable
         {
             if (_connecting || Volatile.Read(ref _isDisposed) != 0)
             {
-                Log($"[TryConnectAsync] Connection in progress or disposed, skipping (connected={_connected})");
-                return _connected;
+                Log($"[TryConnectAsync] Connection in progress or disposed, skipping (state={State})");
+                return State == ConnectionState.Connected;
             }
             _connecting = true;
         }
 
         try
         {
+            State = ConnectionState.Connecting;
+
             // Disconnect any existing transport before attempting new connection
             DisconnectInternal();
 
@@ -171,28 +193,13 @@ public sealed class DisplayDeviceEngine : IDisposable
                     lock (_lock)
                     {
                         _transport = transport;
-                        _connected = true;
                     }
-                    IsSimulationMode = false;
 
-                    // Send device initialization sequence (PING + blank frame + GoToScreen)
-                    // This puts the device in the correct state to receive frames
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await Task.Delay(100); // Small delay after connection
-                            transport.SendInitCommands();
-                            Log("[INIT] Device initialization sequence completed");
-                        }
-                        catch (Exception ex)
-                        {
-                            Log($"[INIT] Device initialization failed: {ex.Message}");
-                        }
-                    });
-
-                    DeviceStatus = "🟢 Physical Device Active";
-                    IsHardwareActive = true;
+                    // Connect() is the single init owner: it already ran
+                    // SendInitCommands (PING + SetBrightness + ClearPage +
+                    // AddWidget + blank framebuffer + GoToScreen) on both the
+                    // WinUSB and LibUsb paths.
+                    State = ConnectionState.Connected;
                     Log("Hardware connection successful!");
                 }
                 else
@@ -213,11 +220,8 @@ public sealed class DisplayDeviceEngine : IDisposable
                 lock (_lock)
                 {
                     _transport = null;
-                    _connected = false;
                 }
-                IsSimulationMode = true;
-                IsHardwareActive = false;
-                DeviceStatus = "🟡 Device Unavailable (Simulation Mode)";
+                State = ConnectionState.Simulated;
                 Log("No physical device found - running in simulation mode");
             }
 
@@ -240,7 +244,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// <returns>True when the frame was written to the transport.</returns>
     public bool SendFrameBytes(byte[] rgb565)
     {
-        if (Volatile.Read(ref _isDisposed) != 0 || !_connected || rgb565 == null || rgb565.Length == 0)
+        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || rgb565 == null || rgb565.Length == 0)
             return false;
 
         IDisplayTransport? transport;
@@ -258,9 +262,10 @@ public sealed class DisplayDeviceEngine : IDisposable
     }
 
     /// <summary>
-    /// Simulates a touch event for testing.
+    /// Simulates a touch event for testing (internal test seam — production
+    /// touch flows through the 16ms poll loop).
     /// </summary>
-    public void SimulateTouch(float x, float y, TouchEventType eventType)
+    internal void SimulateTouch(float x, float y, TouchEventType eventType)
     {
         OnTouchEvent?.Invoke(new SKPoint(x, y), eventType);
     }
@@ -273,8 +278,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         IDisplayTransport? oldTransport;
         lock (_lock)
         {
-            _connected = false;
-            IsHardwareActive = false;
+            State = ConnectionState.Disconnected;
             oldTransport = _transport;
             _transport = null;
         }

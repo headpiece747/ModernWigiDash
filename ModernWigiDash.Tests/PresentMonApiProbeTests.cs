@@ -83,6 +83,15 @@ public class PresentMonApiProbeTests
         Assert.IsNotNull(probe.GetApiVersionFn);
     }
 
+    [TestMethod]
+    public void PmVersion_MarshalledSize_MatchesNativeStruct()
+    {
+        // PM_VERSION is 6 bytes of version ushorts + 34 bytes of build strings.
+        // A smaller mirror made pmGetApiVersion overrun the stack buffer by 34
+        // bytes and fail-fast 0xC0000409 at the caller's return (stack cookie).
+        Assert.AreEqual(40, Marshal.SizeOf<PmVersion>());
+    }
+
     /// <summary>
     /// Fake over the platform seam: fabricates a module handle and resolves
     /// exports from a name table, so the probe's policy branches run without
@@ -115,7 +124,15 @@ public class PresentMonApiProbeTests
             // version gate. Delegate keeps the struct filled; no native call.
             var fn = new PmGetApiVersion(delegate (out PmVersion version)
             {
-                version = new PmVersion { Major = major, Minor = minor, Patch = patch };
+                version = new PmVersion
+                {
+                    Major = major,
+                    Minor = minor,
+                    Patch = patch,
+                    Tag = new byte[22],
+                    Hash = new byte[8],
+                    Config = new byte[4],
+                };
                 return PmStatus.Success;
             });
             _apiVersionPointer = Marshal.GetFunctionPointerForDelegate(fn);

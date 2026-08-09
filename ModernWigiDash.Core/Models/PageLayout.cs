@@ -17,8 +17,22 @@ public class ProfileLayout
     public string ProfileId { get; set; } = Guid.NewGuid().ToString();
     public string ProfileName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Default Profile" : value.Trim(); } = "Default Profile";
     public List<PageLayout> Pages { get; set; } = [new PageLayout()];
-    public int ActivePageIndex { get; set => field = Math.Max(0, value); } = 0;
 
+    /// <summary>
+    /// The active page index, clamped to the page range: never negative and
+    /// never past the last page (the profile's invariants — the ctor creates
+    /// one page, ProfileOps refuses to delete the last one, the import
+    /// sanitizer guarantees at least one — keep <see cref="Pages"/> non-empty).
+    /// </summary>
+    public int ActivePageIndex
+    {
+        get => field;
+        set => field = Pages.Count > 0 ? Math.Clamp(value, 0, Pages.Count - 1) : 0;
+    }
+
+    /// <summary>The active page. The empty-Pages fallback is unreachable in
+    /// practice (see <see cref="ActivePageIndex"/> invariants) and is kept as
+    /// pure defense against a hand-constructed empty profile.</summary>
     public PageLayout ActivePage => Pages.Count > 0 && ActivePageIndex >= 0 && ActivePageIndex < Pages.Count
         ? Pages[ActivePageIndex]
         : Pages.FirstOrDefault() ?? new PageLayout();

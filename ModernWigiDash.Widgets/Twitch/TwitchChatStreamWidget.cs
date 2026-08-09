@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
-using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Tasks;
 using SkiaSharp;
@@ -61,12 +60,20 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private readonly Lock _messagesLock = new();
     private readonly List<ChatMessage> _messages = new();
     private CancellationTokenSource? _cts;
-    private ClientWebSocket? _socket;
+    private IWebSocketFeed? _socket;
     private Task? _ircTask;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
     private volatile int _status;
     private volatile string _statusDetail = "";
     private volatile bool _disposed;
+
+    /// <summary>
+    /// Test seam for the IRC socket. Defaults to the shared
+    /// <see cref="ClientWebSocketFeed"/> adapter; tests inject an in-memory
+    /// feed so the IRC loop (handshake, reconnect backoff, message parsing) is
+    /// drivable without a network.
+    /// </summary>
+    internal Func<IWebSocketFeed> FeedFactory { get; set; } = () => new ClientWebSocketFeed();
 
     private sealed record ChatMessage(string Username, string Text, SKColor Color);
 
@@ -248,47 +255,38 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private async Task ConnectAndReadAsync(CancellationToken ct)
     {
-        using var socket = new ClientWebSocket();
-        _socket = socket;
+        using var feed = FeedFactory();
+        _socket = feed;
         _status = StatusConnecting;
         _statusDetail = "Connecting…";
         Context.RequestRender();
 
-        await socket.ConnectAsync(IrcEndpoint, ct);
+        await feed.ConnectAsync(IrcEndpoint, ct);
 
         var channel = NormalizeChannel(ChannelName);
         string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString();
         string pass = AnonymousPass;
 
-        await SendIrcLineAsync(socket, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct);
-        await SendIrcLineAsync(socket, "PASS " + pass, ct);
-        await SendIrcLineAsync(socket, "NICK " + nick, ct);
-        await SendIrcLineAsync(socket, "JOIN #" + channel, ct);
+        await SendIrcLineAsync(feed, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct);
+        await SendIrcLineAsync(feed, "PASS " + pass, ct);
+        await SendIrcLineAsync(feed, "NICK " + nick, ct);
+        await SendIrcLineAsync(feed, "JOIN #" + channel, ct);
 
         _status = StatusConnecting;
         _statusDetail = "Joining #" + channel + "…";
         Context.RequestRender();
 
-        var buffer = new byte[8192];
-        List<byte> pending = [];
-        while (!ct.IsCancellationRequested)
+        // The feed reassembles fragments; each await returns one complete
+        // IRC message or null when the socket closed.
+        string? message;
+        while ((message = await feed.ReceiveTextAsync(ct)) is not null)
         {
-            var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
-            if (result.MessageType == WebSocketMessageType.Close) break;
-            pending.AddRange(buffer.AsSpan(0, result.Count).ToArray());
-            if (result.EndOfMessage)
-            {
-                DispatchIncomingMessage(Encoding.UTF8.GetString(pending.ToArray()));
-                pending.Clear();
-            }
+            DispatchIncomingMessage(message);
         }
     }
 
-    private static async Task SendIrcLineAsync(ClientWebSocket socket, string line, CancellationToken ct)
-    {
-        var bytes = Encoding.UTF8.GetBytes(line + "\r\n");
-        await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, ct);
-    }
+    private static Task SendIrcLineAsync(IWebSocketFeed socket, string line, CancellationToken ct)
+        => socket.SendTextAsync(line + "\r\n", ct);
 
     private void DispatchIncomingMessage(string data)
     {
@@ -403,6 +401,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     internal void AddTestChatMessageForTesting(string username, string text)
     {
         HandleLine($":{username}!{username}@{username}.tmi.twitch.tv PRIVMSG #channel :{text}");
+    }
+
+    /// <summary>Internal test accessor: how many chat messages the live IRC
+    /// loop has parsed (drive the loop through <see cref="FeedFactory"/>).</summary>
+    internal int MessageCountForTest
+    {
+        get
+        {
+            lock (_messagesLock) return _messages.Count;
+        }
     }
 
     private static string GetTag(string[] tags, string key)

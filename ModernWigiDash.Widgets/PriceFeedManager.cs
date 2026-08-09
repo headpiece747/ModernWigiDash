@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Globalization;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ModernWigiDash.Sdk;
@@ -31,97 +29,114 @@ public class PriceInfo
 
 public sealed class PriceFeedManager : IDisposable
 {
-    private enum WebSocketFeed
+    /// <summary>Canonical base coin for a crypto alias plus its CoinGecko API id.</summary>
+    internal sealed record CryptoAlias(string Symbol, string CoinGeckoId);
+
+    internal enum WebSocketFeed
     {
         Binance,
         Finnhub
     }
 
-    private static readonly FrozenDictionary<string, string> CryptoMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["bitcoin"] = "BTC",
-        ["btc"] = "BTC",
-        ["ethereum"] = "ETH",
-        ["eth"] = "ETH",
-        ["solana"] = "SOL",
-        ["sol"] = "SOL",
-        ["dogecoin"] = "DOGE",
-        ["doge"] = "DOGE",
-        ["cardano"] = "ADA",
-        ["ada"] = "ADA",
-        ["ripple"] = "XRP",
-        ["xrp"] = "XRP",
-        ["polkadot"] = "DOT",
-        ["dot"] = "DOT",
-        ["litecoin"] = "LTC",
-        ["ltc"] = "LTC",
-        ["avalanche-2"] = "AVAX",
-        ["avax"] = "AVAX",
-        ["chainlink"] = "LINK",
-        ["link"] = "LINK",
-        ["polygon"] = "POL",
-        ["pol"] = "POL",
-        ["matic-network"] = "MATIC",
-        ["matic"] = "MATIC",
-        ["tron"] = "TRX",
-        ["trx"] = "TRX",
-        ["shiba-inu"] = "SHIB",
-        ["shib"] = "SHIB",
-        ["uniswap"] = "UNI",
-        ["uni"] = "UNI",
-        ["cosmos"] = "ATOM",
-        ["atom"] = "ATOM",
-        ["near"] = "NEAR",
-        ["aptos"] = "APT",
-        ["apt"] = "APT",
-        ["arbitrum"] = "ARB",
-        ["optimism"] = "OP",
-        ["sui"] = "SUI",
-        ["render"] = "RNDR",
-        ["rndr"] = "RNDR",
-        ["filecoin"] = "FIL",
-        ["fil"] = "FIL",
-        ["theta"] = "THETA",
-        ["bnb"] = "BNB",
-        ["toncoin"] = "TON",
-        ["ton"] = "TON",
-        ["mantle"] = "MNT",
-        ["mnt"] = "MNT",
-        ["injective"] = "INJ",
-        ["inj"] = "INJ",
-        ["pepe"] = "PEPE",
-        ["floki"] = "FLOKI",
-        ["bonk"] = "BONK",
-        ["hedera"] = "HBAR",
-        ["hbar"] = "HBAR",
-        ["vechain"] = "VET",
-        ["vet"] = "VET",
-        ["aave"] = "AAVE",
-        ["maker"] = "MKR",
-        ["mkr"] = "MKR",
-        ["curve"] = "CRV",
-        ["crv"] = "CRV",
-        ["eos"] = "EOS",
-        ["fetch"] = "FET",
-        ["fetch-ai"] = "FET",
-        ["the-graph"] = "GRT",
-        ["grt"] = "GRT",
-        ["sei"] = "SEI",
-        ["starknet"] = "STRK",
-        ["strk"] = "STRK",
-        ["immutable"] = "IMX",
-        ["imx"] = "IMX",
-        ["dydx"] = "DYDX",
-        ["pendle"] = "PENDLE",
-        ["kaspa"] = "KAS",
-        ["kas"] = "KAS",
-        ["fantom"] = "FTM",
-        ["ftm"] = "FTM",
-        ["algorand"] = "ALGO",
-        ["algo"] = "ALGO",
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// One crypto symbol table: user-facing alias â†’ canonical base coin + the
+    /// CoinGecko API id used by the REST fallback. A single table makes a
+    /// symbol with a working live feed but a missing fallback id
+    /// unrepresentable — the fallback can never silently lose a coin.
+    /// </summary>
+    internal static readonly FrozenDictionary<string, CryptoAlias> CryptoAliases =
+        new Dictionary<string, CryptoAlias>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["bitcoin"] = new("BTC", "bitcoin"),
+            ["btc"] = new("BTC", "bitcoin"),
+            ["ethereum"] = new("ETH", "ethereum"),
+            ["eth"] = new("ETH", "ethereum"),
+            ["solana"] = new("SOL", "solana"),
+            ["sol"] = new("SOL", "solana"),
+            ["dogecoin"] = new("DOGE", "dogecoin"),
+            ["doge"] = new("DOGE", "dogecoin"),
+            ["cardano"] = new("ADA", "cardano"),
+            ["ada"] = new("ADA", "cardano"),
+            ["ripple"] = new("XRP", "ripple"),
+            ["xrp"] = new("XRP", "ripple"),
+            ["polkadot"] = new("DOT", "polkadot"),
+            ["dot"] = new("DOT", "polkadot"),
+            ["litecoin"] = new("LTC", "litecoin"),
+            ["ltc"] = new("LTC", "litecoin"),
+            ["avalanche-2"] = new("AVAX", "avalanche-2"),
+            ["avax"] = new("AVAX", "avalanche-2"),
+            ["chainlink"] = new("LINK", "chainlink"),
+            ["link"] = new("LINK", "chainlink"),
+            ["polygon"] = new("POL", "polygon-ecosystem-token"),
+            ["pol"] = new("POL", "polygon-ecosystem-token"),
+            ["matic-network"] = new("MATIC", "matic-network"),
+            ["matic"] = new("MATIC", "matic-network"),
+            ["tron"] = new("TRX", "tron"),
+            ["trx"] = new("TRX", "tron"),
+            ["shiba-inu"] = new("SHIB", "shiba-inu"),
+            ["shib"] = new("SHIB", "shiba-inu"),
+            ["uniswap"] = new("UNI", "uniswap"),
+            ["uni"] = new("UNI", "uniswap"),
+            ["cosmos"] = new("ATOM", "cosmos"),
+            ["atom"] = new("ATOM", "cosmos"),
+            ["near"] = new("NEAR", "near"),
+            ["aptos"] = new("APT", "aptos"),
+            ["apt"] = new("APT", "aptos"),
+            ["arbitrum"] = new("ARB", "arbitrum"),
+            ["arb"] = new("ARB", "arbitrum"),
+            ["optimism"] = new("OP", "optimism"),
+            ["op"] = new("OP", "optimism"),
+            ["sui"] = new("SUI", "sui"),
+            ["render"] = new("RNDR", "render-token"),
+            ["rndr"] = new("RNDR", "render-token"),
+            ["filecoin"] = new("FIL", "filecoin"),
+            ["fil"] = new("FIL", "filecoin"),
+            ["theta"] = new("THETA", "theta-token"),
+            ["bnb"] = new("BNB", "binancecoin"),
+            ["toncoin"] = new("TON", "the-open-network"),
+            ["ton"] = new("TON", "the-open-network"),
+            ["mantle"] = new("MNT", "mantle"),
+            ["mnt"] = new("MNT", "mantle"),
+            ["injective"] = new("INJ", "injective"),
+            ["inj"] = new("INJ", "injective"),
+            ["pepe"] = new("PEPE", "pepe"),
+            ["floki"] = new("FLOKI", "floki"),
+            ["bonk"] = new("BONK", "bonk"),
+            ["hedera"] = new("HBAR", "hedera-hashgraph"),
+            ["hbar"] = new("HBAR", "hedera-hashgraph"),
+            ["vechain"] = new("VET", "vechain"),
+            ["vet"] = new("VET", "vechain"),
+            ["aave"] = new("AAVE", "aave"),
+            ["maker"] = new("MKR", "maker"),
+            ["mkr"] = new("MKR", "maker"),
+            ["curve"] = new("CRV", "curve-dao-token"),
+            ["crv"] = new("CRV", "curve-dao-token"),
+            ["eos"] = new("EOS", "eos"),
+            ["fetch"] = new("FET", "fetch-ai"),
+            ["fet"] = new("FET", "fetch-ai"),
+            ["fetch-ai"] = new("FET", "fetch-ai"),
+            ["the-graph"] = new("GRT", "the-graph"),
+            ["grt"] = new("GRT", "the-graph"),
+            ["sei"] = new("SEI", "sei"),
+            ["starknet"] = new("STRK", "starknet"),
+            ["strk"] = new("STRK", "starknet"),
+            ["immutable"] = new("IMX", "immutable-x"),
+            ["imx"] = new("IMX", "immutable-x"),
+            ["dydx"] = new("DYDX", "dydx"),
+            ["pendle"] = new("PENDLE", "pendle"),
+            ["kaspa"] = new("KAS", "kaspa"),
+            ["kas"] = new("KAS", "kaspa"),
+            ["fantom"] = new("FTM", "fantom"),
+            ["ftm"] = new("FTM", "fantom"),
+            ["algorand"] = new("ALGO", "algorand"),
+            ["algo"] = new("ALGO", "algorand"),
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly FrozenSet<string> KnownCryptos = CryptoMap.Keys.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    private static readonly FrozenSet<string> KnownCryptos = CryptoAliases.Keys.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Returns the CoinGecko API id for a canonical base coin, or null when unknown.</summary>
+    private static string? CoinGeckoIdFor(string baseCoin)
+        => CryptoAliases.TryGetValue(baseCoin, out var alias) ? alias.CoinGeckoId : null;
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
@@ -132,8 +147,10 @@ public sealed class PriceFeedManager : IDisposable
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
 
-    private ClientWebSocket? _binanceWs;
-    private ClientWebSocket? _finnhubWs;
+    private IWebSocketFeed? _binanceFeed;
+    private IWebSocketFeed? _finnhubFeed;
+    private readonly Func<WebSocketFeed, IWebSocketFeed> _feedFactory;
+    private readonly TimeSpan _reconnectDelay;
     private CancellationTokenSource _cts = new();
     private Task? _binanceTask;
     private Task? _finnhubTask;
@@ -162,10 +179,16 @@ public sealed class PriceFeedManager : IDisposable
     {
     }
 
-    /// <summary>Internal constructor with an injectable HttpClient (test seam).</summary>
-    internal PriceFeedManager(HttpClient httpClient, string? finnhubApiKey = null)
+    /// <summary>Internal constructor with injectable seams: HttpClient, WebSocket feed factory, reconnect delay.</summary>
+    internal PriceFeedManager(
+        HttpClient httpClient,
+        string? finnhubApiKey = null,
+        Func<WebSocketFeed, IWebSocketFeed>? feedFactory = null,
+        TimeSpan? reconnectDelay = null)
     {
         _http = httpClient;
+        _feedFactory = feedFactory ?? (_ => new ClientWebSocketFeed());
+        _reconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(5);
         // The Finnhub key must come from an explicit argument or the
         // FINNHUB_API_KEY environment variable — never from source control.
         _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "";
@@ -221,16 +244,16 @@ public sealed class PriceFeedManager : IDisposable
 
     public static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);
     public static string NormalizeSymbol(string symbol) =>
-        CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper();
+        CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper();
 
     /// <summary>
     /// Maps a user-entered symbol to the canonical feed key for an asset kind:
-    /// crypto aliases resolve to the base coin (e.g. "bitcoin" → "BTC"), FX
+    /// crypto aliases resolve to the base coin (e.g. "bitcoin" â†’ "BTC"), FX
     /// pairs to "EURUSD", everything else to the upper-cased symbol.
     /// </summary>
     public static string ToFeedKey(string symbol, AssetKind kind) => kind switch
     {
-        AssetKind.Crypto => CryptoMap.TryGetValue(symbol, out var baseCoin) ? baseCoin : symbol.ToUpper(),
+        AssetKind.Crypto => CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper(),
         AssetKind.Fx => NormalizeFxKey(symbol),
         _ => symbol.ToUpper()
     };
@@ -321,11 +344,12 @@ public sealed class PriceFeedManager : IDisposable
     {
         try
         {
-            ClientWebSocket? ws = feed == WebSocketFeed.Finnhub ? _finnhubWs : _binanceWs;
-            if (ws == null || ws.State != WebSocketState.Open) return;
+            IWebSocketFeed? ws = feed == WebSocketFeed.Finnhub ? _finnhubFeed : _binanceFeed;
+            if (ws == null || !ws.IsOpen) return;
             object message = feed == WebSocketFeed.Finnhub
                 ? new { type = "subscribe", symbol = payload }
-                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 }; await SendJsonAsync(ws, message);
+                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
+            await ws.SendTextAsync(JsonSerializer.Serialize(message), _cts.Token);
         }
         catch
         {
@@ -385,10 +409,10 @@ public sealed class PriceFeedManager : IDisposable
     private void ShutdownLoops()
     {
         _cts.Cancel();
-        try { _binanceWs?.Abort(); } catch { /* best-effort */ }
-        try { _finnhubWs?.Abort(); } catch { /* best-effort */ }
-        _binanceWs = null;
-        _finnhubWs = null;
+        try { _binanceFeed?.Abort(); } catch { /* best-effort */ }
+        try { _finnhubFeed?.Abort(); } catch { /* best-effort */ }
+        _binanceFeed = null;
+        _finnhubFeed = null;
         _binanceTask = null;
         _finnhubTask = null;
         _stockRestTask = null;
@@ -412,7 +436,7 @@ public sealed class PriceFeedManager : IDisposable
         if (kind == AssetKind.Crypto)
         {
             string baseCoin = ToFeedKey(symbol, kind);
-            if (!CoinGeckoIds.TryGetValue(baseCoin, out string? geckoId)) return;
+            if (CoinGeckoIdFor(baseCoin) is not string geckoId) return;
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
             string json = await _http.GetStringAsync(url, _cts.Token);
             using var doc = JsonDocument.Parse(json);
@@ -457,11 +481,12 @@ public sealed class PriceFeedManager : IDisposable
 
     private async Task RunBinanceLoopAsync()
         => await RunWebSocketLoopAsync(
+            WebSocketFeed.Binance,
             "wss://stream.binance.us:9443/ws",
-            ws => SendJsonAsync(ws, new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }),
+            feed => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }), _cts.Token),
             ParseBinanceTicker,
-            ws => _binanceWs = ws,
-            () => _binanceWs = null);
+            feed => _binanceFeed = feed,
+            () => _binanceFeed = null);
 
     private async Task RunFinnhubLoopAsync()
     {
@@ -472,38 +497,46 @@ public sealed class PriceFeedManager : IDisposable
         }
 
         await RunWebSocketLoopAsync(
+            WebSocketFeed.Finnhub,
             $"wss://ws.finnhub.io?token={_finnhubKey}",
-            async ws =>
+            async feed =>
             {
                 foreach (var sym in _subscribedStocks.Keys)
-                    await SendJsonAsync(ws, new { type = "subscribe", symbol = sym });
+                    await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), _cts.Token);
             },
             ParseFinnhubMessage,
-            ws => _finnhubWs = ws,
-            () => _finnhubWs = null);
+            feed => _finnhubFeed = feed,
+            () => _finnhubFeed = null);
     }
 
     /// <summary>
     /// Shared WebSocket feed loop: connect, subscribe, read until closed, then
     /// reconnect after a delay. The per-feed differences (URI, subscription
-    /// payload, message parser) are supplied as delegates.
+    /// payload, message parser) are supplied as delegates; the socket itself
+    /// comes from the feed factory seam, so tests drive the loop with an
+    /// in-memory feed.
     /// </summary>
     private async Task RunWebSocketLoopAsync(
+        WebSocketFeed feedKind,
         string uri,
-        Func<ClientWebSocket, Task> subscribe,
+        Func<IWebSocketFeed, Task> subscribe,
         Action<string> parseMessage,
-        Action<ClientWebSocket> onConnected,
+        Action<IWebSocketFeed> onConnected,
         Action onClosed)
     {
         while (!_disposed && !_cts.IsCancellationRequested)
         {
-            var ws = new ClientWebSocket();
+            IWebSocketFeed feed = _feedFactory(feedKind);
             try
             {
-                onConnected(ws);
-                await ws.ConnectAsync(new Uri(uri), _cts.Token);
-                await subscribe(ws);
-                await ReadLoopAsync(ws, parseMessage, _cts.Token);
+                onConnected(feed);
+                await feed.ConnectAsync(new Uri(uri), _cts.Token);
+                await subscribe(feed);
+                string? message;
+                while ((message = await feed.ReceiveTextAsync(_cts.Token)) is not null)
+                {
+                    parseMessage(message);
+                }
             }
             catch when (!_disposed && !_cts.IsCancellationRequested)
             {
@@ -512,9 +545,9 @@ public sealed class PriceFeedManager : IDisposable
             finally
             {
                 onClosed();
-                ws.Dispose();
+                feed.Dispose();
             }
-            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(5000, _cts.Token);
+            if (!_disposed && !_cts.IsCancellationRequested) await Task.Delay(_reconnectDelay, _cts.Token);
         }
     }
 
@@ -639,56 +672,6 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private static readonly FrozenDictionary<string, string> CoinGeckoIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["BTC"] = "bitcoin",
-        ["ETH"] = "ethereum",
-        ["SOL"] = "solana",
-        ["DOGE"] = "dogecoin",
-        ["ADA"] = "cardano",
-        ["XRP"] = "ripple",
-        ["DOT"] = "polkadot",
-        ["LTC"] = "litecoin",
-        ["AVAX"] = "avalanche-2",
-        ["LINK"] = "chainlink",
-        ["POL"] = "polygon-ecosystem-token",
-        ["MATIC"] = "matic-network",
-        ["TRX"] = "tron",
-        ["SHIB"] = "shiba-inu",
-        ["UNI"] = "uniswap",
-        ["ATOM"] = "cosmos",
-        ["NEAR"] = "near",
-        ["APT"] = "aptos",
-        ["ARB"] = "arbitrum",
-        ["OP"] = "optimism",
-        ["SUI"] = "sui",
-        ["RNDR"] = "render-token",
-        ["FIL"] = "filecoin",
-        ["THETA"] = "theta-token",
-        ["BNB"] = "binancecoin",
-        ["TON"] = "the-open-network",
-        ["MNT"] = "mantle",
-        ["INJ"] = "injective",
-        ["PEPE"] = "pepe",
-        ["FLOKI"] = "floki",
-        ["BONK"] = "bonk",
-        ["HBAR"] = "hedera-hashgraph",
-        ["VET"] = "vechain",
-        ["AAVE"] = "aave",
-        ["MKR"] = "maker",
-        ["CRV"] = "curve-dao-token",
-        ["EOS"] = "eos",
-        ["FET"] = "fetch-ai",
-        ["GRT"] = "the-graph",
-        ["SEI"] = "sei",
-        ["STRK"] = "starknet",
-        ["IMX"] = "immutable-x",
-        ["DYDX"] = "dydx",
-        ["PENDLE"] = "pendle",
-        ["KAS"] = "kaspa",
-        ["FTM"] = "fantom",
-        ["ALGO"] = "algorand",
-    }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private async Task RunCryptoRestPollerAsync()
     {
@@ -732,20 +715,20 @@ public sealed class PriceFeedManager : IDisposable
     {
         try
         {
-            var ids = string.Join(",", _subscribedCrypto.Keys.Where(k => CoinGeckoIds.ContainsKey(k)).Select(k => CoinGeckoIds[k]));
+            var ids = string.Join(",", _subscribedCrypto.Keys.Select(CoinGeckoIdFor).OfType<string>());
             if (string.IsNullOrEmpty(ids)) return;
             var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            foreach (var kvp in CoinGeckoIds)
+            foreach (var alias in CryptoAliases.Values.DistinctBy(a => a.Symbol))
             {
-                if (!root.TryGetProperty(kvp.Value, out var coin)) continue;
+                if (!root.TryGetProperty(alias.CoinGeckoId, out var coin)) continue;
                 if (!coin.TryGetProperty("usd", out var priceEl) || priceEl.ValueKind == JsonValueKind.Null) continue;
                 var price = priceEl.GetDecimal();
                 decimal? change = null;
                 if (coin.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null)
                     change = changeEl.GetDecimal();
-                _prices.AddOrUpdate(kvp.Key, _ => new PriceInfo
+                _prices.AddOrUpdate(alias.Symbol, _ => new PriceInfo
                 {
                     Price = price,
                     ChangePercent = change ?? 0,
@@ -836,43 +819,19 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private static async Task ReadLoopAsync(ClientWebSocket ws, Action<string> handler, CancellationToken ct)
-    {
-        var buffer = new byte[16384];
-        var fragment = new StringBuilder();
-        while (ws.State == WebSocketState.Open)
-        {
-            var result = await ws.ReceiveAsync(buffer, ct);
-            if (result.MessageType == WebSocketMessageType.Close) break;
-            if (result.MessageType == WebSocketMessageType.Text)
-            {
-                fragment.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
-                if (result.EndOfMessage)
-                {
-                    handler(fragment.ToString());
-                    fragment.Clear();
-                }
-            }
-        }
-    }
-
-    private static async Task SendJsonAsync(ClientWebSocket ws, object obj)
-    {
-        var json = JsonSerializer.Serialize(obj);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
-        try { _binanceWs?.Abort(); } catch { /* best-effort */ }
-        try { _finnhubWs?.Abort(); } catch { /* best-effort */ }
-        _binanceWs?.Dispose();
-        _finnhubWs?.Dispose();
-        _http.Dispose();
+        try { _binanceFeed?.Abort(); } catch { /* best-effort */ }
+        try { _finnhubFeed?.Abort(); } catch { /* best-effort */ }
+        _binanceFeed?.Dispose();
+        _finnhubFeed?.Dispose();
+        // The manager never owns its HttpClient: the default instance shares
+        // the static process-wide client, so disposing it here would kill every
+        // other feed manager's socket reuse (the latent cross-widget break).
+        // The client lives for the process; only the loops are shut down.
     }
 }

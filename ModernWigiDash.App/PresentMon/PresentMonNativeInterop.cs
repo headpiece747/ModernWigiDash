@@ -65,10 +65,15 @@ internal delegate PmStatus PmFreeFrameQuery(IntPtr handle);
 internal delegate PmStatus PmGetApiVersion(out PmVersion version);
 
 /// <summary>
-/// Mirror of the PresentMon PM_VERSION struct (uint16 major/minor/patch).
-/// The API fills a struct, NOT three separate fields — marshaling it as
-/// three ints misreads the alignment and the version check fails (the
-/// widget then shows "Install the PresentMon Service").
+/// Mirror of the PresentMon PM_VERSION struct (PresentMonAPI.h).
+///
+/// Layout is critical: the native side fills the WHOLE struct — major, minor,
+/// patch, plus a 22-byte tag, 8-byte hash and 4-byte config string. A mirror
+/// that only declared the first three ushorts made pmGetApiVersion write 34
+/// bytes past the marshalled buffer, which the JIT's stack-overrun check
+/// caught at method return as fail-fast 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN).
+/// The full 40-byte layout below keeps the version gate reading major/minor/
+/// patch from the correct offsets while giving the native write its full space.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct PmVersion
@@ -76,6 +81,18 @@ internal struct PmVersion
     public ushort Major;
     public ushort Minor;
     public ushort Patch;
+
+    /// <summary>Build/config tag string (not consumed by the version gate).</summary>
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 22)]
+    public byte[] Tag;
+
+    /// <summary>Build hash string (not consumed by the version gate).</summary>
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+    public byte[] Hash;
+
+    /// <summary>Build config string (not consumed by the version gate).</summary>
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+    public byte[] Config;
 }
 
 /// <summary>

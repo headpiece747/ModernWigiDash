@@ -71,27 +71,4 @@ public static class FrameEncoder
             }
         }
     }
-
-    /// <summary>
-    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian byte array.
-    /// Reuses a pooled buffer (allocating when undersized) to reduce GC
-    /// pressure at 60 FPS.
-    /// </summary>
-    public static void ConvertToRgb565(SKBitmap bitmap, ref byte[]? poolBuffer)
-    {
-        int frameSize = DisplayProtocolConstants.FrameBufferSize;
-        if (poolBuffer == null || poolBuffer.Length < frameSize)
-            poolBuffer = new byte[frameSize];
-        ConvertToRgb565(bitmap, poolBuffer);
-    }
-
-    /// <summary>
-    /// Converts an SKBitmap (RGBA8888) to a fresh RGB565 little-endian byte array.
-    /// </summary>
-    public static byte[] ConvertToRgb565(SKBitmap bitmap)
-    {
-        byte[]? buffer = null;
-        ConvertToRgb565(bitmap, ref buffer);
-        return buffer!;
-    }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ModernWigiDash.Sdk;
+using SkiaSharp;
 
 namespace ModernWigiDash.Core.Models;
 
@@ -27,9 +28,35 @@ public class PlacedWidgetInstance
     [JsonIgnore]
     public IModernWidget? ActiveInstance { get; set; }
 
+    /// <summary>
+    /// Maps a global (framebuffer) point into this widget's unrotated local
+    /// space — the exact inverse of the render transform in
+    /// SkiaFrameCompositor.Compose (translate to (X, Y), then rotate about the
+    /// center). The two consumers of the transform (rendering and touch
+    /// routing) are therefore one geometry, not two.
+    /// </summary>
+    public SKPoint ToLocalPoint(float pointX, float pointY)
+    {
+        float localX = pointX - X;
+        float localY = pointY - Y;
+
+        if (Math.Abs(Rotation) <= 0.01f)
+            return new SKPoint(localX, localY);
+
+        float radians = -Rotation * (float)(Math.PI / 180.0);
+        float cos = MathF.Cos(radians);
+        float sin = MathF.Sin(radians);
+        float cx = Width / 2f;
+        float cy = Height / 2f;
+        float dx = localX - cx;
+        float dy = localY - cy;
+        return new SKPoint(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
+    }
+
     public bool ContainsPoint(float pointX, float pointY)
     {
-        return pointX >= X && pointX <= X + Width &&
-               pointY >= Y && pointY <= Y + Height;
+        SKPoint local = ToLocalPoint(pointX, pointY);
+        return local.X >= 0 && local.X <= Width &&
+               local.Y >= 0 && local.Y <= Height;
     }
 }

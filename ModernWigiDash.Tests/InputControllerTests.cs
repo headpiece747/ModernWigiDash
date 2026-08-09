@@ -290,6 +290,45 @@ public class InputControllerTests
     }
 
     [TestMethod]
+    public void Begin_OnIconGrabCapabilityWidget_StartsIconGrab_WithoutConcreteType()
+    {
+        // The controller must drive icon grabs through the IWidgetIconGrab
+        // capability — no widget-type branch in the App layer.
+        var grab = new FakeIconGrabWidget();
+        var controller = new InputController();
+        var widget = PlaceWidget(0, 0, 406, 148, grab);
+
+        var kind = controller.Begin(widget, widget, 203, 46, editMode: true);
+
+        Assert.AreEqual(ManipulationKind.IconGrab, kind);
+        Assert.AreEqual(1, grab.HitTestCalls);
+        controller.End(widget, editMode: true, snapToGrid: true, out _);
+    }
+
+    private sealed class FakeIconGrabWidget : ModernWidgetBase, IWidgetIconGrab
+    {
+        public int HitTestCalls { get; private set; }
+
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+        public bool IsPointOverIcon(float width, float height, float localX, float localY)
+        {
+            HitTestCalls++;
+            return true;
+        }
+
+        public bool TryGetIconCenter(float width, float height, out SkiaSharp.SKPoint center, out float half)
+        {
+            center = new SkiaSharp.SKPoint(width / 2f, height * 0.31f);
+            half = 10f;
+            return true;
+        }
+
+        public bool ApplyGrabMove(PlacedWidgetInstance placed, float localX, float localY, float grabOffsetX, float grabOffsetY)
+            => true;
+    }
+
+    [TestMethod]
     public void Move_IconGrab_UpdatesIconOffsetsAndPersists()
     {
         string iconName = GriddyIcons.Names.First();

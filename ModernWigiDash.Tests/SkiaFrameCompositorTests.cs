@@ -22,6 +22,22 @@ public class SkiaFrameCompositorTests
         }
     }
 
+    private sealed class RecordingWidget : ModernWidgetBase
+    {
+        public SKPoint? LastLocalPoint { get; private set; }
+        public TouchEventType? LastEventType { get; private set; }
+
+        public override void Render(SKCanvas canvas, SKRect bounds)
+        {
+        }
+
+        public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
+        {
+            LastLocalPoint = localPoint;
+            LastEventType = eventType;
+        }
+    }
+
     private static PlacedWidgetInstance Widget(float x, float y, float w, float h, IModernWidget instance) => new()
     {
         PluginId = "solid",
@@ -130,5 +146,48 @@ public class SkiaFrameCompositorTests
         // The rotation keeps the widget near its anchor; far corners stay background.
         Assert.AreEqual(new SKColor(10, 200, 90, 255), PixelAt(compositor, 350, 250), "Rotated widget interior must still paint");
         Assert.AreEqual(PageBackground, PixelAt(compositor, 10, 550));
+    }
+
+    [TestMethod]
+    public void HitTest_RotatedWidget_AnswersWhereDrawnNotBoundingBox()
+    {
+        var widget = Widget(0, 0, 200, 100, new SolidWidget(SKColors.Green));
+        widget.Rotation = 90f;
+        var page = new PageLayout { Widgets = [widget] };
+
+        // 90° about the center turns the 200x100 rect into a 100x200 drawn
+        // footprint spanning x in [50,150], y in [-50,150]. (100,140) is inside
+        // that footprint but below the unrotated box (y>100), so only the
+        // rotation-aware test can hit it. (10,50) is in the unrotated box but
+        // left of the drawn footprint (x<50), so it must miss.
+        Assert.IsNotNull(SkiaFrameCompositor.HitTest(page, 100, 140), "A point inside the drawn footprint must hit");
+        Assert.IsNull(SkiaFrameCompositor.HitTest(page, 10, 50), "A point in the unrotated box but outside the drawn footprint must miss");
+    }
+
+    [TestMethod]
+    public void HitTest_RotatedWidget_UnrotatedPointStillHits()
+    {
+        var widget = Widget(0, 0, 200, 100, new SolidWidget(SKColors.Green));
+        widget.Rotation = 90f;
+        var page = new PageLayout { Widgets = [widget] };
+
+        Assert.IsNotNull(SkiaFrameCompositor.HitTest(page, 100, 50), "The rotation center must always hit");
+    }
+
+    [TestMethod]
+    public void RouteTouch_RotatedWidget_DeliversRotatedLocalCoordinates()
+    {
+        var recorder = new RecordingWidget();
+        var widget = Widget(0, 0, 200, 100, recorder);
+        widget.Rotation = 90f;
+        var page = new PageLayout { Widgets = [widget] };
+
+        // Global (100,140) is widget-local (190,50) under a 90° rotation about
+        // the center — well inside the widget, so no boundary float ambiguity.
+        SkiaFrameCompositor.RouteTouch(page, 100, 140, TouchEventType.TouchDown);
+
+        Assert.IsNotNull(recorder.LastLocalPoint, "The touch must reach the rotated widget");
+        Assert.AreEqual(190f, recorder.LastLocalPoint.Value.X, 0.01f, "Rotated local X must be inverse-transformed");
+        Assert.AreEqual(50f, recorder.LastLocalPoint.Value.Y, 0.01f, "Rotated local Y must be inverse-transformed");
     }
 }

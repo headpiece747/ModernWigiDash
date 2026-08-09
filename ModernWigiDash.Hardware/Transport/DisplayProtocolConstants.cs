@@ -3,6 +3,7 @@
 // Licensed under the MIT license.
 // </copyright>
 
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Transport;
 
@@ -51,23 +52,26 @@ public static class DisplayProtocolConstants
     /// <summary>
     /// Active framebuffer width in pixels (1016 = 1024 - 8px border).
     /// 1016x592 widget area within the 1024x600 display.
+    /// Aliased from <see cref="DisplayGeometry"/> — the shared single source.
     /// </summary>
-    public const int FramebufferWidth = 1016;
+    public const int FramebufferWidth = DisplayGeometry.FramebufferWidth;
 
     /// <summary>
     /// Active framebuffer height in pixels (592 = 600 - 8px border).
+    /// Aliased from <see cref="DisplayGeometry"/> — the shared single source.
     /// </summary>
-    public const int FramebufferHeight = 592;
+    public const int FramebufferHeight = DisplayGeometry.FramebufferHeight;
 
     /// <summary>
     /// Bytes per pixel for RGB565 Little Endian format.
+    /// Aliased from <see cref="DisplayGeometry"/> — the shared single source.
     /// </summary>
-    public const int BytesPerPixel = 2;
+    public const int BytesPerPixel = DisplayGeometry.BytesPerPixel;
 
     /// <summary>
     /// Total expected frame buffer payload size in bytes (1016 * 592 * 2 = 1,202,944 bytes).
     /// </summary>
-    public const int FrameBufferSize = FramebufferWidth * FramebufferHeight * BytesPerPixel;
+    public const int FrameBufferSize = DisplayGeometry.FrameBufferSize;
 
     /// <summary>
     /// Display offset in X (4px border on each side).

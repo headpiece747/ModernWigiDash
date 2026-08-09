@@ -15,7 +15,7 @@ public sealed class DisplayPresenter : IDisposable
 
     public DisplayPresenter(Func<byte[], bool> send, Func<bool> isReady, Action<string>? log = null)
     {
-        _delivery = new FrameDelivery(
+        _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
             pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
             send: send,

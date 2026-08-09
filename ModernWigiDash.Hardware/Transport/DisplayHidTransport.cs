@@ -19,14 +19,15 @@ namespace ModernWigiDash.Hardware.Transport;
 ///   ControlOut(0x21, request, wValue, 0, data) for control OUT
 ///   iface.OutPipe.Write(buffer) for bulk OUT
 ///   ControlIn(0xA1, request, wValue, 0, buffer) for control IN
+/// The backend (WinUSB or LibUsbDotNet) is chosen once in
+/// <see cref="Connect"/> and everything else talks to the
+/// <see cref="ITransferBackend"/> seam.
 /// </summary>
 public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null) : IDisplayTransport
 {
     private readonly ILogger<DisplayHidTransport> _logger = logger ?? NullLogger<DisplayHidTransport>.Instance;
 
-    private IUsbDevice? _usbDevice;
-    private UsbEndpointWriter? _bulkWriter;
-    private WinUsbBulkDevice? _winUsbBulk; // Direct WinUSB for bulk writes (fallback)
+    private ITransferBackend? _backend;
     private static readonly Lazy<UsbContext> SharedContext = new(() => new UsbContext());
 
     private volatile bool _isConnected;
@@ -41,23 +42,20 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private int _currentPage;
 
     public bool IsConnected => _isConnected;
-    public string DevicePath
-    {
-        get
-        {
-            if (!_isConnected) return "Disconnected";
-            if (_winUsbBulk != null && _winUsbBulk.IsOpen)
-            {
-                return !string.IsNullOrEmpty(_winUsbBulk.DevicePath)
-                    ? _winUsbBulk.DevicePath
-                    : $"WinUSB {DisplayProtocolConstants.VendorId:X4}:{DisplayProtocolConstants.ProductId:X4}";
-            }
-            return $"LibUsbDotNet {DisplayProtocolConstants.VendorId:X4}:{DisplayProtocolConstants.ProductId:X4}";
-        }
-    }
     public long FramesSent => Volatile.Read(ref _framesSent);
     public long FramesFailed => Volatile.Read(ref _framesFailed);
     public int CurrentPage => _currentPage;
+
+    /// <summary>
+    /// Test seam: constructs the transport bound to an injected backend, so the
+    /// connect/init/frame/touch policy is drivable without hardware.
+    /// </summary>
+    internal DisplayHidTransport(ITransferBackend backend, ILogger<DisplayHidTransport>? logger = null)
+        : this(logger)
+    {
+        _backend = backend;
+        _isConnected = backend.IsOpen;
+    }
 
     public bool Connect()
     {
@@ -72,15 +70,16 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         // --- Try WinUSB first ---
         try
         {
-            _winUsbBulk = new WinUsbBulkDevice();
-            if (_winUsbBulk.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
+            var winUsb = new WinUsbBulkDevice();
+            if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
                 LogToFile("[USB-WINUSB] Direct WinUSB connection opened");
+                _backend = winUsb;
                 _isConnected = true;
 
                 // Verify with PING
                 byte[] pingBuf = new byte[4];
-                bool pingOk = _winUsbBulk.ControlIn(0x00, pingBuf);
+                bool pingOk = _backend.ControlIn(0x00, pingBuf);
                 LogToFile($"[USB-WINUSB] PING: ok={pingOk}");
 
                 if (pingOk)
@@ -88,32 +87,39 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
                     LogToFile("[USB-WINUSB] Using WinUSB for all transfers (control + bulk)");
                     _logger.LogInformation("Connected to WigiDash via WinUSB");
                     bool initOk = SendInitCommands();
-                    if (!initOk)
+                    if (initOk)
                     {
-                        LogToFile("[USB-WINUSB] Init commands failed — treating connection as failed");
-                        Cleanup();
+                        return true;
                     }
-                    return initOk;
-                }
 
-                // PING failed, close WinUSB and try LibUsbDotNet
-                LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
-                _winUsbBulk.Dispose();
-                _winUsbBulk = null;
-                _isConnected = false;
+                    // Init failed through the WinUSB stack — the same control
+                    // sequence may complete through the LibUsb driver stack, so
+                    // fall through to the LibUsbDotNet attempt.
+                    LogToFile("[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
+                    winUsb.Dispose();
+                    _backend = null;
+                    _isConnected = false;
+                }
+                else
+                {
+                    // PING failed, close WinUSB and try LibUsbDotNet
+                    LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
+                    winUsb.Dispose();
+                    _backend = null;
+                    _isConnected = false;
+                }
             }
             else
             {
                 LogToFile("[USB-WINUSB] Failed to open WinUSB, falling back to LibUsbDotNet");
-                _winUsbBulk.Dispose();
-                _winUsbBulk = null;
+                winUsb.Dispose();
             }
         }
         catch (Exception ex)
         {
             LogToFile($"[USB-WINUSB] Exception: {ex.Message}, falling back to LibUsbDotNet");
-            _winUsbBulk?.Dispose();
-            _winUsbBulk = null;
+            _backend?.Dispose();
+            _backend = null;
             _isConnected = false;
         }
 
@@ -178,8 +184,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
             WriteEndpointID endpointId = DiscoverBulkOutEndpoint(device);
             LogToFile($"[USB-ENDPOINT] Using bulk OUT endpoint: {endpointId}");
 
-            _bulkWriter = device.OpenEndpointWriter(endpointId, EndpointType.Bulk);
-            _usbDevice = device;
+            _backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
             _isConnected = true;
 
             LogToFile($"[USB-LIBUSB] Connected: endpoint={endpointId}");
@@ -242,7 +247,12 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         return (WriteEndpointID)DisplayProtocolConstants.BulkOutPipeId;
     }
 
-    public bool SendInitCommands()
+    /// <summary>
+    /// Sends the device initialization sequence (PING + 3-page setup + blank
+    /// framebuffer + GoToScreen). Called by <see cref="Connect"/>; internal so
+    /// tests can drive the sequence through an injected backend.
+    /// </summary>
+    internal bool SendInitCommands()
     {
         _logger.LogInformation("Sending device initialization commands...");
 
@@ -311,7 +321,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
     private void WriteBlankFramebuffer(byte page, byte widgetId)
     {
-        if (_usbDevice == null) return;
+        if (_backend is not { IsOpen: true }) return;
 
         try
         {
@@ -340,153 +350,28 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     }
 
     /// <summary>
-    /// Vendor OUT control transfer.
-    /// Routes through WinUSB (primary) or LibUsbDotNet (fallback).
+    /// Vendor OUT control transfer through the active backend.
     /// bmRequestType = 0x21 (Vendor | Host-to-Device | Interface)
     /// </summary>
     private bool ControlOut(byte request, ushort wValue, byte[]? data)
-    {
-        // Try WinUSB first
-        if (_winUsbBulk != null && _winUsbBulk.IsOpen)
-        {
-            return _winUsbBulk.ControlOut(request, wValue, data);
-        }
-
-        if (_usbDevice == null) return false;
-
-        try
-        {
-            int length = data?.Length ?? 0;
-            var setup = new UsbSetupPacket(
-                DisplayProtocolConstants.VendorOutRequestType,
-                request,
-                wValue,
-                0,
-                length);
-
-            int transferred;
-            if (data == null || data.Length == 0)
-            {
-                transferred = _usbDevice.ControlTransfer(setup);
-            }
-            else
-            {
-                transferred = _usbDevice.ControlTransfer(setup, data, 0, data.Length);
-            }
-
-            return transferred >= 0;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "ControlOut 0x{Request:X2} failed", request);
-            return false;
-        }
-    }
+        => _backend?.ControlOut(request, wValue, data) ?? false;
 
     /// <summary>
-    /// Vendor IN control transfer.
-    /// Routes through WinUSB (primary) or LibUsbDotNet (fallback).
+    /// Vendor IN control transfer through the active backend.
     /// bmRequestType = 0xA1 (Vendor | Device-to-Host | Interface)
     /// </summary>
     private bool ControlIn(byte request, ushort wValue, ushort wIndex, byte[] buffer)
-    {
-        // Try WinUSB first
-        if (_winUsbBulk != null && _winUsbBulk.IsOpen)
-        {
-            return _winUsbBulk.ControlIn(request, buffer, wValue, wIndex);
-        }
-
-        if (_usbDevice == null) return false;
-
-        try
-        {
-            var setup = new UsbSetupPacket(
-                DisplayProtocolConstants.ControlInRequestType,
-                request,
-                wValue,
-                wIndex,
-                buffer.Length);
-
-            int transferred = _usbDevice.ControlTransfer(setup, buffer, 0, buffer.Length);
-            return transferred > 0;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "ControlIn 0x{Request:X2} failed", request);
-            return false;
-        }
-    }
+        => _backend?.ControlIn(request, buffer, wValue, wIndex) ?? false;
 
     /// <summary>
-    /// Writes bulk data using direct WinUSB (primary) or LibUsbDotNet (fallback).
-    /// Direct WinUSB WinUsb_WritePipe is used because LibUsbDotNet's bulk write
-    /// has issues with large transfers on the WinUSB backend.
+    /// Writes bulk data through the active backend. Direct WinUSB writes the
+    /// whole payload in one pipe write; the LibUsb adapter chunks for the
+    /// legacy driver's throughput.
     /// </summary>
     private bool WriteBulkData(byte[] data)
-    {
-        // Try direct WinUSB first
-        if (_winUsbBulk != null && _winUsbBulk.IsOpen)
-        {
-            try
-            {
-                bool ok = _winUsbBulk.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out int transferred);
-                if (ok && transferred == data.Length)
-                {
-                    return true;
-                }
-
-                LogToFile($"[USB-WINUSB-BULK] WinUSB write returned ok={ok} transferred={transferred}/{data.Length}, error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
-            }
-            catch (Exception ex)
-            {
-                LogToFile($"[USB-WINUSB-BULK] WinUSB write exception: {ex.Message}");
-            }
-        }
-
-        // Fallback to LibUsbDotNet — the legacy libusb driver stalls on
-        // multi-megabyte single transfers (10s timeout for partial data), so
-        // always write in bounded chunks sized for the driver's throughput.
-        if (_bulkWriter == null) return false;
-
-        int totalBytes = data.Length;
-        const int chunkSize = 262144;
-        int numChunks = (totalBytes + chunkSize - 1) / chunkSize;
-        if (_bulkDiagCount++ % 60 == 0)
-            LogToFile($"[USB-BULK-LIBUSB] Chunked write: {totalBytes} bytes in {numChunks} chunks");
-
-        int totalTransferred = 0;
-
-        try
-        {
-            for (int i = 0; i < numChunks; i++)
-            {
-                // Advance by the actually-transferred length, not the nominal
-                // chunk stride, so a short write doesn't skip a gap.
-                int offset = totalTransferred;
-                int remaining = totalBytes - offset;
-                int size = Math.Min(chunkSize, remaining);
-
-                Error error = _bulkWriter.Write(data, offset, size, 10000, out int transferLength);
-                if (error != Error.Success || transferLength <= 0)
-                {
-                    LogToFile($"[USB-BULK-ERR] Chunk {i}/{numChunks} failed: error={error} transferred={transferLength}");
-                    return false;
-                }
-
-                totalTransferred += transferLength;
-            }
-
-            return totalTransferred == totalBytes;
-        }
-        catch (Exception ex)
-        {
-            LogToFile($"[USB-BULK-ERR] Chunked write exception: {ex.Message}");
-            return false;
-        }
-    }
+        => _backend?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
 
     private int _touchDiagCount;
-    private int _bulkDiagCount;
 
     // Reused per-call buffers: SendFrame (under _usbLock) and ReadTouch (16ms
     // poll loop) are serialized by their callers, so these are never touched
@@ -496,7 +381,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
     public TouchReport? ReadTouch()
     {
-        if (!_isConnected || _usbDevice == null)
+        if (_backend is not { IsOpen: true })
         {
             if (_touchDiagCount++ % 20 == 0)
                 LogToFile($"[TOUCH-DIAG] Not connected: isConnected={_isConnected}");
@@ -549,38 +434,14 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         }
     }
 
-    public void Disconnect()
-    {
-        Cleanup();
-    }
-
     private void Cleanup()
     {
         _isConnected = false;
 
-        // Dispose WinUSB bulk device
-        _winUsbBulk?.Dispose();
-        _winUsbBulk = null;
-
-        _bulkWriter = null;
-
-        if (_usbDevice != null)
-        {
-            try
-            {
-                if (_usbDevice.IsOpen)
-                {
-                    _usbDevice.ReleaseInterface(0);
-                    _usbDevice.Close();
-                }
-            }
-            catch (IOException)
-            {
-                // USB device may already be disconnected
-                System.Diagnostics.Debug.WriteLine("USB device release failed; device may already be disconnected");
-            }
-            _usbDevice = null;
-        }
+        // The backend owns the device-specific teardown (WinUSB handle free,
+        // LibUsb interface release + close); the transport just drops it.
+        _backend?.Dispose();
+        _backend = null;
 
         // Context is a shared singleton - don't dispose
     }
@@ -656,19 +517,12 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         }
     }
 
-    public bool SetBrightness(byte brightnessPercent)
-    {
-        if (!_isConnected)
-            return false;
-
-        byte clamped = (byte)Math.Clamp((int)brightnessPercent, 0, 100);
-        byte[] brightnessBuf = [clamped];
-        bool ok = ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, brightnessBuf);
-        if (ok) _logger.LogInformation("SetBrightness to {Brightness}%", clamped);
-        return ok;
-    }
-
-    public bool GoToScreen(byte screenId, byte transition = 0)
+    /// <summary>
+    /// Switches the display to the specified screen. Private: only the standby
+    /// path needs it — page navigation is compositor-side, frames are sent for
+    /// the current page directly.
+    /// </summary>
+    private bool GoToScreen(byte screenId, byte transition = 0)
     {
         if (!_isConnected)
             return false;
@@ -698,26 +552,6 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         {
             LogToFile("[STANDBY] Display set to standby (welcome screen)");
         }
-        return ok;
-    }
-
-    public bool ClearPage(byte page = 0)
-    {
-        if (!_isConnected)
-            return false;
-
-        bool ok = ControlOut(DisplayProtocolConstants.CmdClearPage, page, null);
-        if (ok) _logger.LogInformation("ClearPage {Page}", page);
-        return ok;
-    }
-
-    public bool ClearTimeout()
-    {
-        if (!_isConnected)
-            return false;
-
-        bool ok = ControlOut(DisplayProtocolConstants.CmdClearTimeout, 0, null);
-        if (ok) _logger.LogInformation("ClearTimeout");
         return ok;
     }
 

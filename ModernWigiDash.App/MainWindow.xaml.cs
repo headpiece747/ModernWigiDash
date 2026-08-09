@@ -26,7 +26,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
     private readonly DisplayDeviceEngine _usbDevice = new();
-    private readonly DispatcherTimer _renderTimer = new();
+
+    /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
+    private readonly FramePump _framePump;
 
     // Poll loops — one parameterized loop module per producer: SENSOR (LHS
     // shared memory, ADR-0004) and FRAMETIME (PresentMon, ADR-0003) are direct
@@ -83,13 +85,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         _presentMonNative = presentMonNative;
 
+        // The engine is inert until Start: construction never probes USB, the
+        // window's field initializer only allocates. Start the background
+        // connect + touch poll explicitly.
+        _usbDevice.Start();
         InitializeComponent();
         SourceInitialized += (_, _) => ApplyTheme();
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
         _presenter = new DisplayPresenter(
             _usbDevice.SendFrameBytes,
-            () => _usbDevice.IsConnected && !_usbDevice.IsSimulationMode,
+            () => _usbDevice.State == ConnectionState.Connected,
             msg => FileLog.Write("[HW] " + msg));
 
         // One poll loop per direct producer.
@@ -106,9 +112,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _frameTimePoll.Start();
         _sensorPoll.Start();
 
-        // Connection is already fired async by DisplayDeviceEngine constructor.
+        // The engine's Start() above fires the initial connect.
         // Do NOT block the UI thread waiting for USB — the render timer will
-        // start sending frames as soon as the background connection succeeds.
+        // start sending frames as soon as the connection succeeds.
 
         // 1. Register Built-In Display Suite (attribute-driven catalog — adding a
         //    widget to the Widgets assembly needs no registration here)
@@ -117,11 +123,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // 2. Populate Catalog UI (sorted alphabetically by display name)
         ListCatalog.ItemsSource = _loader.RegisteredPlugins.OrderBy(p => p.DisplayName).ToList();
 
-        // 3. Setup Default Profile Layout with 3 cool starter widgets
-        _starterProfile = new StarterProfile(_loader, this);
-        _profile = _starterProfile.Create();
-        RebuildPageTabsUI();
-
+        // 3. Build the host modules (input, inspector, dialog host) BEFORE the
+        // starter profile. Widget InitializeAsync runs synchronously inside
+        // _starterProfile.Create() and may call back into the context (e.g.
+        // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
+        // ShowDeviceAuthorization). Constructing the modules first removes the
+        // startup NRE when those callbacks arrive before the modules exist.
         // Single input module: gesture machine + outcome application + edit-mode
         // manipulation. All input sources feed it; page-switch UI work stays here.
         _inputController = new Input.InputController(
@@ -148,7 +155,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         _dialogHost = new DialogHost(this, TryFindResource, LogError);
 
-        // 4. Hook up USB Hardware physical touch events to Skia RouteTouch & hardware page swipe navigation.
+        // 4. Setup Default Profile Layout with 3 cool starter widgets
+        _starterProfile = new StarterProfile(_loader, this);
+        _profile = _starterProfile.Create();
+        RebuildPageTabsUI();
+
+        // 5. Hook up USB Hardware physical touch events to Skia RouteTouch & hardware page swipe navigation.
         // Display touches are runtime input: they always route to widgets (hotkeys
         // fire on the device even while the desktop is in edit mode) — only the
         // mouse path carries the desktop edit-mode veto.
@@ -160,26 +172,24 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage));
         };
 
-        // 5. Start 30 FPS Skia Render Loop & Hardware Frame Streamer
-        _renderTimer.Interval = TimeSpan.FromMilliseconds(33.3); // 30 FPS
-        _renderTimer.Tick += (s, e) =>
-        {
-#pragma warning disable S125 // paint-pipeline documentation, not commented-out code
-            // Composition and the frame send happen once per paint in
-            // SkiaCanvas_PaintSurface (the buffer sent there is the freshly
-            // composed one — sending from here would be one paint stale);
-            // the timer only drives repaints.
-#pragma warning restore S125
-            SkiaCanvas.InvalidateVisual();
-
-            UpdateUsbBadge();
-        };
-        _renderTimer.Start(); // Start the render loop immediately
+        // 5. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
+        // composes + sends once per tick, then repaints so the window draws
+        // the same buffer it sent; the badge refresh rides the tick.
+        _framePump = new FramePump(
+            composeAndSend: () =>
+            {
+                _compositor.Compose(_profile.ActivePage);
+                _presenter.Send(_compositor.FrameBuffer);
+            },
+            requestRepaint: () => SkiaCanvas.InvalidateVisual(),
+            onTick: UpdateUsbBadge);
+        _framePump.Start(); // Start the render loop immediately
 
         // 6. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
         {
-            _renderTimer.Stop();
+            _framePump.Stop();
+            _framePump.Dispose();
             _sensorPoll.Stop();
             _frameTimePoll.Stop();
             _presentMonProducer.Dispose();
@@ -234,13 +244,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
     {
-        _compositor.Compose(_profile.ActivePage);
+        // Pure draw: the FramePump composed this buffer and queued it for
+        // delivery on this tick, so what is drawn is exactly what was sent.
         e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, new SKSamplingOptions(SKFilterMode.Linear));
-        // Send the freshly composed frame through the direct-USB pipeline.
-        // Paint fires after Compose + DrawBitmap, so the queued frame is the
-        // current one (the old timer-path send was one paint stale). The
-        // encode runs here on the UI thread (~1-3ms); Send just queues.
-        _presenter.Send(_compositor.FrameBuffer);
     }
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -408,14 +414,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
             var sz = instance.DefaultSize;
             // Full-screen widgets go to origin; smaller ones center on the grid
-            if (sz.Width >= GridSizeExtensions.ScreenWidth - 10 || sz.Height >= GridSizeExtensions.ScreenHeight - 10)
+            if (sz.Width >= DisplayGeometry.FramebufferWidth - 10 || sz.Height >= DisplayGeometry.FramebufferHeight - 10)
             {
                 PlaceWidgetOnCanvas(pluginId, 0, 0);
             }
             else
             {
-                float cx = (float)Math.Round(GridSizeExtensions.ScreenWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-                float cy = (float)Math.Round(GridSizeExtensions.ScreenHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+                float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
+                float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
                 PlaceWidgetOnCanvas(pluginId, cx - sz.Width / 2, cy - sz.Height / 2);
             }
         }
@@ -514,8 +520,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void SwitchToPage(int index)
     {
-        if (index < 0 || index >= _profile.Pages.Count) return;
-        _profile.ActivePageIndex = index;
+        if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
         RebuildPageTabsUI();
 
         ScrollToPage(index);
@@ -610,7 +615,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void UpdateUsbBadge()
     {
-        bool active = _usbDevice.IsHardwareActive;
+        bool active = _usbDevice.State == ConnectionState.Connected;
         if (active == _lastUsbBadgeActive) return; // state unchanged — skip the per-tick resource lookup
         _lastUsbBadgeActive = active;
 

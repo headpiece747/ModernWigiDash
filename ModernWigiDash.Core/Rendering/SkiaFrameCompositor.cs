@@ -14,10 +14,24 @@ public class SkiaFrameCompositor : IDisposable
     /// </summary>
     public const float ResizeHandleSize = EditOverlay.ResizeHandleSize;
 
-    private readonly SKBitmap _frameBuffer = new(1016, 592);
+    private readonly SKBitmap _frameBuffer = new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
+    private readonly SKCanvas _canvas;
     private readonly EditOverlay _editOverlay = new();
     private bool _isEditMode = true;
     private PlacedWidgetInstance? _selectedWidget;
+
+    // Zero-alloc render path: the buffer never changes, so the canvas is
+    // created once and reused per compose; the background parse is hoisted
+    // (reparsed only when the page's hex changes); the alpha layer paint is
+    // cached and re-colored per widget instead of allocated per frame.
+    private readonly SKPaint _alphaPaint = new();
+    private string? _lastBgHex;
+    private SKColor _lastBgColor = new(27, 41, 48);
+
+    public SkiaFrameCompositor()
+    {
+        _canvas = new SKCanvas(_frameBuffer);
+    }
 
     public SKBitmap FrameBuffer => _frameBuffer;
     public bool IsEditMode
@@ -33,13 +47,18 @@ public class SkiaFrameCompositor : IDisposable
 
     public void Compose(PageLayout page)
     {
-        using var canvas = new SKCanvas(_frameBuffer);
+        SKCanvas canvas = _canvas;
 
         // 1. Clear background with charcoal slate / page background color
-        if (SKColor.TryParse(page.BackgroundHexColor, out var bgColor))
-            canvas.Clear(bgColor);
-        else
-            canvas.Clear(new SKColor(27, 41, 48)); // #1B2930
+        // (the string parse is hoisted: reparse only when the hex changes).
+        if (page.BackgroundHexColor != _lastBgHex)
+        {
+            _lastBgHex = page.BackgroundHexColor;
+            _lastBgColor = SKColor.TryParse(page.BackgroundHexColor, out var parsed)
+                ? parsed
+                : new SKColor(27, 41, 48); // #1B2930
+        }
+        canvas.Clear(_lastBgColor);
 
         // 2. Draw Grid Lines if SnapToGrid and Edit Mode are enabled (the
         //    authoring chrome lives in EditOverlay)
@@ -70,8 +89,8 @@ public class SkiaFrameCompositor : IDisposable
 
                 if (widget.Opacity < 0.99f)
                 {
-                    using var alphaPaint = new SKPaint { Color = new SKColor(255, 255, 255, (byte)(widget.Opacity * 255)) };
-                    canvas.SaveLayer(alphaPaint);
+                    _alphaPaint.Color = new SKColor(255, 255, 255, (byte)(widget.Opacity * 255));
+                    canvas.SaveLayer(_alphaPaint);
                 }
 
                 // Render the widget content directly to Skia canvas
@@ -158,7 +177,7 @@ public class SkiaFrameCompositor : IDisposable
         var target = HitTest(page, pointX, pointY);
         if (target?.ActiveInstance != null)
         {
-            var localPoint = new SKPoint(pointX - target.X, pointY - target.Y);
+            var localPoint = target.ToLocalPoint(pointX, pointY);
             target.ActiveInstance.OnTouch(localPoint, eventType);
         }
     }
@@ -177,6 +196,8 @@ public class SkiaFrameCompositor : IDisposable
         if (disposing)
         {
             _frameBuffer.Dispose();
+            _canvas.Dispose();
+            _alphaPaint.Dispose();
             _editOverlay.Dispose();
         }
         _disposed = true;

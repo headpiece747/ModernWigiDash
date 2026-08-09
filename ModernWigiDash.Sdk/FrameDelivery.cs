@@ -85,6 +85,30 @@ public sealed class FrameDelivery : IDisposable
     }
 
     /// <summary>
+    /// Creates a fully configured delivery with the policy's required seams.
+    /// Prefer this over the constructor at production bind sites — the encode,
+    /// pool, and send seams are required, so an unconfigured delivery (which
+    /// would silently drop every frame) is unrepresentable. The constructor
+    /// remains for tests that intentionally exercise unconfigured readiness
+    /// semantics.
+    /// </summary>
+    public static FrameDelivery Create(
+        IRgb565Encoder encoder,
+        FrameBufferPool pool,
+        Func<byte[], bool> send,
+        Func<bool>? isReady = null,
+        TimeSpan? minInterval = null,
+        TimeProvider? timeProvider = null,
+        int capacity = 2,
+        Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(encoder);
+        ArgumentNullException.ThrowIfNull(pool);
+        ArgumentNullException.ThrowIfNull(send);
+        return new FrameDelivery(encoder, pool, send, isReady, minInterval, timeProvider, capacity, log);
+    }
+
+    /// <summary>
     /// True when this delivery can currently route frames: the readiness
     /// predicate (when provided) or simply that a send seam is attached.
     /// </summary>

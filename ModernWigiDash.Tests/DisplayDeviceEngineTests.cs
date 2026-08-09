@@ -24,14 +24,17 @@ public class DisplayDeviceEngineTests
     [TestMethod]
     public void TouchPollTick_WithDownReport_RaisesOnTouchEventNormalized()
     {
-        var fake = new FakeTransport { NextReport = new TouchReport
+        var fake = new FakeTransport
         {
-            Type = DisplayProtocolConstants.TouchTypeDown,
-            X = 12,
-            Y = 34,
-            ScreenState = 0,
-            SleepState = false
-        } };
+            NextReport = new TouchReport
+            {
+                Type = DisplayProtocolConstants.TouchTypeDown,
+                X = 12,
+                Y = 34,
+                ScreenState = 0,
+                SleepState = false
+            }
+        };
         using var engine = new DisplayDeviceEngine(fake);
         SKPoint? receivedPoint = null;
         TouchEventType? receivedType = null;
@@ -52,14 +55,17 @@ public class DisplayDeviceEngineTests
     [TestMethod]
     public void TouchPollTick_WithUpReport_RaisesTouchUp()
     {
-        var fake = new FakeTransport { NextReport = new TouchReport
+        var fake = new FakeTransport
         {
-            Type = DisplayProtocolConstants.TouchTypeUp,
-            X = 5,
-            Y = 6,
-            ScreenState = 0,
-            SleepState = false
-        } };
+            NextReport = new TouchReport
+            {
+                Type = DisplayProtocolConstants.TouchTypeUp,
+                X = 5,
+                Y = 6,
+                ScreenState = 0,
+                SleepState = false
+            }
+        };
         using var engine = new DisplayDeviceEngine(fake);
         TouchEventType? receivedType = null;
         engine.OnTouchEvent += (_, type) => receivedType = type;
@@ -83,25 +89,47 @@ public class DisplayDeviceEngineTests
     }
 
     // ── Pre-existing engine tests ─────────────────────────────────────
+
     [TestMethod]
-    public void Constants_MatchProtocolConstants()
+    public async Task Constructed_WithoutStart_StaysDisconnected()
     {
-        // Regression guard: pin the hardware spec values (1016x592 framebuffer,
-        // RGB565 = 2 bytes per pixel). MSTEST0032 is disabled because constant
-        // pins are always-true by construction — they ARE the protocol contract.
-#pragma warning disable MSTEST0032
-        Assert.AreEqual(1016, DisplayDeviceEngine.ScreenWidth);
-        Assert.AreEqual(592, DisplayDeviceEngine.ScreenHeight);
-        Assert.AreEqual(1016 * 592 * 2, DisplayDeviceEngine.FrameBufferSize);
-#pragma warning restore MSTEST0032
+        // The ctor is inert: no connect attempt, no background loops. The old
+        // ctor fired TryConnectAsync and probed real USB (and even put the
+        // attached display into standby on dispose) from the test host.
+        using var engine = new DisplayDeviceEngine();
+        await Task.Delay(150); // generous — the old ctor's probe settled within ~50ms
+
+        Assert.AreEqual(ConnectionState.Disconnected, engine.State);
+    }
+
+    [TestMethod]
+    public void Start_WithInjectedTransport_BeginsTouchPolling()
+    {
+        var fake = new FakeTransport
+        {
+            NextReport = new TouchReport
+            {
+                Type = DisplayProtocolConstants.TouchTypeDown,
+                X = 12,
+                Y = 34,
+                ScreenState = 0,
+                SleepState = false
+            }
+        };
+        using var engine = new DisplayDeviceEngine(fake);
+        using var received = new ManualResetEventSlim(false);
+        engine.OnTouchEvent += (_, _) => received.Set();
+
+        engine.Start();
+
+        Assert.IsTrue(received.Wait(2000), "The 16ms touch poll must deliver the fake report after Start");
     }
 
     [TestMethod]
     public void NewEngine_ConstructsAndDisposesSafely()
     {
-        // The constructor fires a fire-and-forget TryConnectAsync, so connection
-        // state is intentionally not asserted: on a machine with the display
-        // attached (or the service running) it legitimately connects.
+        // The ctor is inert (no connect attempt, no loops), so construction is
+        // safe in any host; dispose must leave the engine inert too.
         var engine = new DisplayDeviceEngine();
         engine.Dispose();
 
@@ -173,17 +201,10 @@ public class DisplayDeviceEngineTests
         public TouchReport? NextReport { get; set; }
 
         public bool IsConnected => false;
-        public string DevicePath => "fake";
 
         public bool Connect() => false;
-        public void Disconnect() { }
-        public bool SetBrightness(byte brightnessPercent) => false;
         public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => false;
-        public bool GoToScreen(byte screenId, byte transition = 0) => false;
-        public bool ClearPage(byte page = 0) => false;
-        public bool ClearTimeout() => false;
         public TouchReport? ReadTouch() => NextReport;
-        public bool SendInitCommands() => false;
         public bool GoToStandby() => false;
         public void Dispose() { }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

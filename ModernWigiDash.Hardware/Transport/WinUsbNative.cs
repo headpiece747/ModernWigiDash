@@ -82,6 +82,7 @@ internal static class SetupApiNative
     public const uint FileShareWrite = 0x00000002;
     public const uint OpenExisting = 3;
     public const uint FileAttributeNormal = 0x80;
+    public const uint FileFlagOverlapped = 0x40000000;
     public static readonly IntPtr InvalidHandleValue = new(-1);
 
     /// <summary>
@@ -170,8 +171,10 @@ internal static class SetupApiNative
 
 /// <summary>
 /// Owns a WinUSB device handle for direct bulk and control transfers.
+/// Implements <see cref="ITransferBackend"/> directly — the adapter is the
+/// class, no wrapper needed.
 /// </summary>
-internal sealed class WinUsbBulkDevice : IDisposable
+internal sealed class WinUsbBulkDevice : ITransferBackend
 {
     private IntPtr _deviceHandle = IntPtr.Zero;
     private IntPtr _interfaceHandle = IntPtr.Zero;
@@ -274,14 +277,19 @@ internal sealed class WinUsbBulkDevice : IDisposable
                         return false;
                     }
 
-                    // Open device with shared access
+                    // Open device with shared access.
+                    // FILE_FLAG_OVERLAPPED is REQUIRED: WinUsb_Initialize fails
+                    // with ERROR_INVALID_HANDLE when the handle was not opened
+                    // for overlapped I/O (see WinUsb_Initialize docs). WinUSB
+                    // reads the FILE_FLAG_OVERLAPPED bit off the handle to
+                    // decide how to process its internal IOCTLs.
                     _deviceHandle = SetupApiNative.CreateFileW(
                         devicePath,
                         SetupApiNative.GenericRead | SetupApiNative.GenericWrite,
                         SetupApiNative.FileShareRead | SetupApiNative.FileShareWrite,
                         IntPtr.Zero,
                         SetupApiNative.OpenExisting,
-                        SetupApiNative.FileAttributeNormal,
+                        SetupApiNative.FileAttributeNormal | SetupApiNative.FileFlagOverlapped,
                         IntPtr.Zero);
 
                     if (_deviceHandle == SetupApiNative.InvalidHandleValue)
@@ -371,8 +379,16 @@ internal sealed class WinUsbBulkDevice : IDisposable
             if (_bulkDiagCount++ % 30 == 0)
                 Log($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
+            if (!ok)
+                Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
+
             transferred = (int)bytesTransferred;
             return ok;
+        }
+        catch (Exception ex)
+        {
+            Log($"BulkWrite exception: {ex.Message}");
+            return false;
         }
         finally
         {

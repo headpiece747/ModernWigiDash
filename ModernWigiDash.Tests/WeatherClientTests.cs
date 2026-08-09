@@ -272,6 +272,14 @@ public class WeatherClientTests
             await writer.FetchCurrentAsync(CoordinateLocation);
 
             var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHandler(Respond)));
+            // The freshly written cache file can land a moment after
+            // FetchCurrentAsync returns (async flush / AV scanner), so wait
+            // for it before asserting it exists — same retry pattern as the
+            // delete loop below.
+            for (int attempt = 0; attempt < 20 && await reader.LoadCacheAsync() is null; attempt++)
+            {
+                await Task.Delay(50);
+            }
             Assert.IsNotNull(await reader.LoadCacheAsync());
 
             // The freshly written file can be held open by the AV scanner for a
