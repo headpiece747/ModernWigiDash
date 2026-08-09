@@ -33,9 +33,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     public bool ShowSourceBadge { get; set; } = true;
 
     // ── SMTC state (all mutated on the UI thread) ─────────────────────────
-    private GlobalSystemMediaTransportControlsSessionManager? _mediaSessionManager;
-    private GlobalSystemMediaTransportControlsSession? _session;
-    private MediaSnapshot? _snapshot;
+    private MediaSessionMonitor? _mediaMonitor;
     private SKBitmap? _albumArt;
     private readonly RetiredBitmapSet _artRetirement = new();
     private string _artKey = "";
@@ -43,7 +41,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private string _loadingArtworkKey = "";
     private SKColor _bgColor = new(18, 18, 24);
     private int _artLoadVersion;
-    private int _refreshVersion;
     private SKPoint? _touchDownPoint;
     private bool _disposed;
 
@@ -53,171 +50,52 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
-    private sealed class MediaSnapshot
-    {
-        public string SourceAppId = "";
-        public string Title = "";
-        public string Artist = "";
-        public string Album = "";
-        public string AlbumArtist = "";
-        public int TrackNumber;
-        public int AlbumTrackCount;
-        public string[] Genres = [];
-        public GlobalSystemMediaTransportControlsSessionPlaybackStatus Status;
-        public TimeSpan Position;
-        public TimeSpan Duration;
-        public DateTimeOffset LastUpdated;
-        public bool Shuffle;
-        public MediaPlaybackAutoRepeatMode Repeat;
-        public double PlaybackRate = 1.0;
-        public bool CanPlay, CanPause, CanStop, CanNext, CanPrev, CanSeek, CanShuffle, CanRepeat;
-        public bool IsPlaying => Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-    }
-
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
-        _ = InitMediaSessionManagerAsync();
+        _mediaMonitor = new MediaSessionMonitor(Context.LogError);
+        _mediaMonitor.SnapshotChanged += OnMediaSnapshotChanged;
+        _ = _mediaMonitor.InitializeAsync();
         return ValueTask.CompletedTask;
     }
 
-    private async Task InitMediaSessionManagerAsync()
+    /// <summary>
+    /// Reacts to monitor snapshot updates: clears the artwork pipeline when the
+    /// session is lost, otherwise reloads album art when the track's art key
+    /// changes. Version-token/stale-guard semantics live in the monitor; the
+    /// artwork key guards (_artKey/_loadedArtworkKey/_loadingArtworkKey) are
+    /// unchanged.
+    /// </summary>
+    private void OnMediaSnapshotChanged(MediaSessionUpdate? update)
     {
-        try
+        if (update is null)
         {
-            // Runs synchronously up to the first await on the WPF UI thread (STA),
-            // so the manager is created in the interactive session's apartment.
-            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            if (_disposed) return;
-
-            _mediaSessionManager = manager;
-            manager.CurrentSessionChanged += OnCurrentSessionChanged;
-            manager.SessionsChanged += OnSessionsChanged;
-            AttachSession(manager.GetCurrentSession());
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"SMTC init failed: {ex.Message}", ex);
-            Context?.RequestRender();
-        }
-    }
-
-    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args)
-    {
-        AttachSession(sender.GetCurrentSession());
-    }
-
-    private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args)
-    {
-        if (_session is null)
-            AttachSession(sender.GetCurrentSession());
-        else
-            _ = RefreshAsync();
-    }
-
-    private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args) => _ = RefreshAsync();
-    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object args) => _ = RefreshAsync();
-    private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args) => _ = RefreshAsync();
-
-    private void AttachSession(GlobalSystemMediaTransportControlsSession? session)
-    {
-        if (ReferenceEquals(_session, session)) return;
-
-        DetachSessionEvents();
-        _session = session;
-
-        if (session != null)
-        {
-            session.MediaPropertiesChanged += OnMediaPropertiesChanged;
-            session.PlaybackInfoChanged += OnPlaybackInfoChanged;
-            session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
-        }
-
-        _ = RefreshAsync();
-    }
-
-    private void DetachSessionEvents()
-    {
-        if (_session == null) return;
-        _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-        _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
-        _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
-    }
-
-    private async Task RefreshAsync()
-    {
-        int refreshVersion = ++_refreshVersion;
-        var session = _session;
-        if (session is null)
-        {
-            _snapshot = null;
             DisposeArtwork();
             _bgColor = new SKColor(18, 18, 24);
             Context?.RequestRender();
             return;
         }
 
-        try
+        bool trackChanged = update.ArtKey != _artKey;
+        bool artworkBecameAvailable = update.Thumbnail is not null &&
+            _loadedArtworkKey != update.ArtKey && _loadingArtworkKey != update.ArtKey;
+        if (trackChanged || artworkBecameAvailable)
         {
-            var props = await session.TryGetMediaPropertiesAsync();
-            var info = session.GetPlaybackInfo();
-            var timeline = session.GetTimelineProperties();
-            if (_disposed || refreshVersion != _refreshVersion) return;
-
-            var previous = _snapshot;
-            _snapshot = new MediaSnapshot
-            {
-                SourceAppId = session.SourceAppUserModelId ?? "",
-                Title = Sanitize(props?.Title, ""),
-                Artist = Sanitize(props?.Artist, ""),
-                Album = Sanitize(props?.AlbumTitle, ""),
-                AlbumArtist = Sanitize(props?.AlbumArtist, ""),
-                TrackNumber = props?.TrackNumber ?? 0,
-                AlbumTrackCount = props?.AlbumTrackCount ?? 0,
-                Genres = props?.Genres?.ToArray() ?? [],
-                Status = info?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed,
-                Position = timeline?.Position ?? TimeSpan.Zero,
-                Duration = timeline?.EndTime ?? TimeSpan.Zero,
-                LastUpdated = timeline?.LastUpdatedTime ?? DateTimeOffset.Now,
-                Shuffle = info?.IsShuffleActive ?? false,
-                Repeat = info?.AutoRepeatMode ?? MediaPlaybackAutoRepeatMode.None,
-                PlaybackRate = info?.PlaybackRate is > 0 ? info.PlaybackRate.Value : 1.0,
-                CanPlay = info?.Controls.IsPlayEnabled ?? false,
-                CanPause = info?.Controls.IsPauseEnabled ?? false,
-                CanStop = info?.Controls.IsStopEnabled ?? false,
-                CanNext = info?.Controls.IsNextEnabled ?? false,
-                CanPrev = info?.Controls.IsPreviousEnabled ?? false,
-                CanSeek = info?.Controls.IsPlaybackPositionEnabled ?? false,
-                CanShuffle = info?.Controls.IsShuffleEnabled ?? false,
-                CanRepeat = info?.Controls.IsRepeatEnabled ?? false
-            };
-
-            string artKey = $"{session.SourceAppUserModelId}:{props?.Title}:{props?.Artist}:{props?.AlbumTitle}";
-            if (previous is not null && previous.Position > TimeSpan.FromSeconds(3) &&
-                _snapshot.Position < TimeSpan.FromSeconds(2.5))
-            {
-                // Some SMTC providers reuse metadata across track transitions.
-                // A timeline reset is still a reliable signal to reload artwork.
-                artKey += $":track{refreshVersion}";
-            }
-
-            bool trackChanged = artKey != _artKey;
-            bool artworkBecameAvailable = props?.Thumbnail is not null &&
-                _loadedArtworkKey != artKey && _loadingArtworkKey != artKey;
-            if (trackChanged || artworkBecameAvailable)
-            {
-                _artKey = artKey;
-                await LoadArtworkAsync(props?.Thumbnail, artKey);
-            }
-
+            _artKey = update.ArtKey;
+            _ = RefreshArtworkAsync(update.Thumbnail, update.ArtKey);
+        }
+        else
+        {
             Context?.RequestRender();
         }
-        catch (Exception ex)
-        {
-            Context?.LogError($"SMTC refresh failed: {ex.Message}", ex);
-        }
+    }
+
+    private async Task RefreshArtworkAsync(IRandomAccessStreamReference? thumbnail, string artKey)
+    {
+        await LoadArtworkAsync(thumbnail, artKey);
+        Context?.RequestRender();
     }
 
     private async Task LoadArtworkAsync(IRandomAccessStreamReference? thumbnail, string artKey)
@@ -303,7 +181,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         using var bg = new SKPaint { Color = bgColor, IsAntialias = true };
         canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, bg);
 
-        var snap = _snapshot;
+        var snap = _mediaMonitor?.CurrentSnapshot;
         if (snap is null || snap.Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed ||
             snap.Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)
         {
@@ -806,7 +684,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
 
         if (eventType != TouchEventType.TouchUp) return;
-        var snap = _snapshot;
+        var snap = _mediaMonitor?.CurrentSnapshot;
         if (snap is null)
         {
             _touchDownPoint = null;
@@ -820,20 +698,20 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         if (_shuffleBtn.Contains(hitPoint) && snap.CanShuffle)
         {
-            _ = _session?.TryChangeShuffleActiveAsync(!snap.Shuffle);
+            _mediaMonitor?.SetShuffle(!snap.Shuffle);
         }
         else if (_prevBtn.Contains(hitPoint) && snap.CanPrev)
         {
-            _ = _session?.TrySkipPreviousAsync();
+            _mediaMonitor?.Previous();
         }
         else if (_ppBtn.Contains(hitPoint))
         {
-            if (snap.IsPlaying && snap.CanPause) _ = _session?.TryPauseAsync();
-            else if (!snap.IsPlaying && snap.CanPlay) _ = _session?.TryPlayAsync();
+            if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
+            else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
         }
         else if (_nextBtn.Contains(hitPoint) && snap.CanNext)
         {
-            _ = _session?.TrySkipNextAsync();
+            _mediaMonitor?.Next();
         }
         else if (_repeatBtn.Contains(hitPoint) && snap.CanRepeat)
         {
@@ -843,11 +721,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                 MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
                 _ => MediaPlaybackAutoRepeatMode.None
             };
-            _ = _session?.TryChangeAutoRepeatModeAsync(next);
+            _mediaMonitor?.SetRepeat(next);
         }
-        else if (_badgeBtn.Contains(hitPoint) && _mediaSessionManager is not null)
+        else if (_badgeBtn.Contains(hitPoint))
         {
-            CycleSession();
+            _mediaMonitor?.CycleSession();
         }
         else if (_progressWidth > 0 && snap.Duration.TotalSeconds > 0
                   && Math.Abs(hitPoint.Y - _progressY) <= 24f
@@ -856,29 +734,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                  && snap.CanSeek)
         {
             double ratio = Math.Clamp((hitPoint.X - _progressLeft) / _progressWidth, 0.0, 1.0);
-            _ = _session?.TryChangePlaybackPositionAsync(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds).Ticks);
+            _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
         }
-    }
-
-    private void CycleSession()
-    {
-        if (_mediaSessionManager is null) return;
-
-        var sessions = _mediaSessionManager.GetSessions();
-        if (sessions.Count <= 1) return;
-
-        int idx = -1;
-        for (int i = 0; i < sessions.Count; i++)
-        {
-            if (ReferenceEquals(sessions[i], _session))
-            {
-                idx = i;
-                break;
-            }
-        }
-
-        int nextIdx = (idx + 1) % sessions.Count;
-        AttachSession(sessions[nextIdx]);
     }
 
     // ── Color extraction (from artwork) ───────────────────────────────────
@@ -1031,13 +888,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         return name.Length > 16 ? name[..16] : name;
     }
 
-    private static string Sanitize(string? input, string fallback)
-    {
-        if (string.IsNullOrEmpty(input)) return fallback;
-        string clean = new string(input.Where(c => !char.IsControl(c) || c == ' ').Take(256).ToArray());
-        return string.IsNullOrWhiteSpace(clean) ? fallback : clean;
-    }
-
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
 
     private static string FormatTime(double totalSeconds)
@@ -1054,15 +904,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (_disposed) return;
         _disposed = true;
 
-        if (_mediaSessionManager is not null)
+        if (_mediaMonitor is not null)
         {
-            _mediaSessionManager.CurrentSessionChanged -= OnCurrentSessionChanged;
-            _mediaSessionManager.SessionsChanged -= OnSessionsChanged;
+            _mediaMonitor.SnapshotChanged -= OnMediaSnapshotChanged;
+            await _mediaMonitor.DisposeAsync();
+            _mediaMonitor = null;
         }
-        DetachSessionEvents();
-        _mediaSessionManager = null;
-        _session = null;
-        _snapshot = null;
         DisposeArtwork();
         _artRetirement.DisposeAll();
 
