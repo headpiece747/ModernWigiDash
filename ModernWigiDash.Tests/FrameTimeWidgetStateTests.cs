@@ -113,7 +113,7 @@ public class FrameTimeWidgetStateTests
     }
 
     [TestMethod]
-    public void Render_NoProcessTracked_RendersDashLayoutWithoutThrowing()
+    public void Render_NoProcessTracked_RendersZeroLayoutWithoutThrowing()
     {
         RenderWith(new FrameTimeSnapshotDto
         {

@@ -12,8 +12,8 @@ namespace ModernWigiDash.Widgets;
 /// (ADR-0003): the app opens a non-elevated session, starts tracking the
 /// focused process, and polls the counters on the 1s poll loop. When the
 /// service is absent, the widget renders the graceful unavailable state; with
-/// no tracked process, the dashboard renders em-dash placeholders instead of
-/// fabricated numbers.
+/// no tracked process, the dashboard renders zero values — PresentMon's own
+/// value for no presents (0 presents/sec).
 /// </summary>
 [WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
 public class FrameTimeWidget : ModernWidgetBase
@@ -68,9 +68,10 @@ public class FrameTimeWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// No process tracked (desktop / own window foreground): the layout renders
-    /// with "—" values — PresentMon has no data to show and its overlay renders
-    /// nothing. No fabricated numbers.
+    /// No process tracked (desktop / own window foreground): the layout
+    /// renders with zero values — PresentMon has no data to show, so the
+    /// readout reads 0 (PresentMon's own math for a tracked-but-idle process
+    /// is 0 presents/sec; the no-process state renders the same).
     /// </summary>
     private void RenderDashView(SKCanvas canvas, SKRect bounds, SKColor accent)
     {
@@ -81,12 +82,17 @@ public class FrameTimeWidget : ModernWidgetBase
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
         var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        canvas.DrawTextWithFallback("—", bounds.Left + pad, heroTop + fpsFontSize * 0.82f, fpsFont, fpsPaint);
+        canvas.DrawTextWithFallback("0", bounds.Left + pad, heroTop + fpsFontSize * 0.82f, fpsFont, fpsPaint);
 
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawTextWithFallback("FPS", bounds.Left + pad + fpsFont.MeasureText("—", fpsPaint) + 10f,
+        canvas.DrawTextWithFallback("FPS", bounds.Left + pad + fpsFont.MeasureText("0", fpsPaint) + 10f,
             heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
+
+        var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
+        using var msPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true };
+        canvas.DrawTextWithFallback("0.0 ms", bounds.Left + pad + fpsFont.MeasureText("0", fpsPaint) + 10f,
+            heroTop + fpsFontSize * 0.82f, msFont, msPaint);
 
         if (bounds.Width >= 410f)
         {
@@ -100,8 +106,8 @@ public class FrameTimeWidget : ModernWidgetBase
             for (int i = 0; i < labels.Length; i++)
             {
                 float cx = bounds.Left + pad + colWidth * (i + 0.5f);
-                float valW = valueFont.MeasureText("—", valuePaint);
-                canvas.DrawTextWithFallback("—", cx - valW / 2f, cardTop + 13f, valueFont, valuePaint);
+                float valW = valueFont.MeasureText("0", valuePaint);
+                canvas.DrawTextWithFallback("0", cx - valW / 2f, cardTop + 13f, valueFont, valuePaint);
                 float lblW = labelFont.MeasureText(labels[i], labelPaint);
                 canvas.DrawTextWithFallback(labels[i], cx - lblW / 2f, cardTop + 13f + 20f, labelFont, labelPaint);
             }
@@ -207,7 +213,6 @@ public class FrameTimeWidget : ModernWidgetBase
     /// </summary>
     private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeSnapshotDto snapshot)
     {
-        bool dash = snapshot.ProcessId <= 0;
         float pad = Math.Clamp(bounds.Height * 0.06f, 8f, 20f);
         float fontSize = Math.Clamp(bounds.Height * 0.052f, 10f, 24f);
 
@@ -216,11 +221,13 @@ public class FrameTimeWidget : ModernWidgetBase
         using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         float lineHeight = fontSize * 1.45f;
 
-        int maxLines = bounds.Height switch { < 110f => 1, < 150f => 4, _ => 9 };
-        int lines = Math.Min(maxLines, dash ? 1 : 9);
+        int lines = bounds.Height switch { < 110f => 1, < 150f => 4, _ => 9 };
 
-        string F1(double v) => v > 0 ? $"{v:F1} ms" : "—";
-        string F0(double v) => v > 0 ? $"{v:F0}" : "—";
+        // Zero is PresentMon's own value for no presents (0 presents/sec), so
+        // the no-process state and a tracked-but-idle process read the same:
+        // numeric values render 0, only the present mode has no numeric zero.
+        string F1(double v) => double.IsFinite(v) && v > 0 ? $"{v:F1} ms" : "0.0 ms";
+        string F0(double v) => v > 0 ? $"{v:F0}" : "0";
 
         string[] labels =
         [
@@ -229,15 +236,15 @@ public class FrameTimeWidget : ModernWidgetBase
         ];
         string[] values =
         [
-            dash ? "—" : $"{snapshot.Fps:F0}",
-            dash ? "—" : F0(snapshot.DisplayedFps),
-            dash ? "—" : F1(1000.0 / snapshot.Low1PercentFps),
-            dash ? "—" : F1(1000.0 / snapshot.Low01PercentFps),
-            dash ? "—" : $"{snapshot.GpuBusyPercent:F0}%",
-            dash ? "—" : F1(snapshot.GpuTimeMs),
-            dash ? "—" : F1(snapshot.CpuFrameTimeMs),
-            dash ? "—" : snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture),
-            dash ? "—" : PresentMonPresentMode.FullName(snapshot.PresentModeId),
+            F0(snapshot.Fps),
+            F0(snapshot.DisplayedFps),
+            F1(1000.0 / snapshot.Low1PercentFps),
+            F1(1000.0 / snapshot.Low01PercentFps),
+            $"{snapshot.GpuBusyPercent:F0}%",
+            F1(snapshot.GpuTimeMs),
+            F1(snapshot.CpuFrameTimeMs),
+            snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture),
+            PresentMonPresentMode.FullName(snapshot.PresentModeId),
         ];
 
         float x = bounds.Left + pad;
