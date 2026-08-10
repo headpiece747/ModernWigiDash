@@ -30,10 +30,21 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     public bool ShowSourceBadge { get; set; } = true;
 
     // ── SMTC state (all mutated on the UI thread) ─────────────────────────
+    private readonly Func<MediaSessionMonitor>? _monitorFactory;
     private MediaSessionMonitor? _mediaMonitor;
     private ArtworkLoader? _artworkLoader;
     private SKPoint? _touchDownPoint;
     private bool _disposed;
+
+    public NowPlayingWidget()
+    {
+    }
+
+    /// <summary>Test seam: inject a monitor factory (e.g. over a fake SMTC source).</summary>
+    internal NowPlayingWidget(Func<MediaSessionMonitor> monitorFactory)
+    {
+        _monitorFactory = monitorFactory;
+    }
 
     /// <summary>Test seam: injectable clock for the progress estimate.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -51,7 +62,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         base.InitializeAsync(context, cancellationToken);
         _artworkLoader = new ArtworkLoader(Context.LogError);
         _artworkLoader.ArtworkChanged += OnArtworkChanged;
-        _mediaMonitor = new MediaSessionMonitor(Context.LogError);
+        _mediaMonitor = (_monitorFactory ?? (() => new MediaSessionMonitor(Context.LogError)))();
         _mediaMonitor.SnapshotChanged += OnMediaSnapshotChanged;
         _ = _mediaMonitor.InitializeAsync();
         return ValueTask.CompletedTask;
@@ -126,7 +137,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (!ShowSourceBadge) return;
 
         float pad = 24f * scale;
-        string name = FriendlyAppName(snap.SourceAppId);
+        string name = NowPlayingPresentation.FriendlyAppName(snap.SourceAppId);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
         using var textPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White), IsAntialias = true };
         float textW = FontHelper.MeasureTextWithFallback(name, font);
@@ -242,21 +253,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             currentY += albumH + 5f * scale;
         }
 
-        string meta = BuildMetaLine(snap);
+        string meta = NowPlayingPresentation.MetaLine(snap.TrackNumber, snap.AlbumTrackCount, snap.Genres);
         if (!string.IsNullOrEmpty(meta))
         {
             canvas.DrawTextWithFallback(meta, textX, currentY - metaFont.Metrics.Top, metaFont, metaPaint);
         }
-    }
-
-    private static string BuildMetaLine(MediaSnapshot snap)
-    {
-        List<string> parts = [];
-        if (snap.TrackNumber > 0)
-            parts.Add(snap.AlbumTrackCount > 0 ? $"Track {snap.TrackNumber}/{snap.AlbumTrackCount}" : $"Track {snap.TrackNumber}");
-        if (snap.Genres.Length > 0)
-            parts.Add(string.Join(" / ", snap.Genres.Take(2)));
-        return string.Join(" · ", parts);
     }
 
     private void DrawProgress(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
@@ -279,22 +280,21 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (snap.IsPlaying)
             posSec += (Clock.GetUtcNow() - snap.LastUpdated).TotalSeconds;
 
-        double ratio = durSec > 0 ? Math.Clamp(posSec / durSec, 0.0, 1.0) : 0.0;
+        double ratio = NowPlayingPresentation.ProgressRatio(posSec, durSec);
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
 
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
         using var timePaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
-        canvas.DrawTextWithFallback(FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, timePaint);
+        canvas.DrawTextWithFallback(NowPlayingPresentation.FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, timePaint);
 
-        string durStr = FormatTime(durSec);
+        string durStr = NowPlayingPresentation.FormatTime(durSec);
         var db = new SKRect();
         timeFont.MeasureText(durStr, out db, timePaint);
         canvas.DrawTextWithFallback(durStr, right - db.Width, timeY, timeFont, timePaint);
 
-        if (Math.Abs(snap.PlaybackRate - 1.0) > 0.001)
+        if (NowPlayingPresentation.PlaybackRateText(snap.PlaybackRate) is { } rate)
         {
-            string rate = $"{snap.PlaybackRate:0.0}×";
             canvas.DrawTextWithFallback(rate, left + db.Width + 20f * scale, timeY, timeFont, timePaint);
         }
 
@@ -641,7 +641,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
                   && hitPoint.X <= _progressLeft + _progressWidth
                  && snap.CanSeek)
         {
-            double ratio = Math.Clamp((hitPoint.X - _progressLeft) / _progressWidth, 0.0, 1.0);
+            double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _progressLeft, _progressWidth);
             _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
         }
     }
@@ -686,15 +686,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     }
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
-
-    private static string FormatTime(double totalSeconds)
-    {
-        if (totalSeconds < 0 || double.IsNaN(totalSeconds) || double.IsInfinity(totalSeconds)) return "0:00";
-        var ts = TimeSpan.FromSeconds(totalSeconds);
-        return ts.TotalHours >= 1
-            ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
-            : $"{ts.Minutes}:{ts.Seconds:D2}";
-    }
 
     public override async ValueTask DisposeAsync()
     {
