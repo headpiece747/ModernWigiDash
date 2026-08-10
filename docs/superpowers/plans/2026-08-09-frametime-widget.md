@@ -223,7 +223,7 @@ public sealed record FrameTimeSnapshotRecord(
 - [ ] **Step 8: Run the full suite**
 
 Run: the full temp-output test command from Global Constraints.
-Expected: all pass (count will be 537: 528 original + 4 label tests + 5 remaining heuristic-era tests that Task 3 removes).
+Expected: all pass, including the four new label tests (the suite's remaining heuristic-era tests are removed by Task 3).
 
 - [ ] **Step 9: Commit**
 
