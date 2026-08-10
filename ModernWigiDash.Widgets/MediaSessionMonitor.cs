@@ -240,7 +240,9 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         };
     }
 
-    private static string Sanitize(string? input, string fallback)
+    /// <summary>Strips control characters (space kept) and caps at 256 chars;
+    /// falls back when nothing survives. Internal so the rule is testable.</summary>
+    internal static string Sanitize(string? input, string fallback)
     {
         if (string.IsNullOrEmpty(input)) return fallback;
         string clean = new string(input.Where(c => !char.IsControl(c) || c == ' ').Take(256).ToArray());

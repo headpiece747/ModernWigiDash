@@ -348,6 +348,10 @@ public class LhmSharedMemoryReaderTests
 
     // ── fixture helpers ─────────────────────────────────────────
 
+    /// <summary>One well-formed sensors map (JSON index, two sensors) for
+    /// cluster-level tests.</summary>
+    internal static byte[] BuildSensorsMapFixture() => BuildMap(JsonIndexFormat, CpuTemp, GpuFan);
+
     private static byte[] BuildMap(int indexFormat, params SensorBlock[] sensors)
     {
         List<IndexEntry> entries = [];
