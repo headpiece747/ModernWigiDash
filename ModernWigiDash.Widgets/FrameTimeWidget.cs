@@ -39,7 +39,7 @@ public class FrameTimeWidget : ModernWidgetBase
 
         // The store owns the staleness decision; a stale snapshot renders the
         // unavailable state instead of frozen data.
-        FrameTimeSnapshotRecord? snapshot = FrameTimeStore.TryReadFresh();
+        FrameTimeSnapshotDto? snapshot = FrameTimeStore.TryReadFresh();
         if (snapshot == null || !snapshot.IsAvailable)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text);
@@ -108,7 +108,7 @@ public class FrameTimeWidget : ModernWidgetBase
         }
     }
 
-    private void RenderTrackedView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotRecord snapshot)
+    private void RenderTrackedView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotDto snapshot)
     {
         float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
 
@@ -205,7 +205,7 @@ public class FrameTimeWidget : ModernWidgetBase
     /// 99th/1st %tile stat naming. Lines clip from the bottom as the placement
     /// shrinks.
     /// </summary>
-    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeSnapshotRecord snapshot)
+    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeSnapshotDto snapshot)
     {
         bool dash = snapshot.ProcessId <= 0;
         float pad = Math.Clamp(bounds.Height * 0.06f, 8f, 20f);
@@ -249,7 +249,7 @@ public class FrameTimeWidget : ModernWidgetBase
         }
     }
 
-    private FrameTimeSnapshotRecord? _lastStringSnapshot;
+    private FrameTimeSnapshotDto? _lastStringSnapshot;
     private string _cachedFpsText = "";
     private string _cachedMsText = "";
     private string _cachedLow1 = "";
@@ -265,7 +265,7 @@ public class FrameTimeWidget : ModernWidgetBase
     /// Formats the snapshot strings once per snapshot instance (the store swaps
     /// the record ~1/s) instead of per render at 30 FPS.
     /// </summary>
-    private void RefreshCachedStrings(FrameTimeSnapshotRecord snapshot)
+    private void RefreshCachedStrings(FrameTimeSnapshotDto snapshot)
     {
         if (ReferenceEquals(snapshot, _lastStringSnapshot)) return;
         _lastStringSnapshot = snapshot;

@@ -66,11 +66,11 @@ public class FrameTimeWidgetStateTests
         var bounds = new SKRect(0, 0, 406, 296);
 
         var unavailable = new FrameTimeWidget();
-        FrameTimeStore.Update(FrameTimeSnapshotRecord.Unavailable());
+        FrameTimeStore.Update(new FrameTimeSnapshotDto());
         unavailable.Render(canvas, bounds);
 
         var waiting = new FrameTimeWidget();
-        FrameTimeStore.Update(new FrameTimeSnapshotRecord(true, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, []));
+        FrameTimeStore.Update(new FrameTimeSnapshotDto { IsAvailable = true, CaptureHealthy = true });
         waiting.Render(canvas, bounds);
 
         var live = new FrameTimeWidget { AccentColorHex = "#22C55E" };
@@ -79,8 +79,20 @@ public class FrameTimeWidgetStateTests
         {
             samples.Add(6.5 + (i % 20) * 0.05);
         }
-        FrameTimeStore.Update(new FrameTimeSnapshotRecord(
-            true, 4321, "fpsbench.exe", 143.2, 6.98, 110.4, 87.2, 93.0, 4.05, 0, 0, 0, -1, samples));
+        FrameTimeStore.Update(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = 4321,
+            ProcessName = "fpsbench.exe",
+            Fps = 143.2,
+            FrameTimeMs = 6.98,
+            Low1PercentFps = 110.4,
+            Low01PercentFps = 87.2,
+            GpuBusyPercent = 93.0,
+            CpuFrameTimeMs = 4.05,
+            RecentFrameTimesMs = samples,
+        });
         live.Render(canvas, bounds);
 
         // Small (2x1) size must also render without exceptions

@@ -76,7 +76,7 @@ public class TelemetryStoreMappingTests
             RecentFrameTimesMs = [6.9, 7.0, 6.8]
         });
 
-        FrameTimeSnapshotRecord rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
 
         Assert.IsTrue(rec.IsAvailable);
         Assert.AreEqual(1234, rec.ProcessId);
@@ -100,7 +100,7 @@ public class TelemetryStoreMappingTests
     {
         FrameTimeStore.UpdateFromDto(null);
 
-        FrameTimeSnapshotRecord rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
 
         Assert.IsFalse(rec.IsAvailable);
     }
@@ -207,7 +207,7 @@ public class TelemetryStoreMappingTests
             LastUpdate = clock.GetUtcNow().UtcDateTime
         });
 
-        FrameTimeSnapshotRecord? fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock);
+        FrameTimeSnapshotDto? fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock);
 
         Assert.IsNotNull(fresh);
         Assert.IsFalse(fresh.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
