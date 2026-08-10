@@ -15,13 +15,6 @@ internal static class HotkeyActionExecutor
     private const uint InputMouse = 0;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint KeyEventUnicode = 0x0004;
-    private const uint MouseLeftDown = 0x0002;
-    private const uint MouseLeftUp = 0x0004;
-    private const uint MouseRightDown = 0x0008;
-    private const uint MouseRightUp = 0x0010;
-    private const uint MouseMiddleDown = 0x0020;
-    private const uint MouseMiddleUp = 0x0040;
-    private const uint MouseWheel = 0x0800;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Input
@@ -63,19 +56,19 @@ internal static class HotkeyActionExecutor
 
     public static async Task ExecuteAsync(IReadOnlyList<HotkeyAction> actions, CancellationToken cancellationToken)
     {
-        if (actions.Count > 64) throw new InvalidOperationException("A macro cannot contain more than 64 actions.");
+        if (actions.Count > HotkeyActionPolicy.MaxActions) throw new InvalidOperationException($"A macro cannot contain more than {HotkeyActionPolicy.MaxActions} actions.");
 
         foreach (var action in actions)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!action.Enabled) continue;
 
-            int repeat = Math.Clamp(action.Repeat, 1, 20);
+            int repeat = HotkeyActionPolicy.ClampRepeat(action.Repeat);
             for (int i = 0; i < repeat; i++)
             {
                 await ExecuteOneAsync(action, cancellationToken).ConfigureAwait(false);
                 if (action.DelayMs > 0)
-                    await Task.Delay(Math.Clamp(action.DelayMs, 0, 5000), cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(HotkeyActionPolicy.ClampDelayMs(action.DelayMs), cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -102,7 +95,7 @@ internal static class HotkeyActionExecutor
                 SendMouseWheel(action.Value);
                 break;
             case HotkeyActionKind.Delay:
-                await Task.Delay(Math.Clamp(action.DelayMs, 0, 5000), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(HotkeyActionPolicy.ClampDelayMs(action.DelayMs), cancellationToken).ConfigureAwait(false);
                 break;
             case HotkeyActionKind.Launch:
                 Launch(action.Value, action.Arguments);
@@ -153,7 +146,7 @@ internal static class HotkeyActionExecutor
 
     private static void SendUnicodeText(string text)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, 4096);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, HotkeyActionPolicy.MaxTextLength);
         var inputs = new List<Input>(text.Length * 2);
         foreach (char character in text)
         {
@@ -166,32 +159,15 @@ internal static class HotkeyActionExecutor
 
     private static void SendMouseClick(string button)
     {
-        (uint down, uint up) = button.Trim().ToLowerInvariant() switch
-        {
-            "right" or "rbutton" => (MouseRightDown, MouseRightUp),
-            "middle" or "mbutton" => (MouseMiddleDown, MouseMiddleUp),
-            _ => (MouseLeftDown, MouseLeftUp)
-        };
+        (uint down, uint up) = HotkeyActionPolicy.MouseButtonFlags(button);
         SendMouse(down);
         SendMouse(up);
     }
 
     private static void SendMouseWheel(string direction)
     {
-        int amount;
-        if (int.TryParse(direction, out int value))
-        {
-            amount = value;
-        }
-        else if (direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase))
-        {
-            amount = -120;
-        }
-        else
-        {
-            amount = 120;
-        }
-        SendMouse(MouseWheel, unchecked((uint)amount));
+        int amount = HotkeyActionPolicy.WheelAmount(direction);
+        SendMouse(HotkeyActionPolicy.WheelFlag, unchecked((uint)amount));
     }
 
     private static void SendMouse(uint flags, uint data = 0)
@@ -209,7 +185,7 @@ internal static class HotkeyActionExecutor
 
     private static void OpenUrl(string url)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "mailto"))
+        if (!HotkeyActionPolicy.IsAllowedUrl(url))
             throw new ArgumentException("Only http, https, and mailto URLs are allowed.", nameof(url));
         Process.Start(new ProcessStartInfo(uri.ToString()) { UseShellExecute = true });
     }
