@@ -44,51 +44,15 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
         {
             var format = capture.WaveFormat;
             int bytesPerSample = format.BitsPerSample / 8;
-            if (bytesPerSample <= 0) return;
 
             // The mix format is not guaranteed IEEE-float: on PCM devices the
             // old code read 4-byte floats over 2-byte samples and produced
-            // garbage. Convert per encoding instead.
-            int count = e.BytesRecorded / bytesPerSample;
-            if (count <= 0) return;
-
-            var samples = new float[count];
-            if (format.Encoding == WaveFormatEncoding.IeeeFloat && bytesPerSample == 4)
+            // garbage. Convert per encoding instead — the conversion is the
+            // pure AudioSampleConverter (testable without a device).
+            if (AudioSampleConverter.Convert(e.Buffer, format.Encoding, bytesPerSample) is { } samples)
             {
-                for (int i = 0; i < count; i++)
-                {
-                    samples[i] = BitConverter.ToSingle(e.Buffer, i * bytesPerSample);
-                }
+                SamplesAvailable?.Invoke(samples);
             }
-            else if (format.Encoding == WaveFormatEncoding.Pcm && bytesPerSample == 2)
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    samples[i] = BitConverter.ToInt16(e.Buffer, i * 2) / 32768f;
-                }
-            }
-            else if (format.Encoding == WaveFormatEncoding.Pcm && bytesPerSample == 3)
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    int raw = e.Buffer[i * 3] | (e.Buffer[i * 3 + 1] << 8) | (e.Buffer[i * 3 + 2] << 16);
-                    if ((raw & 0x800000) != 0) raw |= unchecked((int)0xFF000000); // sign-extend 24-bit
-                    samples[i] = raw / 8388608f;
-                }
-            }
-            else if (format.Encoding == WaveFormatEncoding.Pcm && bytesPerSample == 4)
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    samples[i] = BitConverter.ToInt32(e.Buffer, i * 4) / 2147483648f;
-                }
-            }
-            else
-            {
-                return; // unsupported encoding — deliver nothing rather than garbage
-            }
-
-            SamplesAvailable?.Invoke(samples);
         };
 
         capture.StartRecording();
