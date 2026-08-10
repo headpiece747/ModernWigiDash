@@ -267,13 +267,13 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         => actionType switch
         {
             "Open URL" => new HotkeyAction { Kind = HotkeyActionKind.OpenUrl, Value = actionCommand },
-            "Media Play / Pause" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "PLAYPAUSE" },
-            "Media Next" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "NEXT" },
-            "Media Previous" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "PREVIOUS" },
-            "Media Stop" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "STOP" },
-            "Volume Up" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "VOLUMEUP" },
-            "Volume Down" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "VOLUMEDOWN" },
-            "Mute" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = "MUTE" },
+            "Media Play / Pause" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.PlayPause },
+            "Media Next" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Next },
+            "Media Previous" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Previous },
+            "Media Stop" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Stop },
+            "Volume Up" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.VolumeUp },
+            "Volume Down" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.VolumeDown },
+            "Mute" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Mute },
             _ => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = actionCommand }
         };
 

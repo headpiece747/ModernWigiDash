@@ -217,6 +217,10 @@ internal static class HotkeyActionExecutor
     internal static ushort ParseVirtualKey(string value)
     {
         string key = value.Trim().ToUpperInvariant();
+        if (MediaKeyCatalog.TryGetVirtualKey(key, out ushort mediaVk))
+        {
+            return mediaVk;
+        }
         if (key.Length == 1 && ((key[0] is >= 'A' and <= 'Z') || (key[0] is >= '0' and <= '9')))
             return key[0];
         if (key.StartsWith('F') && int.TryParse(key[1..], out int function) && function is >= 1 and <= 24)
@@ -247,13 +251,6 @@ internal static class HotkeyActionExecutor
             "DOWN" => 0x28,
             "LEFT" => 0x25,
             "RIGHT" => 0x27,
-            "VOLUMEUP" => 0xAF,
-            "VOLUMEDOWN" => 0xAE,
-            "MUTE" => 0xAD,
-            "PLAYPAUSE" => 0xB3,
-            "STOP" => 0xB2,
-            "NEXT" => 0xB0,
-            "PREVIOUS" or "PREV" => 0xB1,
             _ => throw new ArgumentException($"Unknown key '{value}'.", nameof(value))
         };
     }
