@@ -15,7 +15,7 @@ namespace ModernWigiDash.App;
 /// </summary>
 public sealed class TelemetryProducers : IDisposable
 {
-    private readonly LhmSharedMemoryReader _lhsReader = new();
+    private readonly LhmSharedMemoryReader _lhsReader;
     private readonly PresentMonFrameTimeProducer _presentMonProducer;
     private readonly PollLoop _sensorPoll;
     private readonly PollLoop _frameTimePoll;
@@ -29,9 +29,12 @@ public sealed class TelemetryProducers : IDisposable
     /// <param name="presentMonNative">The runtime-loaded PresentMon interop
     /// (injected so tests never load the real DLL).</param>
     /// <param name="log">Log sink (the window's FileLog line writer).</param>
-    public TelemetryProducers(IPresentMonNative presentMonNative, Action<string> log)
+    /// <param name="lhsReader">The LHS map reader (injectable so tests drive
+    /// the poll tick with an in-memory map source).</param>
+    public TelemetryProducers(IPresentMonNative presentMonNative, Action<string> log, LhmSharedMemoryReader? lhsReader = null)
     {
         _log = log;
+        _lhsReader = lhsReader ?? new LhmSharedMemoryReader();
         _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, new TrackedTargetResolver());
 
         // One poll loop per direct producer. The frame-time loop is gated on

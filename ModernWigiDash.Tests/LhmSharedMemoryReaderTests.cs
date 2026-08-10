@@ -233,6 +233,119 @@ public class LhmSharedMemoryReaderTests
         }
     }
 
+    // ── Poll policy through the ILhmMapSource seam ─────────────────
+
+    private sealed class FakeMapSource : ILhmMapSource
+    {
+        public byte[]? Bytes { get; set; }
+        public string? Error { get; set; }
+        public int Calls { get; private set; }
+
+        public byte[]? TryReadSensorsMap(out string? error)
+        {
+            Calls++;
+            error = Error;
+            return Bytes;
+        }
+    }
+
+    [TestMethod]
+    public void Poll_MapSourceReturnsValidMap_ParsesConnectedDto()
+    {
+        var source = new FakeMapSource { Bytes = BuildMap(JsonIndexFormat, CpuTemp, GpuFan) };
+        var reader = new LhmSharedMemoryReader(source);
+
+        SensorSnapshotDto dto = reader.Poll();
+
+        Assert.IsTrue(dto.IsConnected);
+        Assert.AreEqual(2, dto.Readings.Count);
+        Assert.AreEqual("AMD Ryzen 7 5800X: CPU Package", dto.Readings[0].Label);
+        Assert.IsNull(reader.LastError);
+    }
+
+    [TestMethod]
+    public void Poll_MapSourceUnavailable_DisconnectedWithSourceError()
+    {
+        var source = new FakeMapSource { Bytes = null, Error = "LHS sensor mutex not acquired within 100ms (writer holds it)" };
+        var reader = new LhmSharedMemoryReader(source);
+
+        SensorSnapshotDto dto = reader.Poll();
+
+        Assert.IsFalse(dto.IsConnected);
+        Assert.AreEqual("LHS sensor mutex not acquired within 100ms (writer holds it)", reader.LastError);
+    }
+
+    [TestMethod]
+    public void Poll_MapSourceReturnsNullWithoutError_DisconnectedWithGenericMessage()
+    {
+        var reader = new LhmSharedMemoryReader(new FakeMapSource { Bytes = null });
+
+        SensorSnapshotDto dto = reader.Poll();
+
+        Assert.IsFalse(dto.IsConnected);
+        StringAssert.Contains(reader.LastError, "unavailable");
+    }
+
+    [TestMethod]
+    public void Poll_MalformedMap_DisconnectedAsUnreadable()
+    {
+        var source = new FakeMapSource { Bytes = [1, 2, 3] };
+        var reader = new LhmSharedMemoryReader(source);
+
+        SensorSnapshotDto dto = reader.Poll();
+
+        Assert.IsFalse(dto.IsConnected);
+        StringAssert.Contains(reader.LastError, "unreadable or malformed");
+    }
+
+    // ── the bounded copy policy (attacker-claimed sizes) ────────────
+
+    private sealed class FakeMap : MemoryMappedLhmMapSource.IReadableMap
+    {
+        private readonly byte[] _bytes;
+        public FakeMap(byte[] bytes) => _bytes = bytes;
+        public long Capacity => _bytes.Length;
+        public void ReadRange(long offset, byte[] buffer, int bufferOffset, int count)
+            => Array.Copy(_bytes, offset, buffer, bufferOffset, count);
+    }
+
+    [TestMethod]
+    public void CopyMapBytes_HeaderDeclaredSizesDriveCopyLength()
+    {
+        byte[] map = BuildMap(JsonIndexFormat, CpuTemp, GpuFan);
+        var fake = new FakeMap(map);
+
+        byte[] copied = MemoryMappedLhmMapSource.CopyMapBytes(fake);
+
+        Assert.AreEqual(map.Length, copied.Length, "a well-formed map copies exactly its declared data extent");
+        Assert.AreEqual(map.Length, fake.Capacity);
+    }
+
+    [TestMethod]
+    public void CopyMapBytes_DeclaredDataBeyondMap_ClampsToCapacity()
+    {
+        byte[] map = BuildMap(JsonIndexFormat, CpuTemp);
+        // Corrupt data-length to claim an extent far past the real map.
+        int msb = MetadataBlockSize;
+        WriteInt(map, msb + 12, int.MaxValue);
+        var fake = new FakeMap(map);
+
+        byte[] copied = MemoryMappedLhmMapSource.CopyMapBytes(fake);
+
+        Assert.AreEqual(map.Length, copied.Length, "the copy clamps to the map's real capacity, never beyond");
+    }
+
+    [TestMethod]
+    public void CopyMapBytes_ShortMap_ReturnsOnlyWhatExists()
+    {
+        byte[] map = BuildMap(JsonIndexFormat, CpuTemp);
+        var fake = new FakeMap(map.AsSpan(0, 8).ToArray());
+
+        byte[] copied = MemoryMappedLhmMapSource.CopyMapBytes(fake);
+
+        Assert.AreEqual(8, copied.Length, "a map shorter than the fixed header copies only the available bytes");
+    }
+
     // ── fixture helpers ─────────────────────────────────────────
 
     private static byte[] BuildMap(int indexFormat, params SensorBlock[] sensors)

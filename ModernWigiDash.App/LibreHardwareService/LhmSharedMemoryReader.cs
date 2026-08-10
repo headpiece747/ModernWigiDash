@@ -1,4 +1,3 @@
-using System.IO.MemoryMappedFiles;
 using System.Text.Json;
 using MessagePack;
 using ModernWigiDash.Sdk;
@@ -6,22 +5,20 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.App.LibreHardwareService;
 
 /// <summary>
-/// App-side reader for LibreHardwareService's named shared-memory sensor maps.
-/// Owns the mutex-guarded read (map name, mutex, bounded copy) and delegates the
-/// pure parsing to <see cref="TryParse"/>. Never throws — every failure yields a
-/// disconnected snapshot, and <see cref="LastError"/> carries the reason for the
-/// poll tick to log once per change.
+/// App-side reader for LibreHardwareService's shared-memory sensor maps.
+/// Owns the poll policy (map source → parse → outcome) and the pure parsing
+/// (<see cref="TryParse"/>); the mutex/map/copy I/O lives behind the
+/// <see cref="ILhmMapSource"/> seam. Never throws — every failure yields a
+/// disconnected snapshot, and <see cref="LastError"/> carries the reason for
+/// the poll tick to log once per change.
 /// </summary>
 public sealed class LhmSharedMemoryReader
 {
-    // LibreHardwareService (epinter) constants — mirrored from its
-    // MemoryMappedSensors and Constants sources. The metadata block is
-    // 4 + MetadataSize (MetadataSize is sizeof(int)+sizeof(long) = 12, so the
-    // index/data fields start at 16 on a stock install; the reader honors a
-    // variable metadata block size regardless).
-    internal const string SensorsMapName = @"Global\LibreHardwareService/json/sensors/data";
-    internal const string SensorsMutexName = @"Global\LibreHardwareService/json/sensors/data/MUTEX";
-
+    // LibreHardwareService (epinter) header layout — mirrored from its
+    // MemoryMappedSensors source. The metadata block is 4 + MetadataSize
+    // (MetadataSize is sizeof(int)+sizeof(long) = 12, so the index/data
+    // fields start at 16 on a stock install; the reader honors a variable
+    // metadata block size regardless).
     internal const int OffsetMetaDataSize = 0;
     internal const int OffsetUpdateInterval = 4;
     internal const int OffsetLastUpdate = 8;
@@ -44,13 +41,17 @@ public sealed class LhmSharedMemoryReader
     internal const int MaxSensorEntries = 5000;
     internal const int MaxSensorBlockBytes = 64 * 1024;
 
-    private const int MaxCopyBytes = 128 * 1024 * 1024;
-    private static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
-
     private static readonly JsonSerializerOptions SensorJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private readonly ILhmMapSource _mapSource;
+
+    public LhmSharedMemoryReader(ILhmMapSource? mapSource = null)
+    {
+        _mapSource = mapSource ?? new MemoryMappedLhmMapSource();
+    }
 
     /// <summary>
     /// Reason the last <see cref="Poll"/> failed, or null when the last poll
@@ -59,54 +60,24 @@ public sealed class LhmSharedMemoryReader
     public string? LastError { get; private set; }
 
     /// <summary>
-    /// One full mutex-guarded read of the LHS sensors map, parsed into a
-    /// <see cref="SensorSnapshotDto"/>. Never throws.
+    /// One full read of the LHS sensors map — the map source performs the
+    /// mutex-guarded bounded copy, the parse runs outside any lock. Never throws.
     /// </summary>
     public SensorSnapshotDto Poll()
     {
         try
         {
-            using Mutex mutex = Mutex.OpenExisting(SensorsMutexName);
-            bool acquired = false;
-            byte[] mapBytes;
-            try
+            byte[]? mapBytes = _mapSource.TryReadSensorsMap(out string? error);
+            if (mapBytes is null)
             {
-                try
-                {
-                    acquired = mutex.WaitOne(MutexTimeout);
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true; // only the service writes; a dead writer's mutex is safe to continue under
-                }
-
-                if (!acquired)
-                    return Disconnected("LHS sensor mutex not acquired within 100ms (writer holds it)");
-
-                using MemoryMappedFile map = MemoryMappedFile.OpenExisting(SensorsMapName, MemoryMappedFileRights.Read);
-                using MemoryMappedViewAccessor accessor = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-                mapBytes = CopyMapBytes(accessor);
-            }
-            finally
-            {
-                if (acquired)
-                {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch (ApplicationException)
-                    {
-                        // abandoned mutex — nothing to release
-                    }
-                }
+                return Disconnected(error ?? "LHS sensors map unavailable");
             }
 
-            // Parse outside the mutex: only the consistency-preserving copy needs
-            // the writer's lock, never the (potentially slow) parse.
             SensorSnapshotDto dto = TryParse(mapBytes);
             if (!dto.IsConnected)
+            {
                 return Disconnected("LHS sensors map unreadable or malformed");
+            }
 
             LastError = null;
             return dto;
@@ -249,59 +220,6 @@ public sealed class LhmSharedMemoryReader
         IsConnected = false,
         Readings = [],
     };
-
-    /// <summary>
-    /// Bounded copy of the map: reads the header first to size the copy
-    /// (dataOffset + dataLength), so a 64MB map is never copied whole, and
-    /// clamps every copy stage to <see cref="MaxCopyBytes"/> because the
-    /// header-declared sizes are attacker-controlled. A clamped short copy is
-    /// rejected by <see cref="TryParse"/>'s bounds checks.
-    /// Bounds/format validation is left to <see cref="TryParse"/>.
-    /// </summary>
-    private static byte[] CopyMapBytes(MemoryMappedViewAccessor accessor)
-    {
-        long capacity = accessor.Capacity;
-        // The header read is bounded by the accessor's capacity (a read past
-        // capacity throws), so the first FixedHeaderSize bytes are always safe.
-        int prefix = (int)Math.Min(capacity, FixedHeaderSize);
-        byte[] buffer = new byte[prefix];
-        if (prefix > 0)
-            accessor.ReadArray(0, buffer, 0, prefix);
-
-        if (prefix < FixedHeaderSize)
-            return buffer;
-
-        int metaDataSize = BitConverter.ToInt32(buffer, OffsetMetaDataSize);
-        long msb = 4L + metaDataSize;
-        if (msb < 0 || msb + FieldsBlockSize > capacity)
-            return buffer;
-        if (msb + FieldsBlockSize > MaxCopyBytes)
-            return buffer; // claimed metadata block unreachable within the copy cap — malformed
-
-        if (msb + FieldsBlockSize > buffer.Length)
-            buffer = CopyRange(accessor, buffer, (int)(msb + FieldsBlockSize));
-
-        int dataLength = BitConverter.ToInt32(buffer, (int)msb + 12);
-        int dataOffset = BitConverter.ToInt32(buffer, (int)msb + 16);
-
-        long total = (long)dataOffset + dataLength;
-        if (total <= buffer.Length)
-            return buffer;
-        total = Math.Min(total, MaxCopyBytes);
-        total = Math.Min(total, capacity);
-        if (total > buffer.Length)
-            buffer = CopyRange(accessor, buffer, (int)total);
-
-        return buffer;
-    }
-
-    private static byte[] CopyRange(MemoryMappedViewAccessor accessor, byte[] prefix, int total)
-    {
-        byte[] result = new byte[total];
-        Array.Copy(prefix, result, prefix.Length);
-        accessor.ReadArray(prefix.Length, result, prefix.Length, total - prefix.Length);
-        return result;
-    }
 
     /// <summary>
     /// One index entry, mirroring LHS <c>DataIndex</c>: MessagePack keys in this
