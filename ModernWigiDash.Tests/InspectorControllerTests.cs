@@ -31,7 +31,7 @@ public class InspectorControllerTests
         RunOnSta(() =>
         {
             var owner = new Window();
-            var (host, placed, _) = BuildHost(owner);
+            var (host, placed, _) = BuildHost();
             var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
             placed.DisplayName = "My Widget";
             placed.X = 42;
@@ -53,7 +53,7 @@ public class InspectorControllerTests
         RunOnSta(() =>
         {
             var owner = new Window();
-            var (host, _, _) = BuildHost(owner, select: () => null);
+            var (host, _, _) = BuildHost(select: () => null);
             var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
 
             controller.Refresh();
@@ -69,7 +69,7 @@ public class InspectorControllerTests
         RunOnSta(() =>
         {
             var owner = new Window();
-            var (host, placed, widget) = BuildHost(owner);
+            var (host, placed, widget) = BuildHost();
             var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
             PropertyInfo prop = typeof(TestWidget).GetProperty(nameof(TestWidget.Label))!;
 
@@ -84,7 +84,7 @@ public class InspectorControllerTests
     // ── fake host builder ──────────────────────────────────────
 
     private static (InspectorControllerHost Host, PlacedWidgetInstance Placed, TestWidget Widget) BuildHost(
-        Window owner, Func<PlacedWidgetInstance?>? select = null)
+        Func<PlacedWidgetInstance?>? select = null)
     {
         var widget = new TestWidget();
         var placed = new PlacedWidgetInstance

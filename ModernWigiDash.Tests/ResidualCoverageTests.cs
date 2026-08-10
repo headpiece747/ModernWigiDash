@@ -54,19 +54,14 @@ public class ResidualCoverageTests
 
     // ── WidgetPluginLoader branches ──
 
-    private sealed class NonWidgetClass { }
-
-
-
     [TestMethod]
     public void WidgetPluginLoader_NonWidgetTypes_Skipped()
     {
         var loader = new WidgetPluginLoader();
 
-        loader.RegisterBuiltInPlugin(typeof(NonWidgetClass));
+        loader.RegisterBuiltInPlugin(typeof(string));
 
-        Assert.AreEqual(0, loader.RegisteredPlugins.Count(), "a non-widget type must not register");
-        Assert.AreEqual(0, loader.RegisteredPlugins.Count());
+        Assert.AreEqual(0, loader.RegisteredPlugins.Count, "a non-widget type must not register");
     }
 
     [TestMethod]
@@ -139,7 +134,7 @@ public class ResidualCoverageTests
 
         var fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10));
         Assert.IsNotNull(fresh, "a live sample through the cluster must land in the store");
-        Assert.AreEqual(120.0, fresh!.Fps, 0.001);
+        Assert.AreEqual(120.0, fresh.Fps, 0.001);
         FrameTimeStore.Reset();
     }
 
