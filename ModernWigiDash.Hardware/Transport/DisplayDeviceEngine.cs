@@ -23,6 +23,7 @@ namespace ModernWigiDash.Hardware.Transport;
 public sealed class DisplayDeviceEngine : IDisposable
 {
     // -- Connection State --
+    private readonly Func<IDisplayTransport> _transportFactory;
     private IDisplayTransport? _transport;
     private volatile ConnectionState _state = ConnectionState.Disconnected;
     private bool _connecting; // Prevent concurrent connection attempts
@@ -58,8 +59,15 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// hardware (window field initializers, test hosts). Call <see cref="Start"/>
     /// to begin connection and touch polling.
     /// </summary>
-    public DisplayDeviceEngine()
+    /// <summary>
+    /// Creates the engine. The transport is constructed lazily per connect
+    /// attempt via <paramref name="transportFactory"/> (defaults to the real
+    /// hardware transport), so the connect state machine is drivable with a
+    /// fake transport end-to-end.
+    /// </summary>
+    public DisplayDeviceEngine(Func<IDisplayTransport>? transportFactory = null)
     {
+        _transportFactory = transportFactory ?? (() => new DisplayHidTransport());
         Log("=== Display Hardware Engine Initializing ===");
 
         // Direct-USB touch polling: active only while the engine owns the
@@ -74,12 +82,13 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// Test seam: an engine bound to an injected transport, without auto-connect
     /// or background loops. The touch poll loop is created but not started —
     /// tests drive <see cref="TouchPollTick"/> directly (or call
-    /// <see cref="Start"/> to exercise the loop wiring).
+    /// <see cref="Start"/> to exercise the loop wiring). The state derives
+    /// from the injected transport's actual connection truth — never asserted.
     /// </summary>
     internal DisplayDeviceEngine(IDisplayTransport transport)
     {
         _transport = transport;
-        State = ConnectionState.Connected;
+        State = transport.IsConnected ? ConnectionState.Connected : ConnectionState.Simulated;
         _touchPoll = CreateTouchPollLoop();
         _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
     }
@@ -188,13 +197,13 @@ public sealed class DisplayDeviceEngine : IDisposable
             // Disconnect any existing transport before attempting new connection
             DisconnectInternal();
 
-            DisplayHidTransport? transport = null;
+            IDisplayTransport? transport = null;
             bool connected = false;
             bool disposedDuringConnect = false;
 
             try
             {
-                transport = new DisplayHidTransport();
+                transport = _transportFactory();
                 connected = transport.Connect();
 
                 if (connected)

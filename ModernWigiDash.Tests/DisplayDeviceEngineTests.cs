@@ -103,6 +103,8 @@ public class DisplayDeviceEngineTests
     {
         var fake = new FakeTransport
         {
+            ConnectResult = true,
+            ConnectedAfterConnect = true,
             NextReport = new TouchReport
             {
                 Type = DisplayProtocolConstants.TouchTypeDown,
@@ -188,19 +190,82 @@ public class DisplayDeviceEngineTests
 
     /// <summary>
     /// Minimal <see cref="IDisplayTransport"/> fake: returns the canned
-    /// <see cref="NextReport"/> from <see cref="ReadTouch"/>, never connects.
+    /// <see cref="NextReport"/> from <see cref="ReadTouch"/>, and answers the
+    /// connect outcome per test (default: never connects).
     /// </summary>
     private sealed class FakeTransport : IDisplayTransport
     {
         public TouchReport? NextReport { get; set; }
+        public bool ConnectResult { get; set; }
+        public bool ConnectedAfterConnect { get; set; }
+        public bool Disposed { get; private set; }
+        public Action? OnConnect { get; set; }
 
-        public bool IsConnected => false;
+        public bool IsConnected => ConnectResult && ConnectedAfterConnect;
 
-        public bool Connect() => false;
-        public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => false;
+        public bool Connect()
+        {
+            OnConnect?.Invoke();
+            return ConnectResult;
+        }
+        public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected;
         public TouchReport? ReadTouch() => NextReport;
         public bool GoToStandby() => false;
-        public void Dispose() { }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public void Dispose() => Disposed = true;
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    // ── the connect state machine, driven through the factory seam ──
+
+    [TestMethod]
+    public void TryConnectAsync_ConnectSucceeds_AdoptsTransportAndConnects()
+    {
+        var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
+        using var engine = new DisplayDeviceEngine(() => fake);
+
+        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual(ConnectionState.Connected, engine.State);
+        Assert.IsTrue(engine.SendFrameBytes(new byte[8]), "the adopted transport must carry frames");
+    }
+
+    [TestMethod]
+    public void TryConnectAsync_ConnectFails_FallsBackToSimulated()
+    {
+        using var engine = new DisplayDeviceEngine(() => new FakeTransport { ConnectResult = false });
+
+        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(ConnectionState.Simulated, engine.State, "no device - running in simulation mode");
+    }
+
+    [TestMethod]
+    public void TryConnectAsync_DisposedDuringConnect_DoesNotAdoptTransport()
+    {
+        var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
+        using var engine = new DisplayDeviceEngine(() => fake);
+        fake.OnConnect = () => engine.Dispose();
+
+        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+
+        Assert.IsFalse(ok, "a disposed engine must not adopt a live transport");
+        Assert.IsTrue(fake.Disposed, "the orphan transport must be disposed, never leaked");
+        Assert.AreNotEqual(ConnectionState.Connected, engine.State);
+    }
+
+    [TestMethod]
+    public void InternalCtor_StateDerivesFromTransportConnectionTruth()
+    {
+        var connected = new DisplayDeviceEngine(new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true });
+        Assert.AreEqual(ConnectionState.Connected, connected.State, "an open transport reports Connected");
+
+        var simulated = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false });
+        Assert.AreEqual(ConnectionState.Simulated, simulated.State, "a closed transport must not report Connected");
     }
 }
