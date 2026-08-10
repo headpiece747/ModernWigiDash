@@ -1,4 +1,3 @@
-using System.Globalization;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -52,101 +51,52 @@ public class FrameTimeWidget : ModernWidgetBase
             return;
         }
 
+        var display = FrameTimePresentation.Build(snapshot, bounds.Size);
         if (IsOverlayView)
         {
-            RenderOverlayView(canvas, bounds, text, snapshot);
+            RenderOverlayView(canvas, bounds, text, display);
             return;
         }
 
-        if (snapshot.ProcessId <= 0)
-        {
-            RenderDashView(canvas, bounds, accent);
-            return;
-        }
-
-        RenderTrackedView(canvas, bounds, accent, text, snapshot);
+        RenderTrackedView(canvas, bounds, accent, text, snapshot, display);
     }
 
     /// <summary>
-    /// No process tracked (desktop / own window foreground): the layout
-    /// renders with zero values — PresentMon has no data to show, so the
-    /// readout reads 0 (PresentMon's own math for a tracked-but-idle process
-    /// is 0 presents/sec; the no-process state renders the same).
+    /// The dashboard view: hero FPS + frame time, process name, up to eight
+    /// metric cards, and the frame-time sparkline. The no-process state
+    /// renders the same layout with zero values — the presentation model
+    /// decides what every string reads and which rows the placement size
+    /// keeps.
     /// </summary>
-    private void RenderDashView(SKCanvas canvas, SKRect bounds, SKColor accent)
-    {
-        float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
-        float heroTop = bounds.Top + pad;
-        float heroH = Math.Max(8f, bounds.Height - pad * 2f);
-
-        float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
-        using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        canvas.DrawTextWithFallback("0", bounds.Left + pad, heroTop + fpsFontSize * 0.82f, fpsFont, fpsPaint);
-
-        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
-        using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawTextWithFallback("FPS", bounds.Left + pad + fpsFont.MeasureText("0", fpsPaint) + 10f,
-            heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
-
-        var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
-        using var msPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true };
-        canvas.DrawTextWithFallback("0.0 ms", bounds.Left + pad + fpsFont.MeasureText("0", fpsPaint) + 10f,
-            heroTop + fpsFontSize * 0.82f, msFont, msPaint);
-
-        if (bounds.Width >= 410f)
-        {
-            var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
-            using var labelPaint = new SKPaint { Color = accent, IsAntialias = true };
-            var valueFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 15f);
-            using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-            float cardTop = heroTop + fpsFontSize * 0.82f + 12f;
-            float colWidth = (bounds.Width - pad * 2f) / 4f;
-            string[] labels = ["1% LOW", "0.1% LOW", "CPU FRAME", "GPU BUSY"];
-            for (int i = 0; i < labels.Length; i++)
-            {
-                float cx = bounds.Left + pad + colWidth * (i + 0.5f);
-                float valW = valueFont.MeasureText("0", valuePaint);
-                canvas.DrawTextWithFallback("0", cx - valW / 2f, cardTop + 13f, valueFont, valuePaint);
-                float lblW = labelFont.MeasureText(labels[i], labelPaint);
-                canvas.DrawTextWithFallback(labels[i], cx - lblW / 2f, cardTop + 13f + 20f, labelFont, labelPaint);
-            }
-        }
-    }
-
-    private void RenderTrackedView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotDto snapshot)
+    private void RenderTrackedView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotDto snapshot, FrameTimeDisplay display)
     {
         float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
 
         bool tiny = bounds.Height < 150f;
-        bool showCards = bounds.Width >= 410f;
-        bool showSecondRow = bounds.Width >= 520f;
-        bool showGraph = bounds.Height >= 150f && snapshot.RecentFrameTimesMs.Count >= 2;
-        float graphHeight = showGraph ? bounds.Height * 0.12f : 0f;
+        float graphHeight = display.ShowGraph ? bounds.Height * 0.12f : 0f;
 
         float contentTop = bounds.Top + pad;
-        float contentBottom = bounds.Bottom - pad - (showGraph ? graphHeight + 6f : 0f);
+        float contentBottom = bounds.Bottom - pad - (display.ShowGraph ? graphHeight + 6f : 0f);
 
         float heroTop = contentTop;
-        if (!tiny && ShowProcess && !string.IsNullOrWhiteSpace(snapshot.ProcessName))
+        if (!tiny && ShowProcess && display.ShowProcessName)
         {
             float procSize = Math.Clamp((contentBottom - contentTop) * 0.08f, 10f, 15f);
             var processFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, procSize);
             using var processPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            string process = TextRenderHelper.TruncateText(snapshot.ProcessName, processFont, bounds.Width - pad * 2f);
+            string process = TextRenderHelper.TruncateText(display.ProcessName, processFont, bounds.Width - pad * 2f);
             canvas.DrawTextWithFallback(process, bounds.Right - pad - FontHelper.MeasureTextWithFallback(process, processFont), contentTop + procSize, processFont, processPaint);
             heroTop = contentTop + procSize + 6f;
         }
 
-        float heroBottom = showCards ? contentTop + (contentBottom - contentTop) * 0.45f : contentBottom;
+        float heroBottom = display.ShowMetricCards ? contentTop + (contentBottom - contentTop) * 0.45f : contentBottom;
         float heroH = Math.Max(8f, heroBottom - heroTop);
 
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
         var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
-        RefreshCachedStrings(snapshot);
-        string fpsText = _cachedFpsText;
+        string fpsText = display.HeroFps;
         fpsFont.MeasureText(fpsText, out var fpsBounds, fpsPaint);
         float fpsX = bounds.Left + pad;
         float fpsBaseline = heroTop + fpsFontSize * 0.82f;
@@ -159,9 +109,9 @@ public class FrameTimeWidget : ModernWidgetBase
 
         var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
         using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
-        canvas.DrawTextWithFallback(_cachedMsText, unitX, fpsBaseline, msFont, msPaint);
+        canvas.DrawTextWithFallback(display.HeroFrameTimeMs, unitX, fpsBaseline, msFont, msPaint);
 
-        if (showCards)
+        if (display.ShowMetricCards)
         {
             float gridTop = heroBottom + 4f;
             float gridH = contentBottom - gridTop;
@@ -173,22 +123,24 @@ public class FrameTimeWidget : ModernWidgetBase
                 float row1Top = gridTop;
                 float row2Top = gridTop + gridH * 0.52f;
 
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, row1Top, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, row1Top, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, row1Top, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, row1Top, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent);
-
-                if (showSecondRow)
+                for (int i = 0; i < 4; i++)
                 {
-                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, row2Top, "DISPLAYED", _cachedDisplayed, metricValSize, metricLblSize, accent);
-                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, row2Top, "DROPPED", _cachedDropped, metricValSize, metricLblSize, accent);
-                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, row2Top, "GPU TIME", _cachedGpuTime, metricValSize, metricLblSize, accent);
-                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, row2Top, "PRESENT MODE", _cachedPresentMode, metricValSize, metricLblSize, accent);
+                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i + 0.5f), row1Top,
+                        display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, accent);
+                }
+
+                if (display.ShowSecondRow)
+                {
+                    for (int i = 4; i < 8; i++)
+                    {
+                        DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i - 3.5f), row2Top,
+                            display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, accent);
+                    }
                 }
             }
         }
 
-        if (showGraph)
+        if (display.ShowGraph)
         {
             SKRect graphArea = new SKRect(bounds.Left + pad, bounds.Bottom - pad - graphHeight, bounds.Right - pad, bounds.Bottom - pad);
             DrawCachedSparkline(canvas, graphArea, snapshot.RecentFrameTimesMs, accent);
@@ -206,12 +158,11 @@ public class FrameTimeWidget : ModernWidgetBase
 
     /// <summary>
     /// PresentMon-overlay-style readout (view C): the metric lines PresentMon's
-    /// own overlay lists, in the project font and the widget's colors. Frame
-    /// times derive from the percentile FPS values, matching PresentMon's
-    /// 99th/1st %tile stat naming. Lines clip from the bottom as the placement
-    /// shrinks.
+    /// own overlay lists, in the project font and the widget's colors. The
+    /// lines and their shrink clip come from the presentation model; this
+    /// method only lays them out.
     /// </summary>
-    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeSnapshotDto snapshot)
+    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeDisplay display)
     {
         float pad = Math.Clamp(bounds.Height * 0.06f, 8f, 20f);
         float fontSize = Math.Clamp(bounds.Height * 0.052f, 10f, 24f);
@@ -221,73 +172,13 @@ public class FrameTimeWidget : ModernWidgetBase
         using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         float lineHeight = fontSize * 1.45f;
 
-        int lines = bounds.Height switch { < 110f => 1, < 150f => 4, _ => 9 };
-
-        // Zero is PresentMon's own value for no presents (0 presents/sec), so
-        // the no-process state and a tracked-but-idle process read the same:
-        // numeric values render 0, only the present mode has no numeric zero.
-        string F1(double v) => double.IsFinite(v) && v > 0 ? $"{v:F1} ms" : "0.0 ms";
-        string F0(double v) => v > 0 ? $"{v:F0}" : "0";
-
-        string[] labels =
-        [
-            "Presented FPS", "Displayed FPS", "99th %tile Frame Time", "1st %tile Frame Time",
-            "GPU Busy %", "GPU Time", "CPU Frame Time", "Dropped Frames", "Present Mode",
-        ];
-        string[] values =
-        [
-            F0(snapshot.Fps),
-            F0(snapshot.DisplayedFps),
-            F1(1000.0 / snapshot.Low1PercentFps),
-            F1(1000.0 / snapshot.Low01PercentFps),
-            $"{snapshot.GpuBusyPercent:F0}%",
-            F1(snapshot.GpuTimeMs),
-            F1(snapshot.CpuFrameTimeMs),
-            snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture),
-            PresentMonPresentMode.FullName(snapshot.PresentModeId),
-        ];
-
         float x = bounds.Left + pad;
-        for (int i = 0; i < lines; i++)
+        for (int i = 0; i < display.OverlayLineCount; i++)
         {
             float y = bounds.Top + pad + (i + 1) * lineHeight;
-            canvas.DrawTextWithFallback(labels[i], x, y, font, labelPaint, SKTextAlign.Left);
-            canvas.DrawTextWithFallback(values[i], bounds.Right - pad, y, font, valuePaint, SKTextAlign.Right);
+            canvas.DrawTextWithFallback(display.Overlay[i].Label, x, y, font, labelPaint, SKTextAlign.Left);
+            canvas.DrawTextWithFallback(display.Overlay[i].Value, bounds.Right - pad, y, font, valuePaint, SKTextAlign.Right);
         }
-    }
-
-    private FrameTimeSnapshotDto? _lastStringSnapshot;
-    private string _cachedFpsText = "";
-    private string _cachedMsText = "";
-    private string _cachedLow1 = "";
-    private string _cachedLow01 = "";
-    private string _cachedGpu = "";
-    private string _cachedCpu = "";
-    private string _cachedDisplayed = "";
-    private string _cachedDropped = "";
-    private string _cachedGpuTime = "";
-    private string _cachedPresentMode = "";
-
-    /// <summary>
-    /// Formats the snapshot strings once per snapshot instance (the store swaps
-    /// the record ~1/s) instead of per render at 30 FPS.
-    /// </summary>
-    private void RefreshCachedStrings(FrameTimeSnapshotDto snapshot)
-    {
-        if (ReferenceEquals(snapshot, _lastStringSnapshot)) return;
-        _lastStringSnapshot = snapshot;
-        _cachedFpsText = snapshot.Fps.ToString("F0", CultureInfo.InvariantCulture);
-        _cachedMsText = $"{snapshot.FrameTimeMs:F1} ms";
-        _cachedLow1 = $"{snapshot.Low1PercentFps:F0} FPS";
-        _cachedLow01 = $"{snapshot.Low01PercentFps:F0} FPS";
-        _cachedGpu = $"{snapshot.GpuBusyPercent:F0}%";
-        _cachedCpu = $"{snapshot.CpuFrameTimeMs:F1} ms";
-        _cachedDisplayed = $"{snapshot.DisplayedFps:F0} FPS";
-        _cachedDropped = snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture);
-        _cachedGpuTime = $"{snapshot.GpuTimeMs:F1} ms";
-        _cachedPresentMode = snapshot.PresentModeId >= 0
-            ? PresentMonPresentMode.ShortName(snapshot.PresentModeId)
-            : "—";
     }
 
     private IReadOnlyList<double>? _lastSparkSamples;
