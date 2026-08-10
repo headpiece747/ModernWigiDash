@@ -1,17 +1,25 @@
 using System.Net;
 using System.Net.Http;
+using System.Reflection;
+using System.Threading;
+using System.Windows;
+using Windows.Media;
+using Windows.Media.Control;
+using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
+using AppClass = ModernWigiDash.App.App;
 
 namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// The shared test doubles every test file used to copy: the no-op widget
 /// context (with optional counters), the placed-instance persisting variant,
-/// the in-memory WebSocket feed, the HTTP stub, and the PresentMon interop
-/// stub. One double per seam — new widget tests start from a one-line host.
+/// the in-memory WebSocket feed, the HTTP stub, the PresentMon interop stub,
+/// the SMTC media-session triple, the LHS map source, and the STA App host.
+/// One double per seam — new widget tests start from a one-line host.
 /// </summary>
 internal class TestContext : IModernWigiDashContext
 {
@@ -85,12 +93,15 @@ internal sealed class FakeFeed : IWebSocketFeed
 
 /// <summary>
 /// <see cref="HttpMessageHandler"/> stub: responds per request via the
-/// delegate (or a canned body). Use the static factories for the common
-/// single-body and not-found shapes.
+/// delegate, a canned body, or a queue (each request dequeues the next
+/// response; an empty queue answers 400 Bad Request — the Twitch token-poll
+/// pending/error shape). Use the static factories for the common single-body
+/// and not-found shapes.
 /// </summary>
 internal sealed class StubHttpHandler : HttpMessageHandler
 {
     private readonly Func<HttpRequestMessage, HttpResponseMessage> _respond;
+    private readonly Queue<HttpResponseMessage>? _responses;
     public int Calls { get; private set; }
     public List<string> RequestUrls { get; } = [];
 
@@ -101,6 +112,10 @@ internal sealed class StubHttpHandler : HttpMessageHandler
     {
     }
 
+    public StubHttpHandler(params HttpResponseMessage[] responses) => _responses = new Queue<HttpResponseMessage>(responses);
+
+    public void Enqueue(HttpResponseMessage response) => _responses?.Enqueue(response);
+
     public static HttpResponseMessage Ok(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body) };
     public static HttpResponseMessage NotFound() => new(HttpStatusCode.NotFound);
 
@@ -108,21 +123,347 @@ internal sealed class StubHttpHandler : HttpMessageHandler
     {
         Calls++;
         RequestUrls.Add(request.RequestUri?.ToString() ?? "");
+        if (_responses is not null)
+        {
+            return Task.FromResult(_responses.Count > 0
+                ? _responses.Dequeue()
+                : new HttpResponseMessage(HttpStatusCode.BadRequest));
+        }
         return Task.FromResult(_respond(request));
     }
 }
 
-/// <summary>PresentMon interop stub — keeps the real PresentMonAPI2.dll (and
-/// its load-time side effects) out of the test host.</summary>
+/// <summary>
+/// PresentMon interop stub — keeps the real PresentMonAPI2.dll (and its
+/// load-time side effects) out of the test host. Scriptable: the unavailable
+/// defaults match a missing library; available producers set
+/// <see cref="IsAvailable"/> and the poll/track surfaces.
+/// </summary>
 internal sealed class StubPresentMonNative : IPresentMonNative
 {
-    public bool IsAvailable => false;
-    public string? UnavailableReason => "stub (test)";
-    public bool OpenSession() => false;
-    public void CloseSession() { }
-    public bool TrackProcess(int processId) => false;
-    public PresentMonPollResult PollDynamic(int processId) => new(null, PmStatus.Success);
-    public IReadOnlyList<double> DrainFrameTimes(int processId) => [];
-    public void Dispose() { }
+    public bool IsAvailable { get; set; }
+    public string? UnavailableReason { get; set; } = "stub (test)";
+    public bool OpenSessionResult { get; set; }
+    public bool TrackProcessResult { get; set; } = true;
+    public PresentMonDynamicSample? PollResult { get; set; }
+    public PmStatus PollStatus { get; set; } = PmStatus.Success;
+    public IReadOnlyList<double> FrameTimes { get; set; } = [];
+    public Func<int, bool>? TrackHandler { get; set; }
+    public Func<int, PresentMonPollResult>? PollHandler { get; set; }
+
+    public int OpenSessionCalls { get; private set; }
+    public int CloseSessionCalls { get; private set; }
+    public bool Disposed { get; private set; }
+    public List<int> TrackedProcessIds { get; } = [];
+    public List<int> PolledProcessIds { get; } = [];
+
+    public bool OpenSession()
+    {
+        OpenSessionCalls++;
+        return OpenSessionResult;
+    }
+
+    public void CloseSession() => CloseSessionCalls++;
+
+    public bool TrackProcess(int processId)
+    {
+        TrackedProcessIds.Add(processId);
+        return TrackHandler is null ? TrackProcessResult : TrackHandler(processId);
+    }
+
+    public PresentMonPollResult PollDynamic(int processId)
+    {
+        PolledProcessIds.Add(processId);
+        if (PollHandler is not null)
+        {
+            return PollHandler(processId);
+        }
+        return new PresentMonPollResult(
+            PollStatus == PmStatus.Success ? PollResult : null, PollStatus);
+    }
+
+    public IReadOnlyList<double> DrainFrameTimes(int processId) => FrameTimes;
+
+    public void Dispose() => Disposed = true;
 }
 
+/// <summary>In-memory <see cref="ILhmMapSource"/>: one fixed map copy, never
+/// an error — drives the reader's poll policy in tests.</summary>
+internal sealed class StubLhmMapSource(byte[] map) : ILhmMapSource
+{
+    public byte[]? TryReadSensorsMap(out string? error)
+    {
+        error = null;
+        return map;
+    }
+}
+
+/// <summary>SMTC source seam: hands out an injectable manager (null for the
+/// no-manager path).</summary>
+internal sealed class StubMediaSessionSource : IMediaSessionSource
+{
+    public StubMediaSessionSourceManager? Manager { get; set; } = new();
+
+    public Task<IMediaSessionSourceManager?> GetManagerAsync()
+        => Task.FromResult<IMediaSessionSourceManager?>(Manager);
+}
+
+/// <summary>
+/// SMTC manager seam: settable current/sessions plus subscription counters
+/// and raise methods, so the monitor's event wiring is assertable.
+/// </summary>
+internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
+{
+    private Action? _currentSessionChanged;
+    private Action? _sessionsChanged;
+
+    public StubMediaSession? Current { get; set; }
+
+    public List<StubMediaSession> Sessions { get; set; } = [];
+
+    public int CurrentSessionChangedSubscriptionCount { get; private set; }
+
+    public int SessionsChangedSubscriptionCount { get; private set; }
+
+    public event Action? CurrentSessionChanged
+    {
+        add { _currentSessionChanged += value; CurrentSessionChangedSubscriptionCount++; }
+        remove { _currentSessionChanged -= value; CurrentSessionChangedSubscriptionCount--; }
+    }
+
+    public event Action? SessionsChanged
+    {
+        add { _sessionsChanged += value; SessionsChangedSubscriptionCount++; }
+        remove { _sessionsChanged -= value; SessionsChangedSubscriptionCount--; }
+    }
+
+    public IMediaSessionSourceSession? GetCurrentSession() => Current;
+
+    public IReadOnlyList<IMediaSessionSourceSession> GetSessions() => Sessions;
+
+    public void RaiseCurrentSessionChanged() => _currentSessionChanged?.Invoke();
+
+    public void RaiseSessionsChanged() => _sessionsChanged?.Invoke();
+}
+
+/// <summary>
+/// SMTC session seam: settable properties/playback/timeline (or a func for
+/// async-resolution paths), subscription counters, control-call counters, and
+/// raise methods — the monitor's per-session wiring is assertable.
+/// </summary>
+internal sealed class StubMediaSession : IMediaSessionSourceSession
+{
+    private Action? _mediaPropertiesChanged;
+    private Action? _playbackInfoChanged;
+    private Action? _timelinePropertiesChanged;
+
+    public object Identity => this;
+
+    public string SourceAppUserModelId { get; set; } = "fake.app";
+
+    public MediaPropertiesData? Properties { get; set; }
+
+    public PlaybackInfoData? PlaybackInfo { get; set; }
+
+    public TimelinePropertiesData? Timeline { get; set; }
+
+    public Func<Task<MediaPropertiesData?>>? PropertiesFunc { get; set; }
+
+    public int MediaPropertiesSubscriptionCount { get; private set; }
+
+    public int PlaybackInfoSubscriptionCount { get; private set; }
+
+    public int TimelineSubscriptionCount { get; private set; }
+
+    public int PlayCalls { get; private set; }
+
+    public int PauseCalls { get; private set; }
+
+    public int NextCalls { get; private set; }
+
+    public int PreviousCalls { get; private set; }
+
+    public int ShuffleCalls { get; private set; }
+
+    public int RepeatCalls { get; private set; }
+
+    public int SeekCalls { get; private set; }
+
+    public bool LastShuffle { get; private set; }
+
+    public MediaPlaybackAutoRepeatMode LastRepeat { get; private set; }
+
+    public long LastSeekTicks { get; private set; }
+
+    public event Action? MediaPropertiesChanged
+    {
+        add { _mediaPropertiesChanged += value; MediaPropertiesSubscriptionCount++; }
+        remove { _mediaPropertiesChanged -= value; MediaPropertiesSubscriptionCount--; }
+    }
+
+    public event Action? PlaybackInfoChanged
+    {
+        add { _playbackInfoChanged += value; PlaybackInfoSubscriptionCount++; }
+        remove { _playbackInfoChanged -= value; PlaybackInfoSubscriptionCount--; }
+    }
+
+    public event Action? TimelinePropertiesChanged
+    {
+        add { _timelinePropertiesChanged += value; TimelineSubscriptionCount++; }
+        remove { _timelinePropertiesChanged -= value; TimelineSubscriptionCount--; }
+    }
+
+    public Task<MediaPropertiesData?> TryGetMediaPropertiesAsync()
+        => PropertiesFunc is not null ? PropertiesFunc() : Task.FromResult(Properties);
+
+    public PlaybackInfoData? GetPlaybackInfo() => PlaybackInfo;
+
+    public TimelinePropertiesData? GetTimelineProperties() => Timeline;
+
+    public Task<bool> TryPlayAsync() { PlayCalls++; return Task.FromResult(true); }
+
+    public Task<bool> TryPauseAsync() { PauseCalls++; return Task.FromResult(true); }
+
+    public Task<bool> TrySkipNextAsync() { NextCalls++; return Task.FromResult(true); }
+
+    public Task<bool> TrySkipPreviousAsync() { PreviousCalls++; return Task.FromResult(true); }
+
+    public Task<bool> TryChangeShuffleActiveAsync(bool shuffle)
+    {
+        ShuffleCalls++;
+        LastShuffle = shuffle;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode mode)
+    {
+        RepeatCalls++;
+        LastRepeat = mode;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> TryChangePlaybackPositionAsync(long positionTicks)
+    {
+        SeekCalls++;
+        LastSeekTicks = positionTicks;
+        return Task.FromResult(true);
+    }
+
+    public void RaiseMediaPropertiesChanged() => _mediaPropertiesChanged?.Invoke();
+
+    public void RaisePlaybackInfoChanged() => _playbackInfoChanged?.Invoke();
+
+    public void RaiseTimelinePropertiesChanged() => _timelinePropertiesChanged?.Invoke();
+}
+
+/// <summary>
+/// Owns the App on a dedicated STA thread (DialogHostTests and
+/// MainWindowConstructionTests used to copy this): WPF object creation
+/// requires STA, Application.Current is process-wide (created once), and
+/// pack://application resources only resolve while an Application lives on
+/// this thread.
+/// </summary>
+internal sealed class StaHost
+{
+    private readonly object _gate = new();
+    private readonly Thread _thread;
+    private Func<object?>? _work;
+    private object? _result;
+    private Exception? _workError;
+    private bool _done;
+
+    public StaHost(string threadName)
+    {
+        _thread = new Thread(Run) { IsBackground = true, Name = threadName };
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
+    }
+
+    private void Run()
+    {
+        while (true)
+        {
+            lock (_gate)
+            {
+                // STA pump: no exit — the loop dies with the test process.
+                // (S2190 intentionally suppressed: this is a message-pump loop,
+                // not recursion.)
+#pragma warning disable S2190
+                while (_work == null) Monitor.Wait(_gate);
+#pragma warning restore S2190
+                var work = _work ?? throw new InvalidOperationException("work was signaled without a delegate");
+                _work = null;
+                try
+                {
+                    EnsureApp(); // Cleanup detaches the App between tests — recreate if needed
+                    _result = work();
+                    _workError = null;
+                }
+                catch (Exception ex)
+                {
+                    _workError = ex;
+                }
+                _done = true;
+                Monitor.PulseAll(_gate);
+            }
+        }
+    }
+
+    private void EnsureApp()
+    {
+        // `new App()` does not load App.xaml — the generated Main calls
+        // InitializeComponent separately. Without it, Application resources
+        // (e.g. the window's PrimaryFont StaticResource) are missing.
+        var app = Application.Current as AppClass;
+        if (app == null)
+        {
+            app = new AppClass();
+        }
+        app.Resources.Clear(); // a reused App (ThemeManagerTests) only holds theme keys
+        app.InitializeComponent();
+    }
+
+    /// <summary>
+    /// Nulls the private Application._appInstance / _appCreatedInThisAppDomain
+    /// fields so a later class can create its own Application instance.
+    /// </summary>
+    public void DetachApplication()
+    {
+        const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+        FieldInfo appInstance = typeof(Application).GetField("_appInstance", flags)
+            ?? throw new InvalidOperationException("Application._appInstance field not found");
+        FieldInfo createdHere = typeof(Application).GetField("_appCreatedInThisAppDomain", flags)
+            ?? throw new InvalidOperationException("Application._appCreatedInThisAppDomain field not found");
+        appInstance.SetValue(null, null);
+        createdHere.SetValue(null, false);
+    }
+
+    /// <summary>Raw invocation (MainWindowConstructionTests): returns the
+    /// result and any exception for the caller to assert.</summary>
+    public (object? Result, Exception? Error) Invoke(Func<object?> work)
+    {
+        lock (_gate)
+        {
+            _result = null;
+            _workError = null;
+            _done = false;
+            _work = work;
+            Monitor.PulseAll(_gate);
+            while (!_done) Monitor.Wait(_gate);
+
+            return (_result, _workError);
+        }
+    }
+
+    /// <summary>Fail-fast invocation (DialogHostTests): returns the result,
+    /// Assert.Fails when the STA work threw.</summary>
+    public T Run<T>(Func<T> work)
+    {
+        var (result, error) = Invoke(() => work());
+        if (error != null)
+        {
+            Assert.Fail($"STA work failed: {error}");
+        }
+        return (T)result!;
+    }
+}

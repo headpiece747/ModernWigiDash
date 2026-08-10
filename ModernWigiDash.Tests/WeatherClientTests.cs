@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -49,7 +50,7 @@ public class WeatherClientTests
 
     private static WeatherLocation CoordinateLocation => new("Fixed Location", "40.71,-74.00", null, null, null);
 
-    private static WeatherClient CreateClient(HttpMessageHandler stub, FakeClock? clock = null, string? cacheDirectory = null)
+    private static WeatherClient CreateClient(HttpMessageHandler stub, FakeTimeProvider? clock = null, string? cacheDirectory = null)
         => new(cacheDirectory ?? NewTempDir(), "weather_test.json", timeProvider: clock, http: new HttpClient(stub));
 
     private static string NewTempDir() => Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
@@ -146,7 +147,7 @@ public class WeatherClientTests
         // unresolved, and the render kick must not retry at frame rate — the
         // attempt time is stamped so the 5-minute throttle applies.
         var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
-        var clock = new FakeClock(DateTimeOffset.UtcNow);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var client = CreateClient(stub, clock: clock);
 
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
@@ -181,7 +182,7 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_Throttle_UsesInjectedClock()
     {
         var stub = new StubHttpHandler(Respond);
-        var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock);
 
         // Seed the throttle window (result intentionally unused).
@@ -236,7 +237,7 @@ public class WeatherClientTests
     public async Task InvalidateLocation_ResetsThrottle_SoNextFetchRuns()
     {
         var stub = new StubHttpHandler(Respond);
-        var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock);
 
         await client.FetchCurrentAsync(CoordinateLocation, force: true);
@@ -333,19 +334,11 @@ public class WeatherClientTests
             _body = body;
         }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            await _gate.Task;
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) };
-        }
-    }
-
-    private sealed class FakeClock : TimeProvider
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        private DateTimeOffset _now;
-        public FakeClock(DateTimeOffset start) => _now = start;
-        public void Advance(TimeSpan delta) => _now += delta;
-        public override DateTimeOffset GetUtcNow() => _now;
+        Calls++;
+        await _gate.Task;
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) };
     }
+}
 }

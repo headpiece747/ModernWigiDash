@@ -20,16 +20,9 @@ public static class ProfileOps
     /// the test context share.
     /// </summary>
     public static PlacedWidgetInstance? FindPlacedWidget(ProfileLayout profile, object widgetInstance)
-    {
-        foreach (var page in profile.Pages)
-        {
-            foreach (var placed in page.Widgets)
-            {
-                if (ReferenceEquals(placed.ActiveInstance, widgetInstance)) return placed;
-            }
-        }
-        return null;
-    }
+        => profile.Pages
+            .SelectMany(page => page.Widgets)
+            .FirstOrDefault(placed => ReferenceEquals(placed.ActiveInstance, widgetInstance));
 
     // ── page CRUD ───────────────────────────────────────────
 

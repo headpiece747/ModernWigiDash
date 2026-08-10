@@ -37,4 +37,24 @@ public class WidgetPluginLoaderTests
         Assert.AreEqual("#F8FAFC", new TwitchChatStreamWidget().MessageColorHex);
         Assert.AreEqual("#FAFAFA", new TextLabelWidget().TextColorHex);
     }
+
+    // ── loader branch coverage (moved from the residual-coverage grab-bag) ──
+
+    [TestMethod]
+    public void WidgetPluginLoader_NonWidgetTypes_Skipped()
+    {
+        var loader = new WidgetPluginLoader();
+
+        loader.RegisterBuiltInPlugin(typeof(string));
+
+        Assert.AreEqual(0, loader.RegisteredPlugins.Count, "a non-widget type must not register");
+    }
+
+    [TestMethod]
+    public void WidgetPluginLoader_CreateInstance_UnknownIdReturnsNull()
+    {
+        var loader = new WidgetPluginLoader();
+
+        Assert.IsNull(loader.CreateInstance("no_such_plugin"));
+    }
 }

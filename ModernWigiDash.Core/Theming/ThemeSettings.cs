@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 
@@ -190,27 +191,27 @@ public class ThemeSettings
     public static RgbaColor? ParseColor(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex)) return null;
-        string h = hex.Trim().TrimStart('#');
+        ReadOnlySpan<char> h = hex.Trim().TrimStart('#');
         try
         {
             if (h.Length == 6)
             {
                 return new RgbaColor(
                     255,
-                    Convert.ToByte(h.Substring(0, 2), 16),
-                    Convert.ToByte(h.Substring(2, 2), 16),
-                    Convert.ToByte(h.Substring(4, 2), 16));
+                    byte.Parse(h.Slice(0, 2), NumberStyles.HexNumber),
+                    byte.Parse(h.Slice(2, 2), NumberStyles.HexNumber),
+                    byte.Parse(h.Slice(4, 2), NumberStyles.HexNumber));
             }
             if (h.Length == 8)
             {
                 return new RgbaColor(
-                    Convert.ToByte(h.Substring(0, 2), 16),
-                    Convert.ToByte(h.Substring(2, 2), 16),
-                    Convert.ToByte(h.Substring(4, 2), 16),
-                    Convert.ToByte(h.Substring(6, 2), 16));
+                    byte.Parse(h.Slice(0, 2), NumberStyles.HexNumber),
+                    byte.Parse(h.Slice(2, 2), NumberStyles.HexNumber),
+                    byte.Parse(h.Slice(4, 2), NumberStyles.HexNumber),
+                    byte.Parse(h.Slice(6, 2), NumberStyles.HexNumber));
             }
         }
-        catch (Exception)
+        catch (FormatException)
         {
             // Invalid hex value — treat as unparseable
             System.Diagnostics.Debug.WriteLine("Invalid theme hex color value, treating as unparseable");

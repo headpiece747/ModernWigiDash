@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
@@ -11,24 +12,18 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class StopwatchTimerWidgetTests
 {
-    private sealed class MutableTimeProvider : TimeProvider
-    {
-        public DateTimeOffset UtcNowValue { get; set; } = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        public override DateTimeOffset GetUtcNow() => UtcNowValue;
-    }
-
     private static SKCanvas CreateCanvas()
         => SKSurface.Create(new SKImageInfo(203, 148)).Canvas;
 
     [TestMethod]
     public void Start_ThenPause_AccumulatesElapsed()
     {
-        var clock = new MutableTimeProvider();
+        var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
         widget.InitializeAsync(new TestContext()).AsTask().GetAwaiter().GetResult();
 
         widget.OnTouch(default, TouchEventType.TouchDown); // start
-        clock.UtcNowValue += TimeSpan.FromSeconds(5);
+        clock.Advance(TimeSpan.FromSeconds(5));
         widget.OnTouch(default, TouchEventType.TouchDown); // pause
 
         Assert.AreEqual(TimeSpan.FromSeconds(5), widget.ElapsedForTest);
@@ -37,11 +32,11 @@ public class StopwatchTimerWidgetTests
     [TestMethod]
     public void Running_Elapsed_TracksClock()
     {
-        var clock = new MutableTimeProvider();
+        var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
 
         widget.OnTouch(default, TouchEventType.TouchDown); // start
-        clock.UtcNowValue += TimeSpan.FromSeconds(3);
+        clock.Advance(TimeSpan.FromSeconds(3));
 
         Assert.AreEqual(TimeSpan.FromSeconds(3), widget.ElapsedForTest, "A running stopwatch must track the clock");
     }
@@ -49,13 +44,13 @@ public class StopwatchTimerWidgetTests
     [TestMethod]
     public void Paused_Elapsed_IsFrozen()
     {
-        var clock = new MutableTimeProvider();
+        var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
 
         widget.OnTouch(default, TouchEventType.TouchDown); // start
-        clock.UtcNowValue += TimeSpan.FromSeconds(2);
+        clock.Advance(TimeSpan.FromSeconds(2));
         widget.OnTouch(default, TouchEventType.TouchDown); // pause
-        clock.UtcNowValue += TimeSpan.FromSeconds(10);
+        clock.Advance(TimeSpan.FromSeconds(10));
 
         Assert.AreEqual(TimeSpan.FromSeconds(2), widget.ElapsedForTest, "A paused stopwatch must not advance with the clock");
     }
@@ -63,10 +58,10 @@ public class StopwatchTimerWidgetTests
     [TestMethod]
     public void Render_WithRunningStopwatch_DrawsWithoutException()
     {
-        var clock = new MutableTimeProvider();
+        var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
         widget.OnTouch(default, TouchEventType.TouchDown);
-        clock.UtcNowValue += TimeSpan.FromSeconds(1);
+        clock.Advance(TimeSpan.FromSeconds(1));
 
         widget.Render(CreateCanvas(), new SKRect(0, 0, 203, 148));
 

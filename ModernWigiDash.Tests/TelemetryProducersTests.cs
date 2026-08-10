@@ -1,4 +1,8 @@
 using ModernWigiDash.App;
+using ModernWigiDash.App.LibreHardwareService;
+using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.Sdk;
+using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 
@@ -52,5 +56,48 @@ public class TelemetryProducersTests
 
         Assert.AreEqual(0, logs.Count(log => log.Contains("[SENSOR]", StringComparison.Ordinal)),
             "A silent poll must not spam the log");
+    }
+
+    // ── success ticks through the cluster seams (moved from the
+    // residual-coverage grab-bag) ──
+
+    [TestMethod]
+    public void FrameTimePollTick_Success_UpdatesStore()
+    {
+        using var producers = new TelemetryProducers(
+            new StubPresentMonNative
+            {
+                IsAvailable = true,
+                OpenSessionResult = true,
+                PollResult = new PresentMonDynamicSample(120.0, 100.0, 1.0, 3.0, 119.0, 0, 2.0, 4),
+            },
+            _ => { },
+            targetResolver: new TrackedTargetResolver(() => 4321, _ => []));
+        FrameTimeStore.Reset();
+
+        producers.FrameTimePollTick();
+
+        var fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10));
+        Assert.IsNotNull(fresh, "a live sample through the cluster must land in the store");
+        Assert.AreEqual(120.0, fresh.Fps, 0.001);
+        FrameTimeStore.Reset();
+    }
+
+    [TestMethod]
+    public void SensorPollTick_Success_UpdatesStore()
+    {
+        byte[] map = LhmSharedMemoryReaderTests.BuildSensorsMapFixture();
+        using var producers = new TelemetryProducers(
+            new StubPresentMonNative(),
+            _ => { },
+            lhsReader: new LhmSharedMemoryReader(new StubLhmMapSource(map)));
+        LhmSensorStore.Reset();
+
+        producers.SensorPollTick();
+
+        var snap = LhmSensorStore.ReadSnapshot();
+        Assert.IsTrue(snap.IsConnected, "a live sensor map through the cluster must connect the store");
+        Assert.IsTrue(snap.Readings.Count > 0);
+        LhmSensorStore.Reset();
     }
 }

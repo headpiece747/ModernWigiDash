@@ -28,7 +28,7 @@ public class PriceFeedManagerRestPollTests
 
         var info = feed.GetPrice("AAPL", AssetKind.Stock);
         Assert.IsNotNull(info);
-        Assert.AreEqual(150.5m, info!.Price);
+        Assert.AreEqual(150.5m, info.Price);
         Assert.AreEqual(1.4m, info.ChangePercent);
         Assert.AreEqual("Finnhub", info.Source);
         StringAssert.Contains(stub.RequestUrls[0], "token=test-key");
@@ -55,7 +55,7 @@ public class PriceFeedManagerRestPollTests
 
         var info = feed.GetPrice("USDEUR", AssetKind.Fx);
         Assert.IsNotNull(info);
-        Assert.AreEqual(0.93m, info!.Price);
+        Assert.AreEqual(0.93m, info.Price);
         Assert.AreEqual((0.93m / 0.95m - 1m) * 100m, info.ChangePercent);
         Assert.AreEqual("Frankfurter", info.Source);
         // The date window is Clock-driven: today and today-10d.
@@ -84,7 +84,7 @@ public class PriceFeedManagerRestPollTests
 
         var info = feed.GetPrice("BTC", AssetKind.Crypto);
         Assert.IsNotNull(info);
-        Assert.AreEqual(65000m, info!.Price);
+        Assert.AreEqual(65000m, info.Price);
         Assert.AreEqual(2.5m, info.ChangePercent);
         Assert.AreEqual("CoinGecko", info.Source);
         StringAssert.Contains(stub.RequestUrls[0], "ids=bitcoin");

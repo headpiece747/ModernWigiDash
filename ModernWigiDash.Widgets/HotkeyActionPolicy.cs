@@ -44,9 +44,10 @@ internal static class HotkeyActionPolicy
     /// <summary>The wheel amount: an explicit number, else "down" = -120,
     /// anything else (e.g. "up") = +120.</summary>
     public static int WheelAmount(string direction)
-        => int.TryParse(direction, out int value)
-            ? value
-            : direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase) ? -120 : 120;
+    {
+        if (int.TryParse(direction, out int value)) return value;
+        return direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase) ? -120 : 120;
+    }
 
     public static uint WheelFlag => MouseWheel;
 }

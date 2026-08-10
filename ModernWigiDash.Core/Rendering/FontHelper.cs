@@ -378,12 +378,6 @@ public static class FontHelper
     }
 
     /// <summary>
-    /// Creates a high-quality Geist SKFont (subpixel antialiasing + full hinting) for the requested size and style.
-    /// </summary>
-    public static SKFont CreateFont(string familyName, SKFontStyle style, float size)
-        => CreateFont(GetTypeface(familyName, style), size);
-
-    /// <summary>
     /// Creates a high-quality SKFont (subpixel antialiasing + full hinting) for the requested typeface and size.
     /// </summary>
     public static SKFont CreateFont(SKTypeface typeface, float size)

@@ -20,7 +20,6 @@ public sealed class LhmSharedMemoryReader
     // fields start at 16 on a stock install; the reader honors a variable
     // metadata block size regardless).
     internal const int OffsetMetaDataSize = 0;
-    internal const int OffsetUpdateInterval = 4;
     internal const int OffsetLastUpdate = 8;
     internal const int OffsetIndexLength = 16;
     internal const int OffsetIndexOffset = 20;

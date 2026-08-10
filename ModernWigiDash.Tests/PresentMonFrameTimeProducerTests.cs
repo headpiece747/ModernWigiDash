@@ -6,58 +6,12 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class PresentMonFrameTimeProducerTests
 {
-    private sealed class FakePresentMonNative : IPresentMonNative
+    private static StubPresentMonNative AvailableNative()
     {
-        public bool IsAvailable { get; set; } = true;
-        public string? UnavailableReason { get; set; }
-        public bool OpenSessionResult { get; set; } = true;
-        public bool TrackProcessResult { get; set; } = true;
-        public PresentMonDynamicSample? PollResult { get; set; }
-        public PmStatus PollStatus { get; set; } = PmStatus.Success;
-        public IReadOnlyList<double> FrameTimes { get; set; } = [];
-        public Func<int, bool>? TrackHandler { get; set; }
-        public Func<int, PresentMonPollResult>? PollHandler { get; set; }
-
-        public int OpenSessionCalls { get; private set; }
-        public int CloseSessionCalls { get; private set; }
-        public bool Disposed { get; private set; }
-        public List<int> TrackedProcessIds { get; } = [];
-        public List<int> PolledProcessIds { get; } = [];
-
-        public bool OpenSession()
+        return new StubPresentMonNative
         {
-            OpenSessionCalls++;
-            return OpenSessionResult;
-        }
-
-        public void CloseSession() => CloseSessionCalls++;
-
-        public bool TrackProcess(int processId)
-        {
-            TrackedProcessIds.Add(processId);
-            return TrackHandler is null ? TrackProcessResult : TrackHandler(processId);
-        }
-
-        public PresentMonPollResult PollDynamic(int processId)
-        {
-            PolledProcessIds.Add(processId);
-            if (PollHandler is not null)
-            {
-                return PollHandler(processId);
-            }
-            return new PresentMonPollResult(
-                PollStatus == PmStatus.Success ? PollResult : null, PollStatus);
-        }
-
-        public IReadOnlyList<double> DrainFrameTimes(int processId) => FrameTimes;
-
-        public void Dispose() => Disposed = true;
-    }
-
-    private static FakePresentMonNative AvailableNative()
-    {
-        return new FakePresentMonNative
-        {
+            IsAvailable = true,
+            OpenSessionResult = true,
             // GPU busy 4.0 ms at 143.2 fps → 4.0 * 143.2 / 10 = 57.28 % busy.
             PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 142.8, 2, 6.1, 4),
             FrameTimes = [6.5, 6.7],
@@ -65,7 +19,7 @@ public class PresentMonFrameTimeProducerTests
     }
 
     private static PresentMonFrameTimeProducer CreateProducer(
-        FakePresentMonNative native,
+        StubPresentMonNative native,
         int foregroundPid,
         Func<int, IReadOnlyList<int>>? childrenProvider = null,
         Func<int, string>? nameProvider = null)
@@ -79,7 +33,7 @@ public class PresentMonFrameTimeProducerTests
     [TestMethod]
     public void Poll_NotAvailable_ReturnsUnavailableDtoWithReason()
     {
-        var native = new FakePresentMonNative
+        var native = new StubPresentMonNative
         {
             IsAvailable = false,
             UnavailableReason = "PresentMonAPI2.dll not found",
@@ -125,8 +79,9 @@ public class PresentMonFrameTimeProducerTests
     [TestMethod]
     public void Poll_OpenSessionFails_ReturnsUnavailableDto()
     {
-        var native = new FakePresentMonNative
+        var native = new StubPresentMonNative
         {
+            IsAvailable = true,
             OpenSessionResult = false,
             UnavailableReason = "PresentMon service not running",
         };

@@ -25,7 +25,7 @@ public static class InspectorModelBuilder
         var instance = widget.ActiveInstance;
         if (instance == null) return [];
 
-        var result = new List<EditorDescription>();
+        List<EditorDescription> result = [];
         var type = instance.GetType();
 
         foreach (var prop in type.GetProperties())

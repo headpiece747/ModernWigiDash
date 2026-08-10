@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
@@ -10,20 +11,15 @@ public class TelemetryStoreTests
         public static SampleSnapshot Empty() => new(false, DateTime.MinValue, []);
     }
 
-    private sealed class TimeProviderFake : TimeProvider
-    {
-        private readonly DateTimeOffset _now;
-        public TimeProviderFake(DateTime now) => _now = new DateTimeOffset(now);
-        public override DateTimeOffset GetUtcNow() => _now;
-    }
-
     private static TelemetryStore<SampleSnapshot> CreateStore(TimeSpan defaultMaxAge, TimeProvider? timeProvider = null)
         => new(SampleSnapshot.Empty(), defaultMaxAge, timeProvider);
+
+    private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
 
     [TestMethod]
     public void TryReadFresh_FreshSnapshot_IsReturned()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-2);
 
@@ -37,7 +33,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void TryReadFresh_StaleSnapshot_ReturnsNull()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30);
 
@@ -49,7 +45,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void TryReadFresh_DefaultMaxAge_AppliesWhenNoMaxAgePassed()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var freshTimestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-9);
 
@@ -64,7 +60,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void Update_NullRecord_ThrowsArgumentNullException()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
 
         Assert.ThrowsExactly<ArgumentNullException>(() => store.Update(null!, clock.GetUtcNow().UtcDateTime),
@@ -76,7 +72,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void Update_DefaultProducerTimestamp_StampsReceiveTime()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10), clock);
 
         store.Update(new SampleSnapshot(true, default, []), default);
@@ -88,7 +84,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void Reset_RestoresEmptyValue_AndIsNotFresh()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var timestamp = clock.GetUtcNow().UtcDateTime;
         store.Update(new SampleSnapshot(true, timestamp, []), timestamp);
@@ -102,7 +98,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void Update_FreshnessUsesProducerTimestamp_NotReceiveTime()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var oldProducerTimestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-20);
 
@@ -115,7 +111,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void Update_ProducerTimestamp_Preserved_ForFreshnessDecision()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10));
         var producerTime = clock.GetUtcNow().UtcDateTime.AddSeconds(-2);
 
@@ -127,7 +123,7 @@ public class TelemetryStoreTests
     [TestMethod]
     public void TryReadFresh_CtorTimeProvider_UsedWhenNoPerCallClockGiven()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = FixedClock();
         var store = CreateStore(TimeSpan.FromSeconds(10), clock);
         var timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-2);
 

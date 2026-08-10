@@ -29,7 +29,7 @@ public class WasapiLoopbackCaptureSourceTests
         float[]? samples = WasapiLoopbackCaptureSource.ConvertRecorded(buffer, bytesRecorded: 16, WaveFormatEncoding.Pcm, bytesPerSample: 2);
 
         Assert.IsNotNull(samples);
-        Assert.AreEqual(8, samples!.Length, "The zero padding beyond BytesRecorded must not be converted");
+        Assert.AreEqual(8, samples.Length, "The zero padding beyond BytesRecorded must not be converted");
         Assert.AreEqual(1000f / 32768f, samples[0], 0.0001f);
         Assert.AreEqual(8000f / 32768f, samples[7], 0.0001f);
     }

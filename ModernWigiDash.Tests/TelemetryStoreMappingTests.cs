@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
@@ -144,7 +145,7 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_FreshSnapshot_IsReturned()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
@@ -161,7 +162,7 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_StaleSnapshot_ReturnsNull()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
@@ -175,7 +176,7 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_DisconnectedButFresh_IsReturnedForWidgetToDecide()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         LhmSensorStore.UpdateFromDto(null);
 
         SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
@@ -187,7 +188,7 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void FrameTimeStore_TryReadFresh_StaleSnapshot_ReturnsNull()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
         {
             IsAvailable = true,
@@ -200,7 +201,7 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void FrameTimeStore_TryReadFresh_UnavailableButFresh_IsReturned()
     {
-        var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
         {
             IsAvailable = false,
@@ -211,13 +212,6 @@ public class TelemetryStoreMappingTests
 
         Assert.IsNotNull(fresh);
         Assert.IsFalse(fresh.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
-    }
-
-    private sealed class TimeProviderFake : TimeProvider
-    {
-        private readonly DateTimeOffset _now;
-        public TimeProviderFake(DateTime now) => _now = new DateTimeOffset(now);
-        public override DateTimeOffset GetUtcNow() => _now;
     }
 
     [TestMethod]

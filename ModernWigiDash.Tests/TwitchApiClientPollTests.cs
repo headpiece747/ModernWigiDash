@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Twitch;
 
@@ -14,30 +15,11 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class TwitchApiClientPollTests
 {
-    private sealed class StubHandler : HttpMessageHandler
-    {
-        public Queue<HttpResponseMessage> Responses = [];
-        public int Calls;
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Calls++;
-            return Task.FromResult(Responses.Count > 0 ? Responses.Dequeue() : new HttpResponseMessage(HttpStatusCode.BadRequest));
-        }
-    }
-
-    private sealed class FixedClock : TimeProvider
-    {
-        private readonly DateTimeOffset _now;
-        public FixedClock(DateTimeOffset now) => _now = now;
-        public override DateTimeOffset GetUtcNow() => _now;
-    }
-
     private static readonly DateTimeOffset Now = new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
 
-    private static TwitchApiClient CreateClient(StubHandler handler, out FixedClock clock)
+    private static TwitchApiClient CreateClient(StubHttpHandler handler, out FakeTimeProvider clock)
     {
-        clock = new FixedClock(Now);
+        clock = new FakeTimeProvider(Now);
         return new TwitchApiClient("test-client", new HttpClient(handler)) { Clock = clock };
     }
 
@@ -56,10 +38,8 @@ public class TwitchApiClientPollTests
     [TestMethod]
     public async Task PollDeviceTokenAsync_PendingThenSuccess_ReturnsToken()
     {
-        var handler = new StubHandler();
+        var handler = new StubHttpHandler(Pending(), Success());
         var client = CreateClient(handler, out _);
-        handler.Responses.Enqueue(Pending());
-        handler.Responses.Enqueue(Success());
 
         var token = await client.PollDeviceTokenAsync(Authorization(TimeSpan.FromMinutes(5)), CancellationToken.None);
 
@@ -71,11 +51,8 @@ public class TwitchApiClientPollTests
     [TestMethod]
     public async Task PollDeviceTokenAsync_SlowDown_KeepsPolling()
     {
-        var handler = new StubHandler();
+        var handler = new StubHttpHandler(Pending(), Error("slow_down"), Success());
         var client = CreateClient(handler, out _);
-        handler.Responses.Enqueue(Pending());
-        handler.Responses.Enqueue(Error("slow_down"));
-        handler.Responses.Enqueue(Success());
 
         var token = await client.PollDeviceTokenAsync(Authorization(TimeSpan.FromMinutes(5)), CancellationToken.None);
 
@@ -86,9 +63,8 @@ public class TwitchApiClientPollTests
     [TestMethod]
     public async Task PollDeviceTokenAsync_AccessDenied_Throws()
     {
-        var handler = new StubHandler();
+        var handler = new StubHttpHandler(Error("access_denied"));
         var client = CreateClient(handler, out _);
-        handler.Responses.Enqueue(Error("access_denied"));
 
         await Assert.ThrowsAsync<TwitchApiException>(() =>
             client.PollDeviceTokenAsync(Authorization(TimeSpan.FromMinutes(5)), CancellationToken.None));
@@ -97,9 +73,8 @@ public class TwitchApiClientPollTests
     [TestMethod]
     public async Task PollDeviceTokenAsync_ExpiredToken_Throws()
     {
-        var handler = new StubHandler();
+        var handler = new StubHttpHandler(Error("expired_token"));
         var client = CreateClient(handler, out _);
-        handler.Responses.Enqueue(Error("expired_token"));
 
         await Assert.ThrowsAsync<TwitchApiException>(() =>
             client.PollDeviceTokenAsync(Authorization(TimeSpan.FromMinutes(5)), CancellationToken.None));
@@ -108,7 +83,7 @@ public class TwitchApiClientPollTests
     [TestMethod]
     public async Task PollDeviceTokenAsync_ClockPastExpiry_Throws408WithoutPolling()
     {
-        var handler = new StubHandler();
+        var handler = new StubHttpHandler();
         var client = CreateClient(handler, out _);
 
         await Assert.ThrowsAsync<TwitchApiException>(() =>

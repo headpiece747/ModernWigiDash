@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
@@ -9,15 +10,10 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class TelemetryStoreFutureClampTests
 {
-    private sealed class FakeTime : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
-    }
-
     [TestMethod]
     public void Update_FutureProducerTimestamp_ClampsToReceiveTime()
     {
-        var clock = new FakeTime();
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
         var store = new TelemetryStore<string>("", TimeSpan.FromSeconds(5), clock);
 
         store.Update("fresh", producerTimestamp: clock.GetUtcNow().UtcDateTime.AddHours(1));
@@ -30,7 +26,7 @@ public class TelemetryStoreFutureClampTests
     [TestMethod]
     public void Update_PastProducerTimestamp_GoesStaleAfterWindow()
     {
-        var clock = new FakeTime();
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
         var store = new TelemetryStore<string>("", TimeSpan.FromSeconds(5), clock);
 
         store.Update("old", producerTimestamp: clock.GetUtcNow().UtcDateTime.AddSeconds(-6));
