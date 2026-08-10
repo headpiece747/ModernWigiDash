@@ -30,6 +30,15 @@ public class FrameTimeWidgetStateTests
         return surface;
     }
 
+    private static void RenderWith(FrameTimeSnapshotDto dto, out FrameTimeWidget widget)
+    {
+        FrameTimeStore.UpdateFromDto(dto);
+        var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        widget = new FrameTimeWidget();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
+        surface.Dispose();
+    }
+
     [TestMethod]
     public void Render_CaptureInactive_RendersPlaceholderWithoutThrowing()
     {
@@ -101,15 +110,6 @@ public class FrameTimeWidgetStateTests
         live.Render(smallCanvas, new SKRect(0, 0, 200, 160));
 
         Assert.IsNotNull(surface);
-    }
-
-    private static void RenderWith(FrameTimeSnapshotDto dto, out FrameTimeWidget widget)
-    {
-        FrameTimeStore.UpdateFromDto(dto);
-        var surface = SKSurface.Create(new SKImageInfo(1016, 592));
-        widget = new FrameTimeWidget();
-        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
-        surface.Dispose();
     }
 
     [TestMethod]

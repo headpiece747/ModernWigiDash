@@ -261,7 +261,7 @@ public sealed class PresentMonNative : IPresentMonNative
             return false;
         }
 
-        if (!TryReadCatalog(out PresentMonMetricCatalog? catalog))
+        if (!TryReadCatalog(out var catalog))
         {
             UnavailableReason = "Could not read the PresentMon metric catalog (pmGetIntrospectionRoot failed).";
             return false;
@@ -315,11 +315,11 @@ public sealed class PresentMonNative : IPresentMonNative
     /// native root is freed immediately after parsing — the catalog is managed
     /// memory owned by this instance.
     /// </summary>
-    private bool TryReadCatalog(out PresentMonMetricCatalog? catalog)
+    private bool TryReadCatalog(out PresentMonMetricCatalog catalog)
     {
         if (_getIntrospectionRootFn!(_session, out IntPtr rootPtr) != PmStatus.Success)
         {
-            catalog = null;
+            catalog = null!;
             return false;
         }
         try

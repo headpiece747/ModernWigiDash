@@ -53,7 +53,7 @@ public static class PresentMonQueryBuilder
         {
             if ((int)spec.Field >= fieldIndexes.Length)
             {
-                throw new ArgumentOutOfRangeException(nameof(spec), $"DynamicField {spec.Field} has no registration slot.");
+                throw new ArgumentOutOfRangeException(nameof(specs), $"DynamicField {spec.Field} has no registration slot.");
             }
             if (!catalog.TryGet((int)spec.MetricId, out var info))
             {
