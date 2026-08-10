@@ -287,8 +287,11 @@ public class ProfileOpsTests
         var placed = ProfileOps.PlaceCentered(profile, loader, new TestContext(), "profile_test_widget");
 
         Assert.IsNotNull(placed);
-        float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-        float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+        // The center snaps through the shared rule — the same float math the
+        // drag/resize snap uses, so placement and manipulation agree at the
+        // half-cell boundary.
+        float cx = GridSizeExtensions.SnapX(DisplayGeometry.FramebufferWidth / 2.0f);
+        float cy = GridSizeExtensions.SnapY(DisplayGeometry.FramebufferHeight / 2.0f);
         Assert.AreEqual(cx - 406f / 2, placed.X);
         Assert.AreEqual(cy - 148f / 2, placed.Y);
     }
