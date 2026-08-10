@@ -58,7 +58,7 @@ public class PresentMonFrameTimeProducerTests
     {
         return new FakePresentMonNative
         {
-            // GPU busy 4.0 ms at 143.2 fps â†’ 4.0 * 143.2 / 10 = 57.28 % busy.
+            // GPU busy 4.0 ms at 143.2 fps → 4.0 * 143.2 / 10 = 57.28 % busy.
             PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 142.8, 2, 6.1, 4),
             FrameTimes = [6.5, 6.7],
         };
@@ -248,13 +248,13 @@ public class PresentMonFrameTimeProducerTests
 
         Assert.IsTrue(dto.IsAvailable);
         Assert.IsTrue(dto.CaptureHealthy, "The grace window must not report capture dead yet");
-        Assert.AreEqual(-1, dto.ProcessId, "Idle reports no process â€” the widget renders monitor mode");
+        Assert.AreEqual(-1, dto.ProcessId, "Idle reports no process — the widget renders monitor mode");
     }
 
     [TestMethod]
     public void Poll_VideoPlayerPresentingAtLowFps_MapsFpsThrough()
     {
-        // A 24fps video must report 23.97 through the DTO unchanged â€” nothing
+        // A 24fps video must report 23.97 through the DTO unchanged — nothing
         // in the pipeline may floor, clamp, or zero low frame rates.
         var native = AvailableNative();
         native.PollResult = new PresentMonDynamicSample(23.97, 22.1, 2.1, 1.2, 23.9, 1, 2.0, 4);
@@ -414,7 +414,7 @@ public class PresentMonFrameTimeProducerTests
         Assert.IsFalse(dto.IsAvailable, "a dead session mid-loop must surface as unavailable, not idle");
         Assert.AreEqual(1, native.CloseSessionCalls, "the dead session handle must be closed");
         CollectionAssert.AreEqual(new[] { 4321 }, native.PolledProcessIds,
-            "polling must stop immediately on a session loss â€” no further candidates");
+            "polling must stop immediately on a session loss — no further candidates");
     }
 
     [TestMethod]
@@ -529,7 +529,7 @@ public class PresentMonFrameTimeProducerTests
             Assert.IsTrue(producer.Poll().CaptureHealthy, "startup empty polls must be healthy");
         }
 
-        foregroundPid = 0; // target closes â€” idle between targets
+        foregroundPid = 0; // target closes — idle between targets
         for (int i = 0; i < 3; i++)
         {
             Assert.IsTrue(producer.Poll().CaptureHealthy, "idle polls must not count toward the grace window");
@@ -597,13 +597,13 @@ public class PresentMonFrameTimeProducerTests
             dto = producer.Poll();
             Assert.IsNotNull(dto);
             Assert.IsTrue(dto.CaptureHealthy,
-                $"poll {i + 1}: only the tracked polls count â€” 9 of them are inside the grace window");
+                $"poll {i + 1}: only the tracked polls count — 9 of them are inside the grace window");
         }
 
         dto = producer.Poll();
         Assert.IsNotNull(dto);
         Assert.IsFalse(dto.CaptureHealthy,
-            "exactly the tracked-empty polls count â€” the rejected candidate must not shorten the grace");
+            "exactly the tracked-empty polls count — the rejected candidate must not shorten the grace");
         CollectionAssert.DoesNotContain(native.PolledProcessIds, 4321, "a rejected candidate is never polled");
     }
 

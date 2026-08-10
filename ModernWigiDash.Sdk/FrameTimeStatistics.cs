@@ -29,7 +29,7 @@ public static class FrameTimeStatistics
     public static double Percentile(IEnumerable<double> values, double percentile)
     {
         // Explicit NaN guard: Math.Clamp propagates NaN, and casting NaN to
-        // int yields 0 â€” a NaN percentile would silently read as the minimum
+        // int yields 0 — a NaN percentile would silently read as the minimum
         // instead of "no data".
         if (double.IsNaN(percentile)) return 0;
 
@@ -72,7 +72,7 @@ public static class FrameTimeStatistics
 
     /// <summary>
     /// Nearest-rank index for a sorted sample of <paramref name="count"/> items
-    /// at the given percentile â€” the single definition of the index math shared
+    /// at the given percentile — the single definition of the index math shared
     /// by both sample paths, clamped so the result is always in range.
     /// </summary>
     private static int NearestRankIndex(int count, double percentile)

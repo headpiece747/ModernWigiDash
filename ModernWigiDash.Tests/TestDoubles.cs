@@ -11,7 +11,7 @@ namespace ModernWigiDash.Tests;
 /// The shared test doubles every test file used to copy: the no-op widget
 /// context (with optional counters), the placed-instance persisting variant,
 /// the in-memory WebSocket feed, the HTTP stub, and the PresentMon interop
-/// stub. One double per seam â€” new widget tests start from a one-line host.
+/// stub. One double per seam — new widget tests start from a one-line host.
 /// </summary>
 internal class TestContext : IModernWigiDashContext
 {
@@ -32,7 +32,7 @@ internal class TestContext : IModernWigiDashContext
 }
 
 /// <summary>
-/// Context that resolves the owning placed instance like MainWindow does â€”
+/// Context that resolves the owning placed instance like MainWindow does —
 /// the companion to ModernWidgetBase.SetProperty (for tests asserting the
 /// PropertyValues persistence path).
 /// </summary>
@@ -51,7 +51,7 @@ internal sealed class PersistingContext(ProfileLayout profile) : TestContext
 
 /// <summary>
 /// In-memory <see cref="IWebSocketFeed"/>: queued messages feed the consumer,
-/// sent payloads are recorded, and connect failures are injectable â€” the
+/// sent payloads are recorded, and connect failures are injectable — the
 /// feed loops (price, Twitch) are drivable without a network.
 /// </summary>
 internal sealed class FakeFeed : IWebSocketFeed
@@ -112,7 +112,7 @@ internal sealed class StubHttpHandler : HttpMessageHandler
     }
 }
 
-/// <summary>PresentMon interop stub â€” keeps the real PresentMonAPI2.dll (and
+/// <summary>PresentMon interop stub — keeps the real PresentMonAPI2.dll (and
 /// its load-time side effects) out of the test host.</summary>
 internal sealed class StubPresentMonNative : IPresentMonNative
 {

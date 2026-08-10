@@ -78,7 +78,7 @@ public class EditOverlayTests
 
         overlay.DrawSelection(surface.Canvas, Widget(), editMode: true, isSelected: true);
 
-        // Resize handle: local (184,134)..(198,148) for a 200x150 widget â€” blue fill over background.
+        // Resize handle: local (184,134)..(198,148) for a 200x150 widget — blue fill over background.
         Assert.AreNotEqual(Background, PixelAt(surface, 191, 141), "The resize handle must be drawn");
         // Selection border: top edge stroke of the widget bounds.
         Assert.AreNotEqual(Background, PixelAt(surface, 100, 0), "The selection border must be drawn");

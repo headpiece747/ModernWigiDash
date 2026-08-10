@@ -37,9 +37,9 @@ public partial class MainWindow
 
     /// <summary>
     /// Resolves the placed instance that owns <paramref name="widget"/> (by
-    /// identity) and persists the property into its PropertyValues Ã¢â‚¬â€ the
+    /// identity) and persists the property into its PropertyValues — the
     /// companion write to <see cref="ModernWidgetBase.SetProperty"/> so widget
-    /// runtime toggles survive ExportÃ¢â€ â€™Import. A small linear scan over the
+    /// runtime toggles survive Export→Import. A small linear scan over the
     /// profile; property changes are user-frequency, not per-frame.
     /// </summary>
     public void PersistProperty(object widget, string propertyName, object? value)

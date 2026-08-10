@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -136,7 +136,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Kick the fetch only when the static-snapshot rule allows and the
-        // client's sync throttle window has elapsed â€” the per-frame async
+        // client's sync throttle window has elapsed — the per-frame async
         // allocation is skipped while the 5-min window is open. The client's
         // atomic claim still decides throttling/in-flight.
         if (!IsStaticSnapshotBlocking && _client.IsFetchWindowElapsed())
@@ -147,7 +147,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         _lastBounds = bounds;
 
         // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render â€” but only when the source actually changed (the
+        // a list mid-render — but only when the source actually changed (the
         // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
@@ -621,7 +621,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// Fetches live weather through the client's atomic fetch claim â€” the
+    /// Fetches live weather through the client's atomic fetch claim — the
     /// in-flight/throttle decision is the client's, single-sourced. While a
     /// static snapshot is showing, non-forced fetches are blocked.
     /// </summary>
@@ -643,7 +643,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the
-    /// "response omitted this section â†’ keep the previous value" semantics.
+    /// "response omitted this section → keep the previous value" semantics.
     /// </summary>
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
