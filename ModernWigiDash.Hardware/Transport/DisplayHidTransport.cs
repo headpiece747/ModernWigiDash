@@ -41,7 +41,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
     // 3-page double-buffering (Base screens 0x20..0x22 — ScreenBase0..2 in
     // DisplayProtocolConstants; only Base0 is const'ed here).
     private const int NumPages = 3;
-    private const byte Base0 = 0x20;
+    private const byte Base0 = DisplayProtocolConstants.ScreenBase0;
     private int _currentPage;
 
     public bool IsConnected => _isConnected;
@@ -520,9 +520,17 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
                 int page = _currentPage;
 
                 // Reused header buffer: SendFrame is serialized by _usbLock, so
-                // no per-frame allocation on the 30 FPS path.
-                BitConverter.GetBytes((uint)0).CopyTo(_frameHeader, 0);
-                BitConverter.GetBytes((uint)frameArray.Length).CopyTo(_frameHeader, 4);
+                // no per-frame allocation on the 30 FPS path. The uint header
+                // fields are written in place — BitConverter.GetBytes would
+                // allocate two byte[4] per frame.
+                _frameHeader[0] = 0;
+                _frameHeader[1] = 0;
+                _frameHeader[2] = 0;
+                _frameHeader[3] = 0;
+                _frameHeader[4] = (byte)frameArray.Length;
+                _frameHeader[5] = (byte)(frameArray.Length >> 8);
+                _frameHeader[6] = (byte)(frameArray.Length >> 16);
+                _frameHeader[7] = (byte)(frameArray.Length >> 24);
 
                 ushort wValue = (ushort)((page << 8) | 0);
                 if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, _frameHeader))

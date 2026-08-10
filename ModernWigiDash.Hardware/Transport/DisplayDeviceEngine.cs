@@ -84,10 +84,13 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// tests drive <see cref="TouchPollTick"/> directly (or call
     /// <see cref="Start"/> to exercise the loop wiring). The state derives
     /// from the injected transport's actual connection truth — never asserted.
+    /// The transport factory returns this same transport, so a Start() that
+    /// reaches TryConnectAsync reconnects through it instead of NRE-ing.
     /// </summary>
     internal DisplayDeviceEngine(IDisplayTransport transport)
     {
         _transport = transport;
+        _transportFactory = () => transport;
         State = transport.IsConnected ? ConnectionState.Connected : ConnectionState.Simulated;
         _touchPoll = CreateTouchPollLoop();
         _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
@@ -150,7 +153,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         TimeSpan.FromMilliseconds(16),
         ready: () => State == ConnectionState.Connected,
         tick: TouchPollTick,
-        onTickFailure: () => { },
+        onTickFailure: () => Log("Touch poll tick failed"),
         log: msg => Log(msg));
 
     /// <summary>

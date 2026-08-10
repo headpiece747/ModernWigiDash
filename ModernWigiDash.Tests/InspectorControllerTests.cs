@@ -95,7 +95,6 @@ public class InspectorControllerTests
             PropertyValues = []
         };
         var host = new InspectorControllerHost(
-            owner: owner,
             emptyPanel: new StackPanel(),
             activePanel: new StackPanel(),
             nameText: new TextBlock(),

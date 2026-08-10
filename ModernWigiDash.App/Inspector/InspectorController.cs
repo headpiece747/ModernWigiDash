@@ -16,7 +16,6 @@ namespace ModernWigiDash.App.Inspector;
 /// into the window (resource lookup, selection, canvas repaint).
 /// </summary>
 public sealed class InspectorControllerHost(
-    Window owner,
     UIElement emptyPanel,
     UIElement activePanel,
     TextBlock nameText,
@@ -33,7 +32,6 @@ public sealed class InspectorControllerHost(
     Func<PlacedWidgetInstance?> getSelectedWidget,
     Action requestCanvasRender)
 {
-    public Window Owner { get; } = owner;
     public UIElement EmptyPanel { get; } = emptyPanel;
     public UIElement ActivePanel { get; } = activePanel;
     public TextBlock NameText { get; } = nameText;

@@ -95,7 +95,9 @@ public sealed class EditOverlay
         var bounds = new SKRect(0, 0, widget.Width, widget.Height);
         canvas.DrawRect(bounds, _selectionPaint);
 
-        // Draw ZIndex / Name badge at top left
+        // Draw ZIndex / Name badge at top left. A per-render font is correct
+        // here: GetCachedFont returns a cache-owned SKFont that callers must
+        // NOT dispose, and this badge is edit-mode-only (not the 30 FPS path).
         using var font = FontHelper.CreateFont(_uiTypeface, 12f);
         string badgeText = $"{widget.DisplayName} (Z: {widget.ZIndex})";
         var textBounds = new SKRect();

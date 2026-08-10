@@ -438,8 +438,11 @@ internal class WinUsbBulkDevice : ITransferBackend
         setup.Index = wIndex;
         setup.Length = (ushort)buffer.Length;
 
-        return WinUsbNative.WinUsb_ControlTransfer(
-            _interfaceHandle, setup, buffer, (uint)buffer.Length, out _, IntPtr.Zero);
+        // A zero-byte control-in reads as failure (matches the LibUsb backend's
+        // transferred > 0 semantics) — the PING depends on both backends agreeing.
+        bool ok = WinUsbNative.WinUsb_ControlTransfer(
+            _interfaceHandle, setup, buffer, (uint)buffer.Length, out uint transferred, IntPtr.Zero);
+        return ok && transferred > 0;
     }
 
     public void Dispose()

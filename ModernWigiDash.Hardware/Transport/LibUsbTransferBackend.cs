@@ -17,7 +17,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
 {
     private readonly IUsbDevice _device;
     private readonly UsbEndpointWriter _writer;
-    private readonly LogCadence _bulkDiagLog = new(60);
+    private readonly LogCadence _bulkDiagLog = new(30); // matches the WinUSB backend's diag cadence
 
     public LibUsbTransferBackend(IUsbDevice device, UsbEndpointWriter writer)
     {

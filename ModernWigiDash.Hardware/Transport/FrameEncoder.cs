@@ -9,6 +9,11 @@ namespace ModernWigiDash.Hardware.Transport;
 /// </summary>
 public static class FrameEncoder
 {
+    /// <summary>The RGB565 bit packing — the one definition (fast and
+    /// fallback paths share it).</summary>
+    internal static ushort PackRgb565(byte red, byte green, byte blue)
+        => (ushort)(((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3));
+
     /// <summary>
     /// Converts an SKBitmap to RGB565 Little Endian, writing into the
     /// caller-provided destination buffer (which must hold at least the
@@ -60,7 +65,7 @@ public static class FrameEncoder
                                 byte b = srcPtr[i * 4 + blueByte];
                                 byte g = srcPtr[i * 4 + 1];
                                 byte r = srcPtr[i * 4 + redByte];
-                                dstUshort[i] = (ushort)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+                                dstUshort[i] = PackRgb565(r, g, b);
                             }
                         }
                     }
@@ -78,7 +83,7 @@ public static class FrameEncoder
                 int srcX = srcWidth > 0 ? Math.Clamp((x * srcWidth) / width, 0, srcWidth - 1) : 0;
 
                 SKColor color = bitmap.GetPixel(srcX, srcY);
-                ushort rgb565Pixel = (ushort)(((color.Red >> 3) << 11) | ((color.Green >> 2) << 5) | (color.Blue >> 3));
+                ushort rgb565Pixel = PackRgb565(color.Red, color.Green, color.Blue);
 
                 destination[idx++] = (byte)(rgb565Pixel & 0xFF);
                 destination[idx++] = (byte)(rgb565Pixel >> 8);

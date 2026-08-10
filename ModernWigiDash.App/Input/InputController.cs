@@ -34,7 +34,7 @@ public enum ManipulationKind
 /// </summary>
 public sealed class InputController
 {
-    private readonly GestureInterpreter _machine;
+    private readonly GestureInterpreter _machine = new();
     private readonly Action<int>? _navigateTo;
     private readonly Action? _requestRender;
     private readonly Action<PageLayout, float, float, TouchEventType> _routeTouch;
@@ -44,8 +44,6 @@ public sealed class InputController
     private Point _iconGrabOffset;
     private bool _iconGrabMoved;
 
-    /// <param name="machine">Gesture machine; the controller creates one when
-    /// omitted. Tests inject a machine to observe Feed calls.</param>
     /// <param name="navigateTo">Page-switch seam. Called with the target page
     /// index when a swipe/arrow-tap navigates; MainWindow performs the UI work.</param>
     /// <param name="requestRender">Canvas refresh seam, invoked when a touch
@@ -53,12 +51,10 @@ public sealed class InputController
     /// <param name="routeTouch">Widget-touch routing; defaults to the
     /// compositor's hit-test routing. Tests inject a spy.</param>
     public InputController(
-        GestureInterpreter? machine = null,
         Action<int>? navigateTo = null,
         Action? requestRender = null,
         Action<PageLayout, float, float, TouchEventType>? routeTouch = null)
     {
-        _machine = machine ?? new GestureInterpreter();
         _navigateTo = navigateTo;
         _requestRender = requestRender;
         _routeTouch = routeTouch ?? SkiaFrameCompositor.RouteTouch;

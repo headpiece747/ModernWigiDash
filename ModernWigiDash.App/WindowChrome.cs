@@ -26,7 +26,7 @@ public static class WindowChrome
     /// Enables the dark title bar and paints the caption to match the theme.
     /// Assigns the app icon when the window has none (owned dialogs).
     /// </summary>
-    public static void ApplyDarkTitleBar(Window window, string captionHex = "#0F111A")
+    public static void ApplyDarkTitleBar(Window window, string captionHex)
     {
         if (window.Icon == null)
         {

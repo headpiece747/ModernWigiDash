@@ -86,7 +86,6 @@ public sealed class TrackedTargetResolver
     }
 
     /// <summary>True when the pid is this process — never a tracking target.</summary>
-    public static bool IsOwnProcess(int pid) => pid == Environment.ProcessId;
 
     /// <summary>Children of <paramref name="pid"/>: from the resolution-wide
     /// parent map when walking the real tree, else from the injected provider.</summary>

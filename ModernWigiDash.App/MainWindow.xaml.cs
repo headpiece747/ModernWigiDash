@@ -128,7 +128,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _dialogHost = new DialogHost(this, TryFindResource, LogError);
 
         _inspector = new Inspector.InspectorController(new Inspector.InspectorControllerHost(
-            owner: this,
             emptyPanel: PanelEmptyInspector,
             activePanel: PanelActiveInspector,
             nameText: TxtInspName,
