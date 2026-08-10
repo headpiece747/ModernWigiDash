@@ -54,13 +54,13 @@ public class FrameTimeWidget : ModernWidgetBase
 
         if (IsOverlayView)
         {
-            RenderOverlayView(canvas, bounds, accent, text, snapshot);
+            RenderOverlayView(canvas, bounds, text, snapshot);
             return;
         }
 
         if (snapshot.ProcessId <= 0)
         {
-            RenderDashView(canvas, bounds, accent, text);
+            RenderDashView(canvas, bounds, accent);
             return;
         }
 
@@ -72,7 +72,7 @@ public class FrameTimeWidget : ModernWidgetBase
     /// with "—" values — PresentMon has no data to show and its overlay renders
     /// nothing. No fabricated numbers.
     /// </summary>
-    private void RenderDashView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text)
+    private void RenderDashView(SKCanvas canvas, SKRect bounds, SKColor accent)
     {
         float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
         float heroTop = bounds.Top + pad;
@@ -205,7 +205,7 @@ public class FrameTimeWidget : ModernWidgetBase
     /// 99th/1st %tile stat naming. Lines clip from the bottom as the placement
     /// shrinks.
     /// </summary>
-    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotRecord snapshot)
+    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor text, FrameTimeSnapshotRecord snapshot)
     {
         bool dash = snapshot.ProcessId <= 0;
         float pad = Math.Clamp(bounds.Height * 0.06f, 8f, 20f);
@@ -216,7 +216,7 @@ public class FrameTimeWidget : ModernWidgetBase
         using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         float lineHeight = fontSize * 1.45f;
 
-        int maxLines = bounds.Height < 110f ? 1 : bounds.Height < 150f ? 4 : 9;
+        int maxLines = bounds.Height switch { < 110f => 1, < 150f => 4, _ => 9 };
         int lines = Math.Min(maxLines, dash ? 1 : 9);
 
         string F1(double v) => v > 0 ? $"{v:F1} ms" : "—";
