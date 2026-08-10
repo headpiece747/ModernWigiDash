@@ -24,7 +24,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// at the 1s poll cadence. Idle polls (no candidates) and track rejections
     /// never count toward this window.
     /// </summary>
-    private const int CaptureHealthGracePolls = 10;
+    internal const int CaptureHealthGracePolls = 10;
 
     private readonly IPresentMonNative _native;
     private readonly TrackedTargetResolver _resolver;
@@ -50,8 +50,8 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// <summary>
     /// Produces one frame-time snapshot. The DTO is never null: availability
     /// failures, an empty candidate set, and "no data yet" all yield a
-    /// well-formed snapshot the widget can render (unavailable, or idle in
-    /// monitor-refresh mode with <see cref="FrameTimeSnapshotDto.ProcessId"/> = -1).
+    /// well-formed snapshot the widget can render (unavailable, or idle in the
+    /// widget's no-process (dash) state with <see cref="FrameTimeSnapshotDto.ProcessId"/> = -1).
     /// </summary>
     public FrameTimeSnapshotDto Poll()
     {
@@ -131,8 +131,12 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
                 FrameTimeMs = poll.Sample.Fps > 0 ? 1000.0 / poll.Sample.Fps : 0,
                 Low1PercentFps = poll.Sample.Low1PercentFps,
                 Low01PercentFps = FrameTimeStatistics.Low01PercentFps(_recentFrameTimes),
-                GpuBusyMs = poll.Sample.GpuBusyMs,
+                GpuBusyPercent = poll.Sample.GpuBusyPercent,
                 CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
+                DisplayedFps = poll.Sample.DisplayedFps,
+                DroppedFrames = poll.Sample.DroppedFrames,
+                GpuTimeMs = poll.Sample.GpuTimeMs,
+                PresentModeId = poll.Sample.PresentModeId,
                 RecentFrameTimesMs = new List<double>(_recentFrameTimes),
             };
         }
@@ -217,8 +221,8 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// Session is up, a target exists, but no present data has arrived for the
     /// whole grace window — the service's ETW capture is not producing events.
     /// The DTO stays "available" (the service is reachable) but flags the
-    /// capture unhealthy so the widget can say so instead of showing
-    /// monitor-refresh mode as real FPS.
+    /// capture unhealthy so the widget can say so instead of presenting
+    /// fabricated values.
     /// </summary>
     private static FrameTimeSnapshotDto CaptureDead(DateTime now) => new()
     {

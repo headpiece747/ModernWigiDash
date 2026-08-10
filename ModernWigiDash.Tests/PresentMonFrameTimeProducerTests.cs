@@ -58,7 +58,7 @@ public class PresentMonFrameTimeProducerTests
     {
         return new FakePresentMonNative
         {
-            PollResult = new PresentMonDynamicSample(143.2, 110.4, 0.93, 4.05),
+            PollResult = new PresentMonDynamicSample(143.2, 110.4, 71.0, 4.05, 142.8, 2, 6.1, 4),
             FrameTimes = [6.5, 6.7],
         };
     }
@@ -153,8 +153,12 @@ public class PresentMonFrameTimeProducerTests
         Assert.AreEqual(143.2, dto.Fps, 0.001);
         Assert.AreEqual(1000.0 / 143.2, dto.FrameTimeMs, 0.001);
         Assert.AreEqual(110.4, dto.Low1PercentFps, 0.001);
-        Assert.AreEqual(0.93, dto.GpuBusyMs, 0.001, "GPU busy is already ms per frame (PM_METRIC_GPU_BUSY); no conversion");
+        Assert.AreEqual(71.0, dto.GpuBusyPercent, 0.001, "GPU busy is a percent metric (PM_METRIC_GPU_BUSY); no conversion");
         Assert.AreEqual(4.05, dto.CpuFrameTimeMs, 0.001);
+        Assert.AreEqual(142.8, dto.DisplayedFps, 0.001);
+        Assert.AreEqual(2, dto.DroppedFrames);
+        Assert.AreEqual(6.1, dto.GpuTimeMs, 0.001);
+        Assert.AreEqual(4, dto.PresentModeId);
         double expectedLow01 = FrameTimeStatistics.Low01PercentFps([6.5, 6.7]);
         Assert.AreEqual(expectedLow01, dto.Low01PercentFps, 0.001);
         CollectionAssert.AreEqual(new[] { 6.5, 6.7 }, dto.RecentFrameTimesMs.ToArray());
@@ -207,6 +211,58 @@ public class PresentMonFrameTimeProducerTests
         Assert.IsTrue(dto.IsAvailable);
         Assert.AreEqual(-1, dto.ProcessId);
         Assert.AreEqual(0, native.PolledProcessIds.Count, "must not poll a process tracking rejected");
+    }
+
+    [TestMethod]
+    public void Poll_VideoPlayerTrackedButNoPresentData_DeclaresCaptureDeadAfterGrace()
+    {
+        // The video-present pattern: PresentMon tracks the player but never
+        // returns present data (composition/overlay presents are not
+        // attributed to the player). Pin the producer's response: Idle for
+        // the grace window, then CaptureDead.
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 7777);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < PresentMonFrameTimeProducer.CaptureHealthGracePolls; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsTrue(dto!.IsAvailable, "A tracked-but-silent process stays 'available'");
+        Assert.IsFalse(dto.CaptureHealthy, "After the grace window the capture is declared dead");
+        Assert.AreEqual(-1, dto.ProcessId, "The dead-capture DTO reports no target process");
+    }
+
+    [TestMethod]
+    public void Poll_VideoPlayerTrackedButNoPresentData_IdleDuringGrace()
+    {
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(null, PmStatus.Success);
+        var producer = CreateProducer(native, 7777);
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.IsTrue(dto.CaptureHealthy, "The grace window must not report capture dead yet");
+        Assert.AreEqual(-1, dto.ProcessId, "Idle reports no process — the widget renders monitor mode");
+    }
+
+    [TestMethod]
+    public void Poll_VideoPlayerPresentingAtLowFps_MapsFpsThrough()
+    {
+        // A 24fps video must report 23.97 through the DTO unchanged — nothing
+        // in the pipeline may floor, clamp, or zero low frame rates.
+        var native = AvailableNative();
+        native.PollResult = new PresentMonDynamicSample(23.97, 22.1, 2.1, 1.2, 23.9, 1, 2.0, 4);
+        var producer = CreateProducer(native, 7777);
+
+        var dto = producer.Poll();
+
+        Assert.AreEqual(23.97, dto.Fps, 0.001);
+        Assert.AreEqual(7777, dto.ProcessId);
+        Assert.IsTrue(dto.CaptureHealthy);
     }
 
     [TestMethod]
@@ -311,7 +367,7 @@ public class PresentMonFrameTimeProducerTests
         var native = AvailableNative();
         var producer = CreateProducer(native, 4321, pid => pid == 4321 ? [4322] : []);
         native.PollHandler = pid => new PresentMonPollResult(
-            pid == 4322 ? new PresentMonDynamicSample(143.2, 110.4, 0.93, 4.05) : null,
+            pid == 4322 ? new PresentMonDynamicSample(143.2, 110.4, 71.0, 4.05, 142.8, 2, 6.1, 4) : null,
             PmStatus.Success);
 
         var dto = producer.Poll();
@@ -430,7 +486,7 @@ public class PresentMonFrameTimeProducerTests
         }
 
         native.PollHandler = _ => new PresentMonPollResult(
-            new PresentMonDynamicSample(120.0, 100.0, 0.5, 3.0), PmStatus.Success);
+            new PresentMonDynamicSample(120.0, 100.0, 0.5, 3.0, 119.8, 0, 4.0, 8), PmStatus.Success);
 
         var dto = producer.Poll();
 

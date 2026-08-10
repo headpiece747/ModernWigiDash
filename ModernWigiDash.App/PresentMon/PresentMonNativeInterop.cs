@@ -10,8 +10,12 @@ namespace ModernWigiDash.App.PresentMon;
 internal static class PresentMonProtocol
 {
     public const uint MetricCpuFrameTime = 8;
+    public const uint MetricDisplayedFps = 11;
     public const uint MetricPresentedFps = 12;
+    public const uint MetricGpuTime = 13;
     public const uint MetricGpuBusy = 14;
+    public const uint MetricDroppedFrames = 16;
+    public const uint MetricPresentMode = 20;
     public const uint MetricBetweenPresents = 78;
     public const uint StatNone = 0;
     public const uint StatAvg = 1;

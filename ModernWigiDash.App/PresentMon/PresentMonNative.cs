@@ -167,8 +167,12 @@ public sealed class PresentMonNative : IPresentMonNative
             var sample = new PresentMonDynamicSample(
                 Fps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[0]),
                 Low1PercentFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[1]),
-                GpuBusyMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
-                CpuFrameTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[3]));
+                GpuBusyPercent: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
+                CpuFrameTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[3]),
+                DisplayedFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[4]),
+                GpuTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[5]),
+                DroppedFrames: (int)PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[6]),
+                PresentModeId: (int)PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[7]));
             return new PresentMonPollResult(sample, PmStatus.Success);
         }
     }
@@ -226,6 +230,10 @@ public sealed class PresentMonNative : IPresentMonNative
             new PresentMonQueryElement(PresentMonProtocol.MetricPresentedFps, PresentMonProtocol.StatPercentile01, 0, 0, 0, 0),
             new PresentMonQueryElement(PresentMonProtocol.MetricGpuBusy, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
             new PresentMonQueryElement(PresentMonProtocol.MetricCpuFrameTime, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
+            new PresentMonQueryElement(PresentMonProtocol.MetricDisplayedFps, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
+            new PresentMonQueryElement(PresentMonProtocol.MetricGpuTime, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
+            new PresentMonQueryElement(PresentMonProtocol.MetricDroppedFrames, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
+            new PresentMonQueryElement(PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
         };
 
         // dataOffset/dataSize are filled in by the service during registration
