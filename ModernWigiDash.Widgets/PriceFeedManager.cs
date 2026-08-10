@@ -459,19 +459,12 @@ public sealed class PriceFeedManager : IDisposable
             if (CoinGeckoIdFor(baseCoin) is not string geckoId) return;
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
             string json = await _http.GetStringAsync(url, _cts.Token);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty(geckoId, out var coinEl)
-                && coinEl.TryGetProperty("usd", out var usdEl)
-                && usdEl.ValueKind != JsonValueKind.Null)
+            if (PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, geckoId, out var price, out var change))
             {
-                decimal price = usdEl.GetDecimal();
-                decimal change = coinEl.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null
-                    ? changeEl.GetDecimal()
-                    : 0m;
                 _prices[baseCoin] = new PriceInfo
                 {
                     Price = price,
-                    ChangePercent = change,
+                    ChangePercent = change ?? 0m,
                     Source = "CoinGecko",
                     Timestamp = Clock.GetUtcNow().UtcDateTime
                 };
@@ -524,14 +517,12 @@ public sealed class PriceFeedManager : IDisposable
     {
         if (!IsValidSymbol(sym)) return;
         var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        if (root.TryGetProperty("c", out var c) && root.TryGetProperty("dp", out var dp) && dp.ValueKind != JsonValueKind.Null)
+        if (PriceFeedMessages.TryParseFinnhubQuote(json, out var price, out var change))
         {
             _prices[sym] = new PriceInfo
             {
-                Price = c.GetDecimal(),
-                ChangePercent = dp.GetDecimal(),
+                Price = price,
+                ChangePercent = change ?? 0m,
                 Source = "Finnhub",
                 Timestamp = Clock.GetUtcNow().UtcDateTime
             };
@@ -667,23 +658,15 @@ public sealed class PriceFeedManager : IDisposable
                 try
                 {
                     var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token);
-                    using var doc = JsonDocument.Parse(json);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("lastPrice", out var lp) && root.TryGetProperty("priceChangePercent", out var pcp))
+                    if (PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change))
                     {
-                        var priceStr = lp.GetString() ?? "";
-                        var changeStr = pcp.GetString() ?? "";
-                        if (decimal.TryParse(priceStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var price) &&
-                            decimal.TryParse(changeStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var change))
+                        _prices[sym] = new PriceInfo
                         {
-                            _prices[sym] = new PriceInfo
-                            {
-                                Price = price,
-                                ChangePercent = change,
-                                Source = "BinanceUS",
-                                Timestamp = Clock.GetUtcNow().UtcDateTime
-                            };
-                        }
+                            Price = price,
+                            ChangePercent = change,
+                            Source = "BinanceUS",
+                            Timestamp = Clock.GetUtcNow().UtcDateTime
+                        };
                     }
                 }
                 catch
@@ -706,12 +689,10 @@ public sealed class PriceFeedManager : IDisposable
             var root = doc.RootElement;
             foreach (var alias in CryptoAliases.Values.DistinctBy(a => a.Symbol))
             {
-                if (!root.TryGetProperty(alias.CoinGeckoId, out var coin)) continue;
-                if (!coin.TryGetProperty("usd", out var priceEl) || priceEl.ValueKind == JsonValueKind.Null) continue;
-                var price = priceEl.GetDecimal();
-                decimal? change = null;
-                if (coin.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null)
-                    change = changeEl.GetDecimal();
+                if (!PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, alias.CoinGeckoId, out var price, out var change))
+                {
+                    continue;
+                }
                 _prices.AddOrUpdate(alias.Symbol, _ => new PriceInfo
                 {
                     Price = price,
@@ -740,66 +721,31 @@ public sealed class PriceFeedManager : IDisposable
 
     private void ParseBinanceTicker(string json)
     {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            string s, c, P;
-            if (root.TryGetProperty("data", out var data))
-            {
-                s = data.GetProperty("s").GetString() ?? "";
-                c = data.GetProperty("c").GetString() ?? "";
-                P = data.GetProperty("P").GetString() ?? "";
-            }
-            else if (root.TryGetProperty("e", out _))
-            {
-                s = root.GetProperty("s").GetString() ?? "";
-                c = root.GetProperty("c").GetString() ?? "";
-                P = root.GetProperty("P").GetString() ?? "";
-            }
-            else return;
-
-            if (s.EndsWith("USDT") && decimal.TryParse(c, NumberStyles.Any, CultureInfo.InvariantCulture, out var price) && decimal.TryParse(P, NumberStyles.Any, CultureInfo.InvariantCulture, out var change))
-            {
-                var coin = s[..^4].ToUpper();
-                _prices[coin] = new PriceInfo
-                {
-                    Price = price,
-                    ChangePercent = change,
-                    Source = "Binance",
-                    Timestamp = Clock.GetUtcNow().UtcDateTime
-                };
-            }
-        }
-        catch
+        if (!PriceFeedMessages.TryParseBinanceTicker(json, out var coin, out var price, out var change))
         {
             System.Diagnostics.Debug.WriteLine("Failed to parse Binance ticker message; ignoring");
+            return;
         }
+        _prices[coin] = new PriceInfo
+        {
+            Price = price,
+            ChangePercent = change,
+            Source = "Binance",
+            Timestamp = Clock.GetUtcNow().UtcDateTime
+        };
     }
 
     private void ParseFinnhubMessage(string json)
     {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var type = root.GetProperty("type").GetString();
-
-            if (type == "trade" && root.TryGetProperty("data", out var trades))
-            {
-                foreach (var trade in trades.EnumerateArray())
-                {
-                    var s = trade.GetProperty("s").GetString() ?? "";
-                    var p = trade.GetProperty("p").GetDecimal();
-                    _prices.AddOrUpdate(s, _ => new PriceInfo { Price = p, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime },
-                        (_, existing) => new PriceInfo { Price = p, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime });
-                }
-            }
-        }
-        catch
+        if (!PriceFeedMessages.TryParseFinnhubTrades(json, out var trades))
         {
             System.Diagnostics.Debug.WriteLine("Failed to parse Finnhub message; ignoring");
+            return;
+        }
+        foreach (var trade in trades)
+        {
+            _prices.AddOrUpdate(trade.Symbol, _ => new PriceInfo { Price = trade.Price, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime },
+                (_, existing) => new PriceInfo { Price = trade.Price, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime });
         }
     }
 
