@@ -101,17 +101,17 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         await base.DisposeAsync();
     }
 
-    private AssetKind AssetKindValue => PriceFeedManager.DetectAssetKind(Symbol, AssetType);
+    private AssetKind AssetKindValue => SymbolCatalog.DetectAssetKind(Symbol, AssetType);
     private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
 
     private string DisplayLabel
     {
         get
         {
-            string? fxLabel = IsFxAsset && PriceFeedManager.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
+            string? fxLabel = IsFxAsset && SymbolCatalog.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
                 ? $"{baseCur} / {quoteCur}"
                 : null;
-            return TickerPresentation.DisplayLabel(DisplayName, fxLabel, PriceFeedManager.NormalizeSymbol(Symbol));
+            return TickerPresentation.DisplayLabel(DisplayName, fxLabel, SymbolCatalog.NormalizeSymbol(Symbol));
         }
     }
 

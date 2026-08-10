@@ -26,6 +26,60 @@ public class ClockStopwatchTickerPresentationTests
         Assert.AreEqual("Monday, August 10, 2026", ClockPresentation.Date(day));
     }
 
+    [TestMethod]
+    public void Clock_FormatTime_UsesTwelveOrTwentyFourHour()
+    {
+        var now = new DateTime(2026, 8, 7, 13, 37, 5, DateTimeKind.Unspecified);
+
+        Assert.AreEqual("01:37", ClockPresentation.FormatClockTime(now, "12H"));
+        Assert.AreEqual("13:37", ClockPresentation.FormatClockTime(now, "24H"));
+    }
+
+    [TestMethod]
+    public void Clock_FormatTime_MidnightRollsToTwelve()
+    {
+        var midnight = new DateTime(2026, 8, 7, 0, 5, 0, DateTimeKind.Unspecified);
+
+        Assert.AreEqual("12:05", ClockPresentation.FormatClockTime(midnight, "12H"));
+        Assert.AreEqual("00:05", ClockPresentation.FormatClockTime(midnight, "24H"));
+    }
+
+    [TestMethod]
+    public void Clock_HandAngles_Noon_PointStraightUp()
+    {
+        var noon = new DateTime(2026, 8, 10, 12, 0, 0, DateTimeKind.Unspecified);
+
+        (float hour, float minute, float second) = ClockPresentation.HandAngles(noon);
+
+        Assert.AreEqual(0f, hour, 1e-4f, "12:00:00 puts every hand straight up (0 rad)");
+        Assert.AreEqual(0f, minute, 1e-4f);
+        Assert.AreEqual(0f, second, 1e-4f);
+    }
+
+    [TestMethod]
+    public void Clock_HandAngles_ThreeOClock_HourAtNinetyDegrees()
+    {
+        var three = new DateTime(2026, 8, 10, 15, 0, 0, DateTimeKind.Unspecified);
+
+        (float hour, float minute, float second) = ClockPresentation.HandAngles(three);
+
+        Assert.AreEqual((float)(Math.PI / 2), hour, 1e-4f, "3 o'clock reads 90° for the hour hand");
+        Assert.AreEqual(0f, minute, 1e-4f);
+        Assert.AreEqual(0f, second, 1e-4f);
+    }
+
+    [TestMethod]
+    public void Clock_HandAngles_Sweep_MinutesCarryIntoHands()
+    {
+        var sweep = new DateTime(2026, 8, 10, 6, 30, 30, DateTimeKind.Unspecified);
+
+        (float hour, float minute, float second) = ClockPresentation.HandAngles(sweep);
+
+        Assert.AreEqual(195f * (float)(Math.PI / 180f), hour, 1e-4f, "6:30 puts the hour hand halfway to 7");
+        Assert.AreEqual(183f * (float)(Math.PI / 180f), minute, 1e-4f, "the 30s carry moves the minute hand 3° past 6");
+        Assert.AreEqual(180f * (float)(Math.PI / 180f), second, 1e-4f);
+    }
+
     // ── StopwatchPresentation ──
 
     [TestMethod]

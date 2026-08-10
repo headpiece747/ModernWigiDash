@@ -53,17 +53,32 @@ public class TwitchWidgetTests
     }
 
     [TestMethod]
-    public void TwitchWidget_RendersMessagesWithEmojisWithoutErrors()
+    public async Task TwitchWidget_RendersMessagesWithEmojisWithoutErrors()
     {
-        var widget = new TwitchChatStreamWidget();
+        // A raw IRC line through the widget's real path (FakeFeed → IRC loop →
+        // parser → message list), the same wiring TwitchChatStreamLoopTests
+        // drives — the widget owns no message-injection seam anymore.
+        var feed = new FakeFeed();
+        feed.QueueMessage(":GamerOne!GamerOne@GamerOne.tmi.twitch.tv PRIVMSG #test :Hello world! 🔥 🎉 💬\r\n");
+        var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
+        widget.FeedFactory = () => feed;
+        widget.Session = new TwitchSession(
+            new TwitchTokenStore(Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin")),
+            _ => throw new NotSupportedException("An empty store must never reach the API client"),
+            TimeProvider.System);
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
+
+        await TestWait.WaitUntilAsync(() => widget.MessageCountForTest >= 1, TimeSpan.FromSeconds(3));
+
         using var bitmap = new SKBitmap(400, 300);
         using var canvas = new SKCanvas(bitmap);
         var bounds = new SKRect(0, 0, 400, 300);
-        widget.AddTestChatMessageForTesting("GamerOne", "Hello world! 🔥 🎉 💬");
         widget.Render(canvas, bounds);
 
         // The message render must paint the panel — a fully transparent canvas
         // would mean the queued message was never drawn.
         Assert.AreNotEqual(0, bitmap.GetPixel(200, 150).Alpha, "The chat panel must paint when messages are queued");
+
+        await widget.DisposeAsync();
     }
 }

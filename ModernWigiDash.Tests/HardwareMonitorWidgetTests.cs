@@ -170,6 +170,15 @@ public class HardwareMonitorWidgetTests
     }
 
     [TestMethod]
+    public void GaugeFraction_ClampsIntoUnitRange()
+    {
+        Assert.AreEqual(0.5f, HardwareMonitorWidget.GaugeFraction(50f, 100f), 1e-6f);
+        Assert.AreEqual(0f, HardwareMonitorWidget.GaugeFraction(-5f, 100f), "negative values clamp to zero");
+        Assert.AreEqual(1f, HardwareMonitorWidget.GaugeFraction(150f, 100f), "over-max values clamp to one");
+        Assert.AreEqual(1f, HardwareMonitorWidget.GaugeFraction(50f, 0f), "a non-positive max must not divide by zero");
+    }
+
+    [TestMethod]
     public void History_CappedAtCapacity_AfterManyRenders()
     {
         SeedFreshSnapshot();

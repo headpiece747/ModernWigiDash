@@ -60,27 +60,14 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         float padding = Math.Min(12f, bounds.Width * 0.04f);
         float textWidth = bounds.Width - padding * 2f;
 
-        // The wrapped line list is rebuilt only when (Text, FontSize, width)
-        // changes — the wrap loop measures every candidate, so per-frame
-        // recomputation is wasted work at 30 FPS.
-        if (Text != _wrapKeyText
-            || Math.Abs(fontSize - _wrapKeyFontSize) > 0.01f
-            || Math.Abs(textWidth - _wrapKeyWidth) > 0.5f)
-        {
-            _wrapKeyText = Text;
-            _wrapKeyFontSize = fontSize;
-            _wrapKeyWidth = textWidth;
-            List<string> wrapped = [];
-            foreach (string rawLine in (Text ?? "").Split('\n'))
-            {
-                wrapped.AddRange(TextRenderHelper.WrapText(rawLine, font, textWidth));
-            }
-            _wrappedCache = wrapped;
-        }
-        if (_wrappedCache.Count == 0) return;
+        // The wrapped line list is memoized per (Text, fontSize, width) — the
+        // wrap loop measures every candidate, so per-frame recomputation is
+        // wasted work at 30 FPS.
+        IReadOnlyList<string> wrapped = _wrappedLines.GetOrWrap(Text, font, fontSize, textWidth);
+        if (wrapped.Count == 0) return;
 
         float lineHeight = fontSize * 1.25f;
-        float totalHeight = _wrappedCache.Count * lineHeight;
+        float totalHeight = wrapped.Count * lineHeight;
         float firstBaseline = bounds.MidY - totalHeight / 2f + fontSize * 0.8f;
 
         float anchorX = alignment switch
@@ -90,14 +77,11 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
             _ => bounds.MidX
         };
 
-        for (int i = 0; i < _wrappedCache.Count; i++)
+        for (int i = 0; i < wrapped.Count; i++)
         {
-            canvas.DrawTextWithFallback(_wrappedCache[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
+            canvas.DrawTextWithFallback(wrapped[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
         }
     }
 
-    private string _wrapKeyText = "";
-    private float _wrapKeyFontSize = -1f;
-    private float _wrapKeyWidth = -1f;
-    private List<string> _wrappedCache = [];
+    private readonly WrapCache _wrappedLines = new();
 }

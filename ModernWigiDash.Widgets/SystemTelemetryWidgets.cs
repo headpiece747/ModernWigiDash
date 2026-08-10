@@ -142,6 +142,59 @@ public class HardwareMonitorWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, headerFont, headerPaint);
     }
 
+    /// <summary>
+    /// The value progress fraction clamped into 0..1 (shared by the gauge and
+    /// bar tracks). A non-positive max can never divide by zero.
+    /// </summary>
+    internal static float GaugeFraction(float value, float max)
+        => Math.Clamp(value / Math.Max(1f, max), 0f, 1f);
+
+    /// <summary>
+    /// Draws the big hero value with its trailing unit — the "value + unit"
+    /// block shared by the four display modes. Per-mode spacing stays at the
+    /// call sites: value font size, baseline anchor, unit font size, and the
+    /// unit's pixel offset from the value (the +4/+5/+6 deltas are pixel
+    /// behavior, not duplication).
+    /// </summary>
+    /// <param name="anchorX">The value's horizontal anchor: its center, or its
+    /// right edge when <paramref name="rightAligned"/> is set.</param>
+    /// <param name="baselineAnchor">Baseline before the value's own height
+    /// contribution; Gauge adds 1/3 of the measured height to sit the value on
+    /// its own metrics, the other modes use 0 for a fixed baseline.</param>
+    /// <param name="baselineFromValue">Fraction of the measured value height
+    /// added to <paramref name="baselineAnchor"/> for the baseline.</param>
+    private static void DrawHeroValue(
+        SKCanvas canvas,
+        float value,
+        int decimals,
+        float anchorX,
+        float baselineAnchor,
+        float baselineFromValue,
+        float valFontSize,
+        SKColor valueColor,
+        SKColor unitColor,
+        string unit,
+        float unitFontSize,
+        float unitOffset,
+        bool rightAligned = false)
+    {
+        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
+        using var valPaint = new SKPaint { Color = valueColor, IsAntialias = true };
+        valFont.MeasureText(valStr, out var valBounds, valPaint);
+
+        float valueX = rightAligned ? anchorX - valBounds.Width : anchorX - valBounds.Width / 2f;
+        float baselineY = baselineAnchor + valBounds.Height * baselineFromValue;
+        canvas.DrawTextWithFallback(valStr, valueX, baselineY, valFont, valPaint);
+
+        if (!string.IsNullOrWhiteSpace(unit))
+        {
+            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, unitFontSize);
+            using var unitPaint = new SKPaint { Color = unitColor, IsAntialias = true };
+            canvas.DrawTextWithFallback(unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, unitPaint);
+        }
+    }
+
     private void RenderGauge(SKCanvas canvas, SKRect bounds, string label, float value, float max, string unit, int decimals, SKColor accent, SKColor text)
     {
         float pad = 16f;
@@ -158,24 +211,13 @@ public class HardwareMonitorWidget : ModernWidgetBase
         trackPath.AddArc(arcBounds, 135f, 270f);
         canvas.DrawPath(trackPath.Snapshot(), trackPaint);
 
-        float progress = Math.Clamp(value / Math.Max(1f, max), 0f, 1f);
+        float progress = GaugeFraction(value, max);
         using var progressPaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
         var progressPath = new SKPathBuilder();
         progressPath.AddArc(arcBounds, 135f, 270f * progress);
         canvas.DrawPath(progressPath.Snapshot(), progressPaint);
 
-        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, gaugeSize * 0.2f);
-        using var valPaint = new SKPaint { Color = text, IsAntialias = true };
-        valFont.MeasureText(valStr, out var valBounds, valPaint);
-        canvas.DrawTextWithFallback(valStr, cx - valBounds.Width / 2f, cy + valBounds.Height / 3f, valFont, valPaint);
-
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
-            using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            canvas.DrawTextWithFallback(unit, cx - valBounds.Width / 2f + valBounds.Width + 4f, cy + valBounds.Height / 3f, unitFont, unitPaint);
-        }
+        DrawHeroValue(canvas, value, decimals, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), unit, 11f, 4f);
     }
 
     private void RenderBar(SKCanvas canvas, SKRect bounds, string label, float value, float max, string unit, int decimals, SKColor accent, SKColor text)
@@ -183,18 +225,8 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float pad = 16f;
         DrawHeader(canvas, bounds, label, pad, text);
 
-        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(bounds.Height * 0.22f, 22f, 48f));
-        using var valPaint = new SKPaint { Color = text, IsAntialias = true };
-        valFont.MeasureText(valStr, out var valBounds, valPaint);
-        canvas.DrawTextWithFallback(valStr, bounds.MidX - valBounds.Width / 2f, bounds.MidY + 4f, valFont, valPaint);
-
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 12f);
-            using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            canvas.DrawTextWithFallback(unit, bounds.MidX - valBounds.Width / 2f + valBounds.Width + 5f, bounds.MidY + 4f, unitFont, unitPaint);
-        }
+        DrawHeroValue(canvas, value, decimals, bounds.MidX, bounds.MidY + 4f, 0f,
+            Math.Clamp(bounds.Height * 0.22f, 22f, 48f), text, text.WithAlpha(180), unit, 12f, 5f);
 
         var barRect = new SKRect(bounds.Left + pad, bounds.MidY + 20f, bounds.Right - pad, bounds.MidY + 32f);
         float trackRadius = barRect.Height / 2f;
@@ -202,7 +234,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         using var trackPaint = new SKPaint { Color = text.WithAlpha(20), IsAntialias = true };
         canvas.DrawRoundRect(barRect, trackRadius, trackRadius, trackPaint);
 
-        float progress = Math.Clamp(value / Math.Max(1f, max), 0f, 1f);
+        float progress = GaugeFraction(value, max);
         float progressWidth = Math.Max(barRect.Height, barRect.Width * progress);
         var progressRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + progressWidth, barRect.Bottom);
         float progressRadius = Math.Min(trackRadius, progressWidth / 2f);
@@ -215,19 +247,8 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float pad = 16f;
         DrawHeader(canvas, bounds, label, pad, text);
 
-        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        float valFontSize = Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f);
-        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
-        using var valPaint = new SKPaint { Color = text, IsAntialias = true };
-        valFont.MeasureText(valStr, out var valBounds, valPaint);
-        canvas.DrawTextWithFallback(valStr, bounds.MidX - valBounds.Width / 2f, bounds.MidY + 4f, valFont, valPaint);
-
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f);
-            using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            canvas.DrawTextWithFallback(unit, bounds.MidX - valBounds.Width / 2f + valBounds.Width + 6f, bounds.MidY + 4f, unitFont, unitPaint);
-        }
+        DrawHeroValue(canvas, value, decimals, bounds.MidX, bounds.MidY + 4f, 0f,
+            Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f), text, text.WithAlpha(180), unit, 14f, 6f);
     }
 
     private void RenderGraph(SKCanvas canvas, SKRect bounds, string label, float value, string unit, int decimals, SKColor accent, SKColor text, SensorReadingDto reading)
@@ -269,18 +290,9 @@ public class HardwareMonitorWidget : ModernWidgetBase
             TextRenderHelper.DrawSparkline(canvas, area, samples, lo, hi, accent);
         }
 
-        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
-        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
-        using var valPaint = new SKPaint { Color = accent, IsAntialias = true };
-        valFont.MeasureText(valStr, out var valBounds, valPaint);
-        canvas.DrawTextWithFallback(valStr, area.Right - valBounds.Width, area.Top + valFont.Size, valFont, valPaint);
-
-        if (!string.IsNullOrWhiteSpace(unit))
-        {
-            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
-            using var unitPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-            canvas.DrawTextWithFallback(unit, area.Right - valBounds.Width + valBounds.Width + 4f, area.Top + valFont.Size, unitFont, unitPaint);
-        }
+        const float valFontSize = 22f;
+        DrawHeroValue(canvas, value, decimals, area.Right, area.Top + valFontSize, 0f,
+            valFontSize, accent, text.WithAlpha(180), unit, 11f, 4f, rightAligned: true);
     }
 }
 

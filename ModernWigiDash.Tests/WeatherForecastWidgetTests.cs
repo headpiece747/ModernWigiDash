@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Widgets;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -64,7 +65,7 @@ public class WeatherForecastWidgetTests
                 ? StubHttpHandler.Ok(SampleGeocode)
                 : StubHttpHandler.Ok(SampleForecast);
         });
-        var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Clock = clock };
 
         await widget.FetchLiveWeatherAsync(force: true);
@@ -90,14 +91,6 @@ public class WeatherForecastWidgetTests
         widget.Render(surface.Canvas, new SKRect(0, 0, 406, 296));
         var pixel = surface.PeekPixels().GetPixelColor(200, 148);
         Assert.AreNotEqual(SKColors.Transparent, pixel, "The composed surface must contain output");
-    }
-
-    private sealed class FakeClock : TimeProvider
-    {
-        private DateTimeOffset _now;
-        public FakeClock(DateTimeOffset start) => _now = start;
-        public void Advance(TimeSpan delta) => _now += delta;
-        public override DateTimeOffset GetUtcNow() => _now;
     }
 
     [TestMethod]
@@ -143,11 +136,17 @@ public class WeatherForecastWidgetTests
         widget.OnTouch(new SKPoint(20f, 15f), TouchEventType.TouchUp);
         Assert.AreEqual("Detailed", widget.LayoutMode);
 
-        // Touch top-right (Unit switch)
-        widget.OnTouch(new SKPoint(widget.DefaultSize.Width - 20f, 15f), TouchEventType.TouchUp);
+        // Touch the unit badge — the badge rect is the tap target (WeatherLayout
+        // owns the geometry; take the badge's center at the fallback bounds).
+        var fallback = new SKRect(0, 0, widget.DefaultSize.Width, widget.DefaultSize.Height);
+        var scale = WeatherLayout.Scale(fallback);
+        var badge = WeatherLayout.ComputeHeader(fallback, scale.S, scale.Sy).BadgeRect;
+        SKPoint badgeTap = new(badge.MidX, badge.MidY);
+
+        widget.OnTouch(badgeTap, TouchEventType.TouchUp);
         Assert.AreEqual("Celsius (°C, km/h)", widget.UnitSystem);
 
-        widget.OnTouch(new SKPoint(widget.DefaultSize.Width - 20f, 15f), TouchEventType.TouchUp);
+        widget.OnTouch(badgeTap, TouchEventType.TouchUp);
         Assert.AreEqual("Fahrenheit (°F, mph)", widget.UnitSystem);
     }
 

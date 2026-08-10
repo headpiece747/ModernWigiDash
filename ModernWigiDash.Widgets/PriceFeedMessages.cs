@@ -8,9 +8,10 @@ public sealed record PriceFeedTrade(string Symbol, decimal Price);
 
 /// <summary>
 /// Pure parsers for the price-feed payloads (Binance WS/REST, Finnhub
-/// WS/REST, CoinGecko). Extracted from PriceFeedManager's private message
-/// handlers and poll bodies so the wire formats are directly testable; the
-/// manager keeps the writes, the clocks, and the subscription state.
+/// WS/REST, CoinGecko, Frankfurter, Yahoo chart). Extracted from
+/// PriceFeedManager's private message handlers and poll bodies so the wire
+/// formats are directly testable; the manager keeps the writes, the clocks,
+/// and the subscription state.
 /// </summary>
 public static class PriceFeedMessages
 {
@@ -163,6 +164,79 @@ public static class PriceFeedMessages
             {
                 changePercent = changeEl.GetDecimal();
             }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Parses a Frankfurter (ECB) daily-rate series. The last entry is the current rate; the
+    /// day-over-day change percent is computed from the last two entries.
+    /// </summary>
+    internal static bool TryParseFrankfurterSeries(string json, string quoteCurrency, out decimal price, out decimal changePercent)
+    {
+        price = 0m;
+        changePercent = 0m;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("rates", out var rates) || rates.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            List<string> dates = [];
+            var ratesByDate = new Dictionary<string, decimal>(StringComparer.Ordinal);
+            foreach (var entry in rates.EnumerateObject())
+            {
+                if (!entry.Value.TryGetProperty(quoteCurrency, out var rateEl) || rateEl.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+                dates.Add(entry.Name);
+                ratesByDate[entry.Name] = rateEl.GetDecimal();
+            }
+
+            if (dates.Count == 0)
+            {
+                return false;
+            }
+
+            dates.Sort(StringComparer.Ordinal); // ISO yyyy-MM-dd sorts chronologically.
+            price = ratesByDate[dates[^1]];
+            if (dates.Count >= 2 && ratesByDate[dates[^2]] != 0m)
+            {
+                changePercent = (ratesByDate[dates[^1]] / ratesByDate[dates[^2]] - 1m) * 100m;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Yahoo chart response: the first result's <c>meta</c> holds the regular
+    /// market price and the previous close; the change percent is derived from
+    /// them (zero when the previous close is unknown).
+    /// </summary>
+    internal static bool TryParseYahooChart(string json, out decimal price, out decimal changePercent)
+    {
+        price = 0m;
+        changePercent = 0m;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var result = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
+            var meta = result.GetProperty("meta");
+            price = (decimal)meta.GetProperty("regularMarketPrice").GetDouble();
+            decimal prevClose = (decimal)meta.GetProperty("chartPreviousClose").GetDouble();
+            changePercent = prevClose != 0 ? (price - prevClose) / prevClose * 100m : 0m;
             return true;
         }
         catch

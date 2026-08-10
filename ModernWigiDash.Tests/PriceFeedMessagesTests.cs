@@ -117,4 +117,64 @@ public class PriceFeedMessagesTests
     {
         Assert.IsFalse(PriceFeedMessages.TryParseCoinGeckoSimplePrice("""{"bitcoin":{"usd":1}}""", "ethereum", out _, out _));
     }
+
+    [TestMethod]
+    public void TryParseFrankfurterSeries_LastEntryIsPrice_ChangeFromPreviousEntry()
+    {
+        const string json = """
+        {
+          "amount": 1.0,
+          "base": "EUR",
+          "start_date": "2026-07-30",
+          "end_date": "2026-08-04",
+          "rates": {
+            "2026-07-30": { "USD": 1.1476 },
+            "2026-07-31": { "USD": 1.1485 },
+            "2026-08-03": { "USD": 1.1511 },
+            "2026-08-04": { "USD": 1.1515 }
+          }
+        }
+        """;
+        Assert.IsTrue(PriceFeedMessages.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
+        Assert.AreEqual(1.1515m, price);
+        Assert.AreEqual((1.1515m / 1.1511m - 1m) * 100m, change);
+    }
+
+    [TestMethod]
+    public void TryParseFrankfurterSeries_HandlesMissingQuoteMalformedJsonAndSingleEntry()
+    {
+        const string json = """
+        {
+          "base": "EUR",
+          "rates": {
+            "2026-07-30": { "USD": 1.1476 }
+          }
+        }
+        """;
+        Assert.IsFalse(PriceFeedMessages.TryParseFrankfurterSeries(json, "GBP", out _, out _));
+        Assert.IsFalse(PriceFeedMessages.TryParseFrankfurterSeries("not-json", "USD", out _, out _));
+
+        Assert.IsTrue(PriceFeedMessages.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
+        Assert.AreEqual(1.1476m, price);
+        Assert.AreEqual(0m, change);
+    }
+
+    [TestMethod]
+    public void TryParseYahooChart_ValidChart_ParsesPriceAndChange()
+    {
+        const string json = """{"chart":{"result":[{"meta":{"regularMarketPrice":150.5,"chartPreviousClose":148.0}}]}}""";
+
+        Assert.IsTrue(PriceFeedMessages.TryParseYahooChart(json, out var price, out var change));
+
+        Assert.AreEqual(150.5m, price);
+        Assert.AreEqual((150.5m / 148.0m - 1m) * 100m, change);
+    }
+
+    [TestMethod]
+    public void TryParseYahooChart_MissingResultOrMalformed_Fails()
+    {
+        Assert.IsFalse(PriceFeedMessages.TryParseYahooChart("""{"chart":{"result":[]}}""", out _, out _),
+            "an empty result array has no meta to read");
+        Assert.IsFalse(PriceFeedMessages.TryParseYahooChart("not json", out _, out _));
+    }
 }

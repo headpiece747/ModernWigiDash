@@ -17,6 +17,29 @@ public static class TwitchChatPresentation
             _ => "○ Disconnected" // unreachable — guards undefined enum values
         };
 
+    /// <summary>
+    /// The NOTICE → connection-state rule: a login-failure notice (or an
+    /// invalid nick) disconnects the chat, the "you are not logged in" notice
+    /// means the anonymous session is live, and any other notice leaves the
+    /// state untouched. The widget derives its detail text and log channel
+    /// from the result.
+    /// </summary>
+    public static (ChatStatus Status, bool Changed) StatusFromNotice(string noticeText, ChatStatus current)
+    {
+        if (noticeText.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase)
+            || noticeText.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
+        {
+            return (ChatStatus.Disconnected, true);
+        }
+
+        if (noticeText.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
+        {
+            return (ChatStatus.Connected, true);
+        }
+
+        return (current, false);
+    }
+
     /// <summary>The empty-chat hint shown when no messages have arrived yet.</summary>
     public static string EmptyHint(ChatStatus status, bool autoConnect)
         => status switch

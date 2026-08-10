@@ -13,9 +13,6 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
 public class WeatherForecastWidget : ModernWidgetBase
 {
-    private const float DesignWidth = 406f;
-    private const float DesignHeight = 296f;
-
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
 
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
@@ -30,8 +27,8 @@ public class WeatherForecastWidget : ModernWidgetBase
     [WidgetProperty("Unit System", WidgetPropertyType.Choice, "Temperature & speed units", "Fahrenheit (°F, mph)", "Fahrenheit (°F, mph)", "Celsius (°C, km/h)", "Celsius (°C, mph)", "Celsius (°C, m/s)", "Kelvin (K, m/s)")]
     public string UnitSystem { get; set; } = WeatherPresentation.DefaultUnitSystem;
 
-    [WidgetProperty("Layout Mode", WidgetPropertyType.Choice, "Display view style", "Detailed", "Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact")]
-    public string LayoutMode { get; set; } = "Detailed";
+    [WidgetProperty("Layout Mode", WidgetPropertyType.Choice, "Display view style", WeatherLayout.DefaultLayoutMode, "Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact")]
+    public string LayoutMode { get; set; } = WeatherLayout.DefaultLayoutMode;
 
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary glowing accent color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
@@ -163,40 +160,30 @@ public class WeatherForecastWidget : ModernWidgetBase
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
-        float sx = bounds.Width / DesignWidth;
-        float sy = bounds.Height / DesignHeight;
-        float s = Math.Min(sx, sy);
-        float pad = Math.Clamp(14f * s, 8f, 32f);
-        float headerHeight = Math.Clamp(44f * sy, 24f, 90f);
+        var (sx, sy, s) = WeatherLayout.Scale(bounds);
+        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
 
         // Prominent Location Name Header
         string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _client.ResolvedCityName : CustomLabel;
         string headerDisplay = cityRaw.ToUpperInvariant();
-        float locationFontSize = Math.Clamp(24f * s, 12f, 44f);
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, locationFontSize);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
         using var titlePaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-
-        float headerTextY = bounds.Top + headerHeight * 0.65f;
 
         // Auto-truncate city name to guarantee header text fits without overlapping badge
         var (tempUnit, speedUnit) = WeatherPresentation.ParseUnitSystem(UnitSystem);
-        float badgeWidth = Math.Clamp(54f * s, 30f, 100f);
-        float badgeHeight = Math.Clamp(26f * sy, 16f, 50f);
-        float maxTitleW = Math.Max(30f, bounds.Width - pad * 2f - badgeWidth);
+        float maxTitleW = Math.Max(30f, bounds.Width - header.Pad * 2f - header.BadgeRect.Width);
 
         string truncatedHeader = TextRenderHelper.TruncateText(headerDisplay, titleFont, maxTitleW);
-        canvas.DrawTextWithFallback(truncatedHeader, bounds.Left + pad, headerTextY, titleFont, titlePaint);
+        canvas.DrawTextWithFallback(truncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, titlePaint);
 
         // Styled Unit Toggle Badge [°F] / [°C] (No background card)
-        SKRect badgeRect = new(bounds.Right - pad - badgeWidth, bounds.Top + (headerHeight - badgeHeight) / 2f, bounds.Right - pad, bounds.Top + (headerHeight + badgeHeight) / 2f);
-
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(17f * s, 10f, 30f));
         using var unitPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         float uW = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
-        canvas.DrawTextWithFallback(tempUnit, badgeRect.MidX - uW / 2f, badgeRect.MidY + 4.5f * s, unitFont, unitPaint);
+        canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, unitPaint);
 
         // Content Area Bounds
-        SKRect contentBounds = new(bounds.Left + pad, bounds.Top + headerHeight + 6f * sy, bounds.Right - pad, bounds.Bottom - pad);
+        SKRect contentBounds = new(bounds.Left + header.Pad, bounds.Top + header.HeaderHeight + 6f * sy, bounds.Right - header.Pad, bounds.Bottom - header.Pad);
 
         switch (LayoutMode)
         {
@@ -269,9 +256,9 @@ public class WeatherForecastWidget : ModernWidgetBase
         float textStackSpacing = 2f * sy;
         float textStackTotalH = tempH + textStackSpacing + descH;
 
-        if (textStackTotalH > heroHeight * 0.85f)
+        float fitScale = WeatherLayout.HeroTextStackShrinkScale(textStackTotalH, heroHeight);
+        if (fitScale < 1f)
         {
-            float fitScale = (heroHeight * 0.85f) / textStackTotalH;
             tempSize *= fitScale;
             descSize *= fitScale;
             tempFont.Size = tempSize;
@@ -354,9 +341,9 @@ public class WeatherForecastWidget : ModernWidgetBase
         totalPillsW += (metrics.Count - 1) * pillGap;
 
         // If pills exceed bounds width, scale down metric font size to fit inside card
-        if (totalPillsW > w)
+        float metricScale = WeatherLayout.MetricPillShrinkScale(totalPillsW, w);
+        if (metricScale < 1f)
         {
-            float metricScale = Math.Max(0.6f, w / totalPillsW);
             metricFontSize = Math.Max(7f, metricFontSize * metricScale);
             metricFont.Size = metricFontSize;
             pillPadX *= metricScale;
@@ -593,31 +580,23 @@ public class WeatherForecastWidget : ModernWidgetBase
         if (eventType != TouchEventType.TouchUp) return;
 
         // Hit-test against the last rendered bounds so touches line up with the
-        // drawn controls at any widget size, not just the design size.
+        // drawn controls at any widget size, not just the design size. The zones
+        // come from WeatherLayout — the same geometry the render path draws.
         var b = _lastBounds.Width > 0 ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        float sx = b.Width / DesignWidth;
-        float sy = b.Height / DesignHeight;
+        var scale = WeatherLayout.Scale(b);
 
-        if (localPoint.Y < 44f * sy && localPoint.X > b.Width - 64f * sx)
+        switch (WeatherLayout.GetHeaderAction(b, localPoint, scale.S, scale.Sy))
         {
-            SetProperty(nameof(UnitSystem), WeatherPresentation.ToggleUnitSystem(UnitSystem));
-            return;
+            case WeatherHeaderAction.ToggleUnit:
+                SetProperty(nameof(UnitSystem), WeatherPresentation.ToggleUnitSystem(UnitSystem));
+                return;
+            case WeatherHeaderAction.CycleLayout:
+                SetProperty(nameof(LayoutMode), WeatherLayout.NextLayoutMode(LayoutMode));
+                return;
+            default:
+                _ = FetchLiveWeatherAsync(force: true);
+                break;
         }
-
-        if (localPoint.Y < 44f * sy && localPoint.X < 140f * sx)
-        {
-            SetProperty(nameof(LayoutMode), LayoutMode switch
-            {
-                "Detailed" => "Daily Forecast",
-                "Daily Forecast" => "Hourly Forecast",
-                "Hourly Forecast" => "Current Only",
-                "Current Only" => "Compact",
-                _ => "Detailed"
-            });
-            return;
-        }
-
-        _ = FetchLiveWeatherAsync(force: true);
     }
 
     /// <summary>

@@ -156,16 +156,16 @@ public class PriceFeedManagerLifecycleTests
     [TestMethod]
     public void PriceFeedManager_DetectsFxPairsAndNormalizesKeys()
     {
-        Assert.IsTrue(PriceFeedManager.TryParseFxPair("EUR/USD", out string baseCur, out string quoteCur));
+        Assert.IsTrue(SymbolCatalog.TryParseFxPair("EUR/USD", out string baseCur, out string quoteCur));
         Assert.AreEqual("EUR", baseCur);
         Assert.AreEqual("USD", quoteCur);
-        Assert.AreEqual("EURUSD", PriceFeedManager.NormalizeFxKey(" eur/usd "));
-        Assert.AreEqual(AssetKind.Fx, PriceFeedManager.DetectAssetKind("EUR/USD", "Auto"));
-        Assert.AreEqual(AssetKind.Stock, PriceFeedManager.DetectAssetKind("AAPL", "Auto"));
-        Assert.AreEqual(AssetKind.Crypto, PriceFeedManager.DetectAssetKind("BTC", "Auto"));
-        Assert.AreEqual(AssetKind.Crypto, PriceFeedManager.DetectAssetKind("AAPL", "Crypto"));
-        Assert.AreEqual(AssetKind.Fx, PriceFeedManager.DetectAssetKind("BTC", "FX Pair"));
-        Assert.IsFalse(PriceFeedManager.TryParseFxPair("AAPL", out _, out _));
+        Assert.AreEqual("EURUSD", SymbolCatalog.NormalizeFxKey(" eur/usd "));
+        Assert.AreEqual(AssetKind.Fx, SymbolCatalog.DetectAssetKind("EUR/USD", "Auto"));
+        Assert.AreEqual(AssetKind.Stock, SymbolCatalog.DetectAssetKind("AAPL", "Auto"));
+        Assert.AreEqual(AssetKind.Crypto, SymbolCatalog.DetectAssetKind("BTC", "Auto"));
+        Assert.AreEqual(AssetKind.Crypto, SymbolCatalog.DetectAssetKind("AAPL", "Crypto"));
+        Assert.AreEqual(AssetKind.Fx, SymbolCatalog.DetectAssetKind("BTC", "FX Pair"));
+        Assert.IsFalse(SymbolCatalog.TryParseFxPair("AAPL", out _, out _));
     }
 
     [TestMethod]
@@ -175,46 +175,5 @@ public class PriceFeedManagerLifecycleTests
         Assert.AreEqual("+1.08%", up.FormattedChange);
         var down = new PriceInfo { ChangePercent = -0.5m };
         Assert.AreEqual("-0.50%", down.FormattedChange);
-    }
-
-    [TestMethod]
-    public void PriceFeedManager_ParsesFrankfurterSeries_ComputesChange()
-    {
-        const string json = """
-        {
-          "amount": 1.0,
-          "base": "EUR",
-          "start_date": "2026-07-30",
-          "end_date": "2026-08-04",
-          "rates": {
-            "2026-07-30": { "USD": 1.1476 },
-            "2026-07-31": { "USD": 1.1485 },
-            "2026-08-03": { "USD": 1.1511 },
-            "2026-08-04": { "USD": 1.1515 }
-          }
-        }
-        """;
-        Assert.IsTrue(PriceFeedManager.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
-        Assert.AreEqual(1.1515m, price);
-        Assert.AreEqual((1.1515m / 1.1511m - 1m) * 100m, change);
-    }
-
-    [TestMethod]
-    public void PriceFeedManager_ParsesFrankfurterSeries_HandlesMissingQuoteMalformedJsonAndSingleEntry()
-    {
-        const string json = """
-        {
-          "base": "EUR",
-          "rates": {
-            "2026-07-30": { "USD": 1.1476 }
-          }
-        }
-        """;
-        Assert.IsFalse(PriceFeedManager.TryParseFrankfurterSeries(json, "GBP", out _, out _));
-        Assert.IsFalse(PriceFeedManager.TryParseFrankfurterSeries("not-json", "USD", out _, out _));
-
-        Assert.IsTrue(PriceFeedManager.TryParseFrankfurterSeries(json, "USD", out var price, out var change));
-        Assert.AreEqual(1.1476m, price);
-        Assert.AreEqual(0m, change);
     }
 }

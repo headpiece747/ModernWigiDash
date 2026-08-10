@@ -132,4 +132,110 @@ public class FontAndTextTests
         widget.Render(canvas, new SKRect(0, 0, 400, 200));
         Assert.IsNotNull(surface);
     }
+
+    [TestMethod]
+    public void WrapCache_SameTextAndSize_ReturnsSameInstance()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        const string text = "one two three four five six seven eight nine ten";
+
+        var first = cache.GetOrWrap(text, font, 24f, 100f);
+        var second = cache.GetOrWrap(text, font, 24f, 100f);
+
+        Assert.AreSame(first, second, "an unchanged key must not re-wrap");
+        Assert.IsTrue(first.Count > 1, "the long text must actually wrap at the narrow width");
+    }
+
+    [TestMethod]
+    public void WrapCache_DifferentWidth_ReWraps()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        const string text = "one two three four five six seven eight nine ten";
+
+        var narrow = cache.GetOrWrap(text, font, 24f, 100f);
+        var wide = cache.GetOrWrap(text, font, 24f, 2000f);
+
+        Assert.AreNotSame(narrow, wide, "a width change must re-wrap");
+        Assert.AreEqual(1, wide.Count, "the wide width fits the whole text on one line");
+        Assert.AreEqual(text, wide[0]);
+    }
+
+    [TestMethod]
+    public void WrapCache_DifferentFontSize_ReWraps()
+    {
+        var cache = new WrapCache();
+        var small = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        var large = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 48f);
+        const string text = "one two three four five six seven eight nine ten";
+
+        var first = cache.GetOrWrap(text, small, 24f, 150f);
+        var second = cache.GetOrWrap(text, large, 48f, 150f);
+
+        Assert.AreNotSame(first, second, "a font-size change must re-wrap");
+    }
+
+    [TestMethod]
+    public void WrapCache_SplitLines_EachLineWrappedIndependently()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+
+        var lines = cache.GetOrWrap("short\none two three four five six seven eight", font, 24f, 100f);
+
+        Assert.AreEqual("short", lines[0], "an explicit newline becomes its own line");
+        Assert.IsTrue(lines.Count >= 3);
+    }
+
+    [TestMethod]
+    public void WrapCache_Instances_AreIsolated()
+    {
+        var first = new WrapCache();
+        var second = new WrapCache();
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        const string text = "one two three four five six seven eight nine ten";
+
+        var a = first.GetOrWrap(text, font, 24f, 100f);
+        var b = second.GetOrWrap(text, font, 24f, 100f);
+
+        Assert.AreNotSame(a, b, "each widget owns its own cache slot");
+        Assert.AreEqual(a.Count, b.Count, "both wrap the same text identically");
+    }
+
+    // ── TextRenderHelper: the most-used shared helper (moved from the
+    // residual-coverage grab-bag) ──
+
+    [TestMethod]
+    public void TruncateText_ShortText_Unchanged()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(100, 50));
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
+
+        string result = TextRenderHelper.TruncateText("Hello", font, 200f);
+
+        Assert.AreEqual("Hello", result);
+    }
+
+    [TestMethod]
+    public void TruncateText_LongText_GetsEllipsis()
+    {
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
+
+        string result = TextRenderHelper.TruncateText("A very long widget title that cannot fit the space", font, 60f);
+
+        Assert.IsTrue(result.Length < 40, "the result must be shortened");
+        StringAssert.EndsWith(result, "…");
+    }
+
+    [TestMethod]
+    public void WrapText_LongText_SplitsIntoMultipleLines()
+    {
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
+
+        var lines = TextRenderHelper.WrapText("one two three four five six", font, 50f);
+
+        Assert.IsTrue(lines.Count >= 2, "the text must wrap onto multiple lines");
+        Assert.AreEqual("one two three four five six", string.Join(" ", lines));
+    }
 }

@@ -56,6 +56,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     // (add/trim/clear), so the render thread iterates it without a per-frame
     // _messages.ToArray() allocation under the lock.
     private List<ChatMessage> _renderSnapshot = [];
+    private readonly WrapCache _wrapCache = new();
     private CancellationTokenSource? _cts;
     private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
@@ -80,23 +81,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// </summary>
     internal TwitchSession Session { get; set; } = TwitchSession.Shared;
 
-    /// <summary>
-    /// One chat line. The wrapped lines are cached on the message (keyed by the
-    /// render font size + width they were computed with) so re-wrap work is
-    /// skipped on every frame between font/width changes.
-    /// </summary>
-    private sealed record ChatMessage(string Username, string Text, SKColor Color)
-    {
-        public List<string>? WrappedLines { get; set; }
-        public float WrapFontSize { get; set; }
-        public float WrapWidth { get; set; }
-    }
-
-    private static readonly SKColor[] NamePalette =
-    {
-        new(255, 121, 198), new(189, 147, 249), new(127, 202, 250), new(187, 247, 208),
-        new(254, 240, 138), new(253, 186, 116), new(199, 210, 254), new(165, 243, 252)
-    };
+    /// <summary>One chat line — plain data; the wrapped lines come from the
+    /// widget's shared <see cref="WrapCache"/>.</summary>
+    private sealed record ChatMessage(string Username, string Text, SKColor Color);
 
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
@@ -297,110 +284,70 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private void HandleLine(string line)
     {
-        if (line.StartsWith("PING", StringComparison.Ordinal))
+        if (!TwitchIrcMessages.TryParse(line, out var message)) return;
+
+        switch (message.Kind)
         {
-            var sock = _feedLoop?.Current;
-            if (sock != null)
-            {
-                CancellationToken token = _cts?.Token ?? CancellationToken.None;
-                _ = Task.Run(async () =>
+            case IrcMessageKind.Ping:
                 {
-                    try { await SendIrcLineAsync(sock, "PONG :tmi.twitch.tv", token); }
-                    catch
+                    var sock = _feedLoop?.Current;
+                    if (sock != null)
                     {
-                        System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
-                        /* socket closed / cancelled during shutdown */
+                        CancellationToken token = _cts?.Token ?? CancellationToken.None;
+                        _ = Task.Run(async () =>
+                        {
+                            try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token); }
+                            catch
+                            {
+                                System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
+                            }
+                        }, token);
                     }
-                }, token);
-            }
-            return;
-        }
-
-        string[] tags = [];
-        if (line.StartsWith('@'))
-        {
-            var tagEnd = line.IndexOf(' ');
-            if (tagEnd < 0) return;
-            tags = line[1..tagEnd].Split(';');
-            line = line[(tagEnd + 1)..];
-        }
-
-        var parts = line.Split(' ', 4);
-        if (parts.Length < 2) return;
-        var command = parts[1];
-        var trailing = parts.Length > 3 ? parts[3] : "";
-
-        switch (command)
-        {
-            case "ROOMSTATE":
+                    break;
+                }
+            case IrcMessageKind.RoomState:
                 _status = ChatStatus.Connected;
                 _statusDetail = "LIVE";
                 Context.RequestRender();
                 break;
-            case "PRIVMSG":
-                HandlePrivmsg(tags, trailing);
+            case IrcMessageKind.Privmsg:
+                HandlePrivmsg(message);
                 break;
-            case "NOTICE":
+            case IrcMessageKind.Notice:
                 {
-                    var msg = trailing.TrimStart(':');
-                    if (msg.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase) ||
-                        msg.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
+                    var (newStatus, changed) = TwitchChatPresentation.StatusFromNotice(message.Text, _status);
+                    if (changed)
                     {
-                        _status = ChatStatus.Disconnected;
-                        _statusDetail = "Login failed — check token & username";
-                        Context.LogError("Twitch login failed: " + msg);
-                    }
-                    else if (msg.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _status = ChatStatus.Connected;
-                        _statusDetail = "LIVE";
-                        Context.RequestRender();
+                        _status = newStatus;
+                        _statusDetail = newStatus == ChatStatus.Connected ? "LIVE" : "Login failed — check token & username";
+                        if (newStatus == ChatStatus.Connected) Context.RequestRender();
+                        else Context.LogError("Twitch login failed: " + message.Text);
                     }
                     else
                     {
-                        Context.LogInfo("Twitch notice: " + msg);
+                        Context.LogInfo("Twitch notice: " + message.Text);
                     }
                     break;
                 }
+            case IrcMessageKind.Other:
+                break;
         }
     }
 
-    private void HandlePrivmsg(string[] tags, string trailing)
+    private void HandlePrivmsg(IrcMessage message)
     {
-        if (!trailing.StartsWith(':')) return;
-
-        var text = Unescape(trailing[1..]);
-        if (text.Length > 400) text = text[..400];
-
-        var displayName = GetTag(tags, "display-name");
-        var login = GetTag(tags, "login");
-        string username;
-        if (displayName.Length > 0) username = displayName;
-        else if (login.Length > 0) username = login;
-        else username = "user";
-
-        var colorHex = GetTag(tags, "color");
+        var colorHex = message.ColorHex;
         var color = SKColors.White;
         if (colorHex.StartsWith('#')) SKColor.TryParse(colorHex, out color);
-        if (color == SKColors.White) color = PaletteFor(login.Length > 0 ? login : username);
+        if (color == SKColors.White) color = TwitchIrcMessages.PaletteColorFor(message.Login.Length > 0 ? message.Login : message.Username);
 
         lock (_messagesLock)
         {
-            _messages.Add(new ChatMessage(username, text, color));
+            _messages.Add(new ChatMessage(message.Username, message.Text, color));
             while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
             _renderSnapshot = [.. _messages];
         }
         Context?.RequestRender();
-    }
-
-    /// <summary>
-    /// Internal test seam: feeds a raw IRC PRIVMSG line through the real
-    /// parser (HandleLine -> HandlePrivmsg) so tests exercise GetTag,
-    /// Unescape, the color palette and the message clamp.
-    /// </summary>
-    internal void AddTestChatMessageForTesting(string username, string text)
-    {
-        HandleLine($":{username}!{username}@{username}.tmi.twitch.tv PRIVMSG #channel :{text}");
     }
 
     /// <summary>Internal test accessor: how many chat messages the live IRC
@@ -413,31 +360,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         }
     }
 
-    private static string GetTag(string[] tags, string key)
-    {
-        foreach (var t in tags)
-        {
-            var eq = t.IndexOf('=');
-            var k = eq < 0 ? t : t[..eq];
-            if (k == key) return eq < 0 ? "" : t[(eq + 1)..];
-        }
-        return "";
-    }
-
-    private static string Unescape(string s) =>
-        s.Replace("\\s", " ").Replace("\\:", ";").Replace("\\\\", "\\");
-
     private static string NormalizeChannel(string channel)
     {
         var c = channel.Trim().TrimStart('#');
         return c.Length == 0 ? "twitch" : c.ToLowerInvariant();
-    }
-
-    private static SKColor PaletteFor(string name)
-    {
-        int hash = 17;
-        foreach (var c in name) hash = (hash * 31 + c) & 0x7FFFFFFF;
-        return NamePalette[hash % NamePalette.Length];
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -513,16 +439,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         for (int i = snapshot.Count - 1; i >= 0; i--)
         {
             var m = snapshot[i];
-            var lines = m.WrappedLines;
-            if (lines is null
-                || Math.Abs(m.WrapFontSize - msgSize) > 0.01f
-                || Math.Abs(m.WrapWidth - contentBounds.Width) > 0.5f)
-            {
-                lines = TextRenderHelper.WrapText(m.Text, msgFont, contentBounds.Width);
-                m.WrappedLines = lines;
-                m.WrapFontSize = msgSize;
-                m.WrapWidth = contentBounds.Width;
-            }
+            var lines = _wrapCache.GetOrWrap(m.Text, msgFont, msgSize, contentBounds.Width);
 
             float blockH = userLineHeight + lines.Count * lineHeight + 4f * scale;
             cursor -= blockH;

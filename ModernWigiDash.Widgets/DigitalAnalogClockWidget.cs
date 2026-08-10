@@ -45,7 +45,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
     private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
-        string timeStr = FormatClockTime(now, TimeFormat);
+        string timeStr = ClockPresentation.FormatClockTime(now, TimeFormat);
         string amPmStr = ClockPresentation.AmPm(now, TimeFormat);
         string dateStr = ClockPresentation.Date(now);
 
@@ -98,9 +98,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
             canvas.DrawLine(x1, y1, x2, y2, tickPaint);
         }
 
-        float hourAngle = (now.Hour % 12 + now.Minute / 60f) * 30f * (float)(Math.PI / 180f);
-        float minAngle = (now.Minute + now.Second / 60f) * 6f * (float)(Math.PI / 180f);
-        float secAngle = now.Second * 6f * (float)(Math.PI / 180f);
+        (float hourAngle, float minAngle, float secAngle) = ClockPresentation.HandAngles(now);
 
         DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, 4.5f, textColor);
         DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, 3f, textColor);
@@ -109,13 +107,6 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         using var centerDot = new SKPaint { Color = textColor, IsAntialias = true };
         canvas.DrawCircle(cx, cy, 5f, centerDot);
     }
-
-    /// <summary>
-    /// Formats the digital clock time for the 12H/24H choice (pure — the
-    /// formatting is testable without rendering).
-    /// </summary>
-    internal static string FormatClockTime(DateTime now, string timeFormat)
-        => timeFormat == "24H" ? now.ToString("HH:mm") : now.ToString("hh:mm");
 
     private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, float width, SKColor color)
     {

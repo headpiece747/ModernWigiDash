@@ -55,10 +55,10 @@ public class PriceFeedSocketLoopTests
     [TestMethod]
     public void CryptoAliasTable_EveryBaseCoinResolvesAsItsOwnKey_WithCoinGeckoId()
     {
-        foreach (string baseCoin in PriceFeedManager.CryptoAliases.Values.Select(a => a.Symbol).Distinct())
+        foreach (string baseCoin in SymbolCatalog.CryptoAliases.Values.Select(a => a.Symbol).Distinct())
         {
             Assert.IsTrue(
-                PriceFeedManager.CryptoAliases.TryGetValue(baseCoin, out var alias),
+                SymbolCatalog.CryptoAliases.TryGetValue(baseCoin, out var alias),
                 $"{baseCoin} must resolve as its own alias key so the CoinGecko fallback can find it");
             Assert.AreEqual(baseCoin, alias.Symbol);
             Assert.IsFalse(string.IsNullOrEmpty(alias.CoinGeckoId), $"{baseCoin} must have a CoinGecko id");

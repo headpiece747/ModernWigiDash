@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
-using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
@@ -31,114 +29,11 @@ public class PriceInfo
 
 public sealed class PriceFeedManager : IDisposable
 {
-    /// <summary>Canonical base coin for a crypto alias plus its CoinGecko API id.</summary>
-    internal sealed record CryptoAlias(string Symbol, string CoinGeckoId);
-
     internal enum FeedKind
     {
         Binance,
         Finnhub
     }
-
-    /// <summary>
-    /// One crypto symbol table: user-facing alias → canonical base coin + the
-    /// CoinGecko API id used by the REST fallback. A single table makes a
-    /// symbol with a working live feed but a missing fallback id
-    /// unrepresentable — the fallback can never silently lose a coin.
-    /// </summary>
-    internal static readonly FrozenDictionary<string, CryptoAlias> CryptoAliases =
-        new Dictionary<string, CryptoAlias>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["bitcoin"] = new("BTC", "bitcoin"),
-            ["btc"] = new("BTC", "bitcoin"),
-            ["ethereum"] = new("ETH", "ethereum"),
-            ["eth"] = new("ETH", "ethereum"),
-            ["solana"] = new("SOL", "solana"),
-            ["sol"] = new("SOL", "solana"),
-            ["dogecoin"] = new("DOGE", "dogecoin"),
-            ["doge"] = new("DOGE", "dogecoin"),
-            ["cardano"] = new("ADA", "cardano"),
-            ["ada"] = new("ADA", "cardano"),
-            ["ripple"] = new("XRP", "ripple"),
-            ["xrp"] = new("XRP", "ripple"),
-            ["polkadot"] = new("DOT", "polkadot"),
-            ["dot"] = new("DOT", "polkadot"),
-            ["litecoin"] = new("LTC", "litecoin"),
-            ["ltc"] = new("LTC", "litecoin"),
-            ["avalanche-2"] = new("AVAX", "avalanche-2"),
-            ["avax"] = new("AVAX", "avalanche-2"),
-            ["chainlink"] = new("LINK", "chainlink"),
-            ["link"] = new("LINK", "chainlink"),
-            ["polygon"] = new("POL", "polygon-ecosystem-token"),
-            ["pol"] = new("POL", "polygon-ecosystem-token"),
-            ["matic-network"] = new("MATIC", "matic-network"),
-            ["matic"] = new("MATIC", "matic-network"),
-            ["tron"] = new("TRX", "tron"),
-            ["trx"] = new("TRX", "tron"),
-            ["shiba-inu"] = new("SHIB", "shiba-inu"),
-            ["shib"] = new("SHIB", "shiba-inu"),
-            ["uniswap"] = new("UNI", "uniswap"),
-            ["uni"] = new("UNI", "uniswap"),
-            ["cosmos"] = new("ATOM", "cosmos"),
-            ["atom"] = new("ATOM", "cosmos"),
-            ["near"] = new("NEAR", "near"),
-            ["aptos"] = new("APT", "aptos"),
-            ["apt"] = new("APT", "aptos"),
-            ["arbitrum"] = new("ARB", "arbitrum"),
-            ["arb"] = new("ARB", "arbitrum"),
-            ["optimism"] = new("OP", "optimism"),
-            ["op"] = new("OP", "optimism"),
-            ["sui"] = new("SUI", "sui"),
-            ["render"] = new("RNDR", "render-token"),
-            ["rndr"] = new("RNDR", "render-token"),
-            ["filecoin"] = new("FIL", "filecoin"),
-            ["fil"] = new("FIL", "filecoin"),
-            ["theta"] = new("THETA", "theta-token"),
-            ["bnb"] = new("BNB", "binancecoin"),
-            ["toncoin"] = new("TON", "the-open-network"),
-            ["ton"] = new("TON", "the-open-network"),
-            ["mantle"] = new("MNT", "mantle"),
-            ["mnt"] = new("MNT", "mantle"),
-            ["injective"] = new("INJ", "injective"),
-            ["inj"] = new("INJ", "injective"),
-            ["pepe"] = new("PEPE", "pepe"),
-            ["floki"] = new("FLOKI", "floki"),
-            ["bonk"] = new("BONK", "bonk"),
-            ["hedera"] = new("HBAR", "hedera-hashgraph"),
-            ["hbar"] = new("HBAR", "hedera-hashgraph"),
-            ["vechain"] = new("VET", "vechain"),
-            ["vet"] = new("VET", "vechain"),
-            ["aave"] = new("AAVE", "aave"),
-            ["maker"] = new("MKR", "maker"),
-            ["mkr"] = new("MKR", "maker"),
-            ["curve"] = new("CRV", "curve-dao-token"),
-            ["crv"] = new("CRV", "curve-dao-token"),
-            ["eos"] = new("EOS", "eos"),
-            ["fetch"] = new("FET", "fetch-ai"),
-            ["fet"] = new("FET", "fetch-ai"),
-            ["fetch-ai"] = new("FET", "fetch-ai"),
-            ["the-graph"] = new("GRT", "the-graph"),
-            ["grt"] = new("GRT", "the-graph"),
-            ["sei"] = new("SEI", "sei"),
-            ["starknet"] = new("STRK", "starknet"),
-            ["strk"] = new("STRK", "starknet"),
-            ["immutable"] = new("IMX", "immutable-x"),
-            ["imx"] = new("IMX", "immutable-x"),
-            ["dydx"] = new("DYDX", "dydx"),
-            ["pendle"] = new("PENDLE", "pendle"),
-            ["kaspa"] = new("KAS", "kaspa"),
-            ["kas"] = new("KAS", "kaspa"),
-            ["fantom"] = new("FTM", "fantom"),
-            ["ftm"] = new("FTM", "fantom"),
-            ["algorand"] = new("ALGO", "algorand"),
-            ["algo"] = new("ALGO", "algorand"),
-        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
-
-    private static readonly FrozenSet<string> KnownCryptos = CryptoAliases.Keys.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Returns the CoinGecko API id for a canonical base coin, or null when unknown.</summary>
-    private static string? CoinGeckoIdFor(string baseCoin)
-        => CryptoAliases.TryGetValue(baseCoin, out var alias) ? alias.CoinGeckoId : null;
 
     private readonly string _finnhubKey;
     private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
@@ -205,103 +100,18 @@ public sealed class PriceFeedManager : IDisposable
         _http.DefaultRequestHeaders.UserAgent.TryParseAdd("ModernWigiDash/2.0");
     }
 
-    /// <summary>
-    /// Accepts only well-formed ticker/pair symbols (ASCII letters, digits, and
-    /// '.', '-', ':' separators, up to 32 chars) so user-typed input can never
-    /// pollute feed URLs or subscription payloads.
-    /// </summary>
-    private static bool IsValidSymbol(string symbol) =>
-        symbol.Length is > 0 and <= 32 && symbol.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or ':');
-
-    /// <summary>FX pair keys are exactly six letters (e.g. "EURUSD").</summary>
-    private static bool IsValidFxKey(string key) =>
-        key.Length == 6 && key.All(char.IsAsciiLetter);
-
-    /// <summary>
-    /// Validates an FX subscription input: either the "XXX/YYY" pair form (both
-    /// halves and the shape checked by <see cref="TryParseFxPair"/>) or a bare
-    /// six-letter key. Returns the normalized key when valid.
-    /// </summary>
-    private static bool IsValidFxInput(string symbol, out string fxKey)
-    {
-        fxKey = "";
-        if (string.IsNullOrWhiteSpace(symbol)) return false;
-        if (symbol.Contains('/'))
-        {
-            if (!TryParseFxPair(symbol, out _, out _)) return false;
-        }
-        else if (!IsValidSymbol(symbol))
-        {
-            return false;
-        }
-        fxKey = NormalizeFxKey(symbol);
-        return IsValidFxKey(fxKey);
-    }
-
-    private static void LogInvalidSymbol(string? symbol)
-    {
-        string preview;
-        if (symbol is null) preview = "<null>";
-        else if (symbol.Length > 48) preview = symbol[..48] + "…";
-        else preview = symbol;
-        System.Diagnostics.Debug.WriteLine($"Skipping invalid feed symbol '{preview}'");
-    }
-
-    public static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);
-    public static string NormalizeSymbol(string symbol) =>
-        CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper();
-
-    /// <summary>
-    /// Maps a user-entered symbol to the canonical feed key for an asset kind:
-    /// crypto aliases resolve to the base coin (e.g. "bitcoin" → "BTC"), FX
-    /// pairs to "EURUSD", everything else to the upper-cased symbol.
-    /// </summary>
-    public static string ToFeedKey(string symbol, AssetKind kind) => kind switch
-    {
-        AssetKind.Crypto => CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper(),
-        AssetKind.Fx => NormalizeFxKey(symbol),
-        _ => symbol.ToUpper()
-    };
-
-    // Timeout guards the match against catastrophic backtracking on hostile input.
-    private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
-
-    public static bool TryParseFxPair(string symbol, out string baseCurrency, out string quoteCurrency)
-    {
-        baseCurrency = "";
-        quoteCurrency = "";
-        if (string.IsNullOrWhiteSpace(symbol)) return false;
-        Match match = FxPairRegex.Match(symbol.Trim());
-        if (!match.Success) return false;
-        baseCurrency = match.Groups[1].Value.ToUpperInvariant();
-        quoteCurrency = match.Groups[2].Value.ToUpperInvariant();
-        return true;
-    }
-
-    public static string NormalizeFxKey(string symbol)
-        => symbol.Trim().ToUpperInvariant().Replace("/", "", StringComparison.Ordinal);
-
-    public static AssetKind DetectAssetKind(string symbol, string assetType) => assetType switch
-    {
-        "Crypto" => AssetKind.Crypto,
-        "Stock" => AssetKind.Stock,
-        "FX Pair" => AssetKind.Fx,
-        _ when TryParseFxPair(symbol, out _, out _) => AssetKind.Fx,
-        _ => IsCrypto(symbol) ? AssetKind.Crypto : AssetKind.Stock
-    };
-
     public void Subscribe(string symbol, AssetKind kind)
     {
         EnsureActive();
         switch (kind)
         {
             case AssetKind.Crypto:
-                if (!IsValidSymbol(symbol))
+                if (!SymbolCatalog.IsValidSymbol(symbol))
                 {
-                    LogInvalidSymbol(symbol);
+                    SymbolCatalog.LogInvalidSymbol(symbol);
                     return;
                 }
-                var baseCoin = ToFeedKey(symbol, kind);
+                var baseCoin = SymbolCatalog.ToFeedKey(symbol, kind);
                 // Ref-counted: the shared manager keys subscriptions by symbol,
                 // so N widgets on one symbol hold N claims — one widget's
                 // symbol change must not kill another's live feed.
@@ -316,9 +126,9 @@ public sealed class PriceFeedManager : IDisposable
                 }
                 break;
             case AssetKind.Fx:
-                if (!IsValidFxInput(symbol, out string fxKey))
+                if (!SymbolCatalog.IsValidFxInput(symbol, out string fxKey))
                 {
-                    LogInvalidSymbol(symbol);
+                    SymbolCatalog.LogInvalidSymbol(symbol);
                     return;
                 }
                 if (_subscribedFx.AddOrUpdate(fxKey, 1, (_, count) => count + 1) == 1)
@@ -327,9 +137,9 @@ public sealed class PriceFeedManager : IDisposable
                 }
                 break;
             default:
-                if (!IsValidSymbol(symbol))
+                if (!SymbolCatalog.IsValidSymbol(symbol))
                 {
-                    LogInvalidSymbol(symbol);
+                    SymbolCatalog.LogInvalidSymbol(symbol);
                     return;
                 }
                 string stockSym = symbol.ToUpper();
@@ -379,7 +189,7 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     public void Unsubscribe(string symbol, AssetKind kind)
     {
-        string key = ToFeedKey(symbol, kind);
+        string key = SymbolCatalog.ToFeedKey(symbol, kind);
         bool fullyReleased = kind switch
         {
             AssetKind.Crypto => ReleaseSubscription(_subscribedCrypto, key),
@@ -442,7 +252,7 @@ public sealed class PriceFeedManager : IDisposable
 
     public PriceInfo? GetPrice(string symbol, AssetKind kind)
     {
-        string key = ToFeedKey(symbol, kind);
+        string key = SymbolCatalog.ToFeedKey(symbol, kind);
         return _prices.TryGetValue(key, out var info) ? info : null;
     }
 
@@ -455,8 +265,8 @@ public sealed class PriceFeedManager : IDisposable
     {
         if (kind == AssetKind.Crypto)
         {
-            string baseCoin = ToFeedKey(symbol, kind);
-            if (CoinGeckoIdFor(baseCoin) is not string geckoId) return;
+            string baseCoin = SymbolCatalog.ToFeedKey(symbol, kind);
+            if (SymbolCatalog.CoinGeckoIdFor(baseCoin) is not string geckoId) return;
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
             string json = await _http.GetStringAsync(url, _cts.Token);
             if (PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, geckoId, out var price, out var change))
@@ -473,22 +283,19 @@ public sealed class PriceFeedManager : IDisposable
         else if (kind == AssetKind.Stock)
         {
             string stockSym = symbol.ToUpper();
-            if (!IsValidSymbol(stockSym)) return;
+            if (!SymbolCatalog.IsValidSymbol(stockSym)) return;
             string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{stockSym}?interval=1d&range=1d";
             string json = await _http.GetStringAsync(url, _cts.Token);
-            using var doc = JsonDocument.Parse(json);
-            var result = doc.RootElement.GetProperty("chart").GetProperty("result")[0];
-            var meta = result.GetProperty("meta");
-            decimal price = (decimal)meta.GetProperty("regularMarketPrice").GetDouble();
-            decimal prevClose = (decimal)meta.GetProperty("chartPreviousClose").GetDouble();
-            decimal changePct = prevClose != 0 ? (price - prevClose) / prevClose * 100m : 0m;
-            _prices[stockSym] = new PriceInfo
+            if (PriceFeedMessages.TryParseYahooChart(json, out var price, out var changePct))
             {
-                Price = price,
-                ChangePercent = changePct,
-                Source = "Yahoo",
-                Timestamp = Clock.GetUtcNow().UtcDateTime
-            };
+                _prices[stockSym] = new PriceInfo
+                {
+                    Price = price,
+                    ChangePercent = changePct,
+                    Source = "Yahoo",
+                    Timestamp = Clock.GetUtcNow().UtcDateTime
+                };
+            }
         }
     }
 
@@ -515,7 +322,7 @@ public sealed class PriceFeedManager : IDisposable
 
     internal async Task PollStockSymbolAsync(string sym)
     {
-        if (!IsValidSymbol(sym)) return;
+        if (!SymbolCatalog.IsValidSymbol(sym)) return;
         var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
         if (PriceFeedMessages.TryParseFinnhubQuote(json, out var price, out var change))
         {
@@ -534,7 +341,7 @@ public sealed class PriceFeedManager : IDisposable
 
     internal async Task PollFxPairAsync(string key)
     {
-        if (!IsValidFxKey(key))
+        if (!SymbolCatalog.IsValidFxKey(key))
         {
             return;
         }
@@ -544,7 +351,7 @@ public sealed class PriceFeedManager : IDisposable
         string start = Clock.GetUtcNow().UtcDateTime.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string end = Clock.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
-        if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
+        if (PriceFeedMessages.TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
         {
             _prices[key] = new PriceInfo
             {
@@ -590,55 +397,6 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// Parses a Frankfurter (ECB) daily-rate series. The last entry is the current rate; the
-    /// day-over-day change percent is computed from the last two entries.
-    /// </summary>
-    internal static bool TryParseFrankfurterSeries(string json, string quoteCurrency, out decimal price, out decimal changePercent)
-    {
-        price = 0m;
-        changePercent = 0m;
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (!root.TryGetProperty("rates", out var rates) || rates.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
-
-            List<string> dates = [];
-            var ratesByDate = new Dictionary<string, decimal>(StringComparer.Ordinal);
-            foreach (var entry in rates.EnumerateObject())
-            {
-                if (!entry.Value.TryGetProperty(quoteCurrency, out var rateEl) || rateEl.ValueKind == JsonValueKind.Null)
-                {
-                    continue;
-                }
-                dates.Add(entry.Name);
-                ratesByDate[entry.Name] = rateEl.GetDecimal();
-            }
-
-            if (dates.Count == 0)
-            {
-                return false;
-            }
-
-            dates.Sort(StringComparer.Ordinal); // ISO yyyy-MM-dd sorts chronologically.
-            price = ratesByDate[dates[^1]];
-            if (dates.Count >= 2 && ratesByDate[dates[^2]] != 0m)
-            {
-                changePercent = (ratesByDate[dates[^1]] / ratesByDate[dates[^2]] - 1m) * 100m;
-            }
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-
     private async Task RunCryptoRestPollerAsync()
     {
         while (!_disposed)
@@ -682,10 +440,10 @@ public sealed class PriceFeedManager : IDisposable
     {
         try
         {
-            var ids = string.Join(",", _subscribedCrypto.Keys.Select(CoinGeckoIdFor).OfType<string>());
+            var ids = string.Join(",", _subscribedCrypto.Keys.Select(SymbolCatalog.CoinGeckoIdFor).OfType<string>());
             if (string.IsNullOrEmpty(ids)) return;
             var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token);
-            foreach (var alias in CryptoAliases.Values.DistinctBy(a => a.Symbol))
+            foreach (var alias in SymbolCatalog.CryptoAliases.Values.DistinctBy(a => a.Symbol))
             {
                 if (!PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, alias.CoinGeckoId, out var price, out var change))
                 {
