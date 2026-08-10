@@ -14,7 +14,7 @@ public class ClockStopwatchTickerPresentationTests
     [TestMethod]
     public void Clock_AmPm_OnlyInTwelveHourMode()
     {
-        var noon = new DateTime(2026, 8, 10, 12, 0, 0);
+        var noon = new DateTime(2026, 8, 10, 12, 0, 0, DateTimeKind.Unspecified);
         Assert.AreEqual("PM", ClockPresentation.AmPm(noon, "12H"));
         Assert.AreEqual("", ClockPresentation.AmPm(noon, "24H"));
     }
@@ -22,7 +22,7 @@ public class ClockStopwatchTickerPresentationTests
     [TestMethod]
     public void Clock_Date_LongFormatted()
     {
-        var day = new DateTime(2026, 8, 10);
+        var day = new DateTime(2026, 8, 10, 0, 0, 0, DateTimeKind.Unspecified);
         Assert.AreEqual("Monday, August 10, 2026", ClockPresentation.Date(day));
     }
 

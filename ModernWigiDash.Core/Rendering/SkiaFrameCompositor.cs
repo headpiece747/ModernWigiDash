@@ -48,6 +48,12 @@ public class SkiaFrameCompositor : IDisposable
         set => _selectedWidget = value;
     }
 
+    /// <summary>The page-background fallback — parses the one shared default.</summary>
+    private static SKColor ParseDefaultBackground()
+        => SKColor.TryParse(PageLayout.DefaultBackgroundHexColor, out var fallback)
+            ? fallback
+            : new SKColor(18, 20, 29);
+
     public void Compose(PageLayout page)
     {
         SKCanvas canvas = _canvas;
@@ -59,9 +65,7 @@ public class SkiaFrameCompositor : IDisposable
             _lastBgHex = page.BackgroundHexColor;
             _lastBgColor = SKColor.TryParse(page.BackgroundHexColor, out var parsed)
                 ? parsed
-                : SKColor.TryParse(PageLayout.DefaultBackgroundHexColor, out var fallback)
-                    ? fallback
-                    : new SKColor(18, 20, 29);
+                : ParseDefaultBackground();
         }
         canvas.Clear(_lastBgColor);
 
