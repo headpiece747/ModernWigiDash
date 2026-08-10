@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Sdk;
@@ -591,5 +592,69 @@ public class ProfileOpsTests
 
         Assert.AreEqual(42, ProfileOps.ConvertPropertyValue(element, typeof(int)));
         Assert.IsNull(ProfileOps.ConvertPropertyValue(element, typeof(DateTime)), "Incompatible conversion must return null");
+    }
+
+    [TestMethod]
+    public void PageLayout_PageName_EnforcesTrim()
+    {
+        var page = new PageLayout
+        {
+            PageName = "   My Dashboard   "
+        };
+
+        Assert.AreEqual("My Dashboard", page.PageName);
+    }
+
+    [TestMethod]
+    public void ProfileLayout_Serialization_RoundTripsSuccessfully()
+    {
+        var profile = new ProfileLayout
+        {
+            ProfileName = "   Custom Profile   "
+        };
+        profile.ActivePage.Widgets.Add(new PlacedWidgetInstance
+        {
+            PluginId = "clock_modern",
+            DisplayName = "  Clock Widget  ",
+            Width = 408f,
+            Height = 150f,
+            Opacity = 1.5f
+        });
+
+        Assert.AreEqual("Custom Profile", profile.ProfileName);
+        Assert.AreEqual("Clock Widget", profile.ActivePage.Widgets[0].DisplayName);
+        Assert.AreEqual(1.0f, profile.ActivePage.Widgets[0].Opacity, "Opacity should clamp to 1.0");
+
+        string json = JsonSerializer.Serialize(profile);
+        Assert.IsFalse(string.IsNullOrEmpty(json));
+
+        var deserialized = JsonSerializer.Deserialize<ProfileLayout>(json);
+        Assert.IsNotNull(deserialized);
+        Assert.AreEqual("Custom Profile", deserialized.ProfileName);
+        Assert.AreEqual(1, deserialized.Pages[0].Widgets.Count);
+        Assert.AreEqual("Clock Widget", deserialized.Pages[0].Widgets[0].DisplayName);
+    }
+
+    [TestMethod]
+    public void PlacedWidgetInstance_PropertyValues_RoundTripMixedTypes()
+    {
+        var placed = new PlacedWidgetInstance
+        {
+            PluginId = "stopwatch_timer",
+            PropertyValues =
+            {
+                ["TextColorHex"] = "#FFCD85",
+                ["CornerRadius"] = 16f,
+                ["ShowChange"] = true,
+                ["PriceDecimals"] = "4"
+            }
+        };
+
+        string json = JsonSerializer.Serialize(placed);
+        var deserialized = JsonSerializer.Deserialize<PlacedWidgetInstance>(json);
+        Assert.IsNotNull(deserialized);
+        Assert.AreEqual(4, deserialized.PropertyValues.Count);
+        Assert.IsTrue(deserialized.PropertyValues.ContainsKey("TextColorHex"));
+        Assert.AreEqual(JsonValueKind.Number, ((JsonElement)deserialized.PropertyValues["CornerRadius"]!).ValueKind, "Imported numbers should arrive as JsonElement");
     }
 }

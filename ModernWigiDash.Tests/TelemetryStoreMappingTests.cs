@@ -219,4 +219,39 @@ public class TelemetryStoreMappingTests
         public TimeProviderFake(DateTime now) => _now = new DateTimeOffset(now);
         public override DateTimeOffset GetUtcNow() => _now;
     }
+
+    [TestMethod]
+    public void FrameTimeStore_UpdateAndRead_RoundTrips()
+    {
+        var record = new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            ProcessId = 1234,
+            ProcessName = "game.exe",
+            Fps = 144.0,
+            FrameTimeMs = 6.94,
+            Low1PercentFps = 112.0,
+            Low01PercentFps = 89.0,
+            GpuBusyPercent = 92.0,
+            CpuFrameTimeMs = 4.1,
+            DisplayedFps = 144.0,
+            DroppedFrames = 1,
+            GpuTimeMs = 6.0,
+            PresentModeId = 4,
+            RecentFrameTimesMs = [6.9, 7.0, 7.1, 6.8],
+        };
+
+        FrameTimeStore.Update(record);
+        FrameTimeSnapshotDto read = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+
+        Assert.IsTrue(read.IsAvailable);
+        Assert.AreEqual("game.exe", read.ProcessName);
+        Assert.AreEqual(144.0, read.Fps);
+        Assert.AreEqual(92.0, read.GpuBusyPercent);
+        Assert.AreEqual(144.0, read.DisplayedFps);
+        Assert.AreEqual(1, read.DroppedFrames);
+        Assert.AreEqual(6.0, read.GpuTimeMs);
+        Assert.AreEqual(4, read.PresentModeId);
+        CollectionAssert.AreEqual(new[] { 6.9, 7.0, 7.1, 6.8 }, read.RecentFrameTimesMs.ToArray());
+    }
 }

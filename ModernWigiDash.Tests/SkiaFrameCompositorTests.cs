@@ -1,6 +1,7 @@
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
+using ModernWigiDash.Widgets;
 using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
@@ -189,5 +190,96 @@ public class SkiaFrameCompositorTests
         Assert.IsNotNull(recorder.LastLocalPoint, "The touch must reach the rotated widget");
         Assert.AreEqual(190f, recorder.LastLocalPoint.Value.X, 0.01f, "Rotated local X must be inverse-transformed");
         Assert.AreEqual(50f, recorder.LastLocalPoint.Value.Y, 0.01f, "Rotated local Y must be inverse-transformed");
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_HitTest_ReturnsTopMostWidget()
+    {
+        using var compositor = new SkiaFrameCompositor();
+        var page = new PageLayout();
+
+        var w1 = new PlacedWidgetInstance
+        {
+            X = 0,
+            Y = 0,
+            Width = 200,
+            Height = 200,
+            ZIndex = 1,
+            ActiveInstance = new DigitalAnalogClockWidget()
+        };
+        var w2 = new PlacedWidgetInstance
+        {
+            X = 50,
+            Y = 50,
+            Width = 200,
+            Height = 200,
+            ZIndex = 2,
+            ActiveInstance = new DigitalAnalogClockWidget()
+        };
+
+        page.Widgets.Add(w1);
+        page.Widgets.Add(w2);
+
+        var hit = SkiaFrameCompositor.HitTest(page, 75, 75);
+        Assert.IsNotNull(hit);
+        Assert.AreEqual(w2, hit, "HitTest must return highest ZIndex widget at overlapping point");
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_DeliversToTopMostWidgetInLocalCoordinates()
+    {
+        using var compositor = new SkiaFrameCompositor();
+        var page = new PageLayout();
+        var target = new WeatherForecastWidget();
+        var placed = new PlacedWidgetInstance
+        {
+            X = 100,
+            Y = 50,
+            Width = 200,
+            Height = 200,
+            ZIndex = 1,
+            ActiveInstance = target
+        };
+        page.Widgets.Add(placed);
+
+        // Touch at (150, 80) global = (50, 30) local to the widget. The weather
+        // widget's top-left corner cycles LayoutMode on TouchUp, which proves
+        // the touch arrived in widget-local coordinates (a global-coordinate
+        // leak would hit a different zone or miss entirely).
+        SkiaFrameCompositor.RouteTouch(page, 150, 80, TouchEventType.TouchUp);
+
+        Assert.AreEqual("Daily Forecast", target.LayoutMode, "The touch must reach the widget in local coordinates");
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_IgnoresPointOutsideAllWidgets()
+    {
+        using var compositor = new SkiaFrameCompositor();
+        var page = new PageLayout();
+        var target = new WeatherForecastWidget();
+        page.Widgets.Add(new PlacedWidgetInstance
+        {
+            X = 0,
+            Y = 0,
+            Width = 100,
+            Height = 100,
+            ZIndex = 1,
+            ActiveInstance = target
+        });
+
+        // Point far outside every widget must not throw and must not be delivered.
+        SkiaFrameCompositor.RouteTouch(page, 900, 500, TouchEventType.TouchUp);
+
+        Assert.AreEqual("Detailed", target.LayoutMode, "A point outside every widget must not reach any widget");
+    }
+
+    [TestMethod]
+    public void SkiaFrameCompositor_RouteTouch_EmptyPage_DoesNotThrow()
+    {
+        var page = new PageLayout();
+
+        SkiaFrameCompositor.RouteTouch(page, 10, 10, TouchEventType.TouchDown);
+
+        Assert.AreEqual(0, page.Widgets.Count, "Routing on an empty page must not mutate the page");
     }
 }

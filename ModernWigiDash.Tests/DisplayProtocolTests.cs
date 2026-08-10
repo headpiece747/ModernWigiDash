@@ -126,4 +126,15 @@ public class DisplayProtocolTests
 
         Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, rgb565.Length);
     }
+
+    [TestMethod]
+#pragma warning disable MSTEST0032 // Regression guard: verify protocol constants match hardware spec
+    public void DisplayProtocolConstants_FramebufferCalculations_AreExact()
+    {
+        Assert.AreEqual(1016, DisplayProtocolConstants.FramebufferWidth);
+        Assert.AreEqual(592, DisplayProtocolConstants.FramebufferHeight);
+        Assert.AreEqual(2, DisplayProtocolConstants.BytesPerPixel);
+        Assert.AreEqual(1202944, DisplayProtocolConstants.FrameBufferSize);
+    }
+#pragma warning restore MSTEST0032
 }

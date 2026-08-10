@@ -179,4 +179,55 @@ public class ThemeSettingsTests
             Assert.IsTrue(ThemeSettings.Groups.ContainsKey(name), $"Groups missing {name}");
         }
     }
+
+    [TestMethod]
+    public void ThemeSettings_ParseColor_HandlesRgbAndArgb()
+    {
+        var rgb = ModernWigiDash.Core.Theming.ThemeSettings.ParseColor("#FFCD85");
+        Assert.IsNotNull(rgb);
+        Assert.AreEqual(255, rgb.Value.R);
+        Assert.AreEqual(205, rgb.Value.G);
+        Assert.AreEqual(133, rgb.Value.B);
+
+        var argb = ModernWigiDash.Core.Theming.ThemeSettings.ParseColor("#CCFFCD85");
+        Assert.IsNotNull(argb);
+        Assert.AreEqual(204, argb.Value.A);
+
+        Assert.IsNull(ModernWigiDash.Core.Theming.ThemeSettings.ParseColor("not-a-color"));
+    }
+
+    [TestMethod]
+    public void ThemeSettings_DisplayMetadata_CoversEveryColorProperty()
+    {
+        var props = typeof(ModernWigiDash.Core.Theming.ThemeSettings).GetProperties()
+            .Where(p => p.PropertyType == typeof(string))
+            .ToList();
+
+        Assert.IsTrue(props.Count > 0, "ThemeSettings should expose color properties");
+
+        foreach (string name in props.Select(p => p.Name))
+        {
+            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.DisplayNames.ContainsKey(name),
+                $"Missing friendly display name for '{name}'");
+            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.Descriptions.ContainsKey(name),
+                $"Missing description for '{name}'");
+            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.Groups.ContainsKey(name),
+                $"Missing group for '{name}'");
+        }
+    }
+
+    [TestMethod]
+    public void ThemeSettings_DefaultsToTitaniumAmberPalette()
+    {
+        var theme = new ModernWigiDash.Core.Theming.ThemeSettings();
+        Assert.AreEqual("#121214", theme.BgDark);
+        Assert.AreEqual("#1A1A1E", theme.BgPanel);
+        Assert.AreEqual("#26262B", theme.BgCard);
+        Assert.AreEqual("#3F3F46", theme.Border);
+        Assert.AreEqual("#F59E0B", theme.AccentRed);
+        Assert.AreEqual("#FBBF24", theme.M3Primary);
+        Assert.AreEqual("#FAFAFA", theme.TextPrimary);
+        Assert.AreEqual("#A1A1AA", theme.TextSecondary);
+        Assert.AreEqual("#0B0B0C", theme.TitleBar);
+    }
 }

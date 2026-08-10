@@ -63,4 +63,23 @@ public class NowPlayingWidgetTests
 
         Assert.IsNotNull(widget, "Disposing an uninitialized widget must complete without throwing");
     }
+
+    [TestMethod]
+    public void NowPlayingWidget_Render_IdleAndPlaceholder_NoExceptions()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        var canvas = surface.Canvas;
+        var bounds = new SKRect(0, 0, 1016, 592);
+
+        // Idle state (no SMTC session available in headless tests) must render without exceptions
+        var widget = new NowPlayingWidget();
+        widget.Render(canvas, bounds);
+
+        // Render at the minimum size too, exercising the scale path
+        using var smallSurface = SKSurface.Create(new SKImageInfo(408, 150));
+        var smallCanvas = smallSurface.Canvas;
+        widget.Render(smallCanvas, new SKRect(0, 0, 408, 150));
+
+        Assert.IsNotNull(surface);
+    }
 }
