@@ -455,67 +455,6 @@ public sealed class WeatherClient
             && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
     }
 
-    /// <summary>
-    /// Maps a WMO weather code to the display icon and description used by the
-    /// rendering widgets.
-    /// </summary>
-    internal static (string Icon, string Description) MapWmoCode(int code)
-    {
-        return code switch
-        {
-            0 => ("☀️", "Clear Sky"),
-            1 => ("🌤️", "Mainly Clear"),
-            2 => ("⛅", "Partly Cloudy"),
-            3 => ("☁️", "Overcast"),
-            45 or 48 => ("🌫️", "Foggy"),
-            51 or 53 or 55 => ("🌧️", "Drizzle"),
-            56 or 57 => ("🌧️❄️", "Freezing Drizzle"),
-            61 or 63 or 65 => ("🌧️", "Rainy"),
-            66 or 67 => ("🌧️❄️", "Freezing Rain"),
-            71 or 73 or 75 or 77 => ("❄️", "Snowy"),
-            80 or 81 or 82 => ("🌦️", "Rain Showers"),
-            85 or 86 => ("🌨️", "Snow Showers"),
-            95 or 96 or 99 => ("🌩️", "Thunderstorm"),
-            _ => ("☀️", "Fair")
-        };
-    }
-
-    /// <summary>Parses the unit-system choice string into the display unit tokens.</summary>
-    internal static (string tempUnit, string speedUnit) ParseUnitSystem(string unitSystem)
-    {
-        return unitSystem switch
-        {
-            "Fahrenheit (°F, mph)" => ("°F", "mph"),
-            "Celsius (°C, km/h)" or "" or null => ("°C", "km/h"),
-            "Celsius (°C, mph)" => ("°C", "mph"),
-            "Celsius (°C, m/s)" => ("°C", "m/s"),
-            "Kelvin (K, m/s)" => ("K", "m/s"),
-            _ => ("°C", "km/h"),
-        };
-    }
-
-    /// <summary>Formats a Celsius temperature in the requested unit for display.</summary>
-    internal static string FormatTemp(double tempC, string tempUnit, bool shortFormat = false)
-    {
-        return tempUnit switch
-        {
-            "°F" => shortFormat ? $"{(tempC * 9.0 / 5.0 + 32.0):F0}°" : $"{(tempC * 9.0 / 5.0 + 32.0):F0}°F",
-            "K" => $"{tempC + 273.15:F0} K",
-            _ => shortFormat ? $"{tempC:F0}°" : $"{tempC:F1}°C",
-        };
-    }
-
-    /// <summary>Formats a km/h wind speed in the requested unit for display.</summary>
-    internal static string FormatSpeed(double kmh, string speedUnit)
-    {
-        return speedUnit switch
-        {
-            "mph" => $"{(kmh * 0.621371):F0} mph",
-            "m/s" => $"{(kmh / 3.6):F0} m/s",
-            _ => $"{kmh:F0} km/h",
-        };
-    }
-
     private sealed class WeatherCacheData
     {
         public double CurrentTempC { get; set; }
