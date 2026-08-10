@@ -42,6 +42,18 @@ public static class GridSizeExtensions
     public const float CellWidth = DisplayGeometry.FramebufferWidth / 5f;
     public const float CellHeight = DisplayGeometry.FramebufferHeight / 4f;
 
+    /// <summary>Rounds a coordinate to the nearest whole cell — the single
+    /// snap-to-grid rule (placement centering and the drag/resize snap share
+    /// it, so the rounding can never drift between Core and App).</summary>
+    public static float SnapToCell(float value, float cellSize)
+        => (float)Math.Round(value / cellSize) * cellSize;
+
+    /// <summary>Rounds an X coordinate to the horizontal grid.</summary>
+    public static float SnapX(float value) => SnapToCell(value, CellWidth);
+
+    /// <summary>Rounds a Y coordinate to the vertical grid.</summary>
+    public static float SnapY(float value) => SnapToCell(value, CellHeight);
+
     public static SKSize ToSize(this GridSizePreset preset)
     {
         return preset switch

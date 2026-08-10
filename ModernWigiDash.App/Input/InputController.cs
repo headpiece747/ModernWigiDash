@@ -177,6 +177,10 @@ public sealed class InputController
         switch (_manipulation)
         {
             case ManipulationKind.Resize:
+                // Usability floors so the resize handles stay grabbable — a
+                // distinct policy from InspectorValuePolicy.MinWidgetSize (the
+                // inspector's typed-value validation floor); both must stay in
+                // sync with the smallest sensible widget.
                 widget.Width = Math.Max(40f, x - widget.X);
                 widget.Height = Math.Max(30f, y - widget.Y);
                 changed = true;
@@ -212,12 +216,12 @@ public sealed class InputController
         if (wasManipulating && widget != null && editMode && snapToGrid &&
             _manipulation is ManipulationKind.Drag or ManipulationKind.Resize)
         {
-            widget.X = (float)Math.Round(widget.X / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-            widget.Y = (float)Math.Round(widget.Y / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+            widget.X = GridSizeExtensions.SnapX(widget.X);
+            widget.Y = GridSizeExtensions.SnapY(widget.Y);
             if (_manipulation == ManipulationKind.Resize)
             {
-                widget.Width = (float)Math.Round(widget.Width / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-                widget.Height = (float)Math.Round(widget.Height / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+                widget.Width = GridSizeExtensions.SnapToCell(widget.Width, GridSizeExtensions.CellWidth);
+                widget.Height = GridSizeExtensions.SnapToCell(widget.Height, GridSizeExtensions.CellHeight);
             }
         }
 

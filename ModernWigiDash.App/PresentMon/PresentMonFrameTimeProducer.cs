@@ -15,8 +15,8 @@ namespace ModernWigiDash.App.PresentMon;
 /// </summary>
 public sealed class PresentMonFrameTimeProducer : IDisposable
 {
-    /// <summary>Sparkline sample cap — mirrors the widget's test window of 240 samples.</summary>
-    internal const int MaxSparklineSamples = 240;
+    /// <summary>Sparkline sample cap — aliases the single owner on FrameTimeStatistics.</summary>
+    internal const int MaxSparklineSamples = FrameTimeStatistics.MaxSparklineSamples;
 
     /// <summary>
     /// Consecutive polls where at least one candidate tracked successfully but

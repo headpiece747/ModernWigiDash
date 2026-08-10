@@ -176,8 +176,8 @@ public static class ProfileOps
             return PlaceWidget(profile, loader, context, pluginId, 0, 0);
         }
 
-        float cx = (float)Math.Round(DisplayGeometry.FramebufferWidth / 2.0 / GridSizeExtensions.CellWidth) * GridSizeExtensions.CellWidth;
-        float cy = (float)Math.Round(DisplayGeometry.FramebufferHeight / 2.0 / GridSizeExtensions.CellHeight) * GridSizeExtensions.CellHeight;
+        float cx = GridSizeExtensions.SnapX(DisplayGeometry.FramebufferWidth / 2.0f);
+        float cy = GridSizeExtensions.SnapY(DisplayGeometry.FramebufferHeight / 2.0f);
         return PlaceWidget(profile, loader, context, pluginId, cx - size.Width / 2, cy - size.Height / 2);
     }
 

@@ -7,6 +7,10 @@ namespace ModernWigiDash.Sdk;
 /// </summary>
 public static class FrameTimeStatistics
 {
+    /// <summary>The rolling sparkline window (samples) � the single owner of
+    /// the cap the producer's frame-time buffer honors.</summary>
+    public const int MaxSparklineSamples = 240;
+
     /// <summary>
     /// Converts a frame time in milliseconds to an FPS value. Returns 0 for
     /// non-positive frame times so callers never divide by zero.

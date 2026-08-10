@@ -31,11 +31,17 @@ public sealed class TelemetryProducers : IDisposable
     /// <param name="log">Log sink (the window's FileLog line writer).</param>
     /// <param name="lhsReader">The LHS map reader (injectable so tests drive
     /// the poll tick with an in-memory map source).</param>
-    public TelemetryProducers(IPresentMonNative presentMonNative, Action<string> log, LhmSharedMemoryReader? lhsReader = null)
+    /// <param name="targetResolver">The PresentMon tracking-target resolver
+    /// (injectable so tests can stub the foreground window).</param>
+    public TelemetryProducers(
+        IPresentMonNative presentMonNative,
+        Action<string> log,
+        LhmSharedMemoryReader? lhsReader = null,
+        TrackedTargetResolver? targetResolver = null)
     {
         _log = log;
         _lhsReader = lhsReader ?? new LhmSharedMemoryReader();
-        _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, new TrackedTargetResolver());
+        _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, targetResolver ?? new TrackedTargetResolver());
 
         // One poll loop per direct producer. The frame-time loop is gated on
         // the runtime-loaded API library being available; the producer owns

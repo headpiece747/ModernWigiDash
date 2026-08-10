@@ -13,7 +13,10 @@ namespace ModernWigiDash.App.Inspector;
 /// </summary>
 internal sealed class InspectorValuePolicy
 {
-    /// <summary>Minimum width/height a widget may be resized to via the inspector.</summary>
+    /// <summary>Minimum width/height a widget may be resized to via the inspector —
+    /// a distinct policy from InputController's drag-resize floors (40/30,
+    /// usability floors so handles stay grabbable); both stay in sync with the
+    /// smallest sensible widget.</summary>
     private const float MinWidgetSize = 20f;
 
     /// <summary>
