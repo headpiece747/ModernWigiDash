@@ -11,7 +11,7 @@ namespace ModernWigiDash.Tests;
 /// The shared test doubles every test file used to copy: the no-op widget
 /// context (with optional counters), the placed-instance persisting variant,
 /// the in-memory WebSocket feed, the HTTP stub, and the PresentMon interop
-/// stub. One double per seam — new widget tests start from a one-line host.
+/// stub. One double per seam â€” new widget tests start from a one-line host.
 /// </summary>
 internal class TestContext : IModernWigiDashContext
 {
@@ -32,7 +32,7 @@ internal class TestContext : IModernWigiDashContext
 }
 
 /// <summary>
-/// Context that resolves the owning placed instance like MainWindow does —
+/// Context that resolves the owning placed instance like MainWindow does â€”
 /// the companion to ModernWidgetBase.SetProperty (for tests asserting the
 /// PropertyValues persistence path).
 /// </summary>
@@ -40,21 +40,18 @@ internal sealed class PersistingContext(ProfileLayout profile) : TestContext
 {
     public override void PersistProperty(object widget, string propertyName, object? value)
     {
-        foreach (var page in profile.Pages)
+        // The shared identity scan — same rule MainWindow.Context uses, so the
+        // test double is not a copy that can drift.
+        if (ProfileOps.FindPlacedWidget(profile, widget) is { } placed)
         {
-            foreach (var placed in page.Widgets)
-            {
-                if (!ReferenceEquals(placed.ActiveInstance, widget)) continue;
-                placed.PropertyValues[propertyName] = value;
-                return;
-            }
+            placed.PropertyValues[propertyName] = value;
         }
     }
 }
 
 /// <summary>
 /// In-memory <see cref="IWebSocketFeed"/>: queued messages feed the consumer,
-/// sent payloads are recorded, and connect failures are injectable — the
+/// sent payloads are recorded, and connect failures are injectable â€” the
 /// feed loops (price, Twitch) are drivable without a network.
 /// </summary>
 internal sealed class FakeFeed : IWebSocketFeed
@@ -115,7 +112,7 @@ internal sealed class StubHttpHandler : HttpMessageHandler
     }
 }
 
-/// <summary>PresentMon interop stub — keeps the real PresentMonAPI2.dll (and
+/// <summary>PresentMon interop stub â€” keeps the real PresentMonAPI2.dll (and
 /// its load-time side effects) out of the test host.</summary>
 internal sealed class StubPresentMonNative : IPresentMonNative
 {
@@ -128,3 +125,4 @@ internal sealed class StubPresentMonNative : IPresentMonNative
     public IReadOnlyList<double> DrainFrameTimes(int processId) => [];
     public void Dispose() { }
 }
+

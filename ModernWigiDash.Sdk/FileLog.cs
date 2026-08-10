@@ -41,13 +41,17 @@ public static class FileLog
     /// </summary>
     public static string LogPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "display_device.log");
 
+    /// <summary>Test seam: the clock for the timestamp line (the rest of Sdk
+    /// injects TimeProvider — this is the same policy for the shared log).</summary>
+    internal static TimeProvider Clock { get; set; } = TimeProvider.System;
+
     /// <summary>
     /// Writes one line to the shared display log. Never throws: logging is
     /// best-effort and failures (locked/unavailable file) are swallowed.
     /// </summary>
     public static void Write(string message, string? prefix = null)
     {
-        string line = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {(string.IsNullOrEmpty(prefix) ? "" : prefix + " ")}{message}";
+        string line = $"[{Clock.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {(string.IsNullOrEmpty(prefix) ? "" : prefix + " ")}{message}";
         lock (Gate)
         {
             try

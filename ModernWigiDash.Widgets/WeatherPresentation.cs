@@ -44,6 +44,27 @@ public static class WeatherPresentation
         };
     }
 
+    /// <summary>The default unit-system choice — the single source for the
+    /// widget's property default and the tap-toggle.</summary>
+    public const string DefaultUnitSystem = "Fahrenheit (°F, mph)";
+
+    /// <summary>All unit-system choices, in property-list order.</summary>
+    public static readonly string[] UnitSystemOptions =
+    [
+        "Fahrenheit (°F, mph)",
+        "Celsius (°C, km/h)",
+        "Celsius (°C, mph)",
+        "Celsius (°C, m/s)",
+        "Kelvin (K, m/s)",
+    ];
+
+    /// <summary>The tap-toggle rule: Fahrenheit ⇄ Celsius (km/h) — the
+    /// widget's badge cycles between the two primary systems.</summary>
+    public static string ToggleUnitSystem(string current)
+        => current.StartsWith("Fahrenheit", StringComparison.OrdinalIgnoreCase)
+            ? "Celsius (°C, km/h)"
+            : DefaultUnitSystem;
+
     /// <summary>Parses the unit-system choice string into the display unit tokens.</summary>
     public static (string tempUnit, string speedUnit) ParseUnitSystem(string unitSystem)
     {

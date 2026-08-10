@@ -28,7 +28,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     public string CustomLabel { get; set; } = "";
 
     [WidgetProperty("Unit System", WidgetPropertyType.Choice, "Temperature & speed units", "Fahrenheit (°F, mph)", "Fahrenheit (°F, mph)", "Celsius (°C, km/h)", "Celsius (°C, mph)", "Celsius (°C, m/s)", "Kelvin (K, m/s)")]
-    public string UnitSystem { get; set; } = "Fahrenheit (°F, mph)";
+    public string UnitSystem { get; set; } = WeatherPresentation.DefaultUnitSystem;
 
     [WidgetProperty("Layout Mode", WidgetPropertyType.Choice, "Display view style", "Detailed", "Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact")]
     public string LayoutMode { get; set; } = "Detailed";
@@ -136,7 +136,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Kick the fetch only when the static-snapshot rule allows and the
-        // client's sync throttle window has elapsed — the per-frame async
+        // client's sync throttle window has elapsed â€” the per-frame async
         // allocation is skipped while the 5-min window is open. The client's
         // atomic claim still decides throttling/in-flight.
         if (!IsStaticSnapshotBlocking && _client.IsFetchWindowElapsed())
@@ -147,7 +147,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         _lastBounds = bounds;
 
         // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render — but only when the source actually changed (the
+        // a list mid-render â€” but only when the source actually changed (the
         // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
@@ -600,9 +600,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         if (localPoint.Y < 44f * sy && localPoint.X > b.Width - 64f * sx)
         {
-            SetProperty(nameof(UnitSystem), UnitSystem.StartsWith("Fahrenheit", StringComparison.OrdinalIgnoreCase)
-                ? "Celsius (°C, km/h)"
-                : "Fahrenheit (°F, mph)");
+            SetProperty(nameof(UnitSystem), WeatherPresentation.ToggleUnitSystem(UnitSystem));
             return;
         }
 
@@ -623,7 +621,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// Fetches live weather through the client's atomic fetch claim — the
+    /// Fetches live weather through the client's atomic fetch claim â€” the
     /// in-flight/throttle decision is the client's, single-sourced. While a
     /// static snapshot is showing, non-forced fetches are blocked.
     /// </summary>
@@ -645,7 +643,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the
-    /// "response omitted this section → keep the previous value" semantics.
+    /// "response omitted this section â†’ keep the previous value" semantics.
     /// </summary>
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
@@ -668,3 +666,4 @@ public class WeatherForecastWidget : ModernWidgetBase
         if (cached is not null) ApplySnapshot(cached);
     }
 }
+

@@ -40,7 +40,10 @@ public sealed class GestureInterpreter
     public const float SwipeToleranceY = 80f;
     public const float TapThreshold = 30f;
     public const float EdgeLeftX = 60f;
-    public const float EdgeRightX = 964f;
+
+    /// <summary>Derived from the framebuffer geometry: 1016 − 52 (the right
+    /// edge margin) — the mirror of the device's pixel width.</summary>
+    public const float EdgeRightX = ModernWigiDash.Sdk.DisplayGeometry.FramebufferWidth - 52f;
     public const float EdgeTopY = 200f;
     public const float EdgeBottomY = 400f;
     public const float MoveSensitivity = 0.5f;

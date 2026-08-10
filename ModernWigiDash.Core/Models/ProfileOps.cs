@@ -14,6 +14,23 @@ namespace ModernWigiDash.Core.Models;
 /// </summary>
 public static class ProfileOps
 {
+    /// <summary>
+    /// Finds the placed instance wrapping a live widget instance (by
+    /// reference) — the single identity scan the window's PersistProperty and
+    /// the test context share.
+    /// </summary>
+    public static PlacedWidgetInstance? FindPlacedWidget(ProfileLayout profile, object widgetInstance)
+    {
+        foreach (var page in profile.Pages)
+        {
+            foreach (var placed in page.Widgets)
+            {
+                if (ReferenceEquals(placed.ActiveInstance, widgetInstance)) return placed;
+            }
+        }
+        return null;
+    }
+
     // ── page CRUD ───────────────────────────────────────────
 
     /// <summary>Adds a page and activates it. Returns the new page.</summary>

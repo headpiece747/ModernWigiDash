@@ -11,7 +11,7 @@ namespace ModernWigiDash.Widgets;
 /// (ADR-0003): the app opens a non-elevated session, starts tracking the
 /// focused process, and polls the counters on the 1s poll loop. When the
 /// service is absent, the widget renders the graceful unavailable state; with
-/// no tracked process, the dashboard renders zero values — PresentMon's own
+/// no tracked process, the dashboard renders zero values â€” PresentMon's own
 /// value for no presents (0 presents/sec).
 /// </summary>
 [WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
@@ -64,7 +64,7 @@ public class FrameTimeWidget : ModernWidgetBase
     /// <summary>
     /// The dashboard view: hero FPS + frame time, process name, up to eight
     /// metric cards, and the frame-time sparkline. The no-process state
-    /// renders the same layout with zero values — the presentation model
+    /// renders the same layout with zero values â€” the presentation model
     /// decides what every string reads and which rows the placement size
     /// keeps.
     /// </summary>
@@ -72,7 +72,7 @@ public class FrameTimeWidget : ModernWidgetBase
     {
         float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
 
-        bool tiny = bounds.Height < 150f;
+        bool tiny = display.IsCompact; // the model owns the 150px breakpoint
         float graphHeight = display.ShowGraph ? bounds.Height * 0.12f : 0f;
 
         float contentTop = bounds.Top + pad;
@@ -234,3 +234,4 @@ public class FrameTimeWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(label, cx - lblBounds.Width / 2f, lblY, lblFont, lblPaint);
     }
 }
+

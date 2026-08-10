@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
@@ -36,23 +37,22 @@ public partial class MainWindow
 
     /// <summary>
     /// Resolves the placed instance that owns <paramref name="widget"/> (by
-    /// identity) and persists the property into its PropertyValues — the
+    /// identity) and persists the property into its PropertyValues Ã¢â‚¬â€ the
     /// companion write to <see cref="ModernWidgetBase.SetProperty"/> so widget
-    /// runtime toggles survive Export→Import. A small linear scan over the
+    /// runtime toggles survive ExportÃ¢â€ â€™Import. A small linear scan over the
     /// profile; property changes are user-frequency, not per-frame.
     /// </summary>
     public void PersistProperty(object widget, string propertyName, object? value)
     {
-        foreach (var page in _profile.Pages)
+        // The identity scan is the shared ProfileOps rule (the test context
+        // uses the same helper, so the production scan is not a copy).
+        if (ProfileOps.FindPlacedWidget(_profile, widget) is { } placed)
         {
-            foreach (var placed in page.Widgets)
-            {
-                if (!ReferenceEquals(placed.ActiveInstance, widget)) continue;
-                placed.PropertyValues[propertyName] = value;
-                return;
-            }
+            placed.PropertyValues[propertyName] = value;
         }
     }
 
     #endregion
 }
+
+

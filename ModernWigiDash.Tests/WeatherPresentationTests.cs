@@ -85,6 +85,15 @@ public class WeatherPresentationTests
     }
 
     [TestMethod]
+    public void ToggleUnitSystem_CyclesFahrenheitAndCelsius()
+    {
+        Assert.AreEqual("Celsius (°C, km/h)", WeatherPresentation.ToggleUnitSystem("Fahrenheit (°F, mph)"));
+        Assert.AreEqual("Fahrenheit (°F, mph)", WeatherPresentation.ToggleUnitSystem("Celsius (°C, km/h)"));
+        Assert.AreEqual(WeatherPresentation.DefaultUnitSystem, WeatherPresentation.ToggleUnitSystem("Kelvin (K, m/s)"),
+            "an unknown system falls back to the default on toggle");
+    }
+
+    [TestMethod]
     public void DailyHighLowText_LongUnitsJoined()
     {
         Assert.AreEqual("High: 25.0°C  Low: 16.0°C", WeatherPresentation.DailyHighLowText(25, 16, "°C"));

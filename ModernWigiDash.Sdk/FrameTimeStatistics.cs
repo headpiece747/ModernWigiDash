@@ -1,4 +1,4 @@
-﻿namespace ModernWigiDash.Sdk;
+namespace ModernWigiDash.Sdk;
 
 /// <summary>
 /// Pure, testable statistics used to turn a stream of per-frame timings into
