@@ -58,8 +58,12 @@ public static class FontHelper
             System.Diagnostics.Debug.WriteLine("Geist font load failed, using clean fallback");
         }
 
-        return SKTypeface.FromFamilyName("Geist") ?? SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default;
+        return SKTypeface.FromFamilyName(DefaultFontName) ?? SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default;
     });
+
+    /// <summary>The project font family — the one name the widgets pass to
+    /// GetCachedFont (previously a string literal at 60+ call sites).</summary>
+    public const string DefaultFontName = "Geist";
 
     /// <summary>
     /// Gets the loaded Geist Variable SKTypeface instance.
@@ -83,8 +87,8 @@ public static class FontHelper
                 {
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     List<string> list = [];
-                    if (seen.Add("Geist"))
-                        list.Add("Geist");
+                    if (seen.Add(DefaultFontName))
+                        list.Add(DefaultFontName);
                     list.AddRange(SKFontManager.Default.FontFamilies.Where(family => !string.IsNullOrWhiteSpace(family) && seen.Add(family)));
                     _families = list.ToArray();
                 }
@@ -93,7 +97,7 @@ public static class FontHelper
                     // Broken font store — never crash the inspector; Geist alone
                     // still renders (the typeface caches fall back to Default).
                     System.Diagnostics.Debug.WriteLine("Font family enumeration failed, falling back to Geist only");
-                    _families = ["Geist"];
+                    _families = [DefaultFontName];
                 }
             }
         }
@@ -340,7 +344,7 @@ public static class FontHelper
     public static SKTypeface GetTypeface(string familyName, SKFontStyle style)
     {
         if (string.IsNullOrWhiteSpace(familyName) ||
-            familyName.Equals("Geist", StringComparison.OrdinalIgnoreCase))
+            familyName.Equals(DefaultFontName, StringComparison.OrdinalIgnoreCase))
         {
             // Geist is a variable font covering every style — the style-pinned
             // FromFamilyName fallback chain after _geistTypeface.Value was dead

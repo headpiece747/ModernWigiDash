@@ -230,6 +230,31 @@ public class DisplayHidTransportTests
     }
 
     [TestMethod]
+    public void GoToStandby_SendsWelcomeScreenCommand()
+    {
+        var backend = new RecordingBackend();
+        using var transport = new DisplayHidTransport(backend);
+
+        bool ok = transport.GoToStandby();
+
+        Assert.IsTrue(ok);
+        // Standby = the vendor Welcome screen (wValue = screenId, no transition).
+        Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdGoToScreen, WValue: DisplayProtocolConstants.ScreenWelcome }));
+        // The current-page bookkeeping must not change — Welcome is not a Base screen.
+        Assert.IsTrue(backend.ControlCalls.Count(c => c.Request == DisplayProtocolConstants.CmdGoToScreen) == 1);
+    }
+
+    [TestMethod]
+    public void GoToStandby_WhenDisconnected_ReturnsFalse()
+    {
+        var backend = new RecordingBackend { IsOpen = false };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsFalse(transport.GoToStandby());
+        Assert.AreEqual(0, backend.ControlCalls.Count);
+    }
+
+    [TestMethod]
     public void ReadTouch_ValidReport_ParsesCoordinatesAndType()
     {
         var backend = new RecordingBackend
