@@ -39,14 +39,112 @@ public class DisplayHidTransportTests
             return ControlInResult;
         }
 
+        /// <summary>When set, reports a partial transfer (short write) — mirroring
+        /// the real backends' full-transfer contract, a short write fails.</summary>
+        public int? BulkWriteTransferred { get; set; }
+
         public bool BulkWrite(byte pipeId, byte[] data, out int transferred)
         {
             BulkWrites.Add(data);
-            transferred = data.Length;
-            return BulkWriteResult;
+            transferred = BulkWriteTransferred ?? data.Length;
+            return BulkWriteResult && transferred == data.Length;
         }
 
         public void Dispose() => IsOpen = false;
+    }
+
+    /// <summary>
+    /// Subclass seam over <see cref="WinUsbBulkDevice"/>: replaces the real
+    /// SetupAPI/WinUSB P/Invoke surface with canned results and call counts,
+    /// so <see cref="DisplayHidTransport.Connect"/>'s WinUSB policy (open →
+    /// PING → init → LibUsb fallback) is drivable without hardware. Injected
+    /// via <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>.
+    /// </summary>
+    private sealed class FakeWinUsbBulkDevice : WinUsbBulkDevice
+    {
+        public bool OpenResult { get; init; } = true;
+        public bool ControlResult { get; init; } = true;
+        public int OpenCalls { get; private set; }
+        public int ControlInCalls { get; private set; }
+        public int ControlOutCalls { get; private set; }
+        public int BulkWriteCalls { get; private set; }
+        public bool Disposed { get; private set; }
+
+        private bool _isOpen;
+
+        public override bool IsOpen => _isOpen;
+
+        public override bool Open(Guid interfaceGuid)
+        {
+            OpenCalls++;
+            _isOpen = OpenResult;
+            return OpenResult;
+        }
+
+        public override bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+        {
+            ControlInCalls++;
+            return ControlResult;
+        }
+
+        public override bool ControlOut(byte request, ushort wValue, byte[]? data)
+        {
+            ControlOutCalls++;
+            return ControlResult;
+        }
+
+        public override bool BulkWrite(byte pipeId, byte[] data, out int transferred)
+        {
+            BulkWriteCalls++;
+            transferred = data.Length;
+            return ControlResult;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Disposed = true;
+                _isOpen = false;
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Connect_WinUsbOpenAndPingSucceed_ConnectsAndRunsInit()
+    {
+        var fake = new FakeWinUsbBulkDevice();
+        using var transport = new DisplayHidTransport();
+        transport.WinUsbDeviceFactory = () => fake;
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        Assert.IsTrue(transport.IsConnected);
+        Assert.AreEqual(1, fake.OpenCalls);
+        // PING (Connect) + PING (SendInitCommands) both go through the fake
+        Assert.AreEqual(2, fake.ControlInCalls);
+        // Init sequence: brightness + 3x (ClearPage + AddWidget) + FrameHeader + GoToScreen
+        Assert.AreEqual(9, fake.ControlOutCalls);
+        Assert.AreEqual(1, fake.BulkWriteCalls); // blank framebuffer
+    }
+
+    [TestMethod]
+    public void Connect_WinUsbPingFails_FallsBackToLibUsb()
+    {
+        var fake = new FakeWinUsbBulkDevice { ControlResult = false };
+        using var transport = new DisplayHidTransport();
+        transport.WinUsbDeviceFactory = () => fake;
+
+        // The WinUSB path must be abandoned after the failed PING; the LibUsb
+        // fallback then runs against the real device context, so the final
+        // outcome depends on whether hardware is attached. Assert the
+        // deterministic part: the fake was consulted and disposed.
+        bool ok = transport.Connect();
+
+        Assert.AreEqual(1, fake.ControlInCalls, "The failed PING went through the factory-created fake");
+        Assert.IsTrue(fake.Disposed, "The failed WinUSB device must be disposed");
+        Assert.AreEqual(ok, transport.IsConnected, "Connection state must reflect the connect result");
     }
 
     [TestMethod]
@@ -94,6 +192,23 @@ public class DisplayHidTransportTests
     public void SendFrame_WhenBulkFails_SendsFrameAbortAndCountsFailure()
     {
         var backend = new RecordingBackend { BulkWriteResult = false };
+        using var transport = new DisplayHidTransport(backend);
+        byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
+
+        bool ok = transport.SendFrame(frame);
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, transport.FramesFailed);
+        Assert.IsTrue(backend.ControlCalls.Any(c => c.Request == DisplayProtocolConstants.CmdFrameAbort));
+    }
+
+    [TestMethod]
+    public void SendFrame_ShortBulkWrite_SendsFrameAbortAndCountsFailure()
+    {
+        // A backend reporting transferred < length fails the write — the same
+        // full-transfer contract as the real backends — so the transport must
+        // treat it like any bulk failure.
+        var backend = new RecordingBackend { BulkWriteTransferred = 123 };
         using var transport = new DisplayHidTransport(backend);
         byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
 

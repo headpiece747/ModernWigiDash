@@ -17,7 +17,10 @@ public class SkiaFrameCompositor : IDisposable
     private readonly SKBitmap _frameBuffer = new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
     private readonly SKCanvas _canvas;
     private readonly EditOverlay _editOverlay = new();
-    private bool _isEditMode = true;
+    // Defaults OFF: the App's MainWindow syncs this from the Edit Mode checkbox
+    // on startup (the checkbox default is checked, so the window re-asserts it
+    // explicitly); a compositor alone must not assume authoring mode.
+    private bool _isEditMode = false;
     private PlacedWidgetInstance? _selectedWidget;
 
     // Zero-alloc render path: the buffer never changes, so the canvas is
@@ -198,7 +201,6 @@ public class SkiaFrameCompositor : IDisposable
             _frameBuffer.Dispose();
             _canvas.Dispose();
             _alphaPaint.Dispose();
-            _editOverlay.Dispose();
         }
         _disposed = true;
     }

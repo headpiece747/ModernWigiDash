@@ -5,10 +5,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("ticker_stock", "Stock & Crypto", Description = "Shows live stock/crypto symbol, real-time price, and trend badges via WebSocket.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
+[WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities")]
 public class CryptoStockTickerWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
 
     [WidgetProperty("Symbol", WidgetPropertyType.Text, "Crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT)")]
@@ -20,9 +19,9 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     [WidgetProperty("Display Name", WidgetPropertyType.Text, "Optional custom label (leave blank to auto-generate from symbol)")]
     public string DisplayName { get; set; } = "";
 
-    public string Price { get; set; } = "";
+    private string Price = "";
 
-    public string ChangeBadge { get; set; } = "";
+    private string ChangeBadge = "";
 
     [WidgetProperty("Show Change", WidgetPropertyType.Boolean, "Show or hide the change percentage badge", true)]
     public bool ShowChange { get; set; } = true;

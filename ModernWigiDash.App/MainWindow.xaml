@@ -79,7 +79,7 @@
 
                     <TextBlock Grid.Row="0" Text="🗂️ WIDGET CATALOG" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,10"/>
                     
-                    <TextBox x:Name="TxtSearchCatalog" Grid.Row="1" Margin="0,0,0,12" TextChanged="TxtSearchCatalog_TextChanged" Tag="Search widgets..."/>
+                    <TextBox x:Name="TxtSearchCatalog" Grid.Row="1" Margin="0,0,0,12" TextChanged="TxtSearchCatalog_TextChanged"/>
 
                     <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="ListCatalog">
@@ -236,7 +236,7 @@
                                             <TextBlock Text="Layer Opacity" FontSize="11" Foreground="White"/>
                                             <TextBlock x:Name="TxtOpacityVal" Text="100%" FontSize="11" Foreground="{DynamicResource M3Primary}" HorizontalAlignment="Right"/>
                                         </Grid>
-                                        <Slider x:Name="SliderOpacity" Minimum="0.1" Maximum="1.0" Value="1.0" ValueChanged="SliderOpacity_ValueChanged" Margin="0,6,0,0"/>
+                                        <Slider x:Name="SliderOpacity" Minimum="0" Maximum="1.0" Value="1.0" ValueChanged="SliderOpacity_ValueChanged" Margin="0,6,0,0"/>
                                     </StackPanel>
                                 </Grid>
 

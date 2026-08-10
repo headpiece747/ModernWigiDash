@@ -8,10 +8,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("picture_viewer", "Picture & GIF Viewer", Description = "Displays pictures and animated GIFs with rounded borders and click-to-cycle folder viewing.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size2x2)]
+[WidgetMetadata("picture_viewer", "Picture & GIF Viewer", Category = "Social & Visual")]
 public class PictureAndGifWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
     [WidgetProperty("Image Folder/File Path", WidgetPropertyType.Path, "Path to image or folder of images", "C:\\Pictures")]
@@ -40,6 +39,22 @@ public class PictureAndGifWidget : ModernWidgetBase
     private string _loadedPath = "";
     private int _loadVersion;
 
+    // Last-probed-path existence cache: File.Exists per frame is a filesystem
+    // hit; the probe is re-done only when the path changes (ResetMedia clears
+    // the key on ImagePath/SourceMode changes).
+    private string _lastProbePath = "";
+    private bool _lastProbeExists;
+
+    private bool ProbeFileExists(string path)
+    {
+        if (path != _lastProbePath)
+        {
+            _lastProbePath = path;
+            _lastProbeExists = File.Exists(path);
+        }
+        return _lastProbeExists;
+    }
+
     // Media is decoded on a background thread and published atomically. The
     // render thread may be drawing a bitmap at publish time, so replaced
     // bitmaps are retired via _mediaRetirement and disposed only on the UI
@@ -65,7 +80,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         string? currentFile = GetActiveImageFile();
 
-        if (!string.IsNullOrEmpty(currentFile) && File.Exists(currentFile))
+        if (!string.IsNullOrEmpty(currentFile) && ProbeFileExists(currentFile))
         {
             if (currentFile != _loadedPath)
             {
@@ -276,6 +291,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         _folderImages = [];
         _folderScanned = false;
         _imageIndex = 0;
+        _lastProbePath = "";
 
         // UI thread (inspector property change / teardown): nothing is mid-draw
         // right now, so dispose retired media promptly instead of waiting for
@@ -336,7 +352,11 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
         using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        TextRenderHelper.DrawCenteredText(canvas, "Click/Tap to Cycle Pictures", bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
+        // The cycle hint only applies when the source mode actually cycles —
+        // a single-image widget must not promise a tap-to-cycle behavior.
+        bool cycles = SourceMode == "Folder (Cycle)" || (SourceMode == "Auto" && Directory.Exists(ImagePath));
+        string hint = cycles ? "Click/Tap to Cycle Pictures" : "Tap to set an Image Path";
+        TextRenderHelper.DrawCenteredText(canvas, hint, bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
     }
 
     private string? GetActiveImageFile()
@@ -344,7 +364,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         bool singleMode = SourceMode == "Single Image";
         bool folderMode = SourceMode == "Folder (Cycle)";
 
-        if (!folderMode && File.Exists(ImagePath))
+        if (!folderMode && ProbeFileExists(ImagePath))
         {
             return ImagePath;
         }

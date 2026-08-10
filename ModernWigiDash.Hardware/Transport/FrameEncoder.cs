@@ -10,10 +10,14 @@ namespace ModernWigiDash.Hardware.Transport;
 public static class FrameEncoder
 {
     /// <summary>
-    /// Converts an SKBitmap (RGBA8888) to RGB565 Little Endian, writing into
-    /// the caller-provided destination buffer (which must hold at least the
+    /// Converts an SKBitmap to RGB565 Little Endian, writing into the
+    /// caller-provided destination buffer (which must hold at least the
     /// display framebuffer payload). The 30 FPS pipeline encodes straight
     /// into a pooled exact-size buffer, avoiding the extra copy.
+    /// The zero-alloc fast path handles both BGRA8888 (SkiaSharp's
+    /// PlatformColorType on Windows — byte 0 is blue) and RGBA8888 (byte 0
+    /// is red) and requires tightly-packed rows; anything else takes the
+    /// per-pixel fallback.
     /// </summary>
     public static void ConvertToRgb565(SKBitmap bitmap, byte[] destination)
     {
@@ -34,25 +38,35 @@ public static class FrameEncoder
             using var pixmap = bitmap.PeekPixels();
             if (pixmap != null && pixmap.GetPixels() != IntPtr.Zero)
             {
-#pragma warning disable S6640 // zero-alloc encode fast path
-                unsafe
+                // Fast path requires tightly-packed 4-byte rows; a padded
+                // stride would skew every row. Guard color order explicitly:
+                // Rgba8888 has red at byte 0, Bgra8888 has blue at byte 0.
+                bool bgra = pixmap.ColorType == SKColorType.Bgra8888;
+                bool rgba = pixmap.ColorType == SKColorType.Rgba8888;
+                if ((bgra || rgba) && pixmap.RowBytes == width * 4)
                 {
-                    byte* srcPtr = (byte*)pixmap.GetPixels();
-                    fixed (byte* dstPtr = destination)
+                    int redByte = rgba ? 0 : 2;
+                    int blueByte = bgra ? 0 : 2;
+#pragma warning disable S6640 // zero-alloc encode fast path
+                    unsafe
                     {
-                        ushort* dstUshort = (ushort*)dstPtr;
-                        int pixelCount = width * height;
-                        for (int i = 0; i < pixelCount; i++)
+                        byte* srcPtr = (byte*)pixmap.GetPixels();
+                        fixed (byte* dstPtr = destination)
                         {
-                            byte b = srcPtr[i * 4];
-                            byte g = srcPtr[i * 4 + 1];
-                            byte r = srcPtr[i * 4 + 2];
-                            dstUshort[i] = (ushort)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+                            ushort* dstUshort = (ushort*)dstPtr;
+                            int pixelCount = width * height;
+                            for (int i = 0; i < pixelCount; i++)
+                            {
+                                byte b = srcPtr[i * 4 + blueByte];
+                                byte g = srcPtr[i * 4 + 1];
+                                byte r = srcPtr[i * 4 + redByte];
+                                dstUshort[i] = (ushort)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+                            }
                         }
                     }
-                }
 #pragma warning restore S6640
-                return;
+                    return;
+                }
             }
         }
 

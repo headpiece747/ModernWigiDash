@@ -21,10 +21,12 @@ public class PriceInfo
     public string CurrencySymbol { get; set; } = "$";
     public string Source { get; set; } = "";
     public DateTime Timestamp { get; set; }
-    public string FormattedPrice => $"{CurrencySymbol}{Price:N2}";
     public string FormattedChange => $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent:F2}%";
     public bool IsPositive => ChangePercent >= 0;
-    public bool IsStale => (TimeProvider.System.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > 60;
+    public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > 60;
+
+    /// <summary>Test seam: clock for the staleness decision.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
 }
 
 public sealed class PriceFeedManager : IDisposable
@@ -158,6 +160,9 @@ public sealed class PriceFeedManager : IDisposable
     private Task? _cryptoRestTask;
     private Task? _fxRestTask;
     private bool _disposed;
+
+    /// <summary>Test seam: injectable clock for price timestamps and staleness.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
     /// <summary>
     /// One long-lived client shared by every feed manager. Widgets are
@@ -468,7 +473,7 @@ public sealed class PriceFeedManager : IDisposable
                     Price = price,
                     ChangePercent = change,
                     Source = "CoinGecko",
-                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                    Timestamp = Clock.GetUtcNow().UtcDateTime
                 };
             }
         }
@@ -489,7 +494,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = price,
                 ChangePercent = changePct,
                 Source = "Yahoo",
-                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                Timestamp = Clock.GetUtcNow().UtcDateTime
             };
         }
     }
@@ -528,7 +533,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = c.GetDecimal(),
                 ChangePercent = dp.GetDecimal(),
                 Source = "Finnhub",
-                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                Timestamp = Clock.GetUtcNow().UtcDateTime
             };
         }
     }
@@ -545,8 +550,8 @@ public sealed class PriceFeedManager : IDisposable
 
         string baseCurrency = key[..3];
         string quoteCurrency = key[3..];
-        string start = TimeProvider.System.GetUtcNow().UtcDateTime.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string end = TimeProvider.System.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string start = Clock.GetUtcNow().UtcDateTime.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string end = Clock.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
         if (TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
         {
@@ -555,7 +560,7 @@ public sealed class PriceFeedManager : IDisposable
                 Price = price,
                 ChangePercent = change,
                 Source = "Frankfurter",
-                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime,
+                Timestamp = Clock.GetUtcNow().UtcDateTime,
                 CurrencySymbol = ""
             };
         }
@@ -569,7 +574,16 @@ public sealed class PriceFeedManager : IDisposable
     {
         while (!_disposed)
         {
-            await Task.Delay(interval, _cts.Token);
+            try
+            {
+                await Task.Delay(interval, _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown: end the loop normally instead of faulting the
+                // stored task (unobserved task faults on dispose).
+                break;
+            }
             foreach (var symbol in subscribed)
             {
                 try
@@ -638,7 +652,16 @@ public sealed class PriceFeedManager : IDisposable
     {
         while (!_disposed)
         {
-            await Task.Delay(_cryptoRestInterval, _cts.Token);
+            try
+            {
+                await Task.Delay(_cryptoRestInterval, _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutdown: end the loop normally instead of faulting the
+                // stored task (unobserved task faults on dispose).
+                break;
+            }
             foreach (var sym in _subscribedCrypto.Keys)
             {
                 try
@@ -658,7 +681,7 @@ public sealed class PriceFeedManager : IDisposable
                                 Price = price,
                                 ChangePercent = change,
                                 Source = "BinanceUS",
-                                Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                                Timestamp = Clock.GetUtcNow().UtcDateTime
                             };
                         }
                     }
@@ -694,17 +717,17 @@ public sealed class PriceFeedManager : IDisposable
                     Price = price,
                     ChangePercent = change ?? 0,
                     Source = "CoinGecko",
-                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                    Timestamp = Clock.GetUtcNow().UtcDateTime
                 }, (_, existing) =>
                 {
-                    if (existing.Source == "BinanceUS" && (TimeProvider.System.GetUtcNow().UtcDateTime - existing.Timestamp).TotalSeconds < 60)
+                    if (existing.Source == "BinanceUS" && (Clock.GetUtcNow().UtcDateTime - existing.Timestamp).TotalSeconds < 60)
                         return existing;
                     return new PriceInfo
                     {
                         Price = price,
                         ChangePercent = change ?? existing.ChangePercent,
                         Source = "CoinGecko",
-                        Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                        Timestamp = Clock.GetUtcNow().UtcDateTime
                     };
                 });
             }
@@ -745,7 +768,7 @@ public sealed class PriceFeedManager : IDisposable
                     Price = price,
                     ChangePercent = change,
                     Source = "Binance",
-                    Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime
+                    Timestamp = Clock.GetUtcNow().UtcDateTime
                 };
             }
         }
@@ -769,8 +792,8 @@ public sealed class PriceFeedManager : IDisposable
                 {
                     var s = trade.GetProperty("s").GetString() ?? "";
                     var p = trade.GetProperty("p").GetDecimal();
-                    _prices.AddOrUpdate(s, _ => new PriceInfo { Price = p, Source = "Finnhub", Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime },
-                        (_, existing) => new PriceInfo { Price = p, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = TimeProvider.System.GetUtcNow().UtcDateTime });
+                    _prices.AddOrUpdate(s, _ => new PriceInfo { Price = p, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime },
+                        (_, existing) => new PriceInfo { Price = p, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime });
                 }
             }
         }

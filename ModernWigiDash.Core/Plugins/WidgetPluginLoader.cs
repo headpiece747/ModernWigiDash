@@ -23,6 +23,13 @@ public class WidgetPluginLoader
 
     public IReadOnlyCollection<PluginInfo> RegisteredPlugins => _registeredPlugins.Values;
 
+    /// <summary>
+    /// Registers one widget type under its <see cref="WidgetMetadataAttribute"/>
+    /// id. Deliberately public: tests register hand-rolled widget types
+    /// directly, so removing or narrowing this entry point would break the
+    /// test seam. Production hosts use <see cref="RegisterBuiltInAssembly"/>.
+    /// A duplicate id is skipped (first registration wins) with a diagnostic.
+    /// </summary>
     public void RegisterBuiltInPlugin(Type widgetType)
     {
         if (!typeof(IModernWidget).IsAssignableFrom(widgetType) || widgetType.IsAbstract || widgetType.IsInterface)
@@ -31,6 +38,12 @@ public class WidgetPluginLoader
         var attr = widgetType.GetCustomAttribute<WidgetMetadataAttribute>();
         string id = attr?.Id ?? widgetType.Name;
         string name = attr?.DisplayName ?? widgetType.Name;
+
+        if (_registeredPlugins.ContainsKey(id))
+        {
+            System.Diagnostics.Debug.WriteLine($"WidgetPluginLoader: duplicate plugin id '{id}' from {widgetType.FullName}; keeping the first registration");
+            return;
+        }
 
         _registeredPlugins[id] = new PluginInfo
         {
@@ -45,10 +58,24 @@ public class WidgetPluginLoader
     /// Registers every concrete <see cref="IModernWidget"/> in <paramref name="assembly"/>
     /// (usually the Widgets assembly), so adding a built-in widget needs no
     /// host-side registration — the [WidgetMetadata] attribute drives the catalog.
+    /// A <see cref="ReflectionTypeLoadException"/> (broken/missing plugin
+    /// dependency) registers the loadable subset instead of aborting the catalog.
     /// </summary>
     public void RegisterBuiltInAssembly(Assembly assembly)
     {
-        foreach (var type in assembly.GetTypes())
+        Type[] types;
+        try
+        {
+            types = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"WidgetPluginLoader: {ex.LoaderExceptions.Length} type(s) failed to load from {assembly.FullName}; registering the loadable subset");
+            types = ex.Types.OfType<Type>().ToArray();
+        }
+
+        foreach (var type in types)
         {
             if (typeof(IModernWidget).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface)
             {

@@ -17,14 +17,10 @@ public enum GesturePageAction
 /// </summary>
 /// <param name="PageAction">Swipe/edge-tap navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
 /// <param name="RouteToWidgets">True when the sample should be forwarded to the widget compositor.</param>
-/// <param name="X">Touch X in display coordinates.</param>
-/// <param name="Y">Touch Y in display coordinates.</param>
 /// <param name="WidgetTouchType">Touch type to route to widgets (Down/Move/Up mapping).</param>
 public sealed record GestureOutcome(
     GesturePageAction PageAction,
     bool RouteToWidgets,
-    float X,
-    float Y,
     TouchEventType WidgetTouchType);
 
 /// <summary>
@@ -85,7 +81,7 @@ public sealed class GestureInterpreter
             }
 
             bool moved = Math.Abs(_startX - x) > MoveSensitivity || Math.Abs(_startY - y) > MoveSensitivity;
-            return new GestureOutcome(GesturePageAction.None, true, x, y,
+            return new GestureOutcome(GesturePageAction.None, true,
                 moved ? TouchEventType.TouchMove : TouchEventType.TouchDown);
         }
 
@@ -95,7 +91,7 @@ public sealed class GestureInterpreter
             {
                 // The display reports the release state for more than one poll.
                 // Ignore subsequent releases so one physical tap becomes one action.
-                return new GestureOutcome(GesturePageAction.None, false, x, y, TouchEventType.TouchUp);
+                return new GestureOutcome(GesturePageAction.None, false, TouchEventType.TouchUp);
             }
 
             _active = false;
@@ -109,12 +105,12 @@ public sealed class GestureInterpreter
                 {
                     if (deltaX < -SwipeThresholdX && activePageIndex < pageCount - 1)
                     {
-                        return new GestureOutcome(GesturePageAction.NextPage, false, x, y, TouchEventType.TouchUp);
+                        return new GestureOutcome(GesturePageAction.NextPage, false, TouchEventType.TouchUp);
                     }
 
                     if (deltaX > SwipeThresholdX && activePageIndex > 0)
                     {
-                        return new GestureOutcome(GesturePageAction.PrevPage, false, x, y, TouchEventType.TouchUp);
+                        return new GestureOutcome(GesturePageAction.PrevPage, false, TouchEventType.TouchUp);
                     }
                 }
 
@@ -125,19 +121,19 @@ public sealed class GestureInterpreter
                 {
                     if (x <= EdgeLeftX && activePageIndex > 0)
                     {
-                        return new GestureOutcome(GesturePageAction.PrevPage, false, x, y, TouchEventType.TouchUp);
+                        return new GestureOutcome(GesturePageAction.PrevPage, false, TouchEventType.TouchUp);
                     }
 
                     if (x >= EdgeRightX && activePageIndex < pageCount - 1)
                     {
-                        return new GestureOutcome(GesturePageAction.NextPage, false, x, y, TouchEventType.TouchUp);
+                        return new GestureOutcome(GesturePageAction.NextPage, false, TouchEventType.TouchUp);
                     }
                 }
             }
 
-            return new GestureOutcome(GesturePageAction.None, true, x, y, TouchEventType.TouchUp);
+            return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchUp);
         }
 
-        return new GestureOutcome(GesturePageAction.None, true, x, y, TouchEventType.TouchMove);
+        return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchMove);
     }
 }

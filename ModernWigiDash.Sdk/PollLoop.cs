@@ -22,6 +22,7 @@ public sealed class PollLoop : IDisposable
     private readonly Action _onTickFailure;
     private readonly Action<string> _log;
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _stoppedCts;
     private string? _lastFailureMessage;
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
@@ -52,15 +53,26 @@ public sealed class PollLoop : IDisposable
         _ = Task.Run(() => Loop(ct), ct);
     }
 
-    /// <summary>Stops the loop (idempotent).</summary>
+    /// <summary>Stops the loop (idempotent). Cancels but deliberately does NOT
+    /// dispose the token source here: the loop task may still be draining when
+    /// Stop runs, and disposing a CTS a running task still holds can fault the
+    /// task's cancellation registration. The stopped source is handed to
+    /// <see cref="Dispose"/>, which owns its disposal.</summary>
     public void Stop()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
+        if (_cts is null) return;
+        _cts.Cancel();
+        _stoppedCts = _cts;
         _cts = null;
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts = null;
+        _stoppedCts?.Dispose();
+        _stoppedCts = null;
+    }
 
     private async Task Loop(CancellationToken ct)
     {

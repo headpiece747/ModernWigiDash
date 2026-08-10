@@ -85,7 +85,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
         }
         _sessionOpen = true;
 
-#pragma warning disable S125 // documentation of TrackProcess semantics, not commented-out code
+#pragma warning disable S125 // tracking-policy documentation, not commented-out code
         // Multi-process apps (Chrome/Edge/Electron) present from child GPU or
         // renderer processes, so poll the whole descendant tree. TrackProcess
         // is idempotent at the native seam (AlreadyTrackingProcess tolerated);
@@ -123,6 +123,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             return new FrameTimeSnapshotDto
             {
                 IsAvailable = true,
+                CaptureHealthy = true,
                 LastUpdate = now,
                 ProcessId = pid,
                 ProcessName = _processNameProvider(pid) ?? string.Empty,
@@ -207,6 +208,7 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     private static FrameTimeSnapshotDto Idle(DateTime now) => new()
     {
         IsAvailable = true,
+        CaptureHealthy = true,
         ProcessId = -1,
         LastUpdate = now,
     };

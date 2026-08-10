@@ -22,17 +22,19 @@ internal sealed class FixedReconnectPolicy(TimeSpan delay) : IReconnectPolicy
 /// </summary>
 internal sealed class ExponentialBackoffReconnectPolicy(TimeSpan initial, TimeSpan max) : IReconnectPolicy
 {
+    private readonly TimeSpan _initial = initial;
+    private readonly TimeSpan _max = max;
     private TimeSpan _current = initial;
 
     public TimeSpan NextDelay(bool faulted)
     {
         if (!faulted)
         {
-            _current = initial;
-            return initial;
+            _current = _initial;
+            return _initial;
         }
 
-        _current = TimeSpan.FromSeconds(Math.Min(_current.TotalSeconds * 2, max.TotalSeconds));
+        _current = TimeSpan.FromSeconds(Math.Min(_current.TotalSeconds * 2, _max.TotalSeconds));
         return _current;
     }
 }

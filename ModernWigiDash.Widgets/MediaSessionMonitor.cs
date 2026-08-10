@@ -26,6 +26,9 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     private int _refreshVersion;
     private bool _disposed;
 
+    /// <summary>Test seam: injectable clock for the snapshot timestamp.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
     /// <summary>
     /// Raised after each completed refresh with the new snapshot payload, or
     /// with null when the current session is lost or SMTC bootstrap fails.
@@ -203,7 +206,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         }
     }
 
-    private static MediaSnapshot BuildSnapshot(
+    private MediaSnapshot BuildSnapshot(
         IMediaSessionSourceSession session,
         MediaPropertiesData? props,
         PlaybackInfoData? info,
@@ -222,7 +225,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             Status = info?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed,
             Position = timeline?.Position ?? TimeSpan.Zero,
             Duration = timeline?.EndTime ?? TimeSpan.Zero,
-            LastUpdated = timeline?.LastUpdatedTime ?? DateTimeOffset.Now,
+            LastUpdated = timeline?.LastUpdatedTime ?? Clock.GetUtcNow(),
             Shuffle = info?.IsShuffleActive ?? false,
             Repeat = info?.AutoRepeatMode ?? MediaPlaybackAutoRepeatMode.None,
             PlaybackRate = info?.PlaybackRate is > 0 ? info.PlaybackRate.Value : 1.0,

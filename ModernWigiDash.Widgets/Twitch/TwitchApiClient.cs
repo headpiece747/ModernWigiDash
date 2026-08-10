@@ -21,6 +21,9 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
     private readonly string _clientId = clientId.Trim();
     private readonly HttpClient _httpClient = httpClient ?? SharedHttpClient;
 
+    /// <summary>Test seam: injectable clock for token expiry timestamps.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
     public virtual async Task<TwitchDeviceAuthorization> StartDeviceAuthorizationAsync(CancellationToken cancellationToken)
     {
         using var content = new FormUrlEncodedContent(
@@ -43,7 +46,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
             payload.DeviceCode,
             payload.UserCode,
             parsedUri,
-            DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, payload.ExpiresIn)),
+            Clock.GetUtcNow().AddSeconds(Math.Max(1, payload.ExpiresIn)),
             Math.Max(1, payload.Interval));
     }
 
@@ -53,7 +56,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
     {
         TimeSpan interval = TimeSpan.FromSeconds(deviceAuthorization.PollIntervalSeconds);
 
-        while (DateTimeOffset.UtcNow < deviceAuthorization.ExpiresAt)
+        while (Clock.GetUtcNow() < deviceAuthorization.ExpiresAt)
         {
             await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
 
@@ -112,7 +115,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
         if (string.IsNullOrWhiteSpace(payload.RefreshToken))
             payload.RefreshToken = refreshToken;
 
-        return CreateTokenSet(payload, DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, payload.ExpiresIn)));
+        return CreateTokenSet(payload, Clock.GetUtcNow().AddSeconds(Math.Max(1, payload.ExpiresIn)));
     }
 
     public virtual async Task<TwitchTokenValidation> ValidateAsync(string accessToken, CancellationToken cancellationToken)
@@ -194,7 +197,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
             _clientId,
             payload.AccessToken,
             payload.RefreshToken,
-            payload.ExpiresIn > 0 ? DateTimeOffset.UtcNow.AddSeconds(payload.ExpiresIn) : fallbackExpiry,
+            payload.ExpiresIn > 0 ? Clock.GetUtcNow().AddSeconds(payload.ExpiresIn) : fallbackExpiry,
             payload.Scope ?? []);
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)

@@ -76,6 +76,10 @@ public sealed class InspectorController
     {
         _host = host;
         _dialogHost = dialogHost;
+        // The policy's default warning sink is Debug.WriteLine; the controller
+        // routes warnings into the shared file log so conversion failures
+        // surface in the field, not only in a debugger.
+        _policy.LogWarning = msg => FileLog.Write("[INSPECTOR] " + msg);
     }
 
     /// <summary>Rebuilds the panel for the currently selected widget (or the empty state).</summary>
@@ -204,7 +208,7 @@ public sealed class InspectorController
     public void OpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         var selected = _host.GetSelectedWidget();
-        if (selected == null) return;
+        if (_isUpdatingInspector || selected == null) return;
 
         selected.Opacity = _policy.ClampOpacity((float)_host.OpacitySlider.Value);
         _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);

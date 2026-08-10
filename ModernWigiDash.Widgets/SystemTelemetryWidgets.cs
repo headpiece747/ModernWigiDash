@@ -5,10 +5,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("hardware_monitor", "Hardware Monitor", Description = "Show live hardware telemetry (temperature, load, fan, etc.) as a gauge, bar, or sparkline graph. Data is read from LibreHardwareService's shared-memory maps, so the ModernWigiDash service is not involved.", Author = "ModernWigiDash", Version = "2.1.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
+[WidgetMetadata("hardware_monitor", "Hardware Monitor", Category = "System Monitoring")]
 public class HardwareMonitorWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
     [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from LibreHardwareService", "")]
@@ -41,6 +40,27 @@ public class HardwareMonitorWidget : ModernWidgetBase
     private readonly Queue<float> _history = new();
     private const int HistoryCapacity = 96;
 
+    // The SensorLabel→reading match was a linear scan per frame; the match is
+    // cached keyed by (snapshot identity, label) — a new snapshot (~1/s) or a
+    // label change re-scans, the frames in between reuse the result.
+    private LhmSnapshot? _lastMatchSnapshot;
+    private string _lastMatchLabel = "";
+    private LhmReading? _matchedReading;
+
+    private LhmReading? MatchReading(LhmSnapshot snapshot)
+    {
+        if (!ReferenceEquals(snapshot, _lastMatchSnapshot) || _lastMatchLabel != SensorLabel)
+        {
+            _lastMatchSnapshot = snapshot;
+            _lastMatchLabel = SensorLabel;
+            _matchedReading = snapshot.Readings.FirstOrDefault(r => string.Equals(r.Label, SensorLabel, StringComparison.OrdinalIgnoreCase));
+        }
+        return _matchedReading;
+    }
+
+    /// <summary>Internal test accessor: how many history samples are buffered.</summary>
+    internal int HistoryCountForTest => _history.Count;
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
@@ -61,7 +81,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
             return;
         }
 
-        LhmReading? reading = snapshot.Readings.FirstOrDefault(r => string.Equals(r.Label, SensorLabel, StringComparison.OrdinalIgnoreCase));
+        LhmReading? reading = MatchReading(snapshot);
         if (reading == null)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Sensor not found", $"{SensorLabel} is not currently available", text);
@@ -98,11 +118,16 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
     }
 
-    private float ResolveMax(LhmReading reading, float value)
+    /// <summary>
+    /// The gauge/bar maximum: the sensor's recorded peak when Auto Scale is on,
+    /// else the manual <see cref="MaxValue"/>. Falls back to a value-derived
+    /// floor so a zero/negative max can never produce a division-by-zero gauge.
+    /// </summary>
+    internal float ResolveMax(LhmReading reading, float value)
     {
         if (AutoScale)
         {
-            double reference = Math.Max(reading.Max, reading.Avg);
+            double reference = reading.Max;
             reference = Math.Max(reference, value);
             return reference > 0 ? (float)reference : Math.Max(1f, value * 1.2f);
         }

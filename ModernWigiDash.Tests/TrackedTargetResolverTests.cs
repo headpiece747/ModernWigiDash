@@ -11,11 +11,17 @@ public class TrackedTargetResolverTests
         new(foregroundPidProvider, childrenProvider);
 
     [TestMethod]
-    public void GetForegroundProcessId_DelegatesToProvider()
+    public void ResolveCandidates_InvokesForegroundProvider()
     {
-        var resolver = CreateResolver(() => 4242, _ => []);
+        int providerCalls = 0;
+        var resolver = CreateResolver(() =>
+        {
+            providerCalls++;
+            return 4242;
+        }, _ => []);
 
-        Assert.AreEqual(4242, resolver.GetForegroundProcessId());
+        CollectionAssert.AreEqual(new[] { 4242 }, resolver.ResolveCandidates().ToArray());
+        Assert.AreEqual(1, providerCalls, "the foreground provider must be queried exactly once per resolution");
     }
 
     [TestMethod]

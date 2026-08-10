@@ -7,6 +7,10 @@ namespace ModernWigiDash.Hardware.Transport;
 /// fakes, so the transport's connect / init / frame / touch policy is drivable
 /// without hardware and the backend choice is made once in
 /// <see cref="DisplayHidTransport.Connect"/> instead of re-decided per call.
+/// The WinUSB attempt itself is constructed through
+/// <see cref="DisplayHidTransport.WinUsbDeviceFactory"/> (default: a real
+/// <see cref="WinUsbBulkDevice"/>), so the connect policy — open, PING, init,
+/// fallback — is drivable with a fake device too.
 /// </summary>
 internal interface ITransferBackend : IDisposable
 {

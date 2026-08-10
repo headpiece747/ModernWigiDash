@@ -16,9 +16,9 @@ public class FontAndTextTests
     }
 
     [TestMethod]
-    public void FontCatalog_ListsSystemFontFamiliesOnce()
+    public void FontHelper_ListsSystemFontFamiliesOnce()
     {
-        string[] families = FontCatalog.GetAllFamilies();
+        string[] families = FontHelper.GetAllFamilies();
         Assert.IsNotNull(families);
         Assert.IsTrue(families.Length > 0);
         Assert.AreEqual(families.Length, families.Select(f => f.ToUpperInvariant()).Distinct().Count());
@@ -51,7 +51,7 @@ public class FontAndTextTests
     [TestMethod]
     public void FontHelper_GetTypefaceForCodepoint_HonorsPreferredTypeface()
     {
-        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
         Assert.IsNotNull(arial);
         Assert.AreNotEqual(IntPtr.Zero, arial.Handle);
 
@@ -62,7 +62,7 @@ public class FontAndTextTests
     [TestMethod]
     public void FontHelper_GetTypefaceForCodepoint_PreferredWithoutGlyph_FallsBack()
     {
-        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
         var emoji = FontHelper.GetTypefaceForCodepoint(0x1F600, SKFontStyle.Normal, arial);
         Assert.IsNotNull(emoji);
         Assert.AreNotEqual(IntPtr.Zero, emoji.Handle);
@@ -71,7 +71,7 @@ public class FontAndTextTests
     [TestMethod]
     public void FontHelper_GetTextRuns_RespectsPreferredTypeface()
     {
-        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
         var runs = FontHelper.GetTextRuns("Hello", SKFontStyle.Normal, arial);
         Assert.AreEqual(1, runs.Count);
         Assert.AreEqual(arial.FamilyName, runs[0].Typeface.FamilyName, true);
@@ -80,7 +80,7 @@ public class FontAndTextTests
     [TestMethod]
     public void FontHelper_MeasureTextWithFallback_MatchesDirectFontMeasure()
     {
-        var arial = FontCatalog.GetTypeface("Arial", SKFontStyle.Normal);
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
         using var font = FontHelper.CreateFont(arial, 24f);
         float direct = font.MeasureText("Hello");
         float fallback = FontHelper.MeasureTextWithFallback("Hello", font);
@@ -88,9 +88,9 @@ public class FontAndTextTests
     }
 
     [TestMethod]
-    public void FontCatalog_GetAllFamilies_IncludesGeist()
+    public void FontHelper_GetAllFamilies_IncludesGeist()
     {
-        string[] families = FontCatalog.GetAllFamilies();
+        string[] families = FontHelper.GetAllFamilies();
         Assert.IsTrue(families.Contains("Geist"), "Geist must be listed so the inspector can select the default font.");
     }
 

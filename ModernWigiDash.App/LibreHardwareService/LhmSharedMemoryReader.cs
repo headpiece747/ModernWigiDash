@@ -187,7 +187,6 @@ public sealed class LhmSharedMemoryReader
                     Value = block.Value,
                     Min = block.Min,
                     Max = block.Max,
-                    Avg = 0, // LHS publishes value/min/max only; the widget falls back to Max
                 });
             }
 
@@ -334,12 +333,13 @@ public sealed class LhmSharedMemoryReader
     /// <summary>
     /// One LHS <c>DataSensor</c> JSON block (camelCase fields); the
     /// <c>valuesTimeWindow</c>/<c>values</c> members are deliberately ignored.
+    /// <c>hardwareId</c> is ignored by the reader (the DTO carries HardwareName,
+    /// not the internal id) and is not deserialized.
     /// </summary>
     internal sealed record SensorBlock(
         string Identifier,
         string Name,
         string SensorType,
-        string HardwareId,
         string HardwareName,
         string HardwareType,
         double Value,

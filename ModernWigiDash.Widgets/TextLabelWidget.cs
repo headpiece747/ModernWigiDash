@@ -1,16 +1,13 @@
-using System.Text;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("text_label", "Text", Description = "Flexible text label with system fonts, color, size, and alignment.", Author = "ModernWigiDash", Version = "1.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size2x1)]
+[WidgetMetadata("text_label", "Text", Category = "Utilities")]
 public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x1.ToSize();
-    public override SKSize MinimumSize => new SKSize(120, 40);
 
     [WidgetProperty("Text", WidgetPropertyType.Text, "Text to display (supports multiple lines)", "Your text here")]
     public string Text { get; set; } = "Your text here";
@@ -33,7 +30,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
         if (propertyName != nameof(FontFamily)) return [];
-        return FontCatalog.GetAllFamilies()
+        return FontHelper.GetAllFamilies()
             .Select(family => new WidgetPropertyOption(family, family))
             .ToArray();
     }
@@ -57,21 +54,33 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         };
 
         float fontSize = Math.Max(6f, Math.Min(FontSize, bounds.Height / 2f));
-        var font = FontHelper.GetCachedFont(FontCatalog.GetTypeface(FontFamily, SKFontStyle.Normal), fontSize);
+        var font = FontHelper.GetCachedFont(FontHelper.GetTypeface(FontFamily, SKFontStyle.Normal), fontSize);
         using var paint = new SKPaint { Color = textColor, IsAntialias = true };
 
         float padding = Math.Min(12f, bounds.Width * 0.04f);
         float textWidth = bounds.Width - padding * 2f;
 
-        List<string> wrapped = [];
-        foreach (string rawLine in (Text ?? "").Split('\n'))
+        // The wrapped line list is rebuilt only when (Text, FontSize, width)
+        // changes — the wrap loop measures every candidate, so per-frame
+        // recomputation is wasted work at 30 FPS.
+        if (Text != _wrapKeyText
+            || Math.Abs(fontSize - _wrapKeyFontSize) > 0.01f
+            || Math.Abs(textWidth - _wrapKeyWidth) > 0.5f)
         {
-            wrapped.AddRange(WrapLine(rawLine, font, textWidth));
+            _wrapKeyText = Text;
+            _wrapKeyFontSize = fontSize;
+            _wrapKeyWidth = textWidth;
+            List<string> wrapped = [];
+            foreach (string rawLine in (Text ?? "").Split('\n'))
+            {
+                wrapped.AddRange(TextRenderHelper.WrapText(rawLine, font, textWidth));
+            }
+            _wrappedCache = wrapped;
         }
-        if (wrapped.Count == 0) return;
+        if (_wrappedCache.Count == 0) return;
 
         float lineHeight = fontSize * 1.25f;
-        float totalHeight = wrapped.Count * lineHeight;
+        float totalHeight = _wrappedCache.Count * lineHeight;
         float firstBaseline = bounds.MidY - totalHeight / 2f + fontSize * 0.8f;
 
         float anchorX = alignment switch
@@ -81,45 +90,14 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
             _ => bounds.MidX
         };
 
-        for (int i = 0; i < wrapped.Count; i++)
+        for (int i = 0; i < _wrappedCache.Count; i++)
         {
-            canvas.DrawTextWithFallback(wrapped[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
+            canvas.DrawTextWithFallback(_wrappedCache[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
         }
     }
 
-    private static List<string> WrapLine(string text, SKFont font, float maxWidth)
-    {
-        List<string> result = [];
-        if (string.IsNullOrEmpty(text))
-        {
-            result.Add("");
-            return result;
-        }
-
-        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
-        {
-            result.Add(text);
-            return result;
-        }
-
-        var current = new StringBuilder();
-        foreach (string word in text.Split(' '))
-        {
-            string candidate = current.Length == 0 ? word : current + " " + word;
-            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
-            {
-                current.Clear();
-                current.Append(candidate);
-            }
-            else
-            {
-                if (current.Length > 0) result.Add(current.ToString());
-                current.Clear();
-                current.Append(word);
-            }
-        }
-
-        if (current.Length > 0) result.Add(current.ToString());
-        return result;
-    }
+    private string _wrapKeyText = "";
+    private float _wrapKeyFontSize = -1f;
+    private float _wrapKeyWidth = -1f;
+    private List<string> _wrappedCache = [];
 }

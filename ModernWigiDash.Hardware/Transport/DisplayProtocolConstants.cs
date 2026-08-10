@@ -24,30 +24,9 @@ public static class DisplayProtocolConstants
     public const ushort ProductId = 0xEF01;
 
     /// <summary>
-    /// Standard USB Device Interface GUID (GUID_DEVINTERFACE_USB_DEVICE).
-    /// Required for SetupAPI enumeration to produce WinUsb_Initialize-compatible paths.
-    /// </summary>
-    public static readonly Guid DeviceInterfaceGuid = new("{A5DCBF10-6530-11D2-901F-00C04FB951ED}");
-
-    /// <summary>
     /// WinUSB-specific device interface GUID registered by the device INF.
     /// </summary>
     public static readonly Guid WinUsbInterfaceGuid = new("{D876A186-7B31-4804-8115-79A87E8941BD}");
-
-    /// <summary>
-    /// Fallback Serial Number string for direct path construction.
-    /// </summary>
-    public const string DefaultSerialNumber = "395e384e3230";
-
-    /// <summary>
-    /// Full display resolution width in pixels.
-    /// </summary>
-    public const int DisplayWidth = 1024;
-
-    /// <summary>
-    /// Full display resolution height in pixels.
-    /// </summary>
-    public const int DisplayHeight = 600;
 
     /// <summary>
     /// Active framebuffer width in pixels (1016 = 1024 - 8px border).
@@ -74,16 +53,6 @@ public static class DisplayProtocolConstants
     public const int FrameBufferSize = DisplayGeometry.FrameBufferSize;
 
     /// <summary>
-    /// Display offset in X (4px border on each side).
-    /// </summary>
-    public const int DisplayOffsetX = 4;
-
-    /// <summary>
-    /// Display offset in Y (4px border on each side).
-    /// </summary>
-    public const int DisplayOffsetY = 4;
-
-    /// <summary>
     /// Bulk OUT Endpoint ID for sending frame buffer payloads.
     /// </summary>
     public const byte BulkOutPipeId = 0x01;
@@ -102,6 +71,8 @@ public static class DisplayProtocolConstants
 
     /// <summary>
     /// Vendor Command: Clear Timeout / Heartbeat Reset (0x12).
+    /// Deliberately unused: once the heartbeat source stops, the display
+    /// sleeps on its own timeout (see standby path in DisplayHidTransport).
     /// </summary>
     public const byte CmdClearTimeout = 0x12;
 
@@ -160,14 +131,8 @@ public static class DisplayProtocolConstants
     public const byte CmdFrameAbort = 0x63;
 
     /// <summary>
-    /// Device configuration read command (bRequest=16, control IN).
-    /// Used to read device config including display_offset_x, display_offset_y.
-    /// </summary>
-    public const byte CmdReadDeviceConfig = 0x10;
-
-    /// <summary>
     /// Control IN request type for class/device queries (device-to-host).
-    /// 0xA1 = Class | Interface | Device-to-Host. Used for touch polling and config reads.
+    /// 0xA1 = Class | Interface | Device-to-Host. Used for touch polling.
     /// </summary>
     public const byte ControlInRequestType = 0xA1;
 
@@ -186,7 +151,8 @@ public static class DisplayProtocolConstants
 
     /// <summary>
     /// Size of the touch report payload (8 bytes).
-    /// Layout: [Type:1, Reserved:1, X:2(LE signed), Y:2(LE signed), ScreenState:1, SleepState:1]
+    /// Layout: [Type:1, Reserved:1, X:2(LE signed), Y:2(LE signed), Reserved:2]
+    /// Bytes 6-7 carry vendor screen/sleep state; no consumer reads them.
     /// </summary>
     public const int TouchReportSize = 8;
 

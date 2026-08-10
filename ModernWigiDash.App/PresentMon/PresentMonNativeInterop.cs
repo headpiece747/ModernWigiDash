@@ -219,8 +219,14 @@ internal sealed class PresentMonApiProbe
 
         // The PmStatus enum and PM_QUERY_ELEMENT layout this code targets are
         // v3-shaped; the file version (3.0.3) is the service protocol version —
-        // require the API generation, not a patch match.
-        if (GetApiVersionFn!(out PmVersion version) != PmStatus.Success || version.Major != 3)
+        // require the API generation, not a patch match. A failed call and a
+        // wrong generation are distinct failures: the version cannot be read
+        // (call failure) vs a readable, unsupported version.
+        if (GetApiVersionFn!(out PmVersion version) != PmStatus.Success)
+        {
+            FailureReason = "Could not read the PresentMonAPI2.dll API version (pmGetApiVersion failed).";
+        }
+        else if (version.Major != 3)
         {
             FailureReason = $"PresentMonAPI2.dll version {version.Major}.{version.Minor}.{version.Patch} is not supported (v3.x required).";
         }

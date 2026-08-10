@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Text;
 using ModernWigiDash.Core.Rendering;
 using SkiaSharp;
 
@@ -43,15 +44,26 @@ internal static class TextRenderHelper
         float ellipsisW = Measure(ellipsis);
         if (ellipsisW >= maxWidth) return "";
 
-        int len = text.Length;
-        while (len > 0)
+        // Binary-search the longest prefix that fits with the ellipsis —
+        // the old linear probe allocated a substring + concat per step (O(n²)
+        // on the 30 FPS path for long labels).
+        int lo = 0;
+        int hi = text.Length - 1;
+        int best = 0;
+        while (lo <= hi)
         {
-            string sub = text[..len] + ellipsis;
-            if (Measure(sub) <= maxWidth)
-                return sub;
-            len--;
+            int mid = (lo + hi) / 2;
+            if (Measure(text[..(mid + 1)] + ellipsis) <= maxWidth)
+            {
+                best = mid + 1;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
         }
-        return ellipsis;
+        return best > 0 ? text[..best] + ellipsis : ellipsis;
 
         float Measure(string value) => paint is null ? font.MeasureText(value) : font.MeasureText(value, paint);
     }
@@ -67,17 +79,59 @@ internal static class TextRenderHelper
     }
 
     /// <summary>
+    /// Greedy word wrap: splits <paramref name="text"/> into lines that fit
+    /// within <paramref name="maxWidth"/> measured with <paramref name="font"/>.
+    /// Words are never split — a word wider than the available width gets its
+    /// own line. An empty/null text yields a single empty line, and a
+    /// <paramref name="maxWidth"/> ≤ 0 yields one word per line (matching the
+    /// edge semantics of the two former per-widget copies).
+    /// </summary>
+    internal static List<string> WrapText(string text, SKFont font, float maxWidth)
+    {
+        List<string> result = [];
+        if (string.IsNullOrEmpty(text))
+        {
+            result.Add("");
+            return result;
+        }
+
+        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
+        {
+            result.Add(text);
+            return result;
+        }
+
+        var current = new StringBuilder();
+        foreach (string word in text.Split(' '))
+        {
+            string candidate = current.Length == 0 ? word : current + " " + word;
+            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
+            {
+                current.Clear();
+                current.Append(candidate);
+            }
+            else
+            {
+                if (current.Length > 0) result.Add(current.ToString());
+                current.Clear();
+                current.Append(word);
+            }
+        }
+
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
+    }
+
+    /// <summary>
     /// Draws a centered title/subtitle placeholder (bold title above a dimmer subtitle).
     /// </summary>
     internal static void DrawTitleSubtitlePlaceholder(SKCanvas canvas, SKRect bounds, string title, string subtitle, SKColor text)
     {
-        using var titleFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Bold), 16f);
-        FontHelper.ConfigureHighQualityFont(titleFont);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f);
         using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
         DrawCenteredText(canvas, title, bounds.MidX, bounds.MidY - 2f, titleFont, titlePaint);
 
-        using var subFont = new SKFont(FontHelper.GetTypeface("Geist", SKFontStyle.Normal), 11f);
-        FontHelper.ConfigureHighQualityFont(subFont);
+        var subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 11f);
         using var subPaint = new SKPaint { Color = text.WithAlpha(150), IsAntialias = true };
         DrawCenteredText(canvas, subtitle, bounds.MidX, bounds.MidY + 20f, subFont, subPaint);
     }

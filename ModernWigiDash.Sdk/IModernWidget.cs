@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using SkiaSharp;
 
 namespace ModernWigiDash.Sdk;
@@ -5,9 +7,7 @@ namespace ModernWigiDash.Sdk;
 public interface IModernWidget : IAsyncDisposable
 {
     string InstanceId { get; set; }
-    WidgetSizeMode SizeMode { get; }
     SKSize DefaultSize { get; }
-    SKSize MinimumSize { get; }
 
     ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default);
     void Render(SKCanvas canvas, SKRect bounds);
@@ -19,9 +19,8 @@ public abstract class ModernWidgetBase : IModernWidget
 {
     public string InstanceId { get; set; } = Guid.NewGuid().ToString();
 
-    public virtual WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
-    public virtual SKSize DefaultSize => new SKSize(408, 300); // 2x2 grid cell default
-    public virtual SKSize MinimumSize => new SKSize(100, 50);
+    // 2x2 grid cell default (406x296), matching GridSizePreset.Size2x2.
+    public virtual SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
     protected IModernWigiDashContext Context { get; private set; } = null!;
 
@@ -67,6 +66,16 @@ public abstract class ModernWidgetBase : IModernWidget
     }
 
     /// <summary>
+    /// Cached reflection lookup per (type, property name): SetProperty runs on
+    /// inspector write-back and touch toggles; a GetProperty reflection call
+    /// per write is measurable on the 30 FPS path. A missing property caches a
+    /// sentinel so the miss is diagnosed once instead of thrashing reflection.
+    /// </summary>
+    // Cached PropertyInfo per (type, name) — a miss is cached as null so a
+    // repeated typo doesn't re-reflect every call.
+    private static readonly ConcurrentDictionary<(Type Type, string Name), PropertyInfo?> PropertyCache = new();
+
+    /// <summary>
     /// The single write path for widget properties that must survive
     /// Export→Import: sets the instance property, raises
     /// <see cref="OnPropertyChanged"/>, and persists the value into the owning
@@ -78,7 +87,19 @@ public abstract class ModernWidgetBase : IModernWidget
     /// </summary>
     protected void SetProperty(string propertyName, object? value)
     {
-        GetType().GetProperty(propertyName)?.SetValue(this, value);
+        PropertyInfo? property = PropertyCache.GetOrAdd(
+            (GetType(), propertyName),
+            static key => key.Type.GetProperty(key.Name));
+
+        if (property is null)
+        {
+            System.Diagnostics.Debug.WriteLine($"SetProperty: property '{propertyName}' not found on {GetType().Name}");
+        }
+        else
+        {
+            property.SetValue(this, value);
+        }
+
         OnPropertyChanged(propertyName, value);
         Context?.PersistProperty(this, propertyName, value);
     }

@@ -32,7 +32,6 @@ public class LhmSharedMemoryReaderTests
         Identifier: "/amdcpu/0/temperature/0",
         Name: "CPU Package",
         SensorType: "Temperature",
-        HardwareId: "/amdcpu/0",
         HardwareName: "AMD Ryzen 7 5800X",
         HardwareType: "CPU",
         Value: 55.5,
@@ -43,7 +42,6 @@ public class LhmSharedMemoryReaderTests
         Identifier: "/nvidiagpu/0/fan/0",
         Name: "GPU Fan",
         SensorType: "Fan",
-        HardwareId: "/nvidiagpu/0",
         HardwareName: "NVIDIA GeForce RTX 3080",
         HardwareType: "Gpu",
         Value: 1200,
@@ -71,7 +69,6 @@ public class LhmSharedMemoryReaderTests
         Assert.AreEqual(55.5, cpu.Value);
         Assert.AreEqual(40.1, cpu.Min);
         Assert.AreEqual(90.2, cpu.Max);
-        Assert.AreEqual(0, cpu.Avg, "LHS publishes value/min/max only; Avg is deliberately dropped to 0");
 
         SensorReadingDto fan = dto.Readings[1];
         Assert.AreEqual("/nvidiagpu/0/fan/0", fan.SensorId);
@@ -83,7 +80,6 @@ public class LhmSharedMemoryReaderTests
         Assert.AreEqual(1200, fan.Value);
         Assert.AreEqual(0, fan.Min);
         Assert.AreEqual(3000, fan.Max);
-        Assert.AreEqual(0, fan.Avg);
     }
 
     [TestMethod]
@@ -102,12 +98,10 @@ public class LhmSharedMemoryReaderTests
         Assert.AreEqual("Temperature", dto.Readings[0].SensorType);
         Assert.AreEqual("°C", dto.Readings[0].Unit);
         Assert.AreEqual(55.5, dto.Readings[0].Value);
-        Assert.AreEqual(0, dto.Readings[0].Avg);
         Assert.AreEqual("/nvidiagpu/0/fan/0", dto.Readings[1].SensorId);
         Assert.AreEqual("GPU Fan", dto.Readings[1].SensorName);
         Assert.AreEqual("RPM", dto.Readings[1].Unit);
         Assert.AreEqual(1200, dto.Readings[1].Value);
-        Assert.AreEqual(0, dto.Readings[1].Avg);
     }
 
     [TestMethod]

@@ -11,7 +11,7 @@ public class WeatherClientTests
     private const string SampleForecast = """
     {
       "latitude": 40.7128, "longitude": -74.006,
-      "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
+      "current_weather": { "temperature": 12.5, "apparent_temperature": 10.1, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
       "hourly": {
         "time": ["2026-08-07T12:00", "2026-08-07T13:00"],
         "temperature_2m": [12.5, 13.1],
@@ -81,7 +81,7 @@ public class WeatherClientTests
         Assert.AreEqual(12.5, snapshot.CurrentTempC);
         Assert.AreEqual(8.2, snapshot.WindSpeedKmH);
         Assert.AreEqual(2, snapshot.WeatherCode);
-        Assert.AreEqual(12.5, snapshot.FeelsLikeC);
+        Assert.AreEqual(10.1, snapshot.FeelsLikeC, "Feels-like must come from apparent_temperature, not the plain temperature");
         Assert.AreEqual(60, snapshot.Humidity);
         Assert.AreEqual(18.0, snapshot.HighTempC);
         Assert.AreEqual(9.0, snapshot.LowTempC);
@@ -126,7 +126,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_GeocodeFailure_FallsBackToDefaultCoordinates()
+    public async Task FetchCurrentAsync_GeocodeFailure_LeavesCoordinatesUnresolved()
     {
         var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
@@ -136,10 +136,30 @@ public class WeatherClientTests
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
 
-        Assert.IsNotNull(snapshot);
-        Assert.AreEqual(40.7128, snapshot.Lat, "A failed geocode must fall back to the New York default");
-        Assert.AreEqual(-74.0060, snapshot.Lon);
-        Assert.AreEqual("Atlantis", snapshot.ResolvedCityName);
+        Assert.IsNull(snapshot, "A failed geocode must leave coordinates unresolved so the widget shows its no-data state");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_GeocodeFailure_ThrottlesRetries()
+    {
+        // Regression guard for the flood: a failed geocode leaves coordinates
+        // unresolved, and the render kick must not retry at frame rate — the
+        // attempt time is stamped so the 5-minute throttle applies.
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
+        var clock = new FakeClock(DateTimeOffset.UtcNow);
+        var client = CreateClient(stub, clock: clock);
+
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
+        int callsAfterFirst = stub.Calls;
+        Assert.IsTrue(callsAfterFirst >= 1, "The first attempt must hit the network");
+
+        // Within the window, a non-forced fetch must be throttled away.
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
+        Assert.AreEqual(callsAfterFirst, stub.Calls, "A failed geocode must cool down like a success");
+
+        clock.Advance(TimeSpan.FromMinutes(6));
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
+        Assert.IsTrue(stub.Calls > callsAfterFirst, "After the window, a retry is allowed");
     }
 
     [TestMethod]

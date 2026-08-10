@@ -107,7 +107,7 @@ public sealed class WeatherClient
     internal bool TryBeginFetch(bool force = false)
     {
         if (Interlocked.CompareExchange(ref _fetchClaim, 1, 0) != 0) return false;
-        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5 && _lat.HasValue)
+        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5)
         {
             Interlocked.Exchange(ref _fetchClaim, 0);
             return false;
@@ -116,6 +116,18 @@ public sealed class WeatherClient
     }
 
     private void EndFetch() => Interlocked.Exchange(ref _fetchClaim, 0);
+
+    /// <summary>
+    /// Sync throttle pre-check for the render tick: true when no coordinates
+    /// are resolved yet or the 5-minute fetch window has elapsed. The render
+    /// kick gates on this to avoid the per-frame async allocation of
+    /// <see cref="TryBeginFetch"/>; the atomic claim remains the authority.
+    /// </summary>
+    /// <summary>Synchronous render-tick pre-check: has the 5-minute throttle
+    /// window elapsed? The first attempt (never-fetched) reads as elapsed; a
+    /// failed attempt stamps the time, so failures cool down like successes.</summary>
+    internal bool IsFetchWindowElapsed()
+        => Clock.GetUtcNow().UtcDateTime - _lastFetchTime >= TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Resets resolved coordinates and the throttle so the next fetch
@@ -154,8 +166,8 @@ public sealed class WeatherClient
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var (tempC, windSpeedKmH, weatherCode) = ParseCurrentWeather(root);
-            var (feelsLikeC, humidity, hourlyForecasts) = ParseHourlyForecast(root);
+            var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = ParseCurrentWeather(root);
+            var (humidity, hourlyForecasts) = ParseHourlyForecast(root);
             var (highTempC, lowTempC, dailyForecasts) = ParseDailyForecast(root);
             var snapshot = new WeatherSnapshot(
                 tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
@@ -287,31 +299,36 @@ public sealed class WeatherClient
         }
     }
 
-    private static (double? TempC, double? WindSpeedKmH, int? WeatherCode) ParseCurrentWeather(JsonElement root)
+    private static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode) ParseCurrentWeather(JsonElement root)
     {
         double? tempC = null;
+        double? feelsLikeC = null;
         double? windSpeedKmH = null;
         int? weatherCode = null;
 
-        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null);
+        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null);
 
         if (currentWeather.TryGetProperty("temperature", out var tempEl))
             tempC = tempEl.GetDouble();
+        // The URL requests apparent_temperature=true, which adds
+        // apparent_temperature to the legacy current_weather block — the real
+        // "feels like" metric (the old code read hourly.temperature_2m, i.e.
+        // the plain temperature, silently).
+        if (currentWeather.TryGetProperty("apparent_temperature", out var feelsEl))
+            feelsLikeC = feelsEl.GetDouble();
         if (currentWeather.TryGetProperty("windspeed", out var windEl))
             windSpeedKmH = windEl.GetDouble();
         if (currentWeather.TryGetProperty("weathercode", out var codeEl))
             weatherCode = codeEl.GetInt32();
 
-        return (tempC, windSpeedKmH, weatherCode);
+        return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
     }
 
-    private static (double? FeelsLikeC, double? Humidity, IReadOnlyList<HourlyForecastItem>? Hourly) ParseHourlyForecast(JsonElement root)
+    private static (double? Humidity, IReadOnlyList<HourlyForecastItem>? Hourly) ParseHourlyForecast(JsonElement root)
     {
         if (!root.TryGetProperty("hourly", out var hourly)
             || !hourly.TryGetProperty("temperature_2m", out var temps)
-            || temps.GetArrayLength() <= 0) return (null, null, null);
-
-        double? feelsLikeC = temps[0].GetDouble();
+            || temps.GetArrayLength() <= 0) return (null, null);
 
         double? humidity = null;
         if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
@@ -330,7 +347,7 @@ public sealed class WeatherClient
             }
             hourlyForecasts = items;
         }
-        return (feelsLikeC, humidity, hourlyForecasts);
+        return (humidity, hourlyForecasts);
     }
 
     private static (double? HighTempC, double? LowTempC, IReadOnlyList<DailyForecastItem>? Daily) ParseDailyForecast(JsonElement root)
@@ -386,9 +403,12 @@ public sealed class WeatherClient
             _logError?.Invoke($"Geocoding failed for '{SanitizeLog(query)}': {ex.Message}", ex);
         }
 
-        _lat = 40.7128;
-        _lon = -74.0060;
-        _resolvedCityName = string.IsNullOrWhiteSpace(query) ? "New York" : query;
+        // A failed geocode leaves the coordinates unresolved: FetchCurrentAsync
+        // returns null and the widget renders its "no data" state instead of
+        // silently pinning a default location. Stamp the attempt time so the
+        // 5-minute throttle applies even without coordinates — otherwise a
+        // typo'd city or an outage would retry at render rate forever.
+        _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
     }
 
     private async Task GeocodeZipCodeAsync(string zipCode)

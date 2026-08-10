@@ -41,8 +41,6 @@ public static class FrameTimeStore
         FrameTimeSnapshotRecord.Unavailable(),
         defaultMaxAge: DefaultMaxAge);
 
-    public static FrameTimeSnapshotRecord ReadSnapshot() => Store.ReadSnapshot();
-
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
     /// freshness decision uses the producer timestamp with an injectable clock.

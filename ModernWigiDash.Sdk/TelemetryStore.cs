@@ -60,15 +60,20 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
 
     /// <summary>
     /// Stores a snapshot. The producer timestamp is preserved, except a
-    /// default/empty timestamp, which is resolved to the store's receive time.
+    /// default/empty timestamp, which is resolved to the store's receive time,
+    /// and a timestamp in the future, which is clamped to the receive time so
+    /// a producer clock ahead of the store's cannot pin snapshots fresh
+    /// forever.
     /// </summary>
     public void Update(TRecord record, DateTime producerTimestamp)
     {
+        ArgumentNullException.ThrowIfNull(record);
         lock (_gate)
         {
             _current = record;
-            _lastProducerTimestamp = producerTimestamp == default
-                ? _timeProvider.GetUtcNow().UtcDateTime
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            _lastProducerTimestamp = producerTimestamp == default || producerTimestamp > now
+                ? now
                 : producerTimestamp;
         }
     }

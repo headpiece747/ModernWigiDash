@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 
 namespace ModernWigiDash.Sdk;
 
@@ -22,9 +23,6 @@ namespace ModernWigiDash.Sdk;
 public static class FileLog
 {
     private static readonly Lock Gate = new();
-#pragma warning disable S1450 // field: the writer's stream is held for the log's lifetime (flush cadence), not per-call.
-    private static FileStream? _stream;
-#pragma warning restore S1450
     private static StreamWriter? _writer;
     private static int _bufferedBytes;
     private static long _lastFlushTicks;
@@ -62,7 +60,10 @@ public static class FileLog
 
                 _writer ??= OpenWriter();
                 _writer.WriteLine(line);
-                _bufferedBytes += line.Length + 2;
+                // Count the UTF-8 bytes (what actually hits the disk), not the
+                // string length — a line of multi-byte characters otherwise
+                // underestimates the flush threshold.
+                _bufferedBytes += Encoding.UTF8.GetByteCount(line) + 2;
 
                 var now = Stopwatch.GetTimestamp();
                 if (_bufferedBytes >= FlushThresholdBytes ||
@@ -93,8 +94,7 @@ public static class FileLog
         // open) so the file is never appended past the cap from a fresh start.
         TryRotateIfNeeded();
 
-        _stream = new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-        var writer = new StreamWriter(_stream);
+        var writer = new StreamWriter(new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
         _lastFlushTicks = Stopwatch.GetTimestamp();
         return writer;
     }
@@ -115,7 +115,6 @@ public static class FileLog
             _writer?.Flush();
             _writer?.Dispose();
             _writer = null;
-            _stream = null;
             _bufferedBytes = 0;
 
             string rotatedPath = LogPath + ".1";
@@ -138,7 +137,6 @@ public static class FileLog
     {
         try { _writer?.Dispose(); } catch { /* best-effort */ }
         _writer = null;
-        _stream = null;
         _bufferedBytes = 0;
     }
 

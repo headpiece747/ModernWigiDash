@@ -12,6 +12,8 @@ namespace ModernWigiDash.Core.Rendering;
 /// </summary>
 public sealed class RetiredBitmapSet
 {
+    private static readonly List<SKBitmap> Empty = [];
+
     private readonly Lock _lock = new();
     private readonly List<SKBitmap> _pending = [];
 
@@ -69,7 +71,7 @@ public sealed class RetiredBitmapSet
     {
         lock (_lock)
         {
-            if (_pending.Count == 0) return [];
+            if (_pending.Count == 0) return Empty;
             var drained = _pending;
             _pending.Clear();
             return drained;

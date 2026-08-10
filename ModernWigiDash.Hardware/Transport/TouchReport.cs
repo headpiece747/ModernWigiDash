@@ -10,8 +10,6 @@ public readonly record struct TouchReport
     public byte Type { get; init; }
     public short X { get; init; }
     public short Y { get; init; }
-    public byte ScreenState { get; init; }
-    public bool SleepState { get; init; }
 
     /// <summary>
     /// Maps the raw vendor protocol byte to the SDK touch vocabulary. This is

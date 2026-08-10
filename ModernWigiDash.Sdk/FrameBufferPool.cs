@@ -16,6 +16,8 @@ namespace ModernWigiDash.Sdk;
 public sealed class FrameBufferPool
 {
     private readonly ConcurrentQueue<byte[]> _free = new();
+    private readonly int _capacity;
+    private int _freeCount;
 
     /// <summary>Exact size of every pooled buffer, in bytes.</summary>
     public int BufferSize { get; }
@@ -25,26 +27,38 @@ public sealed class FrameBufferPool
     public FrameBufferPool(int bufferSize, int capacity)
     {
         BufferSize = bufferSize;
+        _capacity = capacity;
         for (int i = 0; i < capacity; i++)
         {
             _free.Enqueue(new byte[bufferSize]);
         }
+        _freeCount = capacity;
     }
 
     /// <summary>
     /// Rents a buffer of <see cref="BufferSize"/> bytes, or null when the pool
     /// is exhausted (caller drops the frame — matches DropOldest under load).
     /// </summary>
-    public byte[]? Acquire() => _free.TryDequeue(out var buffer) ? buffer : null;
+    public byte[]? Acquire()
+    {
+        if (!_free.TryDequeue(out var buffer)) return null;
+        Interlocked.Decrement(ref _freeCount);
+        return buffer;
+    }
 
     /// <summary>
-    /// Returns a buffer to the pool. Buffers of the wrong size are ignored.
+    /// Returns a buffer to the pool. Buffers of the wrong size are ignored; a
+    /// release past the pool's capacity is dropped (double-release guard — the
+    /// pool never grows beyond what the constructor pre-allocated).
     /// </summary>
     public void Release(byte[] buffer)
     {
-        if (buffer.Length == BufferSize)
+        if (buffer.Length != BufferSize) return;
+        if (Interlocked.Increment(ref _freeCount) > _capacity)
         {
-            _free.Enqueue(buffer);
+            Interlocked.Decrement(ref _freeCount);
+            return;
         }
+        _free.Enqueue(buffer);
     }
 }

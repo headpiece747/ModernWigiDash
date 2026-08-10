@@ -65,6 +65,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DialogHost _dialogHost;
     private readonly StarterProfile _starterProfile;
 
+    /// <summary>Sampling options for the preview draw — hoisted so the per-frame
+    /// paint never allocates a new instance.</summary>
+    private static readonly SKSamplingOptions FrameSamplingOptions = new(SKFilterMode.Linear);
+
     public MainWindow()
         : this(new PresentMonNative())
     {
@@ -153,7 +157,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // mouse path carries the desktop edit-mode veto.
         _usbDevice.OnTouchEvent += (point, touchType) =>
         {
-            Dispatcher.Invoke(() => _inputController.Feed(
+            Dispatcher.BeginInvoke(() => _inputController.Feed(
                 touchType, point.X, point.Y,
                 suppressWidgetRouting: false,
                 _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage));
@@ -175,7 +179,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // 6. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
         {
-            _framePump.Stop();
             _framePump.Dispose();
             _telemetry.Dispose();
             _presenter.Dispose();
@@ -190,6 +193,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
         UpdateUsbBadge();
         UpdateActiveCount();
         _inspector.Refresh();
+
+        // The compositor defaults to runtime mode (no edit chrome); the Edit
+        // Mode checkbox defaults to checked, and its Checked event fires
+        // during InitializeComponent while the _wired guard is still off — so
+        // re-assert the checkbox state onto the compositor here explicitly.
+        _compositor.IsEditMode = ChkEditMode.IsChecked == true;
 
         _wired = true;
     }
@@ -221,7 +230,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         // Pure draw: the FramePump composed this buffer and queued it for
         // delivery on this tick, so what is drawn is exactly what was sent.
-        e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, new SKSamplingOptions(SKFilterMode.Linear));
+        e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, FrameSamplingOptions);
     }
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
@@ -242,6 +251,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
         _isMouseDown = true;
+        // Capture the mouse so a drag that leaves the canvas still delivers
+        // Move/Up to the gesture machine and edit-mode manipulation.
+        SkiaCanvas.CaptureMouse();
         var pos = e.GetPosition(SkiaCanvas);
 
         // Hit test against active widgets
@@ -303,6 +315,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         if (iconMoved)
             _inspector.Refresh();
+
+        SkiaCanvas.ReleaseMouseCapture();
     }
 
     #endregion
@@ -531,9 +545,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
         {
-            string json = ProfileOps.ExportJson(_profile);
-            File.WriteAllText(dlg.FileName, json);
-            _dialogHost.Info("Export Complete", "Profile exported successfully!");
+            try
+            {
+                string json = ProfileOps.ExportJson(_profile);
+                File.WriteAllText(dlg.FileName, json);
+                _dialogHost.Info("Export Complete", "Profile exported successfully!");
+            }
+            catch (Exception ex)
+            {
+                _dialogHost.Error("Export Error", $"Error exporting profile: {ex.Message}");
+            }
         }
     }
 
@@ -550,6 +571,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 {
                     ProfileOps.DisposeProfile(_profile);
                     _profile = loaded;
+                    // Resync the toggle: the imported page's snap-to-grid may
+                    // differ from the desktop checkbox's current state.
+                    ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
                     RebuildPageTabsUI();
                     ClearSelectionAndRefresh();
                 }
@@ -574,20 +598,34 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
 
     private string _lastUsbBadgeBrush = "";
+    private string _lastUsbBadgeLabel = "";
 
     private void UpdateUsbBadge()
     {
+        // Connecting shares the danger brush with Disconnected (nothing is
+        // green while the engine is still trying); Simulated keeps AccentRed,
+        // which reads as "amber" on this theme.
+        string label = _usbDevice.State switch
+        {
+            ConnectionState.Connected => "Connected",
+            ConnectionState.Simulated => "Simulated",
+            ConnectionState.Connecting => "Connecting",
+            _ => "Disconnected"
+        };
         string brushKey = _usbDevice.State switch
         {
             ConnectionState.Connected => "AccentGreen",
             ConnectionState.Simulated => "AccentRed", // amber — running without the device
+            ConnectionState.Connecting => "DangerBorder",
             _ => "DangerBorder"
         };
-        if (brushKey == _lastUsbBadgeBrush) return; // state unchanged — skip the per-tick resource lookup
+        if (brushKey == _lastUsbBadgeBrush && label == _lastUsbBadgeLabel) return; // state unchanged — skip the per-tick resource lookup
         _lastUsbBadgeBrush = brushKey;
+        _lastUsbBadgeLabel = label;
 
         var resources = Application.Current.Resources;
         UsbStatusDot.Fill = (Brush)resources[brushKey];
+        TxtUsbStatus.Text = label;
     }
 
     private void ApplyTheme()

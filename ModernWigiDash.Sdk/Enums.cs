@@ -2,13 +2,6 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Sdk;
 
-public enum WidgetSizeMode
-{
-    Fixed,       // Widget requires exact dimensions (e.g., exact 204x150 button)
-    Resizable,   // Widget dynamically scales to whatever Width x Height the user drags it to
-    AspectLocked // Resizable, but maintains exact aspect ratio (e.g., circular gauge/clock)
-}
-
 public enum TouchEventType
 {
     TouchDown,
@@ -37,8 +30,7 @@ public enum GridSizePreset
     Size2x4, // 406 x 592 px
     Size3x4, // 609 x 592 px
     Size4x4, // 813 x 592 px
-    Size5x4, // 1016 x 592 px (Full Screen)
-    FreeForm // Custom arbitrary pixel dimensions
+    Size5x4 // 1016 x 592 px (Full Screen)
 }
 
 public static class GridSizeExtensions
@@ -74,7 +66,6 @@ public static class GridSizeExtensions
             GridSizePreset.Size3x4 => new SKSize(609, 592),
             GridSizePreset.Size4x4 => new SKSize(813, 592),
             GridSizePreset.Size5x4 => new SKSize(1016, 592),
-            GridSizePreset.FreeForm => new SKSize(300, 200),
             _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, "Unknown GridSizePreset")
         };
     }

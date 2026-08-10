@@ -29,8 +29,11 @@ public partial class App : Application
 
         DispatcherUnhandledException += (s, e) =>
         {
-            LogCrash(e.Exception);
-            e.Handled = true;
+            // Only cancellation-type failures (expected during teardown) are
+            // benign; everything else propagates so a real crash is visible.
+            bool benign = e.Exception is OperationCanceledException;
+            LogCrash(e.Exception, handled: benign);
+            e.Handled = benign;
         };
     }
 
@@ -41,10 +44,10 @@ public partial class App : Application
         base.OnStartup(e);
     }
 
-    private static void LogCrash(Exception? ex)
+    private static void LogCrash(Exception? ex, bool handled = false)
     {
-        string msg = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:yyyy-MM-dd HH:mm:ss}] UNHANDLED EXCEPTION: {ex}{Environment.NewLine}";
-        Console.WriteLine(msg);
+        string kind = handled ? "HANDLED EXCEPTION" : "UNHANDLED EXCEPTION";
+        string msg = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:yyyy-MM-dd HH:mm:ss}] {kind}: {ex}{Environment.NewLine}";
         try
         {
             File.AppendAllText(CrashLogPath, msg);

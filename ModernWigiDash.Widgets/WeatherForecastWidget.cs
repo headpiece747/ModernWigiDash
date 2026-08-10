@@ -10,15 +10,13 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("weather_forecast", "Weather Forecast", Description = "Displays live real-time weather, hourly/daily forecasts, metrics, and custom layouts via Open-Meteo API. Supports city names, ZIP/postal codes, and coordinates.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
+[WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
 public class WeatherForecastWidget : ModernWidgetBase
 {
     private const float DesignWidth = 406f;
     private const float DesignHeight = 296f;
 
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
-    public override SKSize MinimumSize => new SKSize(200, 160);
 
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
@@ -88,6 +86,8 @@ public class WeatherForecastWidget : ModernWidgetBase
     private readonly Lock _forecastGate = new();
     private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
     private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
+    private int _forecastVersion;
+    private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
@@ -135,10 +135,11 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        // Kick the fetch only when the static-snapshot rule allows; the
-        // client's atomic claim decides throttling/in-flight (a check-then-set
-        // here would race the 15-min refresh loop).
-        if (!IsStaticSnapshotBlocking)
+        // Kick the fetch only when the static-snapshot rule allows and the
+        // client's sync throttle window has elapsed — the per-frame async
+        // allocation is skipped while the 5-min window is open. The client's
+        // atomic claim still decides throttling/in-flight.
+        if (!IsStaticSnapshotBlocking && _client.IsFetchWindowElapsed())
         {
             _ = FetchLiveWeatherAsync();
         }
@@ -146,11 +147,16 @@ public class WeatherForecastWidget : ModernWidgetBase
         _lastBounds = bounds;
 
         // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render.
+        // a list mid-render — but only when the source actually changed (the
+        // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
-            _dailyForecastSnapshot = _dailyForecasts.ToArray();
-            _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
+            if (_renderedForecastVersion != _forecastVersion)
+            {
+                _renderedForecastVersion = _forecastVersion;
+                _dailyForecastSnapshot = _dailyForecasts.ToArray();
+                _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
+            }
         }
 
         SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
@@ -617,11 +623,9 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     /// <summary>
     /// Fetches live weather through the client's atomic fetch claim — the
-    /// in-flight/throttle decision is the client's, single-sourced.
+    /// in-flight/throttle decision is the client's, single-sourced. While a
+    /// static snapshot is showing, non-forced fetches are blocked.
     /// </summary>
-    /// <summary>The static-snapshot rule, single-sourced: while a static
-    /// snapshot is showing, non-forced fetches are blocked (the client's
-    /// atomic claim handles throttling).</summary>
     private bool IsStaticSnapshotBlocking => StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue;
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
@@ -652,9 +656,9 @@ public class WeatherForecastWidget : ModernWidgetBase
         if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
         if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
         if (snapshot.DailyForecasts is not null)
-            lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(snapshot.DailyForecasts); }
+            lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(snapshot.DailyForecasts); _forecastVersion++; }
         if (snapshot.HourlyForecasts is not null)
-            lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(snapshot.HourlyForecasts); }
+            lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(snapshot.HourlyForecasts); _forecastVersion++; }
     }
 
     private async Task LoadCachedWeatherAsync()

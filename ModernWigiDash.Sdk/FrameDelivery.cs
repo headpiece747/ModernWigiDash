@@ -18,7 +18,7 @@ namespace ModernWigiDash.Sdk;
 /// </summary>
 public sealed class FrameDelivery : IDisposable
 {
-    private sealed record FrameSlot(byte[] Buffer);
+    private readonly record struct FrameSlot(byte[] Buffer);
 
     private readonly Channel<FrameSlot> _channel;
     private readonly FrameBufferPool? _pool;
@@ -118,10 +118,14 @@ public sealed class FrameDelivery : IDisposable
     public long FramesSent => Interlocked.Read(ref _sent);
 
     /// <summary>
-    /// Frames rejected by the pipeline (pool exhausted, no encoder) plus stale
-    /// buffered frames dropped by the coalescer during a backlog. The two drop
-    /// sources are also visible separately via <see cref="DroppedPoolCount"/>
-    /// and <see cref="DroppedCoalescedCount"/>.
+    /// Frames dropped inside the pipeline: pool exhaustion at push time,
+    /// channel rejects (a push after disposal), plus stale buffered frames
+    /// dropped by the coalescer during a backlog. Push-time rejections that
+    /// return before the pipeline is reached — no encoder/pool/send seam
+    /// attached, a null frame, or the readiness predicate false — are NOT
+    /// counted here. The two in-pipeline drop sources are also visible
+    /// separately via <see cref="DroppedPoolCount"/> and
+    /// <see cref="DroppedCoalescedCount"/>.
     /// </summary>
     public long DroppedCount => Interlocked.Read(ref _dropped);
 
@@ -177,11 +181,10 @@ public sealed class FrameDelivery : IDisposable
         {
             while (await _channel.Reader.WaitToReadAsync(ct))
             {
-                FrameSlot? latest = ChannelFrameCoalescer.DrainToLatest(
+                FrameSlot latest = ChannelFrameCoalescer.DrainToLatest(
                     _channel.Reader,
                     slot => ReleaseSlot(slot, dropped: true));
-
-                if (latest == null) continue;
+                if (latest.Buffer == null) continue;
 
                 // Pace from the START of the previous send: the interval caps
                 // the frame rate, so a slow transport must not be charged the
@@ -208,14 +211,14 @@ public sealed class FrameDelivery : IDisposable
                     bool ok = _send?.Invoke(latest.Buffer) == true;
                     if (ok)
                     {
-                        Interlocked.Increment(ref _sent);
+                        long sent = Interlocked.Increment(ref _sent);
 #pragma warning disable S125 // log-cadence documentation, not commented-out code
                         // Per-frame success log would grow unbounded at ~30/s;
                         // every-60th cadence keeps it bounded.
                         // (Drops are counted in DroppedCount, not logged.)
 #pragma warning restore S125
                         if (_sentLog.Due())
-                            _log?.Invoke($"[FrameDelivery] Frame #{Volatile.Read(ref _sent)} sent ({latest.Buffer.Length} bytes)");
+                            _log?.Invoke($"[FrameDelivery] Frame #{sent} sent ({latest.Buffer.Length} bytes)");
                     }
                     else
                     {
@@ -269,15 +272,22 @@ public sealed class FrameDelivery : IDisposable
 
     private FrameDeliveryResult Queue(FrameSlot slot)
     {
-        // DropOldest never fails; the coalescer owns stale-frame dropping.
-        _channel.Writer.TryWrite(slot);
-        return FrameDeliveryResult.Queued;
+        // A DropOldest channel only rejects writes once it is completed;
+        // stale-frame dropping is the coalescer's job while it is open.
+        if (_channel.Writer.TryWrite(slot))
+        {
+            return FrameDeliveryResult.Queued;
+        }
+
+        ReleaseSlot(slot, dropped: true);
+        return FrameDeliveryResult.Dropped;
     }
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cts.Cancel();
+        _channel.Writer.TryComplete();
 
         // Return any pooled buffers still queued in the channel before the
         // sender loop exits (they would otherwise be stranded at close).
@@ -308,6 +318,14 @@ public sealed class FrameDelivery : IDisposable
             // The loop faulted after cancellation; nothing left to join.
         }
 
-        _cts.Dispose();
+        // Dispose the token source only once the sender loop has exited — a
+        // send still in flight (up to 30s USB timeout) may hold the token, and
+        // disposing a source a running task still references can fault its
+        // cancellation registration. When the bounded join above timed out,
+        // the source is deliberately dropped with the object instead.
+        if (_senderTask.IsCompleted)
+        {
+            _cts.Dispose();
+        }
     }
 }

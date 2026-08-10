@@ -68,7 +68,9 @@ public static class FontHelper
 
     /// <summary>
     /// Returns the installed system font family list with "Geist" first, deduped
-    /// case-insensitively and cached once.
+    /// case-insensitively and cached once. Falls back to a bare Geist list when
+    /// the font manager itself fails, so the inspector never crashes on a
+    /// broken font store.
     /// </summary>
     public static string[] GetAllFamilies()
     {
@@ -77,12 +79,22 @@ public static class FontHelper
         {
             if (_families == null)
             {
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                List<string> list = [];
-                if (seen.Add("Geist"))
-                    list.Add("Geist");
-                list.AddRange(SKFontManager.Default.FontFamilies.Where(family => !string.IsNullOrWhiteSpace(family) && seen.Add(family)));
-                _families = list.ToArray();
+                try
+                {
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    List<string> list = [];
+                    if (seen.Add("Geist"))
+                        list.Add("Geist");
+                    list.AddRange(SKFontManager.Default.FontFamilies.Where(family => !string.IsNullOrWhiteSpace(family) && seen.Add(family)));
+                    _families = list.ToArray();
+                }
+                catch
+                {
+                    // Broken font store — never crash the inspector; Geist alone
+                    // still renders (the typeface caches fall back to Default).
+                    System.Diagnostics.Debug.WriteLine("Font family enumeration failed, falling back to Geist only");
+                    _families = ["Geist"];
+                }
             }
         }
         return _families;
@@ -288,6 +300,7 @@ public static class FontHelper
 
     /// <summary>
     /// Draws text on the canvas with dynamic font fallback per character run to prevent missing glyph placeholders.
+    /// Center/Right alignment measures the runs built for drawing — one pass, not a second GetTextRuns call.
     /// </summary>
     public static void DrawTextWithFallback(this SKCanvas canvas, string text, float x, float y, SKFont baseFont, SKPaint paint, SKTextAlign align = SKTextAlign.Left)
     {
@@ -299,15 +312,17 @@ public static class FontHelper
         var style = baseFont.Typeface?.FontStyle ?? SKFontStyle.Normal;
         var runs = GetTextRuns(text, style, baseFont.Typeface);
 
-        if (align == SKTextAlign.Right)
+        if (align != SKTextAlign.Left)
         {
-            float totalW = MeasureTextWithFallback(text, baseFont);
-            x -= totalW;
-        }
-        else if (align == SKTextAlign.Center)
-        {
-            float totalW = MeasureTextWithFallback(text, baseFont);
-            x -= totalW * 0.5f;
+            // Measure the runs we already built (the old code re-split the
+            // text via MeasureTextWithFallback — a second run computation
+            // per draw on the 30 FPS path).
+            float totalW = 0f;
+            foreach (var run in runs)
+            {
+                totalW += GetCachedFont(run.Typeface, baseFont.Size).MeasureText(run.Text);
+            }
+            x -= align == SKTextAlign.Right ? totalW : totalW * 0.5f;
         }
 
         float currentX = x;
@@ -327,7 +342,11 @@ public static class FontHelper
         if (string.IsNullOrWhiteSpace(familyName) ||
             familyName.Equals("Geist", StringComparison.OrdinalIgnoreCase))
         {
-            return _geistTypeface.Value ?? SKTypeface.FromFamilyName("Geist", style) ?? SKTypeface.FromFamilyName("Segoe UI", style) ?? SKTypeface.Default;
+            // Geist is a variable font covering every style — the style-pinned
+            // FromFamilyName fallback chain after _geistTypeface.Value was dead
+            // (the lazy never yields null; GeistTypeface already ends in
+            // SKTypeface.Default).
+            return GeistTypeface;
         }
 
         return _typefaceCache.GetOrAdd((familyName, style), key => new Lazy<SKTypeface>(() => ResolveDirectTypeface(key))).Value;
@@ -395,9 +414,6 @@ public static class FontHelper
         => GetCachedFont(GetTypeface(familyName, style), size);
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(long TypefaceHandle, int SizeKey), SKFont> CachedFonts = new();
-
-    /// <summary>Removes all cached fonts (called at shutdown; the process is exiting anyway).</summary>
-    internal static void ClearFontCache() => CachedFonts.Clear();
 
     /// <summary>
     /// Configures high-quality anti-aliasing, subpixel text positioning, and ClearType rendering flags on an SKFont instance.

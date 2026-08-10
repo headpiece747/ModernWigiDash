@@ -31,8 +31,8 @@ public sealed class ThemeDialog : Window
         Height = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Owner = owner;
-        Background = (Brush)Application.Current.Resources["BgPanel"];
-        FontFamily = (FontFamily)Application.Current.Resources["PrimaryFont"];
+        Background = Application.Current.Resources["BgPanel"] as Brush ?? Brushes.Black;
+        FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _applyDarkTitleBar(this, ThemeSettings.Theme.TitleBar);
 
         Content = BuildUi();
@@ -51,7 +51,7 @@ public sealed class ThemeDialog : Window
             Text = "Chrome Theme — colors outside the widget canvas",
             FontSize = 15,
             FontWeight = FontWeights.Bold,
-            Foreground = (Brush)Application.Current.Resources["TextPrimary"],
+            Foreground = Application.Current.Resources["TextPrimary"] as Brush ?? Brushes.White,
             Margin = new Thickness(0, 0, 0, 12)
         };
         root.Children.Add(title);
@@ -77,7 +77,7 @@ public sealed class ThemeDialog : Window
                     Text = group.ToUpperInvariant(),
                     FontSize = 12,
                     FontWeight = FontWeights.Bold,
-                    Foreground = (Brush)Application.Current.Resources["M3Primary"],
+                    Foreground = Application.Current.Resources["M3Primary"] as Brush ?? Brushes.White,
                     Margin = new Thickness(0, 8, 0, 6)
                 });
             }
@@ -92,7 +92,7 @@ public sealed class ThemeDialog : Window
                 Text = friendly,
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources["TextSecondary"],
+                Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 2),
                 ToolTip = $"{friendly} ({prop.Name})"
             };
@@ -101,7 +101,7 @@ public sealed class ThemeDialog : Window
                 Text = desc,
                 FontSize = 10,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = (Brush)Application.Current.Resources["TextSecondary"],
+                Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 4)
             };
             var box = new TextBox { Text = current };
@@ -118,7 +118,7 @@ public sealed class ThemeDialog : Window
         Grid.SetRow(buttons, 2);
         var btnReset = new Button { Content = "Reset", Margin = new Thickness(0, 0, 8, 0) };
         var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0) };
-        _btnApply = new Button { Content = "Apply", Style = (Style)Application.Current.Resources["AccentButton"] };
+        _btnApply = new Button { Content = "Apply", Style = Application.Current.Resources["AccentButton"] as Style };
 
         foreach (var (_, box) in _entries)
         {
@@ -161,7 +161,7 @@ public sealed class ThemeDialog : Window
     private void Validate()
     {
         bool valid = true;
-        Brush borderBrush = (Brush)Application.Current.Resources["BorderBrush"];
+        Brush borderBrush = Application.Current.Resources["BorderBrush"] as Brush ?? Brushes.White;
         foreach (var (_, box) in _entries)
         {
             bool ok = ThemeSettings.ParseColor(box.Text) != null;

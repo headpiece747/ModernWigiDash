@@ -30,9 +30,13 @@ public class ProfileLayout
         set => field = Pages.Count > 0 ? Math.Clamp(value, 0, Pages.Count - 1) : 0;
     }
 
-    /// <summary>The active page. The empty-Pages fallback is unreachable in
-    /// practice (see <see cref="ActivePageIndex"/> invariants) and is kept as
-    /// pure defense against a hand-constructed empty profile.</summary>
+    /// <summary>The active page. WARNING: the empty-Pages fallback hands out a
+    /// freshly constructed orphan page that is NOT part of <see cref="Pages"/>
+    /// — mutations on it (widget placement, renaming) are lost. It is
+    /// unreachable in practice (the ctor creates one page, ProfileOps refuses
+    /// to delete the last, the import sanitizer repairs empty pages) and is
+    /// kept only as pure defense against a hand-constructed empty profile;
+    /// any code that relies on it is a bug.</summary>
     public PageLayout ActivePage => Pages.Count > 0 && ActivePageIndex >= 0 && ActivePageIndex < Pages.Count
         ? Pages[ActivePageIndex]
         : Pages.FirstOrDefault() ?? new PageLayout();

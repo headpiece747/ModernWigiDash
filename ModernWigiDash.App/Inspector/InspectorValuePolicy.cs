@@ -17,6 +17,13 @@ internal sealed class InspectorValuePolicy
     private const float MinWidgetSize = 20f;
 
     /// <summary>
+    /// Warning sink for conversion/parse failures. The policy has no logging
+    /// seam by design (pure, WPF-free); the controller wires this to the
+    /// shared file log. Defaults to debug output.
+    /// </summary>
+    internal Action<string>? LogWarning { get; set; } = msg => System.Diagnostics.Debug.WriteLine(msg);
+
+    /// <summary>
     /// Converts inspector text into the property's CLR type. String properties
     /// pass through unchanged; unconvertible text returns false and logs a
     /// diagnostic. Backed by <see cref="TypeDescriptor"/>'s invariant-string
@@ -38,7 +45,7 @@ internal sealed class InspectorValuePolicy
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Inspector value '{text}' not convertible to {property.PropertyType.Name} for {property.Name}: {ex.Message}");
+            LogWarning?.Invoke($"Inspector value '{text}' not convertible to {property.PropertyType.Name} for {property.Name}: {ex.Message}");
             value = null;
             return false;
         }

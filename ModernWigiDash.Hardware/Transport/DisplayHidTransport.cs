@@ -21,9 +21,12 @@ namespace ModernWigiDash.Hardware.Transport;
 ///   ControlIn(0xA1, request, wValue, 0, buffer) for control IN
 /// The backend (WinUSB or LibUsbDotNet) is chosen once in
 /// <see cref="Connect"/> and everything else talks to the
-/// <see cref="ITransferBackend"/> seam.
+/// <see cref="ITransferBackend"/> seam. The WinUSB attempt is constructed
+/// through <see cref="WinUsbDeviceFactory"/> (default: a real
+/// <see cref="WinUsbBulkDevice"/>), so the connect policy — open, PING, init,
+/// fallback — is drivable in tests with a fake device.
 /// </summary>
-public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null) : IDisplayTransport
+public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null) : IDisplayTransport
 {
     private readonly ILogger<DisplayHidTransport> _logger = logger ?? NullLogger<DisplayHidTransport>.Instance;
 
@@ -35,13 +38,21 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private long _framesFailed;
     private readonly Lock _usbLock = new();
 
-    // 3-page double-buffering (Base0=0x20, Base1=0x21, Base2=0x22)
+    // 3-page double-buffering (Base screens 0x20..0x22 — ScreenBase0..2 in
+    // DisplayProtocolConstants; only Base0 is const'ed here).
     private const int NumPages = 3;
     private const byte Base0 = 0x20;
     private int _currentPage;
 
     public bool IsConnected => _isConnected;
     public long FramesFailed => Volatile.Read(ref _framesFailed);
+
+    /// <summary>
+    /// Test seam: constructs the WinUSB attempt in <see cref="Connect"/>.
+    /// Defaults to a real <see cref="WinUsbBulkDevice"/>; tests substitute a
+    /// fake subclass to drive the connect policy without hardware.
+    /// </summary>
+    internal Func<WinUsbBulkDevice> WinUsbDeviceFactory { get; set; } = static () => new WinUsbBulkDevice();
 
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
@@ -67,7 +78,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         // --- Try WinUSB first ---
         try
         {
-            var winUsb = new WinUsbBulkDevice();
+            var winUsb = WinUsbDeviceFactory();
             if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
                 LogToFile("[USB-WINUSB] Direct WinUSB connection opened");
@@ -91,18 +102,26 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
                     // Init failed through the WinUSB stack — the same control
                     // sequence may complete through the LibUsb driver stack, so
-                    // fall through to the LibUsbDotNet attempt.
+                    // fall through to the LibUsbDotNet attempt. The teardown is
+                    // under _usbLock like Cleanup: the backend handle must not
+                    // be freed while a transfer could be in flight.
                     LogToFile("[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
-                    winUsb.Dispose();
-                    _backend = null;
+                    lock (_usbLock)
+                    {
+                        winUsb.Dispose();
+                        _backend = null;
+                    }
                     _isConnected = false;
                 }
                 else
                 {
                     // PING failed, close WinUSB and try LibUsbDotNet
                     LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
-                    winUsb.Dispose();
-                    _backend = null;
+                    lock (_usbLock)
+                    {
+                        winUsb.Dispose();
+                        _backend = null;
+                    }
                     _isConnected = false;
                 }
             }
@@ -115,8 +134,11 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
         catch (Exception ex)
         {
             LogToFile($"[USB-WINUSB] Exception: {ex.Message}, falling back to LibUsbDotNet");
-            _backend?.Dispose();
-            _backend = null;
+            lock (_usbLock)
+            {
+                _backend?.Dispose();
+                _backend = null;
+            }
             _isConnected = false;
         }
 
@@ -348,7 +370,7 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
     /// <summary>
     /// Vendor OUT control transfer through the active backend.
-    /// bmRequestType = 0x21 (Vendor | Host-to-Device | Interface)
+    /// bmRequestType = 0x21 (Class | Interface | Host-to-Device)
     /// </summary>
     private bool ControlOut(byte request, ushort wValue, byte[]? data)
         => _backend?.ControlOut(request, wValue, data) ?? false;
@@ -368,83 +390,90 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     private bool WriteBulkData(byte[] data)
         => _backend?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
 
-    // Diagnostic cadences: the two %20 touch-diag sites share one counter
+    // Diagnostic cadences: the two touch-diag failure sites share one counter
     // (they are mutually exclusive branches), the Raw dump is every 200th.
     // Note: the raw-dump cadence counts success-path calls only (every 200th
     // successful read) — the old single shared counter made it positional in
     // total ReadTouch calls; steady states are identical.
-    private readonly LogCadence _touchDiagLog = new(20);
+    private readonly LogCadence _touchDiagLog = new(20, logFirst: true);
     private readonly LogCadence _touchDiagRawLog = new(200);
+    private readonly LogCadence _sendFrameSkippedLog = new(60);
 
-    // Reused per-call buffers: SendFrame (under _usbLock) and ReadTouch (16ms
-    // poll loop) are serialized by their callers, so these are never touched
-    // concurrently — no per-call allocation on the hot paths.
+    // Reused per-call buffers: SendFrame and ReadTouch are both serialized by
+    // _usbLock (the 16ms poll loop and the frame path can interleave), and the
+    // two buffers are distinct — so these are never touched concurrently, with
+    // no per-call allocation on the hot paths.
     private readonly byte[] _frameHeader = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
     private readonly byte[] _touchBuffer = new byte[DisplayProtocolConstants.TouchReportSize];
 
     public TouchReport? ReadTouch()
     {
-        if (_backend is not { IsOpen: true })
+        lock (_usbLock)
         {
-            if (_touchDiagLog.Due())
-                LogToFile($"[TOUCH-DIAG] Not connected: isConnected={_isConnected}");
-            return null;
-        }
-
-        try
-        {
-            byte[] touchBuf = _touchBuffer;
-
-            bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf);
-
-            if (!ok)
+            if (_backend is not { IsOpen: true })
             {
                 if (_touchDiagLog.Due())
-                    LogToFile($"[TOUCH-DIAG] ControlIn FAILED");
+                    LogToFile($"[TOUCH-DIAG] Not connected: isConnected={_isConnected}");
                 return null;
             }
 
-            byte type = touchBuf[0];
-            short x = BitConverter.ToInt16(touchBuf, 2);
-            short y = BitConverter.ToInt16(touchBuf, 4);
-
-            if (_touchDiagRawLog.Due())
-                LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y}");
-
-            if (type == DisplayProtocolConstants.TouchTypeNone)
-                return null;
-
-            if (x < 0 || x >= DisplayProtocolConstants.FramebufferWidth ||
-                y < 0 || y >= DisplayProtocolConstants.FramebufferHeight)
-                return null;
-
-            byte screenState = touchBuf[6];
-            byte sleepState = touchBuf[7];
-
-            return new TouchReport
+            try
             {
-                Type = type,
-                X = x,
-                Y = y,
-                ScreenState = screenState,
-                SleepState = sleepState != 0
-            };
-        }
-        catch (Exception ex)
-        {
-            LogToFile($"[TOUCH-DIAG] Exception: {ex.Message}");
-            return null;
+                byte[] touchBuf = _touchBuffer;
+
+                bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf);
+
+                if (!ok)
+                {
+                    if (_touchDiagLog.Due())
+                        LogToFile($"[TOUCH-DIAG] ControlIn FAILED");
+                    return null;
+                }
+
+                byte type = touchBuf[0];
+                short x = BitConverter.ToInt16(touchBuf, 2);
+                short y = BitConverter.ToInt16(touchBuf, 4);
+
+                if (_touchDiagRawLog.Due())
+                    LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y}");
+
+                if (type == DisplayProtocolConstants.TouchTypeNone)
+                    return null;
+
+                if (x < 0 || x >= DisplayProtocolConstants.FramebufferWidth ||
+                    y < 0 || y >= DisplayProtocolConstants.FramebufferHeight)
+                    return null;
+
+                return new TouchReport
+                {
+                    Type = type,
+                    X = x,
+                    Y = y
+                };
+            }
+            catch (Exception ex)
+            {
+                LogToFile($"[TOUCH-DIAG] Exception: {ex.Message}");
+                return null;
+            }
         }
     }
 
     private void Cleanup()
     {
-        _isConnected = false;
+        // Serialized against SendFrame/ReadTouch/GoToStandby: the backend's
+        // teardown frees the native handle, which must never happen while a
+        // transfer is in flight (the Lock is reentrant, so Dispose/DisposeAsync
+        // calling in is safe).
+        lock (_usbLock)
+        {
+            _isConnected = false;
 
-        // The backend owns the device-specific teardown (WinUSB handle free,
-        // LibUsb interface release + close); the transport just drops it.
-        _backend?.Dispose();
-        _backend = null;
+            // The backend owns the device-specific teardown (WinUSB handle free,
+            // LibUsb interface release + close); the transport just drops it.
+            _backend?.Dispose();
+            _backend = null;
+        }
 
         // Context is a shared singleton - don't dispose
     }
@@ -453,7 +482,8 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
     {
         if (!_isConnected)
         {
-            _logger.LogWarning("SendFrame SKIPPED: not connected");
+            if (_sendFrameSkippedLog.Due())
+                _logger.LogWarning("SendFrame SKIPPED: not connected");
             return false;
         }
 
@@ -543,18 +573,21 @@ public sealed partial class DisplayHidTransport(ILogger<DisplayHidTransport>? lo
 
     public bool GoToStandby()
     {
-        if (!_isConnected)
-            return false;
-
-        // The built-in Welcome screen is the vendor standby state. Deliberately
-        // no ClearTimeout afterwards: once the heartbeat source (the service's
-        // touch poll loop) stops, the display sleeps on its own timeout.
-        bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome);
-        if (ok)
+        lock (_usbLock)
         {
-            LogToFile("[STANDBY] Display set to standby (welcome screen)");
+            if (!_isConnected)
+                return false;
+
+            // The built-in Welcome screen is the vendor standby state. Deliberately
+            // no ClearTimeout afterwards: once the heartbeat source stops, the
+            // display sleeps on its own timeout.
+            bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome);
+            if (ok)
+            {
+                LogToFile("[STANDBY] Display set to standby (welcome screen)");
+            }
+            return ok;
         }
-        return ok;
     }
 
     public void Dispose()

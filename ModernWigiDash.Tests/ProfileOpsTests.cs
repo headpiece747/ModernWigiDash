@@ -12,7 +12,7 @@ namespace ModernWigiDash.Tests;
 public class ProfileOpsTests
 {
 
-    [WidgetMetadata("profile_test_widget", "Profile Test", DefaultGridSize = GridSizePreset.Size2x2)]
+    [WidgetMetadata("profile_test_widget", "Profile Test")]
     private sealed class TestWidget : ModernWidgetBase
     {
         [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "default")]
@@ -44,7 +44,7 @@ public class ProfileOpsTests
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
-    [WidgetMetadata("disposable_test_widget", "Disposable Test", DefaultGridSize = GridSizePreset.Size2x2)]
+    [WidgetMetadata("disposable_test_widget", "Disposable Test")]
     private sealed class DisposableTestWidget : ModernWidgetBase
     {
         public bool Disposed { get; private set; }
@@ -160,6 +160,35 @@ public class ProfileOpsTests
         Assert.IsNotNull(loaded);
         Assert.AreEqual(1, loaded.Pages.Count, "The sanitizer must guarantee at least one page");
         Assert.AreEqual(loaded.Pages[0], loaded.ActivePage, "ActivePage must never be an orphan");
+    }
+
+    [TestMethod]
+    public void ImportJson_NullPagesCollection_IsRepaired()
+    {
+        // Regression guard: untrusted JSON with "pages": null NRE'd in the
+        // sanitizer (the guard crashed on exactly the input it exists for).
+        var loaded = ProfileOps.ImportJson("""{"profileId":"x","pages":null}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(1, loaded.Pages.Count);
+    }
+
+    [TestMethod]
+    public void ImportJson_NullWidgetsCollection_IsRepaired()
+    {
+        var loaded = ProfileOps.ImportJson("""{"profileId":"x","pages":[{"pageName":"A","widgets":null}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(0, loaded.ActivePage.Widgets.Count, "A null widgets array must import as an empty page");
+    }
+
+    [TestMethod]
+    public void ImportJson_NullPropertyValuesCollection_IsRepaired()
+    {
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":null}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(1, loaded.ActivePage.Widgets.Count, "A widget with null propertyValues must still import");
     }
 
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──

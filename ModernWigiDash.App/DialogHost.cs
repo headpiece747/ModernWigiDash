@@ -34,19 +34,7 @@ public sealed class DialogHost
     /// </summary>
     public string? PromptForText(string title, string label, string initialValue)
     {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 380,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Owner = _owner,
-            ResizeMode = ResizeMode.NoResize,
-            ShowInTaskbar = false,
-            Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
-            FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
-        };
-        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+        var dialog = CreateChrome(title, 380);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -98,9 +86,9 @@ public sealed class DialogHost
     /// <summary>Themed confirm dialog: true when the user confirmed, false on cancel.</summary>
     public bool Confirm(string title, string message)
     {
-        var dialog = CreateMessageDialog(title, message, isConfirm: true);
+        var (dialog, ok) = CreateMessageDialog(title, message, isConfirm: true);
         bool confirmed = false;
-        WireMessageButton(dialog, () => confirmed = true);
+        ok.Click += (_, _) => confirmed = true;
         dialog.ShowDialog();
         return confirmed;
     }
@@ -108,8 +96,8 @@ public sealed class DialogHost
     /// <summary>Themed info dialog (single OK button).</summary>
     public void Info(string title, string message)
     {
-        var dialog = CreateMessageDialog(title, message, isConfirm: false);
-        WireMessageButton(dialog, () => { });
+        var (dialog, ok) = CreateMessageDialog(title, message, isConfirm: false);
+        ok.Click += (_, _) => { };
         dialog.ShowDialog();
     }
 
@@ -119,30 +107,20 @@ public sealed class DialogHost
 #pragma warning disable S4144 // Info and Error share the chrome by design
     public void Error(string title, string message)
     {
-        var dialog = CreateMessageDialog(title, message, isConfirm: false);
-        WireMessageButton(dialog, () => { });
+        var (dialog, ok) = CreateMessageDialog(title, message, isConfirm: false);
+        ok.Click += (_, _) => { };
         dialog.ShowDialog();
     }
 #pragma warning restore S4144
 
-    /// <summary>Builds the themed message-dialog shell: the message block and
-    /// an OK button (plus a Cancel button for confirmations). The button
-    /// actions are wired by <see cref="WireMessageButton"/>.</summary>
-    private Window CreateMessageDialog(string title, string message, bool isConfirm)
+    /// <summary>
+    /// Builds the themed message-dialog shell: the message block and an OK
+    /// button (plus a Cancel button for confirmations), returning both so the
+    /// caller wires the OK action directly — no post-hoc button search.
+    /// </summary>
+    private (Window Dialog, Button OkButton) CreateMessageDialog(string title, string message, bool isConfirm)
     {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 380,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Owner = _owner,
-            ResizeMode = ResizeMode.NoResize,
-            ShowInTaskbar = false,
-            Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
-            FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
-        };
-        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+        var dialog = CreateChrome(title, 380);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -178,24 +156,28 @@ public sealed class DialogHost
         root.Children.Add(buttons);
 
         dialog.Content = root;
-        return dialog;
+        return (dialog, btnOk);
     }
 
-    /// <summary>Attaches the confirm action to the dialog's OK button (the
-    /// button labels are fixed in <see cref="CreateMessageDialog"/>).</summary>
-    private static void WireMessageButton(Window dialog, Action onConfirm)
+    /// <summary>Shared chrome for the small themed dialogs: fixed-width,
+    /// centered on the owner, non-resizable, themed background/font, and the
+    /// dark DWM title bar.</summary>
+    private Window CreateChrome(string title, double width)
     {
-        if (dialog.Content is not Grid root || root.Children.Count < 2 || root.Children[1] is not StackPanel buttons)
-            return;
-
-        foreach (var child in buttons.Children)
+        var dialog = new Window
         {
-            if (child is Button btn && btn.Content as string == "OK")
-            {
-                btn.Click += (_, _) => onConfirm();
-                return;
-            }
-        }
+            Title = title,
+            Width = width,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = _owner,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
+            FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
+        };
+        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+        return dialog;
     }
 
     /// <summary>
@@ -346,7 +328,7 @@ public sealed class DialogHost
             if (dlg.ShowDialog() != true) return;
             if (!SvgIconLoader.TryGetPath(dlg.FileName, out _))
             {
-                MessageBox.Show(dialog, "Only single-path SVG icons are supported.", "Unsupported SVG", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Error("Unsupported SVG", "Only single-path SVG icons are supported.");
                 return;
             }
             string relative = SvgIconLoader.CopyToIcons(dlg.FileName);
@@ -452,7 +434,17 @@ public sealed class DialogHost
                     _logError("Unable to open the Twitch authorization page", ex);
                 }
             };
-            copy.Click += (_, _) => Clipboard.SetText(userCode);
+            copy.Click += (_, _) =>
+            {
+                try
+                {
+                    Clipboard.SetText(userCode);
+                }
+                catch (Exception ex)
+                {
+                    _logError("Unable to copy the authorization code", ex);
+                }
+            };
             close.Click += (_, _) => window.Close();
 
             buttons.Children.Add(open);

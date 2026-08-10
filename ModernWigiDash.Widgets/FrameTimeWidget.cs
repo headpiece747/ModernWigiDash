@@ -9,15 +9,15 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// Live FPS / frame-time dashboard: current FPS, frame time, 1% low, 0.1% low,
 /// GPU busy %, and CPU frame time for the focused game/app, plus a rolling
-/// frame-time sparkline. Data is captured in-process by the ModernWigiDash
-/// service via Windows ETW (DXGI / D3D9 / DxgKrnl present events) — no separate
-/// tool such as PresentMon, MSI Afterburner, or RTSS needs to be running.
-/// When no DirectX app is focused, the monitor's refresh rate is shown.
+/// frame-time sparkline. Frame times come from the PresentMon Service
+/// (ADR-0003): the app opens a non-elevated session, starts tracking the
+/// focused process, and polls the counters on the 1s poll loop. When the
+/// service is absent, the widget renders the graceful unavailable state; with
+/// no tracked process, the monitor's refresh rate is shown.
 /// </summary>
-[WidgetMetadata("frame_time", "FPS / Frame Time", Description = "Live FPS, frame time, 1% low, 0.1% low, GPU busy, and CPU frame time for the most active game, captured via the PresentMon Service (ADR-0003).", Author = "ModernWigiDash", Version = "1.0.0", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size2x2)]
+[WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
 public class FrameTimeWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#F59E0B")]

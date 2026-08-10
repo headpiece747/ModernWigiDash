@@ -157,6 +157,20 @@ public static class ProfileOps
         if (instance == null) return null;
 
         var size = instance.DefaultSize;
+
+        // The probe instance exists only to report its default size — the
+        // placed widget's instance is created fresh inside PlaceWidget. It is
+        // IAsyncDisposable, so tear it down here instead of leaking one
+        // widget (timers, sockets) per catalog click.
+        try
+        {
+            instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Probe teardown must never break placement.
+        }
+
         if (size.Width >= DisplayGeometry.FramebufferWidth - 10 || size.Height >= DisplayGeometry.FramebufferHeight - 10)
         {
             return PlaceWidget(profile, loader, context, pluginId, 0, 0);
@@ -170,45 +184,72 @@ public static class ProfileOps
     /// <summary>
     /// Creates and initializes the active widget instance for a placed widget,
     /// then applies the user-configured custom property values (surviving
-    /// Export/Import round-trips).
+    /// Export/Import round-trips). Failures are contained per widget: one
+    /// throwing widget (broken constructor or InitializeAsync) is logged and
+    /// skipped so it cannot abort the whole import.
     /// </summary>
     public static IModernWidget? RehydrateWidget(
         WidgetPluginLoader loader,
         IModernWigiDashContext context,
         PlacedWidgetInstance placed)
     {
-        var instance = loader.CreateInstance(placed.PluginId);
-        if (instance == null) return null;
+        IModernWidget? instance = null;
+        try
+        {
+            instance = loader.CreateInstance(placed.PluginId);
+            if (instance == null) return null;
+
+            // The instance and the placed widget share one identity: the
+            // placed's InstanceId survives Export/Import, so rehydration must
+            // sync it back onto the fresh instance (widgets key caches by it).
+            instance.InstanceId = placed.InstanceId;
 
 #pragma warning disable S6966 // Widget initialization must complete before placement — sync wrapper during startup
-        instance.InitializeAsync(context).GetAwaiter().GetResult();
+            instance.InitializeAsync(context).GetAwaiter().GetResult();
 #pragma warning restore S6966
 
-        var type = instance.GetType();
-        foreach (var prop in type.GetProperties())
-        {
-            var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
-            if (attr == null) continue;
-            if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
-
-            object? value = ConvertPropertyValue(raw, prop.PropertyType);
-            if (value == null) continue;
-
-            try
+            var type = instance.GetType();
+            foreach (var prop in type.GetProperties())
             {
-                prop.SetValue(instance, value);
-                instance.OnPropertyChanged(prop.Name, value);
+                var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
+                if (attr == null) continue;
+                if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
+
+                object? value = ConvertPropertyValue(raw, prop.PropertyType);
+                if (value == null) continue;
+
+                try
+                {
+                    prop.SetValue(instance, value);
+                    instance.OnPropertyChanged(prop.Name, value);
+                }
+                catch
+                {
+                    // Stored value is incompatible with the widget property type; ignore it
+                    System.Diagnostics.Debug.WriteLine("Stored value incompatible with widget property type (ignored)");
+                }
             }
-            catch
-            {
-                // Stored value is incompatible with the widget property type; ignore it
-                System.Diagnostics.Debug.WriteLine("Stored value incompatible with widget property type (ignored)");
-            }
+
+            DisposeWidgetInstance(placed);
+            placed.ActiveInstance = instance;
+            return instance;
         }
-
-        DisposeWidgetInstance(placed);
-        placed.ActiveInstance = instance;
-        return instance;
+        catch (Exception ex)
+        {
+            context.LogError($"Widget rehydration failed for '{placed.PluginId}'; the widget is skipped.", ex);
+            if (instance != null && !ReferenceEquals(instance, placed.ActiveInstance))
+            {
+                try
+                {
+                    instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Teardown of the failed instance must not mask the original error.
+                }
+            }
+            return null;
+        }
     }
 
     /// <summary>
@@ -250,9 +291,11 @@ public static class ProfileOps
 
     // ── export / import ─────────────────────────────────────
 
+    private static readonly JsonSerializerOptions ExportOptions = new() { WriteIndented = true };
+
     /// <summary>Serializes the profile to JSON.</summary>
     public static string ExportJson(ProfileLayout profile)
-        => JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
+        => JsonSerializer.Serialize(profile, ExportOptions);
 
     /// <summary>Max widgets a page may carry after an import (startup DoS cap).</summary>
     private const int MaxWidgetsPerPage = 200;
@@ -304,6 +347,11 @@ public static class ProfileOps
     /// </summary>
     private static void SanitizeImportedProfile(ProfileLayout profile)
     {
+        // Untrusted JSON may carry null collections ("pages": null etc.) —
+        // repair them before any counting, or the sanitizer NREs on exactly
+        // the input shape it exists for.
+        profile.Pages ??= [];
+
         // A profile with zero pages cannot exist at runtime (the ctor creates
         // one, DeletePage refuses the last) — an imported JSON with an empty
         // pages array must be repaired here, or ActivePage hands out an orphan
@@ -328,6 +376,8 @@ public static class ProfileOps
         int total = 0;
         foreach (var page in profile.Pages)
         {
+            page.Widgets ??= [];
+
             if (!string.IsNullOrWhiteSpace(page.BackgroundImagePath))
             {
                 page.BackgroundImagePath = SafeRelativePath(page.BackgroundImagePath);
@@ -355,6 +405,9 @@ public static class ProfileOps
 
     private static void SanitizeWidgetValues(PlacedWidgetInstance placed)
     {
+        // Untrusted JSON may carry "propertyValues": null — repair before use.
+        placed.PropertyValues ??= [];
+
         // ActionCommand drives Process.Start / SendInput on the Hotkey widget
         // (identified by its property name, widget-agnostically): a foreign
         // profile must not silently arm command execution. Cleared whenever
@@ -398,6 +451,9 @@ public static class ProfileOps
     {
         if (string.IsNullOrWhiteSpace(path)) return "";
         if (Path.IsPathRooted(path)) return "";
+        // Drive-relative ("C:foo") is not rooted but still resolves against a
+        // drive — reject it so only genuinely relative paths survive.
+        if (path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':') return "";
         if (path.StartsWith("\\\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return "";
         if (path.Split(['\\', '/'], StringSplitOptions.None).Any(segment => segment == "..")) return "";
         return path;

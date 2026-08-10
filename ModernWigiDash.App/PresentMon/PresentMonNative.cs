@@ -132,7 +132,10 @@ public sealed class PresentMonNative : IPresentMonNative
         // PM_STATUS_INSUFFICIENT_BUFFER. numSwapChains is in/out: it declares
         // the blob's capacity on entry and receives the actual chain count on
         // return. Only swap chain 0 is consumed — the primary swap chain is
-        // what the FPS widget should report.
+        // what the FPS widget should report. Growth is capped: a service that
+        // keeps refusing capacity beyond the cap is misbehaving, so the poll
+        // fails instead of allocating unbounded blobs.
+        const int MaxSwapChainCapacity = 8192;
         int capacity = 32;
         while (true)
         {
@@ -142,6 +145,10 @@ public sealed class PresentMonNative : IPresentMonNative
 
             if (status == PmStatus.InsufficientBuffer)
             {
+                if (capacity >= MaxSwapChainCapacity)
+                {
+                    return new PresentMonPollResult(null, PmStatus.ServiceError);
+                }
                 capacity *= 2;
                 continue;
             }

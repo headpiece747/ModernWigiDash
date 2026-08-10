@@ -29,8 +29,7 @@ public class TelemetryStoreMappingTests
                     Unit = "°C",
                     Value = 55.5,
                     Min = 40,
-                    Max = 90,
-                    Avg = 52
+                    Max = 90
                 }
             ]
         });
@@ -73,7 +72,7 @@ public class TelemetryStoreMappingTests
             RecentFrameTimesMs = [6.9, 7.0, 6.8]
         });
 
-        FrameTimeSnapshotRecord rec = FrameTimeStore.ReadSnapshot();
+        FrameTimeSnapshotRecord rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
 
         Assert.IsTrue(rec.IsAvailable);
         Assert.AreEqual(1234, rec.ProcessId);
@@ -93,7 +92,7 @@ public class TelemetryStoreMappingTests
     {
         FrameTimeStore.UpdateFromDto(null);
 
-        FrameTimeSnapshotRecord rec = FrameTimeStore.ReadSnapshot();
+        FrameTimeSnapshotRecord rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
 
         Assert.IsFalse(rec.IsAvailable);
     }
@@ -120,7 +119,7 @@ public class TelemetryStoreMappingTests
         var producerTime = new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc);
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto { IsAvailable = true, LastUpdate = producerTime });
 
-        Assert.AreEqual(producerTime, FrameTimeStore.ReadSnapshot().LastUpdate);
+        Assert.AreEqual(producerTime, FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!.LastUpdate);
     }
 
     [TestMethod]

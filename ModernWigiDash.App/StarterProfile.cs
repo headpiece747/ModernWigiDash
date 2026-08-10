@@ -87,15 +87,20 @@ public sealed class StarterProfile
     }
 
     /// <summary>
-    /// Builds the default starter <see cref="ProfileLayout"/>: six named pages
-    /// with every <see cref="Layout"/> placement rehydrated into a placed
-    /// widget, active page reset to the first. Unknown plugin ids are skipped
-    /// (same as the old window placement path).
+    /// Builds the default starter <see cref="ProfileLayout"/>: every
+    /// <see cref="Layout"/> page (including the first — "Main Dashboard" is an
+    /// explicit spec entry, not the <see cref="ProfileLayout"/> ctor's default
+    /// page riding along) is materialized by name, every placement rehydrated
+    /// into a placed widget, active page reset to the first. Unknown plugin
+    /// ids are skipped (same as the old window placement path).
     /// </summary>
     public ProfileLayout Create()
     {
         var profile = new ProfileLayout();
-        foreach (var page in Layout.Skip(1))
+        // The ctor creates one default page; replace it with the explicit
+        // starter list so the layout spec is the single source of page truth.
+        profile.Pages.Clear();
+        foreach (var page in Layout)
         {
             profile.Pages.Add(new PageLayout { PageName = page.Name });
         }

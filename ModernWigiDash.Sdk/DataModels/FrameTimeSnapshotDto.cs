@@ -7,7 +7,7 @@ namespace ModernWigiDash.Sdk;
 /// frame-query results into this DTO. Frame times are in milliseconds; FPS
 /// values are 1000 / frame time.
 /// </summary>
-public class FrameTimeSnapshotDto
+public sealed record FrameTimeSnapshotDto
 {
     /// <summary>
     /// Whether PresentMon frame capture is active. False when the PresentMon
@@ -16,12 +16,15 @@ public class FrameTimeSnapshotDto
     public bool IsAvailable { get; set; }
 
     /// <summary>
-    /// Whether the capture pipeline is producing present data. False when the
-    /// service session is open but no process yields present events for a grace
-    /// period (service-side ETW capture dead) — distinct from
+    /// Whether the capture pipeline is producing present data. Defaults to
+    /// false so a snapshot never claims a healthy capture before the producer
+    /// reports it; the producer sets it true on live present data and idle
+    /// outcomes that must not count toward a dead capture. False when the
+    /// service session is open but no process yields present events for a
+    /// grace period (service-side ETW capture dead) — distinct from
     /// <see cref="IsAvailable"/>, which only says the service is reachable.
     /// </summary>
-    public bool CaptureHealthy { get; set; } = true;
+    public bool CaptureHealthy { get; set; } = false;
 
     /// <summary>
     /// Human-readable reason when <see cref="IsAvailable"/> is false.

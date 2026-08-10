@@ -119,8 +119,8 @@ public class InspectorModelBuilderTests
         LhmSensorStore.Reset();
         LhmSensorStore.Update(new LhmSnapshot(true, DateTime.UtcNow,
             [
-                new LhmReading("cpu", "CPU Temp", "Mainboard: CPU Temp", "°C", 50, 40, 90, 52),
-                new LhmReading("gpu", "GPU Temp", "GPU: GPU Temp", "°C", 60, 40, 90, 55)
+                new LhmReading("cpu", "CPU Temp", "Mainboard: CPU Temp", "°C", 50, 40, 90),
+                new LhmReading("gpu", "GPU Temp", "GPU: GPU Temp", "°C", 60, 40, 90)
             ]));
 
         var sensorWidget = new SensorSelectorWidgetStub();

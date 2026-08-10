@@ -1,9 +1,11 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ModernWigiDash.Core.Theming;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
@@ -28,14 +30,26 @@ public static class WindowChrome
     {
         if (window.Icon == null)
         {
-            window.Icon = new BitmapImage(
-                new Uri("pack://application:,,,/Resources/Logo/logo.ico"));
+            try
+            {
+                window.Icon = new BitmapImage(
+                    new Uri("pack://application:,,,/Resources/Logo/logo.ico"));
+            }
+            catch (IOException)
+            {
+                // A missing icon resource must not crash dialog creation
+                // (e.g. in test hosts without the app's pack resources).
+            }
         }
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
         // Enable dark mode title bar (Windows 10 1809+)
         int darkMode = 1;
-        DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref darkMode, sizeof(int));
+        int darkResult = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref darkMode, sizeof(int));
+        if (darkResult != 0)
+        {
+            FileLog.Write($"[CHROME] DwmSetWindowAttribute (immersive dark mode) failed for '{window.Title}': 0x{darkResult:X8}");
+        }
         // Set title bar background to match app theme (Windows 11+)
         var color = ThemeSettings.ParseColor(captionHex) ?? new RgbaColor(255, 0x0F, 0x11, 0x1A);
         int colorRef = (color.B << 16) | (color.G << 8) | color.R; // COLORREF (BBGGRR)

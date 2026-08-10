@@ -16,12 +16,13 @@ public static class ThemeManager
 {
     /// <summary>
     /// Maps theme property names whose brush resource key does not equal the property name.
-    /// All other properties map to a brush under the same name.
+    /// All other properties map to a brush under the same name (TextPrimary maps
+    /// to "TextPrimary" only — the AccentBlue alias lives in App.xaml, which the
+    /// theme colors flow into through TextPrimaryColor).
     /// </summary>
     private static readonly FrozenDictionary<string, string[]> BrushKeyMap = new Dictionary<string, string[]>
     {
         ["Border"] = ["BorderBrush"],
-        ["TextPrimary"] = ["TextPrimary", "AccentBlue"],
         ["TitleBar"] = ["TitleBarBrush"]
     }.ToFrozenDictionary();
 

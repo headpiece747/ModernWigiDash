@@ -349,6 +349,8 @@ internal sealed class TwitchSession
 
     private void ClearState(bool deleteStoredToken)
     {
+        // Cancel and drop rather than dispose: a validation task in flight may
+        // still hold the token (the deferral pattern used by the Sdk loops).
         _validationCts?.Cancel();
         _validationCts = null;
         lock (_stateGate)

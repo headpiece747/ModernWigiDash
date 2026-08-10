@@ -4,14 +4,12 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("clock_modern", "Clock", Description = "Displays the current time and date with digital and analog modes.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Clock & Time", DefaultGridSize = GridSizePreset.Size2x1)]
+[WidgetMetadata("clock_modern", "Clock", Category = "Clock & Time")]
 public class DigitalAnalogClockWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x1.ToSize();
-    public override SKSize MinimumSize => new SKSize(150, 80);
 
-    [WidgetProperty("Clock Mode", WidgetPropertyType.Choice, "Display mode for the clock", "Digital", "Digital", "Analog", "Hybrid")]
+    [WidgetProperty("Clock Mode", WidgetPropertyType.Choice, "Display mode for the clock", "Digital", "Digital", "Analog")]
     public string ClockMode { get; set; } = "Digital";
 
     [WidgetProperty("Time Format", WidgetPropertyType.Choice, "12 or 24 hour format", "12H", "12H", "24H")]
@@ -26,9 +24,12 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     [WidgetProperty("Show Date", WidgetPropertyType.Boolean, "Display calendar date badge", true)]
     public bool ShowDate { get; set; } = true;
 
+    /// <summary>Test seam: injectable clock for the rendered time.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        var now = TimeProvider.System.GetLocalNow().LocalDateTime;
+        var now = Clock.GetLocalNow().LocalDateTime;
         SKColor accentColor = ColorOf(AccentColorHex, new SKColor(135, 0, 0));
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
 
@@ -44,7 +45,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
     private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
-        string timeStr = TimeFormat == "24H" ? now.ToString("HH:mm") : now.ToString("hh:mm");
+        string timeStr = FormatClockTime(now, TimeFormat);
         string amPmStr = TimeFormat == "24H" ? "" : now.ToString("tt");
         string dateStr = now.ToString("dddd, MMMM dd, yyyy");
 
@@ -108,6 +109,13 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         using var centerDot = new SKPaint { Color = textColor, IsAntialias = true };
         canvas.DrawCircle(cx, cy, 5f, centerDot);
     }
+
+    /// <summary>
+    /// Formats the digital clock time for the 12H/24H choice (pure — the
+    /// formatting is testable without rendering).
+    /// </summary>
+    internal static string FormatClockTime(DateTime now, string timeFormat)
+        => timeFormat == "24H" ? now.ToString("HH:mm") : now.ToString("hh:mm");
 
     private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, float width, SKColor color)
     {

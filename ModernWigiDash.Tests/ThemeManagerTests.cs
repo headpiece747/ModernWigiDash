@@ -89,9 +89,10 @@ public class ThemeManagerTests
         // "Border" maps to "BorderBrush" (not "Border")
         Assert.IsFalse(resources.Contains("Border"));
         Assert.IsTrue(resources.Contains("BorderBrush"));
-        // "TextPrimary" maps to "TextPrimary" and "AccentBlue"
+        // "TextPrimary" maps to "TextPrimary" only — the AccentBlue alias is
+        // App.xaml's job, not the theme manager's
         Assert.IsTrue(resources.Contains("TextPrimary"));
-        Assert.IsTrue(resources.Contains("AccentBlue"));
+        Assert.IsFalse(resources.Contains("AccentBlue"));
         // "TitleBar" maps to "TitleBarBrush"
         Assert.IsFalse(resources.Contains("TitleBar"));
         Assert.IsTrue(resources.Contains("TitleBarBrush"));

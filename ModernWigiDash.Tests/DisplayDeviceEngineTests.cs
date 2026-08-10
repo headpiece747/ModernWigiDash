@@ -30,9 +30,7 @@ public class DisplayDeviceEngineTests
             {
                 Type = DisplayProtocolConstants.TouchTypeDown,
                 X = 12,
-                Y = 34,
-                ScreenState = 0,
-                SleepState = false
+                Y = 34
             }
         };
         using var engine = new DisplayDeviceEngine(fake);
@@ -61,9 +59,7 @@ public class DisplayDeviceEngineTests
             {
                 Type = DisplayProtocolConstants.TouchTypeUp,
                 X = 5,
-                Y = 6,
-                ScreenState = 0,
-                SleepState = false
+                Y = 6
             }
         };
         using var engine = new DisplayDeviceEngine(fake);
@@ -111,9 +107,7 @@ public class DisplayDeviceEngineTests
             {
                 Type = DisplayProtocolConstants.TouchTypeDown,
                 X = 12,
-                Y = 34,
-                ScreenState = 0,
-                SleepState = false
+                Y = 34
             }
         };
         using var engine = new DisplayDeviceEngine(fake);

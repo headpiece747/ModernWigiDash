@@ -1,4 +1,7 @@
 using ModernWigiDash.App;
+using ModernWigiDash.Core.Plugins;
+using ModernWigiDash.Sdk;
+using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
@@ -70,5 +73,34 @@ public class StarterProfileTests
                 "ticker_stock", "text_label", "hotkey_button", "stopwatch_timer"
             },
             dashboard.Placements.Select(p => p.PluginId).ToArray());
+    }
+
+    // ── Create(): rehydration through the loader/context seam ──
+
+    [TestMethod]
+    public void Create_BuildsExplicitFullPageList_AndResetsActivePage()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(TestStarterWidget));
+        var context = new TestContext();
+
+        var profile = new StarterProfile(loader, context).Create();
+
+        // Page 0 must be the layout's explicit "Main Dashboard", not the
+        // ProfileLayout ctor's default page riding along by name coincidence —
+        // every page name and count comes from the layout spec.
+        CollectionAssert.AreEqual(
+            StarterProfile.Layout.Select(p => p.Name).ToArray(),
+            profile.Pages.Select(p => p.PageName).ToArray());
+        Assert.AreEqual(StarterProfile.Layout.Count, profile.Pages.Count);
+        Assert.AreEqual(0, profile.ActivePageIndex, "Create must reset the active page to the first");
+        Assert.IsTrue(profile.Pages[0].Widgets.Count > 0, "page 0 must receive its layout widgets");
+        Assert.AreEqual("clock_modern", profile.Pages[0].Widgets[0].PluginId);
+    }
+
+    [WidgetMetadata("clock_modern", "Test Clock")]
+    private sealed class TestStarterWidget : ModernWidgetBase
+    {
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 }

@@ -16,7 +16,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Native libusb-1.0.dll required by LibUsbDotNet at runtime -->
+    <!--
+      Native libusb-1.0.dll required by LibUsbDotNet at runtime (the fallback
+      USB backend). Provenance: the x64 runtime DLL shipped inside the
+      LibUsbDotNet NuGet package (runtimes/win-x64/native) at the version
+      pinned in Directory.Packages.props — copied here so it lands next to the
+      app binaries. Keep it in sync with the LibUsbDotNet version: the
+      driver/API version must match what the package expects.
+    -->
     <None Include="libusb-1.0.dll" Link="libusb-1.0.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

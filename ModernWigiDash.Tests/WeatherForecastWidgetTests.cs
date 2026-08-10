@@ -29,15 +29,27 @@ public class WeatherForecastWidgetTests
     """;
 
 
+    private const string SampleGeocode = """
+    {
+      "results": [ { "name": "New York", "latitude": 40.7128, "longitude": -74.006, "country": "US" } ]
+    }
+    """;
+
     [TestMethod]
     public async Task FetchLiveWeather_Forecast_WithStubClient_ParsesIntoForecasts()
     {
-        var stub = new StubHttpHandler(SampleForecast);
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub) };
 
         await widget.FetchLiveWeatherAsync(force: true);
 
-        Assert.IsTrue(stub.Calls >= 1, "The fetch must hit the stub client");
+        Assert.IsTrue(stub.Calls >= 2, "The fetch must hit the stub client (geocode + forecast)");
         Assert.IsTrue(widget._dailyForecasts.Count >= 2, "Daily forecast items must be parsed");
         Assert.IsTrue(widget._hourlyForecasts.Count >= 2, "Hourly forecast items must be parsed");
     }
@@ -45,7 +57,13 @@ public class WeatherForecastWidgetTests
     [TestMethod]
     public async Task FetchLiveWeather_Throttle_UsesInjectedClock()
     {
-        var stub = new StubHttpHandler(SampleForecast);
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
         var clock = new FakeClock(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Clock = clock };
 

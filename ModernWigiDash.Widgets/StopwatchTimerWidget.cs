@@ -4,18 +4,24 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Description = "Precision millisecond stopwatch with touch Start/Pause/Reset controls.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
+[WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Category = "Utilities")]
 public class StopwatchTimerWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
 
     private bool _isRunning = false;
-    private DateTime _startTime = TimeProvider.System.GetUtcNow().UtcDateTime;
+    private DateTime _startTime;
     private TimeSpan _elapsed = TimeSpan.Zero;
 
     /// <summary>Test seam — the timing math is otherwise untestable.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>Primed from <see cref="Clock"/> so a paused-at-zero stopwatch
+    /// shows 0:00.00 regardless of when the widget was constructed.</summary>
+    public StopwatchTimerWidget()
+    {
+        _startTime = Clock.GetUtcNow().UtcDateTime;
+    }
 
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";

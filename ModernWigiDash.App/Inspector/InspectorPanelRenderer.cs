@@ -196,7 +196,7 @@ public static class InspectorPanelRenderer
         {
             ItemsSource = desc.Options.Count > 0
                 ? desc.Options
-                : FontCatalog.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray(),
+                : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray(),
             DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
             SelectedValuePath = nameof(WidgetPropertyOption.Value),
             SelectedValue = desc.CurrentValue?.ToString(),
@@ -255,7 +255,7 @@ public static class InspectorPanelRenderer
     {
         var chk = new CheckBox
         {
-            Content = "Enabled / Active",
+            Content = desc.DisplayName,
             IsChecked = desc.CurrentValue is bool b && b,
             Foreground = Brushes.White
         };

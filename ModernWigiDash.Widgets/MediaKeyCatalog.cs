@@ -1,13 +1,13 @@
 namespace ModernWigiDash.Widgets;
 
-public sealed record MediaKeyOption(string Value, string DisplayName)
+internal sealed record MediaKeyOption(string Value, string DisplayName)
 {
     public override string ToString() => DisplayName;
 }
 
-public static class MediaKeyCatalog
+internal static class MediaKeyCatalog
 {
-    public static readonly IReadOnlyList<MediaKeyOption> Options =
+    internal static readonly IReadOnlyList<MediaKeyOption> Options =
     [
         new("PLAYPAUSE", "Play / Pause"),
         new("NEXT", "Next track"),
@@ -18,6 +18,6 @@ public static class MediaKeyCatalog
         new("MUTE", "Mute")
     ];
 
-    public static string? GetDisplayName(string value)
+    internal static string? GetDisplayName(string value)
         => Options.FirstOrDefault(o => o.Value.Equals(value, StringComparison.OrdinalIgnoreCase))?.DisplayName;
 }

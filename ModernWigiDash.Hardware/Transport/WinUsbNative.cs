@@ -172,23 +172,23 @@ internal static class SetupApiNative
 /// <summary>
 /// Owns a WinUSB device handle for direct bulk and control transfers.
 /// Implements <see cref="ITransferBackend"/> directly — the adapter is the
-/// class, no wrapper needed.
+/// class, no wrapper needed. Members are virtual so tests can subclass with
+/// canned results and drive the transport's connect policy via
+/// <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>.
 /// </summary>
-internal sealed class WinUsbBulkDevice : ITransferBackend
+internal class WinUsbBulkDevice : ITransferBackend
 {
     private IntPtr _deviceHandle = IntPtr.Zero;
     private IntPtr _interfaceHandle = IntPtr.Zero;
 
-    public IntPtr InterfaceHandle => _interfaceHandle;
-    public bool IsOpen => _interfaceHandle != IntPtr.Zero;
-    public string DevicePath { get; private set; } = "";
+    public virtual bool IsOpen => _interfaceHandle != IntPtr.Zero;
 
     private static void Log(string msg) => FileLog.Write(msg, "[USB-WINUSB]");
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.
     /// </summary>
-    public bool Open(Guid interfaceGuid)
+    public virtual bool Open(Guid interfaceGuid)
     {
         if (IsOpen)
             return true;
@@ -269,7 +269,6 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
                     const int cbSizeOffset = 4;
                     string devicePath = Marshal.PtrToStringUni(detailBuffer + cbSizeOffset) ?? "";
                     Log($"Device path: {devicePath}");
-                    DevicePath = devicePath;
 
                     if (string.IsNullOrEmpty(devicePath))
                     {
@@ -356,7 +355,7 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
     /// Performs a synchronous bulk OUT transfer using pinned memory.
     /// Sends the entire buffer in a single WinUsb_WritePipe call.
     /// </summary>
-    public bool BulkWrite(byte pipeId, byte[] data, out int transferred)
+    public virtual bool BulkWrite(byte pipeId, byte[] data, out int transferred)
     {
         transferred = 0;
         if (!IsOpen)
@@ -381,9 +380,14 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
 
             if (!ok)
                 Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
+            else if (bytesTransferred != data.Length)
+                Log($"BulkWrite short write: transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
 
+            // A short write is a failed write — the caller (SendFrame) routes
+            // the failure to CmdFrameAbort, mirroring the LibUsb backend's
+            // full-transfer requirement.
             transferred = (int)bytesTransferred;
-            return ok;
+            return ok && bytesTransferred == data.Length;
         }
         catch (Exception ex)
         {
@@ -401,13 +405,13 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
     /// <summary>
     /// Control OUT transfer (vendor command).
     /// </summary>
-    public bool ControlOut(byte request, ushort wValue, byte[]? data)
+    public virtual bool ControlOut(byte request, ushort wValue, byte[]? data)
     {
         if (!IsOpen)
             return false;
 
         WinUsbNative.WinUsbSetupPacket setup = default;
-        setup.RequestType = 0x21; // Vendor | Host-to-Device | Interface
+        setup.RequestType = 0x21; // Class | Interface | Host-to-Device
         setup.Request = request;
         setup.Value = wValue;
         setup.Index = 0;
@@ -422,7 +426,7 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
     /// <summary>
     /// Control IN transfer (vendor query).
     /// </summary>
-    public bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+    public virtual bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
     {
         if (!IsOpen)
             return false;
@@ -439,6 +443,13 @@ internal sealed class WinUsbBulkDevice : ITransferBackend
     }
 
     public void Dispose()
+    {
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Test seam: subclasses override to observe teardown.</summary>
+    protected virtual void Dispose(bool disposing)
     {
         if (_interfaceHandle != IntPtr.Zero)
         {

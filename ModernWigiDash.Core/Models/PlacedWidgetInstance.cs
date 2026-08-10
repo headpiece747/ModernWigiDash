@@ -18,8 +18,10 @@ public class PlacedWidgetInstance
 
     // Layering & Transparency
     public int ZIndex { get; set; }
-    public float Opacity { get; set => field = Math.Clamp(value, 0f, 1f); } = 1.0f;
-    public float Rotation { get; set; } = 0.0f;
+    public float Opacity { get => field; set => field = Math.Clamp(value, 0f, 1f); } = 1.0f;
+    // Normalized to [0, 360) on write so a profile with 720° (or negative
+    // degrees) renders and hit-tests identically to the equivalent rotation.
+    public float Rotation { get => field; set => field = ((value % 360f) + 360f) % 360f; } = 0.0f;
 
     // Custom properties dictionary configured by user in the right panel
     public Dictionary<string, object?> PropertyValues { get; set; } = [];

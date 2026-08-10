@@ -62,15 +62,15 @@ public class TelemetryStoreTests
     }
 
     [TestMethod]
-    public void Update_NullRecord_DoesNotThrow_AndIsNotReturned()
+    public void Update_NullRecord_ThrowsArgumentNullException()
     {
         var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
         var store = CreateStore(TimeSpan.FromSeconds(10));
 
-        store.Update(null!, clock.GetUtcNow().UtcDateTime);
-
+        Assert.ThrowsExactly<ArgumentNullException>(() => store.Update(null!, clock.GetUtcNow().UtcDateTime),
+            "A null record must be rejected at the store boundary");
         Assert.IsNull(store.TryReadFresh(null, clock));
-        Assert.IsNull(store.Current);
+        Assert.IsNotNull(store.Current, "Current never returns null — it exposes the domain's empty value");
     }
 
     [TestMethod]

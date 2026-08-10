@@ -17,8 +17,7 @@ public sealed record LhmReading(
     string Unit,
     double Value,
     double Min,
-    double Max,
-    double Avg);
+    double Max);
 
 /// <summary>
 /// A point-in-time snapshot of the live hardware sensor set.
@@ -74,8 +73,7 @@ public static class LhmSensorStore
                 r.Unit,
                 r.Value,
                 r.Min,
-                r.Max,
-                r.Avg))
+                r.Max))
             .ToList() ?? [];
 
         Store.Update(

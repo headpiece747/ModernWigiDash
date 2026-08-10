@@ -10,12 +10,14 @@ namespace ModernWigiDash.Sdk;
 public static class ChannelFrameCoalescer
 {
     /// <summary>
-    /// Drains <paramref name="reader"/>, returning the latest element or null
-    /// when the channel was empty.
+    /// Drains <paramref name="reader"/>, returning the latest element or the
+    /// type's default when the channel was empty. Unconstrained so both class
+    /// (string) and struct (FrameSlot) element types can flow through the one
+    /// coalescing definition; callers detect "empty" with a default check.
     /// </summary>
-    public static T? DrainToLatest<T>(ChannelReader<T> reader) where T : class
+    public static T DrainToLatest<T>(ChannelReader<T> reader)
     {
-        T? latest = null;
+        T latest = default!;
         while (reader.TryRead(out var item))
         {
             latest = item;
@@ -24,20 +26,24 @@ public static class ChannelFrameCoalescer
     }
 
     /// <summary>
-    /// Drains <paramref name="reader"/>, returning the latest element or null
-    /// when the channel was empty. Every dropped element is passed to
-    /// <paramref name="onDropped"/> so pooled buffers can be returned.
+    /// Drains <paramref name="reader"/>, returning the latest element or the
+    /// type's default when the channel was empty. Every dropped element is
+    /// passed to <paramref name="onDropped"/> so pooled buffers can be
+    /// returned. Unconstrained (see the parameterless overload); an empty
+    /// channel never invokes <paramref name="onDropped"/>.
     /// </summary>
-    public static T? DrainToLatest<T>(ChannelReader<T> reader, Action<T> onDropped) where T : class
+    public static T DrainToLatest<T>(ChannelReader<T> reader, Action<T> onDropped)
     {
-        T? latest = null;
+        T latest = default!;
+        bool any = false;
         while (reader.TryRead(out var item))
         {
-            if (latest != null)
+            if (any)
             {
                 onDropped(latest);
             }
             latest = item;
+            any = true;
         }
         return latest;
     }

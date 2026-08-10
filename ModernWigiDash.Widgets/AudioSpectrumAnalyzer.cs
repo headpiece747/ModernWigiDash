@@ -6,10 +6,14 @@ namespace ModernWigiDash.Widgets;
 /// maintains the waveform ring buffer. No capture, no rendering — any sample
 /// source (WASAPI adapter, test fake) can drive it, and the binning math is
 /// testable without audio hardware.
+///
+/// NOTE: the spectrum is time-domain absolute-value averaging per bar, NOT an
+/// FFT — no frequency transform is computed. The bars are amplitude bands
+/// over the raw sample stream, which is what the visualizer styles consume.
 /// </summary>
 internal sealed class AudioSpectrumAnalyzer
 {
-    private readonly float[] _fftSpectrum;
+    private readonly float[] _spectrum;
     private readonly float[] _smoothSpectrum;
     private readonly float[] _waveform;
     private int _waveformHead;
@@ -19,7 +23,7 @@ internal sealed class AudioSpectrumAnalyzer
     /// <param name="waveformLength">Ring-buffer length for the oscilloscope.</param>
     public AudioSpectrumAnalyzer(int barCount = 64, int waveformLength = 2048)
     {
-        _fftSpectrum = new float[barCount];
+        _spectrum = new float[barCount];
         _smoothSpectrum = new float[barCount];
         _waveform = new float[waveformLength];
     }
@@ -54,7 +58,7 @@ internal sealed class AudioSpectrumAnalyzer
                 }
             }
 
-            _fftSpectrum[i] = Math.Clamp((barSum / samplesPerBar) * 8.0f, 0.05f, 1f);
+            _spectrum[i] = Math.Clamp((barSum / samplesPerBar) * 8.0f, 0.05f, 1f);
         }
 
         foreach (float sample in samples)
@@ -72,7 +76,7 @@ internal sealed class AudioSpectrumAnalyzer
     {
         for (int i = 0; i < _smoothSpectrum.Length; i++)
         {
-            _smoothSpectrum[i] = _smoothSpectrum[i] * alpha + _fftSpectrum[i] * blend;
+            _smoothSpectrum[i] = _smoothSpectrum[i] * alpha + _spectrum[i] * blend;
         }
     }
 

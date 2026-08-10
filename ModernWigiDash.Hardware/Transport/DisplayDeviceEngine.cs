@@ -13,7 +13,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// Uses DisplayHidTransport for all USB communication - no vendor DLL dependencies.
 /// All state is instance-owned: each engine owns its transport and connection
 /// lifecycle. Callers that need one device per process create exactly
-/// one engine (MainWindow does; the service does).
+/// one engine (MainWindow does).
 ///
 /// Frame delivery (encode → pool → coalesce → paced send) does NOT live here:
 /// the App binds a <see cref="FrameDelivery"/> instance to
@@ -32,11 +32,10 @@ public sealed class DisplayDeviceEngine : IDisposable
     private int _isDisposed;
     private readonly Timer _reconnectTimer;
 
-    // Direct-USB touch polling: the engine owns the transport in direct mode
-    // (the service is isolated per ADR-0003/0004), so it reads the touch
-    // report at the same 16ms cadence the service's loop used and normalizes
-    // it once via TouchReport.ToEventType. Idle while yielded to the service
-    // or in simulation mode — the direct-USB loop is the only touch owner.
+    // Direct-USB touch polling: the engine owns the transport, reads the touch
+    // report at a 16ms cadence, and normalizes it once via
+    // TouchReport.ToEventType. Idle while not connected (simulation mode) —
+    // the direct-USB loop is the only touch owner.
     private readonly PollLoop _touchPoll;
 
     // -- Public State --
@@ -44,6 +43,13 @@ public sealed class DisplayDeviceEngine : IDisposable
     public ConnectionState State { get => _state; private set => _state = value; }
 
     // -- Events --
+    /// <summary>
+    /// Raised for each normalized hardware touch report. Fired from the
+    /// engine's 16ms touch-poll background thread (a <see cref="PollLoop"/>
+    /// tick), never the UI thread — handlers must marshal (e.g. via
+    /// Dispatcher) before touching WPF state. See <see cref="SimulateTouch"/>
+    /// for the test-driven counterpart.
+    /// </summary>
     public event Action<SKPoint, TouchEventType>? OnTouchEvent;
 
     /// <summary>
@@ -57,8 +63,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         Log("=== Display Hardware Engine Initializing ===");
 
         // Direct-USB touch polling: active only while the engine owns the
-        // device (connected, not simulation). The loop is the same shape as
-        // the Service's touch loop — one loop module, every hop.
+        // device (connected, not simulation). One loop module, every hop.
         _touchPoll = CreateTouchPollLoop();
 
         // Reconnect timer is created but disarmed until Start().
@@ -185,6 +190,7 @@ public sealed class DisplayDeviceEngine : IDisposable
 
             DisplayHidTransport? transport = null;
             bool connected = false;
+            bool disposedDuringConnect = false;
 
             try
             {
@@ -193,17 +199,35 @@ public sealed class DisplayDeviceEngine : IDisposable
 
                 if (connected)
                 {
+                    // Dispose() can run while this connect is in flight (the
+                    // entry guard predates the assignment). Re-check under the
+                    // lock: a disposed engine must not adopt a live transport —
+                    // it would never reach standby and the handle would leak.
                     lock (_lock)
                     {
-                        _transport = transport;
+                        disposedDuringConnect = Volatile.Read(ref _isDisposed) != 0;
+                        if (!disposedDuringConnect)
+                        {
+                            _transport = transport;
+                        }
                     }
 
-                    // Connect() is the single init owner: it already ran
-                    // SendInitCommands (PING + SetBrightness + ClearPage +
-                    // AddWidget + blank framebuffer + GoToScreen) on both the
-                    // WinUSB and LibUsb paths.
-                    State = ConnectionState.Connected;
-                    Log("Hardware connection successful!");
+                    if (disposedDuringConnect)
+                    {
+#pragma warning disable S6966 // Sync dispose of an orphan transport; async not needed here
+                        transport?.Dispose();
+#pragma warning restore S6966
+                        connected = false;
+                    }
+                    else
+                    {
+                        // Connect() is the single init owner: it already ran
+                        // SendInitCommands (PING + SetBrightness + ClearPage +
+                        // AddWidget + blank framebuffer + GoToScreen) on both the
+                        // WinUSB and LibUsb paths.
+                        State = ConnectionState.Connected;
+                        Log("Hardware connection successful!");
+                    }
                 }
                 else
                 {
@@ -218,7 +242,7 @@ public sealed class DisplayDeviceEngine : IDisposable
 #pragma warning restore S6966
             }
 
-            if (!connected)
+            if (!connected && !disposedDuringConnect)
             {
                 lock (_lock)
                 {

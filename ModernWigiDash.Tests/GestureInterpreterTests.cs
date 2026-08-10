@@ -22,8 +22,6 @@ public class GestureInterpreterTests
         Assert.AreEqual(GesturePageAction.None, o.PageAction);
         Assert.IsTrue(o.RouteToWidgets);
         Assert.AreEqual(TouchEventType.TouchDown, o.WidgetTouchType);
-        Assert.AreEqual(500, o.X);
-        Assert.AreEqual(300, o.Y);
     }
 
     [TestMethod]

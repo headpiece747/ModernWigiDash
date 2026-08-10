@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
@@ -9,7 +8,7 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets.Twitch;
 
-[WidgetMetadata("twitch_chat", "Twitch", Description = "Live Twitch chat with live followed-channel selection and anonymous read-only IRC access.", Author = "ModernWigiDash", Version = "4.1.0", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size2x4)]
+[WidgetMetadata("twitch_chat", "Twitch", Category = "Social & Visual")]
 public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IWidgetPropertyOptionsProvider, IWidgetActionPresentationProvider
 {
     private const string AnonymousNickPrefix = "justinfan";
@@ -25,9 +24,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         Connected
     }
 
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
-    public override SKSize MinimumSize => new SKSize(180, 120);
 
     [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
     public string ChannelName { get; set; } = "twitch";
@@ -64,6 +61,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private readonly Lock _messagesLock = new();
     private readonly List<ChatMessage> _messages = new();
+    // The render-side snapshot list is replaced wholesale on every mutation
+    // (add/trim/clear), so the render thread iterates it without a per-frame
+    // _messages.ToArray() allocation under the lock.
+    private List<ChatMessage> _renderSnapshot = [];
     private CancellationTokenSource? _cts;
     private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
@@ -79,7 +80,17 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// </summary>
     internal Func<IWebSocketFeed> FeedFactory { get; set; } = () => new ClientWebSocketFeed();
 
-    private sealed record ChatMessage(string Username, string Text, SKColor Color);
+    /// <summary>
+    /// One chat line. The wrapped lines are cached on the message (keyed by the
+    /// render font size + width they were computed with) so re-wrap work is
+    /// skipped on every frame between font/width changes.
+    /// </summary>
+    private sealed record ChatMessage(string Username, string Text, SKColor Color)
+    {
+        public List<string>? WrappedLines { get; set; }
+        public float WrapFontSize { get; set; }
+        public float WrapWidth { get; set; }
+    }
 
     private static readonly SKColor[] NamePalette =
     {
@@ -133,6 +144,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 lock (_messagesLock)
                 {
                     while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
+                    _renderSnapshot = [.. _messages];
                 }
                 break;
         }
@@ -202,7 +214,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = new CancellationTokenSource(); // PONG token
-        lock (_messagesLock) _messages.Clear();
+        lock (_messagesLock)
+        {
+            _messages.Clear();
+            _renderSnapshot = [];
+        }
         _status = ChatStatus.Connecting;
         _statusDetail = "Connecting…";
         Context.RequestRender();
@@ -232,7 +248,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     {
         _feedLoop?.Dispose();
         _feedLoop = null;
+        // Cancel and drop the PONG token rather than disposing it: an
+        // in-flight PONG task may still hold it (same deferral the Sdk's
+        // PollLoop/FrameDelivery apply). The replaced source is dropped with
+        // the object; StartConnection creates a fresh one.
         _cts?.Cancel();
+        _cts = null;
         _status = ChatStatus.Disconnected;
         _statusDetail = "";
         Context.RequestRender();
@@ -367,6 +388,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             _messages.Add(new ChatMessage(username, text, color));
             while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
+            _renderSnapshot = [.. _messages];
         }
         Context?.RequestRender();
     }
@@ -418,30 +440,6 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         return NamePalette[hash % NamePalette.Length];
     }
 
-    private static List<string> WrapText(string text, SKFont font, float maxWidth)
-    {
-        List<string> result = [];
-        var current = new StringBuilder();
-        foreach (var word in text.Split(' '))
-        {
-            var candidate = current.Length == 0 ? word : current.ToString() + " " + word;
-            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth || current.Length == 0)
-            {
-                if (current.Length > 0) current.Append(' ');
-                current.Append(word);
-            }
-            else
-            {
-                result.Add(current.ToString());
-                current.Clear();
-                current.Append(word);
-            }
-        }
-        if (current.Length > 0) result.Add(current.ToString());
-        if (result.Count == 0) result.Add("");
-        return result;
-    }
-
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
@@ -471,7 +469,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             ChatStatus.Connected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
             ChatStatus.Connecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
-            ChatStatus.Disconnected => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected")
+            ChatStatus.Disconnected => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected"),
+            _ => "○ Disconnected" // unreachable — guards undefined enum values
         };
 
         var statusColor = _status == ChatStatus.Connected
@@ -491,15 +490,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         canvas.Save();
         canvas.ClipRect(contentBounds);
 
-        ChatMessage[] snapshot;
-        lock (_messagesLock) snapshot = _messages.ToArray();
+        // The render snapshot is replaced wholesale on every mutation, so no
+        // per-frame _messages.ToArray() under the lock is needed.
+        var snapshot = _renderSnapshot;
 
         float msgSize = baseFontSize * scale;
         float userSize = (Math.Max(10f, baseFontSize - 2f)) * scale;
         float lineHeight = msgSize * 1.4f;
         float userLineHeight = userSize * 1.35f;
 
-        if (snapshot.Length == 0)
+        if (snapshot.Count == 0)
         {
             var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
             using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
@@ -508,7 +508,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 ChatStatus.Connected => "Waiting for chat…",
                 ChatStatus.Disconnected when !AutoConnect => "Tap to connect",
                 ChatStatus.Disconnected => "Waiting for connection…",
-                ChatStatus.Connecting => "Waiting for connection…"
+                ChatStatus.Connecting => "Waiting for connection…",
+                _ => "Waiting for connection…" // unreachable — guards undefined enum values
             };
             canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
             canvas.Restore();
@@ -522,10 +523,19 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         using var userPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         using var msgPaint = new SKPaint { Color = msgColor, IsAntialias = true };
 
-        for (int i = snapshot.Length - 1; i >= 0; i--)
+        for (int i = snapshot.Count - 1; i >= 0; i--)
         {
             var m = snapshot[i];
-            var lines = WrapText(m.Text, msgFont, contentBounds.Width);
+            var lines = m.WrappedLines;
+            if (lines is null
+                || Math.Abs(m.WrapFontSize - msgSize) > 0.01f
+                || Math.Abs(m.WrapWidth - contentBounds.Width) > 0.5f)
+            {
+                lines = TextRenderHelper.WrapText(m.Text, msgFont, contentBounds.Width);
+                m.WrappedLines = lines;
+                m.WrapFontSize = msgSize;
+                m.WrapWidth = contentBounds.Width;
+            }
 
             float blockH = userLineHeight + lines.Count * lineHeight + 4f * scale;
             cursor -= blockH;

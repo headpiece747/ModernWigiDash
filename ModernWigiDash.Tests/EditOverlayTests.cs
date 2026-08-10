@@ -39,7 +39,7 @@ public class EditOverlayTests
     public void DrawGrid_EditModeOnSnapToGrid_DrawsGridLines()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawGrid(surface.Canvas, Page(snapToGrid: true), editMode: true);
 
@@ -51,7 +51,7 @@ public class EditOverlayTests
     public void DrawGrid_EditModeOff_LeavesCanvasUntouched()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawGrid(surface.Canvas, Page(), editMode: false);
 
@@ -63,7 +63,7 @@ public class EditOverlayTests
     public void DrawGrid_SnapToGridDisabled_LeavesCanvasUntouched()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawGrid(surface.Canvas, Page(snapToGrid: false), editMode: true);
 
@@ -74,11 +74,11 @@ public class EditOverlayTests
     public void DrawSelection_SelectedInEditMode_DrawsChrome()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawSelection(surface.Canvas, Widget(), editMode: true, isSelected: true);
 
-        // Resize handle: local (184,134)..(198,148) for a 200x150 widget — blue fill over background.
+        // Resize handle: local (184,134)..(198,148) for a 200x150 widget â€” blue fill over background.
         Assert.AreNotEqual(Background, PixelAt(surface, 191, 141), "The resize handle must be drawn");
         // Selection border: top edge stroke of the widget bounds.
         Assert.AreNotEqual(Background, PixelAt(surface, 100, 0), "The selection border must be drawn");
@@ -88,7 +88,7 @@ public class EditOverlayTests
     public void DrawSelection_NotSelected_LeavesCanvasUntouched()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawSelection(surface.Canvas, Widget(), editMode: true, isSelected: false);
 
@@ -100,7 +100,7 @@ public class EditOverlayTests
     public void DrawSelection_EditModeOff_LeavesCanvasUntouched()
     {
         using var surface = CreateSurface();
-        using var overlay = new EditOverlay();
+        var overlay = new EditOverlay();
 
         overlay.DrawSelection(surface.Canvas, Widget(), editMode: false, isSelected: true);
 

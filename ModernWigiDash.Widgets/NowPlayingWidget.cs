@@ -12,12 +12,10 @@ namespace ModernWigiDash.Widgets;
 /// Covers Spotify, browsers (YouTube/Netflix), VLC, iTunes, Windows Media Player, games —
 /// zero polling, zero network, zero login, works for free-tier accounts.
 /// </summary>
-[WidgetMetadata("now_playing", "Now Playing", Description = "Displays live media playback (Spotify, browsers, VLC, iTunes, games) with album art, progress, shuffle/repeat, and touch controls via Windows media sessions.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x4)]
+[WidgetMetadata("now_playing", "Now Playing", Category = "Media & Audio")]
 public sealed class NowPlayingWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
-    public override SKSize MinimumSize => new SKSize(408, 150);
 
     private const float DesignWidth = 1016f;
     private const float DesignHeight = 592f;
@@ -36,6 +34,9 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private ArtworkLoader? _artworkLoader;
     private SKPoint? _touchDownPoint;
     private bool _disposed;
+
+    /// <summary>Test seam: injectable clock for the progress estimate.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
     // ── Hit rects populated during Render (used by OnTouch) ───────────────
     private SKRect _shuffleBtn, _prevBtn, _ppBtn, _nextBtn, _repeatBtn, _badgeBtn;
@@ -276,7 +277,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         double durSec = snap.Duration.TotalSeconds;
         double posSec = snap.Position.TotalSeconds;
         if (snap.IsPlaying)
-            posSec += (DateTimeOffset.Now - snap.LastUpdated).TotalSeconds;
+            posSec += (Clock.GetUtcNow() - snap.LastUpdated).TotalSeconds;
 
         double ratio = durSec > 0 ? Math.Clamp(posSec / durSec, 0.0, 1.0) : 0.0;
         SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));

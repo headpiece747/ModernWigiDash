@@ -1,15 +1,13 @@
 using System.Diagnostics;
 using ModernWigiDash.Sdk;
-using NAudio.Wave;
 using SkiaSharp;
 using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("audio_visualizer", "Audio Visualizer", Description = "Visualizes live system audio output (Spotify, YouTube, Games) via WASAPI loopback capture.", Author = "ModernWigiDash", Version = "2.0.0", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size4x2)]
+[WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio")]
 public class AudioVisualizerWidget : ModernWidgetBase
 {
-    public override WidgetSizeMode SizeMode => WidgetSizeMode.Resizable;
     public override SKSize DefaultSize => GridSizePreset.Size5x2.ToSize();
 
     [WidgetProperty("Visualizer Style", WidgetPropertyType.Choice, "Bar spectrum or radial wave", "Neon Bars", "Neon Bars", "Oscilloscope Wave", "Radial Pulse")]
@@ -146,6 +144,14 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float barWidth = (availableWidth - ((bars - 1) * barSpacing)) / bars;
         float maxBarHeight = bounds.Height - (pad * 2);
 
+        // One paint shared by every bar (the old code allocated an SKPaint per
+        // bar per frame).
+        using var barPaint = new SKPaint
+        {
+            Color = barColor,
+            IsAntialias = true
+        };
+
         lock (_audioLock)
         {
             ReadOnlySpan<float> spectrum = _analyzer.Spectrum;
@@ -157,11 +163,6 @@ public class AudioVisualizerWidget : ModernWidgetBase
                 float y = bounds.Bottom - pad - h;
 
                 var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
-                using var barPaint = new SKPaint
-                {
-                    Color = barColor,
-                    IsAntialias = true
-                };
                 canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
             }
         }

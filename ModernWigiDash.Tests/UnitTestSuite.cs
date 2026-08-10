@@ -41,12 +41,12 @@ public class UnitTestSuite
     }
 
     [TestMethod]
-    public void PriceInfo_FormattedPrice_RespectsCurrencySymbol()
+    public void PriceInfo_FormattedChange_RendersSignAndPercent()
     {
-        var stock = new PriceInfo { Price = 150.25m, CurrencySymbol = "$" };
-        Assert.AreEqual("$150.25", stock.FormattedPrice);
-        var fx = new PriceInfo { Price = 1.0843m, CurrencySymbol = "" };
-        Assert.AreEqual("1.08", fx.FormattedPrice);
+        var up = new PriceInfo { ChangePercent = 1.0843m };
+        Assert.AreEqual("+1.08%", up.FormattedChange);
+        var down = new PriceInfo { ChangePercent = -0.5m };
+        Assert.AreEqual("-0.50%", down.FormattedChange);
     }
 
     [TestMethod]
@@ -143,7 +143,7 @@ public class UnitTestSuite
 
         Assert.IsNotNull(instance);
         Assert.IsInstanceOfType<DigitalAnalogClockWidget>(instance);
-        Assert.AreEqual(WidgetSizeMode.Resizable, instance.SizeMode);
+        Assert.AreEqual(406f, instance.DefaultSize.Width, "The clock's 2x1 default size must come from its GridSizePreset");
     }
 
     [TestMethod]
@@ -568,7 +568,7 @@ public class UnitTestSuite
             RecentFrameTimesMs: [6.9, 7.0, 7.1, 6.8]);
 
         FrameTimeStore.Update(record);
-        var read = FrameTimeStore.ReadSnapshot();
+        FrameTimeSnapshotRecord read = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
 
         Assert.IsTrue(read.IsAvailable);
         Assert.AreEqual("game.exe", read.ProcessName);

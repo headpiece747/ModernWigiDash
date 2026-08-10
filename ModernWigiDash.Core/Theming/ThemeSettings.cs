@@ -21,12 +21,16 @@ public class ThemeSettings
     public string BgDark { get; set; } = "#121214";
     public string BgPanel { get; set; } = "#1A1A1E";
     public string BgCard { get; set; } = "#26262B";
+    // #3F3F46 (zinc-700) is deliberately shared by Border, M3PrimaryContainer,
+    // and ControlHover — one neutral value serving borders, badge backgrounds,
+    // and hover fills so the chrome reads as one family. The duplicates are
+    // intentional, not drift: each property is themeable independently.
     public string Border { get; set; } = "#3F3F46";
 
     // Accents
     public string AccentRed { get; set; } = "#F59E0B";
     public string M3Primary { get; set; } = "#FBBF24";
-    public string M3PrimaryContainer { get; set; } = "#3F3F46";
+    public string M3PrimaryContainer { get; set; } = "#3F3F46"; // shared zinc-700, see Border
     public string M3OnPrimaryContainer { get; set; } = "#FBBF24";
     public string AccentGreen { get; set; } = "#10B981";
 
@@ -35,7 +39,7 @@ public class ThemeSettings
     public string TextSecondary { get; set; } = "#A1A1AA";
 
     // Interactive states & chrome extras
-    public string ControlHover { get; set; } = "#3F3F46";
+    public string ControlHover { get; set; } = "#3F3F46"; // shared zinc-700, see Border
     public string DropdownHover { get; set; } = "#2A2A30";
     public string TitleBar { get; set; } = "#0B0B0C";
     public string StatusBarBackground { get; set; } = "#0E0E10";
@@ -144,7 +148,7 @@ public class ThemeSettings
         DisplayNames.TryGetValue(propertyName, out var name) ? name : propertyName;
 
     private static readonly string ThemePath =
-        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app_theme.json");
+        Path.Combine(AppContext.BaseDirectory, "app_theme.json");
 
     public static ThemeSettings Load()
     {

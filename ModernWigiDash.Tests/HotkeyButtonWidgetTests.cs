@@ -206,14 +206,6 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyWidget_TaskManagerLegacyType_MapsToLaunchTaskmgr()
-    {
-        var action = HotkeyButtonWidget.CreateAction("Task Manager", "");
-        Assert.AreEqual(HotkeyActionKind.Launch, action.Kind);
-        Assert.AreEqual("taskmgr.exe", action.Value);
-    }
-
-    [TestMethod]
     public void HotkeyWidget_OpenUrlActionType_MapsToOpenUrl()
     {
         var action = HotkeyButtonWidget.CreateAction("Open URL", "https://example.com");

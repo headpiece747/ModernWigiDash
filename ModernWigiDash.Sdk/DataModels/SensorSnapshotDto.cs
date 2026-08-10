@@ -3,7 +3,7 @@ namespace ModernWigiDash.Sdk;
 /// <summary>
 /// A single hardware sensor reading collected by LibreHardwareService.
 /// </summary>
-public class SensorReadingDto
+public sealed record SensorReadingDto
 {
     public string SensorId { get; set; } = string.Empty;
 
@@ -22,15 +22,13 @@ public class SensorReadingDto
     public double Min { get; set; }
 
     public double Max { get; set; }
-
-    public double Avg { get; set; }
 }
 
 /// <summary>
 /// A point-in-time snapshot of the hardware sensor set read from
 /// LibreHardwareService's shared-memory maps.
 /// </summary>
-public class SensorSnapshotDto
+public sealed record SensorSnapshotDto
 {
     public bool IsConnected { get; set; }
 

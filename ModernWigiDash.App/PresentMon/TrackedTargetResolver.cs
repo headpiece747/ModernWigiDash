@@ -20,25 +20,24 @@ public sealed class TrackedTargetResolver
     private static readonly IntPtr InvalidHandleValue = new(-1);
 
     private readonly Func<int> _foregroundPidProvider;
-    private readonly Func<int, IReadOnlyList<int>> _childrenProvider;
+    private readonly Func<int, IReadOnlyList<int>>? _childrenProvider;
 
     public TrackedTargetResolver()
-        : this(GetForegroundPidFromUser32, GetChildrenFromToolhelp)
+        : this(GetForegroundPidFromUser32)
     {
     }
 
     /// <summary>Test seam: injects the foreground lookup and the process-tree
-    /// navigation so tests drive the resolution without real processes.</summary>
+    /// navigation so tests drive the resolution without real processes. When
+    /// <paramref name="childrenProvider"/> is omitted the resolver walks the
+    /// real toolhelp snapshot once per resolution (see <see cref="ResolveCandidates"/>).</summary>
     internal TrackedTargetResolver(
         Func<int> foregroundPidProvider,
-        Func<int, IReadOnlyList<int>> childrenProvider)
+        Func<int, IReadOnlyList<int>>? childrenProvider = null)
     {
         _foregroundPidProvider = foregroundPidProvider;
         _childrenProvider = childrenProvider;
     }
-
-    /// <summary>Foreground window's process id, or 0 when no foreground window.</summary>
-    public int GetForegroundProcessId() => _foregroundPidProvider();
 
     /// <summary>
     /// The foreground pid plus its descendant pids (toolhelp snapshot), root
@@ -53,6 +52,12 @@ public sealed class TrackedTargetResolver
             return [];
         }
 
+        // One toolhelp snapshot per resolution: the real process table is
+        // materialized into a parent map once, so BFS children lookups never
+        // re-enumerate processes. Injected providers (tests) are called per
+        // pid as before.
+        Dictionary<int, List<int>>? parentMap = _childrenProvider is null ? SnapshotParentMap() : null;
+
         List<int> candidates = [rootPid];
         HashSet<int> seen = [rootPid];
         Queue<int> frontier = new();
@@ -61,7 +66,7 @@ public sealed class TrackedTargetResolver
         while (frontier.Count > 0 && candidates.Count < MaxCandidateProcesses)
         {
             int pid = frontier.Dequeue();
-            foreach (int child in _childrenProvider(pid))
+            foreach (int child in ChildrenOf(pid, parentMap))
             {
                 if (child <= 0 || !seen.Add(child))
                 {
@@ -83,6 +88,20 @@ public sealed class TrackedTargetResolver
     /// <summary>True when the pid is this process — never a tracking target.</summary>
     public static bool IsOwnProcess(int pid) => pid == Environment.ProcessId;
 
+    /// <summary>Children of <paramref name="pid"/>: from the resolution-wide
+    /// parent map when walking the real tree, else from the injected provider.</summary>
+    private IReadOnlyList<int> ChildrenOf(int pid, Dictionary<int, List<int>>? parentMap)
+    {
+        if (parentMap is null)
+        {
+            return _childrenProvider!(pid);
+        }
+        if (parentMap.TryGetValue(pid, out var children))
+        {
+            return children;
+        }
+        return [];
+    }
     private static int GetForegroundPidFromUser32()
     {
         IntPtr hwnd = GetForegroundWindow();
@@ -95,15 +114,15 @@ public sealed class TrackedTargetResolver
         return (int)pid;
     }
 
-    /// <summary>Direct children (ParentProcessId == parentPid) via one toolhelp
-    /// snapshot of all processes.</summary>
-    private static IReadOnlyList<int> GetChildrenFromToolhelp(int parentPid)
+    /// <summary>Parent → children map from ONE toolhelp snapshot of all
+    /// processes, taken per <see cref="ResolveCandidates"/> call.</summary>
+    private static Dictionary<int, List<int>> SnapshotParentMap()
     {
-        List<int> children = [];
+        var parentMap = new Dictionary<int, List<int>>();
         IntPtr snapshot = CreateToolhelp32Snapshot(Th32csSnapprocess, 0);
         if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
         {
-            return children;
+            return parentMap;
         }
 
         try
@@ -111,15 +130,18 @@ public sealed class TrackedTargetResolver
             var entry = new ProcessEntry32 { Size = (uint)Marshal.SizeOf<ProcessEntry32>() };
             if (!Process32First(snapshot, ref entry))
             {
-                return children;
+                return parentMap;
             }
 
             do
             {
-                if (entry.ParentProcessId == parentPid)
+                int parentPid = (int)entry.ParentProcessId;
+                if (!parentMap.TryGetValue(parentPid, out var children))
                 {
-                    children.Add((int)entry.ProcessId);
+                    children = [];
+                    parentMap[parentPid] = children;
                 }
+                children.Add((int)entry.ProcessId);
             }
             while (Process32Next(snapshot, ref entry));
         }
@@ -128,7 +150,7 @@ public sealed class TrackedTargetResolver
             CloseHandle(snapshot);
         }
 
-        return children;
+        return parentMap;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
