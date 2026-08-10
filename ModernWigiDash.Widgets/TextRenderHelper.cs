@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Text;
 using ModernWigiDash.Core.Rendering;
 using SkiaSharp;
@@ -257,79 +256,5 @@ internal static class TextRenderHelper
 
         fill = fillBuilder.Detach();
         line = lineBuilder.Detach();
-    }
-
-    /// <summary>
-    /// Draws <paramref name="path"/> centered at <paramref name="center"/> scaled to
-    /// <paramref name="sizePx"/> by its largest bounds dimension, offset by
-    /// <paramref name="offsetX"/>/<paramref name="offsetY"/>. Single shared scaling
-    /// protocol for SVG-path icons.
-    /// </summary>
-    internal static void DrawPathScaled(SKCanvas canvas, SKPath path, SKPoint center, float sizePx, SKColor color, float offsetX, float offsetY)
-    {
-        if (sizePx <= 0 || path.IsEmpty) return;
-        var bounds = path.Bounds;
-        float maxDim = Math.Max(bounds.Width, bounds.Height);
-        if (maxDim <= 0) return;
-
-        float scale = sizePx / maxDim;
-        canvas.Save();
-        canvas.Translate(center.X + offsetX, center.Y + offsetY);
-        canvas.Scale(scale, scale);
-        canvas.Translate(-bounds.MidX, -bounds.MidY);
-        using var paint = new SKPaint { Color = color, IsAntialias = true };
-        canvas.DrawPath(path, paint);
-        canvas.Restore();
-    }
-
-    /// <summary>
-    /// Shared parsed-SVG-path cache with an empty-path fallback. Keyed
-    /// case-insensitively; callers supply the raw path data per key.
-    /// </summary>
-    internal static class SvgPathCache
-    {
-        private static readonly ConcurrentDictionary<string, SKPath> Cache = new(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>
-        /// Returns the cached parsed path for <paramref name="key"/>, parsing
-        /// the path data produced by <paramref name="getPathData"/> on first
-        /// use. Invalid or empty paths resolve to an empty <see cref="SKPath"/>
-        /// (never null).
-        /// </summary>
-        internal static SKPath GetOrParse(string key, string pathData)
-            => GetOrParse(key, () => pathData);
-
-        /// <summary>
-        /// Returns the cached parsed path for <paramref name="key"/>, parsing
-        /// the path data produced by <paramref name="getPathData"/> on first
-        /// use. Invalid or empty paths resolve to an empty <see cref="SKPath"/>
-        /// (never null).
-        /// </summary>
-        internal static SKPath GetOrParse(string key, Func<string> getPathData)
-        {
-            return Cache.GetOrAdd(key, _ =>
-            {
-                try
-                {
-                    string pathData = getPathData();
-                    if (string.IsNullOrWhiteSpace(pathData))
-                        return new SKPath();
-
-                    SKPath? parsed = SKPath.ParseSvgPathData(pathData);
-                    if (parsed != null && parsed.Bounds.Width > 0 && parsed.Bounds.Height > 0)
-                    {
-                        parsed.FillType = SKPathFillType.Winding;
-                        return parsed;
-                    }
-                    parsed?.Dispose();
-                }
-                catch
-                {
-                    // Fall through to an empty path.
-                    System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
-                }
-                return new SKPath();
-            });
-        }
     }
 }

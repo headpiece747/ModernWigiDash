@@ -1,7 +1,3 @@
-using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Threading.Tasks;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
@@ -393,10 +389,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         string statusText = TwitchChatPresentation.StatusText(_status, _statusDetail);
 
-        var statusColor = _status == ChatStatus.Connected
-            ? new SKColor(0x10, 0xB9, 0x81)
-            : SKColors.White;
-        using var statusPaint = new SKPaint { Color = statusColor, IsAntialias = true };
+        using var statusPaint = new SKPaint { Color = TwitchChatPresentation.StatusColor(_status), IsAntialias = true };
         canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;

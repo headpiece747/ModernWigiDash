@@ -51,7 +51,7 @@ public static class SvgIconLoader
             return false;
         }
 
-        path = TextRenderHelper.SvgPathCache.GetOrParse(fullPath, () =>
+        path = SvgIconHelper.SvgPathCache.GetOrParse(fullPath, () =>
             TryExtractSinglePathData(fullPath, out string? pathData) && !string.IsNullOrWhiteSpace(pathData)
                 ? pathData
                 : "");
@@ -61,7 +61,7 @@ public static class SvgIconLoader
 
     public static void Draw(SKCanvas canvas, SKPath path, SKPoint center, float sizePx, SKColor color, float offsetX, float offsetY)
     {
-        TextRenderHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
+        SvgIconHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
     }
 
     private static bool TryExtractSinglePathData(string filePath, out string? pathData)

@@ -17,9 +17,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 {
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
 
-    private const float DesignWidth = 1016f;
-    private const float DesignHeight = 592f;
-
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Progress fill, active toggles, and placeholder accent", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
@@ -49,9 +46,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     /// <summary>Test seam: injectable clock for the progress estimate.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
-    // ── Hit rects populated during Render (used by OnTouch) ───────────────
-    private SKRect _shuffleBtn, _prevBtn, _ppBtn, _nextBtn, _repeatBtn, _badgeBtn;
-    private float _progressLeft, _progressWidth, _progressY;
+    // ── Frame geometry written during Render (used by OnTouch) ────────────
+    // One layout record per frame: Render draws from it, OnTouch hit-tests
+    // the same record, so the drawn controls and the tap targets can never
+    // drift apart.
+    private NowPlayingGeometry _layout;
 
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
@@ -91,11 +90,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     {
         _artworkLoader?.DisposeRetired();
 
-        float scale = Math.Min(bounds.Width / DesignWidth, bounds.Height / DesignHeight);
+        float scale = Math.Min(bounds.Width / NowPlayingLayout.DesignWidth, bounds.Height / NowPlayingLayout.DesignHeight);
 
         // Background panel tinted by artwork-derived color
         var artState = _artworkLoader?.Current;
-        var bgColor = BlendToward(artState?.BackgroundColor ?? new SKColor(18, 18, 24), new SKColor(18, 18, 24), 0.25f);
+        var bgColor = NowPlayingLayout.BlendToward(artState?.BackgroundColor ?? new SKColor(18, 18, 24), new SKColor(18, 18, 24), 0.25f);
         using var bg = new SKPaint { Color = bgColor, IsAntialias = true };
         canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, bg);
 
@@ -107,16 +106,30 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             return;
         }
 
+        _layout = NowPlayingLayout.Compute(bounds, scale, ShowSourceBadge, MeasureBadgeTextWidth(snap, scale));
+
         DrawAlbumArt(canvas, bounds, scale);
-        DrawSourceBadge(canvas, bounds, snap, scale);
+        DrawSourceBadge(canvas, snap, scale);
         DrawTextInfo(canvas, bounds, snap, scale);
         DrawProgress(canvas, bounds, snap, scale);
-        DrawControls(canvas, bounds, snap, scale);
+        DrawControls(canvas, snap, scale);
+    }
+
+    /// <summary>
+    /// The badge label's measured width — the one font-dependent input to the
+    /// frame layout. Measured only when the badge is shown; the layout module
+    /// computes the rect unconditionally but gates hit-testing on visibility.
+    /// </summary>
+    private float MeasureBadgeTextWidth(MediaSnapshot snap, float scale)
+    {
+        if (!ShowSourceBadge) return 0f;
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
+        return FontHelper.MeasureTextWithFallback(NowPlayingPresentation.FriendlyAppName(snap.SourceAppId), font);
     }
 
     private void DrawIdle(SKCanvas canvas, SKRect bounds, float scale)
     {
-        SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 64f * scale);
         using var iconPaint = new SKPaint { Color = accent.WithAlpha(200), IsAntialias = true };
@@ -125,47 +138,41 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         canvas.DrawTextWithFallback("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, iconFont, iconPaint);
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
-        using var labelPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(180), IsAntialias = true };
+        using var labelPaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(180), IsAntialias = true };
         string hint = "No media playing — press play in any app";
         var lb = new SKRect();
         labelFont.MeasureText(hint, out lb, labelPaint);
         canvas.DrawTextWithFallback(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 30f * scale, labelFont, labelPaint);
     }
 
-    private void DrawSourceBadge(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
+    private void DrawSourceBadge(SKCanvas canvas, MediaSnapshot snap, float scale)
     {
-        if (!ShowSourceBadge) return;
+        if (!_layout.SourceBadgeVisible) return;
 
-        float pad = 24f * scale;
+        var pill = _layout.SourceBadgeRect;
+        float h = pill.Height;
+        float x = pill.Left;
         string name = NowPlayingPresentation.FriendlyAppName(snap.SourceAppId);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
-        using var textPaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White), IsAntialias = true };
-        float textW = FontHelper.MeasureTextWithFallback(name, font);
-        float h = 26f * scale;
-        float w = textW + 24f * scale;
-
-        // Positioned right aligned at top-right of container
-        float x = bounds.Right - pad - w;
-        float y = bounds.Top + pad + 2f * scale;
-        _badgeBtn = new SKRect(x, y, x + w, y + h);
 
         using var pillBg = new SKPaint { Color = new SKColor(255, 255, 255, 25), IsAntialias = true };
-        canvas.DrawRoundRect(_badgeBtn, h / 2f, h / 2f, pillBg);
+        canvas.DrawRoundRect(pill, h / 2f, h / 2f, pillBg);
 
         using var pillBorder = new SKPaint { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, StrokeWidth = 1f * scale, IsAntialias = true };
-        canvas.DrawRoundRect(_badgeBtn, h / 2f, h / 2f, pillBorder);
+        canvas.DrawRoundRect(pill, h / 2f, h / 2f, pillBorder);
 
         using var dot = new SKPaint { Color = snap.IsPlaying ? new SKColor(34, 197, 94) : new SKColor(239, 68, 68), IsAntialias = true };
-        canvas.DrawCircle(x + 11f * scale, _badgeBtn.MidY, 3.5f * scale, dot);
+        canvas.DrawCircle(x + 11f * scale, pill.MidY, 3.5f * scale, dot);
 
-        canvas.DrawTextWithFallback(name, x + 18f * scale, _badgeBtn.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, textPaint);
+        using var textPaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White), IsAntialias = true };
+        canvas.DrawTextWithFallback(name, x + 18f * scale, pill.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, textPaint);
     }
 
     private void DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
     {
         float pad = 24f * scale;
         // Equal spacing pad from top, left, and bottom
-        float artSide = GetArtSide(bounds, scale);
+        float artSide = _layout.ArtSide;
         float artTop = bounds.Top + pad + Math.Max(0f, (bounds.Height - pad * 2f - artSide) / 2f);
         var artRect = new SKRect(bounds.Left + pad, artTop,
                                  bounds.Left + pad + artSide, artTop + artSide);
@@ -195,7 +202,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
         else
         {
-            using var fill = new SKPaint { Color = ParseColor(AccentColorHex, new SKColor(255, 205, 133)).WithAlpha(80), IsAntialias = true };
+            using var fill = new SKPaint { Color = ColorOf(AccentColorHex, new SKColor(255, 205, 133)).WithAlpha(80), IsAntialias = true };
             canvas.DrawRoundRect(artRect, r, r, fill);
 
             var font = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, artSide * 0.45f);
@@ -212,15 +219,15 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private void DrawTextInfo(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
     {
         float pad = 24f * scale;
-        float artSide = GetArtSide(bounds, scale);
+        float artSide = _layout.ArtSide;
         float textX = bounds.Left + pad + artSide + 30f * scale;
         float textW = bounds.Right - pad - textX;
         if (textW <= 0) return;
 
         // Shift text stack down approx 3 lines total from top pad (2 lines lower than before)
         float textTop = bounds.Top + pad + Math.Max(0f, (artSide - 160f * scale) / 2f);
-        SKColor text = ParseColor(TextColorHex, SKColors.White);
-        SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor text = ColorOf(TextColorHex, SKColors.White);
+        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
 
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 40f * scale);
         var artistFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 28f * scale);
@@ -263,17 +270,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private void DrawProgress(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
     {
         float pad = 24f * scale;
-        float artSide = GetArtSide(bounds, scale);
-        float left = bounds.Left + pad + artSide + 30f * scale;
+        float left = _layout.ProgressLeft;
         float right = bounds.Right - pad;
-        float barY = bounds.Bottom - pad - 92f * scale;
+        float barY = _layout.ProgressY;
         float timeY = barY - 18f * scale;
-        float barW = right - left;
+        float barW = _layout.ProgressWidth;
         if (barW <= 0) return;
-
-        _progressLeft = left;
-        _progressWidth = barW;
-        _progressY = barY;
 
         double durSec = snap.Duration.TotalSeconds;
         double posSec = snap.Position.TotalSeconds;
@@ -281,11 +283,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             posSec += (Clock.GetUtcNow() - snap.LastUpdated).TotalSeconds;
 
         double ratio = NowPlayingPresentation.ProgressRatio(posSec, durSec);
-        SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
 
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
-        using var timePaint = new SKPaint { Color = ParseColor(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
+        using var timePaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
         canvas.DrawTextWithFallback(NowPlayingPresentation.FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, timePaint);
 
         string durStr = NowPlayingPresentation.FormatTime(durSec);
@@ -316,61 +318,28 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
     }
 
-    private void DrawControls(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
+    private void DrawControls(SKCanvas canvas, MediaSnapshot snap, float scale)
     {
-        float pad = 24f * scale;
-        float artSide = GetArtSide(bounds, scale);
-        float areaLeft = bounds.Left + pad + artSide + 30f * scale;
-        float areaW = bounds.Right - pad - areaLeft;
-        float btnY = bounds.Bottom - pad - 32f * scale;
-        float btnSize = 48f * scale;
-        float ppSize = 58f * scale;
-        float gap = 28f * scale;
-
-        float totalW = btnSize * 4f + ppSize + gap * 4f;
-        float startX = areaLeft + Math.Max(0, (areaW - totalW) / 2f);
-
-        float shuffleX = startX;
-        float prevX = shuffleX + btnSize + gap;
-        float ppX = prevX + btnSize + gap;
-        float nextX = ppX + ppSize + gap;
-        float repeatX = nextX + btnSize + gap;
-
-        _shuffleBtn = new SKRect(shuffleX, btnY - btnSize / 2f, shuffleX + btnSize, btnY + btnSize / 2f);
-        _prevBtn = new SKRect(prevX, btnY - btnSize / 2f, prevX + btnSize, btnY + btnSize / 2f);
-        _ppBtn = new SKRect(ppX, btnY - ppSize / 2f, ppX + ppSize, btnY + ppSize / 2f);
-        _nextBtn = new SKRect(nextX, btnY - btnSize / 2f, nextX + btnSize, btnY + btnSize / 2f);
-        _repeatBtn = new SKRect(repeatX, btnY - btnSize / 2f, repeatX + btnSize, btnY + btnSize / 2f);
-
-        SKColor text = ParseColor(TextColorHex, SKColors.White);
-        SKColor accent = ParseColor(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor text = ColorOf(TextColorHex, SKColors.White);
+        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
 
         // Shuffle (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _shuffleBtn, snap.CanShuffle, snap.Shuffle, accent, text, DrawShuffleIcon);
+        DrawCleanButton(canvas, _layout.ShuffleButton, snap.CanShuffle, snap.Shuffle, accent, text, DrawShuffleIcon);
 
         // Prev (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _prevBtn, snap.CanPrev, false, accent, text, DrawPrevIcon);
+        DrawCleanButton(canvas, _layout.PreviousButton, snap.CanPrev, false, accent, text, DrawPrevIcon);
 
         // Play / Pause (Hero Glowing Accent Button)
         bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;
-        DrawHeroPlayButton(canvas, _ppBtn, scale, canPp, snap.IsPlaying, accent);
+        DrawHeroPlayButton(canvas, _layout.PlayPauseButton, scale, canPp, snap.IsPlaying, accent);
 
         // Next (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _nextBtn, snap.CanNext, false, accent, text, DrawNextIcon);
+        DrawCleanButton(canvas, _layout.NextButton, snap.CanNext, false, accent, text, DrawNextIcon);
 
         // Repeat (Clean icon button without glass circle)
         bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
-        DrawCleanButton(canvas, _repeatBtn, snap.CanRepeat, repeatActive, accent, text,
+        DrawCleanButton(canvas, _layout.RepeatButton, snap.CanRepeat, repeatActive, accent, text,
             (c, r, p) => DrawRepeatIcon(c, r, p, snap.Repeat == MediaPlaybackAutoRepeatMode.Track));
-    }
-
-    private static float GetArtSide(SKRect bounds, float scale)
-    {
-        float pad = 24f * scale;
-        float gap = 30f * scale;
-        float controlRowWidth = (48f * 4f + 58f + 28f * 4f) * scale;
-        float widthLimit = bounds.Width - pad * 2f - gap - controlRowWidth;
-        return Math.Max(0f, Math.Min(bounds.Height - pad * 2f, widthLimit));
     }
 
     private static void DrawCleanButton(SKCanvas canvas, SKRect r, bool enabled, bool active, SKColor accent, SKColor text, Action<SKCanvas, SKRect, SKPaint> drawIcon)
@@ -604,62 +573,41 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKPoint hitPoint = _touchDownPoint ?? localPoint;
         _touchDownPoint = null;
 
-        if (_shuffleBtn.Contains(hitPoint) && snap.CanShuffle)
+        switch (NowPlayingLayout.GetAction(_layout, hitPoint))
         {
-            _mediaMonitor?.SetShuffle(!snap.Shuffle);
-        }
-        else if (_prevBtn.Contains(hitPoint) && snap.CanPrev)
-        {
-            _mediaMonitor?.Previous();
-        }
-        else if (_ppBtn.Contains(hitPoint))
-        {
-            if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
-            else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
-        }
-        else if (_nextBtn.Contains(hitPoint) && snap.CanNext)
-        {
-            _mediaMonitor?.Next();
-        }
-        else if (_repeatBtn.Contains(hitPoint) && snap.CanRepeat)
-        {
-            var next = snap.Repeat switch
-            {
-                MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
-                MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
-                _ => MediaPlaybackAutoRepeatMode.None
-            };
-            _mediaMonitor?.SetRepeat(next);
-        }
-        else if (_badgeBtn.Contains(hitPoint))
-        {
-            _mediaMonitor?.CycleSession();
-        }
-        else if (_progressWidth > 0 && snap.Duration.TotalSeconds > 0
-                  && Math.Abs(hitPoint.Y - _progressY) <= 24f
-                  && hitPoint.X >= _progressLeft
-                  && hitPoint.X <= _progressLeft + _progressWidth
-                 && snap.CanSeek)
-        {
-            double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _progressLeft, _progressWidth);
-            _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
+            case NowPlayingHitAction.Shuffle when snap.CanShuffle:
+                _mediaMonitor?.SetShuffle(!snap.Shuffle);
+                break;
+            case NowPlayingHitAction.Previous when snap.CanPrev:
+                _mediaMonitor?.Previous();
+                break;
+            case NowPlayingHitAction.PlayPause:
+                if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
+                else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
+                break;
+            case NowPlayingHitAction.Next when snap.CanNext:
+                _mediaMonitor?.Next();
+                break;
+            case NowPlayingHitAction.Repeat when snap.CanRepeat:
+                var next = snap.Repeat switch
+                {
+                    MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
+                    MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
+                    _ => MediaPlaybackAutoRepeatMode.None
+                };
+                _mediaMonitor?.SetRepeat(next);
+                break;
+            case NowPlayingHitAction.SourceBadge:
+                _mediaMonitor?.CycleSession();
+                break;
+            case NowPlayingHitAction.Seek when snap.CanSeek && snap.Duration.TotalSeconds > 0:
+                double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
+                _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
+                break;
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
-
-    private static SKColor BlendToward(SKColor from, SKColor to, float amount)
-    {
-        amount = Math.Clamp(amount, 0f, 1f);
-        return new SKColor(
-            (byte)(from.Red + (to.Red - from.Red) * amount),
-            (byte)(from.Green + (to.Green - from.Green) * amount),
-            (byte)(from.Blue + (to.Blue - from.Blue) * amount),
-            from.Alpha);
-    }
-
-    private SKColor ParseColor(string hex, SKColor fallback)
-        => ColorOf(hex, fallback);
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
 

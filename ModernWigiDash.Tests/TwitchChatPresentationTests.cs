@@ -1,4 +1,5 @@
 using ModernWigiDash.Widgets.Twitch;
+using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
@@ -35,5 +36,14 @@ public class TwitchChatPresentationTests
             "manual mode invites a tap");
         Assert.AreEqual("Waiting for connection…", TwitchChatPresentation.EmptyHint(ChatStatus.Disconnected, true));
         Assert.AreEqual("Waiting for connection…", TwitchChatPresentation.EmptyHint(ChatStatus.Connecting, true));
+    }
+
+    [TestMethod]
+    public void StatusColor_ConnectedIsGreen_AllOtherStatesWhite()
+    {
+        Assert.AreEqual(new SKColor(0x10, 0xB9, 0x81), TwitchChatPresentation.StatusColor(ChatStatus.Connected),
+            "a live chat reads green");
+        Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Connecting));
+        Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Disconnected));
     }
 }

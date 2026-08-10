@@ -32,7 +32,7 @@ public static class GriddyIcons
         path = null;
         if (!TryGetPathData(name, out string pathData)) return false;
 
-        path = TextRenderHelper.SvgPathCache.GetOrParse(name.Trim(), pathData);
+        path = SvgIconHelper.SvgPathCache.GetOrParse(name.Trim(), pathData);
         return !path.IsEmpty;
     }
 
@@ -41,6 +41,6 @@ public static class GriddyIcons
         if (sizePx <= 0) return;
         if (!TryGetPath(name, out SKPath? path) || path == null || path.IsEmpty) return;
 
-        TextRenderHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
+        SvgIconHelper.DrawPathScaled(canvas, path, center, sizePx, color, offsetX, offsetY);
     }
 }

@@ -1,3 +1,5 @@
+using SkiaSharp;
+
 namespace ModernWigiDash.Widgets.Twitch;
 
 /// <summary>
@@ -50,4 +52,8 @@ public static class TwitchChatPresentation
             ChatStatus.Connecting => "Waiting for connection…",
             _ => "Waiting for connection…" // unreachable — guards undefined enum values
         };
+
+    /// <summary>The header status color: green when the chat is live, white otherwise.</summary>
+    public static SKColor StatusColor(ChatStatus status)
+        => status == ChatStatus.Connected ? new SKColor(0x10, 0xB9, 0x81) : SKColors.White;
 }
