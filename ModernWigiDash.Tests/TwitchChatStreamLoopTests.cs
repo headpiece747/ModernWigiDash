@@ -14,6 +14,15 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class TwitchChatStreamLoopTests
 {
+    /// <summary>A session with an empty token store: the widget's fire-and-forget
+    /// session restore must never reach the real DPAPI store or the network from
+    /// a test host (a valid stored token would mutate the shared session).</summary>
+    private static TwitchSession EmptySession() =>
+        new(
+            new TwitchTokenStore(Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin")),
+            _ => throw new NotSupportedException("An empty store must never reach the API client"),
+            TimeProvider.System);
+
     [TestMethod]
     public async Task IrcLoop_SendsHandshakeAndParsesPrivmsg()
     {
@@ -22,6 +31,7 @@ public class TwitchChatStreamLoopTests
         feed.QueueMessage(":user!user@user.tmi.twitch.tv PRIVMSG #test :hello world\r\n");
         var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
         widget.FeedFactory = () => feed;
+        widget.Session = EmptySession();
         await widget.InitializeAsync(new TestContext(), CancellationToken.None);
 
         await TestWait.WaitUntilAsync(() => widget.MessageCountForTest >= 1, TimeSpan.FromSeconds(3));
@@ -41,6 +51,7 @@ public class TwitchChatStreamLoopTests
         var feed = new FakeFeed { ConnectError = new IOException("socket fault") };
         var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
         widget.FeedFactory = () => feed;
+        widget.Session = EmptySession();
         await widget.InitializeAsync(new TestContext(), CancellationToken.None);
 
         // The first connect attempt faults; clear the fault so the next

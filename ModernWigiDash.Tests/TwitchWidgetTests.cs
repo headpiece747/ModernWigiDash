@@ -1,3 +1,4 @@
+using System.IO;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Twitch;
 using SkiaSharp;
@@ -10,7 +11,16 @@ public class TwitchWidgetTests
     [TestMethod]
     public void TwitchWidget_DefaultsToAnonymousChatAndDynamicChannelSelection()
     {
-        var widget = new TwitchChatStreamWidget();
+        // An empty-session widget: the anonymous/logged-out presentation must
+        // not depend on the real shared session's ambient state (which a valid
+        // stored token elsewhere in the test host would flip).
+        var widget = new TwitchChatStreamWidget
+        {
+            Session = new TwitchSession(
+                new TwitchTokenStore(Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin")),
+                _ => throw new NotSupportedException("An empty store must never reach the API client"),
+                TimeProvider.System)
+        };
         var optionsProvider = (IWidgetPropertyOptionsProvider)widget;
 
         Assert.AreEqual("twitch", widget.ChannelName);

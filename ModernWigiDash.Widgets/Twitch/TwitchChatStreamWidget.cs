@@ -72,6 +72,15 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     internal Func<IWebSocketFeed> FeedFactory { get; set; } = () => new ClientWebSocketFeed();
 
     /// <summary>
+    /// The Twitch session (one process-wide singleton by default). Test seam in
+    /// the <see cref="FeedFactory"/> image: InitializeAsync restores the session
+    /// fire-and-forget, and the shared session's real token store + client must
+    /// never be reached from a test host — a valid stored token would perform a
+    /// real network restore and mutate the singleton's followed-channel state.
+    /// </summary>
+    internal TwitchSession Session { get; set; } = TwitchSession.Shared;
+
+    /// <summary>
     /// One chat line. The wrapped lines are cached on the message (keyed by the
     /// render font size + width they were computed with) so re-wrap work is
     /// skipped on every frame between font/width changes.
@@ -104,18 +113,18 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     }
 
     public string? GetWidgetActionLabel(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && TwitchSession.Shared.IsAuthenticated
+        => propertyName == nameof(LoginWithTwitch) && Session.IsAuthenticated
             ? "Twitch logged in"
             : null;
 
     public bool IsWidgetActionActive(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && TwitchSession.Shared.IsAuthenticated;
+        => propertyName == nameof(LoginWithTwitch) && Session.IsAuthenticated;
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
         if (propertyName != nameof(ChannelName)) return [];
 
-        return TwitchSession.Shared.FollowedChannels
+        return Session.FollowedChannels
             .Select(channel => new WidgetPropertyOption(channel.Login, channel.DisplayLabel))
             .ToArray();
     }
@@ -146,7 +155,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     {
         try
         {
-            await TwitchSession.Shared.RestoreAsync(TwitchClientId, Context, cancellationToken).ConfigureAwait(false);
+            await Session.RestoreAsync(TwitchClientId, Context, cancellationToken).ConfigureAwait(false);
             Context.RequestInspectorRefresh();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -170,13 +179,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             switch (propertyName)
             {
                 case nameof(LoginWithTwitch):
-                    await TwitchSession.Shared.LoginAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
+                    await Session.LoginAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
                     break;
                 case nameof(RefreshLiveChannels):
-                    await TwitchSession.Shared.RefreshFollowedChannelsAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
+                    await Session.RefreshFollowedChannelsAsync(TwitchClientId, Context, CancellationToken.None).ConfigureAwait(false);
                     break;
                 case nameof(LogoutTwitch):
-                    await TwitchSession.Shared.LogoutAsync(CancellationToken.None).ConfigureAwait(false);
+                    await Session.LogoutAsync(CancellationToken.None).ConfigureAwait(false);
                     break;
             }
 
