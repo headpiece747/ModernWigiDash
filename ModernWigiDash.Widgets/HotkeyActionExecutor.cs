@@ -187,7 +187,7 @@ internal static class HotkeyActionExecutor
     {
         if (!HotkeyActionPolicy.IsAllowedUrl(url))
             throw new ArgumentException("Only http, https, and mailto URLs are allowed.", nameof(url));
-        Process.Start(new ProcessStartInfo(uri.ToString()) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     internal static ushort ParseVirtualKey(string value)
