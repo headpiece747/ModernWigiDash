@@ -3,7 +3,6 @@
 // Licensed under the MIT license.
 // </copyright>
 
-using LibUsbDotNet;
 using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
 using Microsoft.Extensions.Logging;
@@ -21,14 +20,17 @@ namespace ModernWigiDash.Hardware.Transport;
 ///   ControlIn(0xA1, request, wValue, 0, buffer) for control IN
 /// The backend (WinUSB or LibUsbDotNet) is chosen once in
 /// <see cref="Connect"/> and everything else talks to the
-/// <see cref="ITransferBackend"/> seam. The WinUSB attempt is constructed
-/// through <see cref="WinUsbDeviceFactory"/> (default: a real
-/// <see cref="WinUsbBulkDevice"/>), so the connect policy — open, PING, init,
+/// <see cref="ITransferBackend"/> seam. Connect iterates the
+/// <see cref="ProviderFactories"/> list (WinUSB first, LibUsbDotNet fallback):
+/// each provider opens the device and returns a backend (or null), and the
+/// first backend that survives the init sequence is adopted. The WinUSB leg is
+/// constructed through <see cref="WinUsbDeviceFactory"/> (default: a real
+/// <see cref="WinUsbBulkDevice"/>), so the connect policy — open, init,
 /// fallback — is drivable in tests with a fake device.
 /// </summary>
-public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null) : IDisplayTransport
+public sealed class DisplayHidTransport : IDisplayTransport
 {
-    private readonly ILogger<DisplayHidTransport> _logger = logger ?? NullLogger<DisplayHidTransport>.Instance;
+    private readonly ILogger<DisplayHidTransport> _logger;
 
     private ITransferBackend? _backend;
     private static readonly Lazy<UsbContext> SharedContext = new(() => new UsbContext());
@@ -47,12 +49,46 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
     public bool IsConnected => _isConnected;
     public long FramesFailed => Volatile.Read(ref _framesFailed);
 
+    public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
+    {
+        _logger = logger ?? NullLogger<DisplayHidTransport>.Instance;
+        ProviderFactories = [WinUsbProvider, LibUsbProvider];
+    }
+
     /// <summary>
-    /// Test seam: constructs the WinUSB attempt in <see cref="Connect"/>.
-    /// Defaults to a real <see cref="WinUsbBulkDevice"/>; tests substitute a
-    /// fake subclass to drive the connect policy without hardware.
+    /// Test seam: constructs the WinUSB attempt inside the WinUsb provider
+    /// (see <see cref="TryCreateWinUsbBackend"/>). Defaults to a real
+    /// <see cref="WinUsbBulkDevice"/>; tests substitute a fake subclass to
+    /// drive the connect policy without hardware.
     /// </summary>
     internal Func<WinUsbBulkDevice> WinUsbDeviceFactory { get; set; } = static () => new WinUsbBulkDevice();
+
+    /// <summary>
+    /// The provider list <see cref="Connect"/> iterates: WinUSB first, the
+    /// LibUsbDotNet fallback second. Test seam mirroring
+    /// <see cref="WinUsbDeviceFactory"/>: tests replace the list — including a
+    /// fake LibUsb leg, which the factory seam cannot reach — to drive the
+    /// fallback policy deterministically.
+    /// </summary>
+    internal ConnectProvider[] ProviderFactories { get; set; }
+
+    /// <summary>The real WinUSB leg. Internal so tests can keep it in a
+    /// fake provider list (e.g. <c>[transport.WinUsbProvider, fakeLibUsb]</c>).</summary>
+    internal ConnectProvider WinUsbProvider => new(
+        "USB-WINUSB",
+        TryCreateWinUsbBackend,
+        "WinUSB",
+        "[USB-WINUSB] Using WinUSB for all transfers (control + bulk)",
+        "[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
+
+    /// <summary>The real LibUsbDotNet leg. Internal so tests can keep it in a
+    /// fake provider list.</summary>
+    internal ConnectProvider LibUsbProvider => new(
+        "USB-LIBUSB",
+        TryCreateLibUsbBackend,
+        "LibUsbDotNet 3.0",
+        null,
+        "[USB-LIBUSB] Init commands failed — treating connection as failed");
 
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
@@ -72,56 +108,81 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
 
         _logger.LogInformation("Connecting to WigiDash...");
 
-        // STRATEGY: Try WinUSB first, fall back to LibUsbDotNet.
-        // WinUSB and LibUsbDotNet cannot share the same USB interface, so we pick one.
+        // STRATEGY: try each provider in order — WinUSB first, LibUsbDotNet as
+        // the fallback. WinUSB and LibUsbDotNet cannot share the same USB
+        // interface, so exactly one backend is adopted: the first that
+        // survives the init sequence. Each provider owns its open attempt and
+        // partial-state teardown; the loop owns the init gate and the
+        // dispose-on-init-failure (under _usbLock like Cleanup: the backend
+        // handle must not be freed while a transfer could be in flight).
+        foreach (var provider in ProviderFactories)
+        {
+            ITransferBackend? backend;
+            try
+            {
+                backend = provider.TryCreate();
+            }
+            catch (Exception ex)
+            {
+                // The real providers catch their own failures; this only fires
+                // for a provider that let an exception escape, and is treated
+                // as terminal like the LibUsb leg's connect exception.
+                LogToFile($"[{provider.Tag}] Connect exception: {ex.GetType().FullName}: {ex.Message}");
+                _logger.LogError(ex, "Failed to connect to WigiDash");
+                Cleanup();
+                return false;
+            }
 
-        // --- Try WinUSB first ---
+            if (backend is null)
+                continue;
+
+            // Adopt the backend before init: SendInitCommands talks through it.
+            _backend = backend;
+            _isConnected = true;
+
+            if (SendInitCommands())
+            {
+                if (provider.SuccessFileLog is not null)
+                    LogToFile(provider.SuccessFileLog);
+                _logger.LogInformation("Connected to WigiDash via {Via}", provider.ConnectedVia);
+                return true;
+            }
+
+            // Init failed through this stack — the same control sequence may
+            // complete through the next provider's driver stack, so try it.
+            LogToFile(provider.InitFailureLog);
+            lock (_usbLock)
+            {
+                _backend?.Dispose();
+                _backend = null;
+            }
+            _isConnected = false;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// WinUSB attempt: factory → open → backend. There is deliberately no PING
+    /// here — the only PING lives in <see cref="SendInitCommands"/> (the
+    /// pre-PING that used to run in <see cref="Connect"/> duplicated it and had
+    /// drifted). Partial-state teardown is owned here: a failed open disposes
+    /// the device under <c>_usbLock</c> (same rule as <see cref="Cleanup"/>).
+    /// </summary>
+    private ITransferBackend? TryCreateWinUsbBackend()
+    {
         try
         {
             var winUsb = WinUsbDeviceFactory();
             if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
                 LogToFile("[USB-WINUSB] Direct WinUSB connection opened");
-                _backend = winUsb;
-                _isConnected = true;
-
-                // Verify with PING
-                byte[] pingBuf = new byte[4];
-                bool pingOk = _backend.ControlIn(0x00, pingBuf);
-                LogToFile($"[USB-WINUSB] PING: ok={pingOk}");
-
-                if (pingOk)
-                {
-                    LogToFile("[USB-WINUSB] Using WinUSB for all transfers (control + bulk)");
-                    _logger.LogInformation("Connected to WigiDash via WinUSB");
-                    bool initOk = SendInitCommands();
-                    if (initOk)
-                    {
-                        return true;
-                    }
-
-                    // Init failed through the WinUSB stack — the same control
-                    // sequence may complete through the LibUsb driver stack, so
-                    // fall through to the LibUsbDotNet attempt. The teardown is
-                    // under _usbLock like Cleanup: the backend handle must not
-                    // be freed while a transfer could be in flight.
-                    LogToFile("[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
-                    TearDownWinUsb(winUsb);
-                    _isConnected = false;
-                }
-                else
-                {
-                    // PING failed, close WinUSB and try LibUsbDotNet
-                    LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
-                    TearDownWinUsb(winUsb);
-                    _isConnected = false;
-                }
+                return winUsb;
             }
-            else
-            {
-                LogToFile("[USB-WINUSB] Failed to open WinUSB, falling back to LibUsbDotNet");
-                TearDownWinUsb(winUsb);
-            }
+
+            LogToFile("[USB-WINUSB] Failed to open WinUSB, falling back to LibUsbDotNet");
+            TearDownWinUsb(winUsb);
+            return null;
         }
         catch (Exception ex)
         {
@@ -131,10 +192,17 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
                 _backend?.Dispose();
                 _backend = null;
             }
-            _isConnected = false;
+            return null;
         }
+    }
 
-        // --- Fallback to LibUsbDotNet ---
+    /// <summary>
+    /// LibUsbDotNet attempt: find → open → configure → claim → endpoint →
+    /// backend. Partial-state teardown is owned here (device.Close on claim
+    /// failure; the terminal connect-exception handling on any throw).
+    /// </summary>
+    private ITransferBackend? TryCreateLibUsbBackend()
+    {
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
 
         try
@@ -152,8 +220,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
             {
                 _logger.LogWarning("No WigiDash device found (VID=0x{VID:X4}, PID=0x{PID:X4})",
                     DisplayProtocolConstants.VendorId, DisplayProtocolConstants.ProductId);
-                _isConnected = false;
-                return false;
+                return null;
             }
 
             LogToFile($"[USB-FIND] Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
@@ -186,8 +253,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
             {
                 _logger.LogError("Failed to claim USB interface 0");
                 device.Close();
-                _isConnected = false;
-                return false;
+                return null;
             }
 
             LogToFile("[USB-CLAIM] ClaimInterface(0) succeeded");
@@ -195,28 +261,16 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
             WriteEndpointID endpointId = DiscoverBulkOutEndpoint(device);
             LogToFile($"[USB-ENDPOINT] Using bulk OUT endpoint: {endpointId}");
 
-            _backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
-            _isConnected = true;
-
+            var backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
             LogToFile($"[USB-LIBUSB] Connected: endpoint={endpointId}");
-
-            bool initOk = SendInitCommands();
-            if (!initOk)
-            {
-                LogToFile("[USB-LIBUSB] Init commands failed — treating connection as failed");
-                Cleanup();
-                return false;
-            }
-
-            _logger.LogInformation("Connected to WigiDash via LibUsbDotNet 3.0");
-            return true;
+            return backend;
         }
         catch (Exception ex)
         {
             LogToFile($"[USB-LIBUSB] Connect exception: {ex.GetType().FullName}: {ex.Message}");
             _logger.LogError(ex, "Failed to connect to WigiDash");
             Cleanup();
-            return false;
+            return null;
         }
     }
 
@@ -386,8 +440,11 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
     // Note: the raw-dump cadence counts success-path calls only (every 200th
     // successful read) — the old single shared counter made it positional in
     // total ReadTouch calls; steady states are identical.
-    private readonly LogCadence _touchDiagLog = new(20, logFirst: true);
-    private readonly LogCadence _touchDiagRawLog = new(200);
+    private const string TouchDiagCategory = "TOUCH-DIAG";
+    private readonly DiagLog _touchDiagLog = new(TouchDiagCategory, 20, logFirst: true);
+    private readonly DiagLog _touchDiagRawLog = new(TouchDiagCategory, 200);
+    // The send-skipped log rides the ILogger, not FileLog, so it keeps a bare
+    // LogCadence instead of a DiagLog.
     private readonly LogCadence _sendFrameSkippedLog = new(60);
 
     // Reused per-call buffers: SendFrame and ReadTouch are both serialized by
@@ -403,8 +460,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
         {
             if (_backend is not { IsOpen: true })
             {
-                if (_touchDiagLog.Due())
-                    LogToFile($"[TOUCH-DIAG] Not connected: isConnected={_isConnected}");
+                _touchDiagLog.Write($"Not connected: isConnected={_isConnected}");
                 return null;
             }
 
@@ -416,8 +472,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
 
                 if (!ok)
                 {
-                    if (_touchDiagLog.Due())
-                        LogToFile($"[TOUCH-DIAG] ControlIn FAILED");
+                    _touchDiagLog.Write("ControlIn FAILED");
                     return null;
                 }
 
@@ -425,8 +480,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
                 short x = BitConverter.ToInt16(touchBuf, 2);
                 short y = BitConverter.ToInt16(touchBuf, 4);
 
-                if (_touchDiagRawLog.Due())
-                    LogToFile($"[TOUCH-DIAG] Raw: type={type} x={x} y={y}");
+                _touchDiagRawLog.Write($"Raw: type={type} x={x} y={y}");
 
                 if (type == DisplayProtocolConstants.TouchTypeNone)
                     return null;

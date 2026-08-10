@@ -87,13 +87,12 @@ public class DisplayDeviceEngineTests
     // ── Pre-existing engine tests ─────────────────────────────────────
 
     [TestMethod]
-    public async Task Constructed_WithoutStart_StaysDisconnected()
+    public void Constructed_WithoutStart_StaysDisconnected()
     {
         // The ctor is inert: no connect attempt, no background loops. The old
         // ctor probed real USB (and even put the
         // attached display into standby on dispose) from the test host.
         using var engine = new DisplayDeviceEngine();
-        await Task.Delay(150); // generous — the old ctor's probe settled within ~50ms
 
         Assert.AreEqual(ConnectionState.Disconnected, engine.State);
     }
@@ -267,5 +266,59 @@ public class DisplayDeviceEngineTests
 
         var simulated = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false });
         Assert.AreEqual(ConnectionState.Simulated, simulated.State, "a closed transport must not report Connected");
+    }
+
+    // ── the reconnect tick gate ──────────────────────────────────────
+
+    [TestMethod]
+    public void ReconnectTick_WhenDisposed_DoesNotReconnect()
+    {
+        int factoryCalls = 0;
+        using var engine = new DisplayDeviceEngine(() => { factoryCalls++; return new FakeTransport(); });
+        engine.Dispose();
+
+        engine.ReconnectTick(null);
+
+        Assert.AreEqual(0, factoryCalls, "a disposed engine must not attempt a reconnect");
+    }
+
+    [TestMethod]
+    public void ReconnectTick_WhenConnected_DoesNotReconnect()
+    {
+        int factoryCalls = 0;
+        var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
+        using var engine = new DisplayDeviceEngine(() => { factoryCalls++; return fake; });
+        Assert.IsTrue(engine.TryConnect(), "precondition: the engine connects");
+        Assert.AreEqual(1, factoryCalls);
+
+        engine.ReconnectTick(null);
+
+        Assert.AreEqual(1, factoryCalls, "a connected engine must not attempt a reconnect");
+    }
+
+    [TestMethod]
+    public void ReconnectTick_WhenDisconnected_ReconnectsThroughFactory()
+    {
+        int factoryCalls = 0;
+        using var reconnected = new ManualResetEventSlim(false);
+        using var engine = new DisplayDeviceEngine(() =>
+        {
+            factoryCalls++;
+            reconnected.Set();
+            return new FakeTransport { ConnectResult = false };
+        });
+
+        engine.ReconnectTick(null);
+
+        Assert.IsTrue(reconnected.Wait(2000), "the reconnect tick must drive a connect attempt through the factory");
+        Assert.AreEqual(1, factoryCalls);
+    }
+
+    [TestMethod]
+    public void ReconnectPeriod_DefaultsToFiveSeconds()
+    {
+        using var engine = new DisplayDeviceEngine();
+
+        Assert.AreEqual(TimeSpan.FromSeconds(5), engine.ReconnectPeriod);
     }
 }

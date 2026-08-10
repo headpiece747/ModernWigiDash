@@ -89,4 +89,31 @@ public class PriceFeedManagerRestPollTests
         Assert.AreEqual("CoinGecko", info.Source);
         StringAssert.Contains(stub.RequestUrls[0], "ids=bitcoin");
     }
+
+    [TestMethod]
+    public async Task PollCryptoSymbolAsync_BinanceUs24HrTicker_StoresPrice()
+    {
+        var stub = new StubHttpHandler(_ => Ok("""{"symbol":"BTCUSDT","lastPrice":"65000.0","priceChangePercent":"2.5"}"""));
+        using var feed = new PriceFeedManager(new HttpClient(stub));
+
+        await feed.PollCryptoSymbolAsync("BTC");
+
+        var info = feed.GetPrice("BTC", AssetKind.Crypto);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(65000m, info.Price);
+        Assert.AreEqual(2.5m, info.ChangePercent);
+        Assert.AreEqual("BinanceUS", info.Source);
+        StringAssert.Contains(stub.RequestUrls[0], "https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT");
+    }
+
+    [TestMethod]
+    public async Task PollCryptoSymbolAsync_UnparseableBody_StoresNothing()
+    {
+        var stub = new StubHttpHandler("{}");
+        using var feed = new PriceFeedManager(new HttpClient(stub));
+
+        await feed.PollCryptoSymbolAsync("BTC");
+
+        Assert.IsNull(feed.GetPrice("BTC", AssetKind.Crypto));
+    }
 }

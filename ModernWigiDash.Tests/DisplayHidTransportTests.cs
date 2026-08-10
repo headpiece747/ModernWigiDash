@@ -5,54 +5,14 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// Drives the transport's connect/init/frame/touch policy through the
-/// <see cref="ITransferBackend"/> seam — no hardware, no USB. The backend
-/// records every control and bulk transfer, so the protocol framing the
-/// transport owns (init sequence, frame header, touch parsing) is asserted
-/// exactly.
+/// <see cref="ITransferBackend"/> seam (the shared <see cref="RecordingBackend"/>
+/// in TestDoubles.cs) — no hardware, no USB. The backend records every control
+/// and bulk transfer, so the protocol framing the transport owns (init
+/// sequence, frame header, touch parsing) is asserted exactly.
 /// </summary>
 [TestClass]
 public class DisplayHidTransportTests
 {
-    private sealed record ControlCall(string Direction, byte Request, ushort WValue);
-
-    private sealed class RecordingBackend : ITransferBackend
-    {
-        public List<ControlCall> ControlCalls { get; } = [];
-        public List<byte[]> BulkWrites { get; } = [];
-        public bool IsOpen { get; set; } = true;
-        public bool ControlOutResult { get; set; } = true;
-        public bool ControlInResult { get; set; } = true;
-        public bool BulkWriteResult { get; set; } = true;
-        public byte[]? TouchResponse { get; set; }
-
-        public bool ControlOut(byte request, ushort wValue, byte[]? data)
-        {
-            ControlCalls.Add(new ControlCall("out", request, wValue));
-            return ControlOutResult;
-        }
-
-        public bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
-        {
-            ControlCalls.Add(new ControlCall("in", request, wValue));
-            if (TouchResponse is not null && request == DisplayProtocolConstants.CmdGetTouch)
-                TouchResponse.CopyTo(buffer, 0);
-            return ControlInResult;
-        }
-
-        /// <summary>When set, reports a partial transfer (short write) — mirroring
-        /// the real backends' full-transfer contract, a short write fails.</summary>
-        public int? BulkWriteTransferred { get; set; }
-
-        public bool BulkWrite(byte pipeId, byte[] data, out int transferred)
-        {
-            BulkWrites.Add(data);
-            transferred = BulkWriteTransferred ?? data.Length;
-            return BulkWriteResult && transferred == data.Length;
-        }
-
-        public void Dispose() => IsOpen = false;
-    }
-
     /// <summary>
     /// Subclass seam over <see cref="WinUsbBulkDevice"/>: replaces the real
     /// SetupAPI/WinUSB P/Invoke surface with canned results and call counts,
@@ -122,8 +82,10 @@ public class DisplayHidTransportTests
         Assert.IsTrue(ok);
         Assert.IsTrue(transport.IsConnected);
         Assert.AreEqual(1, fake.OpenCalls);
-        // PING (Connect) + PING (SendInitCommands) both go through the fake
-        Assert.AreEqual(2, fake.ControlInCalls);
+        // Exactly one PING in the whole connect: SendInitCommands owns it (the
+        // pre-PING that used to run in Connect duplicated it and had drifted —
+        // the provider loop opens the device and hands it over without PING).
+        Assert.AreEqual(1, fake.ControlInCalls);
         // Init sequence: brightness + 3x (ClearPage + AddWidget) + FrameHeader + GoToScreen
         Assert.AreEqual(9, fake.ControlOutCalls);
         Assert.AreEqual(1, fake.BulkWriteCalls); // blank framebuffer
@@ -136,15 +98,110 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.WinUsbDeviceFactory = () => fake;
 
-        // The WinUSB path must be abandoned after the failed PING; the LibUsb
-        // fallback then runs against the real device context, so the final
-        // outcome depends on whether hardware is attached. Assert the
-        // deterministic part: the fake was consulted and disposed.
+        // The WinUSB path must be abandoned after the failed PING (inside
+        // SendInitCommands — the only PING in the connect, so the fake sees
+        // exactly one ControlIn); the LibUsb fallback then runs against the
+        // real device context, so the final outcome depends on whether
+        // hardware is attached. Assert the deterministic part: the fake was
+        // consulted and disposed.
         bool ok = transport.Connect();
 
         Assert.AreEqual(1, fake.ControlInCalls, "The failed PING went through the factory-created fake");
         Assert.IsTrue(fake.Disposed, "The failed WinUSB device must be disposed");
         Assert.AreEqual(ok, transport.IsConnected, "Connection state must reflect the connect result");
+    }
+
+    // ── the provider loop: WinUSB → LibUsb fallback, drivable end-to-end ──
+
+    /// <summary>
+    /// The real WinUSB leg (driven by the WinUsbDeviceFactory seam) with the
+    /// LibUsb leg replaced by a fake provider — the fallback is deterministic,
+    /// no real hardware involved. <see cref="DisplayHidTransport.ProviderFactories"/>
+    /// is the seam that makes the LibUsb leg drivable.
+    /// </summary>
+    [TestMethod]
+    public void Connect_WinUsbFailsToOpen_FakeLibUsbProviderConnects()
+    {
+        var winUsb = new FakeWinUsbBulkDevice { OpenResult = false };
+        var libUsb = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.WinUsbDeviceFactory = () => winUsb;
+        transport.ProviderFactories =
+        [
+            transport.WinUsbProvider,
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        Assert.IsTrue(transport.IsConnected);
+        Assert.AreEqual(1, winUsb.OpenCalls, "WinUSB is attempted first");
+        Assert.IsTrue(winUsb.Disposed, "The failed WinUSB device must be disposed by its provider");
+        // The fallback backend was adopted and received the init sequence: the
+        // PING control-in is the first call.
+        Assert.AreEqual("in", libUsb.ControlCalls[0].Direction);
+        Assert.AreEqual(0x00, libUsb.ControlCalls[0].Request);
+    }
+
+    [TestMethod]
+    public void Connect_WinUsbInitFails_FakeLibUsbProviderConnects()
+    {
+        var winUsb = new FakeWinUsbBulkDevice { ControlResult = false };
+        var libUsb = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.WinUsbDeviceFactory = () => winUsb;
+        transport.ProviderFactories =
+        [
+            transport.WinUsbProvider,
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        Assert.IsTrue(transport.IsConnected);
+        Assert.IsTrue(winUsb.Disposed, "A backend whose init failed must be disposed before the fallback");
+        // The single PING (inside SendInitCommands) failed on the WinUSB
+        // stack — no pre-PING ran in Connect.
+        Assert.AreEqual(1, winUsb.ControlInCalls);
+    }
+
+    [TestMethod]
+    public void Connect_AllProvidersFail_NotConnected()
+    {
+        var winUsb = new FakeWinUsbBulkDevice { OpenResult = false };
+        using var transport = new DisplayHidTransport();
+        transport.WinUsbDeviceFactory = () => winUsb;
+        transport.ProviderFactories =
+        [
+            transport.WinUsbProvider,
+            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0", null, "init failed"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok);
+        Assert.IsFalse(transport.IsConnected);
+        Assert.IsTrue(winUsb.Disposed, "Every provider's partial state must be torn down");
+    }
+
+    [TestMethod]
+    public void Connect_ProvidersAreTriedInOrder_WinUsbFirstThenLibUsb()
+    {
+        List<string> order = [];
+        var libUsb = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "WinUSB", null, "init failed"),
+            new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return libUsb; }, "LibUsbDotNet 3.0", null, "init failed"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        CollectionAssert.AreEqual(new[] { "winusb", "libusb" }, order, "The provider list is tried strictly in order");
     }
 
     [TestMethod]

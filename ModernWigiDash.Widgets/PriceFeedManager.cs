@@ -366,9 +366,11 @@ public sealed class PriceFeedManager : IDisposable
 
     /// <summary>
     /// Shared REST polling loop: delay, then poll every subscribed symbol via
-    /// <paramref name="pollSymbol"/> (individual failures are non-fatal).
+    /// <paramref name="pollSymbol"/> (individual failures are non-fatal),
+    /// then run the optional <paramref name="afterBatch"/> action at the same
+    /// point of the cycle (e.g. the crypto loop's CoinGecko fallback).
     /// </summary>
-    private async Task RunRestPollLoopAsync(TimeSpan interval, IEnumerable<string> subscribed, Func<string, Task> pollSymbol)
+    private async Task RunRestPollLoopAsync(TimeSpan interval, IEnumerable<string> subscribed, Func<string, Task> pollSymbol, Func<Task>? afterBatch = null)
     {
         while (!_disposed)
         {
@@ -394,45 +396,33 @@ public sealed class PriceFeedManager : IDisposable
                     System.Diagnostics.Debug.WriteLine($"REST poll failed for {symbol}; continuing");
                 }
             }
+            if (afterBatch is not null)
+            {
+                await afterBatch();
+            }
         }
     }
 
     private async Task RunCryptoRestPollerAsync()
+        => await RunRestPollLoopAsync(_cryptoRestInterval, _subscribedCrypto.Keys, PollCryptoSymbolAsync, FallbackCoinGeckoAsync);
+
+    /// <summary>
+    /// One crypto REST poll hop: the BinanceUS 24hr ticker for one subscribed
+    /// symbol. The loop owns the per-symbol failure isolation (see
+    /// <see cref="RunRestPollLoopAsync"/>); this is fetch → parse → store only.
+    /// </summary>
+    internal async Task PollCryptoSymbolAsync(string sym)
     {
-        while (!_disposed)
+        var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token);
+        if (PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change))
         {
-            try
+            _prices[sym] = new PriceInfo
             {
-                await Task.Delay(_cryptoRestInterval, _cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Shutdown: end the loop normally instead of faulting the
-                // stored task (unobserved task faults on dispose).
-                break;
-            }
-            foreach (var sym in _subscribedCrypto.Keys)
-            {
-                try
-                {
-                    var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token);
-                    if (PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change))
-                    {
-                        _prices[sym] = new PriceInfo
-                        {
-                            Price = price,
-                            ChangePercent = change,
-                            Source = "BinanceUS",
-                            Timestamp = Clock.GetUtcNow().UtcDateTime
-                        };
-                    }
-                }
-                catch
-                {
-                    System.Diagnostics.Debug.WriteLine("Crypto REST poll failed for a symbol; continuing");
-                }
-            }
-            await FallbackCoinGeckoAsync();
+                Price = price,
+                ChangePercent = change,
+                Source = "BinanceUS",
+                Timestamp = Clock.GetUtcNow().UtcDateTime
+            };
         }
     }
 

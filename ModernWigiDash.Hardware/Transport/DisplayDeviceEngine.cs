@@ -33,6 +33,12 @@ public sealed class DisplayDeviceEngine : IDisposable
     private int _isDisposed;
     private readonly Timer _reconnectTimer;
 
+    /// <summary>
+    /// Test seam: the reconnect timer period (see <see cref="Start"/>).
+    /// Defaults to 5s — the reconnect cadence on a missing/vanished device.
+    /// </summary>
+    internal TimeSpan ReconnectPeriod { get; set; } = TimeSpan.FromSeconds(5);
+
     // Direct-USB touch polling: the engine owns the transport, reads the touch
     // report at a 16ms cadence, and normalizes it once via
     // TouchReport.ToEventType. Idle while not connected (simulation mode) —
@@ -98,10 +104,10 @@ public sealed class DisplayDeviceEngine : IDisposable
 
     /// <summary>
     /// Starts the engine's background work: the 16ms touch poll, the initial
-    /// connection attempt, and the 5s reconnect timer. Called once by the
-    /// window after construction; calling it again is harmless (the poll
-    /// loop, the connection gate, and the timer are each guarded) but not
-    /// required.
+    /// connection attempt, and the reconnect timer (period:
+    /// <see cref="ReconnectPeriod"/>). Called once by the window after
+    /// construction; calling it again is harmless (the poll loop, the
+    /// connection gate, and the timer are each guarded) but not required.
     /// </summary>
     public void Start()
     {
@@ -125,11 +131,17 @@ public sealed class DisplayDeviceEngine : IDisposable
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
 
-        _reconnectTimer.Change(5000, 5000);
+        _reconnectTimer.Change(ReconnectPeriod, ReconnectPeriod);
     }
 
 #pragma warning disable S1172 // timer callback signature requires the state parameter
-    private void ReconnectTick(object? _)
+    /// <summary>
+    /// One reconnect-timer tick: reconnects when the engine is alive, not
+    /// connected, and no connect attempt is in flight. Internal so tests can
+    /// drive the gate directly (the <see cref="Start"/>-armed timer is the
+    /// production caller).
+    /// </summary>
+    internal void ReconnectTick(object? _)
     {
         bool shouldReconnect;
         lock (_lock)

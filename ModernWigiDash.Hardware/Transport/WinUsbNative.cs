@@ -174,16 +174,36 @@ internal static class SetupApiNative
 /// Implements <see cref="ITransferBackend"/> directly — the adapter is the
 /// class, no wrapper needed. Members are virtual so tests can subclass with
 /// canned results and drive the transport's connect policy via
-/// <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>.
+/// <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>. The WinUSB/SetupAPI
+/// P/Invoke surface flows through the <see cref="WinUsbApi"/> delegate bag
+/// (production: <see cref="WinUsbApi.Default"/>; tests: managed fakes), so the
+/// Open failure and cleanup paths are scriptable without hardware.
 /// </summary>
 internal class WinUsbBulkDevice : ITransferBackend
 {
     private IntPtr _deviceHandle = IntPtr.Zero;
     private IntPtr _interfaceHandle = IntPtr.Zero;
+    private readonly WinUsbApi _api;
+
+    /// <summary>Production construction: the real P/Invoke surface.</summary>
+    public WinUsbBulkDevice()
+        : this(WinUsbApi.Default)
+    {
+    }
+
+    /// <summary>Test seam: an injected P/Invoke surface (see <see cref="WinUsbApi"/>).</summary>
+    internal WinUsbBulkDevice(WinUsbApi api)
+    {
+        _api = api;
+    }
 
     public virtual bool IsOpen => _interfaceHandle != IntPtr.Zero;
 
-    private static void Log(string msg) => FileLog.Write("[USB-WINUSB] " + msg);
+    private const string LogCategory = "USB-WINUSB";
+
+    private static void Log(string msg) => FileLog.Write($"[{LogCategory}] {msg}");
+
+    private readonly DiagLog _bulkDiagLog = new(LogCategory, 30);
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.
@@ -198,7 +218,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             SetupApiNative.NativeGuid guidStruct = SetupApiNative.NativeGuid.FromGuid(interfaceGuid);
             Log($"FromGuid: Data1=0x{guidStruct.Data1:X8} Data2=0x{guidStruct.Data2:X4} Data3=0x{guidStruct.Data3:X4} Data4=[{string.Join(",", guidStruct.Data4.Select(b => b.ToString("X2")))}]");
 
-            IntPtr deviceInfo = SetupApiNative.SetupDiGetClassDevsW(
+            IntPtr deviceInfo = _api.GetClassDevs(
                 ref guidStruct, null, IntPtr.Zero,
                 SetupApiNative.DigcfPresent | SetupApiNative.DigcfDeviceInterface);
 
@@ -218,7 +238,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                 ifaceData.InterfaceClassGuid = guidStruct;
                 Log($"SpDeviceInterfaceData CbSize={ifaceData.CbSize}");
 
-                if (!SetupApiNative.SetupDiEnumDeviceInterfaces(
+                if (!_api.EnumDeviceInterfaces(
                     deviceInfo, IntPtr.Zero, ref guidStruct, 0, ref ifaceData))
                 {
                     int error = Marshal.GetLastWin32Error();
@@ -231,9 +251,8 @@ internal class WinUsbBulkDevice : ITransferBackend
                 // Get required buffer size.
                 // This call is expected to fail with ERROR_INSUFFICIENT_BUFFER (122)
                 // when querying with a NULL buffer — that IS the success path.
-                SetupApiNative.SetupDiGetDeviceInterfaceDetailW(
+                _api.GetDeviceInterfaceDetail(
                     deviceInfo, ref ifaceData, IntPtr.Zero, 0, out uint requiredSize, IntPtr.Zero);
-
                 int sizeQueryError = Marshal.GetLastWin32Error();
                 Log($"SetupDiGetDeviceInterfaceDetailW size query: requiredSize={requiredSize} GetLastError={sizeQueryError} (0x{sizeQueryError:X8})");
 
@@ -257,7 +276,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                     Log($"SetupDiGetDeviceInterfaceDetailW: cbSize={detailCbSize} requiredSize={requiredSize} buffer={requiredSize}");
                     Marshal.WriteInt32(detailBuffer, detailCbSize);
 
-                    if (!SetupApiNative.SetupDiGetDeviceInterfaceDetailW(
+                    if (!_api.GetDeviceInterfaceDetail(
                         deviceInfo, ref ifaceData, detailBuffer, requiredSize, out _, IntPtr.Zero))
                     {
                         int error = Marshal.GetLastWin32Error();
@@ -282,7 +301,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                     // for overlapped I/O (see WinUsb_Initialize docs). WinUSB
                     // reads the FILE_FLAG_OVERLAPPED bit off the handle to
                     // decide how to process its internal IOCTLs.
-                    _deviceHandle = SetupApiNative.CreateFileW(
+                    _deviceHandle = _api.CreateFile(
                         devicePath,
                         SetupApiNative.GenericRead | SetupApiNative.GenericWrite,
                         SetupApiNative.FileShareRead | SetupApiNative.FileShareWrite,
@@ -301,11 +320,11 @@ internal class WinUsbBulkDevice : ITransferBackend
                     Log($"CreateFileW succeeded: handle=0x{_deviceHandle.ToInt64():X}");
 
                     // Initialize WinUSB
-                    if (!WinUsbNative.WinUsb_Initialize(_deviceHandle, out _interfaceHandle))
+                    if (!_api.Initialize(_deviceHandle, out _interfaceHandle))
                     {
                         int error = Marshal.GetLastWin32Error();
                         Log($"WinUsb_Initialize failed: GetLastError={error} (0x{error:X8})");
-                        SetupApiNative.CloseHandle(_deviceHandle);
+                        _api.CloseHandle(_deviceHandle);
                         _deviceHandle = IntPtr.Zero;
                         return false;
                     }
@@ -318,12 +337,12 @@ internal class WinUsbBulkDevice : ITransferBackend
                     {
                         // Control pipe timeout: 1000ms
                         Marshal.WriteInt32(timeoutPtr, 1000);
-                        WinUsbNative.WinUsb_SetPipePolicy(
+                        _api.SetPipePolicy(
                             _interfaceHandle, 0x00, WinUsbNative.PipeTransferTimeout, sizeof(int), timeoutPtr);
 
                         // Bulk OUT pipe timeout: 30000ms (30s for large transfers)
                         Marshal.WriteInt32(timeoutPtr, 30000);
-                        WinUsbNative.WinUsb_SetPipePolicy(
+                        _api.SetPipePolicy(
                             _interfaceHandle, 0x01, WinUsbNative.PipeTransferTimeout, sizeof(int), timeoutPtr);
                     }
                     finally
@@ -341,7 +360,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             }
             finally
             {
-                SetupApiNative.SetupDiDestroyDeviceInfoList(deviceInfo);
+                _api.DestroyDeviceInfoList(deviceInfo);
             }
         }
         catch (Exception ex)
@@ -366,7 +385,7 @@ internal class WinUsbBulkDevice : ITransferBackend
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            bool ok = WinUsbNative.WinUsb_WritePipe(
+            bool ok = _api.WritePipe(
                 _interfaceHandle, pipeId,
                 handle.AddrOfPinnedObject(),
                 (uint)data.Length,
@@ -375,8 +394,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             sw.Stop();
             elapsedMs = sw.ElapsedMilliseconds;
 
-            if (_bulkDiagLog.Due())
-                Log($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
+            _bulkDiagLog.Write($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
             if (!ok)
                 Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
@@ -400,8 +418,6 @@ internal class WinUsbBulkDevice : ITransferBackend
         }
     }
 
-    private readonly LogCadence _bulkDiagLog = new(30);
-
     /// <summary>
     /// Control OUT transfer (vendor command).
     /// </summary>
@@ -419,7 +435,7 @@ internal class WinUsbBulkDevice : ITransferBackend
 
         byte[] buffer = data?.Length > 0 ? data : [];
 
-        return WinUsbNative.WinUsb_ControlTransfer(
+        return _api.ControlTransfer(
             _interfaceHandle, setup, buffer, (uint)buffer.Length, out _, IntPtr.Zero);
     }
 
@@ -440,7 +456,7 @@ internal class WinUsbBulkDevice : ITransferBackend
 
         // A zero-byte control-in reads as failure (matches the LibUsb backend's
         // transferred > 0 semantics) — the PING depends on both backends agreeing.
-        bool ok = WinUsbNative.WinUsb_ControlTransfer(
+        bool ok = _api.ControlTransfer(
             _interfaceHandle, setup, buffer, (uint)buffer.Length, out uint transferred, IntPtr.Zero);
         return ok && transferred > 0;
     }
@@ -456,13 +472,13 @@ internal class WinUsbBulkDevice : ITransferBackend
     {
         if (_interfaceHandle != IntPtr.Zero)
         {
-            WinUsbNative.WinUsb_Free(_interfaceHandle);
+            _api.Free(_interfaceHandle);
             _interfaceHandle = IntPtr.Zero;
         }
 
         if (_deviceHandle != IntPtr.Zero && _deviceHandle != SetupApiNative.InvalidHandleValue)
         {
-            SetupApiNative.CloseHandle(_deviceHandle);
+            _api.CloseHandle(_deviceHandle);
             _deviceHandle = IntPtr.Zero;
         }
     }
