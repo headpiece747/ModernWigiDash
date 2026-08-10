@@ -65,12 +65,11 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
             return FrameTimeSnapshotFactory.Unavailable(_native.UnavailableReason, now);
         }
 
-        // Skip our own process — its render loop presents to the WigiDash
-        // window and would dominate the "foreground app" FPS readout. The
-        // resolver already excludes it; filtering here keeps the producer
-        // robust to whatever the seam returns.
+        // Candidate policy (own-process exclusion included) belongs to the
+        // resolver — it refuses the own pid at the root and never expands into
+        // it. The producer only filters to positive, process-like ids.
         List<int> candidates = _resolver.ResolveCandidates()
-            .Where(pid => pid > 0 && !TrackedTargetResolver.IsOwnProcess(pid))
+            .Where(pid => pid > 0)
             .ToList();
         if (candidates.Count == 0)
         {
