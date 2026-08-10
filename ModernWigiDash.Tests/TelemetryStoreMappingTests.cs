@@ -34,7 +34,7 @@ public class TelemetryStoreMappingTests
             ]
         });
 
-        LhmSnapshot snap = LhmSensorStore.ReadSnapshot();
+        SensorSnapshotDto snap = LhmSensorStore.ReadSnapshot();
 
         Assert.IsTrue(snap.IsConnected);
         Assert.AreEqual(1, snap.Readings.Count);
@@ -49,7 +49,7 @@ public class TelemetryStoreMappingTests
     {
         LhmSensorStore.UpdateFromDto(null);
 
-        LhmSnapshot snap = LhmSensorStore.ReadSnapshot();
+        SensorSnapshotDto snap = LhmSensorStore.ReadSnapshot();
 
         Assert.IsFalse(snap.IsConnected);
         Assert.AreEqual(0, snap.Readings.Count);
@@ -152,7 +152,7 @@ public class TelemetryStoreMappingTests
             Readings = []
         });
 
-        LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
 
         Assert.IsNotNull(fresh);
         Assert.IsTrue(fresh.IsConnected);
@@ -178,7 +178,7 @@ public class TelemetryStoreMappingTests
         var clock = new TimeProviderFake(new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc));
         LhmSensorStore.UpdateFromDto(null);
 
-        LhmSnapshot? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
 
         Assert.IsNotNull(fresh, "A null-DTO snapshot is stamped with the receive time — freshness ≠ connectivity");
         Assert.IsFalse(fresh.IsConnected, "The widget renders the unavailable state via IsConnected");

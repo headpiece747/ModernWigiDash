@@ -43,11 +43,11 @@ public class HardwareMonitorWidget : ModernWidgetBase
     // The SensorLabel→reading match was a linear scan per frame; the match is
     // cached keyed by (snapshot identity, label) — a new snapshot (~1/s) or a
     // label change re-scans, the frames in between reuse the result.
-    private LhmSnapshot? _lastMatchSnapshot;
+    private SensorSnapshotDto? _lastMatchSnapshot;
     private string _lastMatchLabel = "";
-    private LhmReading? _matchedReading;
+    private SensorReadingDto? _matchedReading;
 
-    private LhmReading? MatchReading(LhmSnapshot snapshot)
+    private SensorReadingDto? MatchReading(SensorSnapshotDto snapshot)
     {
         if (!ReferenceEquals(snapshot, _lastMatchSnapshot) || _lastMatchLabel != SensorLabel)
         {
@@ -68,7 +68,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
         // The store owns the staleness decision; a stale or disconnected
         // snapshot renders the unavailable state instead of frozen data.
-        LhmSnapshot? snapshot = LhmSensorStore.TryReadFresh();
+        SensorSnapshotDto? snapshot = LhmSensorStore.TryReadFresh();
         if (snapshot == null || !snapshot.IsConnected)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start LibreHardwareService to read hardware sensors", text);
@@ -81,7 +81,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
             return;
         }
 
-        LhmReading? reading = MatchReading(snapshot);
+        SensorReadingDto? reading = MatchReading(snapshot);
         if (reading == null)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Sensor not found", $"{SensorLabel} is not currently available", text);
@@ -123,7 +123,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// else the manual <see cref="MaxValue"/>. Falls back to a value-derived
     /// floor so a zero/negative max can never produce a division-by-zero gauge.
     /// </summary>
-    internal float ResolveMax(LhmReading reading, float value)
+    internal float ResolveMax(SensorReadingDto reading, float value)
     {
         if (AutoScale)
         {
@@ -230,7 +230,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
     }
 
-    private void RenderGraph(SKCanvas canvas, SKRect bounds, string label, float value, string unit, int decimals, SKColor accent, SKColor text, LhmReading reading)
+    private void RenderGraph(SKCanvas canvas, SKRect bounds, string label, float value, string unit, int decimals, SKColor accent, SKColor text, SensorReadingDto reading)
     {
         float pad = 16f;
         DrawHeader(canvas, bounds, label, pad, text);

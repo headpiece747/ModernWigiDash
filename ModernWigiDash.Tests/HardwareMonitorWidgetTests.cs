@@ -1,3 +1,4 @@
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
 
@@ -11,14 +12,16 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class HardwareMonitorWidgetTests
 {
-    private static readonly LhmReading CpuTemp = new(
-        SensorId: "cpu-temp",
-        SensorName: "CPU Package",
-        Label: "Mainboard: CPU Package",
-        Unit: "°C",
-        Value: 55.5,
-        Min: 40,
-        Max: 90);
+    private static readonly SensorReadingDto CpuTemp = new()
+    {
+        SensorId = "cpu-temp",
+        SensorName = "CPU Package",
+        HardwareName = "Mainboard",
+        Unit = "°C",
+        Value = 55.5,
+        Min = 40,
+        Max = 90,
+    };
 
     private static HardwareMonitorWidget CreateWidget() => new()
     {
@@ -29,7 +32,12 @@ public class HardwareMonitorWidgetTests
 
     private static void SeedFreshSnapshot()
     {
-        LhmSensorStore.Update(new LhmSnapshot(true, DateTime.UtcNow, [CpuTemp]));
+        LhmSensorStore.Update(new SensorSnapshotDto
+        {
+            IsConnected = true,
+            LastUpdate = DateTime.UtcNow,
+            Readings = [CpuTemp],
+        });
     }
 
     private static SKSurface CreateSurface() => SKSurface.Create(new SKImageInfo(203, 148));

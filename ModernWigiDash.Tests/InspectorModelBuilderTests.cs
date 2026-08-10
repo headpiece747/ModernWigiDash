@@ -117,11 +117,16 @@ public class InspectorModelBuilderTests
     public void Describe_SensorSelector_OptionsComeFromLiveStore()
     {
         LhmSensorStore.Reset();
-        LhmSensorStore.Update(new LhmSnapshot(true, DateTime.UtcNow,
+        LhmSensorStore.Update(new SensorSnapshotDto
+        {
+            IsConnected = true,
+            LastUpdate = DateTime.UtcNow,
+            Readings =
             [
-                new LhmReading("cpu", "CPU Temp", "Mainboard: CPU Temp", "°C", 50, 40, 90),
-                new LhmReading("gpu", "GPU Temp", "GPU: GPU Temp", "°C", 60, 40, 90)
-            ]));
+                new SensorReadingDto { SensorId = "cpu", SensorName = "CPU Temp", HardwareName = "Mainboard", Unit = "°C", Value = 50, Min = 40, Max = 90 },
+                new SensorReadingDto { SensorId = "gpu", SensorName = "GPU Temp", HardwareName = "GPU", Unit = "°C", Value = 60, Min = 40, Max = 90 },
+            ],
+        });
 
         var sensorWidget = new SensorSelectorWidgetStub();
         var descriptions = InspectorModelBuilder.Describe(new PlacedWidgetInstance

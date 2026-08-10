@@ -22,6 +22,12 @@ public sealed record SensorReadingDto
     public double Min { get; set; }
 
     public double Max { get; set; }
+
+    /// <summary>
+    /// The human-facing "<c>HardwareName: SensorName</c>" string — the single
+    /// derivation site (the sensor picker and the widgets both key on it).
+    /// </summary>
+    public string Label => $"{HardwareName}: {SensorName}";
 }
 
 /// <summary>
