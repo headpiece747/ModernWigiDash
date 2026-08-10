@@ -18,6 +18,14 @@ namespace ModernWigiDash.Sdk;
 /// </summary>
 public sealed class FrameDelivery : IDisposable
 {
+    /// <summary>The presentation cadence (30 FPS) - the single owner of the frame
+    /// rate, consumed by the delivery pacing and the App's FramePump tick so
+    /// the two can never disagree.</summary>
+    public const double FramesPerSecond = 30.0;
+
+    /// <summary>The pacing interval for one frame (1000/30 ms).</summary>
+    public static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(1000.0 / FramesPerSecond);
+
     private readonly record struct FrameSlot(byte[] Buffer);
 
     private readonly Channel<FrameSlot> _channel;
@@ -67,7 +75,7 @@ public sealed class FrameDelivery : IDisposable
 
         _encoder = encoder;
         _pool = pool;
-        _minInterval = minInterval ?? TimeSpan.FromMilliseconds(33);
+        _minInterval = minInterval ?? FrameInterval;
         _isReady = isReady;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _send = send;

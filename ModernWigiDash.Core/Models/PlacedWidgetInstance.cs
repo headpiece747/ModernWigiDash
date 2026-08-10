@@ -13,8 +13,8 @@ public class PlacedWidgetInstance
     // Absolute pixel positioning on active framebuffer (1016x592)
     public float X { get; set; }
     public float Y { get; set; }
-    public float Width { get; set => field = Math.Max(10f, value); } = 408f;
-    public float Height { get; set => field = Math.Max(10f, value); } = 300f;
+    public float Width { get; set => field = Math.Max(10f, value); } = GridSizePreset.Size2x2.ToSize().Width;
+    public float Height { get; set => field = Math.Max(10f, value); } = GridSizePreset.Size2x2.ToSize().Height;
 
     // Layering & Transparency
     public int ZIndex { get; set; }

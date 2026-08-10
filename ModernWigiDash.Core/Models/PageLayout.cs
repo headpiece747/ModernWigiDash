@@ -2,9 +2,14 @@ namespace ModernWigiDash.Core.Models;
 
 public class PageLayout
 {
+    /// <summary>The one default page background — the compositor's parse
+    /// fallback references this, so the fallback and the default can never
+    /// drift apart.</summary>
+    public const string DefaultBackgroundHexColor = "#12141D";
+
     public string PageId { get; set; } = Guid.NewGuid().ToString();
     public string PageName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Main Dashboard" : value.Trim(); } = "Main Dashboard";
-    public string BackgroundHexColor { get; set => field = string.IsNullOrWhiteSpace(value) ? "#12141D" : value.Trim(); } = "#12141D";
+    public string BackgroundHexColor { get => field; set => field = string.IsNullOrWhiteSpace(value) ? DefaultBackgroundHexColor : value.Trim(); } = DefaultBackgroundHexColor;
     public string BackgroundImagePath { get; set; } = string.Empty;
 
     public bool SnapToGrid { get; set; } = true;

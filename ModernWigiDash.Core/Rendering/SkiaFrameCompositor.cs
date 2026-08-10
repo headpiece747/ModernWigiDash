@@ -29,7 +29,7 @@ public class SkiaFrameCompositor : IDisposable
     // cached and re-colored per widget instead of allocated per frame.
     private readonly SKPaint _alphaPaint = new();
     private string? _lastBgHex;
-    private SKColor _lastBgColor = new(27, 41, 48);
+    private SKColor _lastBgColor = SKColor.TryParse(PageLayout.DefaultBackgroundHexColor, out var initial) ? initial : new SKColor(18, 20, 29);
 
     public SkiaFrameCompositor()
     {
@@ -59,7 +59,9 @@ public class SkiaFrameCompositor : IDisposable
             _lastBgHex = page.BackgroundHexColor;
             _lastBgColor = SKColor.TryParse(page.BackgroundHexColor, out var parsed)
                 ? parsed
-                : new SKColor(27, 41, 48); // #1B2930
+                : SKColor.TryParse(PageLayout.DefaultBackgroundHexColor, out var fallback)
+                    ? fallback
+                    : new SKColor(18, 20, 29);
         }
         canvas.Clear(_lastBgColor);
 

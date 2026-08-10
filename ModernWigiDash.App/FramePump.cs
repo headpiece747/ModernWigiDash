@@ -1,4 +1,5 @@
 using System.Windows.Threading;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
@@ -23,14 +24,15 @@ public sealed class FramePump : IDisposable
     /// <param name="requestRepaint">Asks the window to redraw the composed
     /// buffer (e.g. <c>InvalidateVisual</c>).</param>
     /// <param name="onTick">Optional per-tick callback (e.g. badge updates).</param>
-    /// <param name="interval">Tick interval; defaults to 33.3ms (≈30 FPS, the
-    /// device capability).</param>
+    /// <param name="interval">Tick interval; defaults to the shared 30 FPS
+    /// cadence (<see cref="FrameDelivery.FrameInterval"/> — the single
+    /// frame-rate owner).</param>
     public FramePump(Action composeAndSend, Action requestRepaint, Action? onTick = null, TimeSpan? interval = null)
     {
         _composeAndSend = composeAndSend;
         _requestRepaint = requestRepaint;
         _onTick = onTick;
-        _timer = new DispatcherTimer { Interval = interval ?? TimeSpan.FromMilliseconds(33.3) };
+        _timer = new DispatcherTimer { Interval = interval ?? FrameDelivery.FrameInterval };
         _timer.Tick += (_, _) =>
         {
             _composeAndSend();
