@@ -109,7 +109,7 @@ public sealed class InputController
     /// flag is derived by the source-aware <see cref="Press"/>/<see cref="Move"/>
     /// /<see cref="Release"/> surface; direct calls (tests) pass it explicitly.
     /// </summary>
-    public void Feed(TouchEventType type, float x, float y, bool suppressWidgetRouting)
+    internal void Feed(TouchEventType type, float x, float y, bool suppressWidgetRouting)
     {
         InputState state = _state();
         var outcome = _machine.Feed(type, x, y, state.PageCount, state.ActivePageIndex);
@@ -211,7 +211,7 @@ public sealed class InputController
         _iconGrabMoved = false;
         _lastPos = new Point(x, y);
 
-        if (hit == null || !editMode)
+        if (hit is null || !editMode)
             return _manipulation;
 
         // Click in the resize handle (bottom-right corner) resizes. The handle
@@ -255,7 +255,7 @@ public sealed class InputController
     internal bool MoveManipulation(PlacedWidgetInstance? widget, float x, float y, bool editMode, out bool changed)
     {
         changed = false;
-        if (widget == null || !editMode || _manipulation == ManipulationKind.None)
+        if (widget is null || !editMode || _manipulation == ManipulationKind.None)
             return false;
 
         float dx = x - (float)_lastPos.X;
@@ -301,7 +301,7 @@ public sealed class InputController
         iconMoved = _iconGrabMoved;
 
         bool wasManipulating = _manipulation != ManipulationKind.None;
-        if (wasManipulating && widget != null && editMode && _state().ActivePage.SnapToGrid &&
+        if (wasManipulating && widget is not null && editMode && _state().ActivePage.SnapToGrid &&
             _manipulation is ManipulationKind.Drag or ManipulationKind.Resize)
         {
             widget.X = GridSizeExtensions.SnapX(widget.X);

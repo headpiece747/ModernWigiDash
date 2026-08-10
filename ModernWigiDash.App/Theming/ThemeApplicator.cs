@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Media;
@@ -74,9 +73,8 @@ public sealed class ThemeApplicator : IThemeApplicator
     internal static string Fingerprint(ThemeSettings theme)
     {
         var sb = new StringBuilder();
-        foreach (var prop in typeof(ThemeSettings).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var prop in ThemeSettings.StringProperties)
         {
-            if (prop.PropertyType != typeof(string)) continue;
             sb.Append(prop.Name).Append('=').Append((string?)prop.GetValue(theme)).Append(';');
         }
         return sb.ToString();

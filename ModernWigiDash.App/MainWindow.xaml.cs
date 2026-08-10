@@ -5,7 +5,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
-using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Models;
@@ -30,9 +29,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly FramePump _framePump;
 
     /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
-    /// Injected PresentMon interop so the window can be constructed with a
-    /// fake in tests (no real DLL load).</summary>
-    private readonly IPresentMonNative _presentMonNative;
+    /// The PresentMon interop is injected as a ctor parameter so the window
+    /// can be constructed with a fake in tests (no real DLL load).</summary>
     private readonly TelemetryProducers _telemetry;
 
     private ProfileLayout _profile;
@@ -58,11 +56,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // writes used) bound to the direct-USB engine (ADR-0005).
     private readonly DisplayPresenter _presenter;
 
-    // Deep modules: the property inspector, the small host dialogs, and the
-    // default profile builder own their logic; the window keeps wiring.
+    // Deep modules: the property inspector, the small host dialogs, the page
+    // tabs strip, and the default profile builder own their logic; the window
+    // keeps wiring.
     private readonly Inspector.InspectorController _inspector;
     private readonly DialogHost _dialogHost;
-    private readonly StarterProfile _starterProfile;
+    private readonly PageTabsView _pageTabs;
 
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
@@ -81,8 +80,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// construction never loads the real DLL in the test host.</summary>
     internal MainWindow(IPresentMonNative presentMonNative)
     {
-        _presentMonNative = presentMonNative;
-
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
         // connect + touch poll explicitly.
@@ -99,7 +96,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // One poll loop per direct producer, owned by the telemetry module:
         // SENSOR (LHS shared memory, ADR-0004) and FRAMETIME (PresentMon,
         // ADR-0003) start immediately and stop on close.
-        _telemetry = new TelemetryProducers(_presentMonNative, Log);
+        _telemetry = new TelemetryProducers(presentMonNative, Log);
         _telemetry.Start();
 
         // The engine's Start() above fires the initial connect.
@@ -115,7 +112,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // 3. Build the host modules (input, inspector, dialog host) BEFORE the
         // starter profile. Widget InitializeAsync runs synchronously inside
-        // _starterProfile.Create() and may call back into the context (e.g.
+        // starterProfile.Create() and may call back into the context (e.g.
         // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
         // ShowDeviceAuthorization). Constructing the modules first removes the
         // startup NRE when those callbacks arrive before the modules exist.
@@ -123,7 +120,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // manipulation + the press orchestration. All input sources cross its
         // source-aware surface; page-switch UI work stays here.
         _inputController = new Input.InputController(
-            () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
+            // _profile is assigned below (starter profile) before any input
+            // event can run — the lambda only dereferences it at invoke time.
+            () => new Input.InputState(_profile!.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
             navigateTo: SwitchToPage,
             requestRender: () => SkiaCanvas.InvalidateVisual(),
             select: SelectWidget);
@@ -151,15 +150,26 @@ public partial class MainWindow : Window, IModernWigiDashContext
             requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
             _dialogHost);
 
-        // 4. Setup Default Profile Layout with 3 cool starter widgets
-        _starterProfile = new StarterProfile(_loader, this);
-        _profile = _starterProfile.Create();
-        RebuildPageTabsUI();
+        // Page-tabs strip module: owns tab construction, the wheel scroll, and
+        // scroll-into-view; the window keeps only the page-action seams.
+        _pageTabs = new PageTabsView(
+            PanelPageTabs,
+            ScrollerPageTabs,
+            key => FindResource(key),
+            SwitchToPage,
+            RenamePage,
+            DeletePage);
 
-        // 5. Hook up USB Hardware physical touch events to Skia RouteTouch & hardware page swipe navigation.
-        // Display touches are runtime input: they always route to widgets (hotkeys
-        // fire on the device even while the desktop is in edit mode) — only the
-        // mouse path carries the desktop edit-mode veto.
+        // 4. Setup Default Profile Layout with 3 cool starter widgets
+        var starterProfile = new StarterProfile(_loader, this);
+        _profile = starterProfile.Create();
+        _pageTabs.Rebuild(_profile);
+
+        // 5. Route device touch input through the single input module. Display
+        // touches are runtime input: Press/Move/Release cross the controller's
+        // source-aware surface with the edit-mode flag off, so hotkeys fire on
+        // the device even while the desktop is in edit mode — only the mouse
+        // path carries the desktop edit-mode veto.
         _usbDevice.OnTouchEvent += (point, touchType) =>
         {
             Dispatcher.BeginInvoke(() =>
@@ -179,7 +189,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             });
         };
 
-        // 5. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
+        // 6. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
         // composes + sends once per tick, then repaints so the window draws
         // the same buffer it sent; the badge refresh rides the tick.
         _framePump = new FramePump(
@@ -192,7 +202,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             onTick: UpdateUsbBadge);
         _framePump.Start(); // Start the render loop immediately
 
-        // 6. Clean lifecycle shutdown on window close / debugging stop
+        // 7. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
         {
             _framePump.Dispose();
@@ -240,7 +250,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// </summary>
     private void RefreshAfterMutation(PlacedWidgetInstance? selection)
     {
-        RebuildPageTabsUI();
+        _pageTabs.Rebuild(_profile);
         SelectWidget(selection);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
@@ -304,13 +314,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // A manipulation consumes the sample; otherwise the controller feeds
         // the machine (page navigation + widget touch routing).
-        if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed))
+        if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed) && changed)
         {
-            if (changed)
-            {
-                _inspector.RefreshTransforms();
-                SkiaCanvas.InvalidateVisual();
-            }
+            _inspector.RefreshTransforms();
+            SkiaCanvas.InvalidateVisual();
         }
     }
 
@@ -391,12 +398,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     #region Catalog, Header, and Action Handlers
 
-    private void ScrollerPageTabs_MouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        ScrollerPageTabs.ScrollToHorizontalOffset(
-            ScrollerPageTabs.HorizontalOffset - e.Delta);
-    }
-
     private void TxtSearchCatalog_TextChanged(object sender, TextChangedEventArgs e) => RefreshCatalog();
 
     /// <summary>One catalog sort, three call sites: the initial fill, the
@@ -414,81 +415,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
             if (placed == null) return;
 
             RefreshSelection(placed);
-        }
-    }
-
-    private void RebuildPageTabsUI()
-    {
-        PanelPageTabs.Children.Clear();
-        foreach (var tab in PageTabsViewModel.Build(_profile))
-        {
-            bool isActive = tab.IsActive;
-            bool canDelete = tab.CanDelete;
-
-            var container = new Grid { Margin = new Thickness(3, 0, 3, 0) };
-
-            var btn = new Button
-            {
-                Content = $"📄 {tab.PageName}",
-                Padding = new Thickness(14, 6, canDelete ? 56 : 42, 6),
-                Style = isActive ? (Style)FindResource("AccentButton") : (Style)FindResource(typeof(Button))
-            };
-            btn.Click += (s, e) => SwitchToPage(tab.Index);
-            container.Children.Add(btn);
-
-            var renameBtn = new Button
-            {
-                Content = "✏️",
-                FontSize = 10,
-                ToolTip = "Rename page",
-                Foreground = isActive ? Brushes.White : (Brush)FindResource("TextSecondary"),
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Width = 20,
-                Height = 20,
-                Padding = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, canDelete ? 24 : 4, 0),
-                Cursor = Cursors.Hand
-            };
-            renameBtn.Click += (s, e) => RenamePage(tab.Index);
-            container.Children.Add(renameBtn);
-
-            if (canDelete)
-            {
-                var closeBtn = new Button
-                {
-                    Content = "✕",
-                    FontSize = 10,
-                    Foreground = isActive ? Brushes.White : (Brush)FindResource("TextSecondary"),
-                    Background = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    Width = 20,
-                    Height = 20,
-                    Padding = new Thickness(0),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 4, 0),
-                    Cursor = Cursors.Hand
-                };
-                closeBtn.Click += (s, e) => DeletePage(tab.Index);
-                container.Children.Add(closeBtn);
-            }
-
-            PanelPageTabs.Children.Add(container);
-        }
-
-        ScrollToPage(_profile.ActivePageIndex);
-    }
-
-    /// <summary>Brings the page tab at the given index into view.</summary>
-    private void ScrollToPage(int index)
-    {
-        if (PanelPageTabs.Children.Count > index &&
-            PanelPageTabs.Children[index] is FrameworkElement targetTab)
-        {
-            targetTab.BringIntoView();
         }
     }
 

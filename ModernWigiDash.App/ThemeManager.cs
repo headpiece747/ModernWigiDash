@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Reflection;
 using System.Windows;
 using System.Windows.Media;
 using ModernWigiDash.Core.Theming;
@@ -36,9 +35,8 @@ public static class ThemeManager
         var resources = Application.Current?.Resources;
         if (resources == null) return;
 
-        foreach (var prop in typeof(ThemeSettings).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        foreach (var prop in ThemeSettings.StringProperties)
         {
-            if (prop.PropertyType != typeof(string)) continue;
             string? hex = (string?)prop.GetValue(ThemeSettings.Theme);
             if (string.IsNullOrWhiteSpace(hex)) continue;
 

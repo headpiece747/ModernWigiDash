@@ -147,8 +147,7 @@
                         </Grid.ColumnDefinitions>
                         <ScrollViewer x:Name="ScrollerPageTabs" Grid.Column="0" HorizontalScrollBarVisibility="Auto"
                                       VerticalScrollBarVisibility="Disabled" MaxWidth="900"
-                                      HorizontalAlignment="Center"
-                                      MouseWheel="ScrollerPageTabs_MouseWheel">
+                                      HorizontalAlignment="Center">
                             <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
                         </ScrollViewer>
                         <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>

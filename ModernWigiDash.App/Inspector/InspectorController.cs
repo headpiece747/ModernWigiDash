@@ -84,7 +84,7 @@ public sealed class InspectorController
     public void Refresh()
     {
         var selected = _host.GetSelectedWidget();
-        if (selected == null)
+        if (selected is null)
         {
             _host.EmptyPanel.Visibility = Visibility.Visible;
             _host.ActivePanel.Visibility = Visibility.Collapsed;
@@ -110,7 +110,7 @@ public sealed class InspectorController
 
             // Build dynamic custom property editors for the widget
             _host.CustomProperties.Children.Clear();
-            if (selected.ActiveInstance != null)
+            if (selected.ActiveInstance is not null)
             {
                 InspectorPanelRenderer.Render(
                     selected,
@@ -146,7 +146,7 @@ public sealed class InspectorController
     public void RefreshTransforms()
     {
         var selected = _host.GetSelectedWidget();
-        if (selected == null) return;
+        if (selected is null) return;
         _isUpdatingInspector = true;
         try
         {
@@ -169,7 +169,7 @@ public sealed class InspectorController
     public void ApplyPropertyValue(PropertyInfo? prop, object value)
     {
         var selected = _host.GetSelectedWidget();
-        if (selected?.ActiveInstance == null || prop == null) return;
+        if (selected?.ActiveInstance is null || prop is null) return;
 
         object? converted = value;
         // TextBox input arrives as string; convert to the property's CLR type
@@ -190,7 +190,7 @@ public sealed class InspectorController
     public void TransformChanged(object sender, TextChangedEventArgs e)
     {
         var selected = _host.GetSelectedWidget();
-        if (_isUpdatingInspector || selected == null) return;
+        if (_isUpdatingInspector || selected is null) return;
 
         if (_policy.TryParsePosition(_host.PosX.Text, out float x)) selected.X = x;
         if (_policy.TryParsePosition(_host.PosY.Text, out float y)) selected.Y = y;
@@ -206,7 +206,7 @@ public sealed class InspectorController
     public void OpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         var selected = _host.GetSelectedWidget();
-        if (_isUpdatingInspector || selected == null) return;
+        if (_isUpdatingInspector || selected is null) return;
 
         selected.Opacity = _policy.ClampOpacity((float)_host.OpacitySlider.Value);
         _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);

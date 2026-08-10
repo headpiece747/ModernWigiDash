@@ -1,5 +1,3 @@
-using System;
-using System.Windows;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 

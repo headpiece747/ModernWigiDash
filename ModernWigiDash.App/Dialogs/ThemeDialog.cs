@@ -59,8 +59,7 @@ public sealed class ThemeDialog : Window
         Grid.SetRow(scroll, 1);
         var fields = new StackPanel();
 
-        var props = typeof(ThemeSettings).GetProperties()
-            .Where(p => p.PropertyType == typeof(string))
+        var props = ThemeSettings.StringProperties
             .OrderBy(p => ThemeSettings.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
             .ThenBy(p => p.Name);
 

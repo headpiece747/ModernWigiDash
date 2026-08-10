@@ -1,5 +1,3 @@
-using ModernWigiDash.Sdk;
-
 namespace ModernWigiDash.App.PresentMon;
 
 /// <summary>

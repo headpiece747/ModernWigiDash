@@ -29,18 +29,19 @@ public sealed class TelemetryProducers : IDisposable
     /// <param name="presentMonNative">The runtime-loaded PresentMon interop
     /// (injected so tests never load the real DLL).</param>
     /// <param name="log">Log sink (the window's FileLog line writer).</param>
-    /// <param name="lhsReader">The LHS map reader (injectable so tests drive
-    /// the poll tick with an in-memory map source).</param>
+    /// <param name="lhsMapSource">The LHS shared-memory map source seam
+    /// (injectable so tests drive the poll tick with an in-memory map); null
+    /// selects the real memory-mapped adapter — the one default, chosen here.</param>
     /// <param name="targetResolver">The PresentMon tracking-target resolver
     /// (injectable so tests can stub the foreground window).</param>
     public TelemetryProducers(
         IPresentMonNative presentMonNative,
         Action<string> log,
-        LhmSharedMemoryReader? lhsReader = null,
+        ILhmMapSource? lhsMapSource = null,
         TrackedTargetResolver? targetResolver = null)
     {
         _log = log;
-        _lhsReader = lhsReader ?? new LhmSharedMemoryReader();
+        _lhsReader = new LhmSharedMemoryReader(lhsMapSource ?? new MemoryMappedLhmMapSource());
         _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, targetResolver ?? new TrackedTargetResolver());
 
         // One poll loop per direct producer. The frame-time loop is gated on

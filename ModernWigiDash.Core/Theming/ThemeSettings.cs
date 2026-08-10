@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.IO;
+using System.Reflection;
 using System.Text.Json;
 
 namespace ModernWigiDash.Core.Theming;
@@ -48,6 +48,19 @@ public class ThemeSettings
     public string DangerBorder { get; set; } = "#EF4444";
     public string SuccessBackground { get; set; } = "#064E3B";
     public string SuccessBorder { get; set; } = "#10B981";
+
+    /// <summary>
+    /// Every themeable property: the string-typed instance properties of this
+    /// type. The single enumeration of the "themeable = string-typed property"
+    /// rule, shared by the resource applier, the change fingerprint, and the
+    /// theme dialog — so they can never drift apart. Static, so it never
+    /// enumerates itself.
+    /// </summary>
+    public static IReadOnlyList<PropertyInfo> StringProperties { get; } =
+        typeof(ThemeSettings)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(string))
+            .ToArray();
 
     /// <summary>
     /// The active theme. Lazily loaded from app_theme.json on first access so

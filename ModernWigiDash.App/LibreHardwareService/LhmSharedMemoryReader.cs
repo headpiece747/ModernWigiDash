@@ -4,16 +4,17 @@ using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.LibreHardwareService;
 
-/// <summary>
-/// App-side reader for LibreHardwareService's shared-memory sensor maps.
-/// Owns the poll policy (map source → parse → outcome) and the pure parsing
-/// (<see cref="TryParse"/>); the mutex/map/copy I/O lives behind the
-/// <see cref="ILhmMapSource"/> seam. Never throws — every failure yields a
-/// disconnected snapshot, and <see cref="LastError"/> carries the reason for
-/// the poll tick to log once per change.
-/// </summary>
-public sealed class LhmSharedMemoryReader
-{
+    /// <summary>App-side reader for LibreHardwareService's shared-memory sensor
+    /// maps. Owns the poll policy (map source → parse → outcome) and the pure
+    /// parsing (<see cref="TryParse"/>); the mutex/map/copy I/O lives behind
+    /// the injected <see cref="ILhmMapSource"/> seam — the reader never creates
+    /// a map source itself, so the production default is chosen once by the
+    /// owning module. Never throws — every failure yields a disconnected
+    /// snapshot, and <see cref="LastError"/> carries the reason for the poll
+    /// tick to log once per change.
+    /// </summary>
+    public sealed class LhmSharedMemoryReader
+    {
     // LibreHardwareService (epinter) header layout — mirrored from its
     // MemoryMappedSensors source. The metadata block is 4 + MetadataSize
     // (MetadataSize is sizeof(int)+sizeof(long) = 12, so the index/data
@@ -22,14 +23,10 @@ public sealed class LhmSharedMemoryReader
     internal const int OffsetMetaDataSize = 0;
     internal const int OffsetLastUpdate = 8;
     internal const int OffsetIndexLength = 16;
-    internal const int OffsetIndexOffset = 20;
-    internal const int OffsetIndexFormat = 24;
-    internal const int OffsetDataLength = 28;
-    internal const int OffsetDataOffset = 32;
     internal const int OffsetReserved = 36;
 
     // Fixed 52-byte header block: fields run OffsetIndexLength..OffsetReserved+16
-    // (OffsetIndexLength..OffsetDataOffset is 20 bytes + 16 reserved).
+    // (IndexLength..DataOffset is 20 bytes + 16 reserved).
     internal const int FieldsBlockSize = OffsetReserved + 16 - OffsetIndexLength;
     internal const int FixedHeaderSize = OffsetReserved + 16;
     internal const int IndexFormatJson = 1;
@@ -47,9 +44,12 @@ public sealed class LhmSharedMemoryReader
 
     private readonly ILhmMapSource _mapSource;
 
-    public LhmSharedMemoryReader(ILhmMapSource? mapSource = null)
+    /// <param name="mapSource">The map I/O adapter (memory-mapped production
+    /// adapter or an in-memory fake); required — the default is chosen by the
+    /// owning module, not the reader.</param>
+    public LhmSharedMemoryReader(ILhmMapSource mapSource)
     {
-        _mapSource = mapSource ?? new MemoryMappedLhmMapSource();
+        _mapSource = mapSource;
     }
 
     /// <summary>
