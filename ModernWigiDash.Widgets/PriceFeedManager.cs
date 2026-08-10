@@ -513,7 +513,7 @@ public sealed class PriceFeedManager : IDisposable
     private async Task RunStockRestPollerAsync()
         => await RunRestPollLoopAsync(_stockRestInterval, _subscribedStocks.Keys, PollStockSymbolAsync);
 
-    private async Task PollStockSymbolAsync(string sym)
+    internal async Task PollStockSymbolAsync(string sym)
     {
         if (!IsValidSymbol(sym)) return;
         var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
@@ -532,7 +532,7 @@ public sealed class PriceFeedManager : IDisposable
     private async Task RunFxRestPollerAsync()
         => await RunRestPollLoopAsync(_stockRestInterval, _subscribedFx.Keys, PollFxPairAsync);
 
-    private async Task PollFxPairAsync(string key)
+    internal async Task PollFxPairAsync(string key)
     {
         if (!IsValidFxKey(key))
         {
@@ -678,7 +678,7 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private async Task FallbackCoinGeckoAsync()
+    internal async Task FallbackCoinGeckoAsync()
     {
         try
         {
