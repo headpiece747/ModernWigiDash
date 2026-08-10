@@ -84,12 +84,15 @@ public static class InspectorPanelRenderer
             switch (desc.PropertyType)
             {
                 case WidgetPropertyType.Choice when desc.Options.Count > 0:
-                    var combo = BuildChoiceCombo(desc, isUpdatingInspector, callbacks);
+                    var combo = BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
                     if (provider?.ActionCommandVisibilityChoicePropertyName == desc.Property.Name) actionTypeCombo = combo;
                     propPanel.Children.Add(combo);
                     break;
                 case WidgetPropertyType.Font:
-                    propPanel.Children.Add(BuildFontCombo(desc, isUpdatingInspector, callbacks));
+                    IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
+                    ? desc.Options
+                    : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray();
+                    propPanel.Children.Add(BuildOptionCombo(fontOptions, desc, isUpdatingInspector, callbacks));
                     break;
                 case WidgetPropertyType.Icon:
                     propPanel.Children.Add(BuildIconEditor(widget, desc, isUpdatingInspector, callbacks));
@@ -169,34 +172,17 @@ public static class InspectorPanelRenderer
         return btn;
     }
 
-    private static ComboBox BuildChoiceCombo(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    /// <summary>
+    /// One option-combo builder for every choice-style editor: the choice,
+    /// font, and sensor selectors all share this shape (ItemsSource /
+    /// DisplayMemberPath / SelectedValuePath / guarded write-back / dropdown
+    /// clamp). The three call sites only differ in the option source.
+    /// </summary>
+    private static ComboBox BuildOptionCombo(IReadOnlyList<WidgetPropertyOption> options, EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
     {
         var combo = new ComboBox
         {
-            ItemsSource = desc.Options,
-            DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
-            SelectedValuePath = nameof(WidgetPropertyOption.Value),
-            SelectedValue = desc.CurrentValue?.ToString(),
-            Padding = new Thickness(8, 4, 8, 4)
-        };
-        combo.SelectionChanged += (_, _) =>
-        {
-            if (isUpdatingInspector()) return;
-            string? selectedValue = combo.SelectedValue?.ToString();
-            if (!string.IsNullOrWhiteSpace(selectedValue))
-                callbacks.ApplyInspectorPropertyValue(desc.Property, selectedValue);
-        };
-        callbacks.AttachDropdownWithinWindow(combo);
-        return combo;
-    }
-
-    private static ComboBox BuildFontCombo(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
-    {
-        var combo = new ComboBox
-        {
-            ItemsSource = desc.Options.Count > 0
-                ? desc.Options
-                : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray(),
+            ItemsSource = options,
             DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
             SelectedValuePath = nameof(WidgetPropertyOption.Value),
             SelectedValue = desc.CurrentValue?.ToString(),
@@ -322,23 +308,7 @@ public static class InspectorPanelRenderer
             };
         }
 
-        var combo = new ComboBox
-        {
-            ItemsSource = desc.Options,
-            DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
-            SelectedValuePath = nameof(WidgetPropertyOption.Value),
-            SelectedValue = desc.CurrentValue?.ToString(),
-            Padding = new Thickness(8, 4, 8, 4)
-        };
-        combo.SelectionChanged += (_, _) =>
-        {
-            if (isUpdatingInspector()) return;
-            string? selectedValue = combo.SelectedValue?.ToString();
-            if (!string.IsNullOrWhiteSpace(selectedValue))
-                callbacks.ApplyInspectorPropertyValue(desc.Property, selectedValue);
-        };
-        callbacks.AttachDropdownWithinWindow(combo);
-        return combo;
+        return BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
     }
 
     private static TextBox BuildTextEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
