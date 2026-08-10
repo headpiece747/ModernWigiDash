@@ -29,6 +29,9 @@ public class FrameTimeWidget : ModernWidgetBase
     [WidgetProperty("Show Process", WidgetPropertyType.Boolean, "Show the tracked game/process name", true)]
     public bool ShowProcess { get; set; } = true;
 
+    /// <summary>Test seam: current view (false = dashboard, true = overlay readout).</summary>
+    internal bool IsOverlayView { get; set; }
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
@@ -46,6 +49,12 @@ public class FrameTimeWidget : ModernWidgetBase
         if (!snapshot.CaptureHealthy)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "PresentMon capture inactive", "The service is not producing present data", text);
+            return;
+        }
+
+        if (IsOverlayView)
+        {
+            RenderOverlayView(canvas, bounds, accent, text, snapshot);
             return;
         }
 
@@ -177,6 +186,66 @@ public class FrameTimeWidget : ModernWidgetBase
         {
             SKRect graphArea = new SKRect(bounds.Left + pad, bounds.Bottom - pad - graphHeight, bounds.Right - pad, bounds.Bottom - pad);
             DrawCachedSparkline(canvas, graphArea, snapshot.RecentFrameTimesMs, accent);
+        }
+    }
+
+    public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
+    {
+        if (eventType == TouchEventType.TouchUp)
+        {
+            IsOverlayView = !IsOverlayView;
+            Context?.RequestRender();
+        }
+    }
+
+    /// <summary>
+    /// PresentMon-overlay-style readout (view C): the metric lines PresentMon's
+    /// own overlay lists, in the project font and the widget's colors. Frame
+    /// times derive from the percentile FPS values, matching PresentMon's
+    /// 99th/1st %tile stat naming. Lines clip from the bottom as the placement
+    /// shrinks.
+    /// </summary>
+    private void RenderOverlayView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotRecord snapshot)
+    {
+        bool dash = snapshot.ProcessId <= 0;
+        float pad = Math.Clamp(bounds.Height * 0.06f, 8f, 20f);
+        float fontSize = Math.Clamp(bounds.Height * 0.052f, 10f, 24f);
+
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize);
+        using var labelPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
+        using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        float lineHeight = fontSize * 1.45f;
+
+        int maxLines = bounds.Height < 110f ? 1 : bounds.Height < 150f ? 4 : 9;
+        int lines = Math.Min(maxLines, dash ? 1 : 9);
+
+        string F1(double v) => v > 0 ? $"{v:F1} ms" : "—";
+        string F0(double v) => v > 0 ? $"{v:F0}" : "—";
+
+        string[] labels =
+        [
+            "Presented FPS", "Displayed FPS", "99th %tile Frame Time", "1st %tile Frame Time",
+            "GPU Busy %", "GPU Time", "CPU Frame Time", "Dropped Frames", "Present Mode",
+        ];
+        string[] values =
+        [
+            dash ? "—" : $"{snapshot.Fps:F0}",
+            dash ? "—" : F0(snapshot.DisplayedFps),
+            dash ? "—" : F1(1000.0 / snapshot.Low1PercentFps),
+            dash ? "—" : F1(1000.0 / snapshot.Low01PercentFps),
+            dash ? "—" : $"{snapshot.GpuBusyPercent:F0}%",
+            dash ? "—" : F1(snapshot.GpuTimeMs),
+            dash ? "—" : F1(snapshot.CpuFrameTimeMs),
+            dash ? "—" : snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture),
+            dash ? "—" : PresentMonPresentMode.FullName(snapshot.PresentModeId),
+        ];
+
+        float x = bounds.Left + pad;
+        for (int i = 0; i < lines; i++)
+        {
+            float y = bounds.Top + pad + (i + 1) * lineHeight;
+            canvas.DrawTextWithFallback(labels[i], x, y, font, labelPaint, SKTextAlign.Left);
+            canvas.DrawTextWithFallback(values[i], bounds.Right - pad, y, font, valuePaint, SKTextAlign.Right);
         }
     }
 

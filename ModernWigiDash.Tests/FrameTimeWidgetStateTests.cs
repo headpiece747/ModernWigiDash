@@ -158,4 +158,81 @@ public class FrameTimeWidgetStateTests
         Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
         FrameTimeStore.Reset();
     }
+
+    [TestMethod]
+    public void OnTouch_Tap_TogglesOverlayView()
+    {
+        var widget = new FrameTimeWidget();
+        widget.OnTouch(default, TouchEventType.TouchUp);
+        Assert.IsTrue(widget.IsOverlayView, "a tap must switch to the overlay readout");
+        widget.OnTouch(default, TouchEventType.TouchUp);
+        Assert.IsFalse(widget.IsOverlayView, "a second tap must switch back");
+    }
+
+    [TestMethod]
+    public void OnTouch_TouchDown_DoesNotToggle()
+    {
+        var widget = new FrameTimeWidget();
+        widget.OnTouch(default, TouchEventType.TouchDown);
+        Assert.IsFalse(widget.IsOverlayView);
+    }
+
+    [TestMethod]
+    public void Render_OverlayView_RendersLinesWithoutThrowing()
+    {
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = 4321,
+            ProcessName = "game.exe",
+            Fps = 162.4,
+            FrameTimeMs = 6.16,
+            Low1PercentFps = 138.0,
+            Low01PercentFps = 121.0,
+            GpuBusyPercent = 71.0,
+            CpuFrameTimeMs = 5.2,
+            DisplayedFps = 162.0,
+            DroppedFrames = 3,
+            GpuTimeMs = 6.1,
+            PresentModeId = 4,
+            LastUpdate = DateTime.UtcNow,
+        });
+
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        var widget = new FrameTimeWidget { IsOverlayView = true };
+        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
+        FrameTimeStore.Reset();
+
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void Render_OverlayView_SmallSize_RendersWithoutThrowing()
+    {
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = 4321,
+            ProcessName = "game.exe",
+            Fps = 60.0,
+            Low1PercentFps = 55.0,
+            Low01PercentFps = 50.0,
+            GpuBusyPercent = 30.0,
+            CpuFrameTimeMs = 2.0,
+            DisplayedFps = 60.0,
+            DroppedFrames = 0,
+            GpuTimeMs = 3.0,
+            PresentModeId = 4,
+            LastUpdate = DateTime.UtcNow,
+        });
+
+        using var smallSurface = SKSurface.Create(new SKImageInfo(200, 160));
+        var widget = new FrameTimeWidget { IsOverlayView = true };
+        widget.Render(smallSurface.Canvas, new SKRect(0, 0, 200, 160));
+        FrameTimeStore.Reset();
+
+        Assert.IsNotNull(smallSurface);
+    }
 }
