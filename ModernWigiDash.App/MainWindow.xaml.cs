@@ -609,7 +609,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (PreviewFrame?.Effect is DropShadowEffect shadow)
         {
             var accent = ThemeSettings.ParseColor(ThemeSettings.Theme.AccentRed);
-            if (accent != null) shadow.Color = ToMediaColor(accent.Value);
+            if (accent != null) shadow.Color = ThemeManager.ToMediaColor(accent.Value);
         }
 
         WindowChrome.ApplyDarkTitleBar(this, ThemeSettings.Theme.TitleBar);
@@ -617,8 +617,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var t = ThemeSettings.Theme;
         Log($"[THEME] Applied: TitleBar={t.TitleBar} AccentRed={t.AccentRed}");
     }
-
-    private static Color ToMediaColor(RgbaColor c) => Color.FromArgb(c.A, c.R, c.G, c.B);
 
     private void BtnTheme_Click(object sender, RoutedEventArgs e)
     {

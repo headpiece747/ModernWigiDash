@@ -14,6 +14,11 @@ namespace ModernWigiDash.App;
 /// </summary>
 public static class ThemeManager
 {
+    /// <summary>Converts a theme color to a WPF Color — the single conversion
+    /// site (the resource application and the window's shadow re-application
+    /// both use it, so the channels can never disagree).</summary>
+    public static Color ToMediaColor(RgbaColor c) => Color.FromArgb(c.A, c.R, c.G, c.B);
+
     /// <summary>
     /// Maps theme property names whose brush resource key does not equal the property name.
     /// All other properties map to a brush under the same name (TextPrimary maps
@@ -40,7 +45,7 @@ public static class ThemeManager
             var rgba = ThemeSettings.ParseColor(hex);
             if (rgba == null) continue;
 
-            Color color = Color.FromArgb(rgba.Value.A, rgba.Value.R, rgba.Value.G, rgba.Value.B);
+            Color color = ToMediaColor(rgba.Value);
             resources[$"{prop.Name}Color"] = color;
 
             var brush = new SolidColorBrush(color);
