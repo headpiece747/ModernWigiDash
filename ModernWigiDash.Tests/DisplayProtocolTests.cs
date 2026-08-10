@@ -45,7 +45,8 @@ public class DisplayProtocolTests
         Assert.AreEqual((byte)0x20, DisplayProtocolConstants.ScreenBase0);
         Assert.AreEqual((byte)0x21, DisplayProtocolConstants.ScreenBase1);
         Assert.AreEqual((byte)0x22, DisplayProtocolConstants.ScreenBase2);
-        // GoToScreen derives the current page from the Base screen id: the ids must stay contiguous.
+        // The Base screens are the app's init targets (SendInitCommands) — the
+        // ids must stay contiguous with the Welcome screen convention.
         Assert.AreEqual(1, DisplayProtocolConstants.ScreenBase1 - DisplayProtocolConstants.ScreenBase0);
         Assert.AreEqual(2, DisplayProtocolConstants.ScreenBase2 - DisplayProtocolConstants.ScreenBase0);
 #pragma warning restore MSTEST0025, MSTEST0032

@@ -85,7 +85,7 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// <see cref="Start"/> to exercise the loop wiring). The state derives
     /// from the injected transport's actual connection truth — never asserted.
     /// The transport factory returns this same transport, so a Start() that
-    /// reaches TryConnectAsync reconnects through it instead of NRE-ing.
+    /// reaches TryConnect reconnects through it instead of NRE-ing.
     /// </summary>
     internal DisplayDeviceEngine(IDisplayTransport transport)
     {
@@ -113,7 +113,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // connect (WinUSB probe + init, ~100-150ms) must run off the calling
         // thread — Start() is invoked from the window ctor on the UI thread.
         // ReconnectTick below already runs on the Timer thread.
-        _ = Task.Run(TryConnectAsync).ContinueWith(t =>
+        _ = Task.Run(() => TryConnect()).ContinueWith(t =>
         {
             if (t.IsFaulted)
             {
@@ -140,7 +140,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         if (!shouldReconnect) return;
 
-        _ = TryConnectAsync().ContinueWith(t =>
+        _ = Task.Run(() => TryConnect()).ContinueWith(t =>
         {
             if (t.IsFaulted)
                 Log($"[Reconnect] Connection attempt faulted: {t.Exception?.GetBaseException().Message}");
@@ -170,15 +170,16 @@ public sealed class DisplayDeviceEngine : IDisposable
     }
 
     /// <summary>
-    /// Attempts to connect to the physical device asynchronously.
+    /// Attempts to connect to the physical device. Deliberately synchronous
+    /// (ADR-0001) — callers run it off the UI thread (see <see cref="Start"/>).
     /// Guards against concurrent connection attempts to prevent connection churn.
     /// </summary>
-    public async Task<bool> TryConnectAsync()
+    public bool TryConnect()
     {
         // Fast-path: already connected
         if (State == ConnectionState.Connected)
         {
-            Log("[TryConnectAsync] Already connected, skipping");
+            Log("[TryConnect] Already connected, skipping");
             return true;
         }
 
@@ -187,7 +188,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         {
             if (_connecting || Volatile.Read(ref _isDisposed) != 0)
             {
-                Log($"[TryConnectAsync] Connection in progress or disposed, skipping (state={State})");
+                Log($"[TryConnect] Connection in progress or disposed, skipping (state={State})");
                 return State == ConnectionState.Connected;
             }
             _connecting = true;

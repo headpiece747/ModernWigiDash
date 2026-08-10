@@ -59,10 +59,8 @@ public class FrameDeliveryTests
     {
         using var delivered = new ManualResetEventSlim(false);
         byte[]? received = null;
-        var pool = new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4);
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: pool,
             send: bytes =>
             {
                 received = bytes;
@@ -83,28 +81,25 @@ public class FrameDeliveryTests
     public async Task Push_AfterDelivery_ReturnsBufferToPool()
     {
         using var delivered = new ManualResetEventSlim(false);
-        var pool = new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1);
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: pool,
             send: _ =>
             {
                 delivered.Set();
                 return true;
-            });
+            },
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
 
-        byte[]? buffer = null;
-        await TestWait.WaitUntilAsync(() =>
-        {
-            buffer = pool.Acquire();
-            return buffer != null;
-        }, TimeSpan.FromSeconds(2));
-        Assert.IsNotNull(buffer, "Sender loop must release the buffer back to the pool after delivery");
-        pool.Release(buffer);
+        // Pool of 1: the second push only queues once the first buffer is back
+        // in the pool. The release lands right after the send, so keep pushing
+        // until one queues — a drop is the "buffer still in flight" signal.
+        delivered.Reset();
+        await TestWait.WaitUntilAsync(() => delivery.Push(bitmap) == FrameDeliveryResult.Queued, TimeSpan.FromSeconds(2));
+        Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "The released buffer must deliver a second frame");
     }
 
     [TestMethod]
@@ -112,8 +107,8 @@ public class FrameDeliveryTests
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
-            send: _ => false);
+            send: _ => false,
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         // First push: buffer acquired, send fails, buffer released back.
@@ -127,13 +122,13 @@ public class FrameDeliveryTests
         using var release = new ManualResetEventSlim(false);
         using var delivery2 = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
             send: _ =>
             {
                 blocker.Set();
                 release.Wait();
                 return true;
-            });
+            },
+            capacity: 1);
         delivery2.Push(bitmap);
         Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
 
@@ -154,7 +149,6 @@ public class FrameDeliveryTests
         byte[]? lastDelivered = null;
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
             send: bytes =>
             {
                 lastDelivered = bytes;
@@ -162,15 +156,16 @@ public class FrameDeliveryTests
                     firstEntered.Set();
                 release.Wait();
                 return true;
-            });
+            },
+            capacity: 4);
 
         // Red fills the channel first and pins the sender loop on the gate.
         using var redFrame = CreateFrame(SKColors.Red);
         delivery.Push(redFrame);
         Assert.IsTrue(firstEntered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must start delivering the first frame");
 
-        // Backlog while the loop is blocked. Capacity 2 (DropOldest): green
-        // drops out when white arrives, leaving blue + white queued.
+        // Backlog while the loop is blocked. Channel capacity 4 (DropOldest):
+        // all three queue, and the coalescer discards the two stale ones.
         using var greenFrame = CreateFrame(SKColors.Green);
         using var blueFrame = CreateFrame(SKColors.Blue);
         using var whiteFrame = CreateFrame(SKColors.White);
@@ -201,7 +196,6 @@ public class FrameDeliveryTests
         var timestamps = new List<DateTime>();
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
             send: _ =>
             {
                 lock (timestamps) { timestamps.Add(DateTime.UtcNow); }
@@ -239,7 +233,6 @@ public class FrameDeliveryTests
         using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
             send: _ =>
             {
                 sent++;
@@ -247,7 +240,8 @@ public class FrameDeliveryTests
                 release.Wait();
                 return true;
             },
-            isReady: () => ready);
+            isReady: () => ready,
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         Assert.IsTrue(delivery.IsReady);
@@ -268,8 +262,8 @@ public class FrameDeliveryTests
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
-            send: _ => false);
+            send: _ => false,
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
@@ -285,8 +279,8 @@ public class FrameDeliveryTests
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
-            send: _ => throw new InvalidOperationException("boom"));
+            send: _ => throw new InvalidOperationException("boom"),
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
@@ -302,9 +296,9 @@ public class FrameDeliveryTests
         var logs = new List<string>();
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
             send: _ => false,
-            log: logs.Add);
+            log: logs.Add,
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
@@ -321,13 +315,13 @@ public class FrameDeliveryTests
         using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 1),
             send: _ =>
             {
                 blocker.Set();
                 release.Wait();
                 return true;
-            });
+            },
+            capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
@@ -338,6 +332,51 @@ public class FrameDeliveryTests
 
         Assert.AreEqual(1, delivery.DroppedPoolCount);
         Assert.AreEqual(0, delivery.DroppedCoalescedCount, "Pool exhaustion is not a coalescer drop");
+    }
+
+    // ── pool sizing: the pool is built from the encoder's output size ──
+
+    [TestMethod]
+    public void Push_WithCustomSizedEncoder_PoolMatchesEncoderOutputSize()
+    {
+        // A delivery on a non-standard encoder must pool buffers of exactly
+        // that encoder's output size — the pool self-sizes from the seam, so
+        // a "wrong-size" (relative to the display constant) send still flows.
+        using var delivered = new ManualResetEventSlim(false);
+        byte[]? received = null;
+        using var delivery = FrameDelivery.Create(
+            encoder: new FixedSizeEncoder(4096),
+            send: bytes =>
+            {
+                received = bytes;
+                delivered.Set();
+                return true;
+            });
+        using var bitmap = CreateFrameBitmap();
+
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+        Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
+        Assert.IsNotNull(received);
+        Assert.AreEqual(4096, received.Length, "The pool must be sized from the encoder's OutputBufferSize, not a fixed constant");
+    }
+
+    /// <summary>
+    /// Test-only encoder with a caller-chosen output size; the delivery must
+    /// pool buffers of exactly this size regardless of the display constant.
+    /// </summary>
+    private sealed class FixedSizeEncoder : IRgb565Encoder
+    {
+        private readonly int _outputSize;
+
+        public FixedSizeEncoder(int outputSize) => _outputSize = outputSize;
+
+        public int OutputBufferSize => _outputSize;
+
+        public void Encode(SKBitmap bitmap, byte[] destination)
+        {
+            destination[0] = 0xAB;
+            destination[1] = 0xCD;
+        }
     }
 
     private static SKBitmap CreateFrameBitmap()

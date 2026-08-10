@@ -240,7 +240,7 @@ public class DisplayHidTransportTests
         Assert.IsTrue(ok);
         // Standby = the vendor Welcome screen (wValue = screenId, no transition).
         Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdGoToScreen, WValue: DisplayProtocolConstants.ScreenWelcome }));
-        // The current-page bookkeeping must not change — Welcome is not a Base screen.
+        // GoToScreen is only ever the standby path — page nav is compositor-side.
         Assert.IsTrue(backend.ControlCalls.Count(c => c.Request == DisplayProtocolConstants.CmdGoToScreen) == 1);
     }
 

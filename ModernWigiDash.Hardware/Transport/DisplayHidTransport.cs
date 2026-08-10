@@ -38,11 +38,11 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
     private long _framesFailed;
     private readonly Lock _usbLock = new();
 
-    // 3-page double-buffering (Base screens 0x20..0x22 — ScreenBase0..2 in
-    // DisplayProtocolConstants; only Base0 is const'ed here).
+    // 3-page initialization (Base screens 0x20..0x22 — ScreenBase0..2 in
+    // DisplayProtocolConstants; only Base0 is const'ed here). The app frames
+    // are always written to page 0; page navigation is compositor-side.
     private const int NumPages = 3;
     private const byte Base0 = DisplayProtocolConstants.ScreenBase0;
-    private int _currentPage;
 
     public bool IsConnected => _isConnected;
     public long FramesFailed => Volatile.Read(ref _framesFailed);
@@ -106,29 +106,21 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
                     // under _usbLock like Cleanup: the backend handle must not
                     // be freed while a transfer could be in flight.
                     LogToFile("[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
-                    lock (_usbLock)
-                    {
-                        winUsb.Dispose();
-                        _backend = null;
-                    }
+                    TearDownWinUsb(winUsb);
                     _isConnected = false;
                 }
                 else
                 {
                     // PING failed, close WinUSB and try LibUsbDotNet
                     LogToFile("[USB-WINUSB] PING failed, falling back to LibUsbDotNet");
-                    lock (_usbLock)
-                    {
-                        winUsb.Dispose();
-                        _backend = null;
-                    }
+                    TearDownWinUsb(winUsb);
                     _isConnected = false;
                 }
             }
             else
             {
                 LogToFile("[USB-WINUSB] Failed to open WinUSB, falling back to LibUsbDotNet");
-                winUsb.Dispose();
+                TearDownWinUsb(winUsb);
             }
         }
         catch (Exception ex)
@@ -309,7 +301,6 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
         bool gotoOk = ControlOut(DisplayProtocolConstants.CmdGoToScreen, Base0, null);
         LogToFile($"[USB-INIT] GoToScreen(Base0) sent — all 3 pages initialized, ok={gotoOk}");
 
-        _currentPage = 0;
         initOk &= gotoOk;
         _logger.LogInformation("Device initialization complete (3 pages), ok={InitOk}", initOk);
         return initOk;
@@ -459,6 +450,20 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
         }
     }
 
+    /// <summary>
+    /// Tears down a failed WinUSB attempt: frees the device and clears the
+    /// backend under <c>_usbLock</c> — the handle must never be freed while a
+    /// transfer could be in flight (same rule as <see cref="Cleanup"/>).
+    /// </summary>
+    private void TearDownWinUsb(WinUsbBulkDevice winUsb)
+    {
+        lock (_usbLock)
+        {
+            winUsb.Dispose();
+            _backend = null;
+        }
+    }
+
     private void Cleanup()
     {
         // Serialized against SendFrame/ReadTouch/GoToStandby: the backend's
@@ -514,10 +519,11 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
 
             lock (_usbLock)
             {
-                // WriteToWidget(currentPage, widgetId=0, offset=0, data)
-                // CMD_SDRAM_WIDGET_WRITE (0x61), wValue = (page << 8) | widgetId
-                // Writes directly to the currently displayed page.
-                int page = _currentPage;
+                // WriteToWidget(page 0, widgetId=0, offset=0, data)
+                // CMD_SDRAM_WIDGET_WRITE (0x61), wValue = (0 << 8) | 0.
+                // Frames are always written to the initialized Base screen 0 —
+                // page navigation is compositor-side, so there is no live page
+                // bookkeeping to consult here.
 
                 // Reused header buffer: SendFrame is serialized by _usbLock, so
                 // no per-frame allocation on the 30 FPS path. The uint header
@@ -532,8 +538,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
                 _frameHeader[6] = (byte)(frameArray.Length >> 16);
                 _frameHeader[7] = (byte)(frameArray.Length >> 24);
 
-                ushort wValue = (ushort)((page << 8) | 0);
-                if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, _frameHeader))
+                if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue: 0, _frameHeader))
                 {
                     Interlocked.Increment(ref _framesFailed);
                     return false;
@@ -560,7 +565,7 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
     /// <summary>
     /// Switches the display to the specified screen. Private: only the standby
     /// path needs it — page navigation is compositor-side, frames are sent for
-    /// the current page directly.
+    /// Base screen 0 directly.
     /// </summary>
     private bool GoToScreen(byte screenId, byte transition = 0)
     {
@@ -572,9 +577,6 @@ public sealed class DisplayHidTransport(ILogger<DisplayHidTransport>? logger = n
         if (ok)
         {
             _logger.LogInformation("GoToScreen 0x{ScreenId:X2} (wValue=0x{WValue:X4})", screenId, wValue);
-            // Update current page if switching to a Base screen
-            if (screenId >= DisplayProtocolConstants.ScreenBase0 && screenId <= DisplayProtocolConstants.ScreenBase2)
-                _currentPage = screenId - DisplayProtocolConstants.ScreenBase0;
         }
         return ok;
     }

@@ -17,7 +17,6 @@ public sealed class DisplayPresenter : IDisposable
     {
         _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
-            pool: new FrameBufferPool(DisplayProtocolConstants.FrameBufferSize, capacity: 4),
             send: send,
             isReady: isReady,
             log: log);

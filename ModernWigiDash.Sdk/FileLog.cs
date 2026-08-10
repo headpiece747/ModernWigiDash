@@ -48,10 +48,11 @@ public static class FileLog
     /// <summary>
     /// Writes one line to the shared display log. Never throws: logging is
     /// best-effort and failures (locked/unavailable file) are swallowed.
+    /// Callers bake their component tag into the message (e.g. "[HW] ...").
     /// </summary>
-    public static void Write(string message, string? prefix = null)
+    public static void Write(string message)
     {
-        string line = $"[{Clock.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {(string.IsNullOrEmpty(prefix) ? "" : prefix + " ")}{message}";
+        string line = $"[{Clock.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {message}";
         lock (Gate)
         {
             try

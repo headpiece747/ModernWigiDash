@@ -90,7 +90,7 @@ public class DisplayDeviceEngineTests
     public async Task Constructed_WithoutStart_StaysDisconnected()
     {
         // The ctor is inert: no connect attempt, no background loops. The old
-        // ctor fired TryConnectAsync and probed real USB (and even put the
+        // ctor probed real USB (and even put the
         // attached display into standby on dispose) from the test host.
         using var engine = new DisplayDeviceEngine();
         await Task.Delay(150); // generous — the old ctor's probe settled within ~50ms
@@ -222,12 +222,12 @@ public class DisplayDeviceEngineTests
     // ── the connect state machine, driven through the factory seam ──
 
     [TestMethod]
-    public void TryConnectAsync_ConnectSucceeds_AdoptsTransportAndConnects()
+    public void TryConnect_ConnectSucceeds_AdoptsTransportAndConnects()
     {
         var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
         using var engine = new DisplayDeviceEngine(() => fake);
 
-        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+        bool ok = engine.TryConnect();
 
         Assert.IsTrue(ok);
         Assert.AreEqual(ConnectionState.Connected, engine.State);
@@ -235,24 +235,24 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
-    public void TryConnectAsync_ConnectFails_FallsBackToSimulated()
+    public void TryConnect_ConnectFails_FallsBackToSimulated()
     {
         using var engine = new DisplayDeviceEngine(() => new FakeTransport { ConnectResult = false });
 
-        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+        bool ok = engine.TryConnect();
 
         Assert.IsFalse(ok);
         Assert.AreEqual(ConnectionState.Simulated, engine.State, "no device - running in simulation mode");
     }
 
     [TestMethod]
-    public void TryConnectAsync_DisposedDuringConnect_DoesNotAdoptTransport()
+    public void TryConnect_DisposedDuringConnect_DoesNotAdoptTransport()
     {
         var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
         using var engine = new DisplayDeviceEngine(() => fake);
         fake.OnConnect = () => engine.Dispose();
 
-        bool ok = engine.TryConnectAsync().GetAwaiter().GetResult();
+        bool ok = engine.TryConnect();
 
         Assert.IsFalse(ok, "a disposed engine must not adopt a live transport");
         Assert.IsTrue(fake.Disposed, "the orphan transport must be disposed, never leaked");

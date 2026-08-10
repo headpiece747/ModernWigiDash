@@ -70,13 +70,6 @@ public static class DisplayProtocolConstants
     public const byte CmdSetBrightness = 0x51;
 
     /// <summary>
-    /// Vendor Command: Clear Timeout / Heartbeat Reset (0x12).
-    /// Deliberately unused: once the heartbeat source stops, the display
-    /// sleeps on its own timeout (see standby path in DisplayHidTransport).
-    /// </summary>
-    public const byte CmdClearTimeout = 0x12;
-
-    /// <summary>
     /// Vendor Command: Clear Screen Config (0x90 = CMD_SCREENCFG_CLEAR).
     /// wValue = page number.
     /// </summary>

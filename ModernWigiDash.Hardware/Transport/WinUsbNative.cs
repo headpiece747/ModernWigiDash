@@ -183,7 +183,7 @@ internal class WinUsbBulkDevice : ITransferBackend
 
     public virtual bool IsOpen => _interfaceHandle != IntPtr.Zero;
 
-    private static void Log(string msg) => FileLog.Write(msg, "[USB-WINUSB]");
+    private static void Log(string msg) => FileLog.Write("[USB-WINUSB] " + msg);
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.

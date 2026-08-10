@@ -48,9 +48,8 @@ public sealed class FrameDelivery : IDisposable
     private int _disposed;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
-    /// reusable work buffer. Required for <see cref="Push"/>.</param>
-    /// <param name="pool">Exact-size buffer pool. Required when
-    /// <paramref name="encoder"/> is provided.</param>
+    /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
+    /// is built from its <see cref="IRgb565Encoder.OutputBufferSize"/>.</param>
     /// <param name="send">Send seam to the transport, bound once at
     /// construction.</param>
     /// <param name="isReady">Optional readiness predicate. Defaults to "a send
@@ -58,23 +57,27 @@ public sealed class FrameDelivery : IDisposable
     /// <param name="minInterval">Minimum interval between transport sends
     /// (default 33ms ≈ 30 FPS, the device capability).</param>
     /// <param name="timeProvider">Clock for pacing; tests substitute a fake.</param>
-    /// <param name="capacity">Bounded channel capacity (DropOldest).</param>
+    /// <param name="capacity">Bounded channel capacity (DropOldest) and pool
+    /// pre-allocation (in-flight maximum + margin).</param>
     /// <param name="log">Optional log sink for send/drop lines.</param>
-    public FrameDelivery(
+    internal FrameDelivery(
         IRgb565Encoder? encoder = null,
-        FrameBufferPool? pool = null,
         Func<byte[], bool>? send = null,
         Func<bool>? isReady = null,
         TimeSpan? minInterval = null,
         TimeProvider? timeProvider = null,
-        int capacity = 2,
+        int capacity = 4,
         Action<string>? log = null)
     {
-        if (encoder != null && pool == null)
-            throw new ArgumentException("A buffer pool is required when an encoder is provided.", nameof(pool));
+        if (encoder != null)
+        {
+            // The pool is sized from the encoder's output — an exact-size pool
+            // that disagrees with the encoder (whose releases would be
+            // silently discarded) is unrepresentable by construction.
+            _pool = new FrameBufferPool(encoder.OutputBufferSize, capacity);
+        }
 
         _encoder = encoder;
-        _pool = pool;
         _minInterval = minInterval ?? FrameInterval;
         _isReady = isReady;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -92,26 +95,21 @@ public sealed class FrameDelivery : IDisposable
 
     /// <summary>
     /// Creates a fully configured delivery with the policy's required seams.
-    /// Prefer this over the constructor at production bind sites — the encode,
-    /// pool, and send seams are required, so an unconfigured delivery (which
-    /// would silently drop every frame) is unrepresentable. The constructor
+    /// Prefer this over the constructor at production bind sites — the encode
+    /// and send seams are required, so an unconfigured delivery (which would
+    /// silently drop every frame) is unrepresentable. The internal constructor
     /// remains for tests that intentionally exercise unconfigured readiness
     /// semantics.
     /// </summary>
     public static FrameDelivery Create(
         IRgb565Encoder encoder,
-        FrameBufferPool pool,
         Func<byte[], bool> send,
         Func<bool>? isReady = null,
-        TimeSpan? minInterval = null,
-        TimeProvider? timeProvider = null,
-        int capacity = 2,
         Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(encoder);
-        ArgumentNullException.ThrowIfNull(pool);
         ArgumentNullException.ThrowIfNull(send);
-        return new FrameDelivery(encoder, pool, send, isReady, minInterval, timeProvider, capacity, log);
+        return new FrameDelivery(encoder, send, isReady, log: log);
     }
 
     /// <summary>

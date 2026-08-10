@@ -29,7 +29,6 @@ public enum WidgetPropertyType
     Icon,
     SensorSelector,
     Path,
-    ActionList,
     Button
 }
 
