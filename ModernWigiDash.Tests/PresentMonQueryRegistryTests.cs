@@ -20,11 +20,37 @@ public class PresentMonQueryRegistryTests
         public PmStatus PollStatus = PmStatus.Success;
         public int InsufficientBufferThenSuccess;
         public uint NoDataChains = 1;
-        public Func<int, double>? ValueForMetric;
         public List<uint> ConsumeRequests = [];
         public uint ConsumeBatches;
         public PmStatus RegisterDynamicStatus = PmStatus.Success;
         public PresentMonMetricCatalog? Catalog = new PresentMonMetricCatalog(CatalogMetrics());
+
+        private void FillOffsets(PresentMonQueryElement[] elements)
+        {
+            ulong offset = 0;
+            for (int i = 0; i < elements.Length; i++)
+            {
+                ulong size = elements[i].Metric == MetricPresentMode ? 4UL : 8UL;
+                elements[i] = elements[i] with { DataOffset = offset, DataSize = size };
+                offset += size;
+            }
+        }
+
+        private void WriteChain(byte[] blob, PresentMonQueryElement[] elements, Func<int, double> valueForMetric)
+        {
+            foreach (var e in elements)
+            {
+                double value = valueForMetric((int)e.Metric);
+                if (e.DataSize == 4)
+                {
+                    BitConverter.GetBytes((int)value).CopyTo(blob, (int)e.DataOffset);
+                }
+                else
+                {
+                    BitConverter.GetBytes(value).CopyTo(blob, (int)e.DataOffset);
+                }
+            }
+        }
 
         public PresentMonQueryRegistry CreateRegistry()
         {
@@ -46,8 +72,7 @@ public class PresentMonQueryRegistryTests
                     if (InsufficientBufferThenSuccess > 0)
                     {
                         InsufficientBufferThenSuccess--;
-                        chains = chains; // declares capacity; the registry doubles and retries
-                        return PmStatus.InsufficientBuffer;
+                        return PmStatus.InsufficientBuffer; // chains keeps its declared capacity; the registry doubles and retries
                     }
                     if (PollStatus != PmStatus.Success)
                     {
@@ -56,7 +81,7 @@ public class PresentMonQueryRegistryTests
                     chains = NoDataChains;
                     if (chains > 0)
                     {
-                        WriteChain(blob, RegisteredDynamic!, ValueForMetric ?? (m => m == MetricPresentMode ? 8 : 100.0));
+                        WriteChain(blob, RegisteredDynamic!, m => m == MetricPresentMode ? 8 : 100.0);
                     }
                     return PmStatus.Success;
                 },
@@ -95,33 +120,6 @@ public class PresentMonQueryRegistryTests
         new(16, 3, 0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 10]),
         new(20, 3, 0, [12, 10]),
     ];
-
-    private static void FillOffsets(PresentMonQueryElement[] elements)
-    {
-        ulong offset = 0;
-        for (int i = 0; i < elements.Length; i++)
-        {
-            ulong size = elements[i].Metric == MetricPresentMode ? 4UL : 8UL;
-            elements[i] = elements[i] with { DataOffset = offset, DataSize = size };
-            offset += size;
-        }
-    }
-
-    private static void WriteChain(byte[] blob, PresentMonQueryElement[] elements, Func<int, double> valueForMetric)
-    {
-        foreach (var e in elements)
-        {
-            double value = valueForMetric((int)e.Metric);
-            if (e.DataSize == 4)
-            {
-                BitConverter.GetBytes((int)value).CopyTo(blob, (int)e.DataOffset);
-            }
-            else
-            {
-                BitConverter.GetBytes(value).CopyTo(blob, (int)e.DataOffset);
-            }
-        }
-    }
 
     [TestMethod]
     public void Register_ValidCatalog_RegistersDynamicAndFrameQueries()
