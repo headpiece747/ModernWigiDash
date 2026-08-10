@@ -15,15 +15,6 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private const string AnonymousPass = "SCHMOOPIIE";
     private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
 
-    /// <summary>The chat connection state — an enum so the render switches are
-    /// exhaustive and illegal states are unrepresentable.</summary>
-    private enum ChatStatus
-    {
-        Disconnected,
-        Connecting,
-        Connected
-    }
-
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
 
     [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
@@ -465,13 +456,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
         canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, badgePaint, SKTextAlign.Left);
 
-        string statusText = _status switch
-        {
-            ChatStatus.Connected => "● " + (_statusDetail.Length > 0 ? _statusDetail : "LIVE"),
-            ChatStatus.Connecting => "⟳ " + (_statusDetail.Length > 0 ? _statusDetail : "Connecting…"),
-            ChatStatus.Disconnected => "○ " + (_statusDetail.Length > 0 ? _statusDetail : "Disconnected"),
-            _ => "○ Disconnected" // unreachable — guards undefined enum values
-        };
+        string statusText = TwitchChatPresentation.StatusText(_status, _statusDetail);
 
         var statusColor = _status == ChatStatus.Connected
             ? new SKColor(0x10, 0xB9, 0x81)
@@ -503,14 +488,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
             using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
-            var hint = _status switch
-            {
-                ChatStatus.Connected => "Waiting for chat…",
-                ChatStatus.Disconnected when !AutoConnect => "Tap to connect",
-                ChatStatus.Disconnected => "Waiting for connection…",
-                ChatStatus.Connecting => "Waiting for connection…",
-                _ => "Waiting for connection…" // unreachable — guards undefined enum values
-            };
+            var hint = TwitchChatPresentation.EmptyHint(_status, AutoConnect);
             canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
             canvas.Restore();
             return;
