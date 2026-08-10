@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.InteropServices;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -13,7 +12,8 @@ namespace ModernWigiDash.Widgets;
 /// (ADR-0003): the app opens a non-elevated session, starts tracking the
 /// focused process, and polls the counters on the 1s poll loop. When the
 /// service is absent, the widget renders the graceful unavailable state; with
-/// no tracked process, the monitor's refresh rate is shown.
+/// no tracked process, the dashboard renders em-dash placeholders instead of
+/// fabricated numbers.
 /// </summary>
 [WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
 public class FrameTimeWidget : ModernWidgetBase
@@ -28,66 +28,6 @@ public class FrameTimeWidget : ModernWidgetBase
 
     [WidgetProperty("Show Process", WidgetPropertyType.Boolean, "Show the tracked game/process name", true)]
     public bool ShowProcess { get; set; } = true;
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool EnumDisplaySettingsW(string? lpszDeviceName, int iModeNum, ref DevMode lpDevMode);
-
-    private const int EnumCurrentSettings = -1;
-
-    private static readonly Lazy<int> MonitorRefreshRateHz = new(() =>
-    {
-        try
-        {
-            var mode = new DevMode { dmSize = (short)Marshal.SizeOf<DevMode>() };
-            if (EnumDisplaySettingsW(null, EnumCurrentSettings, ref mode) && mode.dmDisplayFrequency > 0)
-            {
-                return mode.dmDisplayFrequency;
-            }
-        }
-        catch (Exception)
-        {
-            // Fall through to 60 Hz default
-            System.Diagnostics.Debug.WriteLine("Failed to query monitor refresh rate; defaulting to 60 Hz");
-        }
-        return 60;
-    });
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DevMode
-    {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
-        public short dmSpecVersion;
-        public short dmDriverVersion;
-        public short dmSize;
-        public short dmDriverExtra;
-        public int dmFields;
-        public int dmPositionX;
-        public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
-        public short dmColor;
-        public short dmDuplex;
-        public short dmYResolution;
-        public short dmTTOption;
-        public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
-        public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
-        public int dmICMMethod;
-        public int dmICMIntent;
-        public int dmMediaType;
-        public int dmDitherType;
-        public int dmReserved1;
-        public int dmReserved2;
-        public int dmPanningWidth;
-        public int dmPanningHeight;
-    }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -111,29 +51,67 @@ public class FrameTimeWidget : ModernWidgetBase
 
         if (snapshot.ProcessId <= 0)
         {
-            // No process targeted (desktop / static window focused, or the App
-            // itself): show the monitor refresh rate as the FPS.
-            DrawMonitorMode(canvas, bounds, accent, text);
+            RenderDashView(canvas, bounds, accent, text);
             return;
         }
 
+        RenderTrackedView(canvas, bounds, accent, text, snapshot);
+    }
+
+    /// <summary>
+    /// No process tracked (desktop / own window foreground): the layout renders
+    /// with "—" values — PresentMon has no data to show and its overlay renders
+    /// nothing. No fabricated numbers.
+    /// </summary>
+    private void RenderDashView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text)
+    {
+        float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
+        float heroTop = bounds.Top + pad;
+        float heroH = Math.Max(8f, bounds.Height - pad * 2f);
+
+        float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
+        var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
+        using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        canvas.DrawTextWithFallback("—", bounds.Left + pad, heroTop + fpsFontSize * 0.82f, fpsFont, fpsPaint);
+
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
+        using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
+        canvas.DrawTextWithFallback("FPS", bounds.Left + pad + fpsFont.MeasureText("—", fpsPaint) + 10f,
+            heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
+
+        if (bounds.Width >= 410f)
+        {
+            var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
+            using var labelPaint = new SKPaint { Color = accent, IsAntialias = true };
+            var valueFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 15f);
+            using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+            float cardTop = heroTop + fpsFontSize * 0.82f + 12f;
+            float colWidth = (bounds.Width - pad * 2f) / 4f;
+            string[] labels = ["1% LOW", "0.1% LOW", "CPU FRAME", "GPU BUSY"];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                float cx = bounds.Left + pad + colWidth * (i + 0.5f);
+                float valW = valueFont.MeasureText("—", valuePaint);
+                canvas.DrawTextWithFallback("—", cx - valW / 2f, cardTop + 13f, valueFont, valuePaint);
+                float lblW = labelFont.MeasureText(labels[i], labelPaint);
+                canvas.DrawTextWithFallback(labels[i], cx - lblW / 2f, cardTop + 13f + 20f, labelFont, labelPaint);
+            }
+        }
+    }
+
+    private void RenderTrackedView(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text, FrameTimeSnapshotRecord snapshot)
+    {
         float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
 
-        // Auto-hide rules:
-        //  - Below 150px height, everything hides except the large FPS block.
-        //  - Below 410px width, the secondary metric cards (1% low, 0.1% low,
-        //    GPU busy, CPU frame) hide as well.
         bool tiny = bounds.Height < 150f;
-        bool showMetrics = bounds.Width >= 410f;
-
-        // Auto-hides graph when container height is below 150px
+        bool showCards = bounds.Width >= 410f;
+        bool showSecondRow = bounds.Width >= 520f;
         bool showGraph = bounds.Height >= 150f && snapshot.RecentFrameTimesMs.Count >= 2;
-        float graphHeight = showGraph ? bounds.Height * 0.15f : 0f;
+        float graphHeight = showGraph ? bounds.Height * 0.12f : 0f;
 
         float contentTop = bounds.Top + pad;
         float contentBottom = bounds.Bottom - pad - (showGraph ? graphHeight + 6f : 0f);
 
-        // Process name line (top-right). Hidden in tiny mode.
         float heroTop = contentTop;
         if (!tiny && ShowProcess && !string.IsNullOrWhiteSpace(snapshot.ProcessName))
         {
@@ -145,26 +123,20 @@ public class FrameTimeWidget : ModernWidgetBase
             heroTop = contentTop + procSize + 6f;
         }
 
-        // Main Hero FPS & Frame Time Section (Largest Typography)
-        float heroBottom = showMetrics ? contentTop + (contentBottom - contentTop) * 0.55f : contentBottom;
+        float heroBottom = showCards ? contentTop + (contentBottom - contentTop) * 0.45f : contentBottom;
         float heroH = Math.Max(8f, heroBottom - heroTop);
 
-        // Big Hero FPS Value (Largest Font Size!)
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
         var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
         using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
-        // The snapshot record is replaced ~1/s by the store, so the formatted
-        // strings are cached per snapshot instead of re-interpolated 30×/s.
         RefreshCachedStrings(snapshot);
         string fpsText = _cachedFpsText;
         fpsFont.MeasureText(fpsText, out var fpsBounds, fpsPaint);
-
         float fpsX = bounds.Left + pad;
         float fpsBaseline = heroTop + fpsFontSize * 0.82f;
         canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, fpsPaint);
 
-        // "FPS" Label & Frame Time (ms) stacked next to big FPS number
         float unitX = fpsX + fpsBounds.Width + 10f;
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
         using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
@@ -174,26 +146,33 @@ public class FrameTimeWidget : ModernWidgetBase
         using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
         canvas.DrawTextWithFallback(_cachedMsText, unitX, fpsBaseline, msFont, msPaint);
 
-        // Secondary Metrics Grid (1% Low, 0.1% Low, GPU Busy, CPU Frame)
-        // Auto-hides when container width is below 410px.
-        if (showMetrics)
+        if (showCards)
         {
             float gridTop = heroBottom + 4f;
             float gridH = contentBottom - gridTop;
             if (gridH >= 24f)
             {
                 float colWidth = (bounds.Width - pad * 2f) / 4f;
-                float metricValSize = Math.Clamp(gridH * 0.44f, 12f, 36f);
-                float metricLblSize = Math.Clamp(gridH * 0.28f, 9f, 20f);
+                float metricValSize = Math.Clamp(gridH * 0.40f, 12f, 32f);
+                float metricLblSize = Math.Clamp(gridH * 0.25f, 9f, 18f);
+                float row1Top = gridTop;
+                float row2Top = gridTop + gridH * 0.52f;
 
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, gridTop, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, gridTop, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, gridTop, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent);
-                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, gridTop, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, row1Top, "1% LOW", _cachedLow1, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, row1Top, "0.1% LOW", _cachedLow01, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, row1Top, "CPU FRAME", _cachedCpu, metricValSize, metricLblSize, accent);
+                DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, row1Top, "GPU BUSY", _cachedGpu, metricValSize, metricLblSize, accent);
+
+                if (showSecondRow)
+                {
+                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 0.5f, row2Top, "DISPLAYED", _cachedDisplayed, metricValSize, metricLblSize, accent);
+                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 1.5f, row2Top, "DROPPED", _cachedDropped, metricValSize, metricLblSize, accent);
+                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 2.5f, row2Top, "GPU TIME", _cachedGpuTime, metricValSize, metricLblSize, accent);
+                    DrawMetricCard(canvas, bounds.Left + pad + colWidth * 3.5f, row2Top, "PRESENT MODE", _cachedPresentMode, metricValSize, metricLblSize, accent);
+                }
             }
         }
 
-        // Frame-Time Graph (~15% height, auto-hides when container height < 150px)
         if (showGraph)
         {
             SKRect graphArea = new SKRect(bounds.Left + pad, bounds.Bottom - pad - graphHeight, bounds.Right - pad, bounds.Bottom - pad);
@@ -208,6 +187,10 @@ public class FrameTimeWidget : ModernWidgetBase
     private string _cachedLow01 = "";
     private string _cachedGpu = "";
     private string _cachedCpu = "";
+    private string _cachedDisplayed = "";
+    private string _cachedDropped = "";
+    private string _cachedGpuTime = "";
+    private string _cachedPresentMode = "";
 
     /// <summary>
     /// Formats the snapshot strings once per snapshot instance (the store swaps
@@ -221,8 +204,14 @@ public class FrameTimeWidget : ModernWidgetBase
         _cachedMsText = $"{snapshot.FrameTimeMs:F1} ms";
         _cachedLow1 = $"{snapshot.Low1PercentFps:F0} FPS";
         _cachedLow01 = $"{snapshot.Low01PercentFps:F0} FPS";
-        _cachedGpu = $"{snapshot.GpuBusyMs:F1} ms";
+        _cachedGpu = $"{snapshot.GpuBusyPercent:F0}%";
         _cachedCpu = $"{snapshot.CpuFrameTimeMs:F1} ms";
+        _cachedDisplayed = $"{snapshot.DisplayedFps:F0} FPS";
+        _cachedDropped = snapshot.DroppedFrames.ToString(CultureInfo.InvariantCulture);
+        _cachedGpuTime = $"{snapshot.GpuTimeMs:F1} ms";
+        _cachedPresentMode = snapshot.PresentModeId >= 0
+            ? PresentMonPresentMode.ShortName(snapshot.PresentModeId)
+            : "—";
     }
 
     private IReadOnlyList<double>? _lastSparkSamples;
@@ -276,33 +265,5 @@ public class FrameTimeWidget : ModernWidgetBase
         lblFont.MeasureText(label, out var lblBounds, lblPaint);
         float lblY = valY + lblSize + 4f;
         canvas.DrawTextWithFallback(label, cx - lblBounds.Width / 2f, lblY, lblFont, lblPaint);
-    }
-
-    private static void DrawMonitorMode(SKCanvas canvas, SKRect bounds, SKColor accent, SKColor text)
-    {
-        float pad = Math.Clamp(bounds.Height * 0.05f, 10f, 22f);
-        float heroTop = bounds.Top + pad;
-        float heroH = Math.Max(8f, bounds.Height - pad * 2f);
-
-        float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
-        var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
-        using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-
-        string fpsText = MonitorRefreshRateHz.Value.ToString(CultureInfo.InvariantCulture);
-        fpsFont.MeasureText(fpsText, out var fpsBounds, fpsPaint);
-
-        float fpsX = bounds.Left + pad;
-        float fpsBaseline = heroTop + fpsFontSize * 0.82f;
-        canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, fpsPaint);
-
-        float unitX = fpsX + fpsBounds.Width + 10f;
-        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
-        using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawTextWithFallback("FPS", unitX, heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
-
-        var capFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f);
-        using var capPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-        string cap = "MONITOR";
-        canvas.DrawTextWithFallback(cap, bounds.Right - pad - FontHelper.MeasureTextWithFallback(cap, capFont), heroTop + 13f, capFont, capPaint);
     }
 }

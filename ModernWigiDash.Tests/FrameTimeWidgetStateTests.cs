@@ -6,7 +6,7 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// FrameTimeWidget state rendering: the unavailable, capture-inactive, and
-/// monitor-mode states must all render without throwing, and the
+/// dash (no-process) states must all render without throwing, and the
 /// capture-inactive state must not be confused with a real FPS readout.
 /// </summary>
 [TestClass]
@@ -45,7 +45,7 @@ public class FrameTimeWidgetStateTests
     }
 
     [TestMethod]
-    public void Render_IdleMonitorMode_RendersWithoutThrowing()
+    public void Render_NoProcess_RendersWithoutThrowing()
     {
         using var surface = RenderWith(DateTime.UtcNow, isAvailable: true, captureHealthy: true, processId: -1, fps: 0);
         Assert.IsNotNull(surface);
@@ -70,7 +70,7 @@ public class FrameTimeWidgetStateTests
         unavailable.Render(canvas, bounds);
 
         var waiting = new FrameTimeWidget();
-        FrameTimeStore.Update(new FrameTimeSnapshotRecord(true, 0, "", 0, 0, 0, 0, 0, 0, []));
+        FrameTimeStore.Update(new FrameTimeSnapshotRecord(true, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, []));
         waiting.Render(canvas, bounds);
 
         var live = new FrameTimeWidget { AccentColorHex = "#22C55E" };
@@ -80,7 +80,7 @@ public class FrameTimeWidgetStateTests
             samples.Add(6.5 + (i % 20) * 0.05);
         }
         FrameTimeStore.Update(new FrameTimeSnapshotRecord(
-            true, 4321, "fpsbench.exe", 143.2, 6.98, 110.4, 87.2, 93.0, 4.05, samples));
+            true, 4321, "fpsbench.exe", 143.2, 6.98, 110.4, 87.2, 93.0, 4.05, 0, 0, 0, -1, samples));
         live.Render(canvas, bounds);
 
         // Small (2x1) size must also render without exceptions
@@ -91,75 +91,71 @@ public class FrameTimeWidgetStateTests
         Assert.IsNotNull(surface);
     }
 
-    // ---- Desktop-composition detection (video / post-game-close case) ----
-
-    private static FrameTimeSnapshotRecord Composite(double fps, double low1, double gpuBusyMs)
-        => new(true, 4321, "chrome.exe", fps, 1000.0 / fps, low1, low1, gpuBusyMs, 0.2, []);
-
-    [TestMethod]
-    public void LooksLikeDesktopComposition_VsyncPinnedNoGpuWork_True()
+    private static void RenderWith(FrameTimeSnapshotDto dto, out FrameTimeWidget widget)
     {
-        // Chrome with a playing video on a 162 Hz panel: presents pinned at the
-        // panel cadence, no frame-time variance, no per-frame GPU work.
-        Assert.IsTrue(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 161.4, 0.3), 162));
+        FrameTimeStore.UpdateFromDto(dto);
+        var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        widget = new FrameTimeWidget();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
+        surface.Dispose();
     }
 
     [TestMethod]
-    public void LooksLikeDesktopComposition_VsyncPinnedWithGpuWork_False()
+    public void Render_NoProcessTracked_RendersDashLayoutWithoutThrowing()
     {
-        // A real game capped at the refresh rate still shows meaningful GPU
-        // busy and frame-time variance — stays in tracked mode.
-        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 150.2, 3.8), 162));
+        RenderWith(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = -1,
+            LastUpdate = DateTime.UtcNow,
+        }, out _);
+
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
+        FrameTimeStore.Reset();
     }
 
     [TestMethod]
-    public void LooksLikeDesktopComposition_SubRefreshPresenter_False()
+    public void Render_TrackedIdleProcess_ShowsZeroWithoutThrowing()
     {
-        // A 60 fps-paced presenter (e.g. a player presenting at content
-        // cadence) is real data even with no GPU work — tracked mode shows it.
-        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(60.0, 59.2, 0.4), 162));
-    }
-
-    [TestMethod]
-    public void LooksLikeDesktopComposition_NoPresents_False()
-    {
-        // Zero presents is handled by the producer's idle path, not this rule.
-        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(0, 0, 0), 162));
-    }
-
-    [TestMethod]
-    public void LooksLikeDesktopComposition_FrameTimeJitter_False()
-    {
-        // Presenting at the panel cadence but with real frame-time jitter
-        // (1% low well below the average) is a real presenter.
-        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 120.0, 0.5), 162));
-    }
-
-    [TestMethod]
-    public void Render_CompositeSignature_RendersMonitorModeWithoutThrowing()
-    {
-        // High-refresh composite signature is composite on any panel (>= 0.95x
-        // of both 60 Hz and 162 Hz), so the gate decision is deterministic.
-        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        RenderWith(new FrameTimeSnapshotDto
         {
             IsAvailable = true,
             CaptureHealthy = true,
             ProcessId = 4321,
-            ProcessName = "chrome.exe",
-            Fps = 161.9,
-            FrameTimeMs = 6.18,
-            Low1PercentFps = 161.4,
-            Low01PercentFps = 161.0,
-            GpuBusyPercent = 0.3,
-            CpuFrameTimeMs = 0.2,
+            ProcessName = "game.exe",
+            Fps = 0,
             LastUpdate = DateTime.UtcNow,
-        });
+        }, out _);
 
-        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
-        var widget = new FrameTimeWidget();
-        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
         FrameTimeStore.Reset();
+    }
 
-        Assert.IsNotNull(surface);
+    [TestMethod]
+    public void Render_FullMetrics_ShowsAllEightCardsWithoutThrowing()
+    {
+        RenderWith(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = 4321,
+            ProcessName = "game.exe",
+            Fps = 162.4,
+            FrameTimeMs = 6.16,
+            Low1PercentFps = 138.0,
+            Low01PercentFps = 121.0,
+            GpuBusyPercent = 71.0,
+            CpuFrameTimeMs = 5.2,
+            DisplayedFps = 162.0,
+            DroppedFrames = 3,
+            GpuTimeMs = 6.1,
+            PresentModeId = 8,
+            RecentFrameTimesMs = [6.5, 6.7, 6.4],
+            LastUpdate = DateTime.UtcNow,
+        }, out _);
+
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
+        FrameTimeStore.Reset();
     }
 }

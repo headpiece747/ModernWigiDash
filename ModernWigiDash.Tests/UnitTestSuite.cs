@@ -565,6 +565,10 @@ public class UnitTestSuite
             Low01PercentFps: 89.0,
             GpuBusyPercent: 92.0,
             CpuFrameTimeMs: 4.1,
+            DisplayedFps: 0,
+            DroppedFrames: 0,
+            GpuTimeMs: 0,
+            PresentModeId: -1,
             RecentFrameTimesMs: [6.9, 7.0, 7.1, 6.8]);
 
         FrameTimeStore.Update(record);
