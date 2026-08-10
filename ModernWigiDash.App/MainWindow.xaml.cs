@@ -589,15 +589,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     #endregion
 
 
-    private string _lastUsbBadgeBrush = "";
-    private string _lastUsbBadgeLabel = "";
+    private readonly LogOnChange _usbBadgeChanged = new();
 
     private void UpdateUsbBadge()
     {
         var (label, brushKey) = UsbBadgeModel.From(_usbDevice.State);
-        if (brushKey == _lastUsbBadgeBrush && label == _lastUsbBadgeLabel) return; // state unchanged — skip the per-tick resource lookup
-        _lastUsbBadgeBrush = brushKey;
-        _lastUsbBadgeLabel = label;
+        if (!_usbBadgeChanged.Changed(brushKey + label)) return; // state unchanged — skip the per-tick resource lookup
 
         var resources = Application.Current.Resources;
         UsbStatusDot.Fill = (Brush)resources[brushKey];

@@ -375,7 +375,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             sw.Stop();
             elapsedMs = sw.ElapsedMilliseconds;
 
-            if (_bulkDiagCount++ % 30 == 0)
+            if (_bulkDiagLog.Due())
                 Log($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
             if (!ok)
@@ -400,7 +400,7 @@ internal class WinUsbBulkDevice : ITransferBackend
         }
     }
 
-    private int _bulkDiagCount;
+    private readonly LogCadence _bulkDiagLog = new(30);
 
     /// <summary>
     /// Control OUT transfer (vendor command).
@@ -411,7 +411,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             return false;
 
         WinUsbNative.WinUsbSetupPacket setup = default;
-        setup.RequestType = 0x21; // Class | Interface | Host-to-Device
+        setup.RequestType = DisplayProtocolConstants.VendorOutRequestType; // Class | Interface | Host-to-Device
         setup.Request = request;
         setup.Value = wValue;
         setup.Index = 0;
@@ -432,7 +432,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             return false;
 
         WinUsbNative.WinUsbSetupPacket setup = default;
-        setup.RequestType = 0xA1; // Vendor | Device-to-Host | Interface
+        setup.RequestType = DisplayProtocolConstants.ControlInRequestType; // Vendor | Device-to-Host | Interface
         setup.Request = request;
         setup.Value = wValue;
         setup.Index = wIndex;

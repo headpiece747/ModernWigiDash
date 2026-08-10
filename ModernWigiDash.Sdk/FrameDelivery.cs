@@ -122,7 +122,8 @@ public sealed class FrameDelivery : IDisposable
 
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
-    /// of frame accounting — the transport no longer counts.</summary>
+    /// of frame accounting. The transport keeps only a bulk-layer diagnostic
+    /// counter for its own failure log — never a second delivery accounting.</summary>
     public long FramesSent => Interlocked.Read(ref _sent);
 
     /// <summary>
