@@ -106,7 +106,7 @@ public class PresentMonQueryBuilderTests
     public void DynamicQuerySpecs_EveryDynamicField_RegisteredExactlyOnce()
     {
         var fields = Enum.GetValues<DynamicField>();
-        var registered = PresentMonNative.DynamicQuerySpecs.Select(s => s.Field).ToArray();
+        var registered = PresentMonQueryRegistry.DynamicQuerySpecs.Select(s => s.Field).ToArray();
 
         Assert.AreEqual(fields.Length, registered.Length, "the registration config must cover every field slot");
         CollectionAssert.AreEquivalent(fields.ToArray(), registered,
