@@ -69,4 +69,32 @@ public class PresentMonBlobReaderTests
             return Task.CompletedTask;
         });
     }
+
+    [TestMethod]
+    public void ReadDynamicElement_Int32SizedElement_ReadsInt32NotDouble()
+    {
+        // PRESENT_MODE is enum-typed: the service stores it as 4 bytes (the
+        // element's DataSize reports 4). Reading it as an 8-byte double would
+        // swallow the following element's bytes and produce garbage.
+        var element = new PresentMonQueryElement(Metric: 20, Stat: 12, DeviceId: 0, ArrayIndex: 0, DataOffset: 8, DataSize: 4);
+        byte[] blob = new byte[20];
+        BitConverter.GetBytes(8).CopyTo(blob, 8);
+        BitConverter.GetBytes(99.5).CopyTo(blob, 12); // next element's double
+
+        double value = PresentMonBlobReader.ReadDynamicElement(blob, chainIndex: 0, chainStrideBytes: 20, element);
+
+        Assert.AreEqual(8.0, value, "the enum id must read as its int32 value, not a garbage double");
+    }
+
+    [TestMethod]
+    public void ReadDynamicElement_DoubleSizedElement_ReadsDouble()
+    {
+        var element = DoubleAt(8);
+        byte[] blob = new byte[16];
+        BitConverter.GetBytes(143.2).CopyTo(blob, 8);
+
+        double value = PresentMonBlobReader.ReadDynamicElement(blob, chainIndex: 0, chainStrideBytes: 16, element);
+
+        Assert.AreEqual(143.2, value);
+    }
 }

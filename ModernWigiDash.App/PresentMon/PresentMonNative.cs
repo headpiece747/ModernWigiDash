@@ -190,7 +190,7 @@ public sealed class PresentMonNative : IPresentMonNative
     private double ReadField(byte[] blob, DynamicField field)
     {
         int elementIndex = _fieldIndexes[(int)field];
-        return elementIndex < 0 ? 0 : PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements![elementIndex]);
+        return elementIndex < 0 ? 0 : PresentMonBlobReader.ReadDynamicElement(blob, 0, _chainStride, _dynamicElements![elementIndex]);
     }
 
     public IReadOnlyList<double> DrainFrameTimes(int processId)

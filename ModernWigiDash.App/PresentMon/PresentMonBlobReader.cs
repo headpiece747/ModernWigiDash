@@ -43,6 +43,27 @@ public static class PresentMonBlobReader
         => ReadDouble(blob, (long)chainIndex * chainStrideBytes + (long)element.DataOffset);
 
     /// <summary>
+    /// Reads an element's value from a dynamic-query blob, matching the
+    /// service's storage width: numeric metrics are 8-byte IEEE-754 doubles,
+    /// enum-typed metrics (PRESENT_MODE) are 4-byte int32 — the element's
+    /// DataSize reports the actual width. Reading an enum as a double would
+    /// swallow the next element's bytes and yield garbage.
+    /// </summary>
+    public static double ReadDynamicElement(
+        ReadOnlySpan<byte> blob,
+        int chainIndex,
+        int chainStrideBytes,
+        PresentMonQueryElement element)
+    {
+        long offset = (long)chainIndex * chainStrideBytes + (long)element.DataOffset;
+        return element.DataSize switch
+        {
+            4 => BitConverter.ToInt32(blob[(int)offset..]),
+            _ => ReadDouble(blob, offset),
+        };
+    }
+
+    /// <summary>
     /// Reads an element's double from a single frame-query blob (one frame's
     /// worth of data) at the element's registered offset.
     /// </summary>
