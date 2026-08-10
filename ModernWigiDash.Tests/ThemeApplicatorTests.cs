@@ -52,7 +52,7 @@ public class ThemeApplicatorTests
     [TestMethod]
     public void Apply_ThemeChanged_ReappliesPreviewShadowAccent()
     {
-        RunOnSta(() =>
+        StaRunner.Run(() =>
         {
             var window = new Window
             {
@@ -74,29 +74,5 @@ public class ThemeApplicatorTests
             Assert.AreEqual(Color.FromRgb(0xFF, 0, 0), ((DropShadowEffect)preview.Effect).Color,
                 "DropShadowEffect does not track DynamicResource — the applicator must re-derive the accent on theme change");
         });
-    }
-
-    private static void RunOnSta(Action work)
-    {
-        Exception? error = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                work();
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
-        if (error is not null)
-        {
-            Assert.Fail($"STA work failed: {error}");
-        }
     }
 }

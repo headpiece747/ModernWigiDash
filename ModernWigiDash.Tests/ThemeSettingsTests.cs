@@ -217,6 +217,30 @@ public class ThemeSettingsTests
     }
 
     [TestMethod]
+    public void StringProperties_ListsEveryColorPropertyInDeclarationOrder()
+    {
+        string[] names = ThemeSettings.StringProperties.Select(p => p.Name).ToArray();
+
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                nameof(ThemeSettings.BgDark), nameof(ThemeSettings.BgPanel), nameof(ThemeSettings.BgCard),
+                nameof(ThemeSettings.Border), nameof(ThemeSettings.AccentRed), nameof(ThemeSettings.M3Primary),
+                nameof(ThemeSettings.M3PrimaryContainer), nameof(ThemeSettings.M3OnPrimaryContainer),
+                nameof(ThemeSettings.AccentGreen), nameof(ThemeSettings.TextPrimary),
+                nameof(ThemeSettings.TextSecondary), nameof(ThemeSettings.ControlHover),
+                nameof(ThemeSettings.DropdownHover), nameof(ThemeSettings.TitleBar),
+                nameof(ThemeSettings.StatusBarBackground), nameof(ThemeSettings.DangerBackground),
+                nameof(ThemeSettings.DangerBorder), nameof(ThemeSettings.SuccessBackground),
+                nameof(ThemeSettings.SuccessBorder)
+            },
+            names);
+
+        Assert.AreEqual(19, names.Length,
+            "every themeable color property must be enumerated by StringProperties (the applier, fingerprint, and theme dialog consume it)");
+    }
+
+    [TestMethod]
     public void ThemeSettings_DefaultsToTitaniumAmberPalette()
     {
         var theme = new ModernWigiDash.Core.Theming.ThemeSettings();

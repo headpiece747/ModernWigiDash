@@ -15,15 +15,7 @@ public class ThemeManagerTests
     /// </summary>
     private static readonly Lazy<AppClass> SharedApp = new(CreateApp);
 
-    private static AppClass CreateApp()
-    {
-        AppClass app = null!;
-        var thread = new Thread(() => app = new AppClass());
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        return app;
-    }
+    private static AppClass CreateApp() => StaRunner.Run(() => new AppClass());
 
     [TestMethod]
     public void App_Constructor_SetsApplicationCurrent()

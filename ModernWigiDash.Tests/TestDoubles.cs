@@ -17,8 +17,9 @@ namespace ModernWigiDash.Tests;
 /// The shared test doubles every test file used to copy: the no-op widget
 /// context (with optional counters), the placed-instance persisting variant,
 /// the in-memory WebSocket feed, the HTTP stub, the PresentMon interop stub,
-/// the SMTC media-session triple, the LHS map source, and the STA App host.
-/// One double per seam — new widget tests start from a one-line host.
+/// the SMTC media-session triple, the LHS map source, the STA App host, and
+/// the one-shot STA runner. One double per seam — new widget tests start
+/// from a one-line host.
 /// </summary>
 internal class TestContext : IModernWigiDashContext
 {
@@ -393,7 +394,16 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
     public Task<MediaPropertiesData?> TryGetMediaPropertiesAsync()
         => PropertiesFunc is not null ? PropertiesFunc() : Task.FromResult(Properties);
 
-    public PlaybackInfoData? GetPlaybackInfo() => PlaybackInfo;
+    /// <summary>How many times GetPlaybackInfo was called — the signal that a
+    /// refresh resumed past its awaited properties fetch (used to wait out a
+    /// stale refresh's continuation without a fixed delay).</summary>
+    public int PlaybackInfoCalls { get; private set; }
+
+    public PlaybackInfoData? GetPlaybackInfo()
+    {
+        PlaybackInfoCalls++;
+        return PlaybackInfo;
+    }
 
     public TimelinePropertiesData? GetTimelineProperties() => Timeline;
 
@@ -501,10 +511,14 @@ internal sealed class StaHost
     }
 
     /// <summary>
-    /// Nulls the private Application._appInstance / _appCreatedInThisAppDomain
-    /// fields so a later class can create its own Application instance.
+    /// Resets the process-wide WPF Application state the test host must never
+    /// inherit: the singleton fields (so a later class can create its own
+    /// Application) and the shutdown flag that <see cref="Window.Close"/>
+    /// sets when the closed window was the Application's last one —
+    /// <see cref="Window.Show"/> silently no-ops while the flag is set, so
+    /// any later window test would show nothing at all.
     /// </summary>
-    public void DetachApplication()
+    public static void ResetApplicationState()
     {
         const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
         FieldInfo appInstance = typeof(Application).GetField("_appInstance", flags)
@@ -513,7 +527,18 @@ internal sealed class StaHost
             ?? throw new InvalidOperationException("Application._appCreatedInThisAppDomain field not found");
         appInstance.SetValue(null, null);
         createdHere.SetValue(null, false);
+
+        PropertyInfo shuttingDown = typeof(Application).GetProperty("IsShuttingDown", flags)
+            ?? throw new InvalidOperationException("Application.IsShuttingDown property not found");
+        shuttingDown.SetValue(null, false);
     }
+
+    /// <summary>
+    /// Nulls the private Application._appInstance / _appCreatedInThisAppDomain
+    /// fields so a later class can create its own Application instance, and
+    /// clears the shutdown flag Window.Close may have left set.
+    /// </summary>
+    public void DetachApplication() => ResetApplicationState();
 
     /// <summary>Raw invocation (MainWindowConstructionTests): returns the
     /// result and any exception for the caller to assert.</summary>
@@ -542,5 +567,50 @@ internal sealed class StaHost
             Assert.Fail($"STA work failed: {error}");
         }
         return (T)result!;
+    }
+}
+
+/// <summary>
+/// One-shot STA invocation for tests that need WPF objects but no Application
+/// host: runs the work on a fresh background STA thread and fails the test
+/// when the work threw. <see cref="StaHost"/> stays for tests whose WPF
+/// objects need a live Application (pack:// resources, dialog pumps) — these
+/// tests only need the apartment, so each call pays for one throwaway thread.
+/// </summary>
+internal static class StaRunner
+{
+    /// <summary>Runs <paramref name="work"/> on a fresh STA thread, failing the
+    /// test when it throws.</summary>
+    public static void Run(Action work) => Run(() => { work(); return true; });
+
+    /// <summary>Runs <paramref name="work"/> on a fresh STA thread, returning
+    /// its result, failing the test when it throws.</summary>
+    public static T Run<T>(Func<T> work)
+    {
+        Exception? error = null;
+        T result = default!;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = work();
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "StaRunner"
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (error is not null)
+        {
+            Assert.Fail($"STA work failed: {error}");
+        }
+        return result;
     }
 }

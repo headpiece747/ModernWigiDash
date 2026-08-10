@@ -119,64 +119,51 @@ public class InspectorEditorProviderTests
     [TestMethod]
     public void Render_RoutesActionCommand_ToCommandPathEditor()
     {
-        Exception? failure = null;
         string? fileTitle = null;
         string? fileFilter = null;
         string? folderTitle = null;
 
-        var thread = new Thread(() =>
+        StaRunner.Run(() =>
         {
-            try
-            {
-                var placed = Place();
-                var panel = new StackPanel();
-                InspectorPanelRenderer.Render(
-                    placed,
-                    InspectorModelBuilder.Describe(placed),
-                    panel.Children,
-                    () => false,
-                    new InspectorCallbacks
+            var placed = Place();
+            var panel = new StackPanel();
+            InspectorPanelRenderer.Render(
+                placed,
+                InspectorModelBuilder.Describe(placed),
+                panel.Children,
+                () => false,
+                new InspectorCallbacks
+                {
+                    TryFindResource = _ => null,
+                    ApplyInspectorPropertyValue = (_, _) => { },
+                    ShowIconSelectorPopup = (_, _, _) => { },
+                    AttachDropdownWithinWindow = _ => { },
+                    BrowseFile = (title, filter) =>
                     {
-                        TryFindResource = _ => null,
-                        ApplyInspectorPropertyValue = (_, _) => { },
-                        ShowIconSelectorPopup = (_, _, _) => { },
-                        AttachDropdownWithinWindow = _ => { },
-                        BrowseFile = (title, filter) =>
-                        {
-                            fileTitle = title;
-                            fileFilter = filter;
-                            return null;
-                        },
-                        BrowseFolder = title =>
-                        {
-                            folderTitle = title;
-                            return null;
-                        }
-                    });
+                        fileTitle = title;
+                        fileFilter = filter;
+                        return null;
+                    },
+                    BrowseFolder = title =>
+                    {
+                        folderTitle = title;
+                        return null;
+                    }
+                });
 
-                // Last row is the ActionCommand property: the File button must
-                // be the action picker, not the image picker.
-                var commandRow = panel.Children.OfType<StackPanel>().Last();
-                var dock = commandRow.Children.OfType<DockPanel>().Single();
-                var fileButton = dock.Children.OfType<Button>().Single(b => (string)b.Content == "File\u2026");
-                fileButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            // Last row is the ActionCommand property: the File button must
+            // be the action picker, not the image picker.
+            var commandRow = panel.Children.OfType<StackPanel>().Last();
+            var dock = commandRow.Children.OfType<DockPanel>().Single();
+            var fileButton = dock.Children.OfType<Button>().Single(b => (string)b.Content == "File\u2026");
+            fileButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
-                Assert.AreEqual("Select action file or executable", fileTitle);
-                Assert.AreEqual("Programs and files (*.*)|*.*", fileFilter);
+            Assert.AreEqual("Select action file or executable", fileTitle);
+            Assert.AreEqual("Programs and files (*.*)|*.*", fileFilter);
 
-                var folderButton = dock.Children.OfType<Button>().Single(b => (string)b.Content == "Folder\u2026");
-                folderButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Assert.AreEqual("Select action folder", folderTitle);
-            }
-            catch (Exception ex)
-            {
-                failure = ex;
-            }
+            var folderButton = dock.Children.OfType<Button>().Single(b => (string)b.Content == "Folder\u2026");
+            folderButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.AreEqual("Select action folder", folderTitle);
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-
-        Assert.IsNull(failure, failure?.ToString());
     }
 }

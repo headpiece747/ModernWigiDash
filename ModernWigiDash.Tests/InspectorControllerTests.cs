@@ -29,7 +29,7 @@ public class InspectorControllerTests
     [TestMethod]
     public void Refresh_WithSelection_PopulatesHostControls()
     {
-        RunOnSta(() =>
+        StaRunner.Run(() =>
         {
             var owner = new Window();
             var (host, placed, _) = BuildHost();
@@ -51,7 +51,7 @@ public class InspectorControllerTests
     [TestMethod]
     public void Refresh_WithoutSelection_ShowsEmptyPanel()
     {
-        RunOnSta(() =>
+        StaRunner.Run(() =>
         {
             var owner = new Window();
             var (host, _, _) = BuildHost(select: () => null);
@@ -67,7 +67,7 @@ public class InspectorControllerTests
     [TestMethod]
     public void ApplyPropertyValue_WritesInstanceAndPropertyValues()
     {
-        RunOnSta(() =>
+        StaRunner.Run(() =>
         {
             var owner = new Window();
             var (host, placed, widget) = BuildHost();
@@ -112,29 +112,5 @@ public class InspectorControllerTests
             getSelectedWidget: select ?? (() => placed),
             requestCanvasRender: () => { });
         return (host, placed, widget);
-    }
-
-    private static void RunOnSta(Action work)
-    {
-        Exception? error = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                work();
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
-        if (error is not null)
-        {
-            Assert.Fail($"STA work failed: {error}");
-        }
     }
 }

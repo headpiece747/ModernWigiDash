@@ -271,7 +271,10 @@ public class MediaSessionMonitorTests
         Assert.AreEqual("Latest", monitor.CurrentSnapshot?.Title);
 
         tcsA.SetResult(new MediaPropertiesData { Title = "Stale" });
-        await Task.Delay(100);
+        // Resolving the first fetch lets the stale refresh run out; the second
+        // GetPlaybackInfo call is the proof it reached the version check and
+        // discarded itself, so the assertions below are race-free.
+        await TestWait.WaitUntilAsync(() => session.PlaybackInfoCalls == 2, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual("Latest", monitor.CurrentSnapshot?.Title);
         Assert.AreEqual(1, updates.Count);
