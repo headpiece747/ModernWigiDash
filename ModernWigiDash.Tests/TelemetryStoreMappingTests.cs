@@ -67,8 +67,12 @@ public class TelemetryStoreMappingTests
             FrameTimeMs = 6.92,
             Low1PercentFps = 90.1,
             Low01PercentFps = 60.2,
-            GpuBusyMs = 45.3,
+            GpuBusyPercent = 71.0,
             CpuFrameTimeMs = 3.1,
+            DisplayedFps = 144.0,
+            DroppedFrames = 2,
+            GpuTimeMs = 5.1,
+            PresentModeId = 4,
             RecentFrameTimesMs = [6.9, 7.0, 6.8]
         });
 
@@ -81,8 +85,12 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual(6.92, rec.FrameTimeMs);
         Assert.AreEqual(90.1, rec.Low1PercentFps);
         Assert.AreEqual(60.2, rec.Low01PercentFps);
-        Assert.AreEqual(45.3, rec.GpuBusyMs);
+        Assert.AreEqual(71.0, rec.GpuBusyPercent);
         Assert.AreEqual(3.1, rec.CpuFrameTimeMs);
+        Assert.AreEqual(144.0, rec.DisplayedFps);
+        Assert.AreEqual(2, rec.DroppedFrames);
+        Assert.AreEqual(5.1, rec.GpuTimeMs);
+        Assert.AreEqual(4, rec.PresentModeId);
         CollectionAssert.AreEqual(new[] { 6.9, 7.0, 6.8 }, rec.RecentFrameTimesMs.ToArray());
         Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10)));
     }

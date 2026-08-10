@@ -15,14 +15,18 @@ public sealed record FrameTimeSnapshotRecord(
     double FrameTimeMs,
     double Low1PercentFps,
     double Low01PercentFps,
-    double GpuBusyMs,
+    double GpuBusyPercent,
     double CpuFrameTimeMs,
+    double DisplayedFps,
+    int DroppedFrames,
+    double GpuTimeMs,
+    int PresentModeId,
     IReadOnlyList<double> RecentFrameTimesMs,
     DateTime LastUpdate = default,
     bool CaptureHealthy = true)
 {
     public static FrameTimeSnapshotRecord Unavailable() =>
-        new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, []);
+        new(false, 0, string.Empty, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, []);
 }
 
 /// <summary>
@@ -68,8 +72,12 @@ public static class FrameTimeStore
                 dto?.FrameTimeMs ?? 0,
                 dto?.Low1PercentFps ?? 0,
                 dto?.Low01PercentFps ?? 0,
-                dto?.GpuBusyMs ?? 0,
+                dto?.GpuBusyPercent ?? 0,
                 dto?.CpuFrameTimeMs ?? 0,
+                dto?.DisplayedFps ?? 0,
+                dto?.DroppedFrames ?? 0,
+                dto?.GpuTimeMs ?? 0,
+                dto?.PresentModeId ?? -1,
                 dto?.RecentFrameTimesMs ?? [],
                 dto?.LastUpdate ?? default,
                 dto?.CaptureHealthy ?? true),

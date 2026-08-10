@@ -90,4 +90,76 @@ public class FrameTimeWidgetStateTests
 
         Assert.IsNotNull(surface);
     }
+
+    // ---- Desktop-composition detection (video / post-game-close case) ----
+
+    private static FrameTimeSnapshotRecord Composite(double fps, double low1, double gpuBusyMs)
+        => new(true, 4321, "chrome.exe", fps, 1000.0 / fps, low1, low1, gpuBusyMs, 0.2, []);
+
+    [TestMethod]
+    public void LooksLikeDesktopComposition_VsyncPinnedNoGpuWork_True()
+    {
+        // Chrome with a playing video on a 162 Hz panel: presents pinned at the
+        // panel cadence, no frame-time variance, no per-frame GPU work.
+        Assert.IsTrue(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 161.4, 0.3), 162));
+    }
+
+    [TestMethod]
+    public void LooksLikeDesktopComposition_VsyncPinnedWithGpuWork_False()
+    {
+        // A real game capped at the refresh rate still shows meaningful GPU
+        // busy and frame-time variance — stays in tracked mode.
+        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 150.2, 3.8), 162));
+    }
+
+    [TestMethod]
+    public void LooksLikeDesktopComposition_SubRefreshPresenter_False()
+    {
+        // A 60 fps-paced presenter (e.g. a player presenting at content
+        // cadence) is real data even with no GPU work — tracked mode shows it.
+        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(60.0, 59.2, 0.4), 162));
+    }
+
+    [TestMethod]
+    public void LooksLikeDesktopComposition_NoPresents_False()
+    {
+        // Zero presents is handled by the producer's idle path, not this rule.
+        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(0, 0, 0), 162));
+    }
+
+    [TestMethod]
+    public void LooksLikeDesktopComposition_FrameTimeJitter_False()
+    {
+        // Presenting at the panel cadence but with real frame-time jitter
+        // (1% low well below the average) is a real presenter.
+        Assert.IsFalse(FrameTimeWidget.LooksLikeDesktopComposition(Composite(161.9, 120.0, 0.5), 162));
+    }
+
+    [TestMethod]
+    public void Render_CompositeSignature_RendersMonitorModeWithoutThrowing()
+    {
+        // High-refresh composite signature is composite on any panel (>= 0.95x
+        // of both 60 Hz and 162 Hz), so the gate decision is deterministic.
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
+        {
+            IsAvailable = true,
+            CaptureHealthy = true,
+            ProcessId = 4321,
+            ProcessName = "chrome.exe",
+            Fps = 161.9,
+            FrameTimeMs = 6.18,
+            Low1PercentFps = 161.4,
+            Low01PercentFps = 161.0,
+            GpuBusyPercent = 0.3,
+            CpuFrameTimeMs = 0.2,
+            LastUpdate = DateTime.UtcNow,
+        });
+
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        var widget = new FrameTimeWidget();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
+        FrameTimeStore.Reset();
+
+        Assert.IsNotNull(surface);
+    }
 }

@@ -563,7 +563,7 @@ public class UnitTestSuite
             FrameTimeMs: 6.94,
             Low1PercentFps: 112.0,
             Low01PercentFps: 89.0,
-            GpuBusyMs: 92.0,
+            GpuBusyPercent: 92.0,
             CpuFrameTimeMs: 4.1,
             RecentFrameTimesMs: [6.9, 7.0, 7.1, 6.8]);
 
@@ -573,7 +573,7 @@ public class UnitTestSuite
         Assert.IsTrue(read.IsAvailable);
         Assert.AreEqual("game.exe", read.ProcessName);
         Assert.AreEqual(144.0, read.Fps);
-        Assert.AreEqual(92.0, read.GpuBusyMs);
+        Assert.AreEqual(92.0, read.GpuBusyPercent);
         CollectionAssert.AreEqual(new[] { 6.9, 7.0, 7.1, 6.8 }, read.RecentFrameTimesMs.ToArray());
     }
 

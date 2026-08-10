@@ -64,15 +64,37 @@ public sealed record FrameTimeSnapshotDto
     public double Low01PercentFps { get; set; }
 
     /// <summary>
-    /// Average GPU busy time per frame for this process's work, in milliseconds
-    /// (PM_METRIC_GPU_BUSY, "Ms GPU Busy").
+    /// GPU busy percentage (PM_METRIC_GPU_BUSY, documented as %).
     /// </summary>
-    public double GpuBusyMs { get; set; }
+    public double GpuBusyPercent { get; set; }
 
     /// <summary>
     /// Average CPU-side present call duration in milliseconds.
     /// </summary>
     public double CpuFrameTimeMs { get; set; }
+
+    /// <summary>
+    /// Average GPU busy time per frame for this process's work, in milliseconds
+    /// (PM_METRIC_GPU_TIME, "Ms GPU Time").
+    /// </summary>
+    public double GpuTimeMs { get; set; }
+
+    /// <summary>
+    /// Presented frames per second (PM_METRIC_DISPLAYED_FPS) — presented minus
+    /// dropped frames.
+    /// </summary>
+    public double DisplayedFps { get; set; }
+
+    /// <summary>
+    /// Frames dropped in the window (PM_METRIC_DROPPED_FRAMES).
+    /// </summary>
+    public int DroppedFrames { get; set; }
+
+    /// <summary>
+    /// PM_PRESENT_MODE enum value for the tracked swap chain, or -1 when no
+    /// data. Display labels via <see cref="PresentMonPresentMode"/>.
+    /// </summary>
+    public int PresentModeId { get; set; } = -1;
 
     /// <summary>
     /// Recent frame times (ms), newest last, downsampled for a sparkline.
