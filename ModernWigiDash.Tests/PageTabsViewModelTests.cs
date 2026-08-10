@@ -52,4 +52,34 @@ public class PageTabsViewModelTests
         CollectionAssert.AreEqual(new[] { 0, 1, 2 }, tabs.Select(t => t.Index).ToArray());
         CollectionAssert.AreEqual(profile.Pages.Select(p => p.PageName).ToArray(), tabs.Select(t => t.PageName).ToArray());
     }
+
+    [TestMethod]
+    public void CanDelete_SinglePage_IsFalse()
+    {
+        var profile = new ProfileLayout();
+
+        Assert.IsFalse(PageTabsViewModel.CanDelete(profile),
+            "The last remaining page must never be deletable");
+    }
+
+    [TestMethod]
+    public void CanDelete_MultiplePages_IsTrue()
+    {
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "A");
+
+        Assert.IsTrue(PageTabsViewModel.CanDelete(profile));
+    }
+
+    [TestMethod]
+    public void CanDelete_MatchesBuild_TabRulesShareOneRule()
+    {
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "A");
+
+        var tabs = PageTabsViewModel.Build(profile);
+
+        Assert.IsTrue(tabs.All(t => t.CanDelete == PageTabsViewModel.CanDelete(profile)),
+            "the tab strip must consume the same rule the window's delete flow uses");
+    }
 }

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using ModernWigiDash.App;
 using ModernWigiDash.App.Inspector;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -32,7 +33,7 @@ public class InspectorControllerTests
         {
             var owner = new Window();
             var (host, placed, _) = BuildHost();
-            var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
+            var controller = new InspectorController(host, new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }));
             placed.DisplayName = "My Widget";
             placed.X = 42;
             placed.Y = 7;
@@ -54,7 +55,7 @@ public class InspectorControllerTests
         {
             var owner = new Window();
             var (host, _, _) = BuildHost(select: () => null);
-            var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
+            var controller = new InspectorController(host, new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }));
 
             controller.Refresh();
 
@@ -70,7 +71,7 @@ public class InspectorControllerTests
         {
             var owner = new Window();
             var (host, placed, widget) = BuildHost();
-            var controller = new InspectorController(host, new DialogHost(owner, _ => null, (_, _) => { }));
+            var controller = new InspectorController(host, new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }));
             PropertyInfo prop = typeof(TestWidget).GetProperty(nameof(TestWidget.Label))!;
 
             controller.ApplyPropertyValue(prop, "updated");

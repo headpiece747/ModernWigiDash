@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App.Dialogs;
@@ -13,18 +14,16 @@ namespace ModernWigiDash.App.Dialogs;
 /// </summary>
 public sealed class ThemeDialog : Window
 {
-    private readonly Action _applyTheme;
-    private readonly Action<Window, string> _applyDarkTitleBar;
+    private readonly IThemeApplicator _themeApplicator;
     private readonly List<(string Key, TextBox Box)> _entries = [];
     private Button _btnApply = null!;
 
     /// <param name="owner">Owner window for modal centering.</param>
-    /// <param name="applyTheme">Applies the current <see cref="ThemeSettings.Theme"/> to the app resources.</param>
-    /// <param name="applyDarkTitleBar">Applies the dark DWM title bar to a window.</param>
-    public ThemeDialog(Window owner, Action applyTheme, Action<Window, string> applyDarkTitleBar)
+    /// <param name="themeApplicator">Applies the current <see cref="ThemeSettings.Theme"/>
+    /// (resources, preview shadow, title bar, log).</param>
+    public ThemeDialog(Window owner, IThemeApplicator themeApplicator)
     {
-        _applyTheme = applyTheme;
-        _applyDarkTitleBar = applyDarkTitleBar;
+        _themeApplicator = themeApplicator;
 
         Title = "🎨 Theme Customization";
         Width = 440;
@@ -33,7 +32,7 @@ public sealed class ThemeDialog : Window
         Owner = owner;
         Background = Application.Current.Resources["BgPanel"] as Brush ?? Brushes.Black;
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
-        SourceInitialized += (_, _) => _applyDarkTitleBar(this, ThemeSettings.Theme.TitleBar);
+        SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
         Content = BuildUi();
         Validate();
@@ -185,7 +184,7 @@ public sealed class ThemeDialog : Window
             MessageBox.Show("Could not write app_theme.json next to the app. The colors will apply for this session only.",
                             "Theme Save Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        _applyTheme();
+        _themeApplicator.Apply(this);
         Close();
     }
 }

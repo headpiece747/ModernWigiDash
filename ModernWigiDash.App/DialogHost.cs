@@ -4,7 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Microsoft.Win32;
-using ModernWigiDash.Core.Theming;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;
@@ -18,13 +18,15 @@ namespace ModernWigiDash.App;
 public sealed class DialogHost
 {
     private readonly Window _owner;
+    private readonly IThemeApplicator _themeApplicator;
     private readonly Func<string, object?> _tryFindResource;
     private readonly Action<string, Exception?> _logError;
     private Window? _deviceAuthorizationWindow;
 
-    public DialogHost(Window owner, Func<string, object?> tryFindResource, Action<string, Exception?> logError)
+    public DialogHost(Window owner, IThemeApplicator themeApplicator, Func<string, object?> tryFindResource, Action<string, Exception?> logError)
     {
         _owner = owner;
+        _themeApplicator = themeApplicator;
         _tryFindResource = tryFindResource;
         _logError = logError;
     }
@@ -176,7 +178,7 @@ public sealed class DialogHost
             Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
             FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
         };
-        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+        dialog.SourceInitialized += (_, _) => _themeApplicator.Apply(dialog);
         return dialog;
     }
 
@@ -199,7 +201,7 @@ public sealed class DialogHost
             Background = _tryFindResource("BgPanel") as Brush ?? _tryFindResource("PanelBackground") as Brush ?? Brushes.Black,
             Foreground = Brushes.White
         };
-        dialog.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(dialog, ThemeSettings.Theme.TitleBar);
+        dialog.SourceInitialized += (_, _) => _themeApplicator.Apply(dialog);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -375,7 +377,7 @@ public sealed class DialogHost
                 Background = _tryFindResource("BgPanel") as Brush ?? _tryFindResource("PanelBackground") as Brush ?? Brushes.Black,
                 Foreground = _tryFindResource("TextPrimary") as Brush ?? Brushes.White
             };
-            window.SourceInitialized += (_, _) => WindowChrome.ApplyDarkTitleBar(window, ThemeSettings.Theme.TitleBar);
+            window.SourceInitialized += (_, _) => _themeApplicator.Apply(window);
 
             var root = new StackPanel { Margin = new Thickness(20) };
             root.Children.Add(new TextBlock

@@ -3,15 +3,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
-using ModernWigiDash.Core.Theming;
 using ModernWigiDash.Hardware.Transport;
 
 using ModernWigiDash.Sdk;
@@ -65,6 +64,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DialogHost _dialogHost;
     private readonly StarterProfile _starterProfile;
 
+    // Theme application: resources + preview shadow + per-window DWM chrome +
+    // the applied-log line, all behind one seam (ThemeApplicator).
+    private readonly IThemeApplicator _themeApplicator = new ThemeApplicator();
+
     /// <summary>Sampling options for the preview draw — hoisted so the per-frame
     /// paint never allocates a new instance.</summary>
     private static readonly SKSamplingOptions FrameSamplingOptions = new(SKFilterMode.Linear);
@@ -85,7 +88,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // connect + touch poll explicitly.
         _usbDevice.Start();
         InitializeComponent();
-        SourceInitialized += (_, _) => ApplyTheme();
+        SourceInitialized += (_, _) => _themeApplicator.Apply(this);
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
         _presenter = new DisplayPresenter(
@@ -117,15 +120,18 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // ShowDeviceAuthorization). Constructing the modules first removes the
         // startup NRE when those callbacks arrive before the modules exist.
         // Single input module: gesture machine + outcome application + edit-mode
-        // manipulation. All input sources feed it; page-switch UI work stays here.
+        // manipulation + the press orchestration. All input sources cross its
+        // source-aware surface; page-switch UI work stays here.
         _inputController = new Input.InputController(
+            () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
             navigateTo: SwitchToPage,
-            requestRender: () => SkiaCanvas.InvalidateVisual());
+            requestRender: () => SkiaCanvas.InvalidateVisual(),
+            select: SelectWidget);
 
         // One stateful DialogHost for the whole window: the inspector receives
         // this instance (it must never build its own — a second instance could
         // never show the device-authorization window it owns).
-        _dialogHost = new DialogHost(this, TryFindResource, LogError);
+        _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
 
         _inspector = new Inspector.InspectorController(new Inspector.InspectorControllerHost(
             emptyPanel: PanelEmptyInspector,
@@ -156,10 +162,21 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // mouse path carries the desktop edit-mode veto.
         _usbDevice.OnTouchEvent += (point, touchType) =>
         {
-            Dispatcher.BeginInvoke(() => _inputController.Feed(
-                touchType, point.X, point.Y,
-                suppressWidgetRouting: false,
-                _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage));
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (touchType == TouchEventType.TouchDown)
+                {
+                    _inputController.Press(point.X, point.Y, Input.InputSource.Device, editMode: false);
+                }
+                else if (touchType == TouchEventType.TouchMove)
+                {
+                    _inputController.Move(point.X, point.Y, Input.InputSource.Device, editMode: false, out _);
+                }
+                else
+                {
+                    _inputController.Release(point.X, point.Y, Input.InputSource.Device, editMode: false, out _);
+                }
+            });
         };
 
         // 5. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
@@ -215,10 +232,28 @@ public partial class MainWindow : Window, IModernWigiDashContext
         TxtActiveCount.Text = $"Active Widgets: {_profile.ActivePage.Widgets.Count}";
     }
 
-    /// <summary>Clears the widget selection and refreshes the count and canvas.</summary>
-    private void ClearSelectionAndRefresh()
+    /// <summary>
+    /// One refresh sequence after a page-structure mutation (add/delete/rename/
+    /// switch/import): rebuild the tab strip (scrolling to the active tab) and
+    /// refresh the selection, count, and canvas. Passing the current selection
+    /// keeps it (rename); null clears it (page add/delete/switch/import).
+    /// </summary>
+    private void RefreshAfterMutation(PlacedWidgetInstance? selection)
     {
-        SelectWidget(null);
+        RebuildPageTabsUI();
+        SelectWidget(selection);
+        UpdateActiveCount();
+        SkiaCanvas.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// One refresh sequence after a selection-only mutation (place/delete/
+    /// clear): selects the given widget (null clears), refreshes the active
+    /// count, and repaints the canvas.
+    /// </summary>
+    private void RefreshSelection(PlacedWidgetInstance? selection)
+    {
+        SelectWidget(selection);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
     }
@@ -255,20 +290,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SkiaCanvas.CaptureMouse();
         var pos = e.GetPosition(SkiaCanvas);
 
-        // Hit test against active widgets
-        var hit = SkiaFrameCompositor.HitTest(_profile.ActivePage, (float)pos.X, (float)pos.Y);
-        SelectWidget(hit);
-
-        // Edit-mode manipulation (resize / icon-drag / widget-drag) is decided
-        // inside the input controller; a non-manipulating press feeds the
-        // shared gesture machine (page navigation + widget touch routing). The
-        // mouse carries the edit-mode veto: authoring presses manipulate.
-        var kind = _inputController.Begin(hit, _selectedWidget, (float)pos.X, (float)pos.Y, _compositor.IsEditMode);
-        if (kind == Input.ManipulationKind.None)
-        {
-            _inputController.Feed(TouchEventType.TouchDown, (float)pos.X, (float)pos.Y,
-                _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
-        }
+        // The controller owns the press policy: hit-test → select → begin a
+        // manipulation or feed the shared gesture machine (page navigation +
+        // widget touch routing). The mouse carries the edit-mode veto: authoring
+        // presses manipulate.
+        _inputController.Press((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode);
     }
 
     private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
@@ -276,19 +302,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (!_isMouseDown) return;
         var pos = e.GetPosition(SkiaCanvas);
 
-        // A manipulation consumes the sample; otherwise it feeds the machine.
-        if (_inputController.Move(_selectedWidget, (float)pos.X, (float)pos.Y, _compositor.IsEditMode, out bool changed))
+        // A manipulation consumes the sample; otherwise the controller feeds
+        // the machine (page navigation + widget touch routing).
+        if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed))
         {
             if (changed)
             {
                 _inspector.RefreshTransforms();
                 SkiaCanvas.InvalidateVisual();
             }
-            return;
         }
-
-        _inputController.Feed(TouchEventType.TouchMove, (float)pos.X, (float)pos.Y,
-            _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -296,13 +319,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var pos = e.GetPosition(SkiaCanvas);
 
         // A manipulation gesture never reaches the gesture machine — it stays
-        // wholly in the input controller (resize / drag / icon-drag).
-        bool wasManipulating = _inputController.End(_selectedWidget, _compositor.IsEditMode, _profile.ActivePage.SnapToGrid, out bool iconMoved);
-        if (!wasManipulating && _isMouseDown)
-        {
-            _inputController.Feed(TouchEventType.TouchUp, (float)pos.X, (float)pos.Y,
-                _compositor.IsEditMode, _profile.Pages.Count, _profile.ActivePageIndex, _profile.ActivePage);
-        }
+        // wholly in the input controller (resize / drag / icon-drag). A plain
+        // release feeds the machine's TouchUp.
+        bool wasManipulating = _inputController.Release(
+            (float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool iconMoved);
 
         _isMouseDown = false;
 
@@ -349,7 +369,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_selectedWidget != null)
         {
             ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
-            ClearSelectionAndRefresh();
+            RefreshSelection(null);
         }
     }
 
@@ -393,9 +413,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             var placed = ProfileOps.PlaceCentered(_profile, _loader, this, pluginId);
             if (placed == null) return;
 
-            SelectWidget(placed);
-            UpdateActiveCount();
-            SkiaCanvas.InvalidateVisual();
+            RefreshSelection(placed);
         }
     }
 
@@ -483,38 +501,30 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (string.IsNullOrWhiteSpace(newName)) return;
 
         ProfileOps.RenamePage(page, newName);
-        RebuildPageTabsUI();
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
+        RefreshAfterMutation(_selectedWidget);
     }
 
     private void SwitchToPage(int index)
     {
         if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
-        RebuildPageTabsUI();
-
-        ScrollToPage(index);
-
-        ClearSelectionAndRefresh();
+        RefreshAfterMutation(null);
     }
 
     private void DeletePage(int index)
     {
-        if (_profile.Pages.Count <= 1) return;
+        if (!PageTabsViewModel.CanDelete(_profile)) return;
         var targetPage = _profile.Pages[index];
         if (targetPage.Widgets.Count > 0 && !_dialogHost.Confirm("Delete Page", $"Are you sure you want to delete '{targetPage.PageName}' containing {targetPage.Widgets.Count} widget(s)?"))
             return;
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
-        RebuildPageTabsUI();
-        ClearSelectionAndRefresh();
+        RefreshAfterMutation(null);
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
-        RebuildPageTabsUI();
-        ClearSelectionAndRefresh();
+        RefreshAfterMutation(null);
     }
 
     private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
@@ -565,8 +575,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     // Resync the toggle: the imported page's snap-to-grid may
                     // differ from the desktop checkbox's current state.
                     ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-                    RebuildPageTabsUI();
-                    ClearSelectionAndRefresh();
+                    RefreshAfterMutation(null);
                 }
             }
             catch (Exception ex)
@@ -581,7 +590,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
             ProfileOps.ClearPage(_profile.ActivePage);
-            ClearSelectionAndRefresh();
+            RefreshSelection(null);
         }
     }
 
@@ -600,23 +609,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         TxtUsbStatus.Text = label;
     }
 
-    private void ApplyTheme()
-    {
-        ThemeManager.ApplyToApplication();
-
-        // DropShadowEffect does not track DynamicResource — update it explicitly
-        if (PreviewFrame?.Effect is DropShadowEffect shadow)
-        {
-            var accent = ThemeSettings.ParseColor(ThemeSettings.Theme.AccentRed);
-            if (accent != null) shadow.Color = ThemeManager.ToMediaColor(accent.Value);
-        }
-
-        WindowChrome.ApplyDarkTitleBar(this, ThemeSettings.Theme.TitleBar);
-
-        var t = ThemeSettings.Theme;
-        Log($"[THEME] Applied: TitleBar={t.TitleBar} AccentRed={t.AccentRed}");
-    }
-
     private void BtnTheme_Click(object sender, RoutedEventArgs e)
     {
         ShowThemeDialog();
@@ -624,7 +616,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void ShowThemeDialog()
     {
-        new Dialogs.ThemeDialog(this, ApplyTheme, WindowChrome.ApplyDarkTitleBar).ShowDialog();
+        new Dialogs.ThemeDialog(this, _themeApplicator).ShowDialog();
     }
 
     private static void Log(string msg) => FileLog.Write(msg);

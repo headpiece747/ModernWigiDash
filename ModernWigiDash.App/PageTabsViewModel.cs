@@ -14,9 +14,14 @@ public sealed record PageTabItem(string PageName, int Index, bool IsActive, bool
 /// </summary>
 public static class PageTabsViewModel
 {
+    /// <summary>The single delete-page rule: the last page can never be
+    /// deleted. Shared by the tab strip and the window's delete flow — the
+    /// rule is derived in exactly one place.</summary>
+    public static bool CanDelete(ProfileLayout profile) => profile.Pages.Count > 1;
+
     public static IReadOnlyList<PageTabItem> Build(ProfileLayout profile)
     {
-        bool canDelete = profile.Pages.Count > 1;
+        bool canDelete = CanDelete(profile);
         var items = new PageTabItem[profile.Pages.Count];
         for (int i = 0; i < profile.Pages.Count; i++)
         {
