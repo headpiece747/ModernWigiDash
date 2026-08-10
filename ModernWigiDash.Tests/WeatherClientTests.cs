@@ -1,5 +1,4 @@
 using System.IO;
-using System.Net;
 using System.Net.Http;
 using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Widgets;
@@ -203,7 +202,7 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_InFlight_ReturnsNull()
     {
         var gate = new TaskCompletionSource();
-        var stub = new BlockingHandler(gate, SampleForecast);
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast), gate);
         var client = CreateClient(stub);
 
         var inFlight = client.FetchCurrentAsync(CoordinateLocation);
@@ -319,26 +318,4 @@ public class WeatherClientTests
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
-
-
-    /// <summary>Async handler that parks the request until the gate completes.</summary>
-    private sealed class BlockingHandler : HttpMessageHandler
-    {
-        private readonly TaskCompletionSource _gate;
-        private readonly string _body;
-        public int Calls { get; private set; }
-
-        public BlockingHandler(TaskCompletionSource gate, string body)
-        {
-            _gate = gate;
-            _body = body;
-        }
-
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        Calls++;
-        await _gate.Task;
-        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) };
-    }
-}
 }

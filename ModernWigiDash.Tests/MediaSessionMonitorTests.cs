@@ -258,7 +258,7 @@ public class MediaSessionMonitorTests
         int calls = 0;
         session.PropertiesFunc = () => ++calls == 1 ? tcsA.Task : tcsB.Task;
 
-        var updates = new List<MediaSessionUpdate?>();
+        List<MediaSessionUpdate?> updates = [];
         monitor.SnapshotChanged += update => updates.Add(update);
 
         await monitor.InitializeAsync();

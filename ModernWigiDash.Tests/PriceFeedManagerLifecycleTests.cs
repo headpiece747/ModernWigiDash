@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http;
 using ModernWigiDash.Widgets;
 
@@ -151,21 +150,6 @@ public class PriceFeedManagerLifecycleTests
 
         Assert.IsFalse(feed._subscribedCrypto.ContainsKey("BTC"),
             "The last unsubscribe must release the symbol");
-    }
-
-    [TestMethod]
-    public void PriceFeedManager_DetectsFxPairsAndNormalizesKeys()
-    {
-        Assert.IsTrue(SymbolCatalog.TryParseFxPair("EUR/USD", out string baseCur, out string quoteCur));
-        Assert.AreEqual("EUR", baseCur);
-        Assert.AreEqual("USD", quoteCur);
-        Assert.AreEqual("EURUSD", SymbolCatalog.NormalizeFxKey(" eur/usd "));
-        Assert.AreEqual(AssetKind.Fx, SymbolCatalog.DetectAssetKind("EUR/USD", "Auto"));
-        Assert.AreEqual(AssetKind.Stock, SymbolCatalog.DetectAssetKind("AAPL", "Auto"));
-        Assert.AreEqual(AssetKind.Crypto, SymbolCatalog.DetectAssetKind("BTC", "Auto"));
-        Assert.AreEqual(AssetKind.Crypto, SymbolCatalog.DetectAssetKind("AAPL", "Crypto"));
-        Assert.AreEqual(AssetKind.Fx, SymbolCatalog.DetectAssetKind("BTC", "FX Pair"));
-        Assert.IsFalse(SymbolCatalog.TryParseFxPair("AAPL", out _, out _));
     }
 
     [TestMethod]

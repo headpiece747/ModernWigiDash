@@ -1,5 +1,4 @@
 using System.IO;
-using System.Net;
 using System.Net.Http;
 using ModernWigiDash.Widgets;
 
@@ -7,8 +6,8 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// Tests the price-feed WebSocket seam: the Binance/Finnhub loops are driven by
-/// an in-memory feed (no live socket), the reconnect policy is exercised, and
-/// the single crypto symbol table cannot silently lose a CoinGecko fallback.
+/// an in-memory feed (no live socket) and the reconnect policy is exercised.
+/// The crypto symbol table's CoinGecko invariant lives in SymbolCatalogTests.
 /// </summary>
 [TestClass]
 public class PriceFeedSocketLoopTests
@@ -50,19 +49,6 @@ public class PriceFeedSocketLoopTests
         feed.ConnectError = new IOException("socket fault");
         await TestWait.WaitUntilAsync(() => feed.ConnectCount >= 2, TimeSpan.FromSeconds(3));
         Assert.IsTrue(feed.ConnectCount >= 2, "A failed connect must trigger a reconnect attempt");
-    }
-
-    [TestMethod]
-    public void CryptoAliasTable_EveryBaseCoinResolvesAsItsOwnKey_WithCoinGeckoId()
-    {
-        foreach (string baseCoin in SymbolCatalog.CryptoAliases.Values.Select(a => a.Symbol).Distinct())
-        {
-            Assert.IsTrue(
-                SymbolCatalog.CryptoAliases.TryGetValue(baseCoin, out var alias),
-                $"{baseCoin} must resolve as its own alias key so the CoinGecko fallback can find it");
-            Assert.AreEqual(baseCoin, alias.Symbol);
-            Assert.IsFalse(string.IsNullOrEmpty(alias.CoinGeckoId), $"{baseCoin} must have a CoinGecko id");
-        }
     }
 
     [TestMethod]

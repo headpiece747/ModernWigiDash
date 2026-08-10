@@ -1,13 +1,12 @@
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
-using System.Threading;
 using System.Windows;
 using Windows.Media;
-using Windows.Media.Control;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.Core.Models;
+using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using AppClass = ModernWigiDash.App.App;
@@ -60,23 +59,36 @@ internal sealed class PersistingContext(ProfileLayout profile) : TestContext
 /// <summary>
 /// In-memory <see cref="IWebSocketFeed"/>: queued messages feed the consumer,
 /// sent payloads are recorded, and connect failures are injectable — the
-/// feed loops (price, Twitch) are drivable without a network.
+/// feed loops (price, Twitch) are drivable without a network. With
+/// <see cref="ParkConnect"/> set, ConnectAsync parks on an internal gate the
+/// test releases via <see cref="ReleaseConnect"/> (the former per-file
+/// BlockingFeed shape).
 /// </summary>
 internal sealed class FakeFeed : IWebSocketFeed
 {
     private readonly Queue<string> _incoming = new();
+    private readonly TaskCompletionSource _parkedConnect = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public List<string> Sent { get; } = [];
     public bool IsOpen { get; set; } = true;
     public int ConnectCount { get; private set; }
     public Exception? ConnectError { get; set; }
+    public bool ParkConnect { get; set; }
 
     public void QueueMessage(string message) => _incoming.Enqueue(message);
 
     public Task ConnectAsync(Uri uri, CancellationToken ct)
     {
         ConnectCount++;
+        if (ParkConnect)
+        {
+            ct.Register(() => _parkedConnect.TrySetCanceled(ct));
+            return _parkedConnect.Task;
+        }
         return ConnectError is null ? Task.CompletedTask : Task.FromException(ConnectError);
     }
+
+    /// <summary>Releases a parked connect (see <see cref="ParkConnect"/>).</summary>
+    public void ReleaseConnect() => _parkedConnect.TrySetResult();
 
     public Task SendTextAsync(string payload, CancellationToken ct)
     {
@@ -95,17 +107,23 @@ internal sealed class FakeFeed : IWebSocketFeed
 /// <see cref="HttpMessageHandler"/> stub: responds per request via the
 /// delegate, a canned body, or a queue (each request dequeues the next
 /// response; an empty queue answers 400 Bad Request — the Twitch token-poll
-/// pending/error shape). Use the static factories for the common single-body
-/// and not-found shapes.
+/// pending/error shape). An optional gate parks the request until the test
+/// releases it (the former per-file BlockingHandler shape). Use the static
+/// factories for the common single-body and not-found shapes.
 /// </summary>
 internal sealed class StubHttpHandler : HttpMessageHandler
 {
-    private readonly Func<HttpRequestMessage, HttpResponseMessage> _respond;
+    private readonly Func<HttpRequestMessage, HttpResponseMessage>? _respond;
     private readonly Queue<HttpResponseMessage>? _responses;
+    private readonly TaskCompletionSource? _gate;
     public int Calls { get; private set; }
     public List<string> RequestUrls { get; } = [];
 
-    public StubHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) => _respond = respond;
+    public StubHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> respond, TaskCompletionSource? gate = null)
+    {
+        _respond = respond;
+        _gate = gate;
+    }
 
     public StubHttpHandler(string body)
         : this(_ => Ok(body))
@@ -119,17 +137,21 @@ internal sealed class StubHttpHandler : HttpMessageHandler
     public static HttpResponseMessage Ok(string body) => new(HttpStatusCode.OK) { Content = new StringContent(body) };
     public static HttpResponseMessage NotFound() => new(HttpStatusCode.NotFound);
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Calls++;
         RequestUrls.Add(request.RequestUri?.ToString() ?? "");
+        if (_gate is not null)
+        {
+            await _gate.Task;
+        }
         if (_responses is not null)
         {
-            return Task.FromResult(_responses.Count > 0
+            return _responses.Count > 0
                 ? _responses.Dequeue()
-                : new HttpResponseMessage(HttpStatusCode.BadRequest));
+                : new HttpResponseMessage(HttpStatusCode.BadRequest);
         }
-        return Task.FromResult(_respond(request));
+        return _respond!(request);
     }
 }
 
@@ -187,14 +209,21 @@ internal sealed class StubPresentMonNative : IPresentMonNative
     public void Dispose() => Disposed = true;
 }
 
-/// <summary>In-memory <see cref="ILhmMapSource"/>: one fixed map copy, never
-/// an error — drives the reader's poll policy in tests.</summary>
-internal sealed class StubLhmMapSource(byte[] map) : ILhmMapSource
+/// <summary>Scriptable in-memory <see cref="ILhmMapSource"/>: settable map
+/// bytes and error plus a call counter — drives the reader's poll policy in
+/// tests (map present, unavailable with source error, null without error,
+/// malformed).</summary>
+internal sealed class StubLhmMapSource : ILhmMapSource
 {
+    public byte[]? Bytes { get; set; }
+    public string? Error { get; set; }
+    public int Calls { get; private set; }
+
     public byte[]? TryReadSensorsMap(out string? error)
     {
-        error = null;
-        return map;
+        Calls++;
+        error = Error;
+        return Bytes;
     }
 }
 
@@ -206,6 +235,54 @@ internal sealed class StubMediaSessionSource : IMediaSessionSource
 
     public Task<IMediaSessionSourceManager?> GetManagerAsync()
         => Task.FromResult<IMediaSessionSourceManager?>(Manager);
+}
+
+/// <summary>One recorded vendor control transfer (direction + request +
+/// wValue) — the raw transcript the transport-policy tests assert against.</summary>
+internal sealed record ControlCall(string Direction, byte Request, ushort WValue);
+
+/// <summary>
+/// The transport-policy seam: an <see cref="ITransferBackend"/> that records
+/// every control and bulk transfer, so the protocol framing the transport
+/// owns (init sequence, frame header, touch parsing) is assertable exactly —
+/// no hardware, no USB.
+/// </summary>
+internal sealed class RecordingBackend : ITransferBackend
+{
+    public List<ControlCall> ControlCalls { get; } = [];
+    public List<byte[]> BulkWrites { get; } = [];
+    public bool IsOpen { get; set; } = true;
+    public bool ControlOutResult { get; set; } = true;
+    public bool ControlInResult { get; set; } = true;
+    public bool BulkWriteResult { get; set; } = true;
+    public byte[]? TouchResponse { get; set; }
+
+    public bool ControlOut(byte request, ushort wValue, byte[]? data)
+    {
+        ControlCalls.Add(new ControlCall("out", request, wValue));
+        return ControlOutResult;
+    }
+
+    public bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+    {
+        ControlCalls.Add(new ControlCall("in", request, wValue));
+        if (TouchResponse is not null && request == DisplayProtocolConstants.CmdGetTouch)
+            TouchResponse.CopyTo(buffer, 0);
+        return ControlInResult;
+    }
+
+    /// <summary>When set, reports a partial transfer (short write) — mirroring
+    /// the real backends' full-transfer contract, a short write fails.</summary>
+    public int? BulkWriteTransferred { get; set; }
+
+    public bool BulkWrite(byte pipeId, byte[] data, out int transferred)
+    {
+        BulkWrites.Add(data);
+        transferred = BulkWriteTransferred ?? data.Length;
+        return BulkWriteResult && transferred == data.Length;
+    }
+
+    public void Dispose() => IsOpen = false;
 }
 
 /// <summary>
@@ -389,7 +466,7 @@ internal sealed class StaHost
                 // (S2190 intentionally suppressed: this is a message-pump loop,
                 // not recursion.)
 #pragma warning disable S2190
-                while (_work == null) Monitor.Wait(_gate);
+                while (_work is null) Monitor.Wait(_gate);
 #pragma warning restore S2190
                 var work = _work ?? throw new InvalidOperationException("work was signaled without a delegate");
                 _work = null;
@@ -415,7 +492,7 @@ internal sealed class StaHost
         // InitializeComponent separately. Without it, Application resources
         // (e.g. the window's PrimaryFont StaticResource) are missing.
         var app = Application.Current as AppClass;
-        if (app == null)
+        if (app is null)
         {
             app = new AppClass();
         }
@@ -460,7 +537,7 @@ internal sealed class StaHost
     public T Run<T>(Func<T> work)
     {
         var (result, error) = Invoke(() => work());
-        if (error != null)
+        if (error is not null)
         {
             Assert.Fail($"STA work failed: {error}");
         }

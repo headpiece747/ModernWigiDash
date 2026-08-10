@@ -92,7 +92,7 @@ public static class ProfileOps
     /// </summary>
     public static bool RemoveWidget(PageLayout page, PlacedWidgetInstance placed)
     {
-        if (page == null || placed == null || !page.Widgets.Remove(placed)) return false;
+        if (page is null || placed is null || !page.Widgets.Remove(placed)) return false;
         DisposeWidgetInstance(placed);
         return true;
     }
@@ -141,7 +141,7 @@ public static class ProfileOps
         };
 
         var instance = RehydrateWidget(loader, context, placed);
-        if (instance == null) return null;
+        if (instance is null) return null;
 
         placed.Width = width > 0 ? width : instance.DefaultSize.Width;
         placed.Height = height > 0 ? height : instance.DefaultSize.Height;
@@ -164,7 +164,7 @@ public static class ProfileOps
         string pluginId)
     {
         var instance = loader.CreateInstance(pluginId);
-        if (instance == null) return null;
+        if (instance is null) return null;
 
         var size = instance.DefaultSize;
 
@@ -207,7 +207,7 @@ public static class ProfileOps
         try
         {
             instance = loader.CreateInstance(placed.PluginId);
-            if (instance == null) return null;
+            if (instance is null) return null;
 
             // The instance and the placed widget share one identity: the
             // placed's InstanceId survives Export/Import, so rehydration must
@@ -222,11 +222,11 @@ public static class ProfileOps
             foreach (var prop in type.GetProperties())
             {
                 var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
-                if (attr == null) continue;
+                if (attr is null) continue;
                 if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
 
                 object? value = ConvertPropertyValue(raw, prop.PropertyType);
-                if (value == null) continue;
+                if (value is null) continue;
 
                 try
                 {
@@ -247,7 +247,7 @@ public static class ProfileOps
         catch (Exception ex)
         {
             context.LogError($"Widget rehydration failed for '{placed.PluginId}'; the widget is skipped.", ex);
-            if (instance != null && !ReferenceEquals(instance, placed.ActiveInstance))
+            if (instance is not null && !ReferenceEquals(instance, placed.ActiveInstance))
             {
                 try
                 {
@@ -270,7 +270,7 @@ public static class ProfileOps
     /// </summary>
     private static void DisposeWidgetInstance(PlacedWidgetInstance? placed)
     {
-        if (placed?.ActiveInstance == null) return;
+        if (placed?.ActiveInstance is null) return;
         try
         {
             placed.ActiveInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -330,7 +330,7 @@ public static class ProfileOps
         try
         {
             var loaded = JsonSerializer.Deserialize<ProfileLayout>(json);
-            if (loaded == null) return null;
+            if (loaded is null) return null;
 
             SanitizeImportedProfile(loaded);
 

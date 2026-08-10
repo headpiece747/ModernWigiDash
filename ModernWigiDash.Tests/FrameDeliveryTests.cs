@@ -1,4 +1,3 @@
-using System.Threading;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -193,7 +192,7 @@ public class FrameDeliveryTests
     [TestMethod]
     public async Task Pacing_RespectsMinIntervalBetweenSends()
     {
-        var timestamps = new List<DateTime>();
+        List<DateTime> timestamps = [];
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
             send: _ =>
@@ -293,7 +292,7 @@ public class FrameDeliveryTests
     [TestMethod]
     public async Task SendFailure_LogsFirstFailureOnce()
     {
-        var logs = new List<string>();
+        List<string> logs = [];
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
             send: _ => false,

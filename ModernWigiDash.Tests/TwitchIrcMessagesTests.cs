@@ -1,4 +1,3 @@
-using System.Linq;
 using ModernWigiDash.Widgets.Twitch;
 
 namespace ModernWigiDash.Tests;

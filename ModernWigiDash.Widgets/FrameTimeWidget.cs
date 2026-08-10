@@ -39,7 +39,7 @@ public class FrameTimeWidget : ModernWidgetBase
         // The store owns the staleness decision; a stale snapshot renders the
         // unavailable state instead of frozen data.
         FrameTimeSnapshotDto? snapshot = FrameTimeStore.TryReadFresh();
-        if (snapshot == null || !snapshot.IsAvailable)
+        if (snapshot is null || !snapshot.IsAvailable)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text);
             return;
@@ -211,7 +211,7 @@ public class FrameTimeWidget : ModernWidgetBase
             }
         }
 
-        if (_sparkLine == null || _sparkFill == null) return;
+        if (_sparkLine is null || _sparkFill is null) return;
 
         using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
         canvas.DrawPath(_sparkFill, fillPaint);

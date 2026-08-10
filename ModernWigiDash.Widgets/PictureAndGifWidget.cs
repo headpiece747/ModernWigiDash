@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;

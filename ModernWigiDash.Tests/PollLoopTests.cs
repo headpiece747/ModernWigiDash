@@ -1,4 +1,3 @@
-using System.Threading;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
@@ -137,7 +136,7 @@ public class PollLoopTests
         bool fail = true;
         int failures = 0;
         int successes = 0;
-        var logged = new List<string>();
+        List<string> logged = [];
         using var loop = new PollLoop(
             "T", TimeSpan.FromMilliseconds(20),
             ready: () => true,

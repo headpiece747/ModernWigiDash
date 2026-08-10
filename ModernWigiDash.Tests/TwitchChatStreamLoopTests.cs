@@ -1,5 +1,4 @@
 using System.IO;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
 

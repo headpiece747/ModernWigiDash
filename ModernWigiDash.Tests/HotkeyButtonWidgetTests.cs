@@ -1,5 +1,4 @@
 using System.IO;
-using System.Threading;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
@@ -25,7 +24,7 @@ public class HotkeyButtonWidgetTests
         }
     }
 
-    private static HotkeyButtonWidget CreatePressedWidget(FakeExecutor executor, TestContext context)
+    private static async Task<HotkeyButtonWidget> CreatePressedWidget(FakeExecutor executor, TestContext context)
     {
         var widget = new HotkeyButtonWidget
         {
@@ -33,7 +32,7 @@ public class HotkeyButtonWidgetTests
             ActionCommand = "https://example.com"
         };
         widget.ActionExecutor = executor.Execute;
-        widget.InitializeAsync(context).AsTask().Wait();
+        await widget.InitializeAsync(context);
         return widget;
     }
 
@@ -41,7 +40,7 @@ public class HotkeyButtonWidgetTests
     public async Task OnTouch_TouchUp_ExecutesExactlyOneAction()
     {
         var executor = new FakeExecutor();
-        var widget = CreatePressedWidget(executor, new TestContext());
+        var widget = await CreatePressedWidget(executor, new TestContext());
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
 
@@ -57,11 +56,11 @@ public class HotkeyButtonWidgetTests
     public async Task OnTouch_TouchDown_DoesNotExecute()
     {
         var executor = new FakeExecutor();
-        var widget = CreatePressedWidget(executor, new TestContext());
+        var widget = await CreatePressedWidget(executor, new TestContext());
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchDown);
 
-        await Task.Delay(100);
+        // TouchDown is purely synchronous (press state + render request).
         Assert.AreEqual(0, executor.Calls);
     }
 
@@ -71,7 +70,7 @@ public class HotkeyButtonWidgetTests
         var executor = new FakeExecutor();
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         executor.OnExecute = () => gate.Task;
-        var widget = CreatePressedWidget(executor, new TestContext());
+        var widget = await CreatePressedWidget(executor, new TestContext());
 
         // First press blocks on the in-flight executor.
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
@@ -93,7 +92,7 @@ public class HotkeyButtonWidgetTests
         var context = new TestContext();
         var widget = new HotkeyButtonWidget { ActionType = "Launch App", ActionCommand = "" };
         widget.ActionExecutor = executor.Execute;
-        widget.InitializeAsync(context).AsTask().Wait();
+        await widget.InitializeAsync(context);
 
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
 
@@ -109,7 +108,7 @@ public class HotkeyButtonWidgetTests
         var executor = new FakeExecutor();
         executor.OnExecute = () => Task.FromException(new InvalidOperationException("boom"));
         var context = new TestContext();
-        var widget = CreatePressedWidget(executor, context);
+        var widget = await CreatePressedWidget(executor, context);
 
         // Must not throw out of OnTouch (the trigger is fire-and-forget).
         widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);

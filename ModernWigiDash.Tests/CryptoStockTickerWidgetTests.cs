@@ -1,6 +1,4 @@
-using System.Net;
 using System.Net.Http;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
 

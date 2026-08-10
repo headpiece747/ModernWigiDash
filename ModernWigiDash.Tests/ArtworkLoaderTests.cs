@@ -112,7 +112,7 @@ public class ArtworkLoaderTests
         var bitmapB = new SKBitmap(3, 3);
         var decoder = new FakeArtworkDecoder { Result = bitmapA };
         var loader = new ArtworkLoader(decoder);
-        var events = new List<ArtworkLoaded?>();
+        List<ArtworkLoaded?> events = [];
         loader.ArtworkChanged += e => events.Add(e);
 
         loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
@@ -146,7 +146,7 @@ public class ArtworkLoaderTests
     [TestMethod]
     public async Task Load_ThumbnailStreamExceedsTenMegabytes_NoArtworkNoCrashLogged()
     {
-        var errors = new List<string>();
+        List<string> errors = [];
         var loader = new ArtworkLoader(new WinRtArtworkDecoder(), (message, ex) => errors.Add(message));
 
         loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail(new FakeBigStream())));
@@ -167,7 +167,7 @@ public class ArtworkLoaderTests
         int calls = 0;
         var decoder = new FakeArtworkDecoder { Handler = () => ++calls == 1 ? tcsA.Task : tcsB.Task };
         var loader = new ArtworkLoader(decoder);
-        var events = new List<ArtworkLoaded?>();
+        List<ArtworkLoaded?> events = [];
         loader.ArtworkChanged += e => events.Add(e);
 
         loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
 
 namespace ModernWigiDash.Tests;

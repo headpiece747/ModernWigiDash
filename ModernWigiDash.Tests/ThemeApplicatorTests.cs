@@ -1,4 +1,3 @@
-using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -95,7 +94,7 @@ public class ThemeApplicatorTests
         thread.IsBackground = true;
         thread.Start();
         thread.Join();
-        if (error != null)
+        if (error is not null)
         {
             Assert.Fail($"STA work failed: {error}");
         }

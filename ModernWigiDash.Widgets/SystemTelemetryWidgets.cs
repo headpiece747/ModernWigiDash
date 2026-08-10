@@ -69,7 +69,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         // The store owns the staleness decision; a stale or disconnected
         // snapshot renders the unavailable state instead of frozen data.
         SensorSnapshotDto? snapshot = LhmSensorStore.TryReadFresh();
-        if (snapshot == null || !snapshot.IsConnected)
+        if (snapshot is null || !snapshot.IsConnected)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start LibreHardwareService to read hardware sensors", text);
             return;
@@ -82,7 +82,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
 
         SensorReadingDto? reading = MatchReading(snapshot);
-        if (reading == null)
+        if (reading is null)
         {
             TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Sensor not found", $"{SensorLabel} is not currently available", text);
             return;

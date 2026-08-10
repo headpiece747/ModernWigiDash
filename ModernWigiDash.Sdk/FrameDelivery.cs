@@ -69,7 +69,7 @@ public sealed class FrameDelivery : IDisposable
         int capacity = 4,
         Action<string>? log = null)
     {
-        if (encoder != null)
+        if (encoder is not null)
         {
             // The pool is sized from the encoder's output — an exact-size pool
             // that disagrees with the encoder (whose releases would be
@@ -116,7 +116,7 @@ public sealed class FrameDelivery : IDisposable
     /// True when this delivery can currently route frames: the readiness
     /// predicate (when provided) or simply that a send seam is attached.
     /// </summary>
-    public bool IsReady => _isReady?.Invoke() ?? _send != null;
+    public bool IsReady => _isReady?.Invoke() ?? _send is not null;
 
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
@@ -152,13 +152,13 @@ public sealed class FrameDelivery : IDisposable
     /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
     {
-        if (_encoder == null || _pool == null || _send == null || frame == null)
+        if (_encoder is null || _pool is null || _send is null || frame is null)
             return FrameDeliveryResult.Dropped;
         if (_isReady?.Invoke() == false)
             return FrameDeliveryResult.Dropped;
 
         byte[]? buffer = _pool.Acquire();
-        if (buffer == null)
+        if (buffer is null)
         {
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedPool);
@@ -191,7 +191,7 @@ public sealed class FrameDelivery : IDisposable
                 FrameSlot latest = ChannelFrameCoalescer.DrainToLatest(
                     _channel.Reader,
                     slot => ReleaseSlot(slot, dropped: true));
-                if (latest.Buffer == null) continue;
+                if (latest.Buffer is null) continue;
 
                 // Pace from the START of the previous send: the interval caps
                 // the frame rate, so a slow transport must not be charged the
@@ -271,7 +271,7 @@ public sealed class FrameDelivery : IDisposable
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedCoalesced);
         }
-        if (_pool != null)
+        if (_pool is not null)
         {
             _pool.Release(slot.Buffer);
         }
@@ -300,7 +300,7 @@ public sealed class FrameDelivery : IDisposable
         // sender loop exits (they would otherwise be stranded at close).
         while (_channel.Reader.TryRead(out var slot))
         {
-            if (_pool != null)
+            if (_pool is not null)
             {
                 _pool.Release(slot.Buffer);
             }

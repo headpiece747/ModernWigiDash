@@ -145,7 +145,7 @@ public class PresentMonApiProbeTests
         public IntPtr? LoadLibrary(string[] candidatePaths, out string? failureReason)
         {
             failureReason = _failureReason;
-            if (_failureReason != null)
+            if (_failureReason is not null)
             {
                 return null;
             }

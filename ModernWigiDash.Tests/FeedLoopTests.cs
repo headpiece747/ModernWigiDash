@@ -7,32 +7,14 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class FeedLoopTests
 {
-    private sealed class BlockingFeed : IWebSocketFeed
-    {
-        private readonly TaskCompletionSource _connect = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public int ConnectCount { get; private set; }
-        public bool IsOpen => true;
-
-        public Task ConnectAsync(Uri uri, CancellationToken ct)
-        {
-            ConnectCount++;
-            ct.Register(() => _connect.TrySetCanceled(ct));
-            return _connect.Task;
-        }
-
-        public Task SendTextAsync(string payload, CancellationToken ct) => Task.CompletedTask;
-        public Task<string?> ReceiveTextAsync(CancellationToken ct) => Task.FromResult<string?>(null);
-        public void Abort() { }
-        public void Dispose() { }
-    }
-
     [TestMethod]
     public async Task Start_WhenAlreadyStarted_DoesNotStartSecondLoop()
     {
         // Regression guard for duplicate sockets: PriceFeedManager calls
         // Start() per subscribed symbol; a second Start on a running loop must
-        // not launch a second connect attempt.
-        var feed = new BlockingFeed();
+        // not launch a second connect attempt. The parked connect holds the
+        // first loop inside ConnectAsync while the assertion runs.
+        var feed = new FakeFeed { ParkConnect = true };
         var loop = new FeedLoop(
             new Uri("wss://example.test"),
             () => feed,
@@ -43,6 +25,8 @@ public class FeedLoopTests
         loop.Start();
         loop.Start();
 
+        // The first loop must reach the parked connect before we assert.
+        await TestWait.WaitUntilAsync(() => feed.ConnectCount >= 1, TimeSpan.FromSeconds(2));
         await Task.Delay(100);
         Assert.AreEqual(1, feed.ConnectCount, "A second Start must not begin a second connection");
 

@@ -235,24 +235,10 @@ public class LhmSharedMemoryReaderTests
 
     // ── Poll policy through the ILhmMapSource seam ─────────────────
 
-    private sealed class FakeMapSource : ILhmMapSource
-    {
-        public byte[]? Bytes { get; set; }
-        public string? Error { get; set; }
-        public int Calls { get; private set; }
-
-        public byte[]? TryReadSensorsMap(out string? error)
-        {
-            Calls++;
-            error = Error;
-            return Bytes;
-        }
-    }
-
     [TestMethod]
     public void Poll_MapSourceReturnsValidMap_ParsesConnectedDto()
     {
-        var source = new FakeMapSource { Bytes = BuildMap(JsonIndexFormat, CpuTemp, GpuFan) };
+        var source = new StubLhmMapSource { Bytes = BuildMap(JsonIndexFormat, CpuTemp, GpuFan) };
         var reader = new LhmSharedMemoryReader(source);
 
         SensorSnapshotDto dto = reader.Poll();
@@ -266,7 +252,7 @@ public class LhmSharedMemoryReaderTests
     [TestMethod]
     public void Poll_MapSourceUnavailable_DisconnectedWithSourceError()
     {
-        var source = new FakeMapSource { Bytes = null, Error = "LHS sensor mutex not acquired within 100ms (writer holds it)" };
+        var source = new StubLhmMapSource { Error = "LHS sensor mutex not acquired within 100ms (writer holds it)" };
         var reader = new LhmSharedMemoryReader(source);
 
         SensorSnapshotDto dto = reader.Poll();
@@ -278,7 +264,7 @@ public class LhmSharedMemoryReaderTests
     [TestMethod]
     public void Poll_MapSourceReturnsNullWithoutError_DisconnectedWithGenericMessage()
     {
-        var reader = new LhmSharedMemoryReader(new FakeMapSource { Bytes = null });
+        var reader = new LhmSharedMemoryReader(new StubLhmMapSource());
 
         SensorSnapshotDto dto = reader.Poll();
 
@@ -289,7 +275,7 @@ public class LhmSharedMemoryReaderTests
     [TestMethod]
     public void Poll_MalformedMap_DisconnectedAsUnreadable()
     {
-        var source = new FakeMapSource { Bytes = [1, 2, 3] };
+        var source = new StubLhmMapSource { Bytes = [1, 2, 3] };
         var reader = new LhmSharedMemoryReader(source);
 
         SensorSnapshotDto dto = reader.Poll();

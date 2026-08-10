@@ -132,7 +132,7 @@ public class InspectorControllerTests
         thread.IsBackground = true;
         thread.Start();
         thread.Join();
-        if (error != null)
+        if (error is not null)
         {
             Assert.Fail($"STA work failed: {error}");
         }
