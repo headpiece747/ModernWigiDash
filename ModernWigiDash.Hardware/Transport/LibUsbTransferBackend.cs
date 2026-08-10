@@ -15,8 +15,6 @@ namespace ModernWigiDash.Hardware.Transport;
 /// </summary>
 internal sealed class LibUsbTransferBackend : ITransferBackend
 {
-    private const int BulkChunkSize = 262144;
-
     private readonly IUsbDevice _device;
     private readonly UsbEndpointWriter _writer;
     private readonly LogCadence _bulkDiagLog = new(60);
@@ -79,35 +77,22 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
     {
         transferred = 0;
 
-        int totalBytes = data.Length;
-        int numChunks = (totalBytes + BulkChunkSize - 1) / BulkChunkSize;
+        int numChunks = (data.Length + ChunkedBulkWrite.ChunkSize - 1) / ChunkedBulkWrite.ChunkSize;
         if (_bulkDiagLog.Due())
-            FileLog.Write($"[USB-BULK-LIBUSB] Chunked write: {totalBytes} bytes in {numChunks} chunks");
-
-        int totalTransferred = 0;
+            FileLog.Write($"[USB-BULK-LIBUSB] Chunked write: {data.Length} bytes in {numChunks} chunks");
 
         try
         {
-            for (int i = 0; i < numChunks; i++)
-            {
-                // Advance by the actually-transferred length, not the nominal
-                // chunk stride, so a short write doesn't skip a gap.
-                int offset = totalTransferred;
-                int remaining = totalBytes - offset;
-                int size = Math.Min(BulkChunkSize, remaining);
-
-                Error error = _writer.Write(data, offset, size, 10000, out int transferLength);
-                if (error != Error.Success || transferLength <= 0)
+            bool ok = ChunkedBulkWrite.Write(
+                data,
+                (offset, size) =>
                 {
-                    FileLog.Write($"[USB-BULK-ERR] Chunk {i}/{numChunks} failed: error={error} transferred={transferLength}");
-                    return false;
-                }
-
-                totalTransferred += transferLength;
-            }
-
-            transferred = totalTransferred;
-            return totalTransferred == totalBytes;
+                    Error error = _writer.Write(data, offset, size, ChunkedBulkWrite.ChunkTimeoutMs, out int transferLength);
+                    return (error == Error.Success, transferLength, error.ToString());
+                },
+                out transferred,
+                msg => FileLog.Write($"[USB-BULK-ERR] {msg}"));
+            return ok;
         }
         catch (Exception ex)
         {
