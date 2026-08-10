@@ -35,6 +35,17 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
 
     public event Action<float[]>? SamplesAvailable;
 
+    /// <summary>
+    /// Converts only the valid region of NAudio's record buffer. DataAvailable
+    /// carries the full device-buffer allocation with the live audio in the
+    /// first <paramref name="bytesRecorded"/> bytes and zero padding after —
+    /// converting the padding feeds a silence tail into the analyzer, pinning
+    /// the last bars at the floor and filling the 2048-sample waveform ring
+    /// with zeros.
+    /// </summary>
+    internal static float[]? ConvertRecorded(byte[] buffer, int bytesRecorded, WaveFormatEncoding encoding, int bytesPerSample)
+        => AudioSampleConverter.Convert(buffer.AsSpan(0, Math.Min(bytesRecorded, buffer.Length)), encoding, bytesPerSample);
+
     public void Start()
     {
         if (_capture != null) return;
@@ -49,7 +60,7 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
             // old code read 4-byte floats over 2-byte samples and produced
             // garbage. Convert per encoding instead — the conversion is the
             // pure AudioSampleConverter (testable without a device).
-            if (AudioSampleConverter.Convert(e.Buffer, format.Encoding, bytesPerSample) is { } samples)
+            if (ConvertRecorded(e.Buffer, e.BytesRecorded, format.Encoding, bytesPerSample) is { } samples)
             {
                 SamplesAvailable?.Invoke(samples);
             }

@@ -12,7 +12,12 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal static class AudioSampleConverter
 {
-    public static float[]? Convert(byte[] buffer, WaveFormatEncoding encoding, int bytesPerSample)
+    /// <param name="buffer">The recorded bytes — the VALID region only. NAudio
+    /// raises DataAvailable with the full device-buffer allocation (zero-padded
+    /// beyond <c>BytesRecorded</c>), so callers must slice to the recorded
+    /// region first; converting the padding poisons the spectrum tail and the
+    /// waveform ring with silence.</param>
+    public static float[]? Convert(ReadOnlySpan<byte> buffer, WaveFormatEncoding encoding, int bytesPerSample)
     {
         if (bytesPerSample <= 0)
         {
@@ -29,14 +34,14 @@ internal static class AudioSampleConverter
         {
             for (int i = 0; i < count; i++)
             {
-                samples[i] = BitConverter.ToSingle(buffer, i * bytesPerSample);
+                samples[i] = BitConverter.ToSingle(buffer.Slice(i * bytesPerSample, 4));
             }
         }
         else if (encoding == WaveFormatEncoding.Pcm && bytesPerSample == 2)
         {
             for (int i = 0; i < count; i++)
             {
-                samples[i] = BitConverter.ToInt16(buffer, i * 2) / 32768f;
+                samples[i] = BitConverter.ToInt16(buffer.Slice(i * 2, 2)) / 32768f;
             }
         }
         else if (encoding == WaveFormatEncoding.Pcm && bytesPerSample == 3)
@@ -55,7 +60,7 @@ internal static class AudioSampleConverter
         {
             for (int i = 0; i < count; i++)
             {
-                samples[i] = BitConverter.ToInt32(buffer, i * 4) / 2147483648f;
+                samples[i] = BitConverter.ToInt32(buffer.Slice(i * 4, 4)) / 2147483648f;
             }
         }
         else
