@@ -39,7 +39,7 @@ public class ArtworkBackgroundColorTests
 
         var color = ArtworkBackgroundColor.FromSample(sample);
 
-        Assert.AreEqual(166, color.Red, "220 * 0.65/0.86 = 166.3 → 166");
+        Assert.AreEqual(165, color.Red, "220 * 0.65/0.8627 = 165.8, truncated to 165");
         Assert.AreEqual(45, color.Green, "60 * 0.65/0.86 = 45.3 → 45");
         Assert.AreEqual(45, color.Blue);
     }
