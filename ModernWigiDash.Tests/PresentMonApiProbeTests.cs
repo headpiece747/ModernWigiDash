@@ -27,7 +27,8 @@ public class PresentMonApiProbeTests
         loader.AddExports(
             "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
-            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery");
+            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
+            "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");
 
         var probe = new PresentMonApiProbe(loader);
 
@@ -42,7 +43,8 @@ public class PresentMonApiProbeTests
         loader.AddExports(
             "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
-            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery");
+            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
+            "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");
         loader.SetApiVersion(major: 2, minor: 5, patch: 1);
 
         var probe = new PresentMonApiProbe(loader);
@@ -72,7 +74,8 @@ public class PresentMonApiProbeTests
         loader.AddExports(
             "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
-            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery");
+            "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
+            "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");
         loader.SetApiVersion(major: 3, minor: 0, patch: 3);
 
         var probe = new PresentMonApiProbe(loader);
