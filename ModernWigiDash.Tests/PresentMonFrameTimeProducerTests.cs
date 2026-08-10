@@ -456,7 +456,7 @@ public class PresentMonFrameTimeProducerTests
         }
 
         Assert.IsNotNull(dto);
-        Assert.IsTrue(dto.IsAvailable, "the service is reachable ï¿½ availability stays true");
+        Assert.IsTrue(dto.IsAvailable, "the service is reachable — availability stays true");
         Assert.IsFalse(dto.CaptureHealthy, "no present data for the whole grace window must flag the capture");
         StringAssert.Contains(dto.ErrorMessage, "not producing present data");
         Assert.AreEqual(-1, dto.ProcessId);

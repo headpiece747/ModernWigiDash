@@ -7,7 +7,7 @@
 /// </summary>
 public static class FrameTimeStatistics
 {
-    /// <summary>The rolling sparkline window (samples) ï¿½ the single owner of
+    /// <summary>The rolling sparkline window (samples) — the single owner of
     /// the cap the producer's frame-time buffer honors.</summary>
     public const int MaxSparklineSamples = 240;
 
