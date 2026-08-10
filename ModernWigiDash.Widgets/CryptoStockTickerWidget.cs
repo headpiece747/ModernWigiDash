@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 using ModernWigiDash.Core.Rendering;
@@ -43,9 +42,13 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     internal PriceFeedManager Feed { get; set; } = SharedFeed;
 
     private static readonly PriceFeedManager SharedFeed = new();
-    private string? _lastSubscribedSymbol;
-    private AssetKind _lastSubscribedKind = AssetKind.Stock;
+    private readonly FeedSubscription _subscription;
     private DateTime _lastFallback = DateTime.MinValue;
+
+    public CryptoStockTickerWidget()
+    {
+        _subscription = new(() => _ = FallbackFetchAsync());
+    }
 
     /// <summary>Test seam for the fallback-fetch throttle.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -73,31 +76,13 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     private void UpdateSubscription()
     {
-        AssetKind kind = AssetKindValue;
-        if (_lastSubscribedSymbol == Symbol && _lastSubscribedKind == kind) return;
-
-        if (_lastSubscribedSymbol != null)
-        {
-            Feed.Unsubscribe(_lastSubscribedSymbol, _lastSubscribedKind);
-        }
-        // A blank symbol never subscribes (and never triggers the shared
-        // manager's shutdown on dispose).
-        _lastSubscribedSymbol = string.IsNullOrWhiteSpace(Symbol) ? null : Symbol;
-        _lastSubscribedKind = kind;
-        if (string.IsNullOrWhiteSpace(Symbol)) return;
-
-        Feed.Subscribe(Symbol, kind);
-        _ = FallbackFetchAsync(); // seed the first price; the live feed takes over
+        _subscription.Track(Symbol, AssetKindValue, Feed);
     }
 
     public override async ValueTask DisposeAsync()
     {
         // Stop polling this widget's symbol once it is removed from the canvas.
-        if (_lastSubscribedSymbol != null)
-        {
-            Feed.Unsubscribe(_lastSubscribedSymbol, _lastSubscribedKind);
-            _lastSubscribedSymbol = null;
-        }
+        _subscription.Untrack();
         await base.DisposeAsync();
     }
 

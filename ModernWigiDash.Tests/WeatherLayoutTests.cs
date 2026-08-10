@@ -142,6 +142,23 @@ public class WeatherLayoutTests
     }
 
     [TestMethod]
+    public void ParseMode_KnownModes_MapExactly()
+    {
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode("Detailed"));
+        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.ParseMode("Daily Forecast"));
+        Assert.AreEqual(WeatherLayoutMode.HourlyForecast, WeatherLayout.ParseMode("Hourly Forecast"));
+        Assert.AreEqual(WeatherLayoutMode.CurrentOnly, WeatherLayout.ParseMode("Current Only"));
+        Assert.AreEqual(WeatherLayoutMode.Compact, WeatherLayout.ParseMode("Compact"));
+    }
+
+    [TestMethod]
+    public void ParseMode_UnknownMode_DefaultsToDetailed()
+    {
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode("Bogus"));
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode(null));
+    }
+
+    [TestMethod]
     public void HeroTextStackShrinkScale_Overflow_ScalesTo85PercentOfHeroHeight()
     {
         Assert.AreEqual(0.425f, WeatherLayout.HeroTextStackShrinkScale(200f, 100f), 0.001f);

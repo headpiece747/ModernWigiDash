@@ -15,10 +15,10 @@ public sealed class StaticTelemetryStore<TRecord> where TRecord : class
 
     /// <param name="emptyValue">The record a freshly reset store exposes
     /// (e.g. the disconnected/unavailable sentinel of the domain).</param>
-    /// <param name="defaultMaxAge">Staleness window used when
-    /// <see cref="TryReadFresh"/> is called without an explicit max age.</param>
-    /// <param name="timeProvider">Clock used by <see cref="TryReadFresh"/>
-    /// when no per-call clock is supplied.</param>
+    /// <param name="defaultMaxAge">The staleness window used by
+    /// <see cref="TryReadFresh"/>.</param>
+    /// <param name="timeProvider">The clock used by <see cref="TryReadFresh"/>
+    /// and <see cref="Update"/>. Defaults to <see cref="TimeProvider.System"/>.</param>
     public StaticTelemetryStore(TRecord emptyValue, TimeSpan defaultMaxAge, TimeProvider? timeProvider = null)
     {
         _store = new TelemetryStore<TRecord>(emptyValue, defaultMaxAge, timeProvider);
@@ -31,10 +31,9 @@ public sealed class StaticTelemetryStore<TRecord> where TRecord : class
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
-    /// freshness decision uses the producer timestamp with an injectable clock.
+    /// staleness window and the clock bind at construction.
     /// </summary>
-    public TRecord? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
-        => _store.TryReadFresh(maxAge, timeProvider);
+    public TRecord? TryReadFresh() => _store.TryReadFresh();
 
     /// <summary>
     /// Stores a record. A default/empty producer timestamp is resolved to the

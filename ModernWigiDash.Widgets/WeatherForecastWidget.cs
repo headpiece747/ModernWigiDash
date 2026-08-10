@@ -1,10 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
-using SkiaSharp;
+﻿using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
 
@@ -185,18 +179,18 @@ public class WeatherForecastWidget : ModernWidgetBase
         // Content Area Bounds
         SKRect contentBounds = new(bounds.Left + header.Pad, bounds.Top + header.HeaderHeight + 6f * sy, bounds.Right - header.Pad, bounds.Bottom - header.Pad);
 
-        switch (LayoutMode)
+        switch (WeatherLayout.ParseMode(LayoutMode))
         {
-            case "Daily Forecast":
+            case WeatherLayoutMode.DailyForecast:
                 RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, sx, sy);
                 break;
-            case "Hourly Forecast":
+            case WeatherLayoutMode.HourlyForecast:
                 RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, tempUnit, sx, sy);
                 break;
-            case "Current Only":
+            case WeatherLayoutMode.CurrentOnly:
                 RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, tempUnit, sx, sy);
                 break;
-            case "Compact":
+            case WeatherLayoutMode.Compact:
                 RenderCompact(canvas, contentBounds, textPrimary, tempUnit, sx, sy);
                 break;
             default:

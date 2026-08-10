@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
@@ -20,8 +19,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
     public string PrimaryColorHex { get; set; } = "#F59E0B";
 
     private IAudioCaptureSource? _captureSource;
-    private readonly AudioSpectrumAnalyzer _analyzer = new();
-    private readonly Lock _audioLock = new();
+    private readonly AudioFrameBuffer _buffer = new();
 
     /// <summary>
     /// Test seam for the capture source. Defaults to the WASAPI loopback
@@ -99,10 +97,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
             return;
         }
 
-        lock (_audioLock)
-        {
-            _analyzer.Analyze(samples, (int)BarCount);
-        }
+        _buffer.Feed(samples, _buffer.ClampBars((int)BarCount));
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -116,28 +111,27 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
         SKColor barColor = ColorOf(PrimaryColorHex, new SKColor(255, 205, 133));
 
-        lock (_audioLock)
-        {
-            _analyzer.Smooth();
-        }
+        // One locked copy per frame (smooth + double-buffered snapshot); the
+        // draw methods below read the copy without holding the gate.
+        AudioFrame frame = _buffer.Snapshot();
+        int bars = _buffer.ClampBars((int)BarCount);
 
-        switch (VisualizerStyle)
+        switch (AudioVisualizerModeParser.Parse(VisualizerStyle))
         {
-            case "Oscilloscope Wave":
-                DrawOscilloscope(canvas, bounds, barColor);
+            case AudioVisualizerMode.Oscilloscope:
+                DrawOscilloscope(canvas, bounds, barColor, frame.Waveform);
                 break;
-            case "Radial Pulse":
-                DrawRadialPulse(canvas, bounds, barColor);
+            case AudioVisualizerMode.RadialPulse:
+                DrawRadialPulse(canvas, bounds, barColor, frame.Spectrum);
                 break;
             default:
-                DrawNeonBars(canvas, bounds, barColor);
+                DrawNeonBars(canvas, bounds, barColor, frame.Spectrum, bars);
                 break;
         }
     }
 
-    private void DrawNeonBars(SKCanvas canvas, SKRect bounds, SKColor barColor)
+    private void DrawNeonBars(SKCanvas canvas, SKRect bounds, SKColor barColor, ReadOnlySpan<float> spectrum, int bars)
     {
-        int bars = (int)Math.Clamp(BarCount, 8, 64);
         float pad = 20f;
         float availableWidth = bounds.Width - (pad * 2);
         float barSpacing = 4f;
@@ -152,23 +146,19 @@ public class AudioVisualizerWidget : ModernWidgetBase
             IsAntialias = true
         };
 
-        lock (_audioLock)
+        for (int i = 0; i < bars; i++)
         {
-            ReadOnlySpan<float> spectrum = _analyzer.Spectrum;
-            for (int i = 0; i < bars; i++)
-            {
-                float val = spectrum[i];
-                float h = val * maxBarHeight;
-                float x = pad + i * (barWidth + barSpacing);
-                float y = bounds.Bottom - pad - h;
+            float val = spectrum[i];
+            float h = val * maxBarHeight;
+            float x = pad + i * (barWidth + barSpacing);
+            float y = bounds.Bottom - pad - h;
 
-                var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
-                canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
-            }
+            var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
+            canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
         }
     }
 
-    private void DrawOscilloscope(SKCanvas canvas, SKRect bounds, SKColor color)
+    private void DrawOscilloscope(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> waveform)
     {
         float pad = 16f;
         float midY = bounds.MidY;
@@ -184,34 +174,31 @@ public class AudioVisualizerWidget : ModernWidgetBase
             StrokeJoin = SKStrokeJoin.Round
         };
 
-        lock (_audioLock)
+        var builder = new SKPathBuilder();
+        float stepX = (bounds.Width - pad * 2f) / (waveform.Length - 1f);
+        for (int i = 0; i < waveform.Length; i++)
         {
-            var builder = new SKPathBuilder();
-            float stepX = (bounds.Width - pad * 2f) / (_analyzer.WaveformLength - 1f);
-            for (int i = 0; i < _analyzer.WaveformLength; i++)
+            float v = waveform[i];
+            float x = bounds.Left + pad + i * stepX;
+            float y = midY - v * amp;
+            if (i == 0)
             {
-                float v = _analyzer.GetWaveform(i);
-                float x = bounds.Left + pad + i * stepX;
-                float y = midY - v * amp;
-                if (i == 0)
-                {
-                    builder.MoveTo(x, y);
-                }
-                else
-                {
-                    builder.LineTo(x, y);
-                }
+                builder.MoveTo(x, y);
             }
-            canvas.DrawPath(builder.Detach(), linePaint);
+            else
+            {
+                builder.LineTo(x, y);
+            }
         }
+        canvas.DrawPath(builder.Detach(), linePaint);
     }
 
-    private void DrawRadialPulse(SKCanvas canvas, SKRect bounds, SKColor color)
+    private void DrawRadialPulse(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> spectrum)
     {
         float cx = bounds.MidX;
         float cy = bounds.MidY;
         float maxR = Math.Min(bounds.Width, bounds.Height) * 0.42f;
-        int n = _analyzer.BarCount;
+        int n = spectrum.Length;
 
         using var linePaint = new SKPaint
         {
@@ -222,18 +209,14 @@ public class AudioVisualizerWidget : ModernWidgetBase
             StrokeCap = SKStrokeCap.Round
         };
 
-        lock (_audioLock)
+        for (int i = 0; i < n; i++)
         {
-            ReadOnlySpan<float> spectrum = _analyzer.Spectrum;
-            for (int i = 0; i < n; i++)
-            {
-                float v = spectrum[i];
-                float angle = (i / (float)n) * MathF.Tau;
-                float dirX = MathF.Cos(angle);
-                float dirY = MathF.Sin(angle);
-                float len = 10f + v * maxR;
-                canvas.DrawLine(cx + dirX * 6f, cy + dirY * 6f, cx + dirX * len, cy + dirY * len, linePaint);
-            }
+            float v = spectrum[i];
+            float angle = (i / (float)n) * MathF.Tau;
+            float dirX = MathF.Cos(angle);
+            float dirY = MathF.Sin(angle);
+            float len = 10f + v * maxR;
+            canvas.DrawLine(cx + dirX * 6f, cy + dirY * 6f, cx + dirX * len, cy + dirY * len, linePaint);
         }
     }
 

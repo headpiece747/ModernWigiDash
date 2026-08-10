@@ -28,6 +28,20 @@ public readonly record struct WeatherHeaderLayout(
     float Pad);
 
 /// <summary>
+/// The Weather widget's layout modes, in display order. The inspector property
+/// stays a string; <see cref="WeatherLayout.ParseMode"/> is the single
+/// string→mode mapping site.
+/// </summary>
+internal enum WeatherLayoutMode
+{
+    Detailed,
+    DailyForecast,
+    HourlyForecast,
+    CurrentOnly,
+    Compact
+}
+
+/// <summary>
 /// Pure layout rules for the Weather widget: the scale factors, the header
 /// geometry (title, unit badge, content padding), the header touch zones, the
 /// layout-mode cycle, and the hero/pill shrink rules. Moved out of the
@@ -85,6 +99,20 @@ public static class WeatherLayout
         if (point.Y < header.HeaderHeight && point.X < 140f * sx) return WeatherHeaderAction.CycleLayout;
         return WeatherHeaderAction.None;
     }
+
+    /// <summary>
+    /// The single string→mode mapping site (the inspector property stays a
+    /// string); unknown values fall back to <see cref="WeatherLayoutMode.Detailed"/>
+    /// — the property default.
+    /// </summary>
+    internal static WeatherLayoutMode ParseMode(string? mode) => mode switch
+    {
+        "Daily Forecast" => WeatherLayoutMode.DailyForecast,
+        "Hourly Forecast" => WeatherLayoutMode.HourlyForecast,
+        "Current Only" => WeatherLayoutMode.CurrentOnly,
+        "Compact" => WeatherLayoutMode.Compact,
+        _ => WeatherLayoutMode.Detailed,
+    };
 
     /// <summary>
     /// The tap-cycle rule: Detailed → Daily Forecast → Hourly Forecast →

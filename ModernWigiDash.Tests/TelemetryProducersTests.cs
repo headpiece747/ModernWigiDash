@@ -1,7 +1,5 @@
 using ModernWigiDash.App;
-using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -32,7 +30,7 @@ public class TelemetryProducersTests
     [TestMethod]
     public void FrameTimePollTick_Unavailable_DedupsErrorLogging()
     {
-        var logs = new List<string>();
+        List<string> logs = [];
         using var producers = new TelemetryProducers(new StubPresentMonNative(), logs.Add);
 
         producers.FrameTimePollTick();
@@ -45,7 +43,7 @@ public class TelemetryProducersTests
     [TestMethod]
     public void SensorPollTick_WithoutMaps_DoesNotThrow()
     {
-        var logs = new List<string>();
+        List<string> logs = [];
         using var producers = new TelemetryProducers(new StubPresentMonNative(), logs.Add);
 
         // No LibreHardwareService maps exist in the test host: the reader
@@ -77,7 +75,7 @@ public class TelemetryProducersTests
 
         producers.FrameTimePollTick();
 
-        var fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10));
+        var fresh = FrameTimeStore.TryReadFresh();
         Assert.IsNotNull(fresh, "a live sample through the cluster must land in the store");
         Assert.AreEqual(120.0, fresh.Fps, 0.001);
         FrameTimeStore.Reset();
@@ -90,7 +88,7 @@ public class TelemetryProducersTests
         using var producers = new TelemetryProducers(
             new StubPresentMonNative(),
             _ => { },
-            lhsReader: new LhmSharedMemoryReader(new StubLhmMapSource(map)));
+            lhsMapSource: new StubLhmMapSource { Bytes = map });
         LhmSensorStore.Reset();
 
         producers.SensorPollTick();

@@ -10,9 +10,13 @@ public class TelemetryStoreMappingTests
     [TestInitialize]
     public void ResetStores()
     {
-        LhmSensorStore.Reset();
-        FrameTimeStore.Reset();
+        // The facade tests install their own stores; a fresh store also resets
+        // cache state, so the singleton is rebuilt with the system clock.
+        LhmSensorStore.StoreForTest = LhmSensorStore.CreateStoreForTest(TimeProvider.System);
+        FrameTimeStore.StoreForTest = FrameTimeStore.CreateStoreForTest(TimeProvider.System);
     }
+
+    private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
 
     [TestMethod]
     public void LhmSensorStore_UpdateFromDto_MapsReadingsAndTracksFreshness()
@@ -42,7 +46,7 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual("cpu-temp", snap.Readings[0].SensorId);
         Assert.AreEqual("Mainboard: CPU Package", snap.Readings[0].Label);
         Assert.AreEqual(55.5, snap.Readings[0].Value);
-        Assert.IsNotNull(LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10)));
+        Assert.IsNotNull(LhmSensorStore.TryReadFresh());
     }
 
     [TestMethod]
@@ -77,7 +81,7 @@ public class TelemetryStoreMappingTests
             RecentFrameTimesMs = [6.9, 7.0, 6.8]
         });
 
-        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh()!;
 
         Assert.IsTrue(rec.IsAvailable);
         Assert.AreEqual(1234, rec.ProcessId);
@@ -93,7 +97,7 @@ public class TelemetryStoreMappingTests
         Assert.AreEqual(5.1, rec.GpuTimeMs);
         Assert.AreEqual(4, rec.PresentModeId);
         CollectionAssert.AreEqual(new[] { 6.9, 7.0, 6.8 }, rec.RecentFrameTimesMs.ToArray());
-        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(10)));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh());
     }
 
     [TestMethod]
@@ -101,7 +105,7 @@ public class TelemetryStoreMappingTests
     {
         FrameTimeStore.UpdateFromDto(null);
 
-        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+        FrameTimeSnapshotDto rec = FrameTimeStore.TryReadFresh()!;
 
         Assert.IsFalse(rec.IsAvailable);
     }
@@ -125,10 +129,12 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void FrameTimeStore_UpdateFromDto_PreservesProducerTimestamp()
     {
-        var producerTime = new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc);
+        var clock = FixedClock();
+        FrameTimeStore.StoreForTest = FrameTimeStore.CreateStoreForTest(clock);
+        var producerTime = clock.GetUtcNow().UtcDateTime;
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto { IsAvailable = true, LastUpdate = producerTime });
 
-        Assert.AreEqual(producerTime, FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!.LastUpdate);
+        Assert.AreEqual(producerTime, FrameTimeStore.TryReadFresh()!.LastUpdate);
     }
 
     [TestMethod]
@@ -136,7 +142,7 @@ public class TelemetryStoreMappingTests
     {
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto { IsConnected = true, Readings = [] });
 
-        Assert.IsNotNull(LhmSensorStore.TryReadFresh(TimeSpan.FromMinutes(1)),
+        Assert.IsNotNull(LhmSensorStore.TryReadFresh(),
             "A DTO without a producer timestamp must still read as fresh — the store stamps the receive time");
     }
 
@@ -145,7 +151,8 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_FreshSnapshot_IsReturned()
     {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = FixedClock();
+        LhmSensorStore.StoreForTest = LhmSensorStore.CreateStoreForTest(clock);
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
@@ -153,7 +160,7 @@ public class TelemetryStoreMappingTests
             Readings = []
         });
 
-        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh();
 
         Assert.IsNotNull(fresh);
         Assert.IsTrue(fresh.IsConnected);
@@ -162,7 +169,8 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_StaleSnapshot_ReturnsNull()
     {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = FixedClock();
+        LhmSensorStore.StoreForTest = LhmSensorStore.CreateStoreForTest(clock);
         LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
@@ -170,16 +178,17 @@ public class TelemetryStoreMappingTests
             Readings = []
         });
 
-        Assert.IsNull(LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock));
+        Assert.IsNull(LhmSensorStore.TryReadFresh());
     }
 
     [TestMethod]
     public void LhmSensorStore_TryReadFresh_DisconnectedButFresh_IsReturnedForWidgetToDecide()
     {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = FixedClock();
+        LhmSensorStore.StoreForTest = LhmSensorStore.CreateStoreForTest(clock);
         LhmSensorStore.UpdateFromDto(null);
 
-        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh(TimeSpan.FromSeconds(10), clock);
+        SensorSnapshotDto? fresh = LhmSensorStore.TryReadFresh();
 
         Assert.IsNotNull(fresh, "A null-DTO snapshot is stamped with the receive time — freshness ≠ connectivity");
         Assert.IsFalse(fresh.IsConnected, "The widget renders the unavailable state via IsConnected");
@@ -188,27 +197,29 @@ public class TelemetryStoreMappingTests
     [TestMethod]
     public void FrameTimeStore_TryReadFresh_StaleSnapshot_ReturnsNull()
     {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = FixedClock();
+        FrameTimeStore.StoreForTest = FrameTimeStore.CreateStoreForTest(clock);
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
         {
             IsAvailable = true,
             LastUpdate = clock.GetUtcNow().UtcDateTime.AddSeconds(-30)
         });
 
-        Assert.IsNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock));
+        Assert.IsNull(FrameTimeStore.TryReadFresh());
     }
 
     [TestMethod]
     public void FrameTimeStore_TryReadFresh_UnavailableButFresh_IsReturned()
     {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var clock = FixedClock();
+        FrameTimeStore.StoreForTest = FrameTimeStore.CreateStoreForTest(clock);
         FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
         {
             IsAvailable = false,
             LastUpdate = clock.GetUtcNow().UtcDateTime
         });
 
-        FrameTimeSnapshotDto? fresh = FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5), clock);
+        FrameTimeSnapshotDto? fresh = FrameTimeStore.TryReadFresh();
 
         Assert.IsNotNull(fresh);
         Assert.IsFalse(fresh.IsAvailable, "A fresh but unavailable record is not stale — the widget decides presentation");
@@ -236,7 +247,7 @@ public class TelemetryStoreMappingTests
         };
 
         FrameTimeStore.Update(record);
-        FrameTimeSnapshotDto read = FrameTimeStore.TryReadFresh(TimeSpan.MaxValue)!;
+        FrameTimeSnapshotDto read = FrameTimeStore.TryReadFresh()!;
 
         Assert.IsTrue(read.IsAvailable);
         Assert.AreEqual("game.exe", read.ProcessName);

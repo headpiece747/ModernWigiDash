@@ -123,7 +123,7 @@ public class FrameTimeWidgetStateTests
             LastUpdate = DateTime.UtcNow,
         }, out _);
 
-        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh());
         FrameTimeStore.Reset();
     }
 
@@ -140,7 +140,7 @@ public class FrameTimeWidgetStateTests
             LastUpdate = DateTime.UtcNow,
         }, out _);
 
-        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh());
         FrameTimeStore.Reset();
     }
 
@@ -167,7 +167,7 @@ public class FrameTimeWidgetStateTests
             LastUpdate = DateTime.UtcNow,
         }, out _);
 
-        Assert.IsNotNull(FrameTimeStore.TryReadFresh(TimeSpan.FromSeconds(5)));
+        Assert.IsNotNull(FrameTimeStore.TryReadFresh());
         FrameTimeStore.Reset();
     }
 

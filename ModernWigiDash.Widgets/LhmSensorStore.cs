@@ -15,29 +15,45 @@ public static class LhmSensorStore
     /// <summary>Default staleness window for sensor data (~1s poll cadence).</summary>
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(10);
 
-    private static readonly StaticTelemetryStore<SensorSnapshotDto> Store = new(
-        new SensorSnapshotDto(),
-        defaultMaxAge: DefaultMaxAge);
+    private static StaticTelemetryStore<SensorSnapshotDto> _store = CreateStore(TimeProvider.System);
+
+    private static StaticTelemetryStore<SensorSnapshotDto> CreateStore(TimeProvider timeProvider)
+        => new(new SensorSnapshotDto(), defaultMaxAge: DefaultMaxAge, timeProvider: timeProvider);
+
+    /// <summary>
+    /// Internal test seam: builds a store bound to a fake clock (and optional
+    /// max age) so the facade freshness tests can drive time. The production
+    /// singleton binds <see cref="TimeProvider.System"/> at construction.
+    /// </summary>
+    internal static StaticTelemetryStore<SensorSnapshotDto> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
+        => new(new SensorSnapshotDto(), maxAge ?? DefaultMaxAge, timeProvider);
+
+    /// <summary>Internal test seam: installs the store behind the static
+    /// read/update surface (see <see cref="CreateStoreForTest"/>).</summary>
+    internal static StaticTelemetryStore<SensorSnapshotDto> StoreForTest
+    {
+        get => _store;
+        set => _store = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     /// <summary>
     /// Returns the cached snapshot regardless of freshness. Only the inspector's
     /// live sensor picker uses this — it needs the full reading list even when
     /// stale; every other consumer must go through <see cref="TryReadFresh"/>.
     /// </summary>
-    public static SensorSnapshotDto ReadSnapshot() => Store.ReadSnapshot();
+    public static SensorSnapshotDto ReadSnapshot() => _store.ReadSnapshot();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
-    /// freshness decision uses the producer timestamp with an injectable clock.
+    /// staleness window and the clock bind at construction.
     /// </summary>
-    public static SensorSnapshotDto? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
-        => Store.TryReadFresh(maxAge, timeProvider);
+    public static SensorSnapshotDto? TryReadFresh() => _store.TryReadFresh();
 
     /// <summary>
     /// Stores a snapshot. A default/empty producer timestamp is resolved to the
     /// store's receive time.
     /// </summary>
-    public static void Update(SensorSnapshotDto snapshot) => Store.Update(snapshot, snapshot.LastUpdate);
+    public static void Update(SensorSnapshotDto snapshot) => _store.Update(snapshot, snapshot.LastUpdate);
 
     /// <summary>
     /// Stores a snapshot from the producer, tolerating a null DTO (treated as
@@ -45,10 +61,10 @@ public static class LhmSensorStore
     /// loop and the tests rely on.
     /// </summary>
     public static void UpdateFromDto(SensorSnapshotDto? dto)
-        => Store.Update(dto ?? new SensorSnapshotDto(), dto?.LastUpdate ?? default);
+        => _store.Update(dto ?? new SensorSnapshotDto(), dto?.LastUpdate ?? default);
 
     /// <summary>
     /// Resets the cache to the disconnected state. Intended for test isolation.
     /// </summary>
-    public static void Reset() => Store.Reset();
+    public static void Reset() => _store.Reset();
 }

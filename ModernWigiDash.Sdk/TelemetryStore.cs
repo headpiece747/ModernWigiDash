@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-
 namespace ModernWigiDash.Sdk;
 
 /// <summary>
@@ -32,12 +29,10 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
 
     /// <param name="emptyValue">The record a freshly reset store exposes
     /// (e.g. the disconnected/unavailable sentinel of the domain).</param>
-    /// <param name="defaultMaxAge">Staleness window used when
-    /// <see cref="TryReadFresh"/> is called without an explicit max age.
-    /// Defaults to 10 seconds.</param>
-    /// <param name="timeProvider">Clock used by <see cref="TryReadFresh"/>
-    /// when no per-call clock is supplied. Defaults to
-    /// <see cref="TimeProvider.System"/>.</param>
+    /// <param name="defaultMaxAge">The staleness window used by
+    /// <see cref="TryReadFresh"/>. Defaults to 10 seconds.</param>
+    /// <param name="timeProvider">The clock used by <see cref="TryReadFresh"/>
+    /// and <see cref="Update"/>. Defaults to <see cref="TimeProvider.System"/>.</param>
     public TelemetryStore(TRecord emptyValue, TimeSpan? defaultMaxAge = null, TimeProvider? timeProvider = null)
     {
         _emptyValue = emptyValue;
@@ -80,13 +75,10 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
-    /// freshness decision uses the producer timestamp with an injectable clock.
+    /// staleness window and the clock bind at construction — consumers cannot
+    /// re-decide freshness per call.
     /// </summary>
-    /// <param name="maxAge">Staleness window; defaults to the constructor's
-    /// default max age when null.</param>
-    /// <param name="timeProvider">Clock for the freshness decision; defaults to
-    /// the constructor's clock when null.</param>
-    public TRecord? TryReadFresh(TimeSpan? maxAge = null, TimeProvider? timeProvider = null)
+    public TRecord? TryReadFresh()
     {
         lock (_gate)
         {
@@ -95,8 +87,8 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
                 return null;
             }
 
-            var now = (timeProvider ?? _timeProvider).GetUtcNow().UtcDateTime;
-            return now - _lastProducerTimestamp <= (maxAge ?? _defaultMaxAge) ? _current : null;
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            return now - _lastProducerTimestamp <= _defaultMaxAge ? _current : null;
         }
     }
 

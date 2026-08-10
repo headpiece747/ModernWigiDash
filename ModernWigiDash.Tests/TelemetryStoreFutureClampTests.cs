@@ -19,7 +19,7 @@ public class TelemetryStoreFutureClampTests
         store.Update("fresh", producerTimestamp: clock.GetUtcNow().UtcDateTime.AddHours(1));
 
         Assert.AreEqual("fresh", store.Current, "the record is stored");
-        Assert.AreEqual("fresh", store.TryReadFresh(TimeSpan.FromSeconds(5), clock),
+        Assert.AreEqual("fresh", store.TryReadFresh(),
             "the clamped record is fresh at the store's own time");
     }
 
@@ -31,7 +31,7 @@ public class TelemetryStoreFutureClampTests
 
         store.Update("old", producerTimestamp: clock.GetUtcNow().UtcDateTime.AddSeconds(-6));
 
-        Assert.IsNull(store.TryReadFresh(TimeSpan.FromSeconds(5), clock),
+        Assert.IsNull(store.TryReadFresh(),
             "a past producer timestamp governs staleness normally");
         Assert.AreEqual("old", store.Current);
     }
