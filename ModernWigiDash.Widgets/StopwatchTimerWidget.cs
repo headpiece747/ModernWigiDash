@@ -37,7 +37,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var total = _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
-        string timeStr = $"{total.Minutes:D2}:{total.Seconds:D2}.{total.Milliseconds / 10:D2}";
+        string timeStr = StopwatchPresentation.FormatElapsed(total);
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         SKColor accentColor = ColorOf(AccentColorHex, SKColors.White);
 
@@ -49,13 +49,13 @@ public class StopwatchTimerWidget : ModernWidgetBase
 
         var subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f);
         using var subPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-        string statusStr = _isRunning ? "TAP TO PAUSE" : "TAP TO START";
+        string statusStr = StopwatchPresentation.StatusText(_isRunning);
         var sb = new SKRect();
         subFont.MeasureText(statusStr, out sb, subPaint);
         float dotR = 4f;
         float dotX = bounds.MidX - (sb.Width / 2f) - dotR * 2f - 5f;
         float dotY = bounds.Bottom - 16f - 4f;
-        using var dotPaint = new SKPaint { Color = _isRunning ? new SKColor(239, 68, 68) : new SKColor(34, 197, 94), IsAntialias = true };
+        using var dotPaint = new SKPaint { Color = StopwatchPresentation.StatusColor(_isRunning), IsAntialias = true };
         canvas.DrawCircle(dotX, dotY, dotR, dotPaint);
         canvas.DrawTextWithFallback(statusStr, bounds.MidX - (sb.Width / 2f), bounds.Bottom - 16f, subFont, subPaint);
     }

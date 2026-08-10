@@ -108,28 +108,15 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     {
         get
         {
-            if (!string.IsNullOrEmpty(DisplayName)) return DisplayName;
-            if (IsFxAsset && PriceFeedManager.TryParseFxPair(Symbol, out string baseCur, out string quoteCur))
-                return $"{baseCur} / {quoteCur}";
-            return PriceFeedManager.NormalizeSymbol(Symbol);
+            string? fxLabel = IsFxAsset && PriceFeedManager.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
+                ? $"{baseCur} / {quoteCur}"
+                : null;
+            return TickerPresentation.DisplayLabel(DisplayName, fxLabel, PriceFeedManager.NormalizeSymbol(Symbol));
         }
     }
 
     private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
-    {
-        int d = PriceDecimals switch
-        {
-            "2" => 2,
-            "4" => 4,
-            "6" => 6,
-            "8" => 8,
-            _ when rawPrice >= 100 => 2,
-            _ when rawPrice >= 1 => 4,
-            _ when rawPrice >= 0.01m => 6,
-            _ => 8
-        };
-        return currencySymbol + rawPrice.ToString("N" + d);
-    }
+        => TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol);
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {

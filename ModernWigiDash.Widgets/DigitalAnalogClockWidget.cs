@@ -46,8 +46,8 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
         string timeStr = FormatClockTime(now, TimeFormat);
-        string amPmStr = TimeFormat == "24H" ? "" : now.ToString("tt");
-        string dateStr = now.ToString("dddd, MMMM dd, yyyy");
+        string amPmStr = ClockPresentation.AmPm(now, TimeFormat);
+        string dateStr = ClockPresentation.Date(now);
 
         float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
