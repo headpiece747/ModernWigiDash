@@ -685,8 +685,6 @@ public sealed class PriceFeedManager : IDisposable
             var ids = string.Join(",", _subscribedCrypto.Keys.Select(CoinGeckoIdFor).OfType<string>());
             if (string.IsNullOrEmpty(ids)) return;
             var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
             foreach (var alias in CryptoAliases.Values.DistinctBy(a => a.Symbol))
             {
                 if (!PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, alias.CoinGeckoId, out var price, out var change))

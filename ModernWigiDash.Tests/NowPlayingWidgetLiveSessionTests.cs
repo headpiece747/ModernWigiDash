@@ -29,8 +29,6 @@ public class NowPlayingWidgetLiveSessionTests
         public event Action? SessionsChanged { add => _sessionsChanged += value; remove => _sessionsChanged -= value; }
         public IMediaSessionSourceSession? GetCurrentSession() => Session;
         public IReadOnlyList<IMediaSessionSourceSession> GetSessions() => [Session];
-        public void RaiseCurrentSessionChanged() => _currentChanged?.Invoke();
-        public void RaiseSessionsChanged() => _sessionsChanged?.Invoke();
     }
 
     private sealed class FakeSession : IMediaSessionSourceSession

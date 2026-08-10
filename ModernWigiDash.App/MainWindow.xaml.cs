@@ -384,15 +384,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// filter box, and the empty-query reset all render through this.</summary>
     private void RefreshCatalog()
     {
-        string query = TxtSearchCatalog.Text.Trim();
-        IEnumerable<PluginInfo> source = _loader.RegisteredPlugins;
-        if (!string.IsNullOrEmpty(query))
-        {
-            source = source.Where(p =>
-                p.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                p.Category.Contains(query, StringComparison.OrdinalIgnoreCase));
-        }
-        ListCatalog.ItemsSource = source.OrderBy(p => p.DisplayName).ToList();
+        ListCatalog.ItemsSource = CatalogFilter.Apply(_loader.RegisteredPlugins, TxtSearchCatalog.Text.Trim());
     }
 
     private void BtnPlaceWidget_Click(object sender, RoutedEventArgs e)
@@ -602,23 +594,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void UpdateUsbBadge()
     {
-        // Connecting shares the danger brush with Disconnected (nothing is
-        // green while the engine is still trying); Simulated keeps AccentRed,
-        // which reads as "amber" on this theme.
-        string label = _usbDevice.State switch
-        {
-            ConnectionState.Connected => "Connected",
-            ConnectionState.Simulated => "Simulated",
-            ConnectionState.Connecting => "Connecting",
-            _ => "Disconnected"
-        };
-        string brushKey = _usbDevice.State switch
-        {
-            ConnectionState.Connected => "AccentGreen",
-            ConnectionState.Simulated => "AccentRed", // amber — running without the device
-            ConnectionState.Connecting => "DangerBorder",
-            _ => "DangerBorder"
-        };
+        var (label, brushKey) = UsbBadgeModel.From(_usbDevice.State);
         if (brushKey == _lastUsbBadgeBrush && label == _lastUsbBadgeLabel) return; // state unchanged — skip the per-tick resource lookup
         _lastUsbBadgeBrush = brushKey;
         _lastUsbBadgeLabel = label;

@@ -661,30 +661,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private SKColor ParseColor(string hex, SKColor fallback)
         => ColorOf(hex, fallback);
 
-    private static string FriendlyAppName(string appId)
-    {
-        if (string.IsNullOrEmpty(appId)) return "Media";
-        string lower = appId.ToLowerInvariant();
-
-        if (lower.Contains("spotify")) return "Spotify";
-        if (lower.Contains("chrome")) return "Chrome";
-        if (lower.Contains("msedge")) return "Edge";
-        if (lower.Contains("firefox")) return "Firefox";
-        if (lower.Contains("vlc")) return "VLC";
-        if (lower.Contains("itunes")) return "iTunes";
-        if (lower.Contains("apple") || lower.Contains("music")) return "Apple Music";
-        if (lower.Contains("mediaplayer") || lower.Contains("wmplayer")) return "Windows Media Player";
-        if (lower.Contains("discord")) return "Discord";
-        if (lower.Contains("foobar")) return "foobar2000";
-        if (lower.Contains("steam")) return "Steam";
-
-        int slash = appId.LastIndexOf('!');
-        string name = slash >= 0 ? appId[(slash + 1)..] : appId;
-        int dot = name.LastIndexOf('.');
-        if (dot >= 0) name = name[(dot + 1)..];
-        return name.Length > 16 ? name[..16] : name;
-    }
-
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
 
     public override async ValueTask DisposeAsync()
