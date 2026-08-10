@@ -24,6 +24,8 @@ public sealed class PresentMonNative : IPresentMonNative
     private readonly PmRegisterFrameQuery? _registerFrameQueryFn;
     private readonly PmConsumeFrames? _consumeFramesFn;
     private readonly PmFreeFrameQuery? _freeFrameQueryFn;
+    private readonly PmGetIntrospectionRoot? _getIntrospectionRootFn;
+    private readonly PmFreeIntrospectionRoot? _freeIntrospectionRootFn;
     private readonly string? _loadFailureReason;
 
     /// <summary>Creates the runtime-loaded PresentMon interop with the real native probe.</summary>
@@ -45,6 +47,8 @@ public sealed class PresentMonNative : IPresentMonNative
         _registerFrameQueryFn = probe.RegisterFrameQueryFn;
         _consumeFramesFn = probe.ConsumeFramesFn;
         _freeFrameQueryFn = probe.FreeFrameQueryFn;
+        _getIntrospectionRootFn = probe.GetIntrospectionRootFn;
+        _freeIntrospectionRootFn = probe.FreeIntrospectionRootFn;
         _loadFailureReason = probe.FailureReason;
     }
 
@@ -52,6 +56,7 @@ public sealed class PresentMonNative : IPresentMonNative
     private IntPtr _dynamicQuery;
     private IntPtr _frameQuery;
     private PresentMonQueryElement[]? _dynamicElements;
+    private int[] _fieldIndexes = [];
     private PresentMonQueryElement[]? _frameElements;
     private int _chainStride;
     private int _frameBlobSize;
@@ -165,16 +170,27 @@ public sealed class PresentMonNative : IPresentMonNative
             }
 
             var sample = new PresentMonDynamicSample(
-                Fps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[0]),
-                Low1PercentFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[1]),
-                GpuBusyMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
-                CpuFrameTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[3]),
-                DisplayedFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[4]),
-                GpuTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[5]),
-                DroppedFrames: (int)PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[6]),
-                PresentModeId: (int)PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[7]));
+                Fps: ReadField(blob, DynamicField.Fps),
+                Low1PercentFps: ReadField(blob, DynamicField.Low1PercentFps),
+                GpuBusyMs: ReadField(blob, DynamicField.GpuBusyMs),
+                CpuFrameTimeMs: ReadField(blob, DynamicField.CpuFrameTimeMs),
+                DisplayedFps: ReadField(blob, DynamicField.DisplayedFps),
+                GpuTimeMs: ReadField(blob, DynamicField.GpuTimeMs),
+                DroppedFrames: (int)ReadField(blob, DynamicField.DroppedFrames),
+                PresentModeId: (int)ReadField(blob, DynamicField.PresentModeId));
             return new PresentMonPollResult(sample, PmStatus.Success);
         }
+    }
+
+    /// <summary>
+    /// Reads one named metric slot from a polled blob via the field→element map
+    /// built at registration. A field whose metric was dropped (map entry -1)
+    /// reads as 0 — the producer's no-data value.
+    /// </summary>
+    private double ReadField(byte[] blob, DynamicField field)
+    {
+        int elementIndex = _fieldIndexes[(int)field];
+        return elementIndex < 0 ? 0 : PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements![elementIndex]);
     }
 
     public IReadOnlyList<double> DrainFrameTimes(int processId)
@@ -217,40 +233,61 @@ public sealed class PresentMonNative : IPresentMonNative
 
     public void Dispose() => CloseSession();
 
+    /// <summary>
+    /// The wanted dynamic-query metrics. Each spec names the field slot the
+    /// producer reads and the preferred stat; the query builder validates both
+    /// against the installed service's introspection and drops unsupported
+    /// metrics with a named reason (the field then reads 0).
+    /// </summary>
+    internal static readonly PresentMonQuerySpec[] DynamicQuerySpecs =
+    [
+        new(DynamicField.Fps, PresentMonProtocol.MetricPresentedFps, PresentMonProtocol.StatAvg),
+        new(DynamicField.Low1PercentFps, PresentMonProtocol.MetricPresentedFps, PresentMonProtocol.StatPercentile01),
+        new(DynamicField.GpuBusyMs, PresentMonProtocol.MetricGpuBusy, PresentMonProtocol.StatAvg),
+        new(DynamicField.CpuFrameTimeMs, PresentMonProtocol.MetricCpuFrameTime, PresentMonProtocol.StatAvg),
+        new(DynamicField.DisplayedFps, PresentMonProtocol.MetricDisplayedFps, PresentMonProtocol.StatAvg),
+        new(DynamicField.GpuTimeMs, PresentMonProtocol.MetricGpuTime, PresentMonProtocol.StatAvg),
+        new(DynamicField.DroppedFrames, PresentMonProtocol.MetricDroppedFrames, PresentMonProtocol.StatAvg),
+        // PRESENT_MODE is a DYNAMIC_FRAME enum metric: the service accepts only
+        // NEWEST_POINT / MID_LERP stats (AVG and NONE both fail registration).
+        new(DynamicField.PresentModeId, PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatNewestPoint),
+    ];
+
     private bool RegisterQueries()
     {
-        if (_registerDynamicQueryFn is null || _registerFrameQueryFn is null)
+        if (_registerDynamicQueryFn is null || _registerFrameQueryFn is null
+            || _getIntrospectionRootFn is null || _freeIntrospectionRootFn is null)
         {
             return false;
         }
 
-        var dynamicElements = new[]
+        if (!TryReadCatalog(out PresentMonMetricCatalog? catalog))
         {
-            new PresentMonQueryElement(PresentMonProtocol.MetricPresentedFps, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricPresentedFps, PresentMonProtocol.StatPercentile01, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricGpuBusy, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricCpuFrameTime, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricDisplayedFps, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricGpuTime, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricDroppedFrames, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            // PRESENT_MODE is a DYNAMIC_FRAME enum metric: the service accepts
-            // only NEWEST_POINT / MID_LERP stats (AVG and NONE both fail
-            // registration with QueryMalformed).
-            new PresentMonQueryElement(PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatNewestPoint, 0, 0, 0, 0),
-        };
+            UnavailableReason = "Could not read the PresentMon metric catalog (pmGetIntrospectionRoot failed).";
+            return false;
+        }
+
+        var build = PresentMonQueryBuilder.Build(DynamicQuerySpecs, catalog);
+        if (build.Elements.Length == 0)
+        {
+            UnavailableReason = "No PresentMon dynamic-query metrics are registrable on the installed service.";
+            return false;
+        }
 
         // dataOffset/dataSize are filled in by the service during registration
         // — that is why the element array must be the same one used for parsing.
         PmStatus dynamicStatus = _registerDynamicQueryFn(
-            _session, out _dynamicQuery, dynamicElements, (ulong)dynamicElements.Length,
+            _session, out _dynamicQuery, build.Elements, (ulong)build.Elements.Length,
             PresentMonProtocol.DynamicQueryWindowMs, PresentMonProtocol.DynamicQueryOffsetMs);
         if (dynamicStatus != PmStatus.Success)
         {
-            UnavailableReason = $"Failed to register the PresentMon dynamic query (status {dynamicStatus}).";
+            string dropped = build.DroppedMetrics.Count > 0 ? $" Dropped: {string.Join("; ", build.DroppedMetrics)}." : string.Empty;
+            UnavailableReason = $"Failed to register the PresentMon dynamic query (status {dynamicStatus}).{dropped}";
             return false;
         }
-        _dynamicElements = dynamicElements;
-        _chainStride = PresentMonBlobReader.ChainStrideBytes(dynamicElements);
+        _dynamicElements = build.Elements;
+        _fieldIndexes = build.FieldIndexes;
+        _chainStride = PresentMonBlobReader.ChainStrideBytes(build.Elements);
 
         var frameElements = new[]
         {
@@ -271,5 +308,28 @@ public sealed class PresentMonNative : IPresentMonNative
         _frameBlobSize = (int)blobSize;
 
         return true;
+    }
+
+    /// <summary>
+    /// Parses the service's introspection tree into the metric catalog. The
+    /// native root is freed immediately after parsing — the catalog is managed
+    /// memory owned by this instance.
+    /// </summary>
+    private bool TryReadCatalog(out PresentMonMetricCatalog? catalog)
+    {
+        if (_getIntrospectionRootFn!(_session, out IntPtr rootPtr) != PmStatus.Success)
+        {
+            catalog = null;
+            return false;
+        }
+        try
+        {
+            catalog = new PresentMonMetricCatalog(PresentMonIntrospection.ParseMetrics(rootPtr));
+            return true;
+        }
+        finally
+        {
+            _freeIntrospectionRootFn!(rootPtr);
+        }
     }
 }
