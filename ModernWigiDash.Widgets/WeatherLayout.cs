@@ -116,17 +116,32 @@ public static class WeatherLayout
 
     /// <summary>
     /// The tap-cycle rule: Detailed → Daily Forecast → Hourly Forecast →
-    /// Current Only → Compact → Detailed. Unknown modes reset to the default.
+    /// Current Only → Compact → Detailed. The wrap (and any out-of-range
+    /// value) resets to the default — the same default <see cref="ParseMode"/>
+    /// falls back to for unknown strings.
     /// </summary>
-    public static string NextLayoutMode(string current)
-        => current switch
-        {
-            "Detailed" => "Daily Forecast",
-            "Daily Forecast" => "Hourly Forecast",
-            "Hourly Forecast" => "Current Only",
-            "Current Only" => "Compact",
-            _ => DefaultLayoutMode,
-        };
+    internal static WeatherLayoutMode NextMode(WeatherLayoutMode mode) => mode switch
+    {
+        WeatherLayoutMode.Detailed => WeatherLayoutMode.DailyForecast,
+        WeatherLayoutMode.DailyForecast => WeatherLayoutMode.HourlyForecast,
+        WeatherLayoutMode.HourlyForecast => WeatherLayoutMode.CurrentOnly,
+        WeatherLayoutMode.CurrentOnly => WeatherLayoutMode.Compact,
+        _ => WeatherLayoutMode.Detailed,
+    };
+
+    /// <summary>
+    /// The single enum→display-name table — the other copy of the mode names
+    /// lives in the widget's <c>[WidgetProperty]</c> choice array, which must
+    /// stay a compile-time string literal.
+    /// </summary>
+    internal static string DisplayName(WeatherLayoutMode mode) => mode switch
+    {
+        WeatherLayoutMode.DailyForecast => "Daily Forecast",
+        WeatherLayoutMode.HourlyForecast => "Hourly Forecast",
+        WeatherLayoutMode.CurrentOnly => "Current Only",
+        WeatherLayoutMode.Compact => "Compact",
+        _ => DefaultLayoutMode,
+    };
 
     /// <summary>
     /// The shrink factor for the hero text stack (temp + condition): scales

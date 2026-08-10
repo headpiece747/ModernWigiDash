@@ -126,19 +126,23 @@ public class WeatherLayoutTests
     }
 
     [TestMethod]
-    public void NextLayoutMode_CycleOrder_MatchesWidgetCycle()
+    public void NextMode_CycleOrder_MatchesWidgetCycle()
     {
-        Assert.AreEqual("Daily Forecast", WeatherLayout.NextLayoutMode("Detailed"));
-        Assert.AreEqual("Hourly Forecast", WeatherLayout.NextLayoutMode("Daily Forecast"));
-        Assert.AreEqual("Current Only", WeatherLayout.NextLayoutMode("Hourly Forecast"));
-        Assert.AreEqual("Compact", WeatherLayout.NextLayoutMode("Current Only"));
-        Assert.AreEqual(WeatherLayout.DefaultLayoutMode, WeatherLayout.NextLayoutMode("Compact"));
+        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.NextMode(WeatherLayoutMode.Detailed));
+        Assert.AreEqual(WeatherLayoutMode.HourlyForecast, WeatherLayout.NextMode(WeatherLayoutMode.DailyForecast));
+        Assert.AreEqual(WeatherLayoutMode.CurrentOnly, WeatherLayout.NextMode(WeatherLayoutMode.HourlyForecast));
+        Assert.AreEqual(WeatherLayoutMode.Compact, WeatherLayout.NextMode(WeatherLayoutMode.CurrentOnly));
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(WeatherLayoutMode.Compact));
     }
 
     [TestMethod]
-    public void NextLayoutMode_UnknownMode_ResetsToDefault()
+    public void DisplayName_EachMode_MatchesInspectorChoiceStrings()
     {
-        Assert.AreEqual(WeatherLayout.DefaultLayoutMode, WeatherLayout.NextLayoutMode("Bogus"));
+        Assert.AreEqual(WeatherLayout.DefaultLayoutMode, WeatherLayout.DisplayName(WeatherLayoutMode.Detailed));
+        Assert.AreEqual("Daily Forecast", WeatherLayout.DisplayName(WeatherLayoutMode.DailyForecast));
+        Assert.AreEqual("Hourly Forecast", WeatherLayout.DisplayName(WeatherLayoutMode.HourlyForecast));
+        Assert.AreEqual("Current Only", WeatherLayout.DisplayName(WeatherLayoutMode.CurrentOnly));
+        Assert.AreEqual("Compact", WeatherLayout.DisplayName(WeatherLayoutMode.Compact));
     }
 
     [TestMethod]

@@ -18,7 +18,8 @@ public class DisplayHidTransportTests
     /// SetupAPI/WinUSB P/Invoke surface with canned results and call counts,
     /// so <see cref="DisplayHidTransport.Connect"/>'s WinUSB policy (open →
     /// PING → init → LibUsb fallback) is drivable without hardware. Injected
-    /// via <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>.
+    /// through a fake WinUSB <see cref="ConnectProvider"/> in
+    /// <see cref="DisplayHidTransport.ProviderFactories"/>.
     /// </summary>
     private sealed class FakeWinUsbBulkDevice : WinUsbBulkDevice
     {
@@ -70,12 +71,31 @@ public class DisplayHidTransportTests
         }
     }
 
+    /// <summary>A fake WinUSB provider in the image of the real leg's
+    /// <c>TryCreateWinUsbBackend</c>: opens the fake device and returns it, or
+    /// disposes it and returns null on a failed open — so the connect policy
+    /// sees the same open/fail contract it would from the real provider.</summary>
+    private static ConnectProvider WinUsbLeg(FakeWinUsbBulkDevice fake) => new(
+        "USB-WINUSB",
+        () =>
+        {
+            if (!fake.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
+            {
+                fake.Dispose();
+                return null;
+            }
+            return fake;
+        },
+        "WinUSB",
+        null,
+        "init failed");
+
     [TestMethod]
     public void Connect_WinUsbOpenAndPingSucceed_ConnectsAndRunsInit()
     {
         var fake = new FakeWinUsbBulkDevice();
         using var transport = new DisplayHidTransport();
-        transport.WinUsbDeviceFactory = () => fake;
+        transport.ProviderFactories = [WinUsbLeg(fake)];
 
         bool ok = transport.Connect();
 
@@ -96,17 +116,20 @@ public class DisplayHidTransportTests
     {
         var fake = new FakeWinUsbBulkDevice { ControlResult = false };
         using var transport = new DisplayHidTransport();
-        transport.WinUsbDeviceFactory = () => fake;
+        transport.ProviderFactories =
+        [
+            WinUsbLeg(fake),
+            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0", null, "init failed"),
+        ];
 
         // The WinUSB path must be abandoned after the failed PING (inside
         // SendInitCommands — the only PING in the connect, so the fake sees
-        // exactly one ControlIn); the LibUsb fallback then runs against the
-        // real device context, so the final outcome depends on whether
-        // hardware is attached. Assert the deterministic part: the fake was
-        // consulted and disposed.
+        // exactly one ControlIn); the LibUsb fallback then reports no device,
+        // so the outcome is deterministic. Assert the deterministic part: the
+        // fake was consulted and disposed.
         bool ok = transport.Connect();
 
-        Assert.AreEqual(1, fake.ControlInCalls, "The failed PING went through the factory-created fake");
+        Assert.AreEqual(1, fake.ControlInCalls, "The failed PING went through the injected fake");
         Assert.IsTrue(fake.Disposed, "The failed WinUSB device must be disposed");
         Assert.AreEqual(ok, transport.IsConnected, "Connection state must reflect the connect result");
     }
@@ -114,10 +137,10 @@ public class DisplayHidTransportTests
     // ── the provider loop: WinUSB → LibUsb fallback, drivable end-to-end ──
 
     /// <summary>
-    /// The real WinUSB leg (driven by the WinUsbDeviceFactory seam) with the
-    /// LibUsb leg replaced by a fake provider — the fallback is deterministic,
-    /// no real hardware involved. <see cref="DisplayHidTransport.ProviderFactories"/>
-    /// is the seam that makes the LibUsb leg drivable.
+    /// The real WinUSB leg with the LibUsb leg replaced by a fake provider —
+    /// the fallback is deterministic, no real hardware involved.
+    /// <see cref="DisplayHidTransport.ProviderFactories"/> is the seam that
+    /// makes both legs drivable.
     /// </summary>
     [TestMethod]
     public void Connect_WinUsbFailsToOpen_FakeLibUsbProviderConnects()
@@ -125,10 +148,9 @@ public class DisplayHidTransportTests
         var winUsb = new FakeWinUsbBulkDevice { OpenResult = false };
         var libUsb = new RecordingBackend();
         using var transport = new DisplayHidTransport();
-        transport.WinUsbDeviceFactory = () => winUsb;
         transport.ProviderFactories =
         [
-            transport.WinUsbProvider,
+            WinUsbLeg(winUsb),
             new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
         ];
 
@@ -150,10 +172,9 @@ public class DisplayHidTransportTests
         var winUsb = new FakeWinUsbBulkDevice { ControlResult = false };
         var libUsb = new RecordingBackend();
         using var transport = new DisplayHidTransport();
-        transport.WinUsbDeviceFactory = () => winUsb;
         transport.ProviderFactories =
         [
-            transport.WinUsbProvider,
+            WinUsbLeg(winUsb),
             new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
         ];
 
@@ -172,10 +193,9 @@ public class DisplayHidTransportTests
     {
         var winUsb = new FakeWinUsbBulkDevice { OpenResult = false };
         using var transport = new DisplayHidTransport();
-        transport.WinUsbDeviceFactory = () => winUsb;
         transport.ProviderFactories =
         [
-            transport.WinUsbProvider,
+            WinUsbLeg(winUsb),
             new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0", null, "init failed"),
         ];
 

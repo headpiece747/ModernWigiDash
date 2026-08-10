@@ -35,7 +35,6 @@ public sealed class FrameDelivery : IDisposable
     private readonly Func<bool>? _isReady;
     private readonly TimeProvider _timeProvider;
     private readonly CancellationTokenSource _cts;
-    private readonly Action<string>? _log;
     private readonly Task _senderTask;
 
     private readonly Func<byte[], bool>? _send;
@@ -82,7 +81,11 @@ public sealed class FrameDelivery : IDisposable
         _isReady = isReady;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _send = send;
-        _log = log;
+        // The DiagLog write seam is the injected log callback with a
+        // null-tolerant no-op — deliberately NOT DiagLog's FileLog fallback, so
+        // a delivery without a log sink stays silent.
+        _sentLog = new DiagLog("FrameDelivery", 60, write: log ?? (static _ => { }));
+        _sendFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _channel = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(capacity)
         {
             SingleWriter = true,
@@ -224,25 +227,18 @@ public sealed class FrameDelivery : IDisposable
                         // every-60th cadence keeps it bounded.
                         // (Drops are counted in DroppedCount, not logged.)
 #pragma warning restore S125
-                        if (_sentLog.Due())
-                            _log?.Invoke($"[FrameDelivery] Frame #{sent} sent ({latest.Buffer.Length} bytes)");
+                        _sentLog.Write($"Frame #{sent} sent ({latest.Buffer.Length} bytes)");
                     }
                     else
                     {
                         Interlocked.Increment(ref _sendFailed);
-                        if (_sendFailLog.Due())
-                        {
-                            _log?.Invoke($"[FrameDelivery] Send failed (buffer={latest.Buffer.Length} bytes)");
-                        }
+                        _sendFailLog.Write($"Send failed (buffer={latest.Buffer.Length} bytes)");
                     }
                 }
                 catch (Exception ex)
                 {
                     Interlocked.Increment(ref _sendFailed);
-                    if (_sendFailLog.Due())
-                    {
-                        _log?.Invoke($"[FrameDelivery] Send exception: {ex.Message}");
-                    }
+                    _sendFailLog.Write($"Send exception: {ex.Message}");
                 }
                 finally
                 {
@@ -257,12 +253,14 @@ public sealed class FrameDelivery : IDisposable
     }
 
     /// <summary>
-    /// Log cadences: success logs every 60th frame; failure logs the first
-    /// occurrence and then every 60th — a dead bus cannot spam the log at
-    /// ~30 lines/s.
+    /// Log cadences composed as <see cref="DiagLog"/>s: success logs every 60th
+    /// frame; failure logs the first occurrence and then every 60th — a dead
+    /// bus cannot spam the log at ~30 lines/s. The write seam is the injected
+    /// log callback (null = write nothing), so the tag and cadence rules are
+    /// declared once instead of hand-baked at each call site.
     /// </summary>
-    private readonly LogCadence _sentLog = new(60);
-    private readonly LogCadence _sendFailLog = new(60, logFirst: true);
+    private readonly DiagLog _sentLog;
+    private readonly DiagLog _sendFailLog;
 
     private void ReleaseSlot(FrameSlot slot, bool dropped)
     {

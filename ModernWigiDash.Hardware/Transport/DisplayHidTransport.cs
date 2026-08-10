@@ -23,10 +23,10 @@ namespace ModernWigiDash.Hardware.Transport;
 /// <see cref="ITransferBackend"/> seam. Connect iterates the
 /// <see cref="ProviderFactories"/> list (WinUSB first, LibUsbDotNet fallback):
 /// each provider opens the device and returns a backend (or null), and the
-/// first backend that survives the init sequence is adopted. The WinUSB leg is
-/// constructed through <see cref="WinUsbDeviceFactory"/> (default: a real
-/// <see cref="WinUsbBulkDevice"/>), so the connect policy — open, init,
-/// fallback — is drivable in tests with a fake device.
+/// first backend that survives the init sequence is adopted. The WinUSB
+/// provider constructs a real <see cref="WinUsbBulkDevice"/>; tests inject
+/// fake providers — including a fake WinUSB leg — through the list, so the
+/// connect policy — open, init, fallback — is drivable without hardware.
 /// </summary>
 public sealed class DisplayHidTransport : IDisplayTransport
 {
@@ -56,19 +56,10 @@ public sealed class DisplayHidTransport : IDisplayTransport
     }
 
     /// <summary>
-    /// Test seam: constructs the WinUSB attempt inside the WinUsb provider
-    /// (see <see cref="TryCreateWinUsbBackend"/>). Defaults to a real
-    /// <see cref="WinUsbBulkDevice"/>; tests substitute a fake subclass to
-    /// drive the connect policy without hardware.
-    /// </summary>
-    internal Func<WinUsbBulkDevice> WinUsbDeviceFactory { get; set; } = static () => new WinUsbBulkDevice();
-
-    /// <summary>
     /// The provider list <see cref="Connect"/> iterates: WinUSB first, the
-    /// LibUsbDotNet fallback second. Test seam mirroring
-    /// <see cref="WinUsbDeviceFactory"/>: tests replace the list — including a
-    /// fake LibUsb leg, which the factory seam cannot reach — to drive the
-    /// fallback policy deterministically.
+    /// LibUsbDotNet fallback second. Test seam: tests replace the list — with
+    /// fake WinUSB and/or LibUsb legs — to drive the connect and fallback
+    /// policies deterministically.
     /// </summary>
     internal ConnectProvider[] ProviderFactories { get; set; }
 
@@ -163,7 +154,8 @@ public sealed class DisplayHidTransport : IDisplayTransport
     }
 
     /// <summary>
-    /// WinUSB attempt: factory → open → backend. There is deliberately no PING
+    /// WinUSB attempt: open a real <see cref="WinUsbBulkDevice"/> → backend.
+    /// There is deliberately no PING
     /// here — the only PING lives in <see cref="SendInitCommands"/> (the
     /// pre-PING that used to run in <see cref="Connect"/> duplicated it and had
     /// drifted). Partial-state teardown is owned here: a failed open disposes
@@ -173,7 +165,7 @@ public sealed class DisplayHidTransport : IDisplayTransport
     {
         try
         {
-            var winUsb = WinUsbDeviceFactory();
+            var winUsb = new WinUsbBulkDevice();
             if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
                 LogToFile("[USB-WINUSB] Direct WinUSB connection opened");

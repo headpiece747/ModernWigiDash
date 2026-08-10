@@ -101,15 +101,15 @@ public class HardwareMonitorWidget : ModernWidgetBase
             _history.Dequeue();
         }
 
-        switch (DisplayMode)
+        switch (SystemTelemetryDisplayModeParser.Parse(DisplayMode))
         {
-            case "Bar":
+            case SystemTelemetryDisplayMode.Bar:
                 RenderBar(canvas, bounds, label, value, max, unit, decimals, accent, text);
                 break;
-            case "Value":
+            case SystemTelemetryDisplayMode.Value:
                 RenderValue(canvas, bounds, label, value, unit, decimals, text);
                 break;
-            case "Graph":
+            case SystemTelemetryDisplayMode.Graph:
                 RenderGraph(canvas, bounds, label, value, unit, decimals, accent, text, reading);
                 break;
             default:

@@ -4,8 +4,8 @@ using ModernWigiDash.Core.Models;
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The pure page-tab rules that RebuildPageTabsUI renders — active tab,
-/// delete-only-when-more-than-one-page, labels.
+/// The pure page-tab rules that <c>PageTabsView.Rebuild</c> renders — active
+/// tab, delete-only-when-more-than-one-page, labels.
 /// </summary>
 [TestClass]
 public class PageTabsViewModelTests

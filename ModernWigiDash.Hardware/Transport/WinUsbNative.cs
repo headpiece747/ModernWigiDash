@@ -173,8 +173,8 @@ internal static class SetupApiNative
 /// Owns a WinUSB device handle for direct bulk and control transfers.
 /// Implements <see cref="ITransferBackend"/> directly — the adapter is the
 /// class, no wrapper needed. Members are virtual so tests can subclass with
-/// canned results and drive the transport's connect policy via
-/// <see cref="DisplayHidTransport.WinUsbDeviceFactory"/>. The WinUSB/SetupAPI
+/// canned results and drive the transport's connect policy via a fake WinUSB
+/// provider in <c>DisplayHidTransport.ProviderFactories</c>. The WinUSB/SetupAPI
 /// P/Invoke surface flows through the <see cref="WinUsbApi"/> delegate bag
 /// (production: <see cref="WinUsbApi.Default"/>; tests: managed fakes), so the
 /// Open failure and cleanup paths are scriptable without hardware.

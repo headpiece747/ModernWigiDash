@@ -2,9 +2,10 @@ using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.App;
 
-/// <summary>The pure description of one page tab — the rules RebuildPageTabsUI
-/// applies, testable without WPF: which tab is active, whether deletion is
-/// allowed (never on the last page), and the tab label.</summary>
+/// <summary>The pure description of one page tab — the rules
+/// <see cref="PageTabsView.Rebuild"/> applies, testable without WPF: which tab
+/// is active, whether deletion is allowed (never on the last page), and the
+/// tab label.</summary>
 public sealed record PageTabItem(string PageName, int Index, bool IsActive, bool CanDelete);
 
 /// <summary>
