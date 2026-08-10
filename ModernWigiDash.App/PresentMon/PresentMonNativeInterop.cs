@@ -20,6 +20,7 @@ internal static class PresentMonProtocol
     public const uint StatNone = 0;
     public const uint StatAvg = 1;
     public const uint StatPercentile01 = 5;
+    public const uint StatNewestPoint = 12;
 
     /// <summary>Rolling measurement window for the dynamic query (ms).</summary>
     public const double DynamicQueryWindowMs = 1000;

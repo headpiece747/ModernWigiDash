@@ -167,7 +167,7 @@ public sealed class PresentMonNative : IPresentMonNative
             var sample = new PresentMonDynamicSample(
                 Fps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[0]),
                 Low1PercentFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[1]),
-                GpuBusyPercent: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
+                GpuBusyMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[2]),
                 CpuFrameTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[3]),
                 DisplayedFps: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[4]),
                 GpuTimeMs: PresentMonBlobReader.ReadDynamicDouble(blob, 0, _chainStride, _dynamicElements[5]),
@@ -233,7 +233,10 @@ public sealed class PresentMonNative : IPresentMonNative
             new PresentMonQueryElement(PresentMonProtocol.MetricDisplayedFps, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
             new PresentMonQueryElement(PresentMonProtocol.MetricGpuTime, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
             new PresentMonQueryElement(PresentMonProtocol.MetricDroppedFrames, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
-            new PresentMonQueryElement(PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatAvg, 0, 0, 0, 0),
+            // PRESENT_MODE is a DYNAMIC_FRAME enum metric: the service accepts
+            // only NEWEST_POINT / MID_LERP stats (AVG and NONE both fail
+            // registration with QueryMalformed).
+            new PresentMonQueryElement(PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatNewestPoint, 0, 0, 0, 0),
         };
 
         // dataOffset/dataSize are filled in by the service during registration

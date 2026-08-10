@@ -131,7 +131,9 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
                 FrameTimeMs = poll.Sample.Fps > 0 ? 1000.0 / poll.Sample.Fps : 0,
                 Low1PercentFps = poll.Sample.Low1PercentFps,
                 Low01PercentFps = FrameTimeStatistics.Low01PercentFps(_recentFrameTimes),
-                GpuBusyPercent = poll.Sample.GpuBusyPercent,
+                // PM_METRIC_GPU_BUSY is ms per frame (introspection unit ms);
+                // PresentMon's overlay displays it as busy-per-frame %.
+                GpuBusyPercent = poll.Sample.Fps > 0 ? poll.Sample.GpuBusyMs * poll.Sample.Fps / 10.0 : 0,
                 CpuFrameTimeMs = poll.Sample.CpuFrameTimeMs,
                 DisplayedFps = poll.Sample.DisplayedFps,
                 DroppedFrames = poll.Sample.DroppedFrames,

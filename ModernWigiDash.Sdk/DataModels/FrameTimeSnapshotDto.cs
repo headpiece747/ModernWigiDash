@@ -64,7 +64,9 @@ public sealed record FrameTimeSnapshotDto
     public double Low01PercentFps { get; set; }
 
     /// <summary>
-    /// GPU busy percentage (PM_METRIC_GPU_BUSY, documented as %).
+    /// GPU busy as the share of frame time (busy ms / frame ms, PresentMon's
+    /// overlay-style "GPU Busy %"). The raw PM_METRIC_GPU_BUSY value is ms per
+    /// frame; the producer performs the conversion.
     /// </summary>
     public double GpuBusyPercent { get; set; }
 

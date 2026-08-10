@@ -2,14 +2,15 @@ namespace ModernWigiDash.App.PresentMon;
 
 /// <summary>
 /// A point-in-time dynamic-query poll for one tracked process. Values are the
-/// raw PresentMon API results — units match the API's metric table: GPU busy
-/// is a percent (PM_METRIC_GPU_BUSY); PRESENT_MODE carries the raw
-/// PM_PRESENT_MODE enum id.
+/// raw PresentMon API results — units match the API's metric table (verified
+/// via the service's runtime introspection): GPU busy is milliseconds per
+/// frame (PM_METRIC_GPU_BUSY, "Ms GPU Busy"); the producer converts it to the
+/// overlay-style busy-per-frame percentage.
 /// </summary>
 public sealed record PresentMonDynamicSample(
     double Fps,
     double Low1PercentFps,
-    double GpuBusyPercent,
+    double GpuBusyMs,
     double CpuFrameTimeMs,
     double DisplayedFps,
     int DroppedFrames,

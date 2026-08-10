@@ -58,7 +58,8 @@ public class PresentMonFrameTimeProducerTests
     {
         return new FakePresentMonNative
         {
-            PollResult = new PresentMonDynamicSample(143.2, 110.4, 71.0, 4.05, 142.8, 2, 6.1, 4),
+            // GPU busy 4.0 ms at 143.2 fps → 4.0 * 143.2 / 10 = 57.28 % busy.
+            PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 142.8, 2, 6.1, 4),
             FrameTimes = [6.5, 6.7],
         };
     }
@@ -153,7 +154,8 @@ public class PresentMonFrameTimeProducerTests
         Assert.AreEqual(143.2, dto.Fps, 0.001);
         Assert.AreEqual(1000.0 / 143.2, dto.FrameTimeMs, 0.001);
         Assert.AreEqual(110.4, dto.Low1PercentFps, 0.001);
-        Assert.AreEqual(71.0, dto.GpuBusyPercent, 0.001, "GPU busy is a percent metric (PM_METRIC_GPU_BUSY); no conversion");
+        Assert.AreEqual(4.0 * 143.2 / 10.0, dto.GpuBusyPercent, 0.001,
+            "PM_METRIC_GPU_BUSY is ms per frame; the producer converts to the overlay-style busy-per-frame percent");
         Assert.AreEqual(4.05, dto.CpuFrameTimeMs, 0.001);
         Assert.AreEqual(142.8, dto.DisplayedFps, 0.001);
         Assert.AreEqual(2, dto.DroppedFrames);
