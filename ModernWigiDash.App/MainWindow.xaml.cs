@@ -66,7 +66,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (assigned in the ctor before the
     // profile is loaded).
-    private ProfilePersistence _profilePersistence = null!;
+    private ProfilePersistence _profilePersistence;
 
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
@@ -176,12 +176,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // 4. Load the persisted profile, or build the starter profile on first
         //    launch. A first launch persists the starter immediately so the
         //    file exists before any mutation.
-        _profile = _profilePersistence.Load(_loader, this);
-        if (_profile is null)
+        var loaded = _profilePersistence.Load(_loader, this);
+        if (loaded is null)
         {
-            _profile = new StarterProfile(_loader, this).Create();
+            loaded = new StarterProfile(_loader, this).Create();
             _profilePersistence.Save();
         }
+        _profile = loaded;
         _pageTabs.Rebuild(_profile);
 
         // 5. Route device touch input through the single input module. Display
