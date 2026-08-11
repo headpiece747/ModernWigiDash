@@ -10,6 +10,7 @@
 [![C# 14](https://img.shields.io/badge/C%23-14-239120?style=flat-square&logo=sharp&logoColor=white)](https://learn.microsoft.com/en-us/dotnet/csharp/)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen?style=flat-square)](ModernWigiDash.Tests)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?style=flat-square&logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
+[![Release](https://img.shields.io/github/v/release/headpiece747/ModernWigiDash?style=flat-square&label=release)](https://github.com/headpiece747/ModernWigiDash/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 </div>
@@ -110,7 +111,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 ### Option A — Download a Release (no .NET install)
 
-Grab the latest `ModernWigiDash-win-x64.zip` from the **Releases** page. It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
+Grab the latest `ModernWigiDash-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest). It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
 
 ### Option B — Build from Source
 
@@ -129,7 +130,9 @@ The app connects to the display directly over USB — frames and touch work with
 
 ## Packaging a Release
 
-The app ships as a single-file, self-contained, ReadyToRun executable — end users need no .NET runtime:
+Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.1.0`) and the **Release** workflow runs `scripts/build-release.ps1`, then creates a GitHub Release with the `ModernWigiDash-win-x64.zip` asset attached. You can also trigger it manually from the **Actions** tab with a tag input.
+
+The app ships as a single-file, self-contained, ReadyToRun executable — end users need no .NET runtime. To build the zip by hand:
 
 ```powershell
 dotnet publish ModernWigiDash.App\ModernWigiDash.App.csproj -c Release -r win-x64 --self-contained `
