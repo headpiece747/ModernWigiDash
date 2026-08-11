@@ -168,7 +168,7 @@ public sealed class WeatherClient
                 dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon);
 
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            _ = SaveCacheAsync(snapshot);
+            await SaveCacheAsync(snapshot).ConfigureAwait(false);
             return snapshot;
         }
         catch (Exception ex)
