@@ -512,11 +512,11 @@ In the ctor, before the "4. Setup Default Profile Layout" block (before the `Sta
         // dereferences _profile at save time (import swaps the reference).
         _profilePersistence = new ProfilePersistence(
             ProfilePersistence.DefaultProfilePath(),
-            () => _profile,
+            () => _profile!,
             log: msg => FileLog.Write($"[PROFILE] {msg}"));
 ```
 
-Then replace the starter block (lines 163-166). **Load through a local** — assigning `Load`'s `ProfileLayout?` result straight to the non-nullable field warns CS8601; the local + `is null` fallback keeps the semantics warning-free:
+Then replace the starter block (lines 163-166). **Load through a local** — assigning `Load`'s `ProfileLayout?` result straight to the non-nullable field warns CS8601; the local + `is null` fallback keeps the semantics warning-free. The provider lambda keeps `_profile!`: the lambda is created before the ctor assigns `_profile` (the existing `InputState` lambda at line 130 uses the same `!` for the same reason — a plain `_profile` capture warns CS8603 there):
 
 ```csharp
         // 4. Load the persisted profile, or build the starter profile on first
