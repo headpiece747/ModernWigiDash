@@ -6,7 +6,7 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// Owns the persisted profile file: the LocalAppData path, sanitized load via
+/// Owns the persisted profile file: the LocalAppData path, trusted load via
 /// the existing import pipeline, atomic tmp+replace save, and the debounced
 /// MarkDirty/Flush policy. The 30 FPS render loop never touches this module —
 /// only user mutations arm the debounce.
@@ -48,24 +48,26 @@ public sealed class ProfilePersistence : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             DirectoryName, FileName);
 
-    public string ProfilePath => _profilePath;
-
     /// <summary>
     /// Reads and sanitizes the persisted profile through the existing import
     /// pipeline (caps + rehydration). Returns null when absent, oversized,
     /// corrupt, or unparseable — the caller falls back to the starter profile.
+    /// The app's own file loads as TRUSTED input (sanitize: false): the
+    /// untrusted-import rules would wipe the user's configured ActionCommand,
+    /// absolute ImagePath, and BackgroundImagePath on every restart.
     /// </summary>
     public ProfileLayout? Load(WidgetPluginLoader loader, IModernWigiDashContext context)
     {
         try
         {
             if (!File.Exists(_profilePath)) return null;
-            if (ProfileOps.IsImportFileTooLarge(new FileInfo(_profilePath).Length))
+            var info = new FileInfo(_profilePath);
+            if (ProfileOps.IsImportFileTooLarge(info.Length))
             {
-                _log?.Invoke($"Profile file too large ({new FileInfo(_profilePath).Length} bytes); ignoring");
+                _log?.Invoke($"Profile file too large ({info.Length} bytes); ignoring");
                 return null;
             }
-            return ProfileOps.ImportJson(File.ReadAllText(_profilePath), loader, context);
+            return ProfileOps.ImportJson(File.ReadAllText(_profilePath), loader, context, sanitize: false);
         }
         catch (Exception ex)
         {
@@ -92,6 +94,21 @@ public sealed class ProfilePersistence : IDisposable
         catch (Exception ex)
         {
             _log?.Invoke($"Profile save failed: {ex.Message}");
+            // The write or the move may have failed AFTER creating the temp
+            // file (e.g. the move onto a directory path) — remove the litter
+            // best-effort so a later save never trips over a stale .tmp.
+            try
+            {
+                File.Delete(_profilePath + ".tmp");
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup; the save failure is already logged.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort cleanup; the save failure is already logged.
+            }
         }
     }
 
@@ -132,6 +149,7 @@ public sealed class ProfilePersistence : IDisposable
         }
         catch (OperationCanceledException)
         {
+            // Cancelled by a newer MarkDirty or a Flush — expected.
         }
     }
 }

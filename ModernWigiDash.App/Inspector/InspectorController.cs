@@ -63,6 +63,7 @@ public sealed class InspectorController
     private readonly InspectorControllerHost _host;
     private readonly InspectorValuePolicy _policy = new();
     private readonly DialogHost _dialogHost;
+    private readonly Action? _onProfileChanged;
     private bool _isUpdatingInspector = false;
 
     /// <param name="host">The window's wiring holder.</param>
@@ -70,10 +71,17 @@ public sealed class InspectorController
     /// inspector must not build its own — DialogHost is stateful (it owns the
     /// device-authorization window), and two instances for one owner would
     /// silently never show that window.</param>
-    public InspectorController(InspectorControllerHost host, DialogHost dialogHost)
+    /// <param name="onProfileChanged">Invoked after a write-back lands in the
+    /// profile model (transform/opacity/property values) so the owner can arm
+    /// profile persistence.</param>
+    public InspectorController(
+        InspectorControllerHost host,
+        DialogHost dialogHost,
+        Action? onProfileChanged = null)
     {
         _host = host;
         _dialogHost = dialogHost;
+        _onProfileChanged = onProfileChanged;
         // The policy's default warning sink is Debug.WriteLine; the controller
         // routes warnings into the shared file log so conversion failures
         // surface in the field, not only in a debugger.
@@ -184,6 +192,7 @@ public sealed class InspectorController
         prop.SetValue(selected.ActiveInstance, converted);
         selected.ActiveInstance.OnPropertyChanged(prop.Name, converted);
         selected.PropertyValues[prop.Name] = converted;
+        _onProfileChanged?.Invoke();
     }
 
     /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation/opacity write-backs.</summary>
@@ -199,6 +208,7 @@ public sealed class InspectorController
         if (_policy.TryParseZIndex(_host.ZIndexText.Text, out int z)) selected.ZIndex = z;
         if (_policy.TryParseRotation(_host.RotationText.Text, out float r)) selected.Rotation = r;
 
+        _onProfileChanged?.Invoke();
         _host.RequestCanvasRender();
     }
 
@@ -210,6 +220,7 @@ public sealed class InspectorController
 
         selected.Opacity = _policy.ClampOpacity((float)_host.OpacitySlider.Value);
         _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
+        _onProfileChanged?.Invoke();
         _host.RequestCanvasRender();
     }
 

@@ -84,6 +84,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>Test seam: the native PresentMon interop is injected so window
     /// construction never loads the real DLL in the test host.</summary>
     internal MainWindow(IPresentMonNative presentMonNative)
+        : this(presentMonNative, ProfilePersistence.DefaultProfilePath())
+    {
+    }
+
+    /// <summary>Test seam: injects the native PresentMon interop AND the
+    /// persisted-profile path so window-level tests never read/write the real
+    /// LocalAppData profile file.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath)
     {
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
@@ -114,6 +122,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // 2. Populate Catalog UI (sorted alphabetically by display name)
         RefreshCatalog();
+
+        // Profile persistence: owns the LocalAppData path and the debounced
+        // save. Constructed before the host modules so the inspector's
+        // onProfileChanged hook can reference it; the provider lambda only
+        // dereferences _profile at save time (import swaps the reference).
+        _profilePersistence = new ProfilePersistence(
+            profilePath,
+            () => _profile!,
+            log: msg => FileLog.Write($"[PROFILE] {msg}"));
 
         // 3. Build the host modules (input, inspector, dialog host) BEFORE the
         // starter profile. Widget InitializeAsync runs synchronously inside
@@ -153,7 +170,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             tryFindResource: TryFindResource,
             getSelectedWidget: () => _selectedWidget,
             requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
-            _dialogHost);
+            _dialogHost,
+            onProfileChanged: () => _profilePersistence.MarkDirty());
 
         // Page-tabs strip module: owns tab construction, the wheel scroll, and
         // scroll-into-view; the window keeps only the page-action seams.
@@ -164,14 +182,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
             SwitchToPage,
             RenamePage,
             DeletePage);
-
-        // Profile persistence: load the saved profile at startup, falling back
-        // to the starter profile when absent/corrupt. The provider lambda only
-        // dereferences _profile at save time (import swaps the reference).
-        _profilePersistence = new ProfilePersistence(
-            ProfilePersistence.DefaultProfilePath(),
-            () => _profile!,
-            log: msg => FileLog.Write($"[PROFILE] {msg}"));
 
         // 4. Load the persisted profile, or build the starter profile on first
         //    launch. A first launch persists the starter immediately so the
@@ -236,6 +246,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 // Persist before teardown: a clean exit always lands the final
                 // profile state (including the last active page index).
                 _profilePersistence.Flush();
+                _profilePersistence.Dispose();
                 _framePump.Dispose();
                 _telemetry.Dispose();
                 _presenter.Dispose();
@@ -394,12 +405,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (!_wired) return;
         _inspector.TransformChanged(sender, e);
+        _profilePersistence.MarkDirty();
     }
 
     private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!_wired) return;
         _inspector.OpacityChanged(sender, e);
+        _profilePersistence.MarkDirty();
     }
 
     #endregion
