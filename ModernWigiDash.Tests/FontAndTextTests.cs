@@ -88,6 +88,53 @@ public class FontAndTextTests
     }
 
     [TestMethod]
+    public void FontHelper_GetTextRuns_SameInputs_ReturnsSameListInstance()
+    {
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        var first = FontHelper.GetTextRuns("Hello World", SKFontStyle.Normal, arial);
+        var second = FontHelper.GetTextRuns("Hello World", SKFontStyle.Normal, arial);
+        Assert.AreSame(first, second, "identical inputs must hit the memoized run list");
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTextRuns_DifferentStyle_ReturnsDistinctRuns()
+    {
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        var normal = FontHelper.GetTextRuns("Hello", SKFontStyle.Normal, arial);
+        var bold = FontHelper.GetTextRuns("Hello", SKFontStyle.Bold, arial);
+        Assert.AreNotSame(normal, bold, "a style change must key a separate run list");
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTextRuns_DifferentPreferredTypeface_ReturnsDistinctRuns()
+    {
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        var arialRuns = FontHelper.GetTextRuns("Hello", SKFontStyle.Normal, arial);
+        var geistRuns = FontHelper.GetTextRuns("Hello", SKFontStyle.Normal, FontHelper.GeistTypeface);
+        Assert.AreNotSame(arialRuns, geistRuns, "a different preferred typeface must key a separate run list");
+        Assert.AreEqual(arial.FamilyName, arialRuns[0].Typeface.FamilyName, true);
+        Assert.AreEqual(FontHelper.GeistTypeface.FamilyName, geistRuns[0].Typeface.FamilyName, true);
+    }
+
+    [TestMethod]
+    public void FontHelper_MeasureTextWithFallback_CachedRunsMeasureCorrectlyAtAnySize()
+    {
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        using var font = FontHelper.CreateFont(arial, 24f);
+        using var bigFont = FontHelper.CreateFont(arial, 48f);
+
+        // Prime the memoized runs, then reuse them across a second measure and
+        // a different size — the width loop stays per-call and correct.
+        float cached = FontHelper.MeasureTextWithFallback("Hello", font);
+        float second = FontHelper.MeasureTextWithFallback("Hello", font);
+        float bigCached = FontHelper.MeasureTextWithFallback("Hello", bigFont);
+
+        Assert.AreEqual(cached, second, 0.001f);
+        Assert.AreEqual(font.MeasureText("Hello"), cached, 0.01f);
+        Assert.AreEqual(bigFont.MeasureText("Hello"), bigCached, 0.01f);
+    }
+
+    [TestMethod]
     public void FontHelper_GetAllFamilies_IncludesGeist()
     {
         string[] families = FontHelper.GetAllFamilies();

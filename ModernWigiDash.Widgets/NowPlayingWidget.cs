@@ -52,6 +52,20 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     // drift apart.
     private NowPlayingGeometry _layout;
 
+    // ── Cached control-icon geometry ──────────────────────────────────────
+    // The icon paths are pure geometry of their button rects, which change
+    // only when the widget resizes; rebuilt once per rect instead of per
+    // frame. All five button rects derive from the same placement scale, so
+    // the shuffle rect keys the rebuild.
+    private SKRect _iconPathKeyRect;
+    private SKPath? _shuffleCurves;
+    private SKPath? _shuffleTopArrow;
+    private SKPath? _shuffleBottomArrow;
+    private SKPath? _prevTriangle;
+    private SKPath? _playTriangle;
+    private SKPath? _nextTriangle;
+    private SKPath? _repeatArrow;
+
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -107,6 +121,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
 
         _layout = NowPlayingLayout.Compute(bounds, scale, ShowSourceBadge, MeasureBadgeTextWidth(snap, scale));
+        EnsureIconPaths(_layout);
 
         DrawAlbumArt(canvas, bounds, scale);
         DrawSourceBadge(canvas, snap, scale);
@@ -323,112 +338,84 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor text = ColorOf(TextColorHex, SKColors.White);
         SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
 
+        bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
+        bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;
+
+        // One paint set per frame for all five controls; the icon geometry
+        // itself is cached (EnsureIconPaths) and rebuilt only on resize.
+        using var shufflePaint = new SKPaint { Color = IconColor(snap.Shuffle, snap.CanShuffle, accent, text), IsAntialias = true };
+        using var prevPaint = new SKPaint { Color = IconColor(false, snap.CanPrev, accent, text), IsAntialias = true };
+        using var nextPaint = new SKPaint { Color = IconColor(false, snap.CanNext, accent, text), IsAntialias = true };
+        using var repeatPaint = new SKPaint { Color = IconColor(repeatActive, snap.CanRepeat, accent, text), IsAntialias = true };
+
+        using var shuffleStroke = new SKPaint { Color = shufflePaint.Color, Style = SKPaintStyle.Stroke, StrokeWidth = _layout.ShuffleButton.Width * 0.07f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+        using var repeatPen = new SKPaint { Color = repeatPaint.Color, Style = SKPaintStyle.Stroke, StrokeWidth = _layout.RepeatButton.Width * 0.07f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+
+        using var heroBg = new SKPaint { Color = accent.WithAlpha(canPp ? (byte)245 : (byte)100), IsAntialias = true };
+        using var heroGlow = new SKPaint { Color = accent.WithAlpha(canPp ? (byte)90 : (byte)20), Style = SKPaintStyle.Stroke, StrokeWidth = 2f * scale, IsAntialias = true };
+        using var heroIcon = new SKPaint { Color = new SKColor(18, 18, 24), IsAntialias = true };
+
         // Shuffle (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _layout.ShuffleButton, snap.CanShuffle, snap.Shuffle, accent, text, DrawShuffleIcon);
+        DrawShuffleIcon(canvas, shufflePaint, shuffleStroke);
 
         // Prev (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _layout.PreviousButton, snap.CanPrev, false, accent, text, DrawPrevIcon);
+        DrawPrevIcon(canvas, _layout.PreviousButton, prevPaint);
 
         // Play / Pause (Hero Glowing Accent Button)
-        bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;
-        DrawHeroPlayButton(canvas, _layout.PlayPauseButton, scale, canPp, snap.IsPlaying, accent);
+        DrawHeroPlayButton(canvas, _layout.PlayPauseButton, scale, heroBg, heroGlow, heroIcon, snap.IsPlaying);
 
         // Next (Clean icon button without glass circle)
-        DrawCleanButton(canvas, _layout.NextButton, snap.CanNext, false, accent, text, DrawNextIcon);
+        DrawNextIcon(canvas, _layout.NextButton, nextPaint);
 
         // Repeat (Clean icon button without glass circle)
-        bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
-        DrawCleanButton(canvas, _layout.RepeatButton, snap.CanRepeat, repeatActive, accent, text,
-            (c, r, p) => DrawRepeatIcon(c, r, p, snap.Repeat == MediaPlaybackAutoRepeatMode.Track));
+        DrawRepeatIcon(canvas, _layout.RepeatButton, repeatPaint, repeatPen, snap.Repeat == MediaPlaybackAutoRepeatMode.Track);
     }
 
-    private static void DrawCleanButton(SKCanvas canvas, SKRect r, bool enabled, bool active, SKColor accent, SKColor text, Action<SKCanvas, SKRect, SKPaint> drawIcon)
+    private static SKColor IconColor(bool active, bool enabled, SKColor accent, SKColor text)
     {
-        SKColor iconColor;
-        if (active) iconColor = accent;
-        else iconColor = text.WithAlpha(enabled ? (byte)240 : (byte)70);
-        using var iconPaint = new SKPaint { Color = iconColor, IsAntialias = true };
-        drawIcon(canvas, r, iconPaint);
+        if (active) return accent;
+        return text.WithAlpha(enabled ? (byte)240 : (byte)70);
     }
 
-    private static void DrawHeroPlayButton(SKCanvas canvas, SKRect r, float scale, bool enabled, bool isPlaying, SKColor accent)
+    private void DrawHeroPlayButton(SKCanvas canvas, SKRect r, float scale, SKPaint btnBg, SKPaint glowBorder, SKPaint iconPaint, bool isPlaying)
     {
         // Hero Play button: Solid accent fill circular button
-        using var btnBg = new SKPaint
-        {
-            Color = accent.WithAlpha(enabled ? (byte)245 : (byte)100),
-            IsAntialias = true
-        };
         canvas.DrawOval(r, btnBg);
 
         // Outer glow ring
         float glowOff = 4f * scale;
         var glowRect = new SKRect(r.Left - glowOff, r.Top - glowOff, r.Right + glowOff, r.Bottom + glowOff);
-        using var glowBorder = new SKPaint
-        {
-            Color = accent.WithAlpha(enabled ? (byte)90 : (byte)20),
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f * scale,
-            IsAntialias = true
-        };
         canvas.DrawOval(glowRect, glowBorder);
 
         // High contrast dark icon inside play button
-        using var iconPaint = new SKPaint { Color = new SKColor(18, 18, 24), IsAntialias = true };
         if (isPlaying)
             DrawPauseIcon(canvas, r, iconPaint);
         else
-            DrawPlayIcon(canvas, r, iconPaint);
+            DrawPlayIcon(canvas, iconPaint);
     }
 
     // ── Upgraded Vector Icon Drawing ──────────────────────────────────────────
+    // The icon paths are cached per layout rect (EnsureIconPaths); these
+    // methods only draw the cached geometry with the frame's paints.
 
-    private static void DrawPrevIcon(SKCanvas canvas, SKRect r, SKPaint paint)
+    private void DrawPrevIcon(SKCanvas canvas, SKRect r, SKPaint paint)
     {
         float cx = r.MidX, cy = r.MidY;
         float h = r.Height * 0.32f;
         float barW = r.Width * 0.08f;
-        float gap = r.Width * 0.06f;
 
         // Solid vertical bar
         var barRect = new SKRect(cx - r.Width * 0.22f, cy - h, cx - r.Width * 0.22f + barW, cy + h);
         canvas.DrawRoundRect(barRect, barW / 2f, barW / 2f, paint);
 
-        // Smooth rounded triangle
-        using var triPaint = new SKPaint
-        {
-            Color = paint.Color,
-            Style = SKPaintStyle.Fill,
-            IsAntialias = true
-        };
-        var tri = new SKPathBuilder();
-        tri.MoveTo(cx + r.Width * 0.20f, cy - h);
-        tri.LineTo(cx - r.Width * 0.22f + barW + gap, cy);
-        tri.LineTo(cx + r.Width * 0.20f, cy + h);
-        tri.Close();
-        canvas.DrawPath(tri.Detach(), triPaint);
+        // Smooth rounded triangle (cached path)
+        canvas.DrawPath(_prevTriangle, paint);
     }
 
-    private static void DrawPlayIcon(SKCanvas canvas, SKRect r, SKPaint paint)
+    private void DrawPlayIcon(SKCanvas canvas, SKPaint paint)
     {
-        float cx = r.MidX + r.Width * 0.03f, cy = r.MidY;
-        float h = r.Height * 0.32f;
-        float w = r.Width * 0.28f;
-
-        using var triPaint = new SKPaint
-        {
-            Color = paint.Color,
-            Style = SKPaintStyle.Fill,
-            StrokeJoin = SKStrokeJoin.Round,
-            IsAntialias = true
-        };
-
-        var path = new SKPathBuilder();
-        path.MoveTo(cx - w * 0.7f, cy - h);
-        path.LineTo(cx + w, cy);
-        path.LineTo(cx - w * 0.7f, cy + h);
-        path.Close();
-        canvas.DrawPath(path.Detach(), triPaint);
+        // Cached triangle path
+        canvas.DrawPath(_playTriangle, paint);
     }
 
     private static void DrawPauseIcon(SKCanvas canvas, SKRect r, SKPaint paint)
@@ -444,102 +431,38 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         canvas.DrawRoundRect(right, w / 2f, w / 2f, paint);
     }
 
-    private static void DrawNextIcon(SKCanvas canvas, SKRect r, SKPaint paint)
+    private void DrawNextIcon(SKCanvas canvas, SKRect r, SKPaint paint)
     {
         float cx = r.MidX, cy = r.MidY;
         float h = r.Height * 0.32f;
         float barW = r.Width * 0.08f;
-        float gap = r.Width * 0.06f;
 
-        // Smooth rounded triangle
-        using var triPaint = new SKPaint
-        {
-            Color = paint.Color,
-            Style = SKPaintStyle.Fill,
-            IsAntialias = true
-        };
-        var tri = new SKPathBuilder();
-        tri.MoveTo(cx - r.Width * 0.20f, cy - h);
-        tri.LineTo(cx + r.Width * 0.22f - barW - gap, cy);
-        tri.LineTo(cx - r.Width * 0.20f, cy + h);
-        tri.Close();
-        canvas.DrawPath(tri.Detach(), triPaint);
+        // Smooth rounded triangle (cached path)
+        canvas.DrawPath(_nextTriangle, paint);
 
         // Solid vertical bar
         var barRect = new SKRect(cx + r.Width * 0.22f - barW, cy - h, cx + r.Width * 0.22f, cy + h);
         canvas.DrawRoundRect(barRect, barW / 2f, barW / 2f, paint);
     }
 
-    private static void DrawShuffleIcon(SKCanvas canvas, SKRect r, SKPaint paint)
+    private void DrawShuffleIcon(SKCanvas canvas, SKPaint paint, SKPaint stroke)
     {
-        float cx = r.MidX, cy = r.MidY;
-        float w = r.Width * 0.20f;
-        float h = r.Height * 0.20f;
-        float ah = r.Height * 0.12f;
-
-        using var stroke = new SKPaint
-        {
-            Color = paint.Color,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = r.Width * 0.07f,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true
-        };
-
-        var p = new SKPathBuilder();
-        p.MoveTo(cx - w, cy - h);
-        p.CubicTo(cx - w * 0.2f, cy - h, cx + w * 0.2f, cy + h, cx + w, cy + h);
-        p.MoveTo(cx - w, cy + h);
-        p.CubicTo(cx - w * 0.2f, cy + h, cx + w * 0.2f, cy - h, cx + w, cy - h);
-        canvas.DrawPath(p.Detach(), stroke);
-
-        // Arrowheads
-        var arrTop = new SKPathBuilder();
-        arrTop.MoveTo(cx + w, cy - h);
-        arrTop.LineTo(cx + w - ah, cy - h - ah * 0.7f);
-        arrTop.LineTo(cx + w - ah, cy - h + ah * 0.7f);
-        arrTop.Close();
-        canvas.DrawPath(arrTop.Detach(), paint);
-
-        var arrBot = new SKPathBuilder();
-        arrBot.MoveTo(cx + w, cy + h);
-        arrBot.LineTo(cx + w - ah, cy + h - ah * 0.7f);
-        arrBot.LineTo(cx + w - ah, cy + h + ah * 0.7f);
-        arrBot.Close();
-        canvas.DrawPath(arrBot.Detach(), paint);
+        // S-curves (cached path), then the arrowheads (cached paths)
+        canvas.DrawPath(_shuffleCurves, stroke);
+        canvas.DrawPath(_shuffleTopArrow, paint);
+        canvas.DrawPath(_shuffleBottomArrow, paint);
     }
 
-    private static void DrawRepeatIcon(SKCanvas canvas, SKRect r, SKPaint paint, bool repeatOne)
+    private void DrawRepeatIcon(SKCanvas canvas, SKRect r, SKPaint paint, SKPaint pen, bool repeatOne)
     {
         float cx = r.MidX, cy = r.MidY;
         float outer = r.Width * 0.22f;
-        float strokeW = r.Width * 0.07f;
 
         var oval = new SKRect(cx - outer, cy - outer, cx + outer, cy + outer);
-        using var pen = new SKPaint
-        {
-            Color = paint.Color,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = strokeW,
-            StrokeCap = SKStrokeCap.Round,
-            IsAntialias = true
-        };
         canvas.DrawArc(oval, 55f, 250f, false, pen);
 
-        // Arrowhead
-        float endDeg = 305f * MathF.PI / 180f;
-        float tipX = cx + outer * MathF.Cos(endDeg);
-        float tipY = cy + outer * MathF.Sin(endDeg);
-        float tx = -MathF.Sin(endDeg);
-        float ty = MathF.Cos(endDeg);
-        float s = r.Width * 0.09f;
-
-        var tri = new SKPathBuilder();
-        tri.MoveTo(tipX + tx * s, tipY + ty * s);
-        tri.LineTo(tipX - tx * s * 0.35f - ty * s * 0.6f, tipY - ty * s * 0.35f + tx * s * 0.6f);
-        tri.LineTo(tipX - tx * s * 0.35f + ty * s * 0.6f, tipY - ty * s * 0.35f - tx * s * 0.6f);
-        tri.Close();
-        canvas.DrawPath(tri.Detach(), paint);
+        // Arrowhead (cached path)
+        canvas.DrawPath(_repeatArrow, paint);
 
         if (repeatOne)
         {
@@ -548,6 +471,157 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             numFont.MeasureText("1", out var nb, numPaint);
             canvas.DrawTextWithFallback("1", cx - nb.Width / 2f, cy + nb.Height / 3f, numFont, numPaint);
         }
+    }
+
+    // ── Cached icon path management ────────────────────────────────────────
+
+    /// <summary>
+    /// Rebuilds the cached control-icon paths when the layout rects change
+    /// (widget resize). The button rects are pure functions of the placement
+    /// bounds and scale, so the shuffle rect alone keys the rebuild.
+    /// </summary>
+    private void EnsureIconPaths(NowPlayingGeometry layout)
+    {
+        if (_shuffleCurves is not null && SameRect(_iconPathKeyRect, layout.ShuffleButton))
+        {
+            return;
+        }
+
+        _iconPathKeyRect = layout.ShuffleButton;
+        DisposeIconPaths();
+
+        _shuffleCurves = BuildShuffleCurves(layout.ShuffleButton);
+        _shuffleTopArrow = BuildShuffleArrow(layout.ShuffleButton, top: true);
+        _shuffleBottomArrow = BuildShuffleArrow(layout.ShuffleButton, top: false);
+        _prevTriangle = BuildPrevTriangle(layout.PreviousButton);
+        _playTriangle = BuildPlayTriangle(layout.PlayPauseButton);
+        _nextTriangle = BuildNextTriangle(layout.NextButton);
+        _repeatArrow = BuildRepeatArrow(layout.RepeatButton);
+    }
+
+    private void DisposeIconPaths()
+    {
+        _shuffleCurves?.Dispose();
+        _shuffleTopArrow?.Dispose();
+        _shuffleBottomArrow?.Dispose();
+        _prevTriangle?.Dispose();
+        _playTriangle?.Dispose();
+        _nextTriangle?.Dispose();
+        _repeatArrow?.Dispose();
+        _shuffleCurves = null;
+        _shuffleTopArrow = null;
+        _shuffleBottomArrow = null;
+        _prevTriangle = null;
+        _playTriangle = null;
+        _nextTriangle = null;
+        _repeatArrow = null;
+    }
+
+    private static bool SameRect(SKRect a, SKRect b)
+        => BitConverter.SingleToInt32Bits(a.Left) == BitConverter.SingleToInt32Bits(b.Left)
+        && BitConverter.SingleToInt32Bits(a.Top) == BitConverter.SingleToInt32Bits(b.Top)
+        && BitConverter.SingleToInt32Bits(a.Right) == BitConverter.SingleToInt32Bits(b.Right)
+        && BitConverter.SingleToInt32Bits(a.Bottom) == BitConverter.SingleToInt32Bits(b.Bottom);
+
+    private static SKPath BuildPrevTriangle(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float barW = r.Width * 0.08f;
+        float gap = r.Width * 0.06f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(cx + r.Width * 0.20f, cy - h);
+        tri.LineTo(cx - r.Width * 0.22f + barW + gap, cy);
+        tri.LineTo(cx + r.Width * 0.20f, cy + h);
+        tri.Close();
+        return tri.Detach();
+    }
+
+    private static SKPath BuildPlayTriangle(SKRect r)
+    {
+        float cx = r.MidX + r.Width * 0.03f, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float w = r.Width * 0.28f;
+
+        using var path = new SKPathBuilder();
+        path.MoveTo(cx - w * 0.7f, cy - h);
+        path.LineTo(cx + w, cy);
+        path.LineTo(cx - w * 0.7f, cy + h);
+        path.Close();
+        return path.Detach();
+    }
+
+    private static SKPath BuildNextTriangle(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float barW = r.Width * 0.08f;
+        float gap = r.Width * 0.06f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(cx - r.Width * 0.20f, cy - h);
+        tri.LineTo(cx + r.Width * 0.22f - barW - gap, cy);
+        tri.LineTo(cx - r.Width * 0.20f, cy + h);
+        tri.Close();
+        return tri.Detach();
+    }
+
+    private static SKPath BuildShuffleCurves(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float w = r.Width * 0.20f;
+        float h = r.Height * 0.20f;
+
+        using var p = new SKPathBuilder();
+        p.MoveTo(cx - w, cy - h);
+        p.CubicTo(cx - w * 0.2f, cy - h, cx + w * 0.2f, cy + h, cx + w, cy + h);
+        p.MoveTo(cx - w, cy + h);
+        p.CubicTo(cx - w * 0.2f, cy + h, cx + w * 0.2f, cy - h, cx + w, cy - h);
+        return p.Detach();
+    }
+
+    private static SKPath BuildShuffleArrow(SKRect r, bool top)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float w = r.Width * 0.20f;
+        float h = r.Height * 0.20f;
+        float ah = r.Height * 0.12f;
+
+        using var arr = new SKPathBuilder();
+        if (top)
+        {
+            arr.MoveTo(cx + w, cy - h);
+            arr.LineTo(cx + w - ah, cy - h - ah * 0.7f);
+            arr.LineTo(cx + w - ah, cy - h + ah * 0.7f);
+        }
+        else
+        {
+            arr.MoveTo(cx + w, cy + h);
+            arr.LineTo(cx + w - ah, cy + h - ah * 0.7f);
+            arr.LineTo(cx + w - ah, cy + h + ah * 0.7f);
+        }
+        arr.Close();
+        return arr.Detach();
+    }
+
+    private static SKPath BuildRepeatArrow(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float outer = r.Width * 0.22f;
+        float endDeg = 305f * MathF.PI / 180f;
+        float tipX = cx + outer * MathF.Cos(endDeg);
+        float tipY = cy + outer * MathF.Sin(endDeg);
+        float tx = -MathF.Sin(endDeg);
+        float ty = MathF.Cos(endDeg);
+        float s = r.Width * 0.09f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(tipX + tx * s, tipY + ty * s);
+        tri.LineTo(tipX - tx * s * 0.35f - ty * s * 0.6f, tipY - ty * s * 0.35f + tx * s * 0.6f);
+        tri.LineTo(tipX - tx * s * 0.35f + ty * s * 0.6f, tipY - ty * s * 0.35f - tx * s * 0.6f);
+        tri.Close();
+        return tri.Detach();
     }
 
     // ── Touch ─────────────────────────────────────────────────────────────
@@ -615,6 +689,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     {
         if (_disposed) return;
         _disposed = true;
+
+        DisposeIconPaths();
 
         if (_mediaMonitor is not null)
         {

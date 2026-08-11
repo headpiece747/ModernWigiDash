@@ -87,6 +87,8 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         using var facePaint = new SKPaint { Color = textColor.WithAlpha(10), IsAntialias = true };
         canvas.DrawCircle(cx, cy, radius, facePaint);
 
+        using var majorTickPaint = new SKPaint { Color = textColor, StrokeWidth = 3f, IsAntialias = true };
+        using var minorTickPaint = new SKPaint { Color = textColor, StrokeWidth = 1.5f, IsAntialias = true };
         for (int i = 0; i < 12; i++)
         {
             float angle = i * 30f * (float)(Math.PI / 180f);
@@ -94,25 +96,26 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
             float y1 = cy - (radius - 12f) * (float)Math.Cos(angle);
             float x2 = cx + radius * (float)Math.Sin(angle);
             float y2 = cy - radius * (float)Math.Cos(angle);
-            using var tickPaint = new SKPaint { Color = textColor, StrokeWidth = i % 3 == 0 ? 3f : 1.5f, IsAntialias = true };
-            canvas.DrawLine(x1, y1, x2, y2, tickPaint);
+            canvas.DrawLine(x1, y1, x2, y2, i % 3 == 0 ? majorTickPaint : minorTickPaint);
         }
 
         (float hourAngle, float minAngle, float secAngle) = ClockPresentation.HandAngles(now);
 
-        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, 4.5f, textColor);
-        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, 3f, textColor);
-        DrawHand(canvas, cx, cy, secAngle, radius * 0.85f, 1.5f, accentColor);
+        using var hourHandPaint = new SKPaint { Color = textColor, StrokeWidth = 4.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+        using var minuteHandPaint = new SKPaint { Color = textColor, StrokeWidth = 3f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+        using var secondHandPaint = new SKPaint { Color = accentColor, StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, hourHandPaint);
+        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, minuteHandPaint);
+        DrawHand(canvas, cx, cy, secAngle, radius * 0.85f, secondHandPaint);
 
         using var centerDot = new SKPaint { Color = textColor, IsAntialias = true };
         canvas.DrawCircle(cx, cy, 5f, centerDot);
     }
 
-    private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, float width, SKColor color)
+    private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, SKPaint paint)
     {
         float x = cx + length * (float)Math.Sin(angleRad);
         float y = cy - length * (float)Math.Cos(angleRad);
-        using var paint = new SKPaint { Color = color, StrokeWidth = width, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
         canvas.DrawLine(cx, cy, x, y, paint);
     }
 }

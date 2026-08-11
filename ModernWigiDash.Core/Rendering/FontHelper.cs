@@ -30,6 +30,20 @@ public static class FontHelper
     /// </summary>
     private static readonly ConcurrentDictionary<(long TypefaceHandle, int Codepoint), bool> _glyphPresenceCache = new();
 
+    /// <summary>
+    /// Memoized run splits per (text, style, preferred typeface): the per-glyph
+    /// fallback decision depends only on that tuple — not on font size or target
+    /// width — so the expensive split is computed once per distinct input and
+    /// the per-call measure/draw loops iterate the cached runs. The typeface is
+    /// keyed by reference identity; every typeface that flows through
+    /// <see cref="GetTextRuns"/> is a process-lifetime cached singleton, so
+    /// identity is stable. The cached lists are shared — callers must treat
+    /// them as read-only. Bounded by a simple clear-on-overflow reset.
+    /// </summary>
+    private static readonly ConcurrentDictionary<(string Text, SKFontStyle Style, SKTypeface? Preferred), List<(string Text, SKTypeface Typeface)>> _textRunsCache = new();
+
+    private const int TextRunsCacheLimit = 2048;
+
     private static readonly Lazy<SKTypeface?> _geistTypeface = new(() =>
     {
         try
@@ -233,14 +247,27 @@ public static class FontHelper
     /// <summary>
     /// Splits text into runs of contiguous characters sharing the same SKTypeface for rendering.
     /// The preferred typeface is honored first for every codepoint it covers.
+    /// The split is memoized per (text, style, preferred typeface) — it is independent of
+    /// font size and target width — and the returned list is shared: callers must not mutate it.
     /// </summary>
     public static List<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
     {
-        List<(string Text, SKTypeface Typeface)> runs = [];
         if (string.IsNullOrEmpty(text))
         {
-            return runs;
+            return [];
         }
+
+        if (_textRunsCache.Count > TextRunsCacheLimit)
+        {
+            _textRunsCache.Clear();
+        }
+
+        return _textRunsCache.GetOrAdd((text, style, preferred), static key => ComputeTextRuns(key.Text, key.Style, key.Preferred));
+    }
+
+    private static List<(string Text, SKTypeface Typeface)> ComputeTextRuns(string text, SKFontStyle style, SKTypeface? preferred)
+    {
+        List<(string Text, SKTypeface Typeface)> runs = [];
 
         var currentRun = new StringBuilder();
         SKTypeface? currentTf = null;

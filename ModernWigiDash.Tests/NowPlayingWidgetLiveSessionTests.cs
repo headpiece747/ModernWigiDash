@@ -64,6 +64,23 @@ public class NowPlayingWidgetLiveSessionTests
     }
 
     [TestMethod]
+    public void Render_LiveSession_RepeatedSameBounds_UsesCachedIconPaths()
+    {
+        var (widget, _) = CreateLiveWidget();
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        var bounds = new SKRect(0, 0, 1016, 592);
+
+        // The first render builds the cached control-icon paths; the second
+        // exercises the cache-hit path — both must paint the control row.
+        widget.Render(surface.Canvas, bounds);
+        widget.Render(surface.Canvas, bounds);
+
+        // Hero play/pause button center (the control row starts at x 614 at 1016x592).
+        var pixel = surface.PeekPixels().GetPixelColor(795, 536);
+        Assert.AreNotEqual(SKColors.Transparent, pixel, "the hero button must repaint on the cached-path render");
+    }
+
+    [TestMethod]
     public void OnTouch_TapOnRepeatButton_CyclesRepeatModeThroughMonitor()
     {
         var (widget, session) = CreateLiveWidget();

@@ -123,10 +123,14 @@ public class FrameTimeWidget : ModernWidgetBase
                 float row1Top = gridTop;
                 float row2Top = gridTop + gridH * 0.52f;
 
+                // One paint pair per frame for all metric cards (4-8 draws).
+                using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+                using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
+
                 for (int i = 0; i < 4; i++)
                 {
                     DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i + 0.5f), row1Top,
-                        display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, accent);
+                        display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, valPaint, lblPaint);
                 }
 
                 if (display.ShowSecondRow)
@@ -134,7 +138,7 @@ public class FrameTimeWidget : ModernWidgetBase
                     for (int i = 4; i < 8; i++)
                     {
                         DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i - 3.5f), row2Top,
-                            display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, accent);
+                            display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, valPaint, lblPaint);
                     }
                 }
             }
@@ -219,16 +223,14 @@ public class FrameTimeWidget : ModernWidgetBase
         canvas.DrawPath(_sparkLine, linePaint);
     }
 
-    private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, string label, string value, float valSize, float lblSize, SKColor accent)
+    private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, string label, string value, float valSize, float lblSize, SKPaint valPaint, SKPaint lblPaint)
     {
         var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valSize);
-        using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
         valFont.MeasureText(value, out var valBounds, valPaint);
         float valY = topY + valSize * 0.85f;
         canvas.DrawTextWithFallback(value, cx - valBounds.Width / 2f, valY, valFont, valPaint);
 
         var lblFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, lblSize);
-        using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
         lblFont.MeasureText(label, out var lblBounds, lblPaint);
         float lblY = valY + lblSize + 4f;
         canvas.DrawTextWithFallback(label, cx - lblBounds.Width / 2f, lblY, lblFont, lblPaint);
