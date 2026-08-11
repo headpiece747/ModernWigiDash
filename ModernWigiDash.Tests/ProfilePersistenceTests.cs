@@ -141,4 +141,97 @@ public sealed class ProfilePersistenceTests
         Assert.AreEqual(1, log.Count);
         StringAssert.Contains(log[0], "Profile save failed");
     }
+
+    [TestMethod]
+    public async Task MarkDirty_NoSaveBeforeDebounce_CoalescesRepeatedMutations()
+    {
+        string path = Path.Combine(NewTempDir(), "profile.json");
+        var time = new FakeTimeProvider();
+        int saves = 0;
+        var persistence = new ProfilePersistence(
+            path,
+            () => { saves++; return SampleProfile(); },
+            debounceDelay: TimeSpan.FromSeconds(2),
+            timeProvider: time);
+
+        persistence.MarkDirty();
+        persistence.MarkDirty();
+        persistence.MarkDirty();
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(0, saves, "no save before the debounce elapses");
+        Assert.IsFalse(File.Exists(path));
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        await WaitUntil(() => saves == 1, timeoutMs: 2000);
+
+        Assert.AreEqual(1, saves, "three mutations within the window coalesce to one save");
+        Assert.IsTrue(File.Exists(path));
+    }
+
+    [TestMethod]
+    public async Task MarkDirty_SecondMutationAfterSave_ArmsAnotherSave()
+    {
+        string path = Path.Combine(NewTempDir(), "profile.json");
+        var time = new FakeTimeProvider();
+        int saves = 0;
+        var persistence = new ProfilePersistence(
+            path,
+            () => { saves++; return SampleProfile(); },
+            debounceDelay: TimeSpan.FromSeconds(2),
+            timeProvider: time);
+
+        persistence.MarkDirty();
+        time.Advance(TimeSpan.FromSeconds(2));
+        await WaitUntil(() => saves == 1, timeoutMs: 2000);
+
+        persistence.MarkDirty();
+        time.Advance(TimeSpan.FromSeconds(2));
+        await WaitUntil(() => saves == 2, timeoutMs: 2000);
+
+        Assert.AreEqual(2, saves);
+    }
+
+    [TestMethod]
+    public void Flush_SavesImmediately_EvenWithinDebounceWindow()
+    {
+        string path = Path.Combine(NewTempDir(), "profile.json");
+        var time = new FakeTimeProvider();
+        int saves = 0;
+        var persistence = new ProfilePersistence(
+            path,
+            () => { saves++; return SampleProfile(); },
+            debounceDelay: TimeSpan.FromSeconds(2),
+            timeProvider: time);
+
+        persistence.MarkDirty();
+        persistence.Flush();
+
+        Assert.AreEqual(1, saves);
+        Assert.IsTrue(File.Exists(path));
+
+        // The pending debounce must not fire a second save.
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.AreEqual(1, saves);
+    }
+
+    [TestMethod]
+    public async Task MarkDirty_AfterDispose_DoesNotSave()
+    {
+        string path = Path.Combine(NewTempDir(), "profile.json");
+        var time = new FakeTimeProvider();
+        int saves = 0;
+        var persistence = new ProfilePersistence(
+            path,
+            () => { saves++; return SampleProfile(); },
+            debounceDelay: TimeSpan.FromSeconds(2),
+            timeProvider: time);
+
+        persistence.Dispose();
+        persistence.MarkDirty();
+        time.Advance(TimeSpan.FromSeconds(3));
+
+        Assert.AreEqual(0, saves);
+        Assert.IsFalse(File.Exists(path));
+    }
 }
