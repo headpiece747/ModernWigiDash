@@ -69,17 +69,18 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 | Widget | Description |
 | :--- | :--- |
-| **System Telemetry** | Multi-gauge hardware readouts for CPU, GPU, VRAM, memory, and storage utilization |
-| **Frame-Time Analyst** | Live FPS graphs, frame-delay distributions, and 1% / 0.1% low tracking |
+| **Hardware Monitor** | Multi-gauge readouts for CPU, GPU, VRAM, memory, and storage utilization (via LibreHardwareService) |
+| **FPS / Frame Time** | Real-time FPS, 1% / 0.1% lows, and GPU-busy metrics with an overlay-style readout (via PresentMon Service) |
 | **Audio Visualizer** | Real-time multi-band spectrum and oscilloscope visualization from WASAPI loopback capture |
 | **Now Playing** | Windows System Media Transport Controls integration with album artwork and transport buttons |
-| **Twitch Chat & Stream** | Real-time channel chat viewer and live-channel status indicators |
-| **Hotkey Macros** | Customizable macro buttons with vector icon support |
-| **Market Ticker** | Real-time crypto, stock, and FX price feeds (Binance, Finnhub, Yahoo, CoinGecko) |
-| **Clock & Timers** | Analog/digital clocks, stopwatch, and countdown timer |
-| **Picture Viewer** | Static image and animated GIF playback |
+| **Twitch** | Real-time channel chat viewer and live-channel status with Device-Authorization login |
+| **Hotkey** | Customizable macro buttons with vector icon support |
+| **Stock & Crypto** | Real-time crypto, stock, and FX price feeds (Binance, Finnhub, Yahoo, CoinGecko) |
+| **Clock** | Analog and digital clocks |
+| **Stopwatch & Timer** | Stopwatch and countdown timer |
+| **Picture & GIF Viewer** | Static image and animated GIF playback |
 | **Weather Forecast** | Multi-day weather conditions with live refresh |
-| **Text Label** | Static or animated text banners |
+| **Text** | Static or animated text banners |
 
 ---
 
@@ -99,7 +100,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 ## Requirements
 
 - **OS**: Windows 10 or Windows 11 (x64)
-- **Runtime**: .NET 10 SDK
+- **Runtime**: none for release builds (self-contained single-file EXE); the .NET 10 SDK is required only to build from source
 - **Hardware**: [G.Skill WigiDash](https://www.gskill.com/product/412/415/1702982997/WigiDash) 7″ USB touch panel (`USB\VID_28DA&PID_EF01`)
 - **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors) and [PresentMon Service](https://github.com/microsoft/PresentMon) (frame-time analytics) — the app runs without them; the related widgets show an unavailable state
 
@@ -107,28 +108,38 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 ## Quick Start
 
-### 1. Build
+### Option A — Download a Release (no .NET install)
+
+Grab the latest `ModernWigiDash-win-x64.zip` from the **Releases** page. It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
+
+### Option B — Build from Source
 
 ```powershell
 git clone https://github.com/headpiece747/ModernWigiDash.git
 cd ModernWigiDash
 
 dotnet build ModernWigiDash.slnx -c Release
-```
-
-### 2. Run the Test Suite
-
-```powershell
 dotnet test ModernWigiDash.slnx -c Release
-```
-
-### 3. Launch the App
-
-```powershell
 dotnet run --project ModernWigiDash.App\ModernWigiDash.App.csproj
 ```
 
 The app connects to the display directly over USB — frames and touch work with no service installation. Hardware telemetry requires LibreHardwareService to be installed; frame-time widgets require PresentMon Service; both degrade gracefully to an "unavailable" state when absent.
+
+---
+
+## Packaging a Release
+
+The app ships as a single-file, self-contained, ReadyToRun executable — end users need no .NET runtime:
+
+```powershell
+dotnet publish ModernWigiDash.App\ModernWigiDash.App.csproj -c Release -r win-x64 --self-contained `
+  -o ./publish `
+  -p:PublishSingleFile=true -p:PublishReadyToRun=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
+  -p:DebugType=None -p:DebugSymbols=false
+```
+
+This produces `ModernWigiDash.App.exe` plus the `Resources` folder (bundled fonts, theme, icons). Native (SkiaSharp) PDBs are stripped automatically by the shared build target. WPF does not support NativeAOT, so ReadyToRun provides the precompiled-IL speedup.
 
 ---
 
