@@ -641,18 +641,29 @@ public class WeatherForecastWidget : ModernWidgetBase
     /// </summary>
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
-        _dataVersion++;
-        if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
-        if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
-        if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
-        if (snapshot.WindSpeedKmH is not null) _windSpeedKmH = snapshot.WindSpeedKmH.Value;
-        if (snapshot.WeatherCode is not null) _weatherCode = snapshot.WeatherCode.Value;
-        if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
-        if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
-        if (snapshot.DailyForecasts is not null)
-            lock (_forecastGate) { _dailyForecasts.Clear(); _dailyForecasts.AddRange(snapshot.DailyForecasts); _forecastVersion++; }
-        if (snapshot.HourlyForecasts is not null)
-            lock (_forecastGate) { _hourlyForecasts.Clear(); _hourlyForecasts.AddRange(snapshot.HourlyForecasts); _forecastVersion++; }
+        lock (_forecastGate)
+        {
+            _dataVersion++;
+            if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
+            if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
+            if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
+            if (snapshot.WindSpeedKmH is not null) _windSpeedKmH = snapshot.WindSpeedKmH.Value;
+            if (snapshot.WeatherCode is not null) _weatherCode = snapshot.WeatherCode.Value;
+            if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
+            if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
+            if (snapshot.DailyForecasts is not null)
+            {
+                _dailyForecasts.Clear();
+                _dailyForecasts.AddRange(snapshot.DailyForecasts);
+                _forecastVersion++;
+            }
+            if (snapshot.HourlyForecasts is not null)
+            {
+                _hourlyForecasts.Clear();
+                _hourlyForecasts.AddRange(snapshot.HourlyForecasts);
+                _forecastVersion++;
+            }
+        }
     }
 
     private async Task LoadCachedWeatherAsync()
@@ -670,8 +681,24 @@ public class WeatherForecastWidget : ModernWidgetBase
     /// </summary>
     private WeatherRenderModel EnsureRenderModel(SKRect bounds, string tempUnit, string speedUnit)
     {
+        // One snapshot under the gate: the version and the seven scalars are
+        // written by the fetch thread; the model must build from one
+        // consistent view (a torn version read would freeze the cache key).
+        double currentTempC, feelsLikeC, humidity, windSpeedKmH, highTempC, lowTempC;
+        int dataVersion;
+        lock (_forecastGate)
+        {
+            dataVersion = _dataVersion;
+            currentTempC = _currentTempC;
+            feelsLikeC = _feelsLikeC;
+            humidity = _humidity;
+            windSpeedKmH = _windSpeedKmH;
+            highTempC = _highTempC;
+            lowTempC = _lowTempC;
+        }
+
         if (_renderModel is { } cached
-            && cached.DataVersion == _dataVersion
+            && cached.DataVersion == dataVersion
             && cached.Bounds == bounds
             && cached.LayoutMode == LayoutMode
             && cached.UnitSystem == UnitSystem
@@ -691,7 +718,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         var model = new WeatherRenderModel
         {
-            DataVersion = _dataVersion,
+            DataVersion = dataVersion,
             Bounds = bounds,
             LayoutMode = LayoutMode,
             UnitSystem = UnitSystem,
@@ -702,12 +729,12 @@ public class WeatherForecastWidget : ModernWidgetBase
             ShowWind = ShowWind,
             ShowHighLow = ShowHighLow,
             ShowForecast = ShowForecast,
-            MainTemp = WeatherPresentation.FormatTemp(_currentTempC, tempUnit),
+            MainTemp = WeatherPresentation.FormatTemp(currentTempC, tempUnit),
             Metrics = WeatherPresentation.MetricPills(new WeatherMetricsInput(
-                ShowFeelsLike, _feelsLikeC,
-                ShowHumidity, _humidity,
-                ShowWind, _windSpeedKmH,
-                ShowHighLow, _highTempC, _lowTempC,
+                ShowFeelsLike, feelsLikeC,
+                ShowHumidity, humidity,
+                ShowWind, windSpeedKmH,
+                ShowHighLow, highTempC, lowTempC,
                 tempUnit, speedUnit))
         };
 

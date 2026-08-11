@@ -56,8 +56,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private CancellationTokenSource? _cts;
     private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
-    private volatile ChatStatus _status;
-    private volatile string _statusDetail = "";
+    // Status + detail as ONE volatile reference: the render thread composes
+    // them into the status line, and two independent volatiles could tear
+    // (new status with the previous detail for one frame).
+    private sealed record ChatState(ChatStatus Status, string Detail);
+    private volatile ChatState _chatState = new(ChatStatus.Disconnected, "");
     private volatile bool _disposed;
 
     /// <summary>
@@ -188,7 +191,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
-        if (_status == ChatStatus.Connected) StopConnection();
+        if (_chatState.Status == ChatStatus.Connected) StopConnection();
         else StartConnection();
     }
 
@@ -202,8 +205,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             _messages.Clear();
             _renderSnapshot = [];
         }
-        _status = ChatStatus.Connecting;
-        _statusDetail = "Connecting…";
+        _chatState = new(ChatStatus.Connecting, "Connecting…");
         Context.RequestRender();
 
         // The IRC loop is a FeedLoop: connect → handshake → read messages →
@@ -218,8 +220,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             onCycleEnded: _ => SetReconnectingStatus(),
             onStopped: () =>
             {
-                _status = ChatStatus.Disconnected;
-                _statusDetail = "";
+                _chatState = new(ChatStatus.Disconnected, "");
                 Context.RequestRender();
             },
             continueAfterCycle: () => AutoConnect && !_disposed,
@@ -237,8 +238,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         // the object; StartConnection creates a fresh one.
         _cts?.Cancel();
         _cts = null;
-        _status = ChatStatus.Disconnected;
-        _statusDetail = "";
+        _chatState = new(ChatStatus.Disconnected, "");
         Context.RequestRender();
     }
 
@@ -255,15 +255,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         await SendIrcLineAsync(feed, "NICK " + nick, ct);
         await SendIrcLineAsync(feed, "JOIN #" + channel, ct);
 
-        _status = ChatStatus.Connecting;
-        _statusDetail = "Joining #" + channel + "…";
+        _chatState = new(ChatStatus.Connecting, "Joining #" + channel + "…");
         Context.RequestRender();
     }
 
     private void SetReconnectingStatus()
     {
-        _status = ChatStatus.Disconnected;
-        _statusDetail = "Reconnecting…";
+        _chatState = new(ChatStatus.Disconnected, "Reconnecting…");
         Context.RequestRender();
     }
 
@@ -302,8 +300,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                     break;
                 }
             case IrcMessageKind.RoomState:
-                _status = ChatStatus.Connected;
-                _statusDetail = "LIVE";
+                _chatState = new(ChatStatus.Connected, "LIVE");
                 Context.RequestRender();
                 break;
             case IrcMessageKind.Privmsg:
@@ -311,11 +308,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 break;
             case IrcMessageKind.Notice:
                 {
-                    var (newStatus, changed) = TwitchChatPresentation.StatusFromNotice(message.Text, _status);
+                    var (newStatus, changed) = TwitchChatPresentation.StatusFromNotice(message.Text, _chatState.Status);
                     if (changed)
                     {
-                        _status = newStatus;
-                        _statusDetail = newStatus == ChatStatus.Connected ? "LIVE" : "Login failed — check token & username";
+                        _chatState = new(newStatus, newStatus == ChatStatus.Connected ? "LIVE" : "Login failed — check token & username");
                         if (newStatus == ChatStatus.Connected) Context.RequestRender();
                         else Context.LogError("Twitch login failed: " + message.Text);
                     }
@@ -384,8 +380,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private string StatusLine()
     {
-        ChatStatus status = _status;
-        string statusDetail = _statusDetail;
+        ChatState state = _chatState;
+        ChatStatus status = state.Status;
+        string statusDetail = state.Detail;
         if (status != _statusKey || statusDetail != _statusDetailKey)
         {
             _statusKey = status;
@@ -422,7 +419,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         string statusText = StatusLine();
 
-        using var statusPaint = new SKPaint { Color = TwitchChatPresentation.StatusColor(_status), IsAntialias = true };
+        using var statusPaint = new SKPaint { Color = TwitchChatPresentation.StatusColor(_chatState.Status), IsAntialias = true };
         canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;
@@ -449,7 +446,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
             using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
-            var hint = TwitchChatPresentation.EmptyHint(_status, AutoConnect);
+            var hint = TwitchChatPresentation.EmptyHint(_chatState.Status, AutoConnect);
             canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
             canvas.Restore();
             return;

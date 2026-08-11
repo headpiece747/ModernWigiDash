@@ -20,6 +20,12 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
     private IAudioCaptureSource? _captureSource;
     private readonly AudioFrameBuffer _buffer = new();
+    // Capture lifecycle is touched from the UI render thread (start) and the
+    // capture thread (the watchdog stop) — one lock serializes the start/stop
+    // sequences so a watchdog firing as the page switches back can never
+    // unsubscribe/dispose a source mid-start (a lost race self-heals on the
+    // next render tick, which re-arms capture).
+    private readonly Lock _captureLock = new();
 
     /// <summary>
     /// Test seam for the capture source. Defaults to the WASAPI loopback
@@ -45,25 +51,32 @@ public class AudioVisualizerWidget : ModernWidgetBase
     {
         if (_capturing) return;
 
-        StartLiveAudioCapture();
-        _capturing = true;
+        lock (_captureLock)
+        {
+            if (_capturing) return;
+            StartLiveAudioCapture();
+            _capturing = true;
+        }
     }
 
     private void StopLiveAudioCapture()
     {
         if (!_capturing) return;
 
-        _capturing = false;
-        IAudioCaptureSource? source = _captureSource;
-        _captureSource = null;
-        try
+        lock (_captureLock)
         {
-            if (source != null) source.SamplesAvailable -= OnSamplesAvailable;
-            source?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError("Failed to stop audio capture", ex);
+            IAudioCaptureSource? source = _captureSource;
+            _captureSource = null;
+            _capturing = false;
+            try
+            {
+                if (source != null) source.SamplesAvailable -= OnSamplesAvailable;
+                source?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Context?.LogError("Failed to stop audio capture", ex);
+            }
         }
     }
 

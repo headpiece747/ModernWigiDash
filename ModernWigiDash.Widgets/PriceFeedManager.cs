@@ -230,6 +230,10 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     private void EnsureActive()
     {
+        // A disposed manager must never re-arm its loops (latent: profile
+        // dispose precedes manager lifetime today, but the guard makes the
+        // invariant structural).
+        if (_disposed) return;
         if (_cts.IsCancellationRequested)
         {
             var replacement = new CancellationTokenSource();
@@ -500,7 +504,9 @@ public sealed class PriceFeedManager : IDisposable
         if (_disposed) return;
         _disposed = true;
         _cts.Cancel();
-        _cts.Dispose();
+        // Deliberately NOT disposed here: fire-and-forget sends may still be
+        // awaiting with this token (the loops break on OCE and never re-touch
+        // it); the codebase's deferral pattern lets the source be GC'd.
         _binanceLoop?.Dispose();
         _finnhubLoop?.Dispose();
         // The manager never owns its HttpClient: the default instance shares

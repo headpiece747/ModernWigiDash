@@ -175,7 +175,16 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// </summary>
     internal void TouchPollTick()
     {
-        if (_transport?.ReadTouch() is not TouchReport report)
+        // Snapshot under the lock: the connect thread swaps/disposes the
+        // transport (SendFrameBytes's pattern) — a lock-free read could probe
+        // a transport mid-dispose.
+        IDisplayTransport? transport;
+        lock (_lock)
+        {
+            transport = _transport;
+        }
+
+        if (transport?.ReadTouch() is not TouchReport report)
             return;
 
         OnTouchEvent?.Invoke(new SKPoint(report.X, report.Y), TouchReport.ToEventType(report.Type));
@@ -374,8 +383,14 @@ public sealed class DisplayDeviceEngine : IDisposable
             // in-flight frame write holding the transport lock (the LibUsb
             // chunked write can block on chunk timeouts). Standby itself is a
             // fast control transfer once the lock frees; 2s bounds the worst
-            // case, so close can never stall on the write.
-            Task.Run(() => _transport?.GoToStandby()).Wait(TimeSpan.FromSeconds(2));
+            // case, so close can never stall on the write. The transport is
+            // snapshotted under the lock (the touch-poll pattern).
+            IDisplayTransport? transport;
+            lock (_lock)
+            {
+                transport = _transport;
+            }
+            Task.Run(() => transport?.GoToStandby()).Wait(TimeSpan.FromSeconds(2));
         }
         catch (Exception ex)
         {
