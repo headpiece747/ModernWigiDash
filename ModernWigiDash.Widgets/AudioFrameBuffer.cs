@@ -38,10 +38,6 @@ internal sealed class AudioFrameBuffer
         _waveformB = new float[waveformLength];
     }
 
-    public int BarCount => _analyzer.BarCount;
-
-    public int WaveformLength => _analyzer.WaveformLength;
-
     /// <summary>
     /// The single bar-count clamp — [8, capacity] — shared by the capture feed
     /// and the render draw so both sides always agree on how many bars are used.

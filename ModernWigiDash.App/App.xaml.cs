@@ -7,8 +7,6 @@ namespace ModernWigiDash.App;
 
 public partial class App : Application
 {
-    private static readonly string CrashLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
-
     /// <summary>True once the window's close/teardown sequence begins. Teardown
     /// cancels in-flight work, so OperationCanceledExceptions raised while
     /// closing are expected; an OCE at any other time is benign only when its
@@ -54,17 +52,5 @@ public partial class App : Application
     }
 
     private static void LogCrash(Exception? ex, bool handled = false)
-    {
-        string kind = handled ? "HANDLED EXCEPTION" : "UNHANDLED EXCEPTION";
-        string msg = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:yyyy-MM-dd HH:mm:ss}] {kind}: {ex}{Environment.NewLine}";
-        try
-        {
-            File.AppendAllText(CrashLogPath, msg);
-        }
-        catch (IOException)
-        {
-            // Crash log is best-effort; file may be locked. Surface to debug output.
-            System.Diagnostics.Debug.WriteLine("Crash log write failed (file locked)");
-        }
-    }
+        => CrashLog.Append(ex, handled);
 }

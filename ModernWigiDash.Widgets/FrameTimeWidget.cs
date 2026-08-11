@@ -31,6 +31,19 @@ public class FrameTimeWidget : ModernWidgetBase
     /// <summary>Test seam: current view (false = dashboard, true = overlay readout).</summary>
     internal bool IsOverlayView { get; set; }
 
+    // Hoisted paints: fixed-color paints stay constant; the accent/text-driven
+    // ones mutate Color per render, so the 30 FPS render allocates no SKPaint.
+    private readonly SKPaint _processPaint = new() { IsAntialias = true };
+    private readonly SKPaint _fpsPaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
+    private readonly SKPaint _msPaint = new() { IsAntialias = true };
+    private readonly SKPaint _valPaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _lblPaint = new() { IsAntialias = true };
+    private readonly SKPaint _labelPaint = new() { IsAntialias = true };
+    private readonly SKPaint _valuePaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _fillPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = true };
+    private readonly SKPaint _linePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
@@ -83,9 +96,9 @@ public class FrameTimeWidget : ModernWidgetBase
         {
             float procSize = Math.Clamp((contentBottom - contentTop) * 0.08f, 10f, 15f);
             var processFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, procSize);
-            using var processPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
+            _processPaint.Color = text.WithAlpha(180);
             string process = TextRenderHelper.TruncateText(display.ProcessName, processFont, bounds.Width - pad * 2f);
-            canvas.DrawTextWithFallback(process, bounds.Right - pad - FontHelper.MeasureTextWithFallback(process, processFont), contentTop + procSize, processFont, processPaint);
+            canvas.DrawTextWithFallback(process, bounds.Right - pad - FontHelper.MeasureTextWithFallback(process, processFont), contentTop + procSize, processFont, _processPaint);
             heroTop = contentTop + procSize + 6f;
         }
 
@@ -94,22 +107,21 @@ public class FrameTimeWidget : ModernWidgetBase
 
         float fpsFontSize = Math.Clamp(heroH * 0.85f, 24f, 120f);
         var fpsFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize);
-        using var fpsPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
 
         string fpsText = display.HeroFps;
-        fpsFont.MeasureText(fpsText, out var fpsBounds, fpsPaint);
+        fpsFont.MeasureText(fpsText, out var fpsBounds, _fpsPaint);
         float fpsX = bounds.Left + pad;
         float fpsBaseline = heroTop + fpsFontSize * 0.82f;
-        canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, fpsPaint);
+        canvas.DrawTextWithFallback(fpsText, fpsX, fpsBaseline, fpsFont, _fpsPaint);
 
         float unitX = fpsX + fpsBounds.Width + 10f;
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.32f);
-        using var unitPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawTextWithFallback("FPS", unitX, heroTop + fpsFontSize * 0.38f, unitFont, unitPaint);
+        _unitPaint.Color = accent;
+        canvas.DrawTextWithFallback("FPS", unitX, heroTop + fpsFontSize * 0.38f, unitFont, _unitPaint);
 
         var msFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fpsFontSize * 0.36f);
-        using var msPaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
-        canvas.DrawTextWithFallback(display.HeroFrameTimeMs, unitX, fpsBaseline, msFont, msPaint);
+        _msPaint.Color = text.WithAlpha(220);
+        canvas.DrawTextWithFallback(display.HeroFrameTimeMs, unitX, fpsBaseline, msFont, _msPaint);
 
         if (display.ShowMetricCards)
         {
@@ -124,13 +136,13 @@ public class FrameTimeWidget : ModernWidgetBase
                 float row2Top = gridTop + gridH * 0.52f;
 
                 // One paint pair per frame for all metric cards (4-8 draws).
-                using var valPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-                using var lblPaint = new SKPaint { Color = accent, IsAntialias = true };
+                _valPaint.Color = SKColors.White;
+                _lblPaint.Color = accent;
 
                 for (int i = 0; i < 4; i++)
                 {
                     DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i + 0.5f), row1Top,
-                        display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, valPaint, lblPaint);
+                        display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, _valPaint, _lblPaint);
                 }
 
                 if (display.ShowSecondRow)
@@ -138,7 +150,7 @@ public class FrameTimeWidget : ModernWidgetBase
                     for (int i = 4; i < 8; i++)
                     {
                         DrawMetricCard(canvas, bounds.Left + pad + colWidth * (i - 3.5f), row2Top,
-                            display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, valPaint, lblPaint);
+                            display.Dashboard[i].Label, display.Dashboard[i].Value, metricValSize, metricLblSize, _valPaint, _lblPaint);
                     }
                 }
             }
@@ -160,6 +172,21 @@ public class FrameTimeWidget : ModernWidgetBase
         }
     }
 
+    public override ValueTask DisposeAsync()
+    {
+        _processPaint.Dispose();
+        _fpsPaint.Dispose();
+        _unitPaint.Dispose();
+        _msPaint.Dispose();
+        _valPaint.Dispose();
+        _lblPaint.Dispose();
+        _labelPaint.Dispose();
+        _valuePaint.Dispose();
+        _fillPaint.Dispose();
+        _linePaint.Dispose();
+        return base.DisposeAsync();
+    }
+
     /// <summary>
     /// PresentMon-overlay-style readout (view C): the metric lines PresentMon's
     /// own overlay lists, in the project font and the widget's colors. The
@@ -172,16 +199,15 @@ public class FrameTimeWidget : ModernWidgetBase
         float fontSize = Math.Clamp(bounds.Height * 0.052f, 10f, 24f);
 
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize);
-        using var labelPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-        using var valuePaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        _labelPaint.Color = text.WithAlpha(180);
         float lineHeight = fontSize * 1.45f;
 
         float x = bounds.Left + pad;
         for (int i = 0; i < display.OverlayLineCount; i++)
         {
             float y = bounds.Top + pad + (i + 1) * lineHeight;
-            canvas.DrawTextWithFallback(display.Overlay[i].Label, x, y, font, labelPaint, SKTextAlign.Left);
-            canvas.DrawTextWithFallback(display.Overlay[i].Value, bounds.Right - pad, y, font, valuePaint, SKTextAlign.Right);
+            canvas.DrawTextWithFallback(display.Overlay[i].Label, x, y, font, _labelPaint, SKTextAlign.Left);
+            canvas.DrawTextWithFallback(display.Overlay[i].Value, bounds.Right - pad, y, font, _valuePaint, SKTextAlign.Right);
         }
     }
 
@@ -217,10 +243,10 @@ public class FrameTimeWidget : ModernWidgetBase
 
         if (_sparkLine is null || _sparkFill is null) return;
 
-        using var fillPaint = new SKPaint { Color = accent.WithAlpha(40), Style = SKPaintStyle.Fill, IsAntialias = true };
-        canvas.DrawPath(_sparkFill, fillPaint);
-        using var linePaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-        canvas.DrawPath(_sparkLine, linePaint);
+        _fillPaint.Color = accent.WithAlpha(40);
+        canvas.DrawPath(_sparkFill, _fillPaint);
+        _linePaint.Color = accent;
+        canvas.DrawPath(_sparkLine, _linePaint);
     }
 
     private static void DrawMetricCard(SKCanvas canvas, float cx, float topY, string label, string value, float valSize, float lblSize, SKPaint valPaint, SKPaint lblPaint)

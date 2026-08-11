@@ -1,3 +1,4 @@
+using System.Globalization;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -28,6 +29,25 @@ public class WeatherPresentationTests
         Assert.AreEqual("12 km/h", WeatherPresentation.FormatSpeed(12.0, "km/h"));
         Assert.AreEqual("7 mph", WeatherPresentation.FormatSpeed(12.0, "mph"), "12 km/h * 0.621371 rounds to 7");
         Assert.AreEqual("3 m/s", WeatherPresentation.FormatSpeed(12.0, "m/s"), "12 / 3.6 rounds to 3");
+    }
+
+    [TestMethod]
+    public void FormatTempAndSpeed_AreInvariantCulture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+
+            // A comma-decimal locale must not render "21,5°C" on the display.
+            Assert.AreEqual("21.5°C", WeatherPresentation.FormatTemp(21.5, "°C"));
+            Assert.AreEqual("22°F", WeatherPresentation.FormatTemp(-5.5, "°F"));
+            Assert.AreEqual("12 km/h", WeatherPresentation.FormatSpeed(12.0, "km/h"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [TestMethod]

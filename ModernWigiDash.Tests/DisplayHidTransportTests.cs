@@ -42,9 +42,10 @@ public class DisplayHidTransportTests
             return OpenResult;
         }
 
-        public override bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+        public override bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0)
         {
             ControlInCalls++;
+            transferred = buffer.Length;
             return ControlResult;
         }
 
@@ -368,6 +369,21 @@ public class DisplayHidTransportTests
         {
             // x = 9999 (0x270F) — outside the 1016 px framebuffer
             TouchResponse = [1, 0, 0x0F, 0x27, 0x42, 0x01, 0, 0]
+        };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsNull(transport.ReadTouch());
+    }
+
+    [TestMethod]
+    public void ReadTouch_ShortTransfer_ReturnsNull()
+    {
+        // A 2-byte transfer leaves the rest of the reused buffer stale — only
+        // a full report may be parsed as a touch (the backend reports the
+        // transferred count, and the transport requires all of TouchReportSize).
+        var backend = new RecordingBackend
+        {
+            TouchResponse = [1, 0]
         };
         using var transport = new DisplayHidTransport(backend);
 

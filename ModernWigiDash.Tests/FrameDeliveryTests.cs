@@ -42,6 +42,35 @@ public class FrameDeliveryTests
         Assert.IsFalse(delivery.IsReady);
     }
 
+    // ── the compose gate: in-flight flag ────────────────────
+
+    [TestMethod]
+    public void IsSendInFlight_TrueDuringSend_AndFalseAfter()
+    {
+        var observed = new List<bool>();
+        var release = new ManualResetEventSlim(false);
+        FrameDelivery? delivery = null;
+        delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            send: _ =>
+            {
+                observed.Add(delivery!.IsSendInFlight);
+                release.Set();
+                return true;
+            });
+        using var owned = delivery;
+        using var bitmap = CreateFrameBitmap();
+
+        Assert.IsFalse(delivery.IsSendInFlight, "Idle delivery must not report an in-flight send");
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+
+        Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(5)), "The sender must reach the send callback");
+        Assert.IsTrue(observed.Count == 1 && observed[0], "The flag must read true inside the send callback");
+        // The flag clears in the sender's finally — wait for the release to unwind.
+        TestWait.WaitUntilAsync(() => !delivery.IsSendInFlight, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        Assert.IsFalse(delivery.IsSendInFlight, "The flag must clear after the send completes");
+    }
+
     // ── Push (SKBitmap): encode → pooled buffer → deliver ──
 
     [TestMethod]

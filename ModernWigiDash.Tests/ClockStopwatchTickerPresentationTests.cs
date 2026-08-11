@@ -1,3 +1,4 @@
+using System.Globalization;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -133,6 +134,33 @@ public class ClockStopwatchTickerPresentationTests
         Assert.AreEqual("$1,234.56", TickerPresentation.FormatPrice(1234.56m, ""));
         Assert.AreEqual("$0.00001234", TickerPresentation.FormatPrice(0.00001234m, ""));
         Assert.AreEqual("€99.9900", TickerPresentation.FormatPrice(99.99m, "", "€"), "99.99 sits in the 4-decimal tier");
+    }
+
+    [TestMethod]
+    public void Ticker_DecimalsFor_ZeroPrice_TwoDecimals()
+    {
+        // A zero price is never a tiny crypto price — it formats at the
+        // 2-decimal tier instead of "$0.00000000".
+        Assert.AreEqual(2, TickerPresentation.DecimalsFor("", 0m));
+        Assert.AreEqual(2, TickerPresentation.DecimalsFor("auto", 0m));
+    }
+
+    [TestMethod]
+    public void Ticker_FormatPrice_IsInvariantCulture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+
+            // A comma-decimal locale must not render "1.234,56" on the display.
+            Assert.AreEqual("$1,234.56", TickerPresentation.FormatPrice(1234.56m, "2"));
+            Assert.AreEqual("$0.00000000", TickerPresentation.FormatPrice(0m, "8"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [TestMethod]

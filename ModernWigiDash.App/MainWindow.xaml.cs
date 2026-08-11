@@ -191,7 +191,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // 6. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
         // composes + sends once per tick, then repaints so the window draws
-        // the same buffer it sent; the badge refresh rides the tick.
+        // the same buffer it sent; the badge refresh rides the tick. The
+        // compose gate skips the tick while the delivery is still writing the
+        // previous frame (~55ms bulk write vs 33ms tick) — the display can't
+        // take another frame anyway, so composing during the write is dead CPU.
         _framePump = new FramePump(
             composeAndSend: () =>
             {
@@ -199,7 +202,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _presenter.Send(_compositor.FrameBuffer);
             },
             requestRepaint: () => SkiaCanvas.InvalidateVisual(),
-            onTick: UpdateUsbBadge);
+            onTick: UpdateUsbBadge,
+            composeGate: () => !_presenter.IsSending);
         _framePump.Start(); // Start the render loop immediately
 
         // 7. Clean lifecycle shutdown on window close / debugging stop

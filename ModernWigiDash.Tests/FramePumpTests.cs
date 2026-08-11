@@ -38,6 +38,53 @@ public class FramePumpTests
     }
 
     [TestMethod]
+    public void Tick_ComposeGateFalse_SkipsComposeButRepaintsAndFiresOnTick()
+    {
+        var (error, counts) = RunOnSta(() =>
+        {
+            int composes = 0;
+            int repaints = 0;
+            int onTicks = 0;
+            var pump = new FramePump(
+                composeAndSend: () => Interlocked.Increment(ref composes),
+                requestRepaint: () => Interlocked.Increment(ref repaints),
+                onTick: () => Interlocked.Increment(ref onTicks),
+                composeGate: () => false);
+
+            pump.Tick();
+            pump.Tick();
+
+            return (composes, repaints, onTicks);
+        });
+
+        Assert.IsNull(error);
+        var (c, r, t) = ((int, int, int))counts!;
+        Assert.AreEqual(0, c, "The gate veto must skip the compose step");
+        Assert.AreEqual(2, r, "The repaint must still fire every tick");
+        Assert.AreEqual(2, t, "The badge callback must still fire every tick");
+    }
+
+    [TestMethod]
+    public void Tick_ComposeGateTrue_ComposesNormally()
+    {
+        var (error, counts) = RunOnSta(() =>
+        {
+            int composes = 0;
+            var pump = new FramePump(
+                composeAndSend: () => Interlocked.Increment(ref composes),
+                requestRepaint: () => { },
+                composeGate: () => true);
+
+            pump.Tick();
+
+            return composes;
+        });
+
+        Assert.IsNull(error);
+        Assert.AreEqual(1, (int)counts!, "An open gate must not change the compose behavior");
+    }
+
+    [TestMethod]
     public void Start_ComposesSendsAndRepaints_OnCadence()
     {
         var (error, ticks) = RunOnSta(() =>

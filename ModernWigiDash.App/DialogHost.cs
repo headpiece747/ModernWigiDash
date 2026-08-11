@@ -426,6 +426,14 @@ public sealed class DialogHost
 
             open.Click += (_, _) =>
             {
+                // Only shell-open trusted https://*.twitch.tv URLs — a
+                // tampered verification response must not invoke file:/custom
+                // protocol handlers (same rule as the auto-open site).
+                if (!TrustedBrowserUri.IsTrusted(verificationUri))
+                {
+                    _logError("Refusing to open non-Twitch authorization URL", null);
+                    return;
+                }
                 try
                 {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(verificationUri.AbsoluteUri) { UseShellExecute = true });

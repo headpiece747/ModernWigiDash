@@ -27,6 +27,19 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     /// <summary>Test seam: injectable clock for the rendered time.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
+    // Hoisted paints: the colors mutate per render (property-driven), so the
+    // 30 FPS render allocates no SKPaint — not even the tick/hand paints.
+    private readonly SKPaint _textPaint = new() { IsAntialias = true };
+    private readonly SKPaint _amPaint = new() { IsAntialias = true };
+    private readonly SKPaint _datePaint = new() { IsAntialias = true };
+    private readonly SKPaint _facePaint = new() { IsAntialias = true };
+    private readonly SKPaint _majorTickPaint = new() { StrokeWidth = 3f, IsAntialias = true };
+    private readonly SKPaint _minorTickPaint = new() { StrokeWidth = 1.5f, IsAntialias = true };
+    private readonly SKPaint _hourHandPaint = new() { StrokeWidth = 4.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _minuteHandPaint = new() { StrokeWidth = 3f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _secondHandPaint = new() { StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _centerDotPaint = new() { IsAntialias = true };
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var now = Clock.GetLocalNow().LocalDateTime;
@@ -51,30 +64,30 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
         float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
-        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
+        _textPaint.Color = textColor;
 
         var timeBounds = new SKRect();
-        font.MeasureText(timeStr, out timeBounds, textPaint);
+        font.MeasureText(timeStr, out timeBounds, _textPaint);
 
         float centerX = bounds.MidX;
         float centerY = ShowDate ? bounds.MidY - 10f : bounds.MidY + (timeBounds.Height / 3f);
 
-        canvas.DrawTextWithFallback(timeStr, centerX - (timeBounds.Width / 2f), centerY, font, textPaint);
+        canvas.DrawTextWithFallback(timeStr, centerX - (timeBounds.Width / 2f), centerY, font, _textPaint);
 
         if (!string.IsNullOrEmpty(amPmStr))
         {
             var amFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize * 0.35f);
-            using var amPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), amFont, amPaint);
+            _amPaint.Color = accentColor;
+            canvas.DrawTextWithFallback(amPmStr, centerX + (timeBounds.Width / 2f) + 8f, centerY - (timeBounds.Height * 0.45f), amFont, _amPaint);
         }
 
         if (ShowDate)
         {
             var dateFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize * 0.32f);
-            using var datePaint = new SKPaint { Color = textColor, IsAntialias = true };
+            _datePaint.Color = textColor;
             var dateBounds = new SKRect();
-            dateFont.MeasureText(dateStr, out dateBounds, datePaint);
-            canvas.DrawTextWithFallback(dateStr, centerX - (dateBounds.Width / 2f), centerY + (fontSize * 0.5f) + 10f, dateFont, datePaint);
+            dateFont.MeasureText(dateStr, out dateBounds, _datePaint);
+            canvas.DrawTextWithFallback(dateStr, centerX - (dateBounds.Width / 2f), centerY + (fontSize * 0.5f) + 10f, dateFont, _datePaint);
         }
     }
 
@@ -84,11 +97,11 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         float cx = bounds.MidX;
         float cy = bounds.MidY;
 
-        using var facePaint = new SKPaint { Color = textColor.WithAlpha(10), IsAntialias = true };
-        canvas.DrawCircle(cx, cy, radius, facePaint);
+        _facePaint.Color = textColor.WithAlpha(10);
+        canvas.DrawCircle(cx, cy, radius, _facePaint);
 
-        using var majorTickPaint = new SKPaint { Color = textColor, StrokeWidth = 3f, IsAntialias = true };
-        using var minorTickPaint = new SKPaint { Color = textColor, StrokeWidth = 1.5f, IsAntialias = true };
+        _majorTickPaint.Color = textColor;
+        _minorTickPaint.Color = textColor;
         for (int i = 0; i < 12; i++)
         {
             float angle = i * 30f * (float)(Math.PI / 180f);
@@ -96,20 +109,20 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
             float y1 = cy - (radius - 12f) * (float)Math.Cos(angle);
             float x2 = cx + radius * (float)Math.Sin(angle);
             float y2 = cy - radius * (float)Math.Cos(angle);
-            canvas.DrawLine(x1, y1, x2, y2, i % 3 == 0 ? majorTickPaint : minorTickPaint);
+            canvas.DrawLine(x1, y1, x2, y2, i % 3 == 0 ? _majorTickPaint : _minorTickPaint);
         }
 
         (float hourAngle, float minAngle, float secAngle) = ClockPresentation.HandAngles(now);
 
-        using var hourHandPaint = new SKPaint { Color = textColor, StrokeWidth = 4.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        using var minuteHandPaint = new SKPaint { Color = textColor, StrokeWidth = 3f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        using var secondHandPaint = new SKPaint { Color = accentColor, StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, hourHandPaint);
-        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, minuteHandPaint);
-        DrawHand(canvas, cx, cy, secAngle, radius * 0.85f, secondHandPaint);
+        _hourHandPaint.Color = textColor;
+        _minuteHandPaint.Color = textColor;
+        _secondHandPaint.Color = accentColor;
+        DrawHand(canvas, cx, cy, hourAngle, radius * 0.5f, _hourHandPaint);
+        DrawHand(canvas, cx, cy, minAngle, radius * 0.75f, _minuteHandPaint);
+        DrawHand(canvas, cx, cy, secAngle, radius * 0.85f, _secondHandPaint);
 
-        using var centerDot = new SKPaint { Color = textColor, IsAntialias = true };
-        canvas.DrawCircle(cx, cy, 5f, centerDot);
+        _centerDotPaint.Color = textColor;
+        canvas.DrawCircle(cx, cy, 5f, _centerDotPaint);
     }
 
     private static void DrawHand(SKCanvas canvas, float cx, float cy, float angleRad, float length, SKPaint paint)
@@ -117,5 +130,20 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         float x = cx + length * (float)Math.Sin(angleRad);
         float y = cy - length * (float)Math.Cos(angleRad);
         canvas.DrawLine(cx, cy, x, y, paint);
+    }
+
+    public override ValueTask DisposeAsync()
+    {
+        _textPaint.Dispose();
+        _amPaint.Dispose();
+        _datePaint.Dispose();
+        _facePaint.Dispose();
+        _majorTickPaint.Dispose();
+        _minorTickPaint.Dispose();
+        _hourHandPaint.Dispose();
+        _minuteHandPaint.Dispose();
+        _secondHandPaint.Dispose();
+        _centerDotPaint.Dispose();
+        return base.DisposeAsync();
     }
 }

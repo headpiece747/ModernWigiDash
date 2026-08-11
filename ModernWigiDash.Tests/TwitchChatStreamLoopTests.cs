@@ -45,6 +45,46 @@ public class TwitchChatStreamLoopTests
     }
 
     [TestMethod]
+    public async Task IrcLoop_CrlfChannelName_CannotInjectIrcLines()
+    {
+        // An imported channel with an embedded CRLF must not inject extra IRC
+        // lines into the JOIN command — the whole name is rejected and the
+        // default channel is joined instead.
+        var feed = new FakeFeed();
+        var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "x\r\nPRIVMSG #popular :spam" };
+        widget.FeedFactory = () => feed;
+        widget.Session = EmptySession();
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
+
+        await TestWait.WaitUntilAsync(() => feed.Sent.Any(s => s.StartsWith("JOIN", StringComparison.Ordinal)), TimeSpan.FromSeconds(3));
+
+        Assert.IsTrue(feed.Sent.Contains("JOIN #twitch\r\n"), "a CRLF-bearing channel must fall back to the default channel");
+        Assert.IsFalse(feed.Sent.Any(s => s.StartsWith("PRIVMSG", StringComparison.Ordinal)), "no injected IRC lines may be sent");
+        Assert.IsFalse(feed.Sent.Any(s => s.Contains("\r\n", StringComparison.Ordinal) && !s.EndsWith("\r\n", StringComparison.Ordinal)),
+            "no sent line may carry an embedded CRLF beyond its own terminator");
+
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async Task IrcLoop_OverLengthChannelName_FallsBackToTwitch()
+    {
+        // Twitch channel names are capped at 25 chars — an over-cap name must
+        // fall back to the default channel instead of JOINing a bogus target.
+        var feed = new FakeFeed();
+        var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = new string('a', 30) };
+        widget.FeedFactory = () => feed;
+        widget.Session = EmptySession();
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
+
+        await TestWait.WaitUntilAsync(() => feed.Sent.Any(s => s.StartsWith("JOIN", StringComparison.Ordinal)), TimeSpan.FromSeconds(3));
+
+        Assert.IsTrue(feed.Sent.Contains("JOIN #twitch\r\n"), "an over-length channel must fall back to the default channel");
+
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
     public async Task IrcLoop_AfterConnectFault_ReconnectsAndRecovers()
     {
         var feed = new FakeFeed { ConnectError = new IOException("socket fault") };

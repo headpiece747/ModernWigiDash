@@ -14,7 +14,9 @@ public sealed class MemoryMappedLhmMapSource : ILhmMapSource
     internal const string SensorsMapName = @"Global\LibreHardwareService/json/sensors/data";
     internal const string SensorsMutexName = @"Global\LibreHardwareService/json/sensors/data/MUTEX";
 
-    private const int MaxCopyBytes = 128 * 1024 * 1024;
+    // Real LHS maps are hundreds of KB; 8MB caps a misbehaving writer's
+    // claimed size so a transient copy never forces a 128MB LOH allocation.
+    private const int MaxCopyBytes = 8 * 1024 * 1024;
     private static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
     private readonly Func<string, Mutex> _openMutex;

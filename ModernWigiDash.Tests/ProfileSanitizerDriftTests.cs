@@ -2,6 +2,7 @@ using System.Reflection;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
+using ModernWigiDash.Widgets.Twitch;
 
 namespace ModernWigiDash.Tests;
 
@@ -48,5 +49,18 @@ public class ProfileSanitizerDriftTests
             .GetCustomAttribute<WidgetPropertyAttribute>();
         Assert.AreEqual(WidgetPropertyType.Path, attr?.PropertyType,
             "ActionCommand must remain Path-typed; the drift contract assumes it is covered by the path-key scan");
+    }
+
+    [TestMethod]
+    public void ChannelNameKey_MatchesTwitchWidgetPropertyName()
+    {
+        // The import sanitizer keys on "ChannelName" by name (Core cannot
+        // reference the Widgets assembly) — a renamed property would silently
+        // disarm the CRLF-strip guard on the IRC JOIN target.
+        var attr = typeof(TwitchChatStreamWidget)
+            .GetProperty("ChannelName", BindingFlags.Public | BindingFlags.Instance)?
+            .GetCustomAttribute<WidgetPropertyAttribute>();
+        Assert.IsNotNull(attr,
+            "TwitchChatStreamWidget must keep a [WidgetProperty] named ChannelName — the import sanitizer's IRC-injection guard keys on it");
     }
 }

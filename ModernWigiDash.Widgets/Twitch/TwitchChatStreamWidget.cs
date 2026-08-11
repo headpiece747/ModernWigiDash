@@ -10,6 +10,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private const string AnonymousNickPrefix = "justinfan";
     private const string AnonymousPass = "SCHMOOPIIE";
     private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
+    /// <summary>The maximum Twitch channel-name length (Twitch's 25-char cap).</summary>
+    private const int MaxChannelNameLength = 25;
 
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
 
@@ -62,6 +64,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private sealed record ChatState(ChatStatus Status, string Detail);
     private volatile ChatState _chatState = new(ChatStatus.Disconnected, "");
     private volatile bool _disposed;
+
+    // Hoisted paints: every color is computed per render (theme/status-driven),
+    // so each paint is one field reused via Color mutation — the 30 FPS render
+    // allocates no SKPaint.
+    private readonly SKPaint _bgPaint = new() { IsAntialias = true };
+    private readonly SKPaint _badgePaint = new() { IsAntialias = true };
+    private readonly SKPaint _statusPaint = new() { IsAntialias = true };
+    private readonly SKPaint _emptyPaint = new() { IsAntialias = true };
+    private readonly SKPaint _userPaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _msgPaint = new() { IsAntialias = true };
 
     /// <summary>
     /// Test seam for the IRC socket. Defaults to the shared
@@ -352,10 +364,19 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         }
     }
 
+    /// <summary>
+    /// Normalizes a channel name for IRC JOIN and the header badge: trims,
+    /// drops the leading '#', and lowercases. Invalid names — empty,
+    /// over-length (Twitch's 25-char cap), or carrying an embedded CR/LF
+    /// (which could inject extra IRC lines into the JOIN command) — fall back
+    /// to "twitch", the existing empty-channel fallback.
+    /// </summary>
     private static string NormalizeChannel(string channel)
     {
         var c = channel.Trim().TrimStart('#');
-        return c.Length == 0 ? "twitch" : c.ToLowerInvariant();
+        if (c.Length == 0) return "twitch";
+        if (c.IndexOfAny(['\r', '\n']) >= 0) return "twitch";
+        return c.Length > MaxChannelNameLength ? "twitch" : c.ToLowerInvariant();
     }
 
     // The header strings are memoized per input (the WrapCache shape): Render
@@ -401,8 +422,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         var headerColor = ColorOf(HeaderColorHex, SKColors.White);
         var msgColor = ColorOf(MessageColorHex, new SKColor(248, 250, 252));
 
-        using var bgPaint = new SKPaint { Color = bg, IsAntialias = true };
-        canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, bgPaint);
+        _bgPaint.Color = bg;
+        canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, _bgPaint);
 
         float pad = 12f * scale;
         float baseFontSize = Math.Max(10f, Math.Min(32f, FontSize));
@@ -411,16 +432,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, titleSize);
         var statusFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, statusSize);
-        using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
+        _badgePaint.Color = headerColor;
 
         float top = bounds.Top + pad;
         string channelBadge = ChannelBadge();
-        canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, badgePaint, SKTextAlign.Left);
+        canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, _badgePaint, SKTextAlign.Left);
 
         string statusText = StatusLine();
 
-        using var statusPaint = new SKPaint { Color = TwitchChatPresentation.StatusColor(_chatState.Status), IsAntialias = true };
-        canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);
+        _statusPaint.Color = TwitchChatPresentation.StatusColor(_chatState.Status);
+        canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, _statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;
 
@@ -445,9 +466,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         if (snapshot.Count == 0)
         {
             var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
-            using var emptyPaint = new SKPaint { Color = headerColor.WithAlpha(130), IsAntialias = true };
+            _emptyPaint.Color = headerColor.WithAlpha(130);
             var hint = TwitchChatPresentation.EmptyHint(_chatState.Status, AutoConnect);
-            canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, emptyPaint, SKTextAlign.Left);
+            canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, _emptyPaint, SKTextAlign.Left);
             canvas.Restore();
             return;
         }
@@ -456,8 +477,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
         var userFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, userSize);
         var msgFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
-        using var userPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
-        using var msgPaint = new SKPaint { Color = msgColor, IsAntialias = true };
+        _msgPaint.Color = msgColor;
 
         for (int i = snapshot.Count - 1; i >= 0; i--)
         {
@@ -468,13 +488,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             cursor -= blockH;
             if (cursor < contentBounds.Top - userLineHeight) break;
 
-            userPaint.Color = m.Color;
-            canvas.DrawTextWithFallback(m.Username, contentBounds.Left, cursor + userSize, userFont, userPaint, SKTextAlign.Left);
+            _userPaint.Color = m.Color;
+            canvas.DrawTextWithFallback(m.Username, contentBounds.Left, cursor + userSize, userFont, _userPaint, SKTextAlign.Left);
 
             float msgY = cursor + userLineHeight;
             for (int li = 0; li < lines.Count; li++)
             {
-                canvas.DrawTextWithFallback(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, msgFont, msgPaint, SKTextAlign.Left);
+                canvas.DrawTextWithFallback(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, msgFont, _msgPaint, SKTextAlign.Left);
             }
         }
 
@@ -484,6 +504,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override async ValueTask DisposeAsync()
     {
         _disposed = true;
+        _bgPaint.Dispose();
+        _badgePaint.Dispose();
+        _statusPaint.Dispose();
+        _emptyPaint.Dispose();
+        _userPaint.Dispose();
+        _msgPaint.Dispose();
         _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
         _feedLoop = null;
         if (_cts is { } cts) await cts.CancelAsync();

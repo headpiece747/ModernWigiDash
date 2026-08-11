@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="ModernWigiDash.App/Resources/Logo/modernwigidashlogo.svg" alt="ModernWigiDash" width="200"/>
+<img src="ModernWigiDash.App/Resources/Logo/logo.png" alt="ModernWigiDash" width="200"/>
 
 # ModernWigiDash
 

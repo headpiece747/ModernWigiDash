@@ -53,8 +53,9 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         }
     }
 
-    public bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+    public bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0)
     {
+        transferred = 0;
         try
         {
             var setup = new UsbSetupPacket(
@@ -64,7 +65,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
                 wIndex,
                 buffer.Length);
 
-            int transferred = _device.ControlTransfer(setup, buffer, 0, buffer.Length);
+            transferred = _device.ControlTransfer(setup, buffer, 0, buffer.Length);
             return transferred > 0;
         }
         catch (Exception ex)

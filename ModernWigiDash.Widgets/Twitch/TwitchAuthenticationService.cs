@@ -292,7 +292,7 @@ internal sealed class TwitchSession
         lock (_stateGate)
         {
             _tokens = token;
-            _account = new TwitchAccount(validation.UserId, validation.Login, validation.Login);
+            _account = new TwitchAccount(validation.UserId);
             _lastValidatedAt = _timeProvider.GetUtcNow();
         }
     }

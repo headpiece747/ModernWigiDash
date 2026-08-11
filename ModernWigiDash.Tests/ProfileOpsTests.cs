@@ -191,6 +191,70 @@ public class ProfileOpsTests
         Assert.AreEqual(1, loaded.ActivePage.Widgets.Count, "A widget with null propertyValues must still import");
     }
 
+    [TestMethod]
+    public void ImportJson_OverPageCap_ClampsActivePageIndex()
+    {
+        // A 60-page import truncates to MaxPagesPerProfile (50). The active
+        // index was clamped against the ORIGINAL count during deserialization
+        // (pages are listed first), so it must be re-clamped after the
+        // truncation — a stale 59 would make swipe navigation target a
+        // missing page.
+        string pages = string.Join(",", Enumerable.Range(0, 60).Select(i => $"{{\"PageName\":\"P{i}\"}}"));
+        var loaded = ProfileOps.ImportJson($$$"""{"ProfileId":"x","Pages":[{{{pages}}}],"ActivePageIndex":59}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(50, loaded.Pages.Count);
+        Assert.AreEqual(49, loaded.ActivePageIndex, "The active index must clamp to the last page after truncation");
+    }
+
+    [TestMethod]
+    public void ImportJson_NullPageElements_AreSkipped()
+    {
+        // "Pages":[null] deserializes as null ELEMENTS — the sanitizer must
+        // drop them instead of NRE-ing on the page list it exists for.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[null,{"PageName":"A"},null,{"PageName":"B"}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(2, loaded.Pages.Count);
+        Assert.AreEqual("A", loaded.Pages[0].PageName);
+        Assert.AreEqual("B", loaded.Pages[1].PageName);
+    }
+
+    [TestMethod]
+    public void ImportJson_NullWidgetElements_AreSkipped()
+    {
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[null,{"PluginId":"profile_test_widget"},null]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(1, loaded.Pages[0].Widgets.Count, "null widget elements must be dropped, not crash the sanitizer");
+        Assert.AreEqual("profile_test_widget", loaded.Pages[0].Widgets[0].PluginId);
+    }
+
+    [TestMethod]
+    public void ImportJson_CrlfChannelName_IsCleared()
+    {
+        // An imported channel with an embedded CRLF would inject extra IRC
+        // lines on connect — the sanitizer must clear it so the widget's
+        // empty-channel fallback applies.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":{"ChannelName":"x\r\nPRIVMSG #popular :spam"}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["ChannelName"],
+            "a CRLF-bearing channel name must be cleared on import");
+    }
+
+    [TestMethod]
+    public void ImportJson_OverLengthChannelName_IsCleared()
+    {
+        // An over-25-char channel name is invalid on Twitch — clear it so the
+        // widget's empty-channel fallback applies.
+        string longChannel = new string('a', 40);
+        var loaded = ProfileOps.ImportJson($$$"""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":{"ChannelName":"{{{longChannel}}}"}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["ChannelName"]);
+    }
+
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
 
     [TestMethod]

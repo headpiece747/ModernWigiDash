@@ -81,7 +81,7 @@ public class TwitchSessionTests
         var (session, client, store, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token());
-        client.Channels = [new TwitchFollowedChannel("b1", "streamer", "Streamer")];
+        client.Channels = [new TwitchFollowedChannel("streamer", "Streamer")];
 
         bool ok = await session.RestoreAsync(TestClientId, context, CancellationToken.None);
 
@@ -99,7 +99,7 @@ public class TwitchSessionTests
         store.Save(Token());
         client.ValidationUnauthorized = true;
         client.RefreshedToken = Token(accessToken: "refreshed-access");
-        client.Channels = [new TwitchFollowedChannel("b1", "streamer", "Streamer")];
+        client.Channels = [new TwitchFollowedChannel("streamer", "Streamer")];
 
         bool ok = await session.RestoreAsync(TestClientId, context, CancellationToken.None);
 
@@ -131,7 +131,7 @@ public class TwitchSessionTests
         var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
-        client.Channels = [new TwitchFollowedChannel("b1", "streamer", "Streamer")];
+        client.Channels = [new TwitchFollowedChannel("streamer", "Streamer")];
 
         await session.LoginAsync(TestClientId, context, CancellationToken.None);
 

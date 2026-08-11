@@ -148,6 +148,12 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// </summary>
     internal Func<IReadOnlyList<HotkeyAction>, CancellationToken, Task>? ActionExecutor { get; set; }
 
+    // Hoisted paints: the colors mutate per render (property-driven), so the
+    // 30 FPS render allocates no SKPaint. DrawLabelOnly shares the text pair.
+    private readonly SKPaint _fillPaint = new() { IsAntialias = true };
+    private readonly SKPaint _textPaint = new() { IsAntialias = true };
+    private readonly SKPaint _descriptionPaint = new() { IsAntialias = true };
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor btnColor = ColorOf(ButtonColorHex, new SKColor(135, 0, 0));
@@ -156,12 +162,8 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
 
         if (_isPressed)
         {
-            using var fillPaint = new SKPaint
-            {
-                Color = btnColor.WithAlpha(180),
-                IsAntialias = true
-            };
-            canvas.DrawRoundRect(bounds, 16f, 16f, fillPaint);
+            _fillPaint.Color = btnColor.WithAlpha(180);
+            canvas.DrawRoundRect(bounds, 16f, 16f, _fillPaint);
         }
 
         string label = ButtonLabel;
@@ -186,19 +188,19 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         // Draw label and description first so the icon can render in front of them
         float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, labelSize);
-        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
+        _textPaint.Color = textColor;
         var textBounds = new SKRect();
-        font.MeasureText(label, out textBounds, textPaint);
+        font.MeasureText(label, out textBounds, _textPaint);
         canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f,
-            bounds.Top + bounds.Height * 0.78f, font, textPaint);
+            bounds.Top + bounds.Height * 0.78f, font, _textPaint);
 
         if (!string.IsNullOrWhiteSpace(Description))
         {
             var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
-            using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
-            descriptionFont.MeasureText(Description, out var descriptionBounds, descriptionPaint);
+            _descriptionPaint.Color = textColor.WithAlpha(180);
+            descriptionFont.MeasureText(Description, out var descriptionBounds, _descriptionPaint);
             canvas.DrawTextWithFallback(Description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), descriptionFont, descriptionPaint);
+                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), descriptionFont, _descriptionPaint);
         }
 
         // Icon drawn last so it stays in front of the text when overlapped
@@ -212,19 +214,19 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     {
         float fontSize = Math.Min(bounds.Width / 6f, bounds.Height / 5f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
-        using var textPaint = new SKPaint { Color = textColor, IsAntialias = true };
+        _textPaint.Color = textColor;
 
         var textBounds = new SKRect();
-        font.MeasureText(label, out textBounds, textPaint);
-        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, font, textPaint);
+        font.MeasureText(label, out textBounds, _textPaint);
+        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, font, _textPaint);
 
         if (!string.IsNullOrWhiteSpace(description))
         {
             var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
-            using var descriptionPaint = new SKPaint { Color = textColor.WithAlpha(180), IsAntialias = true };
-            descriptionFont.MeasureText(description, out var descriptionBounds, descriptionPaint);
+            _descriptionPaint.Color = textColor.WithAlpha(180);
+            descriptionFont.MeasureText(description, out var descriptionBounds, _descriptionPaint);
             canvas.DrawTextWithFallback(description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(12f, fontSize * 0.65f), descriptionFont, descriptionPaint);
+                bounds.Bottom - Math.Max(12f, fontSize * 0.65f), descriptionFont, _descriptionPaint);
         }
     }
 
@@ -328,6 +330,9 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
 
     public override async ValueTask DisposeAsync()
     {
+        _fillPaint.Dispose();
+        _textPaint.Dispose();
+        _descriptionPaint.Dispose();
         if (_actionCts is { } cts)
         {
             await cts.CancelAsync();

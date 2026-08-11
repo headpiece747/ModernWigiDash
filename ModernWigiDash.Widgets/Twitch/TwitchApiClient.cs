@@ -167,7 +167,6 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
             channels.AddRange(payload.Data
                 .Where(channel => !string.IsNullOrWhiteSpace(channel.UserLogin))
                 .Select(channel => new TwitchFollowedChannel(
-                    channel.UserId,
                     channel.UserLogin,
                     channel.UserName)));
 

@@ -23,7 +23,7 @@ internal sealed class WrapCache
 
     /// <param name="capacity">Maximum distinct texts held; the least recently
     /// used entry is evicted when a miss lands past it.</param>
-    public WrapCache(int capacity = 16)
+    public WrapCache(int capacity = 64)
     {
         _capacity = Math.Max(1, capacity);
     }

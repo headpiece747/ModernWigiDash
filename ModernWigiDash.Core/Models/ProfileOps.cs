@@ -382,8 +382,10 @@ public static class ProfileOps
     {
         // Untrusted JSON may carry null collections ("pages": null etc.) —
         // repair them before any counting, or the sanitizer NREs on exactly
-        // the input shape it exists for.
+        // the input shape it exists for. Null PAGE ELEMENTS ("pages":[null])
+        // are dropped the same way.
         profile.Pages ??= [];
+        profile.Pages = profile.Pages.Where(p => p is not null).ToList();
 
         // A profile with zero pages cannot exist at runtime (the ctor creates
         // one, DeletePage refuses the last) — an imported JSON with an empty
@@ -394,6 +396,11 @@ public static class ProfileOps
             profile.Pages.Add(new PageLayout());
         }
 
+        // Null-element filtering may have shrunk the page list — re-clamp the
+        // deserialized active index (its setter clamped against the ORIGINAL
+        // count, so it can still point past the repaired list).
+        profile.ActivePageIndex = Math.Min(profile.ActivePageIndex, profile.Pages.Count - 1);
+
         if (!string.IsNullOrWhiteSpace(profile.ActivePage?.BackgroundImagePath))
         {
             profile.ActivePage.BackgroundImagePath = SafeRelativePath(profile.ActivePage.BackgroundImagePath);
@@ -402,6 +409,10 @@ public static class ProfileOps
         if (profile.Pages.Count > MaxPagesPerProfile)
         {
             profile.Pages = profile.Pages.Take(MaxPagesPerProfile).ToList();
+            // Truncation leaves the deserialized active index past the new
+            // last page — re-clamp it, or swipe navigation targets a missing
+            // page (InputController refuses out-of-range switches).
+            profile.ActivePageIndex = Math.Min(profile.ActivePageIndex, profile.Pages.Count - 1);
         }
 
         // Enforce per-page and total widget caps in one pass: later pages are
@@ -410,6 +421,9 @@ public static class ProfileOps
         foreach (var page in profile.Pages)
         {
             page.Widgets ??= [];
+            // Null WIDGET elements ("widgets":[null]) must not reach the
+            // per-widget sanitizer or rehydration.
+            page.Widgets = page.Widgets.Where(w => w is not null).ToList();
 
             if (!string.IsNullOrWhiteSpace(page.BackgroundImagePath))
             {
@@ -466,6 +480,20 @@ public static class ProfileOps
             {
                 placed.PropertyValues[key] = SafeRelativePath(path);
             }
+        }
+
+        // TwitchChatStreamWidget's channel name rides the IRC JOIN command:
+        // an embedded CR/LF would inject extra IRC lines on connect. Apply
+        // the widget's own normalization rule here (Core cannot reference
+        // the Widgets assembly, so the rule — reject CR/LF and over-25-char
+        // names — is mirrored; the widget's NormalizeChannel is
+        // defense-in-depth at connect time). Invalid names are cleared to
+        // empty — the widget's empty-channel fallback then applies.
+        if (placed.PropertyValues.TryGetValue("ChannelName", out var channelRaw) &&
+            ConvertPropertyValue(channelRaw, typeof(string)) is string channel)
+        {
+            placed.PropertyValues["ChannelName"] =
+                channel.Contains('\r') || channel.Contains('\n') || channel.Length > 25 ? "" : channel;
         }
     }
 

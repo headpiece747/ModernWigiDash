@@ -243,7 +243,7 @@ public class WinUsbBulkDeviceTests
         using var device = new WinUsbBulkDevice(script.ToApi());
         Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
-        Assert.IsFalse(device.ControlIn(0x00, new byte[4]));
+        Assert.IsFalse(device.ControlIn(0x00, new byte[4], out _));
     }
 
     [TestMethod]
@@ -253,7 +253,7 @@ public class WinUsbBulkDeviceTests
         using var device = new WinUsbBulkDevice(script.ToApi());
         Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
-        Assert.IsTrue(device.ControlIn(0x00, new byte[4]));
+        Assert.IsTrue(device.ControlIn(0x00, new byte[4], out _));
     }
 
     [TestMethod]

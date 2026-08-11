@@ -19,7 +19,8 @@ public class PriceInfo
     public string CurrencySymbol { get; set; } = "$";
     public string Source { get; set; } = "";
     public DateTime Timestamp { get; set; }
-    public string FormattedChange => $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent:F2}%";
+    public string FormattedChange =>
+        $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%";
     public bool IsPositive => ChangePercent >= 0;
     public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > 60;
 

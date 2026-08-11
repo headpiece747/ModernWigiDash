@@ -18,7 +18,14 @@ internal interface ITransferBackend : IDisposable
 
     bool ControlOut(byte request, ushort wValue, byte[]? data);
 
-    bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0);
+    /// <summary>
+    /// Vendor IN control transfer. Returns true when the transfer succeeded
+    /// and reports the transferred byte count — a short transfer still
+    /// succeeds (the device sent fewer bytes than the buffer), so callers
+    /// that need a full report must check <paramref name="transferred"/>
+    /// against the expected size.
+    /// </summary>
+    bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0);
 
     bool BulkWrite(byte pipeId, byte[] data, out int transferred);
 }

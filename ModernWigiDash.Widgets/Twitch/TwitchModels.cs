@@ -9,10 +9,9 @@ internal sealed record TwitchTokenSet(
     DateTimeOffset ExpiresAt,
     string[] Scopes);
 
-internal sealed record TwitchAccount(string UserId, string Login, string DisplayName);
+internal sealed record TwitchAccount(string UserId);
 
 internal sealed record TwitchFollowedChannel(
-    string BroadcasterId,
     string Login,
     string DisplayName)
 {

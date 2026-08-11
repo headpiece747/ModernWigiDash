@@ -423,7 +423,13 @@ public static class FontHelper
         int sizeKey = (int)Math.Round(size * 2); // half-point resolution
         // Key by the typeface HANDLE (stable — typefaces are cached for the
         // process lifetime): the family name alone cannot distinguish
-        // Regular from Bold.
+        // Regular from Bold. Bounded by the same clear-on-overflow reset the
+        // text-runs cache applies, so a long session with many distinct sizes
+        // cannot grow the native-font cache without bound.
+        if (CachedFonts.Count > TextRunsCacheLimit)
+        {
+            CachedFonts.Clear();
+        }
         return CachedFonts.GetOrAdd(
             (typeface.Handle.ToInt64(), sizeKey),
             _ => CreateFont(typeface, size));

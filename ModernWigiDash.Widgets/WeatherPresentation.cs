@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>The metric-pill visibility flags and values the Detailed mode needs.</summary>
@@ -48,16 +50,6 @@ public static class WeatherPresentation
     /// widget's property default and the tap-toggle.</summary>
     public const string DefaultUnitSystem = "Fahrenheit (°F, mph)";
 
-    /// <summary>All unit-system choices, in property-list order.</summary>
-    public static readonly string[] UnitSystemOptions =
-    [
-        "Fahrenheit (°F, mph)",
-        "Celsius (°C, km/h)",
-        "Celsius (°C, mph)",
-        "Celsius (°C, m/s)",
-        "Kelvin (K, m/s)",
-    ];
-
     /// <summary>The tap-toggle rule: Fahrenheit ⇄ Celsius (km/h) — the
     /// widget's badge cycles between the two primary systems.</summary>
     public static string ToggleUnitSystem(string current)
@@ -79,27 +71,34 @@ public static class WeatherPresentation
         };
     }
 
-    /// <summary>Formats a Celsius temperature in the requested unit for display.</summary>
+    /// <summary>Formats a Celsius temperature in the requested unit for display.
+    /// The display is locale-independent: comma-decimal cultures must not
+    /// render "21,5°C".</summary>
     public static string FormatTemp(double tempC, string tempUnit, bool shortFormat = false)
     {
         return tempUnit switch
         {
-            "°F" => shortFormat ? $"{(tempC * 9.0 / 5.0 + 32.0):F0}°" : $"{(tempC * 9.0 / 5.0 + 32.0):F0}°F",
-            "K" => $"{tempC + 273.15:F0} K",
-            _ => shortFormat ? $"{tempC:F0}°" : $"{tempC:F1}°C",
+            "°F" => shortFormat ? $"{Invariant(tempC * 9.0 / 5.0 + 32.0, "F0")}°" : $"{Invariant(tempC * 9.0 / 5.0 + 32.0, "F0")}°F",
+            "K" => $"{Invariant(tempC + 273.15, "F0")} K",
+            _ => shortFormat ? $"{Invariant(tempC, "F0")}°" : $"{Invariant(tempC, "F1")}°C",
         };
     }
 
-    /// <summary>Formats a km/h wind speed in the requested unit for display.</summary>
+    /// <summary>Formats a km/h wind speed in the requested unit for display —
+    /// locale-independent like <see cref="FormatTemp"/>.</summary>
     public static string FormatSpeed(double kmh, string speedUnit)
     {
         return speedUnit switch
         {
-            "mph" => $"{(kmh * 0.621371):F0} mph",
-            "m/s" => $"{(kmh / 3.6):F0} m/s",
-            _ => $"{kmh:F0} km/h",
+            "mph" => $"{Invariant(kmh * 0.621371, "F0")} mph",
+            "m/s" => $"{Invariant(kmh / 3.6, "F0")} m/s",
+            _ => $"{Invariant(kmh, "F0")} km/h",
         };
     }
+
+    /// <summary>Invariant-culture number formatting for display strings.</summary>
+    private static string Invariant(double value, string format)
+        => value.ToString(format, CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The Detailed-mode metric pills, in the widget's fixed order. Only the

@@ -443,8 +443,9 @@ internal class WinUsbBulkDevice : ITransferBackend
     /// <summary>
     /// Control IN transfer (vendor query).
     /// </summary>
-    public virtual bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+    public virtual bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0)
     {
+        transferred = 0;
         if (!IsOpen)
             return false;
 
@@ -458,7 +459,8 @@ internal class WinUsbBulkDevice : ITransferBackend
         // A zero-byte control-in reads as failure (matches the LibUsb backend's
         // transferred > 0 semantics) — the PING depends on both backends agreeing.
         bool ok = _api.ControlTransfer(
-            _interfaceHandle, setup, buffer, (uint)buffer.Length, out uint transferred, IntPtr.Zero);
+            _interfaceHandle, setup, buffer, (uint)buffer.Length, out uint transferredCount, IntPtr.Zero);
+        transferred = (int)transferredCount;
         return ok && transferred > 0;
     }
 

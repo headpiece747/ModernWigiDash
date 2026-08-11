@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http;
 using ModernWigiDash.Widgets;
 
@@ -54,6 +55,25 @@ public class PriceFeedManagerLifecycleTests
         // No feed data → both return null, but the subscription state is consistent.
         Assert.IsNull(feed.GetPrice("BTC", AssetKind.Crypto));
         Assert.IsNull(feed.GetPrice("ETH", AssetKind.Crypto));
+    }
+
+    [TestMethod]
+    public void FormattedChange_IsInvariantCulture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+
+            // A comma-decimal locale must not render "+1,25 %" on the display.
+            Assert.AreEqual("+1.25%", new PriceInfo { ChangePercent = 1.25m }.FormattedChange);
+            Assert.AreEqual("-0.50%", new PriceInfo { ChangePercent = -0.5m }.FormattedChange);
+            Assert.AreEqual("+0.00%", new PriceInfo { ChangePercent = 0m }.FormattedChange);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     [TestMethod]

@@ -264,12 +264,22 @@ internal sealed class RecordingBackend : ITransferBackend
         return ControlOutResult;
     }
 
-    public bool ControlIn(byte request, byte[] buffer, ushort wValue = 0, ushort wIndex = 0)
+    public bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0)
     {
         ControlCalls.Add(new ControlCall("in", request, wValue));
+        transferred = 0;
         if (TouchResponse is not null && request == DisplayProtocolConstants.CmdGetTouch)
+        {
             TouchResponse.CopyTo(buffer, 0);
-        return ControlInResult;
+            transferred = TouchResponse.Length;
+        }
+        else if (ControlInResult)
+        {
+            // Success contract: a full-buffer transfer, matching the real
+            // backends (which only succeed on transferred > 0).
+            transferred = buffer.Length;
+        }
+        return ControlInResult && transferred > 0;
     }
 
     /// <summary>When set, reports a partial transfer (short write) — mirroring

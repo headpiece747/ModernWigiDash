@@ -39,6 +39,7 @@ public sealed class FrameDelivery : IDisposable
 
     private readonly Func<byte[], bool>? _send;
     private DateTimeOffset _lastSendStart;
+    private int _sendInFlight;
     private long _sent;
     private long _dropped;
     private long _droppedPool;
@@ -122,6 +123,13 @@ public sealed class FrameDelivery : IDisposable
         ArgumentNullException.ThrowIfNull(send);
         return new FrameDelivery(encoder, send, isReady, log: log);
     }
+
+    /// <summary>
+    /// True while the sender loop is inside the transport write. A compose
+    /// caller (the FramePump gate) skips composing a new frame during the
+    /// write — the display can't take it anyway, so the encode is dead CPU.
+    /// </summary>
+    public bool IsSendInFlight => Volatile.Read(ref _sendInFlight) != 0;
 
     /// <summary>
     /// True when this delivery can currently route frames: the readiness
@@ -226,6 +234,11 @@ public sealed class FrameDelivery : IDisposable
 
                 try
                 {
+                    // The in-flight flag lets a compose-only caller (the
+                    // FramePump gate) skip work while the display is still
+                    // writing — the bulk write (~55ms) outruns the 33ms tick,
+                    // so composing during it is dead CPU.
+                    Volatile.Write(ref _sendInFlight, 1);
                     bool ok = _send?.Invoke(latest.Buffer) == true;
                     if (ok)
                     {
@@ -250,6 +263,7 @@ public sealed class FrameDelivery : IDisposable
                 }
                 finally
                 {
+                    Volatile.Write(ref _sendInFlight, 0);
                     ReleaseSlot(latest, dropped: false);
                 }
             }

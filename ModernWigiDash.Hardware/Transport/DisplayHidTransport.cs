@@ -315,7 +315,7 @@ public sealed class DisplayHidTransport : IDisplayTransport
 
         // PING command (CMD_PING = 0x00, Control IN)
         byte[] pingBuf = new byte[4];
-        bool pingOk = ControlIn(0x00, 0, 0, pingBuf);
+        bool pingOk = ControlIn(0x00, 0, 0, pingBuf, out _);
         LogToFile($"[USB-INIT] PING: ok={pingOk}");
 
         // Set brightness to 100%
@@ -414,10 +414,14 @@ public sealed class DisplayHidTransport : IDisplayTransport
 
     /// <summary>
     /// Vendor IN control transfer through the active backend.
-    /// bmRequestType = 0xA1 (Vendor | Device-to-Host | Interface)
+    /// bmRequestType = 0xA1 (Vendor | Device-to-Host | Interface).
+    /// Reports the transferred byte count so callers can require a full report.
     /// </summary>
-    private bool ControlIn(byte request, ushort wValue, ushort wIndex, byte[] buffer)
-        => _backend?.ControlIn(request, buffer, wValue, wIndex) ?? false;
+    private bool ControlIn(byte request, ushort wValue, ushort wIndex, byte[] buffer, out int transferred)
+    {
+        transferred = 0;
+        return _backend?.ControlIn(request, buffer, out transferred, wValue, wIndex) ?? false;
+    }
 
     /// <summary>
     /// Writes bulk data through the active backend. Direct WinUSB writes the
@@ -460,11 +464,20 @@ public sealed class DisplayHidTransport : IDisplayTransport
             {
                 byte[] touchBuf = _touchBuffer;
 
-                bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf);
+                bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf, out int transferred);
 
                 if (!ok)
                 {
                     _touchDiagLog.Write("ControlIn FAILED");
+                    return null;
+                }
+
+                if (transferred != DisplayProtocolConstants.TouchReportSize)
+                {
+                    // A short transfer leaves stale bytes past the transferred
+                    // count in the reused buffer; only a full report can be
+                    // parsed as a touch.
+                    _touchDiagLog.Write($"ControlIn short transfer: {transferred}/{DisplayProtocolConstants.TouchReportSize} bytes");
                     return null;
                 }
 
