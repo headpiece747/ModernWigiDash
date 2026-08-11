@@ -27,10 +27,14 @@ $Downloads = [ordered]@{
 }
 
 function Get-Download([string]$Url, [string]$Dest) {
-    if (Test-Path -LiteralPath $Dest) { Write-Host "  cached: $(Split-Path $Dest -Leaf)"; return }
+    if (Test-Path -LiteralPath $Dest) {
+        if ((Get-Item -LiteralPath $Dest).Length -gt 0) { Write-Host "  cached: $(Split-Path $Dest -Leaf)"; return }
+        Remove-Item -LiteralPath $Dest -Force
+    }
     Write-Host "  downloading $(Split-Path $Dest -Leaf)..."
     & curl.exe -f -L -sS -o "$Dest" "$Url"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Dest)) {
+        if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Force }
         throw "Download failed: $Url"
     }
 }
@@ -76,7 +80,7 @@ if (-not $SkipTelemetry) {
     Copy-Item (Join-Path $CacheDir "LHS-LICENSE.txt") (Join-Path $licDir "LHS-LICENSE.txt")
     Copy-Item (Join-Path $CacheDir "PresentMon-LICENSE.txt") (Join-Path $licDir "PresentMon-LICENSE.txt")
 
-    @"
+    $notices = @"
 ModernWigiDash redistributes the following third-party components:
 
 1. LibreHardwareService  v$LhsVersion
@@ -93,7 +97,8 @@ ModernWigiDash redistributes the following third-party components:
 Full license texts are included next to each component and in this folder.
 MPL-2.0 requires that corresponding source be made available; both components'
 source is public at the URLs above.
-"@ | Set-Content -Path (Join-Path $licDir "NOTICES.txt") -Encoding UTF8
+"@
+[System.IO.File]::WriteAllText((Join-Path $licDir "NOTICES.txt"), $notices, [System.Text.UTF8Encoding]::new($false))
 }
 
 # --- 4. Templates ---
