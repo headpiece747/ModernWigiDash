@@ -44,16 +44,23 @@ public class TelemetryProducersTests
     public void SensorPollTick_WithoutMaps_DoesNotThrow()
     {
         List<string> logs = [];
-        using var producers = new TelemetryProducers(new StubPresentMonNative(), logs.Add);
+        using var producers = new TelemetryProducers(
+            new StubPresentMonNative(),
+            logs.Add,
+            lhsMapSource: new StubLhmMapSource());
 
-        // No LibreHardwareService maps exist in the test host: the reader
-        // reports nothing to log, the store is updated with an unavailable
-        // snapshot, and the tick must not throw.
+        // A stub with no bytes and no error stands in for a host with no
+        // LibreHardwareService maps: the reader's missing-map state is one
+        // stable error value, so the error-dedup rule logs it once across
+        // ticks and the store is updated with an unavailable snapshot. The
+        // tick must not throw. The source is injected so this holds on any
+        // runner — without it the real shared-memory source makes the test
+        // depend on whether the LHS service happens to be running.
         producers.SensorPollTick();
         producers.SensorPollTick();
 
-        Assert.AreEqual(0, logs.Count(log => log.Contains("[SENSOR]", StringComparison.Ordinal)),
-            "A silent poll must not spam the log");
+        Assert.AreEqual(1, logs.Count(log => log.Contains("[SENSOR]", StringComparison.Ordinal)),
+            "The missing-map state must be logged once per change, not per tick");
     }
 
     // ── success ticks through the cluster seams (moved from the
