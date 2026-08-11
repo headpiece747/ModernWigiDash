@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 
@@ -20,12 +19,20 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
     private IAudioCaptureSource? _captureSource;
     private readonly AudioFrameBuffer _buffer = new();
-    // Capture lifecycle is touched from the UI render thread (start) and the
-    // capture thread (the watchdog stop) — one lock serializes the start/stop
-    // sequences so a watchdog firing as the page switches back can never
-    // unsubscribe/dispose a source mid-start (a lost race self-heals on the
-    // next render tick, which re-arms capture).
+    // Capture lifecycle is touched from the UI render thread (start), the
+    // capture thread (the watchdog stop), and the thread pool (the deferred
+    // NAudio dispose) — one lock serializes the start/stop sequences so a
+    // watchdog firing as the page switches back can never unsubscribe/dispose
+    // a source mid-start (a lost race self-heals on the next render tick,
+    // which re-arms capture).
     private readonly Lock _captureLock = new();
+
+    /// <summary>
+    /// Test seam for the watchdog clock. Defaults to the system clock; tests
+    /// inject a fake provider so the stale-render watchdog is drivable
+    /// deterministically without sleeping.
+    /// </summary>
+    internal TimeProvider Time { get; set; } = TimeProvider.System;
 
     /// <summary>
     /// Test seam for the capture source. Defaults to the WASAPI loopback
@@ -39,7 +46,8 @@ public class AudioVisualizerWidget : ModernWidgetBase
     // called for a grace period (page switched away). WASAPI loopback capture
     // would otherwise run forever in the background for a hidden widget.
     private volatile bool _capturing;
-    private long _lastRenderTimestamp = Stopwatch.GetTimestamp();
+    private volatile bool _stopQueued;
+    private long _lastRenderTimestamp = TimeProvider.System.GetTimestamp();
 
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
@@ -65,6 +73,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
 
         lock (_captureLock)
         {
+            _stopQueued = false;
             IAudioCaptureSource? source = _captureSource;
             _captureSource = null;
             _capturing = false;
@@ -104,9 +113,22 @@ public class AudioVisualizerWidget : ModernWidgetBase
         // is primed before capture starts, so the first callback cannot kill a
         // fresh capture (the old code left it at 0 — elapsed-since-epoch
         // always exceeded the grace period).
-        if (Stopwatch.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
+        //
+        // NAudio raises DataAvailable from inside ReadNextPacket on the capture
+        // thread, and WasapiCapture.Dispose joins that same thread. Stopping
+        // synchronously here would self-join and deadlock the capture thread
+        // while it holds the capture lock, blocking the UI render thread on
+        // that lock forever. The stop is therefore deferred to the thread pool
+        // and the lock still serializes it against a concurrent start.
+        if (Time.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
         {
-            StopLiveAudioCapture();
+            // Queue at most one deferred stop; the first work item that runs
+            // resets the flag (under the lock) before disposing.
+            if (!_stopQueued)
+            {
+                _stopQueued = true;
+                ThreadPool.QueueUserWorkItem(_ => StopLiveAudioCapture());
+            }
             return;
         }
 
@@ -119,7 +141,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         // Prime the watchdog timestamp BEFORE capture starts, so the first
         // DataAvailable callback can never measure elapsed-since-epoch and
         // kill a fresh capture.
-        _lastRenderTimestamp = Stopwatch.GetTimestamp();
+        _lastRenderTimestamp = Time.GetTimestamp();
         EnsureLiveAudioCapture();
 
         SKColor barColor = ColorOf(PrimaryColorHex, new SKColor(255, 205, 133));
