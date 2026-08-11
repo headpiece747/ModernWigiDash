@@ -11,7 +11,7 @@ namespace ModernWigiDash.App;
 /// MarkDirty/Flush policy. The 30 FPS render loop never touches this module —
 /// only user mutations arm the debounce.
 /// </summary>
-public sealed class ProfilePersistence
+public sealed class ProfilePersistence : IDisposable
 {
     public const string DirectoryName = "ModernWigiDash";
     public const string FileName = "profile.json";
