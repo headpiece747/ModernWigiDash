@@ -494,23 +494,17 @@ The window loads the persisted profile at startup through `ProfilePersistence`, 
 
 - [ ] **Step 1: Remove the dead constant**
 
-In `ModernWigiDash.App/MainWindow.xaml.cs:16`, delete:
-
-```csharp
-    private static readonly string ProfilePath = Path.Combine(LogDirectory, "logs/profile.json");
-```
-
-(This constant is referenced nowhere — verified by the previous design review; it is a leftover stub with a broken double-`logs` path.)
+The plan's design review found `private static readonly string ProfilePath = Path.Combine(LogDirectory, "logs/profile.json");` at line 16. **Verify first**: it may already be gone (an earlier dead-code cleanup removed it; if `Select-String -Pattern "ProfilePath" MainWindow.xaml.cs` finds nothing, skip this step).
 
 - [ ] **Step 2: Add the field and constructor wiring**
 
-Add the field with the other module fields (near `_pageTabs`):
+Add the field with the other module fields (near `_pageTabs`). The `_profile` field in this file is **non-nullable** (`private ProfileLayout _profile;`) — do NOT annotate it nullable (that cascades ~10 CS8602s at existing dereference sites). No initializer needed (the ctor assigns it):
 
 ```csharp
-    private ProfilePersistence _profilePersistence = null!;
+    private ProfilePersistence _profilePersistence;
 ```
 
-In the ctor, before the "4. Setup Default Profile Layout" block (before the `StarterProfile` construction at line 163-166), add:
+In the ctor, before the "4. Setup Default Profile Layout" block (before the `StarterProfile` construction at lines 163-166), add:
 
 ```csharp
         // Profile persistence: load the saved profile at startup, falling back
@@ -518,22 +512,23 @@ In the ctor, before the "4. Setup Default Profile Layout" block (before the `Sta
         // dereferences _profile at save time (import swaps the reference).
         _profilePersistence = new ProfilePersistence(
             ProfilePersistence.DefaultProfilePath(),
-            () => _profile!,
+            () => _profile,
             log: msg => FileLog.Write($"[PROFILE] {msg}"));
 ```
 
-Then replace the starter block (lines 163-166):
+Then replace the starter block (lines 163-166). **Load through a local** — assigning `Load`'s `ProfileLayout?` result straight to the non-nullable field warns CS8601; the local + `is null` fallback keeps the semantics warning-free:
 
 ```csharp
         // 4. Load the persisted profile, or build the starter profile on first
         //    launch. A first launch persists the starter immediately so the
         //    file exists before any mutation.
-        _profile = _profilePersistence.Load(_loader, this);
-        if (_profile is null)
+        var loaded = _profilePersistence.Load(_loader, this);
+        if (loaded is null)
         {
-            _profile = new StarterProfile(_loader, this).Create();
+            loaded = new StarterProfile(_loader, this).Create();
             _profilePersistence.Save();
         }
+        _profile = loaded;
         _pageTabs.Rebuild(_profile);
 ```
 
