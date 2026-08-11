@@ -205,14 +205,25 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // 7. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
         {
-            _framePump.Dispose();
-            _telemetry.Dispose();
-            _presenter.Dispose();
-            ProfileOps.DisposeProfile(_profile);
-
-            _dialogHost.CloseDeviceAuthorization();
-            _compositor.Dispose();
-            _usbDevice.Dispose();
+            // The teardown sequence begins: OCEs raised by the disposes below
+            // are expected and benign (see App.DispatcherUnhandledException).
+            App.IsClosing = true;
+            try
+            {
+                _framePump.Dispose();
+                _telemetry.Dispose();
+                _presenter.Dispose();
+                ProfileOps.DisposeProfile(_profile);
+                _dialogHost.CloseDeviceAuthorization();
+                _compositor.Dispose();
+            }
+            finally
+            {
+                // The engine dispose is the one step that must never be
+                // skipped: the display must reach standby on every exit, even
+                // when an earlier teardown step throws.
+                _usbDevice.Dispose();
+            }
         };
 
         // Update USB badge
@@ -492,14 +503,27 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             try
             {
+                // Untrusted input: cap the file read before any parsing — the
+                // same reject-oversized-input spirit as the import sanitizer
+                // caps in ProfileOps.
+                if (new FileInfo(dlg.FileName).Length > ProfileOps.MaxImportFileBytes)
+                {
+                    _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
+                    return;
+                }
+
                 string json = File.ReadAllText(dlg.FileName);
                 var loaded = ProfileOps.ImportJson(json, _loader, this);
                 if (loaded != null)
                 {
-                    ProfileOps.DisposeProfile(_profile);
-                    _profile = loaded;
+                    // One swap site: ReplaceProfile disposes the old profile's
+                    // widget instances and returns the imported profile active.
+                    _profile = ProfileOps.ReplaceProfile(_profile, loaded);
+
                     // Resync the toggle: the imported page's snap-to-grid may
-                    // differ from the desktop checkbox's current state.
+                    // differ from the checkbox's current state. Applied
+                    // directly from the import result — no reliance on the
+                    // change-handler write-back loop.
                     ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
                     RefreshAfterMutation(null);
                 }

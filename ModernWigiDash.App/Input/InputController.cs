@@ -266,11 +266,11 @@ public sealed class InputController
         {
             case ManipulationKind.Resize:
                 // Usability floors so the resize handles stay grabbable — a
-                // distinct policy from InspectorValuePolicy.MinWidgetSize (the
-                // inspector's typed-value validation floor); both must stay in
-                // sync with the smallest sensible widget.
-                widget.Width = Math.Max(40f, x - widget.X);
-                widget.Height = Math.Max(30f, y - widget.Y);
+                // distinct policy from the inspector's typed-value validation
+                // floor; both live in WidgetSizeLimits, so the floors can
+                // never drift apart.
+                widget.Width = Math.Max(WidgetSizeLimits.MinDragSizeX, x - widget.X);
+                widget.Height = Math.Max(WidgetSizeLimits.MinDragSizeY, y - widget.Y);
                 changed = true;
                 return true;
 

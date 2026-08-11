@@ -370,7 +370,12 @@ public sealed class DisplayDeviceEngine : IDisposable
         // display sleeps on its own timeout once heartbeats stop.
         try
         {
-            _transport?.GoToStandby();
+            // Off-thread with a bounded wait: close must not hang behind an
+            // in-flight frame write holding the transport lock (the LibUsb
+            // chunked write can block on chunk timeouts). Standby itself is a
+            // fast control transfer once the lock frees; 2s bounds the worst
+            // case, so close can never stall on the write.
+            Task.Run(() => _transport?.GoToStandby()).Wait(TimeSpan.FromSeconds(2));
         }
         catch (Exception ex)
         {

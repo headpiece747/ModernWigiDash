@@ -98,7 +98,12 @@ public sealed class TelemetryProducers : IDisposable
 
     public void Dispose()
     {
-        Stop();
+        // Join both loops before freeing the native session: PollLoop.Dispose
+        // cancels AND waits (bounded) for an in-flight tick, so a FRAMETIME
+        // tick can never reach PollDynamic after the producer frees its native
+        // query handles below.
+        _sensorPoll.Dispose();
+        _frameTimePoll.Dispose();
         _presentMonProducer.Dispose();
     }
 }

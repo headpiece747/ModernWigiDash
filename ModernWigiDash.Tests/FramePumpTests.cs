@@ -116,4 +116,29 @@ public class FramePumpTests
         Assert.IsNull(error, error?.ToString());
         Assert.IsTrue(result is true, "no ticks may fire after Stop");
     }
+
+    [TestMethod]
+    public void Dispose_QueuedTick_DoesNotFireCallbacks()
+    {
+        // A tick queued in the dispatcher just before Dispose is not cancelled
+        // by DispatcherTimer.Stop — it runs after teardown. The disposed guard
+        // must make that queued tick a no-op, or the late tick composes onto
+        // disposed state (ObjectDisposedException during close).
+        var (error, ticks) = RunOnSta(() =>
+        {
+            int ticks = 0;
+            var pump = new FramePump(
+                composeAndSend: () => Interlocked.Increment(ref ticks),
+                requestRepaint: () => { },
+                interval: TimeSpan.FromMilliseconds(10));
+
+            pump.Dispose();
+            pump.Tick(); // the queued tick, invoked after Dispose
+
+            return ticks;
+        });
+
+        Assert.IsNull(error, error?.ToString());
+        Assert.AreEqual(0, (int)ticks!, "No callback may fire after Dispose.");
+    }
 }

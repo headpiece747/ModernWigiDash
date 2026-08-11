@@ -17,6 +17,7 @@ public sealed class FramePump : IDisposable
     private readonly Action _composeAndSend;
     private readonly Action _requestRepaint;
     private readonly Action? _onTick;
+    private int _disposed;
 
     /// <param name="composeAndSend">Composes the active page and queues the
     /// frame to the presenter. Runs once per tick, before the repaint, so the
@@ -33,17 +34,31 @@ public sealed class FramePump : IDisposable
         _requestRepaint = requestRepaint;
         _onTick = onTick;
         _timer = new DispatcherTimer { Interval = interval ?? FrameDelivery.FrameInterval };
-        _timer.Tick += (_, _) =>
-        {
-            _composeAndSend();
-            _requestRepaint();
-            _onTick?.Invoke();
-        };
+        _timer.Tick += (_, _) => Tick();
     }
 
     public void Start() => _timer.Start();
 
     public void Stop() => _timer.Stop();
 
-    public void Dispose() => _timer.Stop();
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref _disposed, 1);
+        _timer.Stop();
+    }
+
+    /// <summary>
+    /// One pump tick: compose → send → repaint → badge. The disposed guard
+    /// exists because <see cref="DispatcherTimer.Stop"/> cannot cancel a tick
+    /// already queued in the dispatcher — a tick queued just before Dispose
+    /// would otherwise run after teardown and compose onto disposed state.
+    /// Internal so tests can drive the exact queued-tick-after-dispose race.
+    /// </summary>
+    internal void Tick()
+    {
+        if (Volatile.Read(ref _disposed) != 0) return;
+        _composeAndSend();
+        _requestRepaint();
+        _onTick?.Invoke();
+    }
 }

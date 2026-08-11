@@ -114,6 +114,24 @@ public static class ProfileOps
         }
     }
 
+    /// <summary>Max bytes an import file may carry — the file-read counterpart
+    /// of the sanitizer caps: far beyond any real exported profile, anything
+    /// larger is untrusted junk and must be rejected before any parsing.</summary>
+    public const long MaxImportFileBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Replaces the active profile with an imported one: disposes every widget
+    /// instance of <paramref name="current"/> and returns
+    /// <paramref name="imported"/> as the new active profile. The swap is one
+    /// site, so there is no in-between state where two profiles own live
+    /// widgets (the window used to hand-roll dispose-then-assign).
+    /// </summary>
+    public static ProfileLayout ReplaceProfile(ProfileLayout current, ProfileLayout imported)
+    {
+        DisposeProfile(current);
+        return imported;
+    }
+
     // ── placement & rehydration ─────────────────────────────
 
     /// <summary>
@@ -236,7 +254,7 @@ public static class ProfileOps
                 catch
                 {
                     // Stored value is incompatible with the widget property type; ignore it
-                    System.Diagnostics.Debug.WriteLine("Stored value incompatible with widget property type (ignored)");
+                    context.LogError($"Stored value incompatible with widget property '{prop.Name}' on '{placed.PluginId}' (ignored)");
                 }
             }
 

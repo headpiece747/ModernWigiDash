@@ -22,9 +22,6 @@ public sealed class DisplayPresenter : IDisposable
             log: log);
     }
 
-    /// <summary>Forwards to the delivery: true when frames can currently route to the display.</summary>
-    public bool IsReady => _delivery.IsReady;
-
     /// <summary>Queues the freshly composed frame for encode→coalesce→pace→send.</summary>
     public void Send(SKBitmap frame) => _delivery.Push(frame);
 

@@ -21,6 +21,7 @@ public sealed class PollLoop : IDisposable
     private readonly Action<string> _log;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _stoppedCts;
+    private Task? _loopTask;
     private string? _lastFailureMessage;
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
@@ -48,7 +49,7 @@ public sealed class PollLoop : IDisposable
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         _log($"[{_name}] polling started ({(int)_interval.TotalMilliseconds}ms, background thread)");
-        _ = Task.Run(() => Loop(ct), ct);
+        _loopTask = Task.Run(() => Loop(ct), ct);
     }
 
     /// <summary>Stops the loop (idempotent). Cancels but deliberately does NOT
@@ -64,10 +65,28 @@ public sealed class PollLoop : IDisposable
         _cts = null;
     }
 
+    /// <summary>
+    /// Cancels the loop, waits (bounded) for the loop task to unwind, then
+    /// disposes the stopped token source. The join matters: a tick in flight
+    /// may be mid-probe against a resource the caller frees right after Dispose
+    /// returns (the PresentMon native session on close) — returning past a
+    /// live tick would hand the freed handles to the background thread.
+    /// </summary>
     public void Dispose()
     {
         _cts?.Cancel();
         _cts = null;
+        try
+        {
+            // Bounded wait for the loop task to unwind; the timeout is the
+            // cancellation, so opt out of token-based cancellation explicitly.
+            // Normally fast: a cancelled loop exits at the next await point.
+            _loopTask?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
+        }
+        catch
+        {
+            // Loop task already faulted/cancelled — teardown is best-effort
+        }
         _stoppedCts?.Dispose();
         _stoppedCts = null;
     }

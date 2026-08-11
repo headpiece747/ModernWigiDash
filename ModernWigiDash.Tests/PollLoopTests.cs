@@ -107,6 +107,42 @@ public class PollLoopTests
         Assert.AreEqual(ticksAfterDispose, ticks, "No tick may fire after Dispose.");
     }
 
+    [TestMethod]
+    public void Dispose_BlocksUntilInFlightTickCompletes()
+    {
+        // Arrange — the tick blocks on a gate, so Dispose lands mid-tick: the
+        // join must hold Dispose until the tick finishes (a caller freeing a
+        // resource the tick touches must never return past a live tick), and
+        // releasing the gate must let both the tick and Dispose complete.
+        var tickEntered = new ManualResetEventSlim(false);
+        var tickRelease = new ManualResetEventSlim(false);
+        bool tickCompleted = false;
+        using var loop = new PollLoop(
+            "T", TimeSpan.FromMilliseconds(20),
+            ready: () => true,
+            tick: () => { tickEntered.Set(); tickRelease.Wait(); tickCompleted = true; },
+            onTickFailure: () => { },
+            log: _ => { });
+
+        loop.Start();
+        Assert.IsTrue(tickEntered.Wait(TimeSpan.FromSeconds(2)), "Loop must reach its first tick.");
+
+        // Act — Dispose from another thread: it must not return past the tick
+        var disposeThread = new Thread(() => loop.Dispose()) { IsBackground = true };
+        disposeThread.Start();
+
+        // Assert — Dispose is blocked on the in-flight tick (it had 200ms to
+        // complete and cannot while the tick gate is held)
+        Assert.IsFalse(disposeThread.Join(200), "Dispose must block while a tick is in flight.");
+
+        // Act — release the gate: the tick completes, Dispose joins and returns
+        tickRelease.Set();
+        Assert.IsTrue(disposeThread.Join(TimeSpan.FromSeconds(2)), "Dispose must return once the tick completes.");
+
+        // Assert
+        Assert.IsTrue(tickCompleted, "The in-flight tick must run to completion before Dispose returns.");
+    }
+
     // ── Failure handling / logging dedupe ────────────────────
 
     [TestMethod]

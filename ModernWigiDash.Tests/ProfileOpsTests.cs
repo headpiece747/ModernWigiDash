@@ -401,6 +401,44 @@ public class ProfileOpsTests
         Assert.AreEqual(1, profile.ActivePage.Widgets.Count, "Widgets stay in place; only instances are disposed");
     }
 
+    // ── profile replacement (import swap) ───────────────────
+
+    [TestMethod]
+    public void ReplaceProfile_DisposesOldProfileAndReturnsImported()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(DisposableTestWidget));
+        var current = new ProfileLayout();
+        var oldWidget = new DisposableTestWidget();
+        current.ActivePage.Widgets.Add(new PlacedWidgetInstance { PluginId = "disposable_test_widget", ActiveInstance = oldWidget });
+
+        var imported = new ProfileLayout();
+        imported.ActivePage.SnapToGrid = false;
+
+        var result = ProfileOps.ReplaceProfile(current, imported);
+
+        Assert.AreSame(imported, result, "The imported profile must become the active one");
+        Assert.IsTrue(oldWidget.Disposed, "ReplaceProfile must dispose the old profile's widget instances");
+        Assert.IsFalse(result.ActivePage.SnapToGrid, "The imported profile's snap-to-grid must surface untouched");
+    }
+
+    [TestMethod]
+    public void ReplaceProfile_SurfacesImportedSnapToGrid()
+    {
+        var loader = CreateLoader();
+        var context = new TestContext();
+        var current = CreateProfile(loader, context);
+
+        var imported = new ProfileLayout();
+        imported.ActivePage.SnapToGrid = true;
+
+        var result = ProfileOps.ReplaceProfile(current, imported);
+
+        Assert.AreSame(imported, result, "The swap must return the imported profile active");
+        Assert.IsTrue(result.ActivePage.SnapToGrid, "The import's snap-to-grid must be readable off the result");
+        Assert.AreNotSame(current, result, "The old profile must no longer be active");
+    }
+
     [TestMethod]
     public void RemoveWidget_RemovesFromPageAndDisposes()
     {

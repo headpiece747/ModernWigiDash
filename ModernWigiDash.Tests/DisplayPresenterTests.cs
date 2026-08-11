@@ -50,7 +50,6 @@ public class DisplayPresenterTests
         presenter.Send(frame);
 
         Assert.AreEqual(0, sent, "Not-ready presenter must never call the transport");
-        Assert.IsFalse(presenter.IsReady);
     }
 
     [TestMethod]
