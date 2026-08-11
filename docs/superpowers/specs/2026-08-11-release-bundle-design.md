@@ -1,7 +1,7 @@
 # Release Bundle — Design
 
 **Date:** 2026-08-11
-**Status:** Approved by design review (sections 1–4)
+**Status:** Approved by design review (sections 1–4); Rev 1 — upstream release format discovery
 
 ## Goal
 
@@ -22,6 +22,33 @@ communicating over shared memory (LHS) and the PresentMon API (named pipe). The
 MPL-2.0 file-level copyleft does not extend across process boundaries here, and
 the source for both is publicly available, so redistribution is compliant.
 
+## Rev 1 — Upstream release format discovery (2026-08-11)
+
+During plan preparation the exact upstream releases were inspected and both
+shipped **installers, not the zips assumed in the original decisions**. The
+affected decisions were revised in place (below) to match reality:
+
+| Component | Latest release | Assets | Installs to | Service registered |
+|---|---|---|---|---|
+| LibreHardwareService | v0.3.4 (2026-07-05) | `LibreHardwareService.msi` only | `C:\Program Files\LibreHardwareService\` | `LibreHardwareService` (LocalSystem, Auto) |
+| PresentMon | v2.5.1 (2026-06-29) | `PresentMon-v2.5.1.msi` + bootstrapper exe + symbols | `C:\Program Files\Intel\PresentMonSharedService\` | `PresentMonSharedService` ("PresentMon Shared Service", Auto) |
+
+Both were verified against a live install: the LHS MSI and the PresentMon MSI
+each register their service (LocalSystem, auto-start) during install. The
+client-side PresentMon API (`pmOpenSession`) discovers the service regardless of
+its name, so the app works unchanged with `PresentMonSharedService`. Service
+names referenced in the README were corrected (`PresentMonService` →
+`PresentMonSharedService`).
+
+Consequences:
+- `setup-telemetry.bat` runs the two MSIs silently; it no longer does
+  `sc create` / `sc config`. Idempotency = msiexec repair/upgrade semantics.
+- The zip grows to roughly **230 MB** (LHS MSI 60 MB + PresentMon MSI 158 MB).
+  The user's request was to include both components in the zip, so this is
+  accepted.
+- `binPath` quoting / move-repair concerns disappear: the MSIs install to
+  Program Files, independent of the zip's location.
+
 ## Decision 1 — Package layout
 
 `build-release.ps1` produces `ModernWigiDash-win-x64.zip` that unzips to a single
@@ -35,8 +62,8 @@ ModernWigiDash-win-x64/
 ├─ setup-telemetry.bat           ← optional, one-time, run as Admin
 ├─ LICENSE-ModernWigiDash.txt    ← MIT (app)
 └─ telemetry/
-   ├─ LibreHardwareService/      ← LHS release binaries + its MPL-2.0 LICENSE
-   ├─ PresentMon/                ← PresentMon Service release binaries + its MIT LICENSE
+   ├─ LibreHardwareService/      ← LibreHardwareService.msi + its MPL-2.0 LICENSE
+   ├─ PresentMon/                ← PresentMon-v2.5.1.msi + its MIT LICENSE
    └─ third-party-licenses/      ← generated NOTICES.txt + upstream license files
 ```
 
@@ -53,19 +80,19 @@ Checked in at `release/setup-telemetry.bat`; copied into the zip as-is.
 Behavior:
 1. **Auto-elevates** if not already admin (UAC prompt via PowerShell), so
    "double-click → yes" is the whole flow.
-2. **Registers + starts both services** with `start= auto` (survive reboots):
-   - `LibreHardwareService` → `telemetry\LibreHardwareService\LibreHardwareService.exe`
-   - `PresentMonService` → `telemetry\PresentMon\PresentMonService.exe`
-   - All paths derive from `%~dp0` so the folder may be unzipped anywhere,
-     including paths with spaces; `binPath` is quoted correctly.
-3. **Idempotent**: existing services are stopped, `sc config` updates the
-   `binPath` to the current folder, and they are restarted — re-running after a
-   move/re-download repairs paths instead of erroring.
-4. **Per-service status output**: `[OK] installed & running` or `[FAIL]` with the
-   `sc` error.
+2. **Runs both MSIs silently** (paths derive from `%~dp0`, quoted):
+   - `msiexec /i "%~dp0telemetry\LibreHardwareService\LibreHardwareService.msi" /qn /norestart`
+   - `msiexec /i "%~dp0telemetry\PresentMon\PresentMon-v2.5.1.msi" /qn /norestart`
+3. **Idempotent**: re-running the same MSI versions performs a repair/upgrade,
+   so "run it once after installing or updating" is all the user ever needs.
+4. **Per-component status output**: `[OK] <name> installed` or `[FAIL] <name>`
+   with the `msiexec` exit code (0 = success).
+5. PresentMon fallback: if the MSI exits non-zero, retry with the Burn
+   bootstrapper `PresentMon-2.5.1-x64.exe /quiet /norestart` before reporting
+   failure (covers prerequisite handling the MSI alone may require).
 
-Uninstall is README-only (`sc stop` + `sc delete` for both names), not a separate
-script.
+Uninstall is README-only: remove both programs via Settings → Apps (or
+`msiexec /x`), then delete the zip folder. No separate script.
 
 ## Decision 3 — `scripts/build-release.ps1`
 
@@ -77,15 +104,16 @@ downloaded third-party binaries into the repo.
    `PublishReadyToRun`, `IncludeNativeLibrariesForSelfExtract`,
    `EnableCompressionInSingleFile`, `DebugType=None`, `DebugSymbols=false`.
    Native (SkiaSharp) PDBs are stripped by the shared build target.
-2. **Download pinned LHS + PresentMon** release zips from GitHub into a build-time
-   cache. Versions are script constants, overridable via
+2. **Download pinned LHS + PresentMon** release **MSIs** from GitHub into a
+   build-time cache. Versions are script constants, overridable via
    `-LhsVersion` / `-PresentMonVersion`:
-   - LHS zip → `telemetry\LibreHardwareService\`
-   - PresentMon zip → extract its `Service/` subfolder only → `telemetry\PresentMon\`
+   - `LibreHardwareService.msi` (v0.3.4) → `telemetry\LibreHardwareService\`
+   - `PresentMon-v2.5.1.msi` (v2.5.1) **and** the bootstrapper fallback
+     `PresentMon-2.5.1-x64.exe` → `telemetry\PresentMon\`
 3. **Download upstream license files** verbatim into
    `telemetry\third-party-licenses\` (LHS MPL-2.0 `LICENSE`, PresentMon MIT
-   `LICENSE.txt`) and generate `NOTICES.txt` listing each component and its
-   public source repo.
+   `LICENSE.txt` — raw.githubusercontent.com at the pinned tags) and generate
+   `NOTICES.txt` listing each component and its public source repo.
 4. **Copy the checked-in templates** from `release/`: `README.txt`,
    `setup-telemetry.bat`, plus `LICENSE-ModernWigiDash.txt` (repo root `LICENSE`).
 5. **Zip** the staged folder (with the `ModernWigiDash-win-x64\` root folder
@@ -161,9 +189,9 @@ ModernWigiDash — G.Skill WigiDash widget stack
     The release exe is unsigned. Click  More info -> Run anyway.
 
   Telemetry widgets still "unavailable" after setup-telemetry.bat?
-    - Re-run the batch once (it repairs service paths if you moved the folder).
-    - Check the services in services.msc: LibreHardwareService,
-      PresentMonService — both should be Running / Automatic.
+    - Re-run the batch once (repair/upgrade; safe to repeat).
+    - Check the services in services.msc: LibreHardwareService and
+      "PresentMon Shared Service" — both should be Running / Automatic.
 
 == Updating ==
 
@@ -172,10 +200,11 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 == Uninstalling ==
 
-  1. Delete the ModernWigiDash-win-x64 folder.
-  2. (If you installed telemetry) remove the services, as Admin:
-        sc stop  LibreHardwareService & sc delete  LibreHardwareService
-        sc stop  PresentMonService     & sc delete  PresentMonService
+  1. (If you installed telemetry) remove both programs:
+     Settings -> Apps -> Installed apps ->
+       "LibreHardwareService"     -> Uninstall
+       "Intel PresentMon"         -> Uninstall
+  2. Delete the ModernWigiDash-win-x64 folder.
 
 == License & credits ==
 
@@ -187,29 +216,31 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 ## Error handling & edge cases
 
-- **Move/re-download after install**: `setup-telemetry.bat` re-runs are idempotent
-  and repair `binPath` via `sc config`.
-- **Paths with spaces**: all batch paths derive from `%~dp0`; `binPath` quoted.
+- **Re-run after update**: `setup-telemetry.bat` re-runs are idempotent
+  (msiexec repair/upgrade semantics), and a moved zip folder needs no repair —
+  the MSIs install to Program Files.
+- **MSI prerequisites**: if the PresentMon MSI exits non-zero, the batch retries
+  with the bundled Burn bootstrapper before reporting failure.
 - **Missing display / driver**: README troubleshooting (plug in first, Zadig /
   vendor driver). The app itself degrades to "not connected" with no crash.
 - **Download failure during build**: `build-release.ps1` exits non-zero with the
   failing URL; no partial zip. `-SkipTelemetry` is the escape hatch.
-- **Upstream layout drift**: PresentMon's `Service/` subfolder and LHS zip layout
-  are pinned versions; the manifest printout at the end of the build makes any
-  unexpected file set visible before shipping.
+- **Upstream drift**: versions are pinned constants; the manifest printout at the
+  end of the build makes any unexpected change visible before shipping.
 
 ## Verification
 
 1. Run `scripts/build-release.ps1` end-to-end on the development machine.
 2. Confirm the zip manifest: exe + `Resources/`, `README.txt`,
    `setup-telemetry.bat`, `LICENSE-ModernWigiDash.txt`, `telemetry/` with both
-   services and the license files.
+   MSIs and the license files.
 3. Extract to a **path with spaces** on the real machine; run
    `setup-telemetry.bat` (admin); confirm both services show Running / Automatic
-   in `services.msc`; re-run the batch and confirm idempotent repair.
+   in `services.msc`; re-run the batch and confirm it reports success (repair).
 4. Launch the app with the display attached; confirm Hardware Monitor and
    FPS / Frame Time widgets show live data.
-5. Uninstall path: `sc stop`/`sc delete` both services, delete the folder.
+5. Uninstall path: uninstall both programs via Settings → Apps, delete the
+   folder.
 6. `-SkipTelemetry` produces a valid app-only zip.
 
 ## Out of scope / future
