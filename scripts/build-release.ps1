@@ -1,12 +1,21 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$SkipTelemetry,
+    [string]$Version = "",
     [string]$LhsVersion = "0.3.4",
     [string]$PresentMonVersion = "2.5.1",
-    [string]$OutputZip = "ModernWigiDash-win-x64.zip"
+    [string]$OutputZip = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+# Versioned artifact name (the release standard): the zip is
+# ModernWigiDash-v<semver>-win-x64.zip so every release has a distinct,
+# immutable, sortable filename. When no -Version is given (local ad-hoc
+# builds), fall back to the unversioned name.
+if ([string]::IsNullOrWhiteSpace($OutputZip)) {
+    $OutputZip = if ([string]::IsNullOrWhiteSpace($Version)) { "ModernWigiDash-win-x64.zip" } else { "ModernWigiDash-v$Version-win-x64.zip" }
+}
 
 $Root       = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ReleaseDir = Join-Path $Root "release"
@@ -102,7 +111,15 @@ source is public at the URLs above.
 }
 
 # --- 4. Templates ---
-Copy-Item (Join-Path $ReleaseDir "README.txt") $ZipDir
+$readme = Get-Content (Join-Path $ReleaseDir "README.txt") -Raw
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    # Stamp the version into the user-facing doc so the zip is self-describing.
+    # (Match on the ASCII prefix so the em-dash in the template never matters.)
+    $readme = $readme -replace "ModernWigiDash ", "ModernWigiDash v$Version ", 1
+    $readme = $readme -replace "== Quick Start \(3 steps\) ==",
+        "== Version ==`r`n`r`n  This is release v$Version.`r`n`r`n== Quick Start (3 steps) =="
+}
+[System.IO.File]::WriteAllText((Join-Path $ZipDir "README.txt"), $readme, [System.Text.UTF8Encoding]::new($false))
 Copy-Item (Join-Path $ReleaseDir "setup-telemetry.bat") $ZipDir
 Copy-Item (Join-Path $Root "LICENSE") (Join-Path $ZipDir "LICENSE-ModernWigiDash.txt")
 
