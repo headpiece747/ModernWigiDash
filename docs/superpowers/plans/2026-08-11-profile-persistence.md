@@ -12,7 +12,7 @@
 
 - Test framework is **MSTest**: `[TestClass]` / `[TestMethod]`, AAA pattern, test naming `MethodName_Scenario_ExpectedResult` (`.opencode/rules/dotnet-rules.md`).
 - One type per file, file-scoped namespaces, `sealed` where inheritance is not designed for, `internal` test seams like the rest of the App modules.
-- Do NOT modify `ProfileOps` (Core) or the export/import schema — reuse `ExportJson`, `ImportJson`, `IsImportFileTooLarge`, `ReplaceProfile` exactly as they are.
+- Do NOT modify `ProfileOps` (Core) **except the single backward-compatible `sanitize` parameter on `ImportJson`** (final-review finding C1: the app's own profile must NOT run the untrusted-import sanitizer — it would wipe Hotkey `ActionCommand`, Picture `ImagePath` (absolute paths → `""`), and page `BackgroundImagePath` at every restart). `ExportJson`, `IsImportFileTooLarge`, `ReplaceProfile` are used exactly as they are.
 - File path: `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ModernWigiDash", "profile.json")`.
 - Debounce delay: **2 seconds** (single constant in the module).
 - Save failure is logged via the injected `Action<string>` sink, never thrown.
@@ -32,7 +32,7 @@ The module's core surface: the LocalAppData path, `Load` (sanitized via the exis
 - Modify: `ModernWigiDash.App/MainWindow.xaml.cs:16` (remove the dead `ProfilePath` constant — done in Task 3; not here)
 
 **Interfaces:**
-- Consumes: `ProfileOps.ExportJson(ProfileLayout)` → `string`; `ProfileOps.ImportJson(string, WidgetPluginLoader, IModernWigiDashContext)` → `ProfileLayout?`; `ProfileOps.IsImportFileTooLarge(long)` → `bool`; `ProfileLayout`, `WidgetPluginLoader`, `IModernWigiDashContext` (all existing, unchanged).
+- Consumes: `ProfileOps.ExportJson(ProfileLayout)` → `string`; `ProfileOps.ImportJson(string, WidgetPluginLoader, IModernWigiDashContext, bool sanitize = true)` → `ProfileLayout?` (the `sanitize` parameter is added by this plan's C1 fix — the app's own file loads with `sanitize: false` so the untrusted-import rules never wipe user-configured paths/commands); `ProfileOps.IsImportFileTooLarge(long)` → `bool`; `ProfileLayout`, `WidgetPluginLoader`, `IModernWigiDashContext` (all existing).
 - Produces: `ProfilePersistence` with `static string DefaultProfilePath()`, `string ProfilePath`, `ProfileLayout? Load(WidgetPluginLoader, IModernWigiDashContext)`, `void Save()`, `void MarkDirty()`, `void Flush()`, `void Dispose()`. Ctor: `(string profilePath, Func<ProfileLayout> profileProvider, TimeSpan? debounceDelay = null, TimeProvider? timeProvider = null, Action<string>? log = null)`.
 
 - [ ] **Step 1: Write the failing tests for path, load, and save**
@@ -129,6 +129,58 @@ public sealed class ProfilePersistenceTests
     }
 
     [TestMethod]
+    public void Load_TrustedFile_PreservesUserConfiguredValues()
+    {
+        // C1 regression: the app's own profile must load WITHOUT the
+        // untrusted-import sanitizer, which would wipe the user's configured
+        // Hotkey ActionCommand, absolute Picture ImagePath, and page
+        // BackgroundImagePath at every restart.
+        string path = Path.Combine(NewTempDir(), "profile.json");
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(HotkeyButtonWidget));
+        loader.RegisterBuiltInPlugin(typeof(PictureAndGifWidget));
+        var context = new TestContext();
+
+        var source = new ProfileLayout
+        {
+            Pages =
+            [
+                new PageLayout
+                {
+                    PageName = "P1",
+                    BackgroundImagePath = @"C:\Wallpapers\page-bg.png",
+                    Widgets =
+                    [
+                        new PlacedWidgetInstance
+                        {
+                            PluginId = "hotkey_button",
+                            X = 0, Y = 0, Width = 203, Height = 148,
+                            PropertyValues = new Dictionary<string, object?> { ["ActionCommand"] = @"C:\Tools\launch.bat" }
+                        },
+                        new PlacedWidgetInstance
+                        {
+                            PluginId = "picture_viewer",
+                            X = 203, Y = 0, Width = 406, Height = 296,
+                            PropertyValues = new Dictionary<string, object?> { ["ImagePath"] = @"C:\Pictures\Wallpapers" }
+                        }
+                    ]
+                }
+            ]
+        };
+        File.WriteAllText(path, ProfileOps.ExportJson(source));
+
+        var persistence = new ProfilePersistence(path, static () => SampleProfile());
+        var loaded = persistence.Load(loader, context);
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(@"C:\Wallpapers\page-bg.png", loaded.Pages[0].BackgroundImagePath);
+        var hotkey = loaded.Pages[0].Widgets[0];
+        Assert.AreEqual(@"C:\Tools\launch.bat", hotkey.PropertyValues["ActionCommand"]);
+        var picture = loaded.Pages[0].Widgets[1];
+        Assert.AreEqual(@"C:\Pictures\Wallpapers", picture.PropertyValues["ImagePath"]);
+    }
+
+    [TestMethod]
     public void Load_OversizedFile_ReturnsNull()
     {
         string path = Path.Combine(NewTempDir(), "profile.json");
@@ -190,6 +242,48 @@ public sealed class ProfilePersistenceTests
 Run: `dotnet test ModernWigiDash.slnx -c Release --nologo --filter "ProfilePersistenceTests" -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ -nodeReuse:false`
 Expected: build fails — `ProfilePersistence` does not exist.
 
+- [ ] **Step 2b: Add the `sanitize` parameter to `ProfileOps.ImportJson` (C1)**
+
+In `ModernWigiDash.Core/Models/ProfileOps.cs`, change `ImportJson`'s signature and its sanitizer call — the one backward-compatible Core change this plan makes. Existing callers (manual import, tests) keep the default; the app's own file passes `sanitize: false` so the untrusted rules never wipe user-configured values:
+
+```csharp
+    public static ProfileLayout? ImportJson(
+        string json,
+        WidgetPluginLoader loader,
+        IModernWigiDashContext context,
+        bool sanitize = true)
+    {
+        try
+        {
+            var loaded = JsonSerializer.Deserialize<ProfileLayout>(json);
+            if (loaded is null) return null;
+
+            // The app's own persisted profile is TRUSTED input: skipping the
+            // untrusted-import sanitizer preserves the user's configured
+            // ActionCommand / ImagePath / BackgroundImagePath values (the
+            // sanitizer's SafeRelativePath and ActionCommand clear would wipe
+            // them on every restart). Manual imports stay sanitized (default).
+            if (sanitize)
+            {
+                SanitizeImportedProfile(loaded);
+            }
+
+            foreach (var page in loaded.Pages)
+            {
+                foreach (var placed in page.Widgets)
+                {
+                    RehydrateWidget(loader, context, placed);
+                }
+            }
+            return loaded;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+```
+
 - [ ] **Step 3: Write the implementation**
 
 Create `ModernWigiDash.App/ProfilePersistence.cs`:
@@ -207,7 +301,7 @@ namespace ModernWigiDash.App;
 /// MarkDirty/Flush policy. The 30 FPS render loop never touches this module —
 /// only user mutations arm the debounce.
 /// </summary>
-public sealed class ProfilePersistence
+public sealed class ProfilePersistence : IDisposable
 {
     public const string DirectoryName = "ModernWigiDash";
     public const string FileName = "profile.json";
@@ -250,6 +344,9 @@ public sealed class ProfilePersistence
     /// Reads and sanitizes the persisted profile through the existing import
     /// pipeline (caps + rehydration). Returns null when absent, oversized,
     /// corrupt, or unparseable — the caller falls back to the starter profile.
+    /// The app's own file loads as TRUSTED input (sanitize: false): the
+    /// untrusted-import rules would wipe the user's configured ActionCommand,
+    /// absolute ImagePath, and BackgroundImagePath on every restart.
     /// </summary>
     public ProfileLayout? Load(WidgetPluginLoader loader, IModernWigiDashContext context)
     {
@@ -261,7 +358,7 @@ public sealed class ProfilePersistence
                 _log?.Invoke($"Profile file too large ({new FileInfo(_profilePath).Length} bytes); ignoring");
                 return null;
             }
-            return ProfileOps.ImportJson(File.ReadAllText(_profilePath), loader, context);
+            return ProfileOps.ImportJson(File.ReadAllText(_profilePath), loader, context, sanitize: false);
         }
         catch (Exception ex)
         {
@@ -494,23 +591,17 @@ The window loads the persisted profile at startup through `ProfilePersistence`, 
 
 - [ ] **Step 1: Remove the dead constant**
 
-In `ModernWigiDash.App/MainWindow.xaml.cs:16`, delete:
-
-```csharp
-    private static readonly string ProfilePath = Path.Combine(LogDirectory, "logs/profile.json");
-```
-
-(This constant is referenced nowhere — verified by the previous design review; it is a leftover stub with a broken double-`logs` path.)
+The plan's design review found `private static readonly string ProfilePath = Path.Combine(LogDirectory, "logs/profile.json");` at line 16. **Verify first**: it may already be gone (an earlier dead-code cleanup removed it; if `Select-String -Pattern "ProfilePath" MainWindow.xaml.cs` finds nothing, skip this step).
 
 - [ ] **Step 2: Add the field and constructor wiring**
 
-Add the field with the other module fields (near `_pageTabs`):
+Add the field with the other module fields (near `_pageTabs`). The `_profile` field in this file is **non-nullable** (`private ProfileLayout _profile;`) — do NOT annotate it nullable (that cascades ~10 CS8602s at existing dereference sites). No initializer needed (the ctor assigns it):
 
 ```csharp
-    private ProfilePersistence _profilePersistence = null!;
+    private ProfilePersistence _profilePersistence;
 ```
 
-In the ctor, before the "4. Setup Default Profile Layout" block (before the `StarterProfile` construction at line 163-166), add:
+In the ctor, before the "4. Setup Default Profile Layout" block (before the `StarterProfile` construction at lines 163-166), add:
 
 ```csharp
         // Profile persistence: load the saved profile at startup, falling back
@@ -522,16 +613,16 @@ In the ctor, before the "4. Setup Default Profile Layout" block (before the `Sta
             log: msg => FileLog.Write($"[PROFILE] {msg}"));
 ```
 
-Then replace the starter block (lines 163-166):
+Then replace the starter block (lines 163-166). **Assign `_profile` before the first-launch `Save()`** — a Save that runs while `_profile` is still null writes `"null"` (ExportJson(null)); the `?? ` coalesce assigns first, the `is null` check then decides whether to persist the fresh starter (warning-free: no `ProfileLayout?` → non-nullable field assignment). The provider lambda keeps `_profile!`: the lambda is created before the ctor assigns `_profile` (the existing `InputState` lambda at line 130 uses the same `!` for the same reason — a plain `_profile` capture warns CS8603 there):
 
 ```csharp
         // 4. Load the persisted profile, or build the starter profile on first
         //    launch. A first launch persists the starter immediately so the
         //    file exists before any mutation.
-        _profile = _profilePersistence.Load(_loader, this);
-        if (_profile is null)
+        var loaded = _profilePersistence.Load(_loader, this);
+        _profile = loaded ?? new StarterProfile(_loader, this).Create();
+        if (loaded is null)
         {
-            _profile = new StarterProfile(_loader, this).Create();
             _profilePersistence.Save();
         }
         _pageTabs.Rebuild(_profile);
@@ -541,6 +632,16 @@ Then replace the starter block (lines 163-166):
 
 Run: `dotnet build ModernWigiDash.slnx -c Release --nologo`
 Expected: succeeds — the window compiles with the new wiring; the `FileLog`/`StarterProfile` references resolve.
+
+- [ ] **Step 3b: Test-path seam (I2)**
+
+The window ctor hardcodes `ProfilePersistence.DefaultProfilePath()` — test processes that construct `MainWindow` would read/write the real `%LocalAppData%\ModernWigiDash\profile.json` (the `Closed` handler's `Flush()` rewrites it). Add an internal ctor overload accepting the profile path (the transport-factory precedent — the existing test ctor already takes `IPresentMonNative`):
+
+1. Change the existing internal test ctor `internal MainWindow(IPresentMonNative presentMonNative)` into a delegating ctor: `internal MainWindow(IPresentMonNative presentMonNative) : this(presentMonNative, ProfilePersistence.DefaultProfilePath()) { }`.
+2. Add `internal MainWindow(IPresentMonNative presentMonNative, string profilePath)` — the body of the old ctor — and use `profilePath` in the `ProfilePersistence` construction instead of `ProfilePersistence.DefaultProfilePath()`.
+3. The public ctor `MainWindow() : this(new PresentMonNative())` is unchanged.
+
+Existing window tests keep compiling unchanged (the one-arg internal ctor still exists); the new overload lets a future window-level persistence test inject a temp path.
 
 - [ ] **Step 4: Run the existing window-level tests**
 
@@ -580,7 +681,26 @@ In `ModernWigiDash.App/MainWindow.Context.cs`, inside `PersistProperty`, after `
         }
 ```
 
-This single seam covers every widget property write: inspector write-back, icon-grab moves, and widget `OnTouch` toggles (all route through `ModernWidgetBase.SetProperty` → context `PersistProperty`).
+This single seam covers every widget property write routed through `ModernWidgetBase.SetProperty` (icon-grab moves, widget `OnTouch` toggles) — but NOT the inspector panel (final-review finding I1): `InspectorController.TransformChanged` / `OpacityChanged` / `ApplyPropertyValue` write the placed instance directly, bypassing `SetProperty`/`PersistProperty`. The inspector hooks are Step 1b below.
+
+- [ ] **Step 1b: Hook the inspector write-back path (I1)**
+
+The inspector's three write paths never reach `PersistProperty`, so they never arm the debounce. Wire `MarkDirty` at the window's forwarders and the controller's apply seam:
+
+In `MainWindow.xaml.cs`, the existing forwarders `Transform_Changed` and `SliderOpacity_ValueChanged` (both already `_wired`-guarded) forward to the inspector controller — add `_profilePersistence.MarkDirty();` after the forward:
+
+```csharp
+    private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!_wired) return;
+        _inspector.OpacityChanged(sender, e);
+        _profilePersistence.MarkDirty();
+    }
+```
+
+(Find the `Transform_Changed` forwarder in the same event-forwarding region and add the same line after it.)
+
+The custom-property editors (inspector `ApplyPropertyValue` → writes `PropertyValues` directly) need a callback seam. In `ModernWigiDash.App/Inspector/InspectorController.cs`, add an optional ctor parameter `Action? onProfileChanged = null`, store it, and invoke it at the end of `ApplyPropertyValue` (after the `PropertyValues` write), `TransformChanged` (after the writes), and `OpacityChanged` (after the write) — each only when a value was actually written (past the `_isUpdatingInspector`/null guard). Wire it in MainWindow's ctor: `new Inspector.InspectorController(..., onProfileChanged: () => _profilePersistence.MarkDirty())`.
 
 - [ ] **Step 2: Hook the page/widget structural seams**
 

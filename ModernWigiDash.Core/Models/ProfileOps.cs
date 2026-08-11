@@ -348,14 +348,26 @@ public static class ProfileOps
     /// launch) are cleared, and image/icon paths are restricted to safe
     /// relative paths.
     /// </summary>
-    public static ProfileLayout? ImportJson(string json, WidgetPluginLoader loader, IModernWigiDashContext context)
+    public static ProfileLayout? ImportJson(
+        string json,
+        WidgetPluginLoader loader,
+        IModernWigiDashContext context,
+        bool sanitize = true)
     {
         try
         {
             var loaded = JsonSerializer.Deserialize<ProfileLayout>(json);
             if (loaded is null) return null;
 
-            SanitizeImportedProfile(loaded);
+            // The app's own persisted profile is TRUSTED input: skipping the
+            // untrusted-import sanitizer preserves the user's configured
+            // ActionCommand / ImagePath / BackgroundImagePath values (the
+            // sanitizer's SafeRelativePath and ActionCommand clear would wipe
+            // them on every restart). Manual imports stay sanitized (default).
+            if (sanitize)
+            {
+                SanitizeImportedProfile(loaded);
+            }
 
             foreach (var page in loaded.Pages)
             {

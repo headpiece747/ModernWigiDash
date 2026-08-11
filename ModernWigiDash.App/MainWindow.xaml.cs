@@ -63,6 +63,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DialogHost _dialogHost;
     private readonly PageTabsView _pageTabs;
 
+    // Profile persistence: loads the saved profile at startup and owns the
+    // debounced save of the current profile (assigned in the ctor before the
+    // profile is loaded).
+    private ProfilePersistence _profilePersistence;
+
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
     private readonly IThemeApplicator _themeApplicator = new ThemeApplicator();
@@ -79,6 +84,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>Test seam: the native PresentMon interop is injected so window
     /// construction never loads the real DLL in the test host.</summary>
     internal MainWindow(IPresentMonNative presentMonNative)
+        : this(presentMonNative, ProfilePersistence.DefaultProfilePath())
+    {
+    }
+
+    /// <summary>Test seam: injects the native PresentMon interop AND the
+    /// persisted-profile path so window-level tests never read/write the real
+    /// LocalAppData profile file.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath)
     {
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
@@ -109,6 +122,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // 2. Populate Catalog UI (sorted alphabetically by display name)
         RefreshCatalog();
+
+        // Profile persistence: owns the LocalAppData path and the debounced
+        // save. Constructed before the host modules so the inspector's
+        // onProfileChanged hook can reference it; the provider lambda only
+        // dereferences _profile at save time (import swaps the reference).
+        _profilePersistence = new ProfilePersistence(
+            profilePath,
+            () => _profile!,
+            log: msg => FileLog.Write($"[PROFILE] {msg}"));
 
         // 3. Build the host modules (input, inspector, dialog host) BEFORE the
         // starter profile. Widget InitializeAsync runs synchronously inside
@@ -148,7 +170,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             tryFindResource: TryFindResource,
             getSelectedWidget: () => _selectedWidget,
             requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
-            _dialogHost);
+            _dialogHost,
+            onProfileChanged: () => _profilePersistence.MarkDirty());
 
         // Page-tabs strip module: owns tab construction, the wheel scroll, and
         // scroll-into-view; the window keeps only the page-action seams.
@@ -160,9 +183,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
             RenamePage,
             DeletePage);
 
-        // 4. Setup Default Profile Layout with 3 cool starter widgets
-        var starterProfile = new StarterProfile(_loader, this);
-        _profile = starterProfile.Create();
+        // 4. Load the persisted profile, or build the starter profile on first
+        //    launch. A first launch persists the starter immediately so the
+        //    file exists before any mutation.
+        var loaded = _profilePersistence.Load(_loader, this);
+        _profile = loaded ?? new StarterProfile(_loader, this).Create();
+        if (loaded is null)
+        {
+            _profilePersistence.Save();
+        }
         _pageTabs.Rebuild(_profile);
 
         // 5. Route device touch input through the single input module. Display
@@ -214,6 +243,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
             App.IsClosing = true;
             try
             {
+                // Persist before teardown: a clean exit always lands the final
+                // profile state (including the last active page index).
+                _profilePersistence.Flush();
+                _profilePersistence.Dispose();
                 _framePump.Dispose();
                 _telemetry.Dispose();
                 _presenter.Dispose();
@@ -329,6 +362,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // the machine (page navigation + widget touch routing).
         if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed) && changed)
         {
+            _profilePersistence.MarkDirty();
             _inspector.RefreshTransforms();
             SkiaCanvas.InvalidateVisual();
         }
@@ -355,6 +389,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (iconMoved)
             _inspector.Refresh();
 
+        if (wasManipulating)
+        {
+            _profilePersistence.MarkDirty();
+        }
+
         SkiaCanvas.ReleaseMouseCapture();
     }
 
@@ -366,12 +405,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (!_wired) return;
         _inspector.TransformChanged(sender, e);
+        _profilePersistence.MarkDirty();
     }
 
     private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!_wired) return;
         _inspector.OpacityChanged(sender, e);
+        _profilePersistence.MarkDirty();
     }
 
     #endregion
@@ -390,6 +431,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
             RefreshSelection(null);
+            _profilePersistence.MarkDirty();
         }
     }
 
@@ -428,6 +470,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             if (placed == null) return;
 
             RefreshSelection(placed);
+            _profilePersistence.MarkDirty();
         }
     }
 
@@ -441,6 +484,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         ProfileOps.RenamePage(page, newName);
         RefreshAfterMutation(_selectedWidget);
+        _profilePersistence.MarkDirty();
     }
 
     private void SwitchToPage(int index)
@@ -458,18 +502,21 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
         RefreshAfterMutation(null);
+        _profilePersistence.MarkDirty();
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
         RefreshAfterMutation(null);
+        _profilePersistence.MarkDirty();
     }
 
     private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
     {
         if (!_wired) return;
         _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
+        _profilePersistence.MarkDirty();
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -528,6 +575,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     // change-handler write-back loop.
                     ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
                     RefreshAfterMutation(null);
+                    _profilePersistence.MarkDirty();
                 }
             }
             catch (Exception ex)
@@ -543,6 +591,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             ProfileOps.ClearPage(_profile.ActivePage);
             RefreshSelection(null);
+            _profilePersistence.MarkDirty();
         }
     }
 
