@@ -93,7 +93,9 @@ public abstract class ModernWidgetBase : IModernWidget
 
         if (property is null)
         {
-            System.Diagnostics.Debug.WriteLine($"SetProperty: property '{propertyName}' not found on {GetType().Name}");
+            string message = $"SetProperty: property '{propertyName}' not found on {GetType().FullName}";
+            System.Diagnostics.Debug.WriteLine(message);
+            FileLog.Write(message);
         }
         else
         {

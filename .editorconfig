@@ -24,7 +24,7 @@ dotnet_diagnostic.S1854.severity = none
 # S2292: Backing fields needed for Dispose pattern with _disposed flag
 dotnet_diagnostic.S2292.severity = none
 
-# S1075: Hardcoded URIs used as default values for configurable WidgetProperty attributes (same pattern as WeatherForecastWidget)
+# S1075: Structurally-literal URIs that cannot be configurable: the fixed Binance WS endpoint (PriceFeedManager.CreateBinanceLoop) and the pack URI to the embedded logo resource (WindowChrome.ApplyDarkTitleBar)
 dotnet_diagnostic.S1075.severity = none
 
 # Style rules the codebase actually follows

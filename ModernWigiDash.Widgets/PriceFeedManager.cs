@@ -176,7 +176,7 @@ public sealed class PriceFeedManager : IDisposable
         {
             // Incremental subscribe is best-effort; the connect-time payload
             // covers the symbols known at that point.
-            System.Diagnostics.Debug.WriteLine($"Incremental feed subscribe failed for {payload}");
+            FileLog.Write($"[PRICE-FEED] Incremental feed subscribe failed for {payload}");
         }
     }
 

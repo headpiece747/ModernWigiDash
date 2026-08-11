@@ -174,7 +174,7 @@ namespace ModernWigiDash.App.LibreHardwareService;
     }
 
     /// <summary>
-    /// Replicates the Service-side <c>LhmSensorReader.UnitFor</c> table, string-keyed
+    /// Replicates LibreHardwareService's <c>UnitFor</c> mapping, string-keyed
     /// on the LHS <c>SensorType.ToString()</c> values.
     /// </summary>
     internal static string UnitFor(string sensorType) => sensorType switch

@@ -41,7 +41,9 @@ public class WidgetPluginLoader
 
         if (_registeredPlugins.ContainsKey(id))
         {
-            System.Diagnostics.Debug.WriteLine($"WidgetPluginLoader: duplicate plugin id '{id}' from {widgetType.FullName}; keeping the first registration");
+            string message = $"WidgetPluginLoader: duplicate plugin id '{id}' from {widgetType.FullName}; keeping the first registration";
+            System.Diagnostics.Debug.WriteLine(message);
+            FileLog.Write(message);
             return;
         }
 
@@ -70,8 +72,9 @@ public class WidgetPluginLoader
         }
         catch (ReflectionTypeLoadException ex)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"WidgetPluginLoader: {ex.LoaderExceptions.Length} type(s) failed to load from {assembly.FullName}; registering the loadable subset");
+            string message = $"WidgetPluginLoader: {ex.LoaderExceptions.Length} type(s) failed to load from {assembly.FullName}; registering the loadable subset";
+            System.Diagnostics.Debug.WriteLine(message);
+            FileLog.Write(message);
             types = ex.Types.OfType<Type>().ToArray();
         }
 
@@ -99,7 +102,9 @@ public class WidgetPluginLoader
         {
             // A widget whose constructor throws must not crash the host; surface
             // the failure so the catalog can show the plugin as broken.
-            System.Diagnostics.Debug.WriteLine($"Widget instantiation failed for {pluginId}: {ex.Message}");
+            string message = $"Widget instantiation failed for {pluginId} ({info.WidgetType.FullName}): {ex.Message}";
+            System.Diagnostics.Debug.WriteLine(message);
+            FileLog.Write(message);
             return null;
         }
     }

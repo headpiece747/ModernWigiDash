@@ -189,8 +189,9 @@ public sealed class ArtworkLoader
 
             _bgColor = ArtworkBackgroundColor.FromSample(sample);
         }
-        catch
+        catch (Exception ex)
         {
+            _logError?.Invoke($"Album art background color extraction failed; using default background: {ex.Message}", ex);
             _bgColor = DefaultBackground;
         }
     }

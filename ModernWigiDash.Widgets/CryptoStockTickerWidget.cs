@@ -223,7 +223,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         }
         catch
         {
-            System.Diagnostics.Debug.WriteLine("Market price fetch failed; keeping last known price");
+            FileLog.Write($"[PRICE-FEED] Market price fetch failed for '{Symbol}'; keeping last known price");
         }
     }
 }

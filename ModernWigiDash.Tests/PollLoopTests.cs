@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
@@ -30,22 +32,30 @@ public class PollLoopTests
     [TestMethod]
     public async Task NotReady_PausesAt500ms_ThenTicksWhenReady()
     {
-        // Arrange
+        // Arrange — readiness checks are timed: the not-ready branch is
+        // `await Task.Delay(500, ct)`, so consecutive checks while not ready
+        // are pinned to the real 500ms pause (not merely "longer than the
+        // test's wait").
         bool ready = false;
         int ticks = 0;
+        var readyChecks = new ConcurrentQueue<long>();
+        var stopwatch = Stopwatch.StartNew();
         using var loop = new PollLoop(
             "T", TimeSpan.FromMilliseconds(20),
-            ready: () => ready,
+            ready: () => { readyChecks.Enqueue(stopwatch.ElapsedMilliseconds); return ready; },
             tick: () => ticks++,
             onTickFailure: () => { },
             log: _ => { });
 
         // Act — not ready: the loop pauses at 500ms instead of ticking
         loop.Start();
-        await Task.Delay(200);
+        await TestWait.WaitUntilAsync(() => readyChecks.Count >= 2, TimeSpan.FromSeconds(2));
 
         // Assert
+        var checks = readyChecks.ToArray();
         Assert.AreEqual(0, ticks, "No tick may fire while not ready.");
+        Assert.IsTrue(checks[1] - checks[0] >= 400,
+            $"Not-ready pause must be ~500ms, measured {checks[1] - checks[0]}ms between readiness checks.");
 
         // Act — ready: ticks resume
         ready = true;

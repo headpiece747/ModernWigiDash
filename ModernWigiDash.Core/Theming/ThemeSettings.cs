@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Core.Theming;
 
@@ -175,10 +176,12 @@ public class ThemeSettings
                 if (loaded != null) return loaded;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Corrupt or unreadable theme file — fall back to defaults
-            System.Diagnostics.Debug.WriteLine("Theme load failed, falling back to defaults");
+            string message = $"Theme load failed, falling back to defaults: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine(message);
+            FileLog.Write(message);
         }
         return new ThemeSettings();
     }

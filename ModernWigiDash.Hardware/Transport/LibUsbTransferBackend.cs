@@ -124,9 +124,10 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
             _device.ReleaseInterface(0);
             _device.Close();
         }
-        catch
+        catch (Exception ex)
         {
             // USB device may already be disconnected
+            FileLog.Write($"[USB-DISPOSE] LibUsb backend dispose failed: {ex.Message}");
         }
     }
 }
