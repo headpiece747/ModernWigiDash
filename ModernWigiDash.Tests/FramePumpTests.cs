@@ -141,4 +141,65 @@ public class FramePumpTests
         Assert.IsNull(error, error?.ToString());
         Assert.AreEqual(0, (int)ticks!, "No callback may fire after Dispose.");
     }
+
+    [TestMethod]
+    public void Start_InvokesOnTick_OncePerCadence()
+    {
+        var (error, result) = RunOnSta(() =>
+        {
+            int ticks = 0;
+            int onTicks = 0;
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var pump = new FramePump(
+                composeAndSend: () => Interlocked.Increment(ref ticks),
+                requestRepaint: () => { },
+                onTick: () => Interlocked.Increment(ref onTicks),
+                interval: TimeSpan.FromMilliseconds(10));
+            pump.Start();
+
+            var observer = new DispatcherTimer(DispatcherPriority.Normal, dispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(120)
+            };
+            observer.Tick += (_, _) =>
+            {
+                observer.Stop();
+                pump.Stop();
+                pump.Dispose();
+                dispatcher.BeginInvokeShutdown(DispatcherPriority.Normal);
+            };
+            observer.Start();
+            Dispatcher.Run();
+            return (ticks, onTicks);
+        });
+
+        Assert.IsNull(error, error?.ToString());
+        var (ticks, onTicks) = result is (int t, int o) ? (t, o) : (0, 0);
+        Assert.IsTrue(ticks >= 3, $"expected at least 3 ticks, got {ticks}");
+        Assert.AreEqual(ticks, onTicks, "onTick must fire exactly once per cadence tick");
+    }
+
+    [TestMethod]
+    public void Dispose_QueuedTick_DoesNotFireOnTick()
+    {
+        // The disposed guard covers the badge callback too: a tick queued just
+        // before Dispose must not run onTick (the window's UpdateUsbBadge)
+        // against torn-down state.
+        var (error, onTicks) = RunOnSta(() =>
+        {
+            int onTicks = 0;
+            var pump = new FramePump(
+                composeAndSend: () => { },
+                requestRepaint: () => { },
+                onTick: () => Interlocked.Increment(ref onTicks));
+
+            pump.Dispose();
+            pump.Tick(); // the queued tick, invoked after Dispose
+
+            return onTicks;
+        });
+
+        Assert.IsNull(error, error?.ToString());
+        Assert.AreEqual(0, (int)onTicks!, "No onTick may fire after Dispose.");
+    }
 }

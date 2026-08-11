@@ -290,14 +290,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        var canvasPos = e.GetPosition(SkiaCanvas);
-        if (canvasPos.X >= 0 && canvasPos.Y >= 0 &&
-            canvasPos.X <= SkiaCanvas.ActualWidth && canvasPos.Y <= SkiaCanvas.ActualHeight)
-            return;
-
-        var inspectorPos = e.GetPosition(InspectorPanel);
-        if (inspectorPos.X >= 0 && inspectorPos.Y >= 0 &&
-            inspectorPos.X <= InspectorPanel.ActualWidth && inspectorPos.Y <= InspectorPanel.ActualHeight)
+        // The click-outside-deselect geometry rule is pure
+        // (MainWindowInputPolicy) — the handler only feeds it the two
+        // element-relative positions.
+        if (!MainWindowInputPolicy.ShouldDeselect(
+                e.GetPosition(SkiaCanvas), new Size(SkiaCanvas.ActualWidth, SkiaCanvas.ActualHeight),
+                e.GetPosition(InspectorPanel), new Size(InspectorPanel.ActualWidth, InspectorPanel.ActualHeight)))
             return;
 
         SelectWidget(null);
@@ -398,7 +396,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if ((e.Key == Key.Delete || e.Key == Key.Back) &&
-            Keyboard.FocusedElement is not TextBox)
+            MainWindowInputPolicy.ShouldHandleDeleteKey(Keyboard.FocusedElement is TextBox))
         {
             DeleteSelectedWidget();
             e.Handled = true;
@@ -506,7 +504,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 // Untrusted input: cap the file read before any parsing — the
                 // same reject-oversized-input spirit as the import sanitizer
                 // caps in ProfileOps.
-                if (new FileInfo(dlg.FileName).Length > ProfileOps.MaxImportFileBytes)
+                if (ProfileOps.IsImportFileTooLarge(new FileInfo(dlg.FileName).Length))
                 {
                     _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
                     return;

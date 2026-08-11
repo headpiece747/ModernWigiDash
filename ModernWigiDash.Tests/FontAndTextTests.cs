@@ -250,6 +250,43 @@ public class FontAndTextTests
         Assert.AreEqual(a.Count, b.Count, "both wrap the same text identically");
     }
 
+    [TestMethod]
+    public void WrapCache_MultipleTexts_EachHitsOnSecondCall()
+    {
+        // The Twitch chat renderer wraps every visible message per frame — a
+        // single-slot cache would evict message N-1 on message N and re-wrap
+        // the whole chat every frame. Each distinct text must hit on its
+        // second call, like the single-slot cache did for one text.
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        const string alpha = "alpha beta gamma delta epsilon zeta";
+        const string beta = "one two three four five six seven eight";
+        const string gamma = "lorem ipsum dolor sit amet consectetur";
+
+        var alpha1 = cache.GetOrWrap(alpha, font, 24f, 100f);
+        var beta1 = cache.GetOrWrap(beta, font, 24f, 100f);
+        var gamma1 = cache.GetOrWrap(gamma, font, 24f, 100f);
+
+        Assert.AreSame(alpha1, cache.GetOrWrap(alpha, font, 24f, 100f), "each distinct text must hit on its second call");
+        Assert.AreSame(beta1, cache.GetOrWrap(beta, font, 24f, 100f), "each distinct text must hit on its second call");
+        Assert.AreSame(gamma1, cache.GetOrWrap(gamma, font, 24f, 100f), "each distinct text must hit on its second call");
+    }
+
+    [TestMethod]
+    public void WrapCache_Bounded_EvictsLeastRecentlyUsed()
+    {
+        var cache = new WrapCache(capacity: 2);
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+
+        var first = cache.GetOrWrap("first text", font, 24f, 100f);
+        var second = cache.GetOrWrap("second text", font, 24f, 100f);
+        var third = cache.GetOrWrap("third text", font, 24f, 100f);
+
+        Assert.AreSame(second, cache.GetOrWrap("second text", font, 24f, 100f), "the live entries must still hit");
+        Assert.AreSame(third, cache.GetOrWrap("third text", font, 24f, 100f), "the live entries must still hit");
+        Assert.AreNotSame(first, cache.GetOrWrap("first text", font, 24f, 100f), "the evicted entry must re-wrap");
+    }
+
     // ── TextRenderHelper: the most-used shared helper (moved from the
     // residual-coverage grab-bag) ──
 

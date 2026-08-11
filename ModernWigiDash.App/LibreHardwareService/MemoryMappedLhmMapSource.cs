@@ -17,12 +17,32 @@ public sealed class MemoryMappedLhmMapSource : ILhmMapSource
     private const int MaxCopyBytes = 128 * 1024 * 1024;
     private static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
+    private readonly Func<string, Mutex> _openMutex;
+    private readonly Func<string, MemoryMappedFile> _openMap;
+
+    /// <summary>Production construction: the real named mutex/map openers.</summary>
+    public MemoryMappedLhmMapSource()
+        : this(Mutex.OpenExisting, name => MemoryMappedFile.OpenExisting(name, MemoryMappedFileRights.Read))
+    {
+    }
+
+    /// <summary>
+    /// Test seam: injected named-mutex/map openers (the WinUsbApi delegate-bag
+    /// shape), so the missing-map, locked-mutex, and copy outcomes are
+    /// scriptable without LibreHardwareService running.
+    /// </summary>
+    internal MemoryMappedLhmMapSource(Func<string, Mutex> openMutex, Func<string, MemoryMappedFile> openMap)
+    {
+        _openMutex = openMutex;
+        _openMap = openMap;
+    }
+
     public byte[]? TryReadSensorsMap(out string? error)
     {
         error = null;
         try
         {
-            using Mutex mutex = Mutex.OpenExisting(SensorsMutexName);
+            using Mutex mutex = _openMutex(SensorsMutexName);
             bool acquired = false;
             byte[] mapBytes;
             try
@@ -42,7 +62,7 @@ public sealed class MemoryMappedLhmMapSource : ILhmMapSource
                     return null;
                 }
 
-                using MemoryMappedFile map = MemoryMappedFile.OpenExisting(SensorsMapName, MemoryMappedFileRights.Read);
+                using MemoryMappedFile map = _openMap(SensorsMapName);
                 using MemoryMappedViewAccessor accessor = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
                 mapBytes = CopyMapBytes(new AccessorMap(accessor));
             }

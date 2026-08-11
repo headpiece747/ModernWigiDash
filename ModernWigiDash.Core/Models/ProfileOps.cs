@@ -119,6 +119,11 @@ public static class ProfileOps
     /// larger is untrusted junk and must be rejected before any parsing.</summary>
     public const long MaxImportFileBytes = 10 * 1024 * 1024;
 
+    /// <summary>True when an import file exceeds <see cref="MaxImportFileBytes"/> —
+    /// the window's pre-read reject rule, so the guard's boundary lives in one
+    /// place with the cap it enforces.</summary>
+    public static bool IsImportFileTooLarge(long fileLength) => fileLength > MaxImportFileBytes;
+
     /// <summary>
     /// Replaces the active profile with an imported one: disposes every widget
     /// instance of <paramref name="current"/> and returns

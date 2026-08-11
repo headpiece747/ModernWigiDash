@@ -130,6 +130,18 @@ public static class WeatherLayout
     };
 
     /// <summary>
+    /// The tap-cycle rule for the persisted string value: a known mode string
+    /// advances through the cycle; an unknown value (a hand-edited profile)
+    /// parses to the default and the cycle must LAND on that default — not
+    /// advance past it — so garbage resets the widget instead of stepping it.
+    /// </summary>
+    internal static WeatherLayoutMode NextMode(string? mode)
+    {
+        WeatherLayoutMode parsed = ParseMode(mode);
+        return mode == DisplayName(parsed) ? NextMode(parsed) : parsed;
+    }
+
+    /// <summary>
     /// The single enum→display-name table — the other copy of the mode names
     /// lives in the widget's <c>[WidgetProperty]</c> choice array, which must
     /// stay a compile-time string literal.

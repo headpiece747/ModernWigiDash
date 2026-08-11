@@ -163,6 +163,18 @@ public class WeatherLayoutTests
     }
 
     [TestMethod]
+    public void NextMode_UnknownMode_LandsOnDefault()
+    {
+        // A hand-edited profile with an unknown LayoutMode string must reset
+        // to the default on tap — not advance past it (the OLD bug: garbage
+        // parsed to Detailed, then the cycle stepped it to Daily Forecast).
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode("Bogus"));
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(null));
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(""));
+        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.NextMode("Detailed"), "a known mode still advances");
+    }
+
+    [TestMethod]
     public void HeroTextStackShrinkScale_Overflow_ScalesTo85PercentOfHeroHeight()
     {
         Assert.AreEqual(0.425f, WeatherLayout.HeroTextStackShrinkScale(200f, 100f), 0.001f);

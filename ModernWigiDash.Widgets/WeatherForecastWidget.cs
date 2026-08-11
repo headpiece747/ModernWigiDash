@@ -606,7 +606,7 @@ public class WeatherForecastWidget : ModernWidgetBase
                 return;
             case WeatherHeaderAction.CycleLayout:
                 SetProperty(nameof(LayoutMode), WeatherLayout.DisplayName(
-                    WeatherLayout.NextMode(WeatherLayout.ParseMode(LayoutMode))));
+                    WeatherLayout.NextMode(LayoutMode)));
                 return;
             default:
                 _ = FetchLiveWeatherAsync(force: true);

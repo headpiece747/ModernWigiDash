@@ -634,6 +634,29 @@ public class ProfileOpsTests
         Assert.IsNull(ProfileOps.ConvertPropertyValue(element, typeof(DateTime)), "Incompatible conversion must return null");
     }
 
+    // ── import size guard ─────────────────────────────────────
+
+    [TestMethod]
+    public void IsImportFileTooLarge_ExactCap_IsAllowed()
+    {
+        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(ProfileOps.MaxImportFileBytes),
+            "a file of exactly the cap bytes is the largest allowed import");
+    }
+
+    [TestMethod]
+    public void IsImportFileTooLarge_OneByteOverCap_IsRejected()
+    {
+        Assert.IsTrue(ProfileOps.IsImportFileTooLarge(ProfileOps.MaxImportFileBytes + 1),
+            "anything past the cap is untrusted junk and must be rejected before parsing");
+    }
+
+    [TestMethod]
+    public void IsImportFileTooLarge_EmptyFile_IsAllowed()
+    {
+        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(0));
+        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(-1));
+    }
+
     [TestMethod]
     public void PageLayout_PageName_EnforcesTrim()
     {

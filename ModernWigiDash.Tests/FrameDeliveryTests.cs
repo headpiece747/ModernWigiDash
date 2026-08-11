@@ -116,7 +116,9 @@ public class FrameDeliveryTests
         // no-buffer path by exhausting with a blocking send.
         Assert.AreEqual(0, delivery.DroppedCount);
 
-        // Pool of 1: acquire twice without release → second push must drop.
+        // Pool of 2 (capacity 1 + the sender's in-flight margin): the first
+        // push after the pin fills the channel, the second exhausts the pool —
+        // acquire three times without release → third push must drop.
         using var blocker = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         using var delivery2 = new FrameDelivery(
@@ -131,7 +133,9 @@ public class FrameDeliveryTests
         delivery2.Push(bitmap);
         Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
 
-        // The pooled buffer is in flight; a second push has no buffer to acquire.
+        // The pooled buffer is in flight; the margin buffer fills the channel.
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery2.Push(bitmap), "The in-flight-margin buffer must queue (channel has room)");
+        // Both buffers are now in flight — a third push has nothing to acquire.
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery2.Push(bitmap));
         Assert.AreEqual(1, delivery2.DroppedCount);
         release.Set();
@@ -326,6 +330,9 @@ public class FrameDeliveryTests
         delivery.Push(bitmap);
         Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
 
+        // Pool of 2 (capacity 1 + the sender's in-flight margin): the first
+        // push after the pin fills the channel, the second exhausts the pool.
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "The in-flight-margin buffer must queue (channel has room)");
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
         release.Set();
 

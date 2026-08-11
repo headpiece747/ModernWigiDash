@@ -13,7 +13,7 @@
     <PackageVersion Include="NAudio.Wasapi" Version="2.3.0" />
     <PackageVersion Include="SkiaSharp" Version="4.151.1" />
     <PackageVersion Include="SkiaSharp.Views.WPF" Version="4.151.1" />
-    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.31.0.145097" />
+    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.32.0.713" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
   </ItemGroup>
 </Project>

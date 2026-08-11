@@ -56,8 +56,10 @@ public sealed class FrameDelivery : IDisposable
     /// <param name="minInterval">Minimum interval between transport sends
     /// (default 33ms ≈ 30 FPS, the device capability).</param>
     /// <param name="timeProvider">Clock for pacing; tests substitute a fake.</param>
-    /// <param name="capacity">Bounded channel capacity (DropOldest) and pool
-    /// pre-allocation (in-flight maximum + margin).</param>
+    /// <param name="capacity">Bounded channel capacity (DropOldest). The buffer
+    /// pool pre-allocates capacity + 1 — the in-flight maximum is the channel
+    /// (capacity) plus the sender's held slot (1), so the pool must cover both
+    /// or backlog pressure would exhaust it before the coalescer drops.</param>
     /// <param name="log">Optional log sink for send/drop lines.</param>
     internal FrameDelivery(
         IRgb565Encoder? encoder = null,
@@ -72,8 +74,14 @@ public sealed class FrameDelivery : IDisposable
         {
             // The pool is sized from the encoder's output — an exact-size pool
             // that disagrees with the encoder (whose releases would be
-            // silently discarded) is unrepresentable by construction.
-            _pool = new FrameBufferPool(encoder.OutputBufferSize, capacity);
+            // silently discarded) is unrepresentable by construction. The +1
+            // margin covers the sender's in-flight slot: while the transport
+            // is stalled, the channel holds up to `capacity` frames and the
+            // sender holds one more, so a pool of exactly `capacity` would
+            // exhaust (DroppedPoolCount) before the coalescer ever saw the
+            // backlog. Sized capacity + 1, backlog drops stay coalescer drops
+            // until the channel itself is full.
+            _pool = new FrameBufferPool(encoder.OutputBufferSize, capacity + 1);
         }
 
         _encoder = encoder;

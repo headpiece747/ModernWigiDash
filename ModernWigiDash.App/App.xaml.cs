@@ -9,11 +9,11 @@ public partial class App : Application
 {
     private static readonly string CrashLogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
 
-    /// <summary>True once the window's close/teardown sequence begins. Only
-    /// OperationCanceledExceptions raised while closing are benign (expected
-    /// during teardown); an OCE at any other time propagates so a genuine
-    /// cancellation crash stays visible. Set by MainWindow's Closed handler
-    /// before any teardown dispose runs.</summary>
+    /// <summary>True once the window's close/teardown sequence begins. Teardown
+    /// cancels in-flight work, so OperationCanceledExceptions raised while
+    /// closing are expected; an OCE at any other time is benign only when its
+    /// own token is cancelled (see <see cref="CrashSuppression"/>). Set by
+    /// MainWindow's Closed handler before any teardown dispose runs.</summary>
     internal static volatile bool IsClosing;
 
     public App()
@@ -36,10 +36,11 @@ public partial class App : Application
 
         DispatcherUnhandledException += (s, e) =>
         {
-            // Only cancellation-type failures raised during the close/teardown
-            // sequence are benign; everything else propagates so a real crash
-            // is visible.
-            bool benign = e.Exception is OperationCanceledException && IsClosing;
+            // Only cancellation-type failures are benign: an OCE whose token
+            // is cancelled (the operation was cancelled by design, wherever
+            // it lands) or any OCE raised during the close/teardown sequence.
+            // Everything else propagates so a real crash is visible.
+            bool benign = CrashSuppression.ShouldSuppress(e.Exception, IsClosing);
             LogCrash(e.Exception, handled: benign);
             e.Handled = benign;
         };
