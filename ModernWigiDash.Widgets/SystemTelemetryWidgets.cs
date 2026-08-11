@@ -95,12 +95,6 @@ public class HardwareMonitorWidget : ModernWidgetBase
         string label = string.IsNullOrWhiteSpace(DisplayLabel) ? reading.Label : DisplayLabel;
         string unit = string.IsNullOrWhiteSpace(Unit) ? reading.Unit : Unit;
 
-        _history.Enqueue(value);
-        while (_history.Count > HistoryCapacity)
-        {
-            _history.Dequeue();
-        }
-
         switch (SystemTelemetryDisplayModeParser.Parse(DisplayMode))
         {
             case SystemTelemetryDisplayMode.Bar:
@@ -163,7 +157,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// its own metrics, the other modes use 0 for a fixed baseline.</param>
     /// <param name="baselineFromValue">Fraction of the measured value height
     /// added to <paramref name="baselineAnchor"/> for the baseline.</param>
-    private static void DrawHeroValue(
+    private void DrawHeroValue(
         SKCanvas canvas,
         float value,
         int decimals,
@@ -178,7 +172,18 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float unitOffset,
         bool rightAligned = false)
     {
-        string valStr = value.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+        // The formatted value is memoized per (value bits, decimals): the
+        // reading updates ~1×/s, so identical inputs render the cached string
+        // (bit-exact keying keeps -0.0 distinct from 0.0).
+        int valueBits = BitConverter.SingleToInt32Bits(value);
+        if (valueBits != _lastValueBits || decimals != _lastValueDecimals)
+        {
+            _lastValueBits = valueBits;
+            _lastValueDecimals = decimals;
+            _lastValueText = value.ToString(ValueFormats[decimals], CultureInfo.InvariantCulture);
+        }
+        string valStr = _lastValueText;
+
         var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
         using var valPaint = new SKPaint { Color = valueColor, IsAntialias = true };
         valFont.MeasureText(valStr, out var valBounds, valPaint);
@@ -195,6 +200,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
     }
 
+    // The hero-value format cache: one slot per widget, keyed bit-exactly on
+    // the value and the decimal count. ValueFormats precomputes the "F{n}"
+    // format strings (decimals is clamped to 0..3 before this is called).
+    private int _lastValueBits = int.MinValue;
+    private int _lastValueDecimals = -1;
+    private string _lastValueText = "";
+    private static readonly string[] ValueFormats = ["F0", "F1", "F2", "F3"];
+
     private void RenderGauge(SKCanvas canvas, SKRect bounds, string label, float value, float max, string unit, int decimals, SKColor accent, SKColor text)
     {
         float pad = 16f;
@@ -207,15 +220,11 @@ public class HardwareMonitorWidget : ModernWidgetBase
         var arcBounds = new SKRect(cx - radius, cy - radius, cx + radius, cy + radius);
 
         using var trackPaint = new SKPaint { Color = text.WithAlpha(20), Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        var trackPath = new SKPathBuilder();
-        trackPath.AddArc(arcBounds, 135f, 270f);
-        canvas.DrawPath(trackPath.Snapshot(), trackPaint);
+        canvas.DrawArc(arcBounds, 135f, 270f, false, trackPaint);
 
         float progress = GaugeFraction(value, max);
         using var progressPaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        var progressPath = new SKPathBuilder();
-        progressPath.AddArc(arcBounds, 135f, 270f * progress);
-        canvas.DrawPath(progressPath.Snapshot(), progressPaint);
+        canvas.DrawArc(arcBounds, 135f, 270f * progress, false, progressPaint);
 
         DrawHeroValue(canvas, value, decimals, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), unit, 11f, 4f);
     }
@@ -255,6 +264,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
     {
         float pad = 16f;
         DrawHeader(canvas, bounds, label, pad, text);
+
+        // The sparkline is the only consumer of the history buffer, so the
+        // sample is appended here — Gauge/Bar/Value frames skip the queue work.
+        _history.Enqueue(value);
+        while (_history.Count > HistoryCapacity)
+        {
+            _history.Dequeue();
+        }
 
         float graphTop = bounds.Top + 40f;
         float graphBottom = bounds.Bottom - pad;

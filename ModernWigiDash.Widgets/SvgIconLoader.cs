@@ -6,11 +6,13 @@ namespace ModernWigiDash.Widgets;
 
 public static class SvgIconLoader
 {
-    // File-existence probes are cached per path: Render hit-tests the icon
-    // geometry every frame, and File.Exists per frame is a filesystem hit. The
-    // parsed path is cached in SvgPathCache anyway, so the probe result is
-    // stable for the process lifetime of a given path.
-    private static readonly ConcurrentDictionary<string, byte> ExistenceCache = new(StringComparer.OrdinalIgnoreCase);
+    // File-existence probes are cached per path — positive and negative alike:
+    // Render hit-tests the icon geometry every frame, and File.Exists per
+    // frame is a filesystem hit. The parsed path is cached in SvgPathCache
+    // anyway, so the probe result is stable for the process lifetime of a
+    // given path. CopyToIcons (the one runtime path that adds icon files)
+    // refreshes the entry, so a copied icon appears on the next frame.
+    private static readonly ConcurrentDictionary<string, bool> ExistenceCache = new(StringComparer.OrdinalIgnoreCase);
 
     public static string IconsDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -29,7 +31,9 @@ public static class SvgIconLoader
     {
         Directory.CreateDirectory(IconsDirectory);
         string fileName = $"{Path.GetFileNameWithoutExtension(sourcePath)}_{Guid.NewGuid():N}.svg";
-        File.Copy(sourcePath, Path.Combine(IconsDirectory, fileName));
+        string destination = Path.Combine(IconsDirectory, fileName);
+        File.Copy(sourcePath, destination);
+        ExistenceCache[destination] = true;
         return fileName;
     }
 
@@ -39,17 +43,15 @@ public static class SvgIconLoader
         string fullPath = ResolveFullPath(iconFile);
         if (string.IsNullOrWhiteSpace(fullPath)) return false;
 
-        // Only positive results are cached: an icon copied into IconsDirectory
-        // at runtime (the picker's flow) must become visible on the next frame,
-        // so negatives are re-probed each call.
-        if (ExistenceCache.ContainsKey(fullPath) || File.Exists(fullPath))
+        // Existence is cached per path — a missing IconFile must not hit the
+        // filesystem 30×/s. CopyToIcons refreshes the entry when it adds a
+        // file, so a runtime-copied icon still appears on the next frame.
+        if (!ExistenceCache.TryGetValue(fullPath, out bool exists))
         {
-            ExistenceCache.TryAdd(fullPath, 0);
+            exists = File.Exists(fullPath);
+            ExistenceCache.TryAdd(fullPath, exists);
         }
-        else
-        {
-            return false;
-        }
+        if (!exists) return false;
 
         path = SvgIconHelper.SvgPathCache.GetOrParse(fullPath, () =>
             TryExtractSinglePathData(fullPath, out string? pathData) && !string.IsNullOrWhiteSpace(pathData)

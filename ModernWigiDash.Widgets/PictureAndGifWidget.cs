@@ -288,6 +288,8 @@ public class PictureAndGifWidget : ModernWidgetBase
         _folderScanned = false;
         _imageIndex = 0;
         _lastProbePath = "";
+        _clipPath?.Dispose();
+        _clipPath = null;
 
         // UI thread (inspector property change / teardown): nothing is mid-draw
         // right now, so dispose retired media promptly instead of waiting for
@@ -307,19 +309,32 @@ public class PictureAndGifWidget : ModernWidgetBase
     private static long FrameDurationMs(long[]? durations, int frameIndex)
         => durations is { Length: > 0 } ? durations[Math.Min(frameIndex, durations.Length - 1)] : 100L;
 
+    // The rounded clip path is cached per (bounds, radius): the media draw
+    // clips every frame, but the geometry changes only on a resize or a
+    // corner-radius edit.
+    private SKPath? _clipPath;
+    private SKRect _clipBounds;
+    private float _clipRadius = -1f;
+
     private void DrawImage(SKCanvas canvas, SKRect bounds, SKBitmap bitmap)
     {
         if (bitmap == null) return;
 
         canvas.Save();
         float radius = Math.Clamp(CornerRadius, 0f, Math.Min(bounds.Width, bounds.Height) / 2f);
-        using (var clipBuilder = new SKPathBuilder())
+        if (_clipPath is null || _clipBounds != bounds
+            || BitConverter.SingleToInt32Bits(_clipRadius) != BitConverter.SingleToInt32Bits(radius))
         {
-            clipBuilder.AddRoundRect(bounds, radius, radius);
-            using var clipPath = clipBuilder.Snapshot();
-            canvas.ClipPath(clipPath);
-            canvas.DrawBitmap(bitmap, GetDrawRect(bounds, bitmap.Width, bitmap.Height), new SKSamplingOptions(SKFilterMode.Linear));
+            _clipBounds = bounds;
+            _clipRadius = radius;
+            _clipPath ??= new SKPath();
+#pragma warning disable CS0618 // SKPath.Rewind/AddRoundRect are obsolete in favor of SKPathBuilder, whose Snapshot() allocates a new SKPath per call — the clip path object is reused and rebuilt instead (zero-alloc hot path).
+            _clipPath.Rewind();
+            _clipPath.AddRoundRect(bounds, radius, radius);
+#pragma warning restore CS0618
         }
+        canvas.ClipPath(_clipPath);
+        canvas.DrawBitmap(bitmap, GetDrawRect(bounds, bitmap.Width, bitmap.Height), new SKSamplingOptions(SKFilterMode.Linear));
         canvas.Restore();
     }
 

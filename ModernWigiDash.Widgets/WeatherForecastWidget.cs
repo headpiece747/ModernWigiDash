@@ -72,6 +72,20 @@ public class WeatherForecastWidget : ModernWidgetBase
     private double _highTempC = 26.6;   // 80°F default
     private double _lowTempC = 20.5;    // 69°F default
 
+    // The card fill/stroke paints behind every pill, row, and column — one
+    // shared pair, colors swapped via Paint.Color mutation (hoisted out of the
+    // per-card loops).
+    private readonly SKPaint _cardFillPaint = new() { IsAntialias = true };
+    private readonly SKPaint _cardStrokePaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true };
+    private readonly SKPaint _metricPaint = new() { IsAntialias = true };
+    private readonly SKPaint _dayPaint = new() { IsAntialias = true };
+    private readonly SKPaint _iconPaint = new() { IsAntialias = true };
+    private readonly SKPaint _descPaint = new() { IsAntialias = true };
+    private readonly SKPaint _tempPaint = new() { IsAntialias = true };
+    private readonly SKPaint _timePaint = new() { IsAntialias = true };
+    private readonly SKPaint _rangePaint = new() { IsAntialias = true };
+    private readonly SKPaint _dayIconPaint = new() { IsAntialias = true };
+
     internal readonly List<DailyForecastItem> _dailyForecasts = [];
     internal readonly List<HourlyForecastItem> _hourlyForecasts = [];
     private readonly Lock _forecastGate = new();
@@ -80,6 +94,13 @@ public class WeatherForecastWidget : ModernWidgetBase
     private int _forecastVersion;
     private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
+
+    // The render-model cache: every formatted string the draw paths need is
+    // rebuilt only when (data version, bounds, property snapshot) changes —
+    // weather data moves at most every 15 minutes, so the static scene
+    // allocates nothing on the 30 FPS render path.
+    private int _dataVersion;
+    private WeatherRenderModel? _renderModel;
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
     private PollLoop? _refreshPoll;
@@ -156,19 +177,16 @@ public class WeatherForecastWidget : ModernWidgetBase
 
         var (sx, sy, s) = WeatherLayout.Scale(bounds);
         var header = WeatherLayout.ComputeHeader(bounds, s, sy);
+        var (tempUnit, speedUnit) = WeatherPresentation.ParseUnitSystem(UnitSystem);
+
+        // The render model owns every formatted string; the draw paths only
+        // measure and paint (the model rebuilds when its key components change).
+        var model = EnsureRenderModel(bounds, tempUnit, speedUnit);
 
         // Prominent Location Name Header
-        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _client.ResolvedCityName : CustomLabel;
-        string headerDisplay = cityRaw.ToUpperInvariant();
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
         using var titlePaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-
-        // Auto-truncate city name to guarantee header text fits without overlapping badge
-        var (tempUnit, speedUnit) = WeatherPresentation.ParseUnitSystem(UnitSystem);
-        float maxTitleW = Math.Max(30f, bounds.Width - header.Pad * 2f - header.BadgeRect.Width);
-
-        string truncatedHeader = TextRenderHelper.TruncateText(headerDisplay, titleFont, maxTitleW);
-        canvas.DrawTextWithFallback(truncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, titlePaint);
+        canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, titlePaint);
 
         // Styled Unit Toggle Badge [°F] / [°C] (No background card)
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(17f * s, 10f, 30f));
@@ -182,24 +200,24 @@ public class WeatherForecastWidget : ModernWidgetBase
         switch (WeatherLayout.ParseMode(LayoutMode))
         {
             case WeatherLayoutMode.DailyForecast:
-                RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, sx, sy);
+                RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
                 break;
             case WeatherLayoutMode.HourlyForecast:
-                RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, tempUnit, sx, sy);
+                RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, sx, sy, model);
                 break;
             case WeatherLayoutMode.CurrentOnly:
-                RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, tempUnit, sx, sy);
+                RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, sx, sy, model);
                 break;
             case WeatherLayoutMode.Compact:
-                RenderCompact(canvas, contentBounds, textPrimary, tempUnit, sx, sy);
+                RenderCompact(canvas, contentBounds, textPrimary, sx, sy, model);
                 break;
             default:
-                RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, tempUnit, speedUnit, sx, sy);
+                RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
                 break;
         }
     }
 
-    private void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, string speedUnit, float sx, float sy)
+    private void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
         var (icon, desc) = WeatherPresentation.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
@@ -210,15 +228,8 @@ public class WeatherForecastWidget : ModernWidgetBase
         bool hasForecast = ShowForecast && _dailyForecastSnapshot.Count > 0 && h >= 150f;
         float forecastH = hasForecast ? Math.Clamp(80f * sy, 45f, 160f) : 0f;
 
-        List<string> metrics = [.. WeatherPresentation.MetricPills(new WeatherMetricsInput(
-            ShowFeelsLike, _feelsLikeC,
-            ShowHumidity, _humidity,
-            ShowWind, _windSpeedKmH,
-            ShowHighLow, _highTempC, _lowTempC,
-            tempUnit, speedUnit))];
-
         // Show metrics pill strip only if container height is at least 150px physical units
-        bool hasMetrics = metrics.Count > 0 && h >= 150f;
+        bool hasMetrics = model.Metrics.Count > 0 && h >= 150f;
         float metricsH = hasMetrics ? Math.Clamp(28f * sy, 16f, 50f) : 0f;
 
         float heroTop = bounds.Top + 4f * sy;
@@ -235,7 +246,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
-        string mainTempStr = WeatherPresentation.FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = model.MainTemp;
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
 
@@ -308,11 +319,11 @@ public class WeatherForecastWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(mainTempStr, rightX, tempBaseline, tempFont, tempPaint);
         canvas.DrawTextWithFallback(desc, rightX, descBaseline, descFont, descPaint);
 
-        RenderMetricPills(canvas, bounds, metrics, hasMetrics, metricsH, heroBottom, textSecondary, sx, sy);
-        RenderForecastStrip(canvas, bounds, hasForecast, forecastH, accentColor, textPrimary, textSecondary, tempUnit, sx, sy);
+        RenderMetricPills(canvas, bounds, hasMetrics, metricsH, heroBottom, textSecondary, sx, sy, model);
+        RenderForecastStrip(canvas, bounds, hasForecast, forecastH, accentColor, textPrimary, textSecondary, sx, sy, model);
     }
 
-    private void RenderMetricPills(SKCanvas canvas, SKRect bounds, List<string> metrics, bool hasMetrics, float metricsH, float heroBottom, SKColor textSecondary, float sx, float sy)
+    private void RenderMetricPills(SKCanvas canvas, SKRect bounds, bool hasMetrics, float metricsH, float heroBottom, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
         if (!hasMetrics) return;
 
@@ -326,13 +337,12 @@ public class WeatherForecastWidget : ModernWidgetBase
         float pillPadX = Math.Clamp(10f * s, 4f, 20f);
         float pillGap = Math.Clamp(8f * s, 3f, 16f);
         float totalPillsW = 0f;
-        float[] metricWidths = new float[metrics.Count];
-        for (int i = 0; i < metrics.Count; i++)
+        float[] metricWidths = model.MetricWidths;
+        for (int i = 0; i < metricWidths.Length; i++)
         {
-            metricWidths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
             totalPillsW += metricWidths[i];
         }
-        totalPillsW += (metrics.Count - 1) * pillGap;
+        totalPillsW += (model.Metrics.Count - 1) * pillGap;
 
         // If pills exceed bounds width, scale down metric font size to fit inside card
         float metricScale = WeatherLayout.MetricPillShrinkScale(totalPillsW, w);
@@ -344,30 +354,32 @@ public class WeatherForecastWidget : ModernWidgetBase
             pillGap *= metricScale;
 
             totalPillsW = 0f;
-            for (int i = 0; i < metrics.Count; i++)
+            for (int i = 0; i < model.Metrics.Count; i++)
             {
-                metricWidths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
+                metricWidths[i] = metricFont.MeasureText(model.Metrics[i]) + pillPadX * 2;
                 totalPillsW += metricWidths[i];
             }
-            totalPillsW += (metrics.Count - 1) * pillGap;
+            totalPillsW += (model.Metrics.Count - 1) * pillGap;
         }
 
+        _cardStrokePaint.Color = new SKColor(255, 255, 255, 22);
+        _cardStrokePaint.StrokeWidth = Math.Max(1f * s, 1f);
+        _metricPaint.Color = textSecondary;
+
+        metricFont.GetFontMetrics(out var mMetrics);
+        float mBaseline = pillY + pillHeight / 2f - (mMetrics.Ascent + mMetrics.Descent) / 2f;
+
         float pillStartX = bounds.MidX - totalPillsW / 2f;
-        for (int i = 0; i < metrics.Count; i++)
+        for (int i = 0; i < model.Metrics.Count; i++)
         {
             SKRect pillRect = new(pillStartX, pillY, pillStartX + metricWidths[i], pillY + pillHeight);
-            using var pillBorder = new SKPaint { Color = new SKColor(255, 255, 255, 22), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
-            canvas.DrawRoundRect(pillRect, 8f * s, 8f * s, pillBorder);
-
-            using var metricPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
-            metricFont.GetFontMetrics(out var mMetrics);
-            float mBaseline = pillRect.MidY - (mMetrics.Ascent + mMetrics.Descent) / 2f;
-            canvas.DrawTextWithFallback(metrics[i], pillRect.MidX, mBaseline, metricFont, metricPaint, SKTextAlign.Center);
+            canvas.DrawRoundRect(pillRect, 8f * s, 8f * s, _cardStrokePaint);
+            canvas.DrawTextWithFallback(model.Metrics[i], pillRect.MidX, mBaseline, metricFont, _metricPaint, SKTextAlign.Center);
             pillStartX += metricWidths[i] + pillGap;
         }
     }
 
-    private void RenderForecastStrip(SKCanvas canvas, SKRect bounds, bool hasForecast, float forecastH, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, float sx, float sy)
+    private void RenderForecastStrip(SKCanvas canvas, SKRect bounds, bool hasForecast, float forecastH, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
         if (!hasForecast) return;
 
@@ -377,13 +389,21 @@ public class WeatherForecastWidget : ModernWidgetBase
         float stripY = bounds.Bottom - forecastH;
         SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
 
-        using var stripBorder = new SKPaint { Color = new SKColor(255, 255, 255, 18), Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1f * s, 1f), IsAntialias = true };
-        canvas.DrawRoundRect(stripBounds, 12f * s, 12f * s, stripBorder);
+        _cardStrokePaint.Color = new SKColor(255, 255, 255, 18);
+        _cardStrokePaint.StrokeWidth = Math.Max(1f * s, 1f);
+        canvas.DrawRoundRect(stripBounds, 12f * s, 12f * s, _cardStrokePaint);
 
         float colWidth = w / count;
         float dayFontSize = Math.Clamp(14f * s, 8f, 24f);
         float dayIconFontSize = Math.Clamp(22f * s, 10f, 48f);
         float rangeFontSize = Math.Clamp(12f * s, 7f, 22f);
+
+        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, dayFontSize);
+        var rangeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, rangeFontSize);
+        var dayIconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
+
+        _rangePaint.Color = textSecondary;
+        _dayIconPaint.Color = SKColors.Black;
 
         for (int i = 0; i < count; i++)
         {
@@ -391,25 +411,19 @@ public class WeatherForecastWidget : ModernWidgetBase
             var (dayIcon, _) = WeatherPresentation.MapWmoCode(day.WeatherCode);
             float colCx = bounds.Left + (i + 0.5f) * colWidth;
 
-            var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, dayFontSize);
-            using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
+            _dayPaint.Color = i == 0 ? accentColor : textPrimary;
             float dayY = stripY + Math.Clamp(18f * s, 10f, 36f);
 
             dayFont.MeasureText(day.DayName, out var dayBounds);
             float dayX = colCx - (dayBounds.Left + dayBounds.Width / 2f);
-            canvas.DrawTextWithFallback(day.DayName, dayX, dayY, dayFont, dayPaint);
+            canvas.DrawTextWithFallback(day.DayName, dayX, dayY, dayFont, _dayPaint);
 
-            string rangeStr = WeatherPresentation.ForecastRangeText(day.MaxTempC, day.MinTempC, tempUnit);
-            var rangeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, rangeFontSize);
-            using var rangePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
+            string rangeStr = model.ForecastRanges[i];
             float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
 
             rangeFont.MeasureText(rangeStr, out var rangeBounds);
             float rangeX = colCx - (rangeBounds.Left + rangeBounds.Width / 2f);
-            canvas.DrawTextWithFallback(rangeStr, rangeX, rangeY, rangeFont, rangePaint);
-
-            var dayIconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
-            using var dayIconPaint = new SKPaint { IsAntialias = true };
+            canvas.DrawTextWithFallback(rangeStr, rangeX, rangeY, rangeFont, _rangePaint);
 
             // Calculate exact vertical center between Day Name and Temp Range baselines
             dayFont.GetFontMetrics(out var dayMetrics);
@@ -426,11 +440,11 @@ public class WeatherForecastWidget : ModernWidgetBase
             float iconVisualCenterX = iconRect.Left + (iconRect.Width / 2f);
             float iconX = colCx - iconVisualCenterX;
 
-            canvas.DrawTextWithFallback(dayIcon, iconX, dayIconBaseline, dayIconFont, dayIconPaint);
+            canvas.DrawTextWithFallback(dayIcon, iconX, dayIconBaseline, dayIconFont, _dayIconPaint);
         }
     }
 
-    private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, string tempUnit, float sx, float sy)
+    private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
         int count = Math.Min(_dailyForecastSnapshot.Count, 5);
         if (count == 0) return;
@@ -438,39 +452,42 @@ public class WeatherForecastWidget : ModernWidgetBase
         float rowHeight = bounds.Height / count;
         float s = Math.Min(sx, sy);
 
+        _cardFillPaint.Color = new SKColor(22, 26, 40, 180);
+        _cardStrokePaint.Color = new SKColor(255, 255, 255, 15);
+        _cardStrokePaint.StrokeWidth = 1f;
+        _descPaint.Color = textSecondary;
+        _tempPaint.Color = accentColor;
+        _iconPaint.Color = SKColors.Black;
+
+        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(16f * s, 10f, 22f));
+        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(11f * s, 8f, 15f));
+        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
+
         for (int i = 0; i < count; i++)
         {
             var day = _dailyForecastSnapshot[i];
             float y = bounds.Top + (i * rowHeight);
             SKRect rowRect = new(bounds.Left, y + 2, bounds.Right, y + rowHeight - 2);
 
-            using var rowBg = new SKPaint { Color = new SKColor(22, 26, 40, 180), IsAntialias = true };
-            using var rowBorder = new SKPaint { Color = new SKColor(255, 255, 255, 15), Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
-            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, rowBg);
-            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, rowBorder);
+            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, _cardFillPaint);
+            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, _cardStrokePaint);
 
             var (icon, desc) = WeatherPresentation.MapWmoCode(day.WeatherCode);
 
-            var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
-            using var dayPaint = new SKPaint { Color = i == 0 ? accentColor : textPrimary, IsAntialias = true };
-            canvas.DrawTextWithFallback(day.DayName, rowRect.Left + 12f * sx, rowRect.MidY + 5f * sy, dayFont, dayPaint);
+            _dayPaint.Color = i == 0 ? accentColor : textPrimary;
+            canvas.DrawTextWithFallback(day.DayName, rowRect.Left + 12f * sx, rowRect.MidY + 5f * sy, dayFont, _dayPaint);
 
-            var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(16f * s, 10f, 22f));
-            using var iconPaint = new SKPaint { IsAntialias = true };
-            canvas.DrawTextWithFallback(icon, rowRect.Left + 80f * sx, rowRect.MidY + 6f * sy, iconFont, iconPaint);
+            canvas.DrawTextWithFallback(icon, rowRect.Left + 80f * sx, rowRect.MidY + 6f * sy, iconFont, _iconPaint);
 
-            var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(11f * s, 8f, 15f));
-            using var descPaint = new SKPaint { Color = textSecondary, IsAntialias = true };
-            canvas.DrawTextWithFallback(desc, rowRect.Left + 110f * sx, rowRect.MidY + 4f * sy, descFont, descPaint);
+            canvas.DrawTextWithFallback(desc, rowRect.Left + 110f * sx, rowRect.MidY + 4f * sy, descFont, _descPaint);
 
-            string highLowStr = WeatherPresentation.DailyHighLowText(day.MaxTempC, day.MinTempC, tempUnit);
-            var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
-            using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(highLowStr, rowRect.Right - FontHelper.MeasureTextWithFallback(highLowStr, tempFont) - 12f * sx, rowRect.MidY + 4f * sy, tempFont, tempPaint);
+            string highLowStr = model.DailyHighLows[i];
+            canvas.DrawTextWithFallback(highLowStr, rowRect.Right - FontHelper.MeasureTextWithFallback(highLowStr, tempFont) - 12f * sx, rowRect.MidY + 4f * sy, tempFont, _tempPaint);
         }
     }
 
-    private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, string tempUnit, float sx, float sy)
+    private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
         int count = Math.Min(_hourlyForecastSnapshot.Count, 6);
         if (count == 0) return;
@@ -478,35 +495,38 @@ public class WeatherForecastWidget : ModernWidgetBase
         float itemWidth = bounds.Width / count;
         float s = Math.Min(sx, sy);
 
+        _cardFillPaint.Color = new SKColor(22, 26, 40, 180);
+        _cardStrokePaint.Color = new SKColor(255, 255, 255, 15);
+        _cardStrokePaint.StrokeWidth = 1f;
+        _timePaint.Color = textSecondary;
+        _tempPaint.Color = accentColor;
+        _iconPaint.Color = SKColors.Black;
+
+        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
+        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(20f * s, 12f, 28f));
+        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
+
         for (int i = 0; i < count; i++)
         {
             var item = _hourlyForecastSnapshot[i];
             float x = bounds.Left + (i * itemWidth);
             SKRect colRect = new(x + 2, bounds.Top + 4, x + itemWidth - 2, bounds.Bottom - 4);
 
-            using var colBg = new SKPaint { Color = new SKColor(22, 26, 40, 180), IsAntialias = true };
-            using var colBorder = new SKPaint { Color = new SKColor(255, 255, 255, 15), Style = SKPaintStyle.Stroke, StrokeWidth = 1f, IsAntialias = true };
-            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, colBg);
-            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, colBorder);
+            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, _cardFillPaint);
+            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, _cardStrokePaint);
 
             var (icon, _) = WeatherPresentation.MapWmoCode(item.WeatherCode);
 
-            var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
-            using var timePaint = new SKPaint { Color = textSecondary, IsAntialias = true };
-            canvas.DrawTextWithFallback(item.TimeLabel, colRect.MidX - (FontHelper.MeasureTextWithFallback(item.TimeLabel, timeFont) / 2f), colRect.Top + 22f * sy, timeFont, timePaint);
+            canvas.DrawTextWithFallback(item.TimeLabel, colRect.MidX - (FontHelper.MeasureTextWithFallback(item.TimeLabel, timeFont) / 2f), colRect.Top + 22f * sy, timeFont, _timePaint);
 
-            var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(20f * s, 12f, 28f));
-            using var iconPaint = new SKPaint { IsAntialias = true };
-            canvas.DrawTextWithFallback(icon, colRect.MidX - 12f * sx, colRect.MidY + 6f * sy, iconFont, iconPaint);
+            canvas.DrawTextWithFallback(icon, colRect.MidX - 12f * sx, colRect.MidY + 6f * sy, iconFont, _iconPaint);
 
-            string tempStr = WeatherPresentation.FormatTemp(item.TempC, tempUnit);
-            var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
-            using var tempPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(tempStr, colRect.MidX - (FontHelper.MeasureTextWithFallback(tempStr, tempFont) / 2f), colRect.Bottom - 14f * sy, tempFont, tempPaint);
+            string tempStr = model.HourlyTemps[i];
+            canvas.DrawTextWithFallback(tempStr, colRect.MidX - (FontHelper.MeasureTextWithFallback(tempStr, tempFont) / 2f), colRect.Bottom - 14f * sy, tempFont, _tempPaint);
         }
     }
 
-    private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, string tempUnit, float sx, float sy)
+    private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
         var (icon, desc) = WeatherPresentation.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
@@ -521,7 +541,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { IsAntialias = true };
         float iconW = iconFont.MeasureText(icon);
 
-        string mainTempStr = WeatherPresentation.FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = model.MainTemp;
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         float tempW = tempFont.MeasureText(mainTempStr);
@@ -554,7 +574,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(desc, rightX, descBaseline, descFont, descPaint);
     }
 
-    private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, string tempUnit, float sx, float sy)
+    private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
         var (icon, _) = WeatherPresentation.MapWmoCode(_weatherCode);
         float s = Math.Min(sx, sy);
@@ -563,7 +583,7 @@ public class WeatherForecastWidget : ModernWidgetBase
         using var iconPaint = new SKPaint { IsAntialias = true };
         canvas.DrawTextWithFallback(icon, bounds.Left, bounds.MidY + 10f * sy, iconFont, iconPaint);
 
-        string mainTempStr = WeatherPresentation.FormatTemp(_currentTempC, tempUnit);
+        string mainTempStr = model.MainTemp;
         var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(20f * s, 12f, 26f));
         using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
         canvas.DrawTextWithFallback(mainTempStr, bounds.Left + 36f * sx, bounds.MidY + 8f * sy, tempFont, tempPaint);
@@ -621,6 +641,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     /// </summary>
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
+        _dataVersion++;
         if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
         if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
         if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
@@ -638,6 +659,129 @@ public class WeatherForecastWidget : ModernWidgetBase
     {
         var cached = await _client.LoadCacheAsync().ConfigureAwait(false);
         if (cached is not null) ApplySnapshot(cached);
+    }
+
+    /// <summary>
+    /// Returns the cached render model for the current frame, rebuilding it
+    /// when (data version, bounds, property snapshot) no longer matches. The
+    /// pill widths are measured here with the same pill font size the draw
+    /// path derives from the bounds, so the per-frame path allocates no
+    /// strings and no arrays for the static scene.
+    /// </summary>
+    private WeatherRenderModel EnsureRenderModel(SKRect bounds, string tempUnit, string speedUnit)
+    {
+        if (_renderModel is { } cached
+            && cached.DataVersion == _dataVersion
+            && cached.Bounds == bounds
+            && cached.LayoutMode == LayoutMode
+            && cached.UnitSystem == UnitSystem
+            && cached.CustomLabel == CustomLabel
+            && cached.ResolvedCity == _client.ResolvedCityName
+            && cached.ShowFeelsLike == ShowFeelsLike
+            && cached.ShowHumidity == ShowHumidity
+            && cached.ShowWind == ShowWind
+            && cached.ShowHighLow == ShowHighLow
+            && cached.ShowForecast == ShowForecast)
+        {
+            return cached;
+        }
+
+        var (sx, sy, s) = WeatherLayout.Scale(bounds);
+        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
+
+        var model = new WeatherRenderModel
+        {
+            DataVersion = _dataVersion,
+            Bounds = bounds,
+            LayoutMode = LayoutMode,
+            UnitSystem = UnitSystem,
+            CustomLabel = CustomLabel,
+            ResolvedCity = _client.ResolvedCityName,
+            ShowFeelsLike = ShowFeelsLike,
+            ShowHumidity = ShowHumidity,
+            ShowWind = ShowWind,
+            ShowHighLow = ShowHighLow,
+            ShowForecast = ShowForecast,
+            MainTemp = WeatherPresentation.FormatTemp(_currentTempC, tempUnit),
+            Metrics = WeatherPresentation.MetricPills(new WeatherMetricsInput(
+                ShowFeelsLike, _feelsLikeC,
+                ShowHumidity, _humidity,
+                ShowWind, _windSpeedKmH,
+                ShowHighLow, _highTempC, _lowTempC,
+                tempUnit, speedUnit))
+        };
+
+        // Auto-truncated header: the city name uppercased once per model, then
+        // truncated to the same max width the draw path uses.
+        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _client.ResolvedCityName : CustomLabel;
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
+        float maxTitleW = Math.Max(30f, bounds.Width - header.Pad * 2f - header.BadgeRect.Width);
+        model.TruncatedHeader = TextRenderHelper.TruncateText(cityRaw.ToUpperInvariant(), titleFont, maxTitleW);
+
+        // Pill widths: measured with the pill font the draw path derives from
+        // the same bounds (the pill shrink re-measures when it triggers).
+        float s2 = Math.Min(sx, sy);
+        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(13f * s2, 8f, 24f));
+        float pillPadX = Math.Clamp(10f * s2, 4f, 20f);
+        float[] widths = new float[model.Metrics.Count];
+        for (int i = 0; i < widths.Length; i++)
+        {
+            widths[i] = metricFont.MeasureText(model.Metrics[i]) + pillPadX * 2;
+        }
+        model.MetricWidths = widths;
+
+        int dailyCount = Math.Min(_dailyForecastSnapshot.Count, 5);
+        var ranges = new string[dailyCount];
+        var highLows = new string[dailyCount];
+        for (int i = 0; i < dailyCount; i++)
+        {
+            var day = _dailyForecastSnapshot[i];
+            ranges[i] = WeatherPresentation.ForecastRangeText(day.MaxTempC, day.MinTempC, tempUnit);
+            highLows[i] = WeatherPresentation.DailyHighLowText(day.MaxTempC, day.MinTempC, tempUnit);
+        }
+        model.ForecastRanges = ranges;
+        model.DailyHighLows = highLows;
+
+        int hourlyCount = Math.Min(_hourlyForecastSnapshot.Count, 6);
+        var temps = new string[hourlyCount];
+        for (int i = 0; i < hourlyCount; i++)
+        {
+            temps[i] = WeatherPresentation.FormatTemp(_hourlyForecastSnapshot[i].TempC, tempUnit);
+        }
+        model.HourlyTemps = temps;
+
+        _renderModel = model;
+        return model;
+    }
+
+    /// <summary>
+    /// The cached render model: every formatted string the five layout modes
+    /// draw, recomputed only when its key components change. The key covers
+    /// everything that can change the strings — the data version, the bounds
+    /// (layout-derived font sizes), and the property snapshot (mode, unit
+    /// system, custom label, visibility toggles).
+    /// </summary>
+    private sealed class WeatherRenderModel
+    {
+        public int DataVersion = int.MinValue;
+        public SKRect Bounds;
+        public string LayoutMode = "";
+        public string UnitSystem = "";
+        public string CustomLabel = "";
+        public string ResolvedCity = "";
+        public bool ShowFeelsLike;
+        public bool ShowHumidity;
+        public bool ShowWind;
+        public bool ShowHighLow;
+        public bool ShowForecast;
+
+        public string TruncatedHeader = "";
+        public string MainTemp = "";
+        public IReadOnlyList<string> Metrics = [];
+        public float[] MetricWidths = [];
+        public string[] ForecastRanges = [];
+        public string[] DailyHighLows = [];
+        public string[] HourlyTemps = [];
     }
 }
 

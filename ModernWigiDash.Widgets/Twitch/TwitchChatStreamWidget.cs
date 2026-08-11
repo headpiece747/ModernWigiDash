@@ -362,6 +362,39 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         return c.Length == 0 ? "twitch" : c.ToLowerInvariant();
     }
 
+    // The header strings are memoized per input (the WrapCache shape): Render
+    // composes the badge and status line every frame, but both change only via
+    // the inspector or the IRC loop. Single-slot caches keyed by the source
+    // value, so the per-frame path allocates nothing for the static header.
+    private string _badgeChannelKey = "";
+    private string _badgeText = "";
+    private ChatStatus _statusKey = ChatStatus.Disconnected;
+    private string _statusDetailKey = "";
+    private string _statusText = "";
+
+    private string ChannelBadge()
+    {
+        if (ChannelName != _badgeChannelKey)
+        {
+            _badgeChannelKey = ChannelName;
+            _badgeText = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
+        }
+        return _badgeText;
+    }
+
+    private string StatusLine()
+    {
+        ChatStatus status = _status;
+        string statusDetail = _statusDetail;
+        if (status != _statusKey || statusDetail != _statusDetailKey)
+        {
+            _statusKey = status;
+            _statusDetailKey = statusDetail;
+            _statusText = TwitchChatPresentation.StatusText(status, statusDetail);
+        }
+        return _statusText;
+    }
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
@@ -384,10 +417,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         using var badgePaint = new SKPaint { Color = headerColor, IsAntialias = true };
 
         float top = bounds.Top + pad;
-        string channelBadge = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
+        string channelBadge = ChannelBadge();
         canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, badgePaint, SKTextAlign.Left);
 
-        string statusText = TwitchChatPresentation.StatusText(_status, _statusDetail);
+        string statusText = StatusLine();
 
         using var statusPaint = new SKPaint { Color = TwitchChatPresentation.StatusColor(_status), IsAntialias = true };
         canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, statusPaint, SKTextAlign.Right);

@@ -174,7 +174,12 @@ public class AudioVisualizerWidget : ModernWidgetBase
             StrokeJoin = SKStrokeJoin.Round
         };
 
-        var builder = new SKPathBuilder();
+        // The wave shape changes every frame, so the SKPath object is reused
+        // and re-lined instead of building + detaching a new one (SKPathBuilder
+        // has no reuse path — every Snapshot/Detach allocates a new SKPath).
+        _oscilloscopePath ??= new SKPath();
+#pragma warning disable CS0618 // SKPath.Rewind/MoveTo/LineTo are obsolete in favor of SKPathBuilder, whose Snapshot()/Detach() allocate a new SKPath per call — the wave path is reused and re-lined instead (zero-alloc hot path).
+        _oscilloscopePath.Rewind();
         float stepX = (bounds.Width - pad * 2f) / (waveform.Length - 1f);
         for (int i = 0; i < waveform.Length; i++)
         {
@@ -183,14 +188,15 @@ public class AudioVisualizerWidget : ModernWidgetBase
             float y = midY - v * amp;
             if (i == 0)
             {
-                builder.MoveTo(x, y);
+                _oscilloscopePath.MoveTo(x, y);
             }
             else
             {
-                builder.LineTo(x, y);
+                _oscilloscopePath.LineTo(x, y);
             }
         }
-        canvas.DrawPath(builder.Detach(), linePaint);
+#pragma warning restore CS0618
+        canvas.DrawPath(_oscilloscopePath, linePaint);
     }
 
     private void DrawRadialPulse(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> spectrum)
@@ -223,6 +229,10 @@ public class AudioVisualizerWidget : ModernWidgetBase
     public override ValueTask DisposeAsync()
     {
         StopLiveAudioCapture();
+        _oscilloscopePath?.Dispose();
         return base.DisposeAsync();
     }
+
+    // The reused oscilloscope wave path (re-lined per frame, never reallocated).
+    private SKPath? _oscilloscopePath;
 }

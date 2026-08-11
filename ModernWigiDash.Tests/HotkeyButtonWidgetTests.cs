@@ -294,4 +294,20 @@ public class HotkeyButtonWidgetTests
             File.Delete(svg);
         }
     }
+
+    [TestMethod]
+    public void HotkeyWidget_IconProbe_RefreshesWhenIconChanges()
+    {
+        // The Griddy-icon probe memoizes per icon name, and the icon set is
+        // static; changing the name, then changing it back, must refresh the
+        // memoized result instead of serving a stale probe.
+        var widget = new HotkeyButtonWidget { Icon = "activity" };
+        Assert.IsTrue(widget.IsPointOverIcon(200, 150, 100, 46), "The known icon must hit-test at its center");
+
+        widget.Icon = "definitely_not_an_icon";
+        Assert.IsFalse(widget.IsPointOverIcon(200, 150, 100, 46), "An unknown icon must not hit-test");
+
+        widget.Icon = "activity";
+        Assert.IsTrue(widget.IsPointOverIcon(200, 150, 100, 46), "The probe memo must refresh when the icon name changes back");
+    }
 }

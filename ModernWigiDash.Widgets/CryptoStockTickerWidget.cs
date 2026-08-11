@@ -89,19 +89,50 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     private AssetKind AssetKindValue => SymbolCatalog.DetectAssetKind(Symbol, AssetType);
     private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
 
+    // The label and formatted price are memoized per input: Render composes
+    // them every frame, but the inputs change only via the inspector (label
+    // keys) or the feed's ~1×/s price updates. Single-slot caches keyed by the
+    // source values, so identical inputs produce identical strings with no
+    // per-frame formatting work.
+    private string _labelKeySymbol = "";
+    private string _labelKeyType = "";
+    private string _labelKeyName = "";
+    private string _labelText = "";
+
     private string DisplayLabel
     {
         get
         {
-            string? fxLabel = IsFxAsset && SymbolCatalog.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
-                ? $"{baseCur} / {quoteCur}"
-                : null;
-            return TickerPresentation.DisplayLabel(DisplayName, fxLabel, SymbolCatalog.NormalizeSymbol(Symbol));
+            if (Symbol != _labelKeySymbol || AssetType != _labelKeyType || DisplayName != _labelKeyName)
+            {
+                _labelKeySymbol = Symbol;
+                _labelKeyType = AssetType;
+                _labelKeyName = DisplayName;
+                string? fxLabel = IsFxAsset && SymbolCatalog.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
+                    ? $"{baseCur} / {quoteCur}"
+                    : null;
+                _labelText = TickerPresentation.DisplayLabel(DisplayName, fxLabel, SymbolCatalog.NormalizeSymbol(Symbol));
+            }
+            return _labelText;
         }
     }
 
+    private decimal _lastPrice;
+    private string _lastPriceDecimals = "";
+    private string _lastPriceCurrency = "";
+    private string _lastPriceText = "";
+
     private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
-        => TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol);
+    {
+        if (rawPrice != _lastPrice || PriceDecimals != _lastPriceDecimals || currencySymbol != _lastPriceCurrency)
+        {
+            _lastPrice = rawPrice;
+            _lastPriceDecimals = PriceDecimals;
+            _lastPriceCurrency = currencySymbol;
+            _lastPriceText = TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol);
+        }
+        return _lastPriceText;
+    }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
