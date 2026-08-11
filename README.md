@@ -60,7 +60,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 | **Hardware Telemetry** | Live CPU, GPU, VRAM, RAM, and thermal readouts read from **LibreHardwareService's** shared-memory maps (ADR-0004) — no elevation required |
 | **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003) — the app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy |
 | **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards; loadable from `app_theme.json` |
-| **Profile Import / Export** | JSON profile round-trip with import sanitization — widget/page count caps, ActionCommand stripping, and path checks against malicious profiles |
+| **Profile Persistence** | Auto-saved profile (`profile.json` in `%LocalAppData%\ModernWigiDash`) — widget placements, pages, and property values survive restarts via debounced save + flush-on-close |
+| **Profile Import / Export** | Manual JSON profile round-trip with import sanitization — widget/page count caps, ActionCommand stripping, and path checks against malicious profiles |
 | **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
 | **Extensible Plugin SDK** | Build isolated C# widget assemblies targeting `ModernWigiDash.Sdk` |
 
@@ -111,7 +112,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 ### Option A — Download a Release (no .NET install)
 
-Grab the latest `ModernWigiDash-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest). It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
+Grab the latest `ModernWigiDash-vX.Y.Z-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest). It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
 
 ### Option B — Build from Source
 
@@ -130,7 +131,7 @@ The app connects to the display directly over USB — frames and touch work with
 
 ## Packaging a Release
 
-Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.1.0`) and the **Release** workflow runs `scripts/build-release.ps1`, then creates a GitHub Release with the `ModernWigiDash-win-x64.zip` asset attached. You can also trigger it manually from the **Actions** tab with a tag input.
+Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.3.0`) and the **Release** workflow runs `scripts/build-release.ps1 -Version 0.3.0`, then creates a GitHub Release with the versioned `ModernWigiDash-v0.3.0-win-x64.zip` asset attached (the version is also stamped into the zip's `README.txt`). You can also trigger it manually from the **Actions** tab with a tag input.
 
 The app ships as a single-file, self-contained, ReadyToRun executable — end users need no .NET runtime. To build the zip by hand:
 
