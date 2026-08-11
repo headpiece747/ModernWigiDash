@@ -386,3 +386,6 @@ FodyWeavers.xsd
 # Release bundle build artifacts
 /ModernWigiDash-win-x64.zip
 /scripts/.release-cache/
+
+# Git worktrees
+/.worktrees/
