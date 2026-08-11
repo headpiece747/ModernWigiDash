@@ -177,12 +177,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         //    launch. A first launch persists the starter immediately so the
         //    file exists before any mutation.
         var loaded = _profilePersistence.Load(_loader, this);
+        _profile = loaded ?? new StarterProfile(_loader, this).Create();
         if (loaded is null)
         {
-            loaded = new StarterProfile(_loader, this).Create();
             _profilePersistence.Save();
         }
-        _profile = loaded;
         _pageTabs.Rebuild(_profile);
 
         // 5. Route device touch input through the single input module. Display
