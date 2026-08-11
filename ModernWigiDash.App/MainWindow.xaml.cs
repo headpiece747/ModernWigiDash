@@ -63,6 +63,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DialogHost _dialogHost;
     private readonly PageTabsView _pageTabs;
 
+    // Profile persistence: loads the saved profile at startup and owns the
+    // debounced save of the current profile (assigned in the ctor before the
+    // profile is loaded).
+    private ProfilePersistence _profilePersistence = null!;
+
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
     private readonly IThemeApplicator _themeApplicator = new ThemeApplicator();
@@ -160,9 +165,23 @@ public partial class MainWindow : Window, IModernWigiDashContext
             RenamePage,
             DeletePage);
 
-        // 4. Setup Default Profile Layout with 3 cool starter widgets
-        var starterProfile = new StarterProfile(_loader, this);
-        _profile = starterProfile.Create();
+        // Profile persistence: load the saved profile at startup, falling back
+        // to the starter profile when absent/corrupt. The provider lambda only
+        // dereferences _profile at save time (import swaps the reference).
+        _profilePersistence = new ProfilePersistence(
+            ProfilePersistence.DefaultProfilePath(),
+            () => _profile!,
+            log: msg => FileLog.Write($"[PROFILE] {msg}"));
+
+        // 4. Load the persisted profile, or build the starter profile on first
+        //    launch. A first launch persists the starter immediately so the
+        //    file exists before any mutation.
+        _profile = _profilePersistence.Load(_loader, this);
+        if (_profile is null)
+        {
+            _profile = new StarterProfile(_loader, this).Create();
+            _profilePersistence.Save();
+        }
         _pageTabs.Rebuild(_profile);
 
         // 5. Route device touch input through the single input module. Display
