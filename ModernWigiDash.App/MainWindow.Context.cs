@@ -47,6 +47,7 @@ public partial class MainWindow
         if (ProfileOps.FindPlacedWidget(_profile, widget) is { } placed)
         {
             placed.PropertyValues[propertyName] = value;
+            _profilePersistence.MarkDirty();
         }
     }
 

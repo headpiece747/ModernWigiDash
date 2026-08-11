@@ -233,6 +233,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
             App.IsClosing = true;
             try
             {
+                // Persist before teardown: a clean exit always lands the final
+                // profile state (including the last active page index).
+                _profilePersistence.Flush();
                 _framePump.Dispose();
                 _telemetry.Dispose();
                 _presenter.Dispose();
@@ -348,6 +351,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // the machine (page navigation + widget touch routing).
         if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed) && changed)
         {
+            _profilePersistence.MarkDirty();
             _inspector.RefreshTransforms();
             SkiaCanvas.InvalidateVisual();
         }
@@ -373,6 +377,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         if (iconMoved)
             _inspector.Refresh();
+
+        if (wasManipulating)
+        {
+            _profilePersistence.MarkDirty();
+        }
 
         SkiaCanvas.ReleaseMouseCapture();
     }
@@ -409,6 +418,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
             RefreshSelection(null);
+            _profilePersistence.MarkDirty();
         }
     }
 
@@ -447,6 +457,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             if (placed == null) return;
 
             RefreshSelection(placed);
+            _profilePersistence.MarkDirty();
         }
     }
 
@@ -460,6 +471,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         ProfileOps.RenamePage(page, newName);
         RefreshAfterMutation(_selectedWidget);
+        _profilePersistence.MarkDirty();
     }
 
     private void SwitchToPage(int index)
@@ -477,18 +489,21 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
         RefreshAfterMutation(null);
+        _profilePersistence.MarkDirty();
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
         RefreshAfterMutation(null);
+        _profilePersistence.MarkDirty();
     }
 
     private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
     {
         if (!_wired) return;
         _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
+        _profilePersistence.MarkDirty();
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -547,6 +562,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     // change-handler write-back loop.
                     ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
                     RefreshAfterMutation(null);
+                    _profilePersistence.MarkDirty();
                 }
             }
             catch (Exception ex)
@@ -562,6 +578,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             ProfileOps.ClearPage(_profile.ActivePage);
             RefreshSelection(null);
+            _profilePersistence.MarkDirty();
         }
     }
 
