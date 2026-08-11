@@ -377,3 +377,12 @@ FodyWeavers.xsd
 # Runtime diagnostics artifacts (glider-trace / dotnet tools)
 .glider-trace/
 
+# Release bundle packaging templates (checked in; the [Rr]elease/ rule above
+# would otherwise ignore this folder)
+!release/
+!release/README.txt
+!release/setup-telemetry.bat
+
+# Release bundle build artifacts
+/ModernWigiDash-win-x64.zip
+/scripts/.release-cache/
