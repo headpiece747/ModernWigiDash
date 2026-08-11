@@ -21,14 +21,12 @@ dotnet_diagnostic.S3010.severity = none
 # S1854: False positive on MeasureText/SKPaint.MeasureText out parameters - the out param IS the purpose
 dotnet_diagnostic.S1854.severity = none
 
-# S6561: DateTime.Now used for UI frame pacing, not benchmarking
-dotnet_diagnostic.S6561.severity = none
-
 # S2292: Backing fields needed for Dispose pattern with _disposed flag
 dotnet_diagnostic.S2292.severity = none
 
-# S1944: WCF proxy casts - the runtime proxy implements both IModernWigiDashDisplayService and ICommunicationObject
-dotnet_diagnostic.S1944.severity = none
-
 # S1075: Hardcoded URIs used as default values for configurable WidgetProperty attributes (same pattern as WeatherForecastWidget)
 dotnet_diagnostic.S1075.severity = none
+
+# Style rules the codebase actually follows
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion

@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): 8-metric `FrameTimeWidget` two-view (dashboard + overlay readout), `PresentMonApiProbe`/query registry pipeline. Archived for history.
+
 # FPS / Frame Time Widget — PresentMon-Faithful Two-View Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

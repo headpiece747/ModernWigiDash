@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `Resources/Logo` assets + neutral USB status badge pill. The session-specific working-tree-hygiene bullet was trimmed on archival. Archived for history.
+
 # Header Logo & Neutral USB Status Badge Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -17,7 +19,7 @@
 - Header logo: 38×38, `Stretch=Uniform` (proportional), `VerticalAlignment="Top"` aligned with the title's first line.
 - Logo assets registered exactly like the existing fonts: `<Resource Include="Resources\Logo\..." ><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Resource>`.
 - Commit messages follow repo style (`feat(app):`, `fix(app):`, etc.). Stage only the files named in each task.
-- **Working-tree hygiene first:** The tree currently has uncommitted dropdown-fix changes in `ModernWigiDash.App/MainWindow.xaml.cs`, `ModernWigiDash.Tests/UnitTestSuite.cs`, `ModernWigiDash.Widgets/SocialAndVisualWidgets.cs`, `ModernWigiDash.Widgets/UtilityAndInteractiveWidgets.cs`, deleted `.superpowers/sdd/*` files, and untracked `.superpowers/brainstorm/`. Before Task 1, commit the dropdown-fix changes + the sdd deletions as one separate commit (e.g. `fix(app): keep widget combo dropdowns within screen bounds`). Never stage `.superpowers/brainstorm/`.
+- **Working-tree hygiene first:** commit the uncommitted changes (e.g. the dropdown-fix) as one separate commit before starting Task 1.
 
 ## File Structure
 

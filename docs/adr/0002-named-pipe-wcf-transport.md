@@ -1,7 +1,7 @@
 # ADR-0002: Named-Pipe WCF Transport
 
 **Date:** 2026-08-06  
-**Status:** Accepted  
+**Status:** Superseded by ADR-0005  
 **Deciders:** Project owner
 
 ## Context

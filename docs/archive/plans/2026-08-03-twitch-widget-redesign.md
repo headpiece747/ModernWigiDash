@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `TwitchChatStreamWidget` FontSize + block header/chat layout (final default 24pt, not the planned 16). Archived for history.
+
 # Twitch Chat Widget Visual Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -6,7 +8,7 @@
 
 **Architecture:** Update `TwitchChatStreamWidget` in `SocialAndVisualWidgets.cs` with a new `FontSize` property, clean IRC status detail strings, and refactor `Render()` to draw a modern badge header and clip/wrap chat messages in a block layout.
 
-**Tech Stack:** .NET 10.0, C# 13, SkiaSharp (`SKCanvas`, `SKPaint`, `SKFont`, `SKRect`), NUnit for testing.
+**Tech Stack:** .NET 10.0, C# 13, SkiaSharp (`SKCanvas`, `SKPaint`, `SKFont`, `SKRect`), MSTest for testing.
 
 ## Global Constraints
 

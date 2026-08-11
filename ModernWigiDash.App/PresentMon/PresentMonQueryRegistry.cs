@@ -46,6 +46,15 @@ internal sealed class PresentMonQueryRegistry
     private int _chainStride;
     private int _frameBlobSize;
 
+    // Reused per-poll buffers: both loops run on the 1s poll tick, so the
+    // blobs and the drain result list are pooled across ticks (grown on
+    // PM_STATUS_INSUFFICIENT_BUFFER / re-registration) instead of allocated
+    // per poll. The drain result list is safe to reuse because the producer
+    // consumes it synchronously (AppendFrameTimes copies it out).
+    private byte[]? _dynamicBlob;
+    private byte[]? _frameBlob;
+    private readonly List<double> _frameTimes = [];
+
     public PresentMonQueryRegistry(
         PmRegisterDynamicQuery registerDynamic,
         PmFreeDynamicQuery freeDynamic,
@@ -155,7 +164,11 @@ internal sealed class PresentMonQueryRegistry
         int capacity = 32;
         while (true)
         {
-            byte[] blob = new byte[_chainStride * capacity];
+            byte[]? blob = _dynamicBlob;
+            if (blob is null || blob.Length < _chainStride * capacity)
+            {
+                blob = _dynamicBlob = new byte[_chainStride * capacity];
+            }
             uint numSwapChains = (uint)capacity;
             PmStatus status = _pollDynamic(_dynamicQuery, (uint)processId, blob, ref numSwapChains);
 
@@ -212,8 +225,14 @@ internal sealed class PresentMonQueryRegistry
         }
 
         const uint MaxFramesPerCall = 256;
-        List<double> frameTimes = [];
-        byte[] buffer = new byte[_frameBlobSize * MaxFramesPerCall];
+        byte[]? buffer = _frameBlob;
+        int size = _frameBlobSize * (int)MaxFramesPerCall;
+        if (buffer is null || buffer.Length != size)
+        {
+            buffer = _frameBlob = new byte[size];
+        }
+        _frameTimes.Clear();
+        List<double> frameTimes = _frameTimes;
 
         // pmConsumeFrames drains the queue; loop until it returns fewer than
         // the requested capacity so a burst of pending frames is fully consumed.

@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `TextLabelWidget`, FX pairs in `SymbolCatalog`, Griddy icon picker, media-key actions. Archived for history.
+
 # Widget Enhancements: Text, FX, Hotkey Icons & Media Keys Design Specification
 
 ## Overview

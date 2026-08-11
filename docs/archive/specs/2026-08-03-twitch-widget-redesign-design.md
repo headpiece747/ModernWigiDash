@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`). Archived for history.
+
 # Twitch Chat Widget Visual Redesign Design Specification
 
 ## Overview

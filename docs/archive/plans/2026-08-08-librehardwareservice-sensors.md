@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `LhmSharedMemoryReader` + MessagePack index parsing (ADR-0004). Note: this plan's "remove WCF sensor path" step also stages `ModernWigiDash.Service`/`Service.Contracts` files that ADR-0005 later removed wholesale — the step is kept as historical record. Archived for history.
+
 # LibreHardwareService Shared Memory as Hardware Sensor Source — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

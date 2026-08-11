@@ -19,9 +19,19 @@ public sealed class DiagLog(string category, int cadence, bool logFirst = false,
     /// FrameDelivery's injected log callback; production defaults to
     /// <see cref="FileLog"/>.
     /// </summary>
-    public void Write(string message)
+    /// <param name="message">The message, composed lazily — the lambda runs
+    /// only when the cadence fires, so hot-path call sites (per-frame bulk
+    /// writes, touch polls) never pay for suppressed lines.</param>
+    public void Write(Func<string> message)
     {
         if (_cadence.Due())
-            _write($"[{category}] {message}");
+            _write($"[{category}] {message()}");
     }
+
+    /// <summary>
+    /// Eager convenience overload: composes <paramref name="message"/> at the
+    /// call site. Fine for cold paths; hot paths should use the lazy
+    /// <see cref="Write(Func{string})"/> form.
+    /// </summary>
+    public void Write(string message) => Write(() => message);
 }

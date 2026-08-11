@@ -90,7 +90,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
         bool hasIcon = useCustomFile
             ? SvgIconLoader.TryGetPath(IconFile, out _)
-            : !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
+            : HasGriddyIcon;
         if (!hasIcon)
         {
             center = default;
@@ -112,6 +112,25 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
             Math.Clamp(width / 2f + IconOffsetX, half, width - half),
             Math.Clamp(height * 0.31f + IconOffsetY, half, height - half));
         return true;
+    }
+
+    // The Griddy-icon probe is memoized per icon name: the icon set is static,
+    // so a probed name's result cannot change — Render hit-tests the icon every
+    // frame, and Contains would otherwise Trim-allocate on every call.
+    private string _lastGriddyIcon = "";
+    private bool _lastGriddyIconResult;
+
+    private bool HasGriddyIcon
+    {
+        get
+        {
+            if (Icon != _lastGriddyIcon)
+            {
+                _lastGriddyIcon = Icon;
+                _lastGriddyIconResult = !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
+            }
+            return _lastGriddyIconResult;
+        }
     }
 
     private bool _isPressed = false;

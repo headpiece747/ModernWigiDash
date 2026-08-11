@@ -79,7 +79,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         transferred = 0;
 
         int numChunks = (data.Length + ChunkedBulkWrite.ChunkSize - 1) / ChunkedBulkWrite.ChunkSize;
-        _bulkDiagLog.Write($"Chunked write: {data.Length} bytes in {numChunks} chunks");
+        _bulkDiagLog.Write(() => $"Chunked write: {data.Length} bytes in {numChunks} chunks");
 
         try
         {
@@ -87,8 +87,10 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
                 data,
                 (offset, size) =>
                 {
-                    Error error = _writer.Write(data, offset, size, ChunkedBulkWrite.ChunkTimeoutMs, out int transferLength);
-                    return (error == Error.Success, transferLength, error.ToString());
+                    Error error = WriteChunk(data, offset, size, out int transferLength);
+                    return error == Error.Success
+                        ? (true, transferLength, string.Empty)
+                        : (false, transferLength, error.ToString());
                 },
                 out transferred,
                 msg => FileLog.Write($"[USB-BULK-ERR] {msg}"));
@@ -99,6 +101,18 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
             FileLog.Write($"[USB-BULK-ERR] Chunked write exception: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Writes one chunk through the endpoint writer. Returns the raw
+    /// <see cref="Error"/>; the caller materializes the failure detail string
+    /// only on the failure branch — the success-path Error.ToString() was a
+    /// per-chunk allocation on the frame path.
+    /// </summary>
+    private Error WriteChunk(byte[] data, int offset, int size, out int transferLength)
+    {
+        transferLength = 0;
+        return _writer.Write(data, offset, size, ChunkedBulkWrite.ChunkTimeoutMs, out transferLength);
     }
 
     public void Dispose()

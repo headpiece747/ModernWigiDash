@@ -384,17 +384,18 @@ internal class WinUsbBulkDevice : ITransferBackend
         long elapsedMs = 0;
         try
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            // Zero-alloc timing: GetTimestamp/GetElapsedTime avoid the
+            // Stopwatch.StartNew allocation on the per-frame bulk write path.
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
             bool ok = _api.WritePipe(
                 _interfaceHandle, pipeId,
                 handle.AddrOfPinnedObject(),
                 (uint)data.Length,
                 out uint bytesTransferred,
                 IntPtr.Zero); // Synchronous (no OVERLAPPED)
-            sw.Stop();
-            elapsedMs = sw.ElapsedMilliseconds;
+            elapsedMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
 
-            _bulkDiagLog.Write($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
+            _bulkDiagLog.Write(() => $"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
             if (!ok)
                 Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");

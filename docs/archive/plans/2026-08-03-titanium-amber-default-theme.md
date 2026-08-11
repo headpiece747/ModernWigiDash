@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `ThemeSettings` defaults `#121214`/`#F59E0B` + dark title-bar styling. Archived for history.
+
 # Titanium & Sunset Amber Default Theme Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -6,7 +8,7 @@
 
 **Architecture:** Update `ThemeSettings.cs` defaults, `App.xaml` color resources, `MainWindow.xaml.cs` window initialization hooks, and default widget properties across `ModernWigiDash.Widgets`.
 
-**Tech Stack:** .NET 10.0, WPF, SkiaSharp, NUnit for unit tests.
+**Tech Stack:** .NET 10.0, WPF, SkiaSharp, MSTest for unit tests.
 
 ## Global Constraints
 

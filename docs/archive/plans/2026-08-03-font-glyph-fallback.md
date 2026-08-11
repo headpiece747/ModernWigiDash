@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): `FontHelper.DrawTextWithFallback` / `MeasureTextWithFallback` + Twitch chat integration. Archived for history.
+
 # Dynamic Font Glyph Fallback Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -6,7 +8,7 @@
 
 **Architecture:** Extend `FontHelper` in `ModernWigiDash.Core` with codepoint-to-typeface matching (`ConcurrentDictionary` cached) and multi-run text drawing/measurement methods (`DrawTextWithFallback`, `MeasureTextWithFallback`), and integrate into `TwitchChatStreamWidget`.
 
-**Tech Stack:** .NET 10.0, SkiaSharp (`SKFontManager`, `SKTypeface`, `SKFont`, `SKCanvas`), NUnit for unit tests.
+**Tech Stack:** .NET 10.0, SkiaSharp (`SKFontManager`, `SKTypeface`, `SKFont`, `SKCanvas`), MSTest for unit tests.
 
 ## Global Constraints
 

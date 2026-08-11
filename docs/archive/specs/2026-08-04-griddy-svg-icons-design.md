@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): the bundled `GriddyIcons` set + `SvgIconHelper` cache. Archived for history.
+
 # Griddy SVG Icons Design
 
 **Date:** 2026-08-04

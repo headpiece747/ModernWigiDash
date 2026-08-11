@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`). Archived for history.
+
 # Titanium & Sunset Amber Default Color Theme Specification
 
 ## Overview

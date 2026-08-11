@@ -33,7 +33,11 @@
 
   <ItemGroup>
     <!-- Vendor DLLs removed - using clean native HID/WinUSB transport -->
-    <Resource Include="Resources\Fonts\Geist-VariableFont_wght.ttf">
+    <!-- The variable font is owned by Core (FontHelper loads it from its own
+         output); the App links that copy so the WPF pack URI
+         (pack://application:,,,/Resources/Fonts/#Geist) resolves one file. -->
+    <Resource Include="..\ModernWigiDash.Core\Resources\Fonts\Geist-VariableFont_wght.ttf">
+      <Link>Resources\Fonts\Geist-VariableFont_wght.ttf</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
     <Resource Include="Resources\Fonts\Geist-Regular.ttf">

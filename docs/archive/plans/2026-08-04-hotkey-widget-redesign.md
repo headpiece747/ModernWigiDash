@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): single-action `HotkeyButtonWidget` (ActionType/Icon/IconFile + media keys) and the icon-name box + Browse popup selector. The session-specific "never stage or commit" working-tree instructions were trimmed on archival. Archived for history.
+
 # Hotkey Widget Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -10,7 +12,7 @@
 
 ## Global Constraints
 
-- Run tests from the repo root with `dotnet test ModernWigiDash.slnx`. The full suite currently has exactly **1 known failure**: `TwitchWidget_DefaultsToFontSize16AndCleanStatus` — owned by the user's uncommitted `SocialAndVisualWidgets.cs`. Never stage or commit that file, `.superpowers/sdd/`, or `.superpowers/brainstorm/`. Task-level verification uses `--filter` so the known failure stays out of the way; the final full-suite run must show exactly that one failure and nothing else.
+- Run tests from the repo root with `dotnet test ModernWigiDash.slnx`; task-level verification uses `--filter` so unrelated failures stay out of the way.
 - `ModernWigiDash.Widgets` has `[assembly: InternalsVisibleTo("ModernWigiDash.Tests")]` — internal helpers are directly testable.
 - `WidgetPropertyType.Icon` is used **only** by `HotkeyButtonWidget` — the Icon editor branch can be rewritten unconditionally.
 - `ActionType` values (exact strings): `"Launch App"`, `"Open URL"`, `"Media Play / Pause"`, `"Media Next"`, `"Media Previous"`, `"Media Stop"`, `"Volume Up"`, `"Volume Down"`, `"Mute"`. Default: `"Launch App"`.

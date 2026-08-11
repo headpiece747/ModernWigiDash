@@ -225,13 +225,13 @@ public class PresentMonQueryRegistryTests
 
         service.ConsumeBatches = 256;
         var first = registry.DrainFrameTimes(4321);
+        Assert.AreEqual(256, first.Count, "a full-capacity batch drains completely");
         service.ConsumeBatches = 256;
         var second = registry.DrainFrameTimes(4321);
+        Assert.AreEqual(256, second.Count, "the pooled result list is refilled per drain");
         service.ConsumeBatches = 2;
         var tail = registry.DrainFrameTimes(4321);
 
-        Assert.AreEqual(256, first.Count);
-        Assert.AreEqual(256, second.Count);
         Assert.AreEqual(2, tail.Count, "a short final batch ends the drain loop");
         Assert.AreEqual(6.51, tail[1], 0.001);
         CollectionAssert.AreEqual(new uint[] { 256, 256, 256, 256, 256 }, service.ConsumeRequests.ToArray());

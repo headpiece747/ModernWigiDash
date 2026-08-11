@@ -13,12 +13,15 @@ public enum GesturePageAction
 }
 
 /// <summary>
-/// Result of feeding one input sample into the gesture interpreter.
+/// Result of feeding one input sample into the gesture interpreter. A
+/// readonly struct (the <see cref="InputState"/> precedent): callers only read
+/// the three fields, so the per-sample outcome is a value, never a heap
+/// allocation on the touch path.
 /// </summary>
 /// <param name="PageAction">Swipe/edge-tap navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
 /// <param name="RouteToWidgets">True when the sample should be forwarded to the widget compositor.</param>
 /// <param name="WidgetTouchType">Touch type to route to widgets (Down/Move/Up mapping).</param>
-public sealed record GestureOutcome(
+public readonly record struct GestureOutcome(
     GesturePageAction PageAction,
     bool RouteToWidgets,
     TouchEventType WidgetTouchType);

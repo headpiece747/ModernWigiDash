@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`). The session-specific testing note ("1 known WIP fail … never staged") was trimmed on archival. Archived for history.
+
 # Hotkey Widget Redesign — Design Spec
 
 **Date:** 2026-08-04
@@ -167,9 +169,8 @@ rewriting required.
 
 ## Testing
 
-Update `ModernWigiDash.Tests/UnitTestSuite.cs` (suite currently 61 pass / 1 known WIP
-fail on the Twitch font test owned by the user's uncommitted `SocialAndVisualWidgets.cs`
-— never staged; verification requires that 1 known failure stays the only failure).
+Update `ModernWigiDash.Tests` with the hotkey widget tests (the old grab-bag
+`UnitTestSuite.cs` has since been retired; tests live with their subject files).
 
 Kept as-is (still valid): the existing hotkey icon/size/offset tests
 (`:196-236`), `MediaKeyCatalog_ListsSevenActionsWithFriendlyNames` (`:238`),

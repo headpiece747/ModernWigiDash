@@ -1,3 +1,5 @@
+> **Shipped** — implemented as of 2026-08-10 (commits through `fc42ac4`): marketing text removed, page tabs under the preview canvas, Delete/Back deletes the selected widget. Archived for history.
+
 # Window Cleanup + Page Tabs Under Canvas + Keyboard Delete — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

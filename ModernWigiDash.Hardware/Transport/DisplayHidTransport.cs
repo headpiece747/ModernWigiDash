@@ -472,7 +472,7 @@ public sealed class DisplayHidTransport : IDisplayTransport
                 short x = BitConverter.ToInt16(touchBuf, 2);
                 short y = BitConverter.ToInt16(touchBuf, 4);
 
-                _touchDiagRawLog.Write($"Raw: type={type} x={x} y={y}");
+                _touchDiagRawLog.Write(() => $"Raw: type={type} x={x} y={y}");
 
                 if (type == DisplayProtocolConstants.TouchTypeNone)
                     return null;

@@ -227,7 +227,7 @@ public sealed class FrameDelivery : IDisposable
                         // every-60th cadence keeps it bounded.
                         // (Drops are counted in DroppedCount, not logged.)
 #pragma warning restore S125
-                        _sentLog.Write($"Frame #{sent} sent ({latest.Buffer.Length} bytes)");
+                        _sentLog.Write(() => $"Frame #{sent} sent ({latest.Buffer.Length} bytes)");
                     }
                     else
                     {
