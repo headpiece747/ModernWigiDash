@@ -5,14 +5,27 @@
     architecture (x86/x64/arm64) into every build output. These native PDBs
     are only useful for debugging SkiaSharp-internal crashes, never at
     runtime, and bloat output by ~1.5 GB across the solution. Remove them
-    after each build. Lives in .targets because it is a custom post-build
-    target, not a property default.
+    after each build, and strip them from the publish pipeline so a release
+    zip never carries them either (publish restages the native payload after
+    the Build target runs, so the post-build delete alone is not enough — the
+    item must be filtered from ResolvedFileToPublish). The two must be
+    separate targets: a target that already ran (AfterTargets="Build") is not
+    re-run for a later BeforeTargets hook, and ResolvedFileToPublish is only
+    populated after the build phase. Lives in .targets because these are
+    custom post-build/publish targets, not property defaults.
   -->
   <Target Name="TrimSkiaSharpNativePdb" AfterTargets="Build">
     <ItemGroup>
       <_SkiaPdb Include="$(TargetDir)**\libSkiaSharp.pdb" />
     </ItemGroup>
     <Delete Files="@(_SkiaPdb)" />
+  </Target>
+
+  <Target Name="TrimSkiaSharpNativePdbFromPublish" BeforeTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(FileName)%(Extension)' == 'libSkiaSharp.pdb'" />
+    </ItemGroup>
   </Target>
 
 </Project>

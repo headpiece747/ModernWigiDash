@@ -55,14 +55,6 @@ public static class FontHelper
                 var tf = SKTypeface.FromFile(fontPath);
                 if (tf != null) return tf;
             }
-
-            string asmLocation = Path.GetDirectoryName(typeof(FontHelper).Assembly.Location) ?? "";
-            string asmFontPath = Path.Combine(asmLocation, "Resources", "Fonts", "Geist-VariableFont_wght.ttf");
-            if (File.Exists(asmFontPath))
-            {
-                var tf = SKTypeface.FromFile(asmFontPath);
-                if (tf != null) return tf;
-            }
         }
         catch
         {
