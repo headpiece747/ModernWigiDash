@@ -44,6 +44,31 @@ public class ColorPickerEditorTests
         });
 
     [TestMethod]
+    public void HexSetter_RaisesNeitherAppliedNorChanged()
+        => StaRunner.Run(() =>
+        {
+            var editor = new ColorPickerEditor();
+            bool applied = false;
+            bool changed = false;
+            editor.Applied += _ => applied = true;
+            editor.Changed += () => changed = true;
+            editor.Hex = "#00FF00";
+            Assert.IsFalse(applied);
+            Assert.IsFalse(changed);
+        });
+
+    [TestMethod]
+    public void PopupApply_RaisesChanged()
+        => StaRunner.Run(() =>
+        {
+            var editor = new ColorPickerEditor();
+            int changed = 0;
+            editor.Changed += () => changed++;
+            editor.PopupContent.ApplyButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Assert.AreEqual(1, changed);
+        });
+
+    [TestMethod]
     public void ShowHexBoxFalse_HidesHexBox()
         => StaRunner.Run(() =>
         {

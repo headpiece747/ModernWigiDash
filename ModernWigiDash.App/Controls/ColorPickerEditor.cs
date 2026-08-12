@@ -62,7 +62,9 @@ public sealed class ColorPickerEditor : UserControl
 
         SwatchButton.Click += (_, _) =>
         {
-            PopupContent.SetFromHex(_hex); // internal reuse: sync popup state
+            // SetFromHex no-ops on an invalid row hex, so the popup shows its
+            // last valid state until Apply — acceptable, Apply recovers the row.
+            PopupContent.SetFromHex(_hex);
             PopupClamp.AttachPopupWithinWindow(Popup, SwatchButton);
             Popup.IsOpen = true;
         };
@@ -72,7 +74,6 @@ public sealed class ColorPickerEditor : UserControl
             if (_suppress) return;
             _hex = HexBox.Text.Trim();
             IsValidHex = ThemeSettings.ParseColor(_hex) is not null;
-            HexBox.BorderBrush = IsValidHex ? null : Brushes.Red;
             SyncSwatch();
             Changed?.Invoke();
             if (IsValidHex) Applied?.Invoke(_hex);
@@ -86,6 +87,7 @@ public sealed class ColorPickerEditor : UserControl
             SyncSwatch();
             IsValidHex = true;
             Applied?.Invoke(hex);
+            Changed?.Invoke(); // validation hook (theme dialog) must re-run after a popup commit
         };
         PopupContent.Cancelled += () => Popup.IsOpen = false;
 
@@ -132,6 +134,7 @@ public sealed class ColorPickerEditor : UserControl
     private void SyncSwatch()
     {
         var color = ThemeSettings.ParseColor(_hex);
+        HexBox.BorderBrush = color is null ? Brushes.Red : null;
         var brush = color is { } c
             ? new SolidColorBrush(Color.FromArgb(c.A, c.R, c.G, c.B))
             : new SolidColorBrush(Color.FromRgb(18, 20, 29));

@@ -47,12 +47,17 @@ public static class ColorConversions
         double h = 0;
         if (delta > 0)
         {
+            // S1244 suppressed below: `max` is bit-identical to one of the
+            // r/g/b inputs (assigned from Math.Max of them), so `==` is exact
+            // by construction — the guard needs no float tolerance.
+#pragma warning disable S1244 // exact-by-construction: max is bit-identical to one input
             h = max switch
             {
                 var m when m == r => 60 * ((g - b) / delta % 6),
                 var m when m == g => 60 * ((b - r) / delta + 2),
                 _ => 60 * ((r - g) / delta + 4)
             };
+#pragma warning restore S1244
             if (h < 0) h += 360;
         }
 

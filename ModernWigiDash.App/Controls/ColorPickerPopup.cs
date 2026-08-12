@@ -1,7 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using ModernWigiDash.Core.Theming;
@@ -16,11 +14,9 @@ namespace ModernWigiDash.App.Controls;
 public sealed class ColorPickerPopup : UserControl
 {
     private HsvColor _hsv;
-    private byte _alpha = 255;
+    private byte _alpha;
     private readonly Canvas _svCanvas;
     private readonly Rectangle _svHueLayer;
-    private readonly Rectangle _svWhiteLayer;
-    private readonly Rectangle _svBlackLayer;
     private readonly Border _svThumb;
     private readonly Canvas _hueCanvas;
     private readonly Border _hueThumb;
@@ -61,14 +57,14 @@ public sealed class ColorPickerPopup : UserControl
         root.Children.Add(PresetPanel);
 
         // SV square: hue base + white (horizontal) + black (vertical) overlays
-        _svCanvas = new Canvas { Width = 252, Height = 130 };
+        _svCanvas = new Canvas { Width = 252, Height = 130, ClipToBounds = true };
         _svHueLayer = new Rectangle { Width = 252, Height = 130, IsHitTestVisible = false };
-        _svWhiteLayer = new Rectangle
+        var svWhiteLayer = new Rectangle
         {
             Width = 252, Height = 130, IsHitTestVisible = false,
             Fill = new LinearGradientBrush(Colors.White, Colors.Transparent, 0)
         };
-        _svBlackLayer = new Rectangle
+        var svBlackLayer = new Rectangle
         {
             Width = 252, Height = 130, IsHitTestVisible = false,
             Fill = new LinearGradientBrush(Colors.Transparent, Colors.Black, 90)
@@ -81,13 +77,13 @@ public sealed class ColorPickerPopup : UserControl
         };
         Canvas.SetLeft(_svThumb, -7); Canvas.SetTop(_svThumb, -7);
         _svCanvas.Children.Add(_svHueLayer);
-        _svCanvas.Children.Add(_svWhiteLayer);
-        _svCanvas.Children.Add(_svBlackLayer);
+        _svCanvas.Children.Add(svWhiteLayer);
+        _svCanvas.Children.Add(svBlackLayer);
         _svCanvas.Children.Add(_svThumb);
         root.Children.Add(_svCanvas);
 
         // Hue strip
-        _hueCanvas = new Canvas { Width = 252, Height = 16, Margin = new Thickness(0, 10, 0, 0) };
+        _hueCanvas = new Canvas { Width = 252, Height = 16, Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true };
         var hueStrip = new Rectangle
         {
             Width = 252, Height = 16,
@@ -191,7 +187,12 @@ public sealed class ColorPickerPopup : UserControl
         Canvas.SetLeft(_svThumb, _svCanvas.Width * _hsv.S - 7);
         Canvas.SetTop(_svThumb, _svCanvas.Height * (1 - _hsv.V) - 7);
         Canvas.SetLeft(_hueThumb, _hueCanvas.Width * (_hsv.H / 360) - 5);
+        // S1244 suppressed: the slider is integral (Minimum 0, Maximum 255,
+        // IsSnapToTickEnabled), so the compare is exact and terminates the
+        // value-sync loop instead of re-entering it forever.
+#pragma warning disable S1244 // integral slider values: exact compare terminates the loop
         if (_alphaSlider != null && _alphaSlider.Value != _alpha) _alphaSlider.Value = _alpha;
+#pragma warning restore S1244
 
         _suppress = true;
         _hexBox.Text = ColorConversions.FormatHex(CurrentColor);

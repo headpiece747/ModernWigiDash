@@ -52,6 +52,8 @@ public class ThemeDialogTests
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
             var editor = dialog.FindVisualChildren<ColorPickerEditor>().First();
+            editor.HexBox.Text = "zzz";
+            Assert.IsFalse(dialog.ApplyIsEnabledForTest);
             editor.HexBox.Text = "#F59E0B";
             Assert.IsTrue(dialog.ApplyIsEnabledForTest);
             return null;
