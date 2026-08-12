@@ -33,6 +33,38 @@ public class WeatherClientTests
     }
     """;
 
+    // Two same-named cities across countries: the exact-name match must beat
+    // the higher-population fuzzy match (the Vitoria/Victoria bug).
+    private const string SampleSameNameMultiCountry = """
+    {
+      "results": [
+        { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
+        { "name": "Vit\u00f3ria", "latitude": -20.3194, "longitude": -40.3378, "admin1": "Esp\u00edrito Santo", "country": "Brazil", "country_code": "BR", "population": 1962476 }
+      ]
+    }
+    """;
+
+    // Two same-named cities in one country: the state suffix must pick the
+    // right admin1 even when the wrong one is listed first with more people.
+    private const string SampleSpringfields = """
+    {
+      "results": [
+        { "name": "Springfield", "latitude": 37.21533, "longitude": -93.29824, "admin1": "Missouri", "country": "United States", "country_code": "US", "population": 167601 },
+        { "name": "Springfield", "latitude": 42.10148, "longitude": -72.58981, "admin1": "Massachusetts", "country": "United States", "country_code": "US", "population": 155932 }
+      ]
+    }
+    """;
+
+    // Identical names across countries: the CountryCode hint must decide.
+    private const string SampleSanJoses = """
+    {
+      "results": [
+        { "name": "San Jose", "latitude": 37.33939, "longitude": -121.89496, "admin1": "California", "country": "United States", "country_code": "US", "population": 1026908 },
+        { "name": "San Jose", "latitude": 9.92807, "longitude": -84.09072, "admin1": "San Jos\u00e9 Province", "country": "Costa Rica", "country_code": "CR", "population": 335007 }
+      ]
+    }
+    """;
+
     // The ZIP parse reads root-level latitude/longitude, so the test body
     // mirrors the shape the parser expects (numeric root values).
     private const string SampleZip = """
@@ -104,10 +136,79 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual("Berlin", snapshot.ResolvedCityName, "The geocoding API's name must be used");
+        Assert.AreEqual("Berlin, Germany", snapshot.ResolvedCityName, "The resolved name must carry the country so a wrong pick is visible");
         Assert.AreEqual(52.52, snapshot.Lat);
         Assert.AreEqual(13.405, snapshot.Lon);
         Assert.AreEqual(2, stub.Calls, "Geocode + forecast must be exactly two calls");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousName_ExactMatchBeatsHigherPopulationFuzzy()
+    {
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
+                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(SampleForecast)
+                    : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        // "Victoria" must resolve to Victoria, Canada — not Vitoria, Brazil,
+        // which the API ranks first by population (the reported bug).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(48.4284, snapshot.Lat);
+        Assert.AreEqual(-123.3656, snapshot.Lon);
+        Assert.AreEqual("Victoria, British Columbia, Canada", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_StateSuffix_PicksMatchingAdmin1()
+    {
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleSpringfields)
+                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(SampleForecast)
+                    : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        // Missouri is listed first with more people; the ", MA" suffix must
+        // pick Springfield, Massachusetts anyway.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Springfield, MA", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(42.10148, snapshot.Lat);
+        Assert.AreEqual(-72.58981, snapshot.Lon);
+        Assert.AreEqual("Springfield, Massachusetts, United States", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_CountryCodeHint_FiltersToRequestedCountry()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            if (request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                Assert.IsTrue(
+                    request.RequestUri.AbsoluteUri.Contains("countryCode=CR", StringComparison.OrdinalIgnoreCase),
+                    "The CountryCode hint must be passed to the geocoding API");
+                return StubHttpHandler.Ok(SampleSanJoses);
+            }
+            return request.RequestUri.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleForecast)
+                : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // Identical city names in two countries: the CR hint must pick Costa Rica.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose", null, null, null, "CR"));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(9.92807, snapshot.Lat);
+        Assert.AreEqual(-84.09072, snapshot.Lon);
+        Assert.AreEqual("San Jose, San José Province, Costa Rica", snapshot.ResolvedCityName);
     }
 
     [TestMethod]

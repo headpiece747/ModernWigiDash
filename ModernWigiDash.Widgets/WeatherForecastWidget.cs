@@ -51,6 +51,9 @@ public class WeatherForecastWidget : ModernWidgetBase
     [WidgetProperty("Longitude", WidgetPropertyType.Text, "Override longitude (e.g. -74.0060). Leave empty to auto-resolve from Location.", "")]
     public string Longitude { get; set; } = "";
 
+    [WidgetProperty("Country Code", WidgetPropertyType.Text, "Optional ISO country code (US, DE, CA, JP...) to disambiguate same-named cities worldwide. You can also type \"City, State\" or \"City, Country\" in Location.", "")]
+    public string CountryCode { get; set; } = "";
+
     private readonly WeatherClient _client;
 
     public WeatherForecastWidget()
@@ -633,7 +636,7 @@ public class WeatherForecastWidget : ModernWidgetBase
     }
 
     private WeatherLocation BuildLocation()
-        => new(LocationType, Location, Latitude, Longitude, CustomLabel);
+        => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim());
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the

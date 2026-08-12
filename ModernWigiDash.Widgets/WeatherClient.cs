@@ -19,8 +19,17 @@ public readonly record struct HourlyForecastItem(string TimeLabel, double TempC,
 /// A resolved place the weather is fetched for. Latitude/Longitude are the
 /// optional explicit coordinate overrides; when either is empty the location
 /// query (city name, ZIP, or "lat,lon" pair) is resolved via geocoding.
+/// <see cref="CountryCode"/> is the optional ISO country-code hint ("US",
+/// "DE", ...) that disambiguates same-named cities across countries.
 /// </summary>
-public sealed record WeatherLocation(string LocationType, string Location, string? Latitude, string? Longitude, string? CustomLabel);
+public sealed record WeatherLocation(string LocationType, string Location, string? Latitude, string? Longitude, string? CustomLabel)
+{
+    /// <summary>Optional ISO 3166-1 alpha-2 country-code hint for geocoding.</summary>
+    public string? CountryCode { get; init; }
+
+    public WeatherLocation(string locationType, string location, string? latitude, string? longitude, string? customLabel, string? countryCode)
+        : this(locationType, location, latitude, longitude, customLabel) => CountryCode = countryCode;
+}
 
 /// <summary>
 /// One complete Open-Meteo fetch result. Fields are null when the response
@@ -289,7 +298,7 @@ public sealed class WeatherClient
         }
         else
         {
-            await GeocodeCityLocationAsync(location.Location).ConfigureAwait(false);
+            await GeocodeCityLocationAsync(location).ConfigureAwait(false);
         }
     }
 
@@ -376,25 +385,62 @@ public sealed class WeatherClient
         return (highTempC, lowTempC, dailyForecasts);
     }
 
-    private async Task GeocodeCityLocationAsync(string query)
+    /// <summary>
+    /// Resolves a city-name query via the Open-Meteo geocoding API. The API
+    /// ranks by population, so a bare name can resolve to the wrong same-named
+    /// city worldwide ("Victoria" -> Vitoria, Brazil). This fetches ten
+    /// candidates and ranks them: exact name match first, then a comma-suffix
+    /// match ("Springfield, MA" / "Victoria, BC" / "San Jose, Costa Rica")
+    /// against admin1/country/country_code, then the <see cref="WeatherLocation.CountryCode"/>
+    /// hint, with population as the tiebreak. The resolved name carries
+    /// "Name, Admin1, Country" so the widget title shows what was picked.
+    /// </summary>
+    private async Task GeocodeCityLocationAsync(WeatherLocation location)
     {
         try
         {
-            string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=1&language=en&format=json";
+            string query = location.Location.Trim();
+            string namePart = query;
+            string? suffixPart = null;
+            int comma = query.IndexOf(',');
+            if (comma > 0)
+            {
+                namePart = query[..comma].Trim();
+                suffixPart = query[(comma + 1)..].Trim();
+                if (suffixPart.Length == 0) suffixPart = null;
+            }
+
+            string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(namePart)}&count=10&language=en&format=json";
+            if (!string.IsNullOrWhiteSpace(location.CountryCode))
+                url += $"&countryCode={Uri.EscapeDataString(location.CountryCode.Trim())}";
+
             string json = await Http.GetStringAsync(url).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
             {
-                var first = results[0];
-                _lat = first.GetProperty("latitude").GetDouble();
-                _lon = first.GetProperty("longitude").GetDouble();
-                _resolvedCityName = first.TryGetProperty("name", out var n) ? n.GetString() ?? query : query;
+                JsonElement best = results[0];
+                int bestScore = int.MinValue;
+                double bestPopulation = -1;
+                foreach (var candidate in results.EnumerateArray())
+                {
+                    var (score, population) = RankGeocodeCandidate(candidate, namePart, suffixPart, location.CountryCode);
+                    if (score > bestScore || (score == bestScore && population > bestPopulation))
+                    {
+                        bestScore = score;
+                        bestPopulation = population;
+                        best = candidate;
+                    }
+                }
+
+                _lat = best.GetProperty("latitude").GetDouble();
+                _lon = best.GetProperty("longitude").GetDouble();
+                _resolvedCityName = ComposeResolvedName(best, namePart);
                 return;
             }
         }
         catch (Exception ex)
         {
-            _logError?.Invoke($"Geocoding failed for '{SanitizeLog(query)}': {ex.Message}", ex);
+            _logError?.Invoke($"Geocoding failed for '{SanitizeLog(location.Location)}': {ex.Message}", ex);
         }
 
         // A failed geocode leaves the coordinates unresolved: FetchCurrentAsync
@@ -403,6 +449,63 @@ public sealed class WeatherClient
         // 5-minute throttle applies even without coordinates — otherwise a
         // typo'd city or an outage would retry at render rate forever.
         _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
+    }
+
+    /// <summary>
+    /// Pure geocode-candidate ranking: exact name match dominates; the
+    /// comma-suffix (state/country) and the country-code hint add weighted
+    /// matches; population breaks ties. Returns the score and population so
+    /// the caller can pick the best.
+    /// </summary>
+    private static (int Score, double Population) RankGeocodeCandidate(JsonElement candidate, string namePart, string? suffixPart, string? countryCode)
+    {
+        int score = 0;
+        string name = candidate.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+        if (name.Equals(namePart, StringComparison.OrdinalIgnoreCase)) score += 1000;
+
+        string admin1 = candidate.TryGetProperty("admin1", out var a1) ? a1.GetString() ?? "" : "";
+        string country = candidate.TryGetProperty("country", out var c) ? c.GetString() ?? "" : "";
+        string code = candidate.TryGetProperty("country_code", out var cc) ? cc.GetString() ?? "" : "";
+
+        if (!string.IsNullOrWhiteSpace(suffixPart))
+        {
+            if (admin1.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
+                || country.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
+                || code.Equals(suffixPart, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 500;
+            }
+            else if (admin1.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
+                || country.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
+                || code.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 250; // abbreviation ("MA" -> Massachusetts)
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(countryCode)
+            && (code.Equals(countryCode.Trim(), StringComparison.OrdinalIgnoreCase)
+                || country.Equals(countryCode.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            score += 500;
+        }
+
+        double population = candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
+            ? p.GetDouble()
+            : 0;
+        return (score, population);
+    }
+
+    /// <summary>"Name, Admin1, Country" (omitting missing parts) so the widget
+    /// title shows exactly which place was picked.</summary>
+    private static string ComposeResolvedName(JsonElement candidate, string fallbackName)
+    {
+        string name = candidate.TryGetProperty("name", out var n) ? n.GetString() ?? fallbackName : fallbackName;
+        string admin1 = candidate.TryGetProperty("admin1", out var a1) ? a1.GetString() ?? "" : "";
+        string country = candidate.TryGetProperty("country", out var c) ? c.GetString() ?? "" : "";
+
+        if (string.IsNullOrWhiteSpace(admin1)) return string.IsNullOrWhiteSpace(country) ? name : $"{name}, {country}";
+        return string.IsNullOrWhiteSpace(country) ? $"{name}, {admin1}" : $"{name}, {admin1}, {country}";
     }
 
     private async Task GeocodeZipCodeAsync(string zipCode)
@@ -425,7 +528,7 @@ public sealed class WeatherClient
             _logError?.Invoke($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
         }
 
-        await GeocodeCityLocationAsync(zipCode).ConfigureAwait(false);
+        await GeocodeCityLocationAsync(new WeatherLocation("Fixed Location", zipCode, null, null, null)).ConfigureAwait(false);
     }
 
     private static bool IsZipCode(string query)
