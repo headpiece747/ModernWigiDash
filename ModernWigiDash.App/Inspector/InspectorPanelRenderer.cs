@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Sdk;
@@ -100,6 +101,9 @@ public static class InspectorPanelRenderer
                 case WidgetPropertyType.Boolean:
                     propPanel.Children.Add(BuildBooleanEditor(desc, callbacks));
                     break;
+                case WidgetPropertyType.Color:
+                    propPanel.Children.Add(BuildColorEditor(desc, isUpdatingInspector, callbacks));
+                    break;
                 case WidgetPropertyType.Path:
                     if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
                     {
@@ -117,7 +121,7 @@ public static class InspectorPanelRenderer
                     propPanel.Children.Add(BuildSensorSelector(desc, isUpdatingInspector, callbacks));
                     break;
                 default:
-                    // Text, Number, or Color
+                    // Text or Number
                     propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
                     break;
             }
@@ -309,6 +313,20 @@ public static class InspectorPanelRenderer
         }
 
         return BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
+    }
+
+    private static UIElement BuildColorEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    {
+        var editor = new ColorPickerEditor
+        {
+            Hex = desc.CurrentValue?.ToString() ?? ""
+        };
+        editor.Applied += hex =>
+        {
+            if (isUpdatingInspector()) return;
+            callbacks.ApplyInspectorPropertyValue(desc.Property, hex);
+        };
+        return editor;
     }
 
     private static TextBox BuildTextEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)

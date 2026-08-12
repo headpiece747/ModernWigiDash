@@ -22,6 +22,9 @@ public class InspectorEditorProviderTests
         [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "x")]
         public string Label { get; set; } = "x";
 
+        [WidgetProperty("Accent", WidgetPropertyType.Color, defaultValue: "#F59E0B")]
+        public string AccentHex { get; set; } = "#F59E0B";
+
         [WidgetProperty("Icon File", WidgetPropertyType.Path, defaultValue: "")]
         public string IconFile { get; set; } = "";
 
@@ -73,7 +76,7 @@ public class InspectorEditorProviderTests
         Assert.IsTrue(descriptions.Any(d => d.Property.Name == nameof(ProviderWidget.ActionCommand)),
             "The ActionCommand property must keep its editor");
         CollectionAssert.AreEqual(
-            new[] { "Label", "Icon", "ActionType", "ActionCommand" },
+            new[] { "Label", "AccentHex", "Icon", "ActionType", "ActionCommand" },
             descriptions.Select(d => d.Property.Name).ToArray());
     }
 
@@ -164,6 +167,42 @@ public class InspectorEditorProviderTests
             var folderButton = dock.Children.OfType<Button>().Single(b => (string)b.Content == "Folder\u2026");
             folderButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Assert.AreEqual("Select action folder", folderTitle);
+        });
+    }
+
+    [TestMethod]
+    public void Render_ColorProperty_BuildsColorPickerEditor_AndWritesBackThroughSeam()
+    {
+        StaRunner.Run(() =>
+        {
+            System.Reflection.PropertyInfo? writtenProp = null;
+            object? writtenValue = null;
+
+            var placed = Place();
+            var panel = new StackPanel();
+            InspectorPanelRenderer.Render(
+                placed,
+                InspectorModelBuilder.Describe(placed),
+                panel.Children,
+                () => false,
+                new InspectorCallbacks
+                {
+                    TryFindResource = _ => null,
+                    ApplyInspectorPropertyValue = (prop, value) => { writtenProp = prop; writtenValue = value; },
+                    ShowIconSelectorPopup = (_, _, _) => { },
+                    AttachDropdownWithinWindow = _ => { },
+                    BrowseFile = (_, _) => null,
+                    BrowseFolder = _ => null
+                });
+
+            var editor = panel.Children.OfType<StackPanel>()
+                .SelectMany(sp => sp.Children.OfType<ModernWigiDash.App.Controls.ColorPickerEditor>())
+                .Single();
+
+            Assert.AreEqual("#F59E0B", editor.Hex);
+            editor.HexBox.Text = "#00FF00"; // live write-back
+            Assert.AreEqual(nameof(ProviderWidget.AccentHex), writtenProp?.Name);
+            Assert.AreEqual("#00FF00", writtenValue);
         });
     }
 }
