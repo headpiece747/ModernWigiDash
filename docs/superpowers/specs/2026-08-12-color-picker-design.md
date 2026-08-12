@@ -105,7 +105,8 @@ for precise picking. Three surfaces are in scope:
 ## No-Regression & Physical Device
 
 - Full suite: `dotnet test ModernWigiDash.slnx -c Release --nologo
-  -p:BaseOutputPath=<temp>/opencode/wmd-build/ -nodeReuse:false` (existing 929 tests stay green).
+  -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ -nodeReuse:false`
+  (existing 929 tests stay green).
 - Render/transport path is **untouched**: compositor, frame pipeline, USB transport, and
   widget renderers don't change — only desktop-side input surfaces. Colors reach the
   device through the existing `ColorOf` → SKColor → compositor → RGB565 flow.
