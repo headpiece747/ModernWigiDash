@@ -276,7 +276,7 @@ public sealed class InspectorController
         combo.Loaded += (_, _) =>
         {
             combo.ApplyTemplate();
-            if (Window.GetWindow(combo) is not Window window) return;
+            if (Window.GetWindow(combo) is null) return;
             if (combo.Template?.FindName("PART_Popup", combo) is not Popup popup) return;
 
             PopupClamp.AttachPopupWithinWindow(popup, combo);
