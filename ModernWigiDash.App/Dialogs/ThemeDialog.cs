@@ -120,16 +120,12 @@ public sealed class ThemeDialog : Window
         var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0) };
         _btnApply = new Button { Content = "Apply", Style = Application.Current.Resources["AccentButton"] as Style };
 
-        foreach (var (_, editor) in _entries)
-        {
-            editor.Changed += () => Validate();
-        }
-
         btnReset.Click += (_, _) =>
         {
             var defaults = new ThemeSettings();
             foreach (var (key, editor) in _entries)
                 editor.Hex = (string?)defaults.GetType().GetProperty(key)?.GetValue(defaults) ?? "#000000";
+            Validate(); // programmatic Hex sets never raise Changed — re-arm Apply explicitly
         };
 
         btnCancel.Click += (_, _) => Close();
