@@ -1,3 +1,4 @@
+using System.IO;
 using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
@@ -53,6 +54,27 @@ public class MainWindowConstructionTests
         });
 
         Assert.IsNull(error, error?.ToString());
+    }
+
+    [TestMethod]
+    public void Construct_PageBackgroundPicker_ReflectsStarterPageBackground()
+    {
+        var (hex, error) = Host.Invoke(() =>
+        {
+            string tempDir = Path.Combine(Path.GetTempPath(), "wmd-bg-" + Guid.NewGuid().ToString("N"));
+            var window = new MainWindow(new StubPresentMonNative(), Path.Combine(tempDir, "profile.json"));
+            try
+            {
+                return (object?)window.PageBgPicker.Hex;
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+        Assert.IsNull(error, error?.ToString());
+        Assert.AreEqual(ModernWigiDash.Core.Models.PageLayout.DefaultBackgroundHexColor, hex);
     }
 
     /// <summary>

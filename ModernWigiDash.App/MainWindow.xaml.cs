@@ -183,6 +183,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
             RenamePage,
             DeletePage);
 
+        // Page-background picker: the swatch commits the active page's color.
+        // Its Hex is kept in sync by RefreshAfterMutation (the mutation funnel).
+        PageBgPicker.Applied += OnPageBackgroundApplied;
+
         // 4. Load the persisted profile, or build the starter profile on first
         //    launch. A first launch persists the starter immediately so the
         //    file exists before any mutation.
@@ -193,6 +197,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _profilePersistence.Save();
         }
         _pageTabs.Rebuild(_profile);
+        PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
 
         // 5. Route device touch input through the single input module. Display
         // touches are runtime input: Press/Move/Release cross the controller's
@@ -301,6 +306,18 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _pageTabs.Rebuild(_profile);
         SelectWidget(selection);
         UpdateActiveCount();
+        SkiaCanvas.InvalidateVisual();
+        PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
+    }
+
+    /// <summary>Page-background picker commit: writes the active page's
+    /// BackgroundHexColor (the compositor diffs it per frame, so the change
+    /// flows to the physical display on the next tick) and marks the profile
+    /// dirty. The swatch itself is kept in sync by <see cref="RefreshAfterMutation"/>.</summary>
+    private void OnPageBackgroundApplied(string hex)
+    {
+        _profile.ActivePage.BackgroundHexColor = hex;
+        _profilePersistence.MarkDirty();
         SkiaCanvas.InvalidateVisual();
     }
 
