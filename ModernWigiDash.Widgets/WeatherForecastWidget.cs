@@ -5,7 +5,7 @@ using ModernWigiDash.Core.Rendering;
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
-public class WeatherForecastWidget : ModernWidgetBase
+public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 {
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
 
@@ -53,6 +53,22 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     [WidgetProperty("Country Code", WidgetPropertyType.Text, "Optional ISO country code (US, DE, CA, JP...) to disambiguate same-named cities worldwide. You can also type \"City, State\" or \"City, Country\" in Location.", "")]
     public string CountryCode { get; set; } = "";
+
+    /// <summary>
+    /// Pick from the geocoder's candidates when a city name resolves
+    /// ambiguously (e.g. "Victoria" matches Canada, Seychelles, ...). Options
+    /// are populated from the last geocode via <see cref="IWidgetPropertyOptionsProvider"/>;
+    /// an empty value means "let the automatic ranking decide".
+    /// </summary>
+    [WidgetProperty("Location Match", WidgetPropertyType.Choice, "Pick the exact place when the city name is ambiguous. Leave empty for automatic.", "")]
+    public string LocationMatch { get; set; } = "";
+
+    public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
+        => propertyName == nameof(LocationMatch)
+            ? _client.LastCandidates
+                .Select(c => new WidgetPropertyOption(c.Query, c.Label))
+                .ToArray()
+            : [];
 
     private readonly WeatherClient _client;
 
@@ -140,7 +156,7 @@ public class WeatherForecastWidget : ModernWidgetBase
 
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
-        if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude))
+        if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode) or nameof(LocationMatch))
         {
             _client.InvalidateLocation();
             _ = FetchLiveWeatherAsync(force: true);
@@ -636,7 +652,10 @@ public class WeatherForecastWidget : ModernWidgetBase
     }
 
     private WeatherLocation BuildLocation()
-        => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim());
+        => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim())
+        {
+            LocationMatch = string.IsNullOrWhiteSpace(LocationMatch) ? null : LocationMatch.Trim()
+        };
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the

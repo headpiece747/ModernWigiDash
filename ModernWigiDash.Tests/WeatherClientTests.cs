@@ -128,6 +128,54 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_LocationMatchPick_ResolvesToExactCandidateCoordinates()
+    {
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
+                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(SampleForecast)
+                    : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        // First resolution populates the candidates (exact match wins by ranking).
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+        Assert.IsTrue(client.LastCandidates.Count >= 2, "Candidates must be exposed for the Location Match dropdown");
+
+        // A user pick resolves DIRECTLY to that candidate — no re-geocode.
+        string picked = client.LastCandidates.Last().Label; // Vitoria, Brazil
+        int geocodesBefore = stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal));
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(-20.3194, snapshot.Lat);
+        Assert.AreEqual(-40.3378, snapshot.Lon);
+        Assert.AreEqual(picked, snapshot.ResolvedCityName);
+        Assert.AreEqual(geocodesBefore, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
+            "A pick must not re-geocode — it resolves from the cached candidates");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_StaleLocationMatch_FallsBackToGeocode()
+    {
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
+                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(SampleForecast)
+                    : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        // The pick references a candidate that no longer exists (the query
+        // changed and re-geocoded, replacing the candidate list) — must fall
+        // back to normal geocoding instead of failing.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = "Gone, Nowhere, Atlantis" });
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(48.4284, snapshot.Lat, "Fallback geocoding must resolve the exact-name match (Victoria, Canada)");
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_CityGeocode_ResolvesViaGeocodingApi()
     {
         var stub = new StubHttpHandler(Respond);

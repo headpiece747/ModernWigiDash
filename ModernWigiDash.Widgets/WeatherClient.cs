@@ -27,6 +27,13 @@ public sealed record WeatherLocation(string LocationType, string Location, strin
     /// <summary>Optional ISO 3166-1 alpha-2 country-code hint for geocoding.</summary>
     public string? CountryCode { get; init; }
 
+    /// <summary>
+    /// Optional user pick from the geocoder's candidates ("Location Match"
+    /// dropdown): the chosen candidate's label, resolved directly to its
+    /// coordinates instead of re-geocoding.
+    /// </summary>
+    public string? LocationMatch { get; init; }
+
     public WeatherLocation(string locationType, string location, string? latitude, string? longitude, string? customLabel, string? countryCode)
         : this(locationType, location, latitude, longitude, customLabel) => CountryCode = countryCode;
 }
@@ -48,6 +55,14 @@ public sealed record WeatherSnapshot(
     string ResolvedCityName,
     double Lat,
     double Lon);
+
+/// <summary>
+/// One geocoding candidate the user can pick from the widget's "Location
+/// Match" dropdown: the display label (Name, Admin1, Country) and the exact
+/// coordinates it resolves to. When the user picks one, the widget re-fetches
+/// with its query so the pick is honored deterministically.
+/// </summary>
+public sealed record GeocodeCandidate(string Label, string Query, double Lat, double Lon);
 
 /// <summary>
 /// Deep weather data module: geocode → fetch → parse → disk cache, with an
@@ -83,6 +98,13 @@ public sealed class WeatherClient
 
     /// <summary>The last resolved display name for the location (API name, override label, or fallback).</summary>
     internal string ResolvedCityName => _resolvedCityName;
+
+    /// <summary>
+    /// The geocode candidates from the last city-name resolution, in API order
+    /// — the widget's "Location Match" dropdown options. Empty when the last
+    /// resolution was coordinates, a ZIP, or a failed geocode.
+    /// </summary>
+    internal IReadOnlyList<GeocodeCandidate> LastCandidates { get; private set; } = [];
 
     /// <summary>UTC timestamp of the last successful fetch or cache load (drives throttling).</summary>
     internal DateTime LastFetchTimeUtc => _lastFetchTime;
@@ -155,7 +177,7 @@ public sealed class WeatherClient
 
         try
         {
-            string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}";
+            string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.LocationMatch}";
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
                 await ResolveCoordinatesAsync(location, currentQuery).ConfigureAwait(false);
 
@@ -275,6 +297,23 @@ public sealed class WeatherClient
     private async Task ResolveCoordinatesAsync(WeatherLocation location, string currentQuery)
     {
         _lastLocationQuery = currentQuery;
+
+        // A user pick from the "Location Match" dropdown resolves directly to
+        // that candidate's exact coordinates — no re-geocode, deterministic.
+        if (!string.IsNullOrWhiteSpace(location.LocationMatch))
+        {
+            var match = LastCandidates.FirstOrDefault(c =>
+                c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                _lat = match.Lat;
+                _lon = match.Lon;
+                _resolvedCityName = string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel;
+                return;
+            }
+            // A stale pick (candidates since replaced by a different query):
+            // fall through and re-geocode the location normally.
+        }
 
         if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
             && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal))
@@ -418,6 +457,20 @@ public sealed class WeatherClient
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
             {
+                // Every candidate becomes a pickable option ("Location Match"
+                // dropdown): label = "Name, Admin1, Country", query = the label
+                // text so a pick re-resolves deterministically to this place.
+                var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
+                foreach (var candidate in results.EnumerateArray())
+                {
+                    string label = ComposeResolvedName(candidate, namePart);
+                    candidates.Add(new GeocodeCandidate(
+                        label, label,
+                        candidate.GetProperty("latitude").GetDouble(),
+                        candidate.GetProperty("longitude").GetDouble()));
+                }
+                LastCandidates = candidates;
+
                 JsonElement best = results[0];
                 int bestScore = int.MinValue;
                 double bestPopulation = -1;

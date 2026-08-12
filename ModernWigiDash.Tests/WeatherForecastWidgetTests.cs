@@ -55,6 +55,40 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task LocationMatchOptions_AfterGeocode_ExposeCandidates()
+    {
+        const string multi = """
+        {
+          "results": [
+            { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
+            { "name": "Vit\u00f3ria", "latitude": -20.3194, "longitude": -40.3378, "admin1": "Esp\u00edrito Santo", "country": "Brazil", "country_code": "BR", "population": 1962476 }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(multi)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
+
+        await widget.FetchLiveWeatherAsync(force: true);
+
+        var options = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch));
+        Assert.AreEqual(2, options.Count);
+        CollectionAssert.Contains(
+            options.Select(o => o.Value).ToArray(),
+            "Victoria, British Columbia, Canada",
+            "The exact-match candidate must be pickable by its label");
+        CollectionAssert.Contains(
+            options.Select(o => o.DisplayName).ToArray(),
+            "Vitória, Espírito Santo, Brazil",
+            "The alternative candidate must be pickable by its label");
+    }
+
+    [TestMethod]
     public async Task FetchLiveWeather_Throttle_UsesInjectedClock()
     {
         var stub = new StubHttpHandler(request =>
