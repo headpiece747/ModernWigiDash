@@ -17,6 +17,12 @@
 
 ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, and direct USB access — all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), Twitch chat, media controls, and market tickers at your fingertips.
 
+<div align="center">
+
+<img src="docs/images/default-start-page.gif" alt="Default start page" width="700"/>
+
+</div>
+
 ---
 
 ## Architecture
