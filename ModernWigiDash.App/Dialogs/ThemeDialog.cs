@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using ModernWigiDash.App.Controls;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
@@ -15,7 +16,7 @@ namespace ModernWigiDash.App.Dialogs;
 public sealed class ThemeDialog : Window
 {
     private readonly IThemeApplicator _themeApplicator;
-    private readonly List<(string Key, TextBox Box)> _entries = [];
+    private readonly List<(string Key, ColorPickerEditor Editor)> _entries = [];
     private Button _btnApply = null!;
 
     /// <param name="owner">Owner window for modal centering.</param>
@@ -102,12 +103,13 @@ public sealed class ThemeDialog : Window
                 Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 4)
             };
-            var box = new TextBox { Text = current };
+            var editor = new ColorPickerEditor { Hex = current };
+            editor.Changed += () => Validate();
             row.Children.Add(label);
             row.Children.Add(hint);
-            row.Children.Add(box);
+            row.Children.Add(editor);
             fields.Children.Add(row);
-            _entries.Add((prop.Name, box));
+            _entries.Add((prop.Name, editor));
         }
         scroll.Content = fields;
         root.Children.Add(scroll);
@@ -118,17 +120,16 @@ public sealed class ThemeDialog : Window
         var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0) };
         _btnApply = new Button { Content = "Apply", Style = Application.Current.Resources["AccentButton"] as Style };
 
-        foreach (var (_, box) in _entries)
+        foreach (var (_, editor) in _entries)
         {
-            box.TextChanged += (_, _) => Validate();
-            box.LostFocus += (_, _) => Validate();
+            editor.Changed += () => Validate();
         }
 
         btnReset.Click += (_, _) =>
         {
             var defaults = new ThemeSettings();
-            foreach (var (key, box) in _entries)
-                box.Text = (string?)defaults.GetType().GetProperty(key)?.GetValue(defaults) ?? "#000000";
+            foreach (var (key, editor) in _entries)
+                editor.Hex = (string?)defaults.GetType().GetProperty(key)?.GetValue(defaults) ?? "#000000";
         };
 
         btnCancel.Click += (_, _) => Close();
@@ -158,25 +159,16 @@ public sealed class ThemeDialog : Window
 
     private void Validate()
     {
-        bool valid = true;
-        Brush borderBrush = Application.Current.Resources["BorderBrush"] as Brush ?? Brushes.White;
-        foreach (var (_, box) in _entries)
-        {
-            bool ok = ThemeSettings.ParseColor(box.Text) != null;
-            box.BorderBrush = ok ? borderBrush : Brushes.Red;
-            box.ToolTip = ok ? null : "Enter a hex color like #RRGGBB or #AARRGGBB";
-            if (!ok) valid = false;
-        }
+        bool valid = _entries.All(e => e.Editor.IsValidHex);
         _btnApply.IsEnabled = valid;
     }
 
     private void ApplyFromDialog()
     {
-        foreach (var (key, box) in _entries)
+        foreach (var (key, editor) in _entries)
         {
-            string value = box.Text.Trim();
-            if (ThemeSettings.ParseColor(value) != null)
-                ThemeSettings.Theme.GetType().GetProperty(key)?.SetValue(ThemeSettings.Theme, value);
+            if (ThemeSettings.ParseColor(editor.Hex) is not null)
+                ThemeSettings.Theme.GetType().GetProperty(key)?.SetValue(ThemeSettings.Theme, editor.Hex);
         }
         if (!ThemeSettings.Save())
         {
@@ -185,5 +177,21 @@ public sealed class ThemeDialog : Window
         }
         _themeApplicator.Apply(this);
         Close();
+    }
+
+    internal bool ApplyIsEnabledForTest => _btnApply.IsEnabled;
+
+    internal IEnumerable<T> FindVisualChildren<T>() where T : DependencyObject
+        => FindVisualChildren<T>(this);
+
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) yield return match;
+            foreach (var nested in FindVisualChildren<T>(child)) yield return nested;
+        }
     }
 }
