@@ -363,9 +363,10 @@ public static class PopupClamp
 In `InspectorController.cs`, replace the `CustomPopupPlacementCallback` assignment (lines ~283-303) with:
 
 ```csharp
-popup.Placement = PlacementMode.Custom;
-popup.CustomPopupPlacementCallback = PopupClamp.AttachPopupWithinWindow(popup, combo);
+PopupClamp.AttachPopupWithinWindow(popup, combo);
 ```
+
+(`AttachPopupWithinWindow` sets `PlacementMode.Custom` and the callback itself — the helper owns the whole placement.)
 
 ...and add the `using ModernWigiDash.App.Controls;` import. **Do not change** the `PART_Popup` lookup or the `DropDownOpened` scroll cap.
 
@@ -831,8 +832,7 @@ public class ColorPickerEditorTests
             var editor = new ColorPickerEditor { Hex = "#F59E0B" };
             string? applied = null;
             editor.Applied += hex => applied = hex;
-            var popup = (ColorPickerPopup)editor.Popup.Child;
-            popup.ApplyButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            editor.PopupContent.ApplyButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             Assert.AreEqual("#F59E0B", applied);
         });
 }
@@ -873,6 +873,7 @@ public sealed class ColorPickerEditor : UserControl
     internal TextBox HexBox { get; }
     internal Button SwatchButton { get; }
     internal Popup Popup { get; }
+    internal ColorPickerPopup PopupContent { get; }
 
     public ColorPickerEditor()
     {
@@ -892,6 +893,7 @@ public sealed class ColorPickerEditor : UserControl
         row.Children.Add(SwatchButton);
         row.Children.Add(HexBox);
 
+        PopupContent = new ColorPickerPopup(new RgbaColor(255, 0, 0, 0));
         Popup = new Popup
         {
             PlacementTarget = SwatchButton,
@@ -904,13 +906,13 @@ public sealed class ColorPickerEditor : UserControl
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(12),
-                Child = new ColorPickerPopup(new RgbaColor(255, 0, 0, 0))
+                Child = PopupContent
             }
         };
 
         SwatchButton.Click += (_, _) =>
         {
-            ((ColorPickerPopup)Popup.Child).SetFromHex(_hex); // internal reuse: sync popup state
+            PopupContent.SetFromHex(_hex); // internal reuse: sync popup state
             PopupClamp.AttachPopupWithinWindow(Popup, SwatchButton);
             Popup.IsOpen = true;
         };
@@ -926,15 +928,14 @@ public sealed class ColorPickerEditor : UserControl
             if (IsValidHex) Applied?.Invoke(_hex);
         };
 
-        var popup = (ColorPickerPopup)Popup.Child;
-        popup.Applied += hex =>
+        PopupContent.Applied += hex =>
         {
             Popup.IsOpen = false;
             SetHexSilently(hex);
             IsValidHex = true;
             Applied?.Invoke(hex);
         };
-        popup.Cancelled += () => Popup.IsOpen = false;
+        PopupContent.Cancelled += () => Popup.IsOpen = false;
 
         Content = row;
     }
@@ -1022,7 +1023,7 @@ In `ModernWigiDash.Tests/InspectorEditorProviderTests.cs`:
 public string AccentHex { get; set; } = "#F59E0B";
 ```
 
-2. Update the `Describe_SkipsIconPickerCompanion_KeepsPickerAndCommand` expected list from `["Label", "Icon", "ActionType", "ActionCommand"]` to `["Label", "Accent", "Icon", "ActionType", "ActionCommand"]`.
+2. Update the `Describe_SkipsIconPickerCompanion_KeepsPickerAndCommand` expected list from `["Label", "Icon", "ActionType", "ActionCommand"]` to `["Label", "AccentHex", "Icon", "ActionType", "ActionCommand"]` (the assertion compares `Property.Name`, so the new property's actual name `AccentHex` goes in the list).
 
 3. Add a renderer routing test at the end of the class:
 
