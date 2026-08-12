@@ -28,6 +28,7 @@ public sealed class ColorPickerPopup : UserControl
     internal Button ApplyButton { get; }
     internal Button CancelButton { get; }
     internal WrapPanel PresetPanel { get; }
+    internal Canvas SvCanvas => _svCanvas;
 
     public ColorPickerPopup(RgbaColor initial)
     {
@@ -56,8 +57,12 @@ public sealed class ColorPickerPopup : UserControl
         }
         root.Children.Add(PresetPanel);
 
-        // SV square: hue base + white (horizontal) + black (vertical) overlays
-        _svCanvas = new Canvas { Width = 252, Height = 130, ClipToBounds = true };
+        // SV square: hue base + white (horizontal) + black (vertical) overlays.
+        // All children are IsHitTestVisible=false (the thumb must not swallow
+        // drags), so the canvas needs an explicit transparent Background — a
+        // panel with a null Background is invisible to WPF hit testing and the
+        // drag handlers would never fire.
+        _svCanvas = new Canvas { Width = 252, Height = 130, ClipToBounds = true, Background = Brushes.Transparent };
         _svHueLayer = new Rectangle { Width = 252, Height = 130, IsHitTestVisible = false };
         var svWhiteLayer = new Rectangle
         {
@@ -82,8 +87,8 @@ public sealed class ColorPickerPopup : UserControl
         _svCanvas.Children.Add(_svThumb);
         root.Children.Add(_svCanvas);
 
-        // Hue strip
-        _hueCanvas = new Canvas { Width = 252, Height = 16, Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true };
+        // Hue strip (Background for the same hit-test reason as the SV square)
+        _hueCanvas = new Canvas { Width = 252, Height = 16, Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true, Background = Brushes.Transparent };
         var hueStrip = new Rectangle
         {
             Width = 252, Height = 16,
