@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using Microsoft.Win32;
+using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
@@ -277,30 +278,8 @@ public sealed class InspectorController
             combo.ApplyTemplate();
             if (Window.GetWindow(combo) is not Window window) return;
             if (combo.Template?.FindName("PART_Popup", combo) is not Popup popup) return;
-            if (window.Content is not Visual content) return;
 
-            popup.Placement = PlacementMode.Custom;
-            popup.CustomPopupPlacementCallback = (popupSize, targetSize, _) =>
-            {
-                double clientW = (content as FrameworkElement)?.ActualWidth ?? window.ActualWidth;
-                double clientH = (content as FrameworkElement)?.ActualHeight ?? window.ActualHeight;
-                var tl = combo.TransformToAncestor(content).Transform(new Point(0, 0));
-
-                List<CustomPopupPlacement> placements = [];
-                if (clientH - (tl.Y + targetSize.Height) >= popupSize.Height)
-                {
-                    placements.Add(new CustomPopupPlacement(new Point(0, targetSize.Height), PopupPrimaryAxis.Horizontal));
-                }
-                if (tl.Y >= popupSize.Height)
-                {
-                    placements.Add(new CustomPopupPlacement(new Point(0, -popupSize.Height), PopupPrimaryAxis.Horizontal));
-                }
-
-                double popupLeft = Math.Clamp(tl.X, 0, Math.Max(0, clientW - popupSize.Width));
-                double popupTop = Math.Clamp(tl.Y + targetSize.Height, 0, Math.Max(0, clientH - popupSize.Height));
-                placements.Add(new CustomPopupPlacement(new Point(popupLeft - tl.X, popupTop - tl.Y), PopupPrimaryAxis.Horizontal));
-                return placements.ToArray();
-            };
+            PopupClamp.AttachPopupWithinWindow(popup, combo);
         };
 
         combo.DropDownOpened += (_, _) =>
