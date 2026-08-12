@@ -82,6 +82,8 @@ public sealed class ColorPickerEditor : UserControl
         {
             Popup.IsOpen = false;
             SetHexSilently(hex);
+            _hex = hex;
+            SyncSwatch();
             IsValidHex = true;
             Applied?.Invoke(hex);
         };

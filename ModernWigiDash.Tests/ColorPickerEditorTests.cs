@@ -61,4 +61,16 @@ public class ColorPickerEditorTests
             editor.PopupContent.ApplyButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             Assert.AreEqual("#F59E0B", applied);
         });
+
+    [TestMethod]
+    public void PopupApply_WithDifferentPopupColor_UpdatesHexAndSwatch()
+        => StaRunner.Run(() =>
+        {
+            var editor = new ColorPickerEditor { Hex = "#F59E0B" };
+            editor.PopupContent.SetFromHex("#00FF00");
+            editor.PopupContent.ApplyButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            Assert.AreEqual("#00FF00", editor.Hex);
+            var brush = editor.SwatchButton.Background as SolidColorBrush;
+            Assert.AreEqual(Color.FromRgb(0, 255, 0), brush!.Color);
+        });
 }
