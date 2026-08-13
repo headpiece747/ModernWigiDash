@@ -3,3 +3,7 @@
 
 # Committed font files are binary — never normalize or diff them.
 *.ttf binary
+
+# Batch files must be CRLF on disk: cmd.exe misparses parenthesized
+# if-blocks in LF-only files, and apply-update.cmd is embedded verbatim.
+*.cmd text eol=crlf
