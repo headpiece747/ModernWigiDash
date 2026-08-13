@@ -65,7 +65,17 @@ public static class UpdateChecker
         foreach (var asset in assets.EnumerateArray())
         {
             string u = asset.TryGetProperty("browser_download_url", out var ue) ? ue.GetString() ?? "" : "";
-            if (u == url && asset.TryGetProperty("digest", out var d)) return d.GetString();
+            if (u == url && asset.TryGetProperty("digest", out var d))
+            {
+                // GitHub's digest is "sha256:<hex>" — normalize to the raw hex
+                // the SHA-256 comparison uses.
+                string? raw = d.GetString();
+                if (raw is null) return null;
+                const string prefix = "sha256:";
+                return raw.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    ? raw[prefix.Length..]
+                    : raw;
+            }
         }
         return null;
     }

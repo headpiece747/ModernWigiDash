@@ -28,6 +28,25 @@ public class UpdateCheckerTests
     }
 
     [TestMethod]
+    public void ParseLatestRelease_GitHubSha256PrefixedDigest_IsNormalized()
+    {
+        // GitHub's asset digest is "sha256:<hex>"; the app compares raw hex.
+        // A prefixed digest must be normalized, not compared verbatim (the
+        // on-device update loop failed on exactly this until the fix).
+        const string prefixed = """
+        { "tag_name": "v0.5.0", "assets": [
+            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://example.com/app.zip",
+              "digest": "sha256:05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070" } ] }
+        """;
+
+        var info = UpdateChecker.ParseLatestRelease(prefixed, new Version(0, 4, 1));
+
+        Assert.IsNotNull(info);
+        Assert.AreEqual("05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070", info!.Sha256,
+            "the sha256: prefix must be stripped before the hex comparison");
+    }
+
+    [TestMethod]
     public void ParseLatestRelease_CurrentVersionUpToDate_ReturnsNull()
     {
         Assert.IsNull(UpdateChecker.ParseLatestRelease(LatestJson, new Version(0, 5, 0)));

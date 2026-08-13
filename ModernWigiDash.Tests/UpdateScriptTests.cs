@@ -17,10 +17,12 @@ public class UpdateScriptTests
 
     /// <summary>Runs the real apply-update.cmd against a temp install dir with a
     /// fake exe, verifying the rename-aside swap, preservation of user files,
-    /// and relaunch.</summary>
+    /// and relaunch. The fake exe uses a unique name so a running real app
+    /// (image-name match in the cmd's tasklist wait) can't interfere.</summary>
     [TestMethod]
     public void ApplyUpdateCmd_SwapsExePreservesUserFilesAndRelaunches()
     {
+        const string fakeExe = "WmdTestApp.exe";
         string root = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
         string install = Path.Combine(root, "install");
         string stage = Path.Combine(root, "staged");
@@ -28,10 +30,10 @@ public class UpdateScriptTests
         Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64"));
 
         // Old install: exe + a user file that must survive.
-        File.WriteAllText(Path.Combine(install, "ModernWigiDash.App.exe"), "old-exe");
+        File.WriteAllText(Path.Combine(install, fakeExe), "old-exe");
         File.WriteAllText(Path.Combine(install, "app_theme.json"), "user-theme");
         // Staged new exe + Resources.
-        File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", "ModernWigiDash.App.exe"), "new-exe");
+        File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe), "new-exe");
         Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64", "Resources"));
         File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", "Resources", "font.ttf"), "font");
 
@@ -49,7 +51,7 @@ public class UpdateScriptTests
         // form triggers cmd's quote-stripping (the script path gets mangled into
         // "The filename, directory name, or volume label syntax is incorrect").
         string logPath = Path.Combine(root, "update.log");
-        var psi = new ProcessStartInfo("cmd.exe", $"/S /C \"\"{cmdPath}\" \"{install}\" \"{stage}\" ModernWigiDash.App.exe\"")
+        var psi = new ProcessStartInfo("cmd.exe", $"/S /C \"\"{cmdPath}\" \"{install}\" \"{stage}\" {fakeExe}\"")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -61,11 +63,11 @@ public class UpdateScriptTests
         Assert.IsTrue(proc.WaitForExit(30_000), $"updater timed out; output: {outp}");
         Assert.AreEqual(0, proc.ExitCode, $"updater failed ({proc.ExitCode}): {outp}");
 
-        Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, "ModernWigiDash.App.exe")));
-        Assert.IsFalse(File.Exists(Path.Combine(install, "ModernWigiDash.App.exe.old")), "the .old must be cleaned after a successful swap");
+        Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, fakeExe)));
+        Assert.IsFalse(File.Exists(Path.Combine(install, fakeExe + ".old")), "the .old must be cleaned after a successful swap");
         Assert.AreEqual("user-theme", File.ReadAllText(Path.Combine(install, "app_theme.json")), "user files must survive");
         Assert.IsTrue(File.Exists(Path.Combine(install, "Resources", "font.ttf")), "staged Resources must be copied");
-        Assert.IsFalse(File.Exists(Path.Combine(stage, "ModernWigiDash-win-x64", "ModernWigiDash.App.exe")),
+        Assert.IsFalse(File.Exists(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe)),
             "the stage must be deleted after applying");
         Assert.IsTrue(File.Exists(logPath), "the updater must log under WMD_UPDATE_LOG, never the real update log");
         StringAssert.Contains(File.ReadAllText(logPath), "swap complete");
