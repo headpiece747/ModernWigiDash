@@ -140,11 +140,13 @@ public partial class MainWindow
             // /S /C with doubled inner quotes: the canonical form cmd.exe handles
             // correctly (a plain /c "..." strips quotes and mangles the script
             // path — "filename, directory name, or volume label syntax is incorrect").
+            // UseShellExecute=true detaches the updater from this process's job
+            // object: without it the child is reaped when the app closes on the
+            // next line, and the swap never runs (seen in the on-device loop).
             string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
             var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"")
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
+                UseShellExecute = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
             };
             // Replace the {{RELAUNCH}} marker inside the staged cmd with the relaunch line.
