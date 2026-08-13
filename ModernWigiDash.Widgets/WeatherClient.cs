@@ -86,7 +86,8 @@ public sealed class WeatherClient
 
     private double? _lat;
     private double? _lon;
-    private string _resolvedCityName = "New York";
+    // Neutral until a resolution sets a real identity (never a hardcoded city).
+    private string _resolvedCityName = "Unknown location";
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -229,6 +230,10 @@ public sealed class WeatherClient
         catch (Exception ex)
         {
             _logError?.Invoke($"Weather fetch failed: {ex.Message}", ex);
+            // Stamp the attempt time so a failure cools down like a success —
+            // otherwise the widget's render tick sees an elapsed window and
+            // retries at frame rate during an outage (request + log storm).
+            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             return null;
         }
         finally
@@ -252,7 +257,21 @@ public sealed class WeatherClient
             string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
             var data = JsonSerializer.Deserialize<WeatherCacheData>(json);
             if (data == null) return null;
-            _resolvedCityName = data.ResolvedCityName ?? "New York";
+            // A cache without a resolved name must not invent one (the old
+            // "New York" fallback mislabeled any location) — use the cached
+            // coordinates, the only truthful identity the cache carries.
+            if (!string.IsNullOrWhiteSpace(data.ResolvedCityName))
+            {
+                _resolvedCityName = data.ResolvedCityName;
+            }
+            else if (data.Lat is double cachedLat && data.Lon is double cachedLon)
+            {
+                _resolvedCityName = $"{cachedLat.ToString("F2", CultureInfo.InvariantCulture)}, {cachedLon.ToString("F2", CultureInfo.InvariantCulture)}";
+            }
+            else
+            {
+                _resolvedCityName = "Unknown location";
+            }
             _lat = data.Lat;
             _lon = data.Lon;
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
@@ -510,6 +529,24 @@ public sealed class WeatherClient
                         bestScore = score;
                         bestPopulation = population;
                         best = candidate;
+                    }
+                }
+
+                // A persisted Location Match pick must survive restart/import:
+                // candidates are in-memory per instance, so after re-creation
+                // the stored pick cannot resolve from cache. If the pick
+                // matches a freshly geocoded candidate, promote that candidate
+                // to the winner instead of silently reverting to the ranking.
+                if (!string.IsNullOrWhiteSpace(location.LocationMatch))
+                {
+                    var picked = candidates.FirstOrDefault(c =>
+                        c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (picked is not null)
+                    {
+                        _lat = picked.Lat;
+                        _lon = picked.Lon;
+                        _resolvedCityName = picked.Label;
+                        return;
                     }
                 }
 

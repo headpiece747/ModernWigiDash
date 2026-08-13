@@ -210,7 +210,14 @@ public class DisplayDeviceEngineTests
         public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected;
         public TouchReport? ReadTouch() => NextReport;
         public bool GoToStandby() => false;
-        public void Dispose() => Disposed = true;
+        /// <summary>Simulates a device whose Dispose hangs behind an in-flight
+        /// frame write (the bulk-write timeout path).</summary>
+        public int DisposeBlockMs { get; set; }
+        public void Dispose()
+        {
+            if (DisposeBlockMs > 0) Thread.Sleep(DisposeBlockMs);
+            Disposed = true;
+        }
         public ValueTask DisposeAsync()
         {
             Disposed = true;
@@ -320,5 +327,23 @@ public class DisplayDeviceEngineTests
         using var engine = new DisplayDeviceEngine();
 
         Assert.AreEqual(TimeSpan.FromSeconds(5), engine.ReconnectPeriod);
+    }
+
+    [TestMethod]
+    public void Dispose_WithHungTransport_ReturnsWithinBound()
+    {
+        // A hung device holds the transport lock behind an in-flight frame
+        // write (bulk-write timeout); close must not stall on it — the bounded
+        // off-thread dispose (the standby pattern) caps the wait.
+        var fake = new FakeTransport { DisposeBlockMs = 15_000 };
+        var engine = new DisplayDeviceEngine(fake);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        engine.Dispose();
+        sw.Stop();
+
+        Assert.IsTrue(sw.Elapsed < TimeSpan.FromSeconds(8),
+            $"engine Dispose must not stall behind a hung transport (took {sw.Elapsed.TotalSeconds:F1}s)");
+        Assert.IsFalse(fake.Disposed, "the abandoned dispose may still be running off-thread");
     }
 }

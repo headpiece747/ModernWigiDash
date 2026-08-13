@@ -618,6 +618,25 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void ImportJson_WhitespaceOnlyActionCommand_IsCleared()
+    {
+        // A whitespace-only command can't arm anything, but normalizing it to
+        // empty keeps the "imports never carry a command" invariant airtight.
+        var loader = CreateLoader();
+        var context = new TestContext();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, context, "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ActionCommand"] = "   ";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, context);
+
+        var imported = loaded!.Pages[1].Widgets[0];
+        Assert.AreEqual("", imported.PropertyValues["ActionCommand"], "Whitespace-only ActionCommand must be normalized to empty");
+    }
+
+    [TestMethod]
     public void ImportJson_ExcessiveWidgetCount_IsCapped()
     {
         var loader = CreateLoader();

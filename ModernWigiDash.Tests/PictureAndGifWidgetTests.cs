@@ -1,4 +1,5 @@
 using System.IO;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
@@ -98,6 +99,44 @@ public class PictureAndGifWidgetTests
             hugeWidget.Render(canvas, bounds);
 
             Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            DeleteTempDirWithRetry(tempDir);
+        }
+    }
+
+    [TestMethod]
+    public void PictureAndGifWidget_FolderCycle_RescansForNewFilesAfterThrottle()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            CreateTestPng(Path.Combine(tempDir, "a.png"), SKColors.Red);
+
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero));
+            using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+            var canvas = surface.Canvas;
+            var bounds = new SKRect(0, 0, 406, 296);
+
+            var widget = new PictureAndGifWidget
+            {
+                ImagePath = tempDir,
+                SourceMode = "Folder (Cycle)",
+                Clock = clock
+            };
+            widget.Render(canvas, bounds); // first scan: [a.png]
+
+            // A file added while the app runs must appear once the rescan
+            // throttle elapses — the old one-shot latch froze the list forever.
+            CreateTestPng(Path.Combine(tempDir, "b.png"), SKColors.Green);
+            clock.Advance(TimeSpan.FromSeconds(31));
+
+            widget.Render(canvas, bounds);
+
+            Assert.IsTrue(widget._folderImagesForTest.Any(f => f.EndsWith("b.png", StringComparison.OrdinalIgnoreCase)),
+                "a cycling folder must rescan for files added while running");
         }
         finally
         {

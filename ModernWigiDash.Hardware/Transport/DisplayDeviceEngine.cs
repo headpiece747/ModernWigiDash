@@ -344,16 +344,21 @@ public sealed class DisplayDeviceEngine : IDisposable
             _transport = null;
         }
 
-        // Dispose outside lock to avoid holding lock during I/O
+        // Dispose outside the lock to avoid holding it during I/O — and
+        // bounded off-thread: an in-flight frame write holds the transport's
+        // lock up to the bulk-write timeout (30s on a hung device), and close
+        // must never stall on that (the standby pattern — a leaked handle at
+        // exit beats a frozen window). The timer thread may also reach this
+        // via the reconnect path, where an abandoned dispose is equally fine.
         if (oldTransport != null)
         {
             try
             {
-                oldTransport.Dispose();
+                Task.Run(() => oldTransport.Dispose()).Wait(TimeSpan.FromSeconds(3));
             }
             catch (Exception ex)
             {
-                Log($"[Dispose] Transport disposal failed: {ex.Message}");
+                Log($"[Dispose] Transport disposal failed or timed out: {ex.Message}");
             }
         }
     }

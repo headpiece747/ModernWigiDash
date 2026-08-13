@@ -129,10 +129,15 @@ public sealed class DisplayHidTransport : IDisplayTransport
 
             // Adopt the backend before init: SendInitCommands talks through it.
             _backend = backend;
-            _isConnected = true;
 
             if (SendInitCommands())
             {
+                // Connected only once init completes — the transport's contract
+                // must not report connected while the init sequence is still
+                // running (the engine's ConnectionState gate already blocks
+                // frame flow until Connect() returns; this keeps the transport's
+                // own flag truthful too).
+                _isConnected = true;
                 if (provider.SuccessFileLog is not null)
                     LogToFile(provider.SuccessFileLog);
                 _logger.LogInformation("Connected to WigiDash via {Via}", provider.ConnectedVia);

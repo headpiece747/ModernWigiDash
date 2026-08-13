@@ -475,10 +475,12 @@ public static class ProfileOps
         // also Path-typed and listed in PathPropertyKeys, but this unconditional
         // clear must run FIRST: the path rules alone would preserve a safe
         // relative command. PropertyValues hold JsonElement after
-        // deserialization — normalize before inspecting.
+        // deserialization — normalize before inspecting. Whitespace-only
+        // values ("   ") are cleared too: they cannot arm anything, but the
+        // "imports never carry a command" invariant stays airtight.
         if (placed.PropertyValues.TryGetValue("ActionCommand", out var raw) &&
             ConvertPropertyValue(raw, typeof(string)) is string command &&
-            !string.IsNullOrWhiteSpace(command))
+            !string.IsNullOrEmpty(command))
         {
             placed.PropertyValues["ActionCommand"] = "";
         }

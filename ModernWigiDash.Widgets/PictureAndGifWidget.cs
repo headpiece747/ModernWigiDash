@@ -35,6 +35,20 @@ public class PictureAndGifWidget : ModernWidgetBase
     private string _loadedPath = "";
     private int _loadVersion;
 
+    /// <summary>Test seam: clock for the folder-rescan throttle (defaults to the system clock).</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>Last folder scan time — files added to a cycling folder while
+    /// the app runs appear on the next throttled rescan, not only after a
+    /// property change (the old one-shot latch froze the list forever).</summary>
+    private DateTimeOffset _folderLastScan = DateTimeOffset.MinValue;
+
+    /// <summary>How often a cycling folder is rescanned for new files.</summary>
+    private static readonly TimeSpan FolderRescanPeriod = TimeSpan.FromSeconds(30);
+
+    /// <summary>The currently listed folder images (test seam).</summary>
+    internal string[] _folderImagesForTest => _folderImages;
+
     // Last-probed-path existence cache: File.Exists per frame is a filesystem
     // hit; the probe is re-done only when the path changes (ResetMedia clears
     // the key on ImagePath/SourceMode changes).
@@ -382,7 +396,11 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         if (!singleMode && Directory.Exists(ImagePath))
         {
-            if (!_folderScanned)
+            // Rescan on first use and then on a throttled cadence: files added
+            // to a cycling folder while the app runs appear within one period,
+            // without a per-frame disk scan (the old one-shot latch froze the
+            // list until a property change or restart).
+            if (!_folderScanned || Clock.GetUtcNow() - _folderLastScan >= FolderRescanPeriod)
             {
                 _folderImages = Directory.GetFiles(ImagePath, "*.*")
                     .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
@@ -391,6 +409,7 @@ public class PictureAndGifWidget : ModernWidgetBase
                                 f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
                     .ToArray();
                 _folderScanned = true;
+                _folderLastScan = Clock.GetUtcNow();
             }
 
             if (_folderImages.Length > 0)

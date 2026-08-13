@@ -407,6 +407,59 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_ForecastFailure_ThrottlesRetries()
+    {
+        // Regression guard: a forecast failure (geocode OK, forecast 500)
+        // must cool down like a success — the render kick would otherwise
+        // retry at frame rate during an outage (request + log storm).
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.NotFound());
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var client = CreateClient(stub, clock: clock);
+
+        var first = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        Assert.IsNull(first, "The forecast failure must return null");
+        int callsAfterFirst = stub.Calls;
+
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        Assert.AreEqual(callsAfterFirst, stub.Calls, "A failed forecast must cool down like a success");
+
+        clock.Advance(TimeSpan.FromMinutes(6));
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        Assert.IsTrue(stub.Calls > callsAfterFirst, "After the window, a retry is allowed");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_PersistedPickOnFreshInstance_ResolvesToPickedCandidate()
+    {
+        // Restart/import: candidates are in-memory per instance, so a stored
+        // Location Match pick cannot resolve from cache. A fresh geocode must
+        // promote the picked candidate to the winner instead of silently
+        // reverting to the population ranking (the wrong-city bug returns).
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // Fresh instance, no prior geocode: the persisted pick must win over
+        // the exact-name ranking (Victoria, Canada) and resolve to Vitoria.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null)
+        {
+            LocationMatch = "Vitória, Espírito Santo, Brazil"
+        });
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(-20.3194, snapshot.Lat);
+        Assert.AreEqual(-40.3378, snapshot.Lon);
+        Assert.AreEqual("Vitória, Espírito Santo, Brazil", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_ExplicitLatLonOverride_SkipsGeocoding()
     {
         var stub = new StubHttpHandler(Respond);
@@ -465,12 +518,22 @@ public class WeatherClientTests
     {
         bool fail = true;
         var stub = new StubHttpHandler(_ => fail ? StubHttpHandler.NotFound() : StubHttpHandler.Ok(SampleForecast));
-        var client = CreateClient(stub);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var client = CreateClient(stub, clock: clock);
 
         var failed = await client.FetchCurrentAsync(CoordinateLocation);
         Assert.IsNull(failed, "A failed fetch must yield null, not throw");
 
+        // A failure cools down like a success (the retry-storm guard) — a
+        // non-forced retry within the window must be throttled away.
+        int callsAfterFirst = stub.Calls;
         fail = false;
+        var throttled = await client.FetchCurrentAsync(CoordinateLocation);
+        Assert.IsNull(throttled, "A failed fetch must throttle retries within the window");
+        Assert.AreEqual(callsAfterFirst, stub.Calls, "No retry may hit the network within the throttle window");
+
+        // After the window elapses, the fetch runs and recovers.
+        clock.Advance(TimeSpan.FromMinutes(6));
         var recovered = await client.FetchCurrentAsync(CoordinateLocation);
         Assert.IsNotNull(recovered, "A subsequent fetch must succeed (the in-flight flag must be cleared)");
         Assert.AreEqual(12.5, recovered.CurrentTempC);
@@ -513,6 +576,31 @@ public class WeatherClientTests
         Assert.AreEqual(40.71, loaded.Lat);
         Assert.AreEqual("40.71, -74.00", loaded.ResolvedCityName);
         Assert.AreNotEqual(DateTime.MinValue, reader.LastFetchTimeUtc, "A successful cache load must prime the fetch throttle");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_CacheWithoutName_DoesNotInventOne()
+    {
+        // A cache whose resolved name is missing must not be labeled "New York"
+        // (the old fallback mislabeled any location) — the coordinates are the
+        // only truthful identity a nameless cache carries.
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        await File.WriteAllTextAsync(path, """
+        {
+          "CurrentTempC": 12.5, "FeelsLikeC": 10.1, "Humidity": 60, "WindSpeedKmH": 8.2,
+          "WeatherCode": 2, "HighTempC": 18, "LowTempC": 9, "ResolvedCityName": null,
+          "Lat": 48.85, "Lon": 2.35, "DailyForecasts": [], "HourlyForecasts": []
+        }
+        """);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync();
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("48.85, 2.35", loaded.ResolvedCityName,
+            "A nameless cache must fall back to its coordinates, never a hardcoded city");
     }
 
     [TestMethod]

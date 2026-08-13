@@ -22,7 +22,11 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
     private IMediaSessionSourceManager? _manager;
     private IMediaSessionSourceSession? _session;
-    private MediaSnapshot? _snapshot;
+    // Volatile: the render thread reads the snapshot while the SMTC
+    // continuation thread publishes it — reference assignment is atomic, and
+    // volatile makes the cross-thread publish intent explicit (the engine's
+    // _state uses the same pattern).
+    private volatile MediaSnapshot? _snapshot;
     private int _refreshVersion;
     private bool _disposed;
 

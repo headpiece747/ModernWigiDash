@@ -64,11 +64,19 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     public string LocationMatch { get; set; } = "";
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
-        => propertyName == nameof(LocationMatch)
-            ? _client.LastCandidates.Count > 0
-                ? [new WidgetPropertyOption("", "Automatic (by ranking)"), .. _client.LastCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))]
-                : []
-            : [];
+    {
+        if (propertyName != nameof(LocationMatch)) return [];
+
+        // Empty candidates: no dropdown yet (the geocode may not have run).
+        if (_client.LastCandidates.Count == 0) return [];
+
+        // The empty "Automatic (by ranking)" entry lets a pick be cleared.
+        return
+        [
+            new WidgetPropertyOption("", "Automatic (by ranking)"),
+            .. _client.LastCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
+        ];
+    }
 
     private readonly WeatherClient _client;
 
