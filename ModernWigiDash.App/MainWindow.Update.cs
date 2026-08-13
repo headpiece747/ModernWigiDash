@@ -3,6 +3,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using ModernWigiDash.App.Update;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
@@ -26,10 +27,24 @@ public partial class MainWindow
     private async void OnUpdateCheckAtStartup(object? sender, EventArgs e)
     {
         // SourceInitialized: the window is visible; run the check off-thread.
-        var info = await _updateService.CheckForUpdateAsync();
-        if (info is null) return; // up-to-date/offline/failed — silent
-        _pendingUpdate = info;
-        Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available", info.Version));
+        // The real network path throws (DNS failure, connection refused, the
+        // 10s timeout -> TaskCanceledException) and, with ConfigureAwait(false)
+        // inside the service, the continuation lands on a threadpool thread —
+        // an unhandled exception here would reach AppDomain.UnhandledException
+        // and terminate the process. Log and stay silent (button hidden); the
+        // same guard covers the shutdown edge (posting to a shutting-down
+        // dispatcher can throw a canceled-operation exception).
+        try
+        {
+            var info = await _updateService.CheckForUpdateAsync();
+            if (info is null) return; // up-to-date/offline/failed — silent
+            _pendingUpdate = info;
+            Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available", info.Version));
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"[UPDATE] check failed: {ex.Message}");
+        }
     }
 
     internal void ApplyUpdateState(UpdateState state, string tooltip, string? version)
@@ -89,23 +104,40 @@ public partial class MainWindow
         if (!restart) return;
 
         // Spawn the updater hidden, then close normally (standby teardown).
-        string installDir = AppContext.BaseDirectory;
-        string stageDir = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ModernWigiDash", "updates", "staged", _pendingUpdate.Version);
-        string cmd = _updateService.StagedCmdPath(_pendingUpdate);
-        string relaunch = $"start \"\" \"{installDir}\\ModernWigiDash.App.exe\"";
-        string args = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
+        // The staged cmd can vanish between staging and this click (cleanup
+        // tools, AV, external wipe) — the read/substitute/start must not throw
+        // on the UI thread (DispatcherUnhandledException does not mark
+        // non-benign exceptions handled). Log, hide the button again (the
+        // download-failure path's shape), and keep the window open.
+        try
+        {
+            string installDir = AppContext.BaseDirectory;
+            string stageDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ModernWigiDash", "updates", "staged", _pendingUpdate.Version);
+            string cmd = _updateService.StagedCmdPath(_pendingUpdate);
+            string relaunch = $"start \"\" \"{installDir}\\ModernWigiDash.App.exe\"";
+            string args = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
 
-        // /S /C with doubled inner quotes: the canonical form cmd.exe handles
-        // correctly (a plain /c "..." strips quotes and mangles the script
-        // path — "filename, directory name, or volume label syntax is incorrect").
-        string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"") { UseShellExecute = false };
-        // Replace the {{RELAUNCH}} marker inside the staged cmd with the relaunch line.
-        string body = System.IO.File.ReadAllText(cmd).Replace("{{RELAUNCH}}", relaunch);
-        System.IO.File.WriteAllText(cmd, body);
-        System.Diagnostics.Process.Start(psi);
+            // /S /C with doubled inner quotes: the canonical form cmd.exe handles
+            // correctly (a plain /c "..." strips quotes and mangles the script
+            // path — "filename, directory name, or volume label syntax is incorrect").
+            string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"") { UseShellExecute = false };
+            // Replace the {{RELAUNCH}} marker inside the staged cmd with the relaunch line.
+            string body = System.IO.File.ReadAllText(cmd);
+            string substituted = body.Replace("{{RELAUNCH}}", relaunch);
+            if (substituted.Length == body.Length)
+                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
+            System.IO.File.WriteAllText(cmd, substituted);
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"[UPDATE] launch failed: {ex.Message}");
+            ApplyUpdateState(UpdateState.Hidden, "", null);
+            return;
+        }
 
         Close();
     }
