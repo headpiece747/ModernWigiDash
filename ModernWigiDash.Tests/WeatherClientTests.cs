@@ -11,7 +11,28 @@ public class WeatherClientTests
     private const string SampleForecast = """
     {
       "latitude": 40.7128, "longitude": -74.006,
-      "current_weather": { "temperature": 12.5, "apparent_temperature": 10.1, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
+      "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 2, "wind_speed_10m": 8.2, "time": "2026-08-07T12:00" },
+      "hourly": {
+        "time": ["2026-08-07T00:00", "2026-08-07T01:00"],
+        "temperature_2m": [12.5, 13.1],
+        "relative_humidity_2m": [40, 45],
+        "weather_code": [2, 2]
+      },
+      "daily": {
+        "time": ["2026-08-07", "2026-08-08"],
+        "weather_code": [2, 3],
+        "temperature_2m_max": [18.0, 20.0],
+        "temperature_2m_min": [9.0, 11.0]
+      }
+    }
+    """;
+
+    // The legacy response shape (current_weather + relativehumidity_2m +
+    // weathercode) must still parse — stale caches and edge responses carry it.
+    private const string SampleForecastLegacy = """
+    {
+      "latitude": 40.7128, "longitude": -74.006,
+      "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
       "hourly": {
         "time": ["2026-08-07T12:00", "2026-08-07T13:00"],
         "temperature_2m": [12.5, 13.1],
@@ -120,11 +141,51 @@ public class WeatherClientTests
         Assert.AreEqual(2, snapshot.DailyForecasts!.Count);
         Assert.AreEqual(2, snapshot.HourlyForecasts!.Count);
         Assert.AreEqual("Today", snapshot.DailyForecasts[0].DayName);
-        Assert.AreEqual("12:00", snapshot.HourlyForecasts[0].TimeLabel);
+        Assert.AreEqual("00:00", snapshot.HourlyForecasts[0].TimeLabel);
         Assert.AreEqual("40.71, -74.00", snapshot.ResolvedCityName);
         Assert.AreEqual(40.71, snapshot.Lat);
         Assert.AreEqual(-74.00, snapshot.Lon);
         Assert.AreEqual(1, stub.Calls, "A coordinate-pair location must skip geocoding entirely");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_HumidityAndFeelsLike_ComeFromCurrentBlockNotMidnightBucket()
+    {
+        // Precision regression: the hourly array starts at local midnight, so
+        // its first humidity bucket is hours stale. The current block's
+        // relative_humidity_2m (15-min precision) must win, and
+        // apparent_temperature must actually parse (the legacy current_weather
+        // block never carried it).
+        var stub = new StubHttpHandler(Respond);
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(60, snapshot.Humidity, "humidity must come from the current block (60), not the midnight hourly bucket (40)");
+        Assert.AreEqual(10.1, snapshot.FeelsLikeC, "feels-like must come from the current block's apparent_temperature");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_LegacyResponseShape_StillParses()
+    {
+        // Stale caches / legacy responses carry current_weather +
+        // relativehumidity_2m + weathercode; they must parse (with the
+        // by-hours-stale humidity as the only option) rather than fail.
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleForecastLegacy)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(12.5, snapshot.CurrentTempC);
+        Assert.AreEqual(60, snapshot.Humidity, "legacy shape must fall back to the hourly bucket");
+        Assert.AreEqual(2, snapshot.WeatherCode);
+        Assert.AreEqual(2, snapshot.DailyForecasts!.Count);
+        Assert.AreEqual(2, snapshot.HourlyForecasts!.Count);
     }
 
     [TestMethod]

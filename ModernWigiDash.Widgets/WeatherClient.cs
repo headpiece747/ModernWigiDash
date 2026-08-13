@@ -211,7 +211,7 @@ public sealed class WeatherClient
             double lat = _lat.Value;
             double lon = _lon.Value;
 
-            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat:F4}&longitude={lon:F4}&current_weather=true&hourly=temperature_2m,relativehumidity_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&apparent_temperature=true&timezone=auto";
+            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat:F4}&longitude={lon:F4}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,precipitation,cloud_cover&hourly=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto";
             string json = await Http.GetStringAsync(forecastUrl, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -388,6 +388,13 @@ public sealed class WeatherClient
         }
     }
 
+    /// <summary>
+    /// Parses current conditions. The modern <c>current</c> block (15-minute
+    /// precision, humidity + feels-like included) is primary; the legacy
+    /// <c>current_weather</c> block is the fallback so cached/legacy responses
+    /// still parse. The legacy block never carried apparent_temperature or
+    /// humidity, which is why this reads them from <c>current</c>.
+    /// </summary>
     private static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode) ParseCurrentWeather(JsonElement root)
     {
         double? tempC = null;
@@ -395,48 +402,85 @@ public sealed class WeatherClient
         double? windSpeedKmH = null;
         int? weatherCode = null;
 
+        if (root.TryGetProperty("current", out var current))
+        {
+            if (current.TryGetProperty("temperature_2m", out var tempEl))
+                tempC = tempEl.GetDouble();
+            if (current.TryGetProperty("apparent_temperature", out var feelsEl))
+                feelsLikeC = feelsEl.GetDouble();
+            if (current.TryGetProperty("wind_speed_10m", out var windEl))
+                windSpeedKmH = windEl.GetDouble();
+            if (current.TryGetProperty("weather_code", out var codeEl))
+                weatherCode = codeEl.GetInt32();
+            return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
+        }
+
         if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null);
 
-        if (currentWeather.TryGetProperty("temperature", out var tempEl))
-            tempC = tempEl.GetDouble();
-        // The URL requests apparent_temperature=true, which adds
-        // apparent_temperature to the legacy current_weather block — the real
-        // "feels like" metric (the old code read hourly.temperature_2m, i.e.
-        // the plain temperature, silently).
-        if (currentWeather.TryGetProperty("apparent_temperature", out var feelsEl))
-            feelsLikeC = feelsEl.GetDouble();
-        if (currentWeather.TryGetProperty("windspeed", out var windEl))
-            windSpeedKmH = windEl.GetDouble();
-        if (currentWeather.TryGetProperty("weathercode", out var codeEl))
-            weatherCode = codeEl.GetInt32();
+        if (currentWeather.TryGetProperty("temperature", out var legacyTemp))
+            tempC = legacyTemp.GetDouble();
+        // The legacy block has no apparent_temperature — the URL's
+        // apparent_temperature=true hint never materialized there, so the
+        // "feels like" metric can only come from the modern current block.
+        if (currentWeather.TryGetProperty("apparent_temperature", out var legacyFeels))
+            feelsLikeC = legacyFeels.GetDouble();
+        if (currentWeather.TryGetProperty("windspeed", out var legacyWind))
+            windSpeedKmH = legacyWind.GetDouble();
+        if (currentWeather.TryGetProperty("weathercode", out var legacyCode))
+            weatherCode = legacyCode.GetInt32();
 
         return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
     }
 
     private static (double? Humidity, IReadOnlyList<HourlyForecastItem>? Hourly) ParseHourlyForecast(JsonElement root)
     {
+        // Humidity is a current condition — the modern current block carries
+        // it at 15-minute precision. The hourly array starts at local midnight,
+        // so its first bucket is hours stale; never use it as "current".
+        if (root.TryGetProperty("current", out var current)
+            && current.TryGetProperty("relative_humidity_2m", out var humEl))
+        {
+            double? humidity = humEl.GetDouble();
+
+            IReadOnlyList<HourlyForecastItem>? hourlyForecasts = ParseHourlyItems(root);
+            return (humidity, hourlyForecasts);
+        }
+
         if (!root.TryGetProperty("hourly", out var hourly)
             || !hourly.TryGetProperty("temperature_2m", out var temps)
             || temps.GetArrayLength() <= 0) return (null, null);
 
-        double? humidity = null;
+        // Legacy fallback: no current block, so the hourly array is the only
+        // humidity source (still stale-by-hours — better than nothing).
+        double? legacyHumidity = null;
         if (hourly.TryGetProperty("relativehumidity_2m", out var hums) && hums.GetArrayLength() > 0)
-            humidity = hums[0].GetDouble();
+            legacyHumidity = hums[0].GetDouble();
 
-        IReadOnlyList<HourlyForecastItem>? hourlyForecasts = null;
-        if (hourly.TryGetProperty("time", out var times) && hourly.TryGetProperty("weathercode", out var codes) && hourly.TryGetProperty("temperature_2m", out var tempsInner))
+        return (legacyHumidity, ParseHourlyItems(root));
+    }
+
+    private static IReadOnlyList<HourlyForecastItem>? ParseHourlyItems(JsonElement root)
+    {
+        if (!root.TryGetProperty("hourly", out var hourly)) return null;
+        if (!hourly.TryGetProperty("time", out var times)
+            || !hourly.TryGetProperty("temperature_2m", out var tempsInner)
+            || times.GetArrayLength() <= 0 || tempsInner.GetArrayLength() <= 0) return null;
+
+        // Both the modern (weather_code) and legacy (weathercode) names are
+        // honored so either response shape parses.
+        bool modernCodes = hourly.TryGetProperty("weather_code", out var codes);
+        bool legacyCodes = !modernCodes && hourly.TryGetProperty("weathercode", out codes);
+
+        int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
+        List<HourlyForecastItem> items = [];
+        for (int i = 0; i < Math.Min(hLen, 12); i++)
         {
-            int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
-            List<HourlyForecastItem> items = [];
-            for (int i = 0; i < Math.Min(hLen, 12); i++)
-            {
-                string timeStr = times[i].GetString() ?? "";
-                string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
-                items.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), codes[i].GetInt32()));
-            }
-            hourlyForecasts = items;
+            string timeStr = times[i].GetString() ?? "";
+            string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
+            int code = modernCodes || legacyCodes ? codes[i].GetInt32() : 0;
+            items.Add(new HourlyForecastItem(label, tempsInner[i].GetDouble(), code));
         }
-        return (humidity, hourlyForecasts);
+        return items;
     }
 
     private static (double? HighTempC, double? LowTempC, IReadOnlyList<DailyForecastItem>? Daily) ParseDailyForecast(JsonElement root)
@@ -452,21 +496,28 @@ public sealed class WeatherClient
         if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
             lowTempC = mins[0].GetDouble();
 
-        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("weathercode", out var dCodes) && daily.TryGetProperty("temperature_2m_max", out _))
+        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("temperature_2m_max", out _))
         {
-            int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
-            List<DailyForecastItem> items = [];
-            for (int i = 0; i < Math.Min(dLen, 7); i++)
+            // Both the modern (weather_code) and legacy (weathercode) names are
+            // honored so either response shape parses.
+            bool modernCodes = daily.TryGetProperty("weather_code", out var dCodes);
+            bool legacyCodes = !modernCodes && daily.TryGetProperty("weathercode", out dCodes);
+            if (modernCodes || legacyCodes)
             {
-                string dateStr = dTimes[i].GetString() ?? "";
-                string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
-                items.Add(new DailyForecastItem(
-                    i == 0 ? "Today" : dayName,
-                    maxes[i].GetDouble(),
-                    mins[i].GetDouble(),
-                    dCodes[i].GetInt32()));
+                int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
+                List<DailyForecastItem> items = [];
+                for (int i = 0; i < Math.Min(dLen, 7); i++)
+                {
+                    string dateStr = dTimes[i].GetString() ?? "";
+                    string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
+                    items.Add(new DailyForecastItem(
+                        i == 0 ? "Today" : dayName,
+                        maxes[i].GetDouble(),
+                        mins[i].GetDouble(),
+                        dCodes[i].GetInt32()));
+                }
+                dailyForecasts = items;
             }
-            dailyForecasts = items;
         }
         return (highTempC, lowTempC, dailyForecasts);
     }
