@@ -48,6 +48,14 @@
                 <!-- Right Mode Toggles & USB Badge -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Border Width="1" Height="24" Background="{DynamicResource BorderBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <!-- Update button: hidden until an update is available (UpdateService) -->
+                    <Button x:Name="UpdateButton" Visibility="Collapsed" Margin="0,0,16,0" Padding="6"
+                            ToolTip="Check for updates" Click="UpdateButton_Click"
+                            Background="Transparent" BorderThickness="0"
+                            Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+                        <Path x:Name="UpdateIconPath" Width="18" Height="18" Stretch="Uniform"
+                              Fill="{DynamicResource M3Primary}"/>
+                    </Button>
                     <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
                     <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
                     <Button x:Name="BtnTheme" Content="🎨 Theme" Padding="12,6" Margin="0,0,16,0" Click="BtnTheme_Click"/>

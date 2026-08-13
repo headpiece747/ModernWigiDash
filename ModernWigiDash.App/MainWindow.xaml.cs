@@ -99,6 +99,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _usbDevice.Start();
         InitializeComponent();
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
+        SourceInitialized += OnUpdateCheckAtStartup;
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
         _presenter = new DisplayPresenter(
