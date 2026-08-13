@@ -393,3 +393,4 @@ FodyWeavers.xsd
 # Release bundles
 ModernWigiDash-v*.zip
 ModernWigiDash-win-x64.zip
+ModernWigiDash-app-only-win-x64.zip
