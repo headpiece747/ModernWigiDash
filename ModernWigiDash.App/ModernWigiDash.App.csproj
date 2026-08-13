@@ -18,7 +18,8 @@
     <!-- Dev builds must parse as "no version" (AppVersion.Parse maps 0.0.0 to
          null -> IsDevBuild, updater disabled). Without this, the SDK default
          1.0.0 makes dev builds look release-stamped and they nag at startup.
-         build-release.ps1 overrides InformationalVersion with the release tag. -->
+         build-release.ps1 overrides InformationalVersion (updater stamp) and
+         FileVersion (Windows Details tab) with the release tag. -->
     <Version>0.0.0</Version>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>

@@ -83,6 +83,11 @@ $publishArgs = @(
 )
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     $publishArgs += "-p:InformationalVersion=$Version"
+    # The csproj pins <Version>0.0.0</Version> so dev builds parse as
+    # unversioned (AppVersion -> IsDevBuild -> updater off); that also pins
+    # the Windows FileVersion resource to 0.0.0. Stamp it explicitly so
+    # release exes show the real version in Explorer's Details tab.
+    $publishArgs += "-p:FileVersion=$Version"
 }
 & dotnet publish (Join-Path $Root "ModernWigiDash.App\ModernWigiDash.App.csproj") @publishArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
