@@ -141,7 +141,7 @@ public sealed class UpdateService
 
     private void WriteUpdaterCmd(string path, string version)
     {
-        // The full batch body lives in the embedded apply-update.cmd resource;
+        // The full batch body lives in the embedded apply-update.cmd resource —
         // this method copies it into the stage with the version substituted.
         var assembly = typeof(UpdateService).Assembly;
         using var stream = assembly.GetManifestResourceStream("ModernWigiDash.App.Update.apply-update.cmd")
@@ -177,5 +177,5 @@ public sealed class UpdateService
         }
     }
 
-    private static void TryDeleteDirectory(string dir) { try { Directory.Delete(dir, true); } catch { } }
+    private static void TryDeleteDirectory(string dir) { try { Directory.Delete(dir, true); } catch { /* best-effort: a locked file must not fail the caller */ } }
 }

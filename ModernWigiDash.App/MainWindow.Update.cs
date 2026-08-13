@@ -54,7 +54,7 @@ public partial class MainWindow
             var info = await _updateService.CheckForUpdateAsync();
             if (info is null) return; // up-to-date/offline/failed — silent
             _pendingUpdate = info;
-            Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available", info.Version));
+            _ = Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available", info.Version));
         }
         catch (Exception ex)
         {
