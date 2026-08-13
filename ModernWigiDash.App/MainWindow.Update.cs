@@ -129,7 +129,12 @@ public partial class MainWindow
             string installDir = AppContext.BaseDirectory;
             string stageDir = System.IO.Path.Combine(_updateService.UpdatesRoot, "staged", _pendingUpdate.Version);
             string cmd = _updateService.StagedCmdPath(_pendingUpdate);
-            string relaunch = $"start \"\" \"{installDir}\\ModernWigiDash.App.exe\"";
+            // AppContext.BaseDirectory ends with a separator — Path.Combine
+            // (not string concat) so the relaunch path never doubles the
+            // backslash (start "" "<path>\\exe" fails with "cannot find the
+            // path specified" and silently skips the relaunch).
+            string relaunchExe = System.IO.Path.Combine(installDir, "ModernWigiDash.App.exe");
+            string relaunch = $"start \"\" \"{relaunchExe}\"";
             string args = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
 
             // /S /C with doubled inner quotes: the canonical form cmd.exe handles
