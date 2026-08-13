@@ -140,8 +140,8 @@ public partial class MainWindow
             // object: without it the child is reaped when the app closes on the
             // next line, and the swap never runs (seen in the on-device loop).
             // With ShellExecute, cmd receives the arguments as one string, so
-            // the /S /C ""..."" form does NOT work (verified: exits 1, no log);
-            // the whole command must be a single quoted argument to /c.
+            // the slash-S slash-C doubled-quote form fails silently; the whole
+            // command must be a single quoted argument to slash-c.
             string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
             string inner = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
             var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
