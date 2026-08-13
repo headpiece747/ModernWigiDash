@@ -100,6 +100,13 @@ public sealed class WeatherClient
     internal string ResolvedCityName => _resolvedCityName;
 
     /// <summary>
+    /// Number of completed fetches (success or failure) — a test seam for
+    /// waiting on fetch completion, since the in-flight claim releases only
+    /// when <see cref="FetchCurrentAsync"/> returns.
+    /// </summary>
+    internal int FetchCompletedCount { get; private set; }
+
+    /// <summary>
     /// The geocode candidates from the last city-name resolution, in API order
     /// — the widget's "Location Match" dropdown options. Empty when the last
     /// resolution was coordinates, a ZIP, or a failed geocode.
@@ -157,12 +164,29 @@ public sealed class WeatherClient
     /// <summary>
     /// Resets resolved coordinates and the throttle so the next fetch
     /// re-resolves the location and runs immediately (location property change).
+    /// Also drops the geocode candidates: a pick made against a previous
+    /// location must never resolve against a changed Location/CountryCode/coords.
     /// </summary>
     internal void InvalidateLocation()
     {
         _lat = null;
         _lon = null;
         _lastFetchTime = DateTime.MinValue;
+        _lastLocationQuery = "";
+        LastCandidates = [];
+    }
+
+    /// <summary>
+    /// Resets only the resolved coordinates and throttle — the geocode
+    /// candidates stay. Used when the Location Match pick itself changes, so
+    /// the pick can resolve against the candidates it was offered from.
+    /// </summary>
+    internal void InvalidateCoordinates()
+    {
+        _lat = null;
+        _lon = null;
+        _lastFetchTime = DateTime.MinValue;
+        _lastLocationQuery = "";
     }
 
     /// <summary>
@@ -177,7 +201,7 @@ public sealed class WeatherClient
 
         try
         {
-            string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.LocationMatch}";
+            string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.CountryCode}_{location.LocationMatch}";
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
                 await ResolveCoordinatesAsync(location, currentQuery).ConfigureAwait(false);
 
@@ -210,6 +234,7 @@ public sealed class WeatherClient
         finally
         {
             EndFetch();
+            FetchCompletedCount++;
         }
     }
 
@@ -298,23 +323,8 @@ public sealed class WeatherClient
     {
         _lastLocationQuery = currentQuery;
 
-        // A user pick from the "Location Match" dropdown resolves directly to
-        // that candidate's exact coordinates — no re-geocode, deterministic.
-        if (!string.IsNullOrWhiteSpace(location.LocationMatch))
-        {
-            var match = LastCandidates.FirstOrDefault(c =>
-                c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (match is not null)
-            {
-                _lat = match.Lat;
-                _lon = match.Lon;
-                _resolvedCityName = string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel;
-                return;
-            }
-            // A stale pick (candidates since replaced by a different query):
-            // fall through and re-geocode the location normally.
-        }
-
+        // Explicit coordinates are authoritative — they must win over a stale
+        // Location Match pick from a previous city query.
         if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
             && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal))
         {
@@ -333,10 +343,28 @@ public sealed class WeatherClient
         }
         else if (IsZipCode(location.Location))
         {
-            await GeocodeZipCodeAsync(location.Location.Trim()).ConfigureAwait(false);
+            await GeocodeZipCodeAsync(location).ConfigureAwait(false);
         }
         else
         {
+            // A user pick from the "Location Match" dropdown resolves directly
+            // to that candidate's exact coordinates — no re-geocode. The pick
+            // is only honored inside the city branch (after the override and
+            // ZIP paths), and candidates were cleared by InvalidateLocation on
+            // any location/coords change, so a stale pick cannot win.
+            if (!string.IsNullOrWhiteSpace(location.LocationMatch))
+            {
+                var match = LastCandidates.FirstOrDefault(c =>
+                    c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    _lat = match.Lat;
+                    _lon = match.Lon;
+                    _resolvedCityName = string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel;
+                    return;
+                }
+            }
+
             await GeocodeCityLocationAsync(location).ConfigureAwait(false);
         }
     }
@@ -561,8 +589,9 @@ public sealed class WeatherClient
         return string.IsNullOrWhiteSpace(country) ? $"{name}, {admin1}" : $"{name}, {admin1}, {country}";
     }
 
-    private async Task GeocodeZipCodeAsync(string zipCode)
+    private async Task GeocodeZipCodeAsync(WeatherLocation location)
     {
+        string zipCode = location.Location.Trim();
         try
         {
             string url = $"https://api.zippopotam.us/us/{Uri.EscapeDataString(zipCode)}";
@@ -581,7 +610,10 @@ public sealed class WeatherClient
             _logError?.Invoke($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
         }
 
-        await GeocodeCityLocationAsync(new WeatherLocation("Fixed Location", zipCode, null, null, null)).ConfigureAwait(false);
+        // The zippopotam path is US-only; fall back to the worldwide Open-Meteo
+        // geocoder WITH the original location (so the CountryCode hint is
+        // carried — e.g. "10115" + "DE" resolves the Berlin postal district).
+        await GeocodeCityLocationAsync(location).ConfigureAwait(false);
     }
 
     private static bool IsZipCode(string query)

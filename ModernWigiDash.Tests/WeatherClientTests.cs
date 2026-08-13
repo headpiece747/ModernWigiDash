@@ -131,11 +131,11 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_LocationMatchPick_ResolvesToExactCandidateCoordinates()
     {
         var stub = new StubHttpHandler(request =>
-            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
-                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                    ? StubHttpHandler.Ok(SampleForecast)
-                    : StubHttpHandler.NotFound());
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
         var client = CreateClient(stub);
 
         // First resolution populates the candidates (exact match wins by ranking).
@@ -143,7 +143,7 @@ public class WeatherClientTests
         Assert.IsTrue(client.LastCandidates.Count >= 2, "Candidates must be exposed for the Location Match dropdown");
 
         // A user pick resolves DIRECTLY to that candidate — no re-geocode.
-        string picked = client.LastCandidates.Last().Label; // Vitoria, Brazil
+        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
         int geocodesBefore = stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal));
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
 
@@ -159,11 +159,11 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_StaleLocationMatch_FallsBackToGeocode()
     {
         var stub = new StubHttpHandler(request =>
-            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
-                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                    ? StubHttpHandler.Ok(SampleForecast)
-                    : StubHttpHandler.NotFound());
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
         var client = CreateClient(stub);
 
         // The pick references a candidate that no longer exists (the query
@@ -176,9 +176,102 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_LocationChangedAfterPick_RegeocodesNewLocation()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                // Different name => different candidates (Berlin's geocode).
+                return StubHttpHandler.Ok(url.Contains("name=Berlin", StringComparison.OrdinalIgnoreCase)
+                    ? """{ "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ] }"""
+                    : SampleSameNameMultiCountry);
+            }
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // Pick Vitoria (the last candidate) from the "Victoria" resolution.
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
+        var pickSnapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        Assert.AreEqual(-20.3194, pickSnapshot!.Lat, "The pick itself must still resolve to Vitoria");
+
+        // Changing Location must drop the candidates, so the stale pick cannot
+        // win: "Berlin" must geocode to Berlin.
+        client.InvalidateLocation();
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null) { LocationMatch = picked }, force: true);
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(52.52, snapshot.Lat, "After InvalidateLocation the stale pick must not override the new Location");
+        Assert.AreEqual(13.405, snapshot.Lon);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_ExplicitCoordinates_WinOverStalePick()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // A pick from a previous city resolution must never override explicit
+        // lat/lon overrides (they are documented as authoritative).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", "40.1", "-75.2", null) { LocationMatch = "Victoria, British Columbia, Canada" });
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(40.1, snapshot.Lat);
+        Assert.AreEqual(-75.2, snapshot.Lon);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_ZipFallback_CarriesCountryCodeHint()
+    {
+        string? searchUrl = null;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.NotFound(); // US lookup fails for non-US zip
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                searchUrl = url;
+                return StubHttpHandler.Ok("""{ "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ] }""");
+            }
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // "10115" + "DE": the US-only zippopotam path fails, and the worldwide
+        // fallback must carry the country-code hint so Berlin's postal district
+        // resolves (the spec's named scenario).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE"));
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsNotNull(searchUrl);
+        Assert.IsTrue(searchUrl.Contains("countryCode=DE", StringComparison.OrdinalIgnoreCase), "The ZIP fallback must forward the CountryCode hint");
+        Assert.AreEqual(52.52, snapshot.Lat);
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_CityGeocode_ResolvesViaGeocodingApi()
     {
-        var stub = new StubHttpHandler(Respond);
+        string? searchUrl = null;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                searchUrl = url;
+                return StubHttpHandler.Ok(SampleGeocode);
+            }
+            if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleZip);
+            if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+            return StubHttpHandler.NotFound();
+        });
         var client = CreateClient(stub);
 
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
@@ -188,17 +281,19 @@ public class WeatherClientTests
         Assert.AreEqual(52.52, snapshot.Lat);
         Assert.AreEqual(13.405, snapshot.Lon);
         Assert.AreEqual(2, stub.Calls, "Geocode + forecast must be exactly two calls");
+        Assert.IsNotNull(searchUrl);
+        Assert.IsTrue(searchUrl.Contains("count=10", StringComparison.Ordinal), "The geocoder must fetch 10 candidates for ranking");
     }
 
     [TestMethod]
     public async Task FetchCurrentAsync_AmbiguousName_ExactMatchBeatsHigherPopulationFuzzy()
     {
         var stub = new StubHttpHandler(request =>
-            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleSameNameMultiCountry)
-                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                    ? StubHttpHandler.Ok(SampleForecast)
-                    : StubHttpHandler.NotFound());
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
         var client = CreateClient(stub);
 
         // "Victoria" must resolve to Victoria, Canada — not Vitoria, Brazil,
@@ -215,11 +310,11 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_StateSuffix_PicksMatchingAdmin1()
     {
         var stub = new StubHttpHandler(request =>
-            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleSpringfields)
-                : request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                    ? StubHttpHandler.Ok(SampleForecast)
-                    : StubHttpHandler.NotFound());
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSpringfields);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
         var client = CreateClient(stub);
 
         // Missouri is listed first with more people; the ", MA" suffix must

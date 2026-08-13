@@ -196,7 +196,10 @@ public static class InspectorPanelRenderer
         {
             if (isUpdatingInspector()) return;
             string? selectedValue = combo.SelectedValue?.ToString();
-            if (!string.IsNullOrWhiteSpace(selectedValue))
+            // Empty values are valid selections (e.g. the weather widget's
+            // "Automatic (by ranking)" Location Match entry) — only a null
+            // selection (nothing chosen) is skipped.
+            if (selectedValue is not null)
                 callbacks.ApplyInspectorPropertyValue(desc.Property, selectedValue);
         };
         callbacks.AttachDropdownWithinWindow(combo);

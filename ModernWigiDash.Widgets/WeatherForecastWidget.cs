@@ -65,9 +65,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
         => propertyName == nameof(LocationMatch)
-            ? _client.LastCandidates
-                .Select(c => new WidgetPropertyOption(c.Query, c.Label))
-                .ToArray()
+            ? _client.LastCandidates.Count > 0
+                ? [new WidgetPropertyOption("", "Automatic (by ranking)"), .. _client.LastCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))]
+                : []
             : [];
 
     private readonly WeatherClient _client;
@@ -82,6 +82,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     /// <summary>Test seam: substitute HTTP transport for fetch tests (forwards to the client).</summary>
     internal HttpClient? TestHttpClient { get => _client.TestHttpClient; set => _client.TestHttpClient = value; }
+
+    /// <summary>The last resolved display name (test/UI seam into the client).</summary>
+    internal string ResolvedCityName => _client.ResolvedCityName;
+
+    /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
+    internal int FetchCompletedCount => _client.FetchCompletedCount;
 
     private double _currentTempC = 25.0; // 77°F default
     private double _feelsLikeC = 22.2;  // 72°F default
@@ -156,7 +162,15 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
-        if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode) or nameof(LocationMatch))
+        // A Location Match pick resolves against the candidates it was offered
+        // from, so it keeps them (InvalidateCoordinates); every other location
+        // change clears the candidates so a stale pick can never win.
+        if (propertyName == nameof(LocationMatch))
+        {
+            _client.InvalidateCoordinates();
+            _ = FetchLiveWeatherAsync(force: true);
+        }
+        else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
         {
             _client.InvalidateLocation();
             _ = FetchLiveWeatherAsync(force: true);
@@ -648,6 +662,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         if (snapshot is null) return;
 
         ApplySnapshot(snapshot);
+
+        // The geocode may have produced new Location Match candidates: refresh
+        // the inspector so an already-open panel shows the dropdown (the Twitch
+        // pattern — the renderer only builds a ComboBox when options exist).
+        if (_client.LastCandidates.Count > 0) Context?.RequestInspectorRefresh();
+
         Context?.RequestRender();
     }
 
