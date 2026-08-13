@@ -103,7 +103,8 @@ public sealed class UpdateService
     }
 
     /// <summary>Deletes any existing staged/download folders — a stage present at
-    /// startup means the last update was never applied (stale).</summary>
+    /// startup means the last update was never applied (stale) — plus a leftover
+    /// live-updater cmd from a previous restart.</summary>
     public void CleanupStale()
     {
         foreach (string sub in new[] { "staged", "downloads" })
@@ -111,6 +112,7 @@ public sealed class UpdateService
             string dir = Path.Combine(_updatesRoot, sub);
             if (Directory.Exists(dir)) TryDeleteDirectory(dir);
         }
+        TryDelete(Path.Combine(_updatesRoot, "apply-update-live.cmd"));
     }
 
     /// <summary>Repairs an interrupted swap: restores exe.old when the new exe is
