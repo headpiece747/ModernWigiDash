@@ -118,11 +118,12 @@ public sealed class InspectorController
             _host.OpacitySlider.Value = selected.Opacity;
             _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
 
-            // Remember which custom-property row owned focus before the rebuild:
-            // the panel is cleared and re-rendered below, which would otherwise
-            // eject the user from the field they are typing in (the weather
-            // widget's inspector refresh fires while Location is being edited).
-            int focusedRow = FindFocusedRowIndex();
+            // Remember which custom-property row owned focus (and where the
+            // caret was) before the rebuild: the panel is cleared and
+            // re-rendered below, which would otherwise eject the user from the
+            // field they are typing in (the weather widget's inspector refresh
+            // fires while Location is being edited).
+            var (focusedRow, focusedCaret) = CaptureFocusState();
 
             // Build dynamic custom property editors for the widget
             _host.CustomProperties.Children.Clear();
@@ -154,7 +155,7 @@ public sealed class InspectorController
                 // Restore focus to the same property's editor so typing and
                 // caret placement survive the refresh. The rebuilt row sits at
                 // the same index as the old one (one row per property).
-                RestoreFocusToRow(focusedRow);
+                RestoreFocusToRow(focusedRow, focusedCaret);
             }
         }
         finally
@@ -164,36 +165,45 @@ public sealed class InspectorController
     }
 
     /// <summary>
-    /// Index of the custom-properties row containing the focused element, or
-    /// -1 when focus is elsewhere (transforms, catalog, outside the panel).
+    /// Index of the custom-properties row containing the focused element (or
+    /// -1 when focus is elsewhere — transforms, catalog, outside the panel),
+    /// plus the focused TextBox's caret offset so it can be restored.
     /// </summary>
-    private int FindFocusedRowIndex()
+    private (int RowIndex, int CaretIndex) CaptureFocusState()
     {
-        if (Keyboard.FocusedElement is not DependencyObject focused) return -1;
+        if (Keyboard.FocusedElement is not DependencyObject focused) return (-1, 0);
         var current = focused;
         while (current is not null)
         {
             if (current is UIElement element)
             {
                 int idx = _host.CustomProperties.Children.IndexOf(element);
-                if (idx >= 0) return idx;
+                if (idx >= 0)
+                {
+                    int caret = focused is TextBox box ? box.CaretIndex : 0;
+                    return (idx, caret);
+                }
             }
             current = VisualTreeHelper.GetParent(current);
         }
-        return -1;
+        return (-1, 0);
     }
 
     /// <summary>
     /// Refocuses the editor in the given rebuilt row (the one the user was
-    /// typing in before the refresh). A row's editor is its first focusable
-    /// child (TextBox or ComboBox).
+    /// typing in before the refresh), restoring the caret to where it was.
+    /// A row's editor is its first focusable child (TextBox or ComboBox).
     /// </summary>
-    private void RestoreFocusToRow(int rowIndex)
+    private void RestoreFocusToRow(int rowIndex, int caretIndex)
     {
         if (rowIndex < 0 || rowIndex >= _host.CustomProperties.Children.Count) return;
         if (_host.CustomProperties.Children[rowIndex] is not DependencyObject row) return;
         var editor = FindFirstFocusable(row);
-        editor?.Focus();
+        if (editor is not TextBox box) { editor?.Focus(); return; }
+        box.Focus();
+        // Focus lands the caret at 0 on a freshly built TextBox; restore it to
+        // where the user was typing (clamped to the current text length).
+        box.CaretIndex = Math.Clamp(caretIndex, 0, box.Text.Length);
     }
 
     private static IInputElement? FindFirstFocusable(DependencyObject root)

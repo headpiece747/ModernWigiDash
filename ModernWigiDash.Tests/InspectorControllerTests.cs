@@ -84,11 +84,12 @@ public class InspectorControllerTests
     }
 
     [TestMethod]
-    public void Refresh_WithFocusedPropertyEditor_PreservesFocusAcrossRebuild()
+    public void Refresh_WithFocusedPropertyEditor_PreservesFocusAndCaretAcrossRebuild()
     {
         // The weather widget's inspector refresh fires while the user is still
-        // typing in Location: the rebuild must return focus to the same
-        // property's editor, or every keystroke kicks the user out of the box.
+        // typing in Location: the rebuild must return focus (and the caret) to
+        // the same property's editor, or every keystroke kicks the user out of
+        // the box or jumps the caret back to the start of the word.
         StaRunner.Run(() =>
         {
             var owner = new Window();
@@ -106,8 +107,11 @@ public class InspectorControllerTests
                 // The Label property renders one row with a TextBox editor.
                 var labelRow = (StackPanel)host.CustomProperties.Children[0];
                 var labelEditor = labelRow.Children.OfType<TextBox>().Single();
+                labelEditor.Text = "springfield";
+                labelEditor.CaretIndex = 5; // mid-word: "sprin|gfield"
                 labelEditor.Focus();
                 Assert.IsTrue(labelEditor.IsKeyboardFocused, "precondition: the editor must own focus");
+                Assert.AreEqual(5, labelEditor.CaretIndex, "precondition: caret is mid-word");
 
                 controller.Refresh();
 
@@ -116,6 +120,8 @@ public class InspectorControllerTests
                 Assert.AreNotSame(labelEditor, rebuiltEditor, "the panel must be rebuilt (new editor instances)");
                 Assert.IsTrue(rebuiltEditor.IsKeyboardFocused,
                     "focus must follow the rebuild to the same property's editor");
+                Assert.AreEqual(5, rebuiltEditor.CaretIndex,
+                    "the caret must stay where the user was typing, not jump to the start");
             }
             finally
             {
