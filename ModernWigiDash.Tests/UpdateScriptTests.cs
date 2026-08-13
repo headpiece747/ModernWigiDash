@@ -48,12 +48,14 @@ public class UpdateScriptTests
         // and passes the args through verbatim. The plain "/c \"path\" \"arg\""
         // form triggers cmd's quote-stripping (the script path gets mangled into
         // "The filename, directory name, or volume label syntax is incorrect").
+        string logPath = Path.Combine(root, "update.log");
         var psi = new ProcessStartInfo("cmd.exe", $"/S /C \"\"{cmdPath}\" \"{install}\" \"{stage}\" ModernWigiDash.App.exe\"")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        psi.Environment["WMD_UPDATE_LOG"] = logPath;
         using var proc = Process.Start(psi)!;
         string outp = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
         Assert.IsTrue(proc.WaitForExit(30_000), $"updater timed out; output: {outp}");
@@ -65,5 +67,7 @@ public class UpdateScriptTests
         Assert.IsTrue(File.Exists(Path.Combine(install, "Resources", "font.ttf")), "staged Resources must be copied");
         Assert.IsFalse(File.Exists(Path.Combine(stage, "ModernWigiDash-win-x64", "ModernWigiDash.App.exe")),
             "the stage must be deleted after applying");
+        Assert.IsTrue(File.Exists(logPath), "the updater must log under WMD_UPDATE_LOG, never the real update log");
+        StringAssert.Contains(File.ReadAllText(logPath), "swap complete");
     }
 }

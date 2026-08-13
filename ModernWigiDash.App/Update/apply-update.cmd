@@ -4,8 +4,10 @@ rem apply-update.cmd <installDir> <stagedVersionDir> <appExeName>
 rem The swap: wait for the app to exit, ensure the install dir is writable
 rem (self-elevate if not), then rename-aside the exe and copy the staged
 rem payload in. Never delete-first: a crash mid-swap leaves the .old recoverable.
+rem Log file: WMD_UPDATE_LOG overrides the default path (tests redirect it to a temp file).
 set "LOG=%LOCALAPPDATA%\ModernWigiDash\updates\update.log"
-mkdir "%LOCALAPPDATA%\ModernWigiDash\updates" 2>nul
+if defined WMD_UPDATE_LOG set "LOG=%WMD_UPDATE_LOG%"
+for %%D in ("%LOG%") do mkdir "%%~dpD." 2>nul
 echo [%date% %time%] updater start args: %* >> "%LOG%"
 
 set "INSTALL=%~1"

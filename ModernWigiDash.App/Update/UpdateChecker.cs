@@ -32,7 +32,11 @@ public static class UpdateChecker
                 url,
                 digest);
         }
-        catch (JsonException)
+        // Wrong-typed fields (tag_name as a number, assets as an object, a
+        // numeric browser_download_url) throw InvalidOperationException from
+        // the JsonElement accessors; both shapes mean "not a valid release
+        // payload" -> null, never an escape past the invalid->null contract.
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return null;
         }

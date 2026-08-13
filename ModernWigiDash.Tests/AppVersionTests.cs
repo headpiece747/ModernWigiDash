@@ -7,11 +7,16 @@ namespace ModernWigiDash.Tests;
 public class AppVersionTests
 {
     [TestMethod]
-    public void Current_ReadsInformationalVersion_AsSemVer()
+    public void Current_MatchesParseOfRealInformationalStamp()
     {
-        // The test assembly has no informational stamp; the checker treats
-        // unparseable as dev. This test pins the parse path directly instead.
-        Assert.IsTrue(AppVersion.IsDevBuild || AppVersion.Current is not null);
+        // Pin the parse path against the assembly's actual informational
+        // stamp: Current must be exactly what Parse produces from it (null
+        // for a 0.0.0 dev build, the release version for a stamped build).
+        var stamp = typeof(AppVersion).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion;
+
+        Assert.AreEqual(AppVersion.Current, AppVersion.Parse(stamp));
     }
 
     [TestMethod]

@@ -5,7 +5,8 @@ namespace ModernWigiDash.App.Update;
 /// <summary>
 /// The app's own version, read from the build-time informational stamp
 /// (written by build-release.ps1 from the release tag). Dev builds embed
-/// "0.0.0-dev" — unparseable, so <see cref="IsDevBuild"/> disables the updater.
+/// the 0.0.0 csproj default (with the SDK's git-sha suffix), which
+/// <see cref="Parse"/> maps to null — so <see cref="IsDevBuild"/> disables the updater.
 /// </summary>
 public static class AppVersion
 {

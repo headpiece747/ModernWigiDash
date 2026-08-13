@@ -26,6 +26,8 @@ $ZipPath    = Join-Path $Root $OutputZip
 
 # --- 0. Auto-resolve upstream telemetry versions (when pins are empty) ---
 # Runs before the download map below so the map uses the resolved versions.
+# Gated behind -SkipTelemetry: that switch is the documented offline dev path,
+# and the resolved versions are only consumed by the telemetry bundle block.
 function Get-LatestReleaseVersion([string]$Repo) {
     $json = & curl.exe -f -L -sS "https://api.github.com/repos/$Repo/releases/latest"
     if ($LASTEXITCODE -ne 0) { throw "Could not query latest release for $Repo" }
@@ -33,13 +35,15 @@ function Get-LatestReleaseVersion([string]$Repo) {
     return $release.tag_name.TrimStart("v")
 }
 
-if ([string]::IsNullOrWhiteSpace($LhsVersion)) {
-    $LhsVersion = Get-LatestReleaseVersion "epinter/LibreHardwareService"
-    Write-Host "LHS: auto-resolved latest v$LhsVersion"
-}
-if ([string]::IsNullOrWhiteSpace($PresentMonVersion)) {
-    $PresentMonVersion = Get-LatestReleaseVersion "GameTechDev/PresentMon"
-    Write-Host "PresentMon: auto-resolved latest v$PresentMonVersion"
+if (-not $SkipTelemetry) {
+    if ([string]::IsNullOrWhiteSpace($LhsVersion)) {
+        $LhsVersion = Get-LatestReleaseVersion "epinter/LibreHardwareService"
+        Write-Host "LHS: auto-resolved latest v$LhsVersion"
+    }
+    if ([string]::IsNullOrWhiteSpace($PresentMonVersion)) {
+        $PresentMonVersion = Get-LatestReleaseVersion "GameTechDev/PresentMon"
+        Write-Host "PresentMon: auto-resolved latest v$PresentMonVersion"
+    }
 }
 
 $LhsRelease = "https://github.com/epinter/LibreHardwareService/releases/download/v$LhsVersion"

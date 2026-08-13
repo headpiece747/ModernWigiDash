@@ -2,6 +2,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.Update;
 
@@ -16,6 +17,7 @@ public sealed class UpdateService
 {
     public const string GitHubLatestUrl = "https://api.github.com/repos/headpiece747/ModernWigiDash/releases/latest";
     private const string RepoUserAgent = "ModernWigiDash-Updater/1.0";
+    private static readonly TimeSpan DownloadStallTimeout = TimeSpan.FromMinutes(15);
 
     private static readonly HttpClient SharedHttp = new()
     {
@@ -27,12 +29,14 @@ public sealed class UpdateService
     private readonly Func<string, string, IProgress<double>, CancellationToken, Task> _downloadFile;
     private readonly Func<string, bool> _sha256Matches;
     private readonly string _updatesRoot;
+    private readonly Version? _currentVersion;
 
     public UpdateService(
         Func<string, string?, Task<string?>>? downloadText = null,
         Func<string, string, IProgress<double>, CancellationToken, Task>? downloadFile = null,
         Func<string, bool>? sha256Matches = null,
-        string? updatesRoot = null)
+        string? updatesRoot = null,
+        Version? currentVersion = null)
     {
         _updatesRoot = updatesRoot ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -40,19 +44,29 @@ public sealed class UpdateService
         _downloadText = downloadText ?? DownloadTextAsync;
         _downloadFile = downloadFile ?? DownloadFileAsync;
         _sha256Matches = sha256Matches ?? (actual => true); // digest verified by DownloadAndStage
+        _currentVersion = currentVersion;
     }
 
     public string StagedCmdPath(UpdateInfo info) => Path.Combine(_updatesRoot, "staged", info.Version, "apply-update.cmd");
 
+    /// <summary>The LocalAppData updates root every staged/download path lives under.</summary>
+    public string UpdatesRoot => _updatesRoot;
+
     /// <summary>One startup check: newer slim release → UpdateInfo, else null (silent).</summary>
     public async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken ct = default)
     {
-        if (AppVersion.IsDevBuild) return null;
+        // _currentVersion is a test seam; production reads the assembly stamp
+        // (null for 0.0.0 dev builds — the updater never runs against dev).
+        Version? current = _currentVersion ?? AppVersion.Current;
+        if (current is null) return null;
         string? json = await _downloadText(GitHubLatestUrl, RepoUserAgent).ConfigureAwait(false);
-        return json is null ? null : UpdateChecker.ParseLatestRelease(json, AppVersion.Current);
+        return json is null ? null : UpdateChecker.ParseLatestRelease(json, current);
     }
 
-    /// <summary>Downloads the slim zip, verifies SHA-256, extracts to staged/{version}, writes the cmd.</summary>
+    /// <summary>Downloads the slim zip, verifies SHA-256, extracts to staged/{version}, writes the cmd.
+    /// The download is bounded by a 15-minute stall timeout: with ResponseHeadersRead
+    /// the 10s <see cref="HttpClient.Timeout"/> expires at header arrival, so a
+    /// mid-body stall must be cut off separately (the caller's token wins early).</summary>
     public async Task<bool> DownloadAndStageAsync(UpdateInfo info, IProgress<double> progress, CancellationToken ct = default)
     {
         string downloadDir = Path.Combine(_updatesRoot, "downloads");
@@ -63,13 +77,16 @@ public sealed class UpdateService
 
         try
         {
-            await _downloadFile(info.ZipUrl, zipPath, progress, ct).ConfigureAwait(false);
+            using var stallBound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            stallBound.CancelAfter(DownloadStallTimeout);
+            await _downloadFile(info.ZipUrl, zipPath, progress, stallBound.Token).ConfigureAwait(false);
             if (!File.Exists(zipPath)) return false;
 
             string actual = ComputeSha256(zipPath);
             if (!_sha256Matches(actual) || !string.Equals(actual, info.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 TryDeleteDirectory(downloadDir);
+                FileLog.Write($"[UPDATE] download digest mismatch for v{info.Version}; download deleted");
                 return false;
             }
 
@@ -77,9 +94,10 @@ public sealed class UpdateService
             WriteUpdaterCmd(StagedCmdPath(info), info.Version);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
             TryDeleteDirectory(downloadDir);
+            FileLog.Write($"[UPDATE] download/stage failed for v{info.Version}: {ex.Message}");
             return false;
         }
     }

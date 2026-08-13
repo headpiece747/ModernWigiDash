@@ -28,12 +28,27 @@ public partial class MainWindow
     {
         // SourceInitialized: the window is visible; run the check off-thread.
         // The real network path throws (DNS failure, connection refused, the
-        // 10s timeout -> TaskCanceledException) and, with ConfigureAwait(false)
-        // inside the service, the continuation lands on a threadpool thread —
-        // an unhandled exception here would reach AppDomain.UnhandledException
-        // and terminate the process. Log and stay silent (button hidden); the
+        // 10s timeout -> TaskCanceledException) and, because the await below
+        // resumes on the captured UI (dispatcher) context, an unhandled
+        // exception would surface through DispatcherUnhandledException and
+        // terminate the process. Log and stay silent (button hidden); the
         // same guard covers the shutdown edge (posting to a shutting-down
         // dispatcher can throw a canceled-operation exception).
+
+        // Startup recovery runs once, before the check: heal an interrupted
+        // swap (.old restore) and clear stale stage/download dirs from failed
+        // downloads — otherwise a crash between rename-aside and copy-complete
+        // leaves the install with no exe and no automatic restore.
+        try
+        {
+            _updateService.CleanupStale();
+            UpdateService.RecoverInterruptedSwap(AppContext.BaseDirectory);
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"[UPDATE] startup recovery failed: {ex.Message}");
+        }
+
         try
         {
             var info = await _updateService.CheckForUpdateAsync();
@@ -112,9 +127,7 @@ public partial class MainWindow
         try
         {
             string installDir = AppContext.BaseDirectory;
-            string stageDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ModernWigiDash", "updates", "staged", _pendingUpdate.Version);
+            string stageDir = System.IO.Path.Combine(_updateService.UpdatesRoot, "staged", _pendingUpdate.Version);
             string cmd = _updateService.StagedCmdPath(_pendingUpdate);
             string relaunch = $"start \"\" \"{installDir}\\ModernWigiDash.App.exe\"";
             string args = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
@@ -123,7 +136,12 @@ public partial class MainWindow
             // correctly (a plain /c "..." strips quotes and mangles the script
             // path — "filename, directory name, or volume label syntax is incorrect").
             string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"") { UseShellExecute = false };
+            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            };
             // Replace the {{RELAUNCH}} marker inside the staged cmd with the relaunch line.
             string body = System.IO.File.ReadAllText(cmd);
             string substituted = body.Replace("{{RELAUNCH}}", relaunch);

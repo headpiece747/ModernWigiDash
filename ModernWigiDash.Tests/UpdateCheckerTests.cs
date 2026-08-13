@@ -56,6 +56,34 @@ public class UpdateCheckerTests
     }
 
     [TestMethod]
+    public void ParseLatestRelease_WrongTypedTag_ReturnsNull()
+    {
+        // tag_name as a number throws InvalidOperationException from
+        // GetString — the invalid->null contract must not let it escape.
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(
+            """{ "tag_name": 42, "assets": [] }""", new Version(0, 4, 1)));
+    }
+
+    [TestMethod]
+    public void ParseLatestRelease_WrongTypedAssets_ReturnsNull()
+    {
+        // assets as an object throws InvalidOperationException from
+        // EnumerateArray — must degrade to null, not throw.
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(
+            """{ "tag_name": "v0.5.0", "assets": { "name": "x" } }""", new Version(0, 4, 1)));
+    }
+
+    [TestMethod]
+    public void ParseLatestRelease_WrongTypedDownloadUrl_ReturnsNull()
+    {
+        // browser_download_url as a number throws InvalidOperationException
+        // from GetString inside the slim-asset pick.
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(
+            """{ "tag_name": "v0.5.0", "assets": [ { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": 0 } ] }""",
+            new Version(0, 4, 1)));
+    }
+
+    [TestMethod]
     public void ParseLatestRelease_NoAssets_ReturnsNull()
     {
         Assert.IsNull(UpdateChecker.ParseLatestRelease("""{ "tag_name": "v0.5.0" }""", new Version(0, 4, 1)));

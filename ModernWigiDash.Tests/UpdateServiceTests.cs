@@ -37,7 +37,8 @@ public class UpdateServiceTests
         """;
         var service = new UpdateService(
             downloadText: (_, _) => Task.FromResult<string?>(json),
-            updatesRoot: NewDir());
+            updatesRoot: NewDir(),
+            currentVersion: new Version(1, 0, 0)); // the real stamp is a dev 0.0.0 — pin a release version
 
         var info = await service.CheckForUpdateAsync();
 
@@ -139,6 +140,29 @@ public class UpdateServiceTests
         string stagedExe = Path.Combine(dir, "staged", "0.5.0", "ModernWigiDash-win-x64", "ModernWigiDash.App.exe");
         Assert.IsTrue(File.Exists(stagedExe), "the zip must be extracted under staged/{version}");
         Assert.IsTrue(File.Exists(service.StagedCmdPath(info)), "apply-update.cmd must be written into the stage");
+    }
+
+    [TestMethod]
+    public async Task DownloadAndStage_CancelledMidDownload_ReturnsFalse()
+    {
+        // The 15-minute stall bound is wired through the download token: a
+        // download seam that never completes must be cut off when the caller
+        // (or the bound) cancels — the method returns false, never hangs.
+        string dir = NewDir();
+        var service = new UpdateService(
+            downloadFile: async (_, _, _, token) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
+            },
+            updatesRoot: dir);
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>(), cts.Token);
+
+        Assert.IsFalse(ok);
+        Assert.IsFalse(Directory.Exists(Path.Combine(dir, "downloads")),
+            "a cancelled download must be cleaned up");
     }
 
     [TestMethod]
