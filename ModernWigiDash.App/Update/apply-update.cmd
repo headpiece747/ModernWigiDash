@@ -19,7 +19,9 @@ tasklist /FI "IMAGENAME eq %EXE%" 2>nul | find /I "%EXE%" >nul
 if errorlevel 1 goto exited
 set /a WAIT+=1
 if %WAIT% GEQ 60 goto timeout
-timeout /t 1 /nobreak >nul
+rem ping instead of timeout: console-independent ~1s delay (timeout fails
+rem with "Input redirection is not supported" when stdin has no console)
+ping -n 2 127.0.0.1 >nul
 goto waitloop
 :timeout
 echo [%date% %time%] ERROR: app did not exit within 60s >> "%LOG%"
@@ -34,6 +36,9 @@ del "%PROBE%" 2>nul
 goto writable
 :elevate
 echo [%date% %time%] install dir not writable; requesting elevation >> "%LOG%"
+rem Note: the quoted args below break if a path contains a single quote
+rem (e.g. "O'Brien"); paths with spaces are fine. The app's own dirs are
+rem ASCII by construction, so this is accepted rather than worked around.
 powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs" 
 exit /b 0
 :writable
@@ -54,14 +59,14 @@ copy /Y "%STAGE%\ModernWigiDash-win-x64\%EXE%" "%INSTALL%\%EXE%" >nul 2>&1
 if not errorlevel 1 goto copied
 set /a TRY+=1
 if %TRY% GEQ 10 goto copyfail
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 goto copyloop
 :copyfail
 echo [%date% %time%] ERROR: could not copy new exe after 10 tries >> "%LOG%"
 exit /b 4
 :copied
 
-rem Copy staged Resources over (fonts/theme/icons) — preserve unknown user files.
+rem Copy staged Resources over (fonts/theme/icons) - preserve unknown user files.
 if exist "%STAGE%\ModernWigiDash-win-x64\Resources" (
   xcopy /E /I /Y "%STAGE%\ModernWigiDash-win-x64\Resources" "%INSTALL%\Resources" >nul
 )
