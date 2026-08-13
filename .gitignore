@@ -389,3 +389,7 @@ FodyWeavers.xsd
 
 # Git worktrees
 /.worktrees/
+
+# Release bundles
+ModernWigiDash-v*.zip
+ModernWigiDash-win-x64.zip
