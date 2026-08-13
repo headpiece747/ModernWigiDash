@@ -2,8 +2,8 @@
 param(
     [switch]$SkipTelemetry,
     [string]$Version = "",
-    [string]$LhsVersion = "0.3.4",
-    [string]$PresentMonVersion = "2.5.1",
+    [string]$LhsVersion = "",
+    [string]$PresentMonVersion = "",
     [string]$OutputZip = ""
 )
 
@@ -23,6 +23,24 @@ $CacheDir   = Join-Path $Root "scripts\.release-cache"
 $Staging    = Join-Path ([System.IO.Path]::GetTempPath()) "wmd-release-staging"
 $ZipDir     = Join-Path $Staging "ModernWigiDash-win-x64"
 $ZipPath    = Join-Path $Root $OutputZip
+
+# --- 0. Auto-resolve upstream telemetry versions (when pins are empty) ---
+# Runs before the download map below so the map uses the resolved versions.
+function Get-LatestReleaseVersion([string]$Repo) {
+    $json = & curl.exe -f -L -sS "https://api.github.com/repos/$Repo/releases/latest"
+    if ($LASTEXITCODE -ne 0) { throw "Could not query latest release for $Repo" }
+    $release = $json | ConvertFrom-Json
+    return $release.tag_name.TrimStart("v")
+}
+
+if ([string]::IsNullOrWhiteSpace($LhsVersion)) {
+    $LhsVersion = Get-LatestReleaseVersion "epinter/LibreHardwareService"
+    Write-Host "LHS: auto-resolved latest v$LhsVersion"
+}
+if ([string]::IsNullOrWhiteSpace($PresentMonVersion)) {
+    $PresentMonVersion = Get-LatestReleaseVersion "GameTechDev/PresentMon"
+    Write-Host "PresentMon: auto-resolved latest v$PresentMonVersion"
+}
 
 $LhsRelease = "https://github.com/epinter/LibreHardwareService/releases/download/v$LhsVersion"
 $PmRelease  = "https://github.com/GameTechDev/PresentMon/releases/download/v$PresentMonVersion"
@@ -53,11 +71,16 @@ Write-Host "Publishing ModernWigiDash.App (single-file, self-contained)..."
 $publishOut = Join-Path $Staging "publish"
 if (Test-Path $Staging) { Remove-Item $Staging -Recurse -Force }
 New-Item -ItemType Directory -Path $Staging -Force | Out-Null
-& dotnet publish (Join-Path $Root "ModernWigiDash.App\ModernWigiDash.App.csproj") `
-    -c Release -r win-x64 --self-contained -o $publishOut `
-    -p:PublishSingleFile=true -p:PublishReadyToRun=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-    -p:DebugType=None -p:DebugSymbols=false | Out-Null
+$publishArgs = @(
+    "-c", "Release", "-r", "win-x64", "--self-contained", "-o", $publishOut,
+    "-p:PublishSingleFile=true", "-p:PublishReadyToRun=true",
+    "-p:IncludeNativeLibrariesForSelfExtract=true", "-p:EnableCompressionInSingleFile=true",
+    "-p:DebugType=None", "-p:DebugSymbols=false"
+)
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    $publishArgs += "-p:InformationalVersion=$Version"
+}
+& dotnet publish (Join-Path $Root "ModernWigiDash.App\ModernWigiDash.App.csproj") @publishArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
 # --- 2. Assemble the zip root ---
@@ -108,10 +131,14 @@ MPL-2.0 requires that corresponding source be made available; both components'
 source is public at the URLs above.
 "@
 [System.IO.File]::WriteAllText((Join-Path $licDir "NOTICES.txt"), $notices, [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText(
+    (Join-Path $licDir "telemetry-versions.txt"),
+    "LibreHardwareService=$LhsVersion`r`nPresentMon=$PresentMonVersion`r`n",
+    [System.Text.UTF8Encoding]::new($false))
 }
 
 # --- 4. Templates ---
-$readme = Get-Content (Join-Path $ReleaseDir "README.txt") -Raw
+$readme = Get-Content (Join-Path $ReleaseDir "README.txt") -Raw -Encoding UTF8
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     # Stamp the version into the user-facing doc so the zip is self-describing.
     # (Match on the ASCII prefix so the em-dash in the template never matters;
@@ -129,6 +156,26 @@ Write-Host "Zipping..."
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path $ZipDir -DestinationPath $ZipPath
 if (-not (Test-Path $ZipPath)) { throw "Zip creation failed" }
+
+# --- 5b. Slim app-only zip (updater payload: exe + Resources + docs) ---
+# The zip's root folder is named like the full zip's ("ModernWigiDash-win-x64")
+# because the in-app updater's extraction resolves the exe at that fixed path.
+Write-Host "Building app-only slim zip..."
+$SlimDir = Join-Path $Staging "slim"
+New-Item -ItemType Directory -Path $SlimDir -Force | Out-Null
+$SlimPayload = Join-Path $SlimDir "ModernWigiDash-win-x64"
+New-Item -ItemType Directory -Path $SlimPayload -Force | Out-Null
+Copy-Item (Join-Path $publishOut "ModernWigiDash.App.exe") $SlimPayload
+Copy-Item (Join-Path $publishOut "Resources") (Join-Path $SlimPayload "Resources") -Recurse
+[System.IO.File]::WriteAllText((Join-Path $SlimPayload "README.txt"), $readme, [System.Text.UTF8Encoding]::new($false))
+Copy-Item (Join-Path $Root "LICENSE") (Join-Path $SlimPayload "LICENSE-ModernWigiDash.txt")
+
+$SlimZipPath = if ([string]::IsNullOrWhiteSpace($Version)) { Join-Path $Root "ModernWigiDash-app-only-win-x64.zip" } else { Join-Path $Root "ModernWigiDash-v$Version-app-only.zip" }
+if (Test-Path $SlimZipPath) { Remove-Item $SlimZipPath -Force }
+Compress-Archive -Path $SlimPayload -DestinationPath $SlimZipPath
+if (-not (Test-Path $SlimZipPath)) { throw "Slim zip creation failed" }
+Write-Host ""
+Write-Host "Built $SlimZipPath"
 
 # --- 6. Contents manifest + size ---
 Write-Host ""

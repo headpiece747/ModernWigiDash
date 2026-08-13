@@ -66,6 +66,8 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 == Updating ==
 
+  The app's built-in updater uses the separate app-only zip; never
+  use that artifact for a fresh install (it has no telemetry installers).
   Download the new zip, unzip over the old folder (or delete it), and
   re-run setup-telemetry.bat once. Profiles and settings are kept.
 
