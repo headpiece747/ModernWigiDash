@@ -135,16 +135,16 @@ public partial class MainWindow
             // path specified" and silently skips the relaunch).
             string relaunchExe = System.IO.Path.Combine(installDir, "ModernWigiDash.App.exe");
             string relaunch = $"start \"\" \"{relaunchExe}\"";
-            string args = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
 
-            // /S /C with doubled inner quotes: the canonical form cmd.exe handles
-            // correctly (a plain /c "..." strips quotes and mangles the script
-            // path — "filename, directory name, or volume label syntax is incorrect").
             // UseShellExecute=true detaches the updater from this process's job
             // object: without it the child is reaped when the app closes on the
             // next line, and the swap never runs (seen in the on-device loop).
+            // With ShellExecute, cmd receives the arguments as one string, so
+            // the /S /C ""..."" form does NOT work (verified: exits 1, no log);
+            // the whole command must be a single quoted argument to /c.
             string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/S /C \"\"{args}\"")
+            string inner = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
+            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
             {
                 UseShellExecute = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
