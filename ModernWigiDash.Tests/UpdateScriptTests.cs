@@ -12,7 +12,7 @@ public class UpdateScriptTests
     [TestCleanup]
     public void Cleanup()
     {
-        try { Directory.Delete(TempRoot, true); } catch { }
+        try { Directory.Delete(TempRoot, true); } catch { /* best-effort */ }
     }
 
     /// <summary>Runs the real apply-update.cmd against a temp install dir with a

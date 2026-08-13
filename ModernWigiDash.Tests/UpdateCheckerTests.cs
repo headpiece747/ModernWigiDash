@@ -22,7 +22,7 @@ public class UpdateCheckerTests
         var info = UpdateChecker.ParseLatestRelease(LatestJson, new Version(0, 4, 1));
 
         Assert.IsNotNull(info);
-        Assert.AreEqual("0.5.0", info!.Version);
+        Assert.AreEqual("0.5.0", info.Version);
         Assert.AreEqual("https://example.com/app.zip", info.ZipUrl, "must pick the app-only zip, never the full zip");
         Assert.AreEqual("bbb", info.Sha256);
     }

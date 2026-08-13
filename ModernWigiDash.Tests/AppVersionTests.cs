@@ -24,7 +24,7 @@ public class AppVersionTests
     {
         var v = AppVersion.Parse("0.4.1-alpha.1");
         Assert.IsNotNull(v);
-        Assert.AreEqual(0, v!.Major);
+        Assert.AreEqual(0, v.Major);
         Assert.AreEqual(4, v.Minor);
         Assert.AreEqual(1, v.Build);
     }
@@ -34,7 +34,7 @@ public class AppVersionTests
     {
         var v = AppVersion.Parse("v0.5.0");
         Assert.IsNotNull(v);
-        Assert.AreEqual(0, v!.Major);
+        Assert.AreEqual(0, v.Major);
         Assert.AreEqual(5, v.Minor);
     }
 

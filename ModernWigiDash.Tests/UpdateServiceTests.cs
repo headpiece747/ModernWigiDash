@@ -17,7 +17,7 @@ public class UpdateServiceTests
     [TestCleanup]
     public void Cleanup()
     {
-        try { Directory.Delete(TempRoot, true); } catch { }
+        try { Directory.Delete(TempRoot, true); } catch { /* best-effort */ }
     }
 
     private static string NewDir() => Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
@@ -43,7 +43,7 @@ public class UpdateServiceTests
         var info = await service.CheckForUpdateAsync();
 
         Assert.IsNotNull(info);
-        Assert.AreEqual("1.1.0", info!.Version);
+        Assert.AreEqual("1.1.0", info.Version);
     }
 
     [TestMethod]
@@ -119,13 +119,16 @@ public class UpdateServiceTests
         string dir = NewDir();
         string zipPath = Path.Combine(dir, "slim.zip");
         Directory.CreateDirectory(dir);
+        // S6966 suppressed: ZipArchive has no OpenAsync/Entry.OpenAsync variants.
+#pragma warning disable S6966
         using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
             var entry = zip.CreateEntry("ModernWigiDash-win-x64/ModernWigiDash.App.exe");
             using var w = new StreamWriter(entry.Open());
-            w.Write("exe");
+            await w.WriteAsync("exe");
         }
-        byte[] zipBytes = File.ReadAllBytes(zipPath);
+#pragma warning restore S6966
+        byte[] zipBytes = await File.ReadAllBytesAsync(zipPath);
         string digest = Convert.ToHexString(SHA256.HashData(zipBytes)).ToLowerInvariant();
 
         var service = new UpdateService(
