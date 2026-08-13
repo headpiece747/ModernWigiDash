@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using ModernWigiDash.App;
 using ModernWigiDash.App.Inspector;
 using ModernWigiDash.App.Theming;
@@ -79,6 +80,47 @@ public class InspectorControllerTests
             Assert.AreEqual("updated", widget.Label);
             Assert.AreEqual("updated", placed.PropertyValues[nameof(TestWidget.Label)],
                 "the write-back seam must persist into the placed instance's PropertyValues");
+        });
+    }
+
+    [TestMethod]
+    public void Refresh_WithFocusedPropertyEditor_PreservesFocusAcrossRebuild()
+    {
+        // The weather widget's inspector refresh fires while the user is still
+        // typing in Location: the rebuild must return focus to the same
+        // property's editor, or every keystroke kicks the user out of the box.
+        StaRunner.Run(() =>
+        {
+            var owner = new Window();
+            var (host, _, _) = BuildHost();
+            var controller = new InspectorController(host, new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }));
+            controller.Refresh();
+
+            // Host the custom-properties panel in a real shown window so the
+            // editors can take keyboard focus (Focus needs a PresentationSource).
+            var window = new Window { Content = host.CustomProperties, Width = 300, Height = 200 };
+            window.Show();
+            window.UpdateLayout();
+            try
+            {
+                // The Label property renders one row with a TextBox editor.
+                var labelRow = (StackPanel)host.CustomProperties.Children[0];
+                var labelEditor = labelRow.Children.OfType<TextBox>().Single();
+                labelEditor.Focus();
+                Assert.IsTrue(labelEditor.IsKeyboardFocused, "precondition: the editor must own focus");
+
+                controller.Refresh();
+
+                var rebuiltRow = (StackPanel)host.CustomProperties.Children[0];
+                var rebuiltEditor = rebuiltRow.Children.OfType<TextBox>().Single();
+                Assert.AreNotSame(labelEditor, rebuiltEditor, "the panel must be rebuilt (new editor instances)");
+                Assert.IsTrue(rebuiltEditor.IsKeyboardFocused,
+                    "focus must follow the rebuild to the same property's editor");
+            }
+            finally
+            {
+                window.Close();
+            }
         });
     }
 

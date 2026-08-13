@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
 using ModernWigiDash.App.Controls;
@@ -117,6 +118,12 @@ public sealed class InspectorController
             _host.OpacitySlider.Value = selected.Opacity;
             _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
 
+            // Remember which custom-property row owned focus before the rebuild:
+            // the panel is cleared and re-rendered below, which would otherwise
+            // eject the user from the field they are typing in (the weather
+            // widget's inspector refresh fires while Location is being edited).
+            int focusedRow = FindFocusedRowIndex();
+
             // Build dynamic custom property editors for the widget
             _host.CustomProperties.Children.Clear();
             if (selected.ActiveInstance is not null)
@@ -143,12 +150,61 @@ public sealed class InspectorController
                             return dlg.ShowDialog() == true ? dlg.FolderName : null;
                         }
                     });
+
+                // Restore focus to the same property's editor so typing and
+                // caret placement survive the refresh. The rebuilt row sits at
+                // the same index as the old one (one row per property).
+                RestoreFocusToRow(focusedRow);
             }
         }
         finally
         {
             _isUpdatingInspector = false;
         }
+    }
+
+    /// <summary>
+    /// Index of the custom-properties row containing the focused element, or
+    /// -1 when focus is elsewhere (transforms, catalog, outside the panel).
+    /// </summary>
+    private int FindFocusedRowIndex()
+    {
+        if (Keyboard.FocusedElement is not DependencyObject focused) return -1;
+        var current = focused;
+        while (current is not null)
+        {
+            if (current is UIElement element)
+            {
+                int idx = _host.CustomProperties.Children.IndexOf(element);
+                if (idx >= 0) return idx;
+            }
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Refocuses the editor in the given rebuilt row (the one the user was
+    /// typing in before the refresh). A row's editor is its first focusable
+    /// child (TextBox or ComboBox).
+    /// </summary>
+    private void RestoreFocusToRow(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _host.CustomProperties.Children.Count) return;
+        if (_host.CustomProperties.Children[rowIndex] is not DependencyObject row) return;
+        var editor = FindFirstFocusable(row);
+        editor?.Focus();
+    }
+
+    private static IInputElement? FindFirstFocusable(DependencyObject root)
+    {
+        if (root is TextBox or ComboBox) return root as IInputElement;
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            if (FindFirstFocusable(VisualTreeHelper.GetChild(root, i)) is { } found) return found;
+        }
+        return null;
     }
 
     /// <summary>Refreshes only the transform text boxes (used during drag/resize).</summary>
