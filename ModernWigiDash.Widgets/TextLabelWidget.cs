@@ -67,7 +67,16 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         if (wrapped.Count == 0) return;
 
         float lineHeight = fontSize * 1.25f;
-        float totalHeight = wrapped.Count * lineHeight;
+
+        // Fit the wrapped lines inside the bounds: cap the drawn line count to
+        // what the height fits (ellipsis on the last visible line when cut),
+        // and truncate any single line wider than the text width (a word wider
+        // than the widget wraps onto its own line by design and would spill).
+        float availableHeight = bounds.Height - padding * 2f;
+        IReadOnlyList<string> display = FitLinesToBounds(wrapped, font, textWidth, lineHeight, availableHeight);
+        if (display.Count == 0) return;
+
+        float totalHeight = display.Count * lineHeight;
         float firstBaseline = bounds.MidY - totalHeight / 2f + fontSize * 0.8f;
 
         float anchorX = alignment switch
@@ -77,10 +86,43 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
             _ => bounds.MidX
         };
 
-        for (int i = 0; i < wrapped.Count; i++)
+        for (int i = 0; i < display.Count; i++)
         {
-            canvas.DrawTextWithFallback(wrapped[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
+            canvas.DrawTextWithFallback(display[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
         }
+    }
+
+    /// <summary>
+    /// Pure display rule: caps <paramref name="wrapped"/> to the lines that fit
+    /// within <paramref name="availableHeight"/> at <paramref name="lineHeight"/>
+    /// (an ellipsis marks the last visible line when lines are cut), and
+    /// truncates any single line wider than <paramref name="maxWidth"/> so
+    /// text never spills past the widget bounds. The returned list is new —
+    /// callers draw it, they never mutate the wrapped cache.
+    /// </summary>
+    internal static IReadOnlyList<string> FitLinesToBounds(
+        IReadOnlyList<string> wrapped, SKFont font, float maxWidth, float lineHeight, float availableHeight)
+    {
+        int maxLines = Math.Max(1, (int)(availableHeight / lineHeight));
+        bool truncated = wrapped.Count > maxLines;
+        int count = Math.Min(wrapped.Count, maxLines);
+        if (count == 0) return [];
+
+        List<string> display = new(count);
+        for (int i = 0; i < count; i++)
+        {
+            // TruncateText is a no-op for lines that already fit; it truncates
+            // an over-wide word (its own line by WrapText's design).
+            display.Add(TextRenderHelper.TruncateText(wrapped[i], font, maxWidth));
+        }
+
+        if (truncated)
+        {
+            // Signal the cut with an ellipsis on the last visible line (the
+            // appended " …" is itself truncated if the line is full).
+            display[^1] = TextRenderHelper.TruncateText(display[^1] + " …", font, maxWidth);
+        }
+        return display;
     }
 
     private readonly WrapCache _wrappedLines = new();

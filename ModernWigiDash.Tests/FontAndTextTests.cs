@@ -181,6 +181,63 @@ public class FontAndTextTests
     }
 
     [TestMethod]
+    public void TextLabelWidget_RendersVeryLongText_WithoutOverflowingBounds()
+    {
+        // Regression: long names wrapped into many lines spilled past the
+        // widget's height (and an over-wide word spilled past the width).
+        var widget = new TextLabelWidget
+        {
+            Text = "Christopher Jonathan Alexander-Montgomery the Third of Longville-on-the-Moor",
+            FontFamily = "Arial",
+            FontSize = 32,
+            Alignment = "Center"
+        };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 148));
+        var canvas = surface.Canvas;
+        widget.Render(canvas, new SKRect(0, 0, 406, 148));
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void FitLinesToBounds_TooManyLines_CapsToHeightWithEllipsis()
+    {
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        List<string> wrapped = ["one", "two", "three", "four", "five", "six", "seven", "eight"];
+
+        // 8 lines at 24*1.25=30px each = 240px; only 3 fit in 100px.
+        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
+
+        Assert.AreEqual(3, display.Count, "only the lines that fit may be drawn");
+        StringAssert.EndsWith(display[^1], "…", "the cut must be signaled with an ellipsis on the last visible line");
+        Assert.AreEqual("one", display[0]);
+        Assert.AreEqual("two", display[1]);
+    }
+
+    [TestMethod]
+    public void FitLinesToBounds_EverythingFits_ReturnsAllLines()
+    {
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        List<string> wrapped = ["one", "two"];
+
+        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
+
+        CollectionAssert.AreEqual(new[] { "one", "two" }, display.ToArray());
+    }
+
+    [TestMethod]
+    public void FitLinesToBounds_OverwideWord_IsTruncatedToWidth()
+    {
+        var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
+        // A single word wider than maxWidth (WrapText gives it its own line).
+        List<string> wrapped = ["Supercalifragilisticexpialidocious"];
+
+        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 80f, lineHeight: 30f, availableHeight: 100f);
+
+        Assert.AreEqual(1, display.Count);
+        StringAssert.EndsWith(display[0], "…", "an over-wide word must be truncated, not spill past the width");
+    }
+
+    [TestMethod]
     public void WrapCache_SameTextAndSize_ReturnsSameInstance()
     {
         var cache = new WrapCache();
