@@ -16,13 +16,15 @@ public static class AppVersion
     public static bool IsDevBuild => Current is null;
 
     /// <summary>Parses "v0.5.0", "0.5.0", or "0.5.0-suffix" into a Version (suffix stripped);
-    /// null for unparseable input and 0.0.0 dev builds.</summary>
+    /// also strips "+metadata" (the SDK appends the git commit hash to
+    /// InformationalVersion when building in a repo). Null for unparseable
+    /// input and 0.0.0 dev builds.</summary>
     public static Version? Parse(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         string trimmed = value.Trim().TrimStart('v', 'V');
-        int dash = trimmed.IndexOf('-');
-        if (dash >= 0) trimmed = trimmed[..dash];
+        int cut = trimmed.IndexOfAny(['-', '+']);
+        if (cut >= 0) trimmed = trimmed[..cut];
         if (!Version.TryParse(trimmed, out var v)) return null;
         return v.Major == 0 && v.Minor == 0 && v.Build == 0 ? null : v;
     }

@@ -59,4 +59,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Update\apply-update.cmd" />
+  </ItemGroup>
 </Project>
