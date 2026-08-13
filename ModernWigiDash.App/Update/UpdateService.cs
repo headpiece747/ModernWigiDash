@@ -112,7 +112,7 @@ public sealed class UpdateService
             string dir = Path.Combine(_updatesRoot, sub);
             if (Directory.Exists(dir)) TryDeleteDirectory(dir);
         }
-        TryDelete(Path.Combine(_updatesRoot, "apply-update-live.cmd"));
+        TryDeleteFile(Path.Combine(_updatesRoot, "apply-update-live.cmd"));
     }
 
     /// <summary>Repairs an interrupted swap: restores exe.old when the new exe is
@@ -180,4 +180,5 @@ public sealed class UpdateService
     }
 
     private static void TryDeleteDirectory(string dir) { try { Directory.Delete(dir, true); } catch { /* best-effort: a locked file must not fail the caller */ } }
+    private static void TryDeleteFile(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ } }
 }
