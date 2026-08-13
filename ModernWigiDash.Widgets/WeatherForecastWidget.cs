@@ -654,6 +654,15 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// </summary>
     private bool IsStaticSnapshotBlocking => StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue;
 
+    /// <summary>
+    /// The candidate labels last pushed to the inspector. Refreshing the
+    /// inspector rebuilds the panel, which steals focus from the field the
+    /// user is typing in — so a refresh fires only when the pickable options
+    /// actually changed (e.g. the first geocode after a Location edit), never
+    /// on every fetch.
+    /// </summary>
+    private string _lastInspectorCandidatesStamp = "";
+
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
         if (IsStaticSnapshotBlocking && !force) return;
@@ -666,7 +675,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // The geocode may have produced new Location Match candidates: refresh
         // the inspector so an already-open panel shows the dropdown (the Twitch
         // pattern — the renderer only builds a ComboBox when options exist).
-        if (_client.LastCandidates.Count > 0) Context?.RequestInspectorRefresh();
+        // Only when the option set changed — see _lastInspectorCandidatesStamp.
+        string stamp = string.Join('\n', _client.LastCandidates.Select(c => c.Query));
+        if (stamp != _lastInspectorCandidatesStamp)
+        {
+            _lastInspectorCandidatesStamp = stamp;
+            Context?.RequestInspectorRefresh();
+        }
 
         Context?.RequestRender();
     }

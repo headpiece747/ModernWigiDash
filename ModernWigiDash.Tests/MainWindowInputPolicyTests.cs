@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
@@ -15,14 +16,25 @@ public class MainWindowInputPolicyTests
     [TestMethod]
     public void ShouldHandleDeleteKey_FocusInTextBox_ReturnsFalse()
     {
-        Assert.IsFalse(MainWindowInputPolicy.ShouldHandleDeleteKey(focusIsTextBox: true),
-            "Backspace must edit the focused field, not delete the selected widget");
+        Assert.IsFalse(MainWindowInputPolicy.ShouldHandleDeleteKey(Key.Delete, focusIsTextBox: true),
+            "Delete in a focused field must edit the field, not delete the selected widget");
     }
 
     [TestMethod]
     public void ShouldHandleDeleteKey_FocusElsewhere_ReturnsTrue()
     {
-        Assert.IsTrue(MainWindowInputPolicy.ShouldHandleDeleteKey(focusIsTextBox: false));
+        Assert.IsTrue(MainWindowInputPolicy.ShouldHandleDeleteKey(Key.Delete, focusIsTextBox: false));
+    }
+
+    [TestMethod]
+    public void ShouldHandleDeleteKey_Backspace_NeverDeletesWidgets()
+    {
+        // Backspace must never delete a widget — even outside a text box —
+        // because typing in a field that momentarily lost focus (e.g. an
+        // inspector rebuild) would otherwise nuke the selection while the user
+        // corrects text. Only Delete deletes.
+        Assert.IsFalse(MainWindowInputPolicy.ShouldHandleDeleteKey(Key.Back, focusIsTextBox: false));
+        Assert.IsFalse(MainWindowInputPolicy.ShouldHandleDeleteKey(Key.Back, focusIsTextBox: true));
     }
 
     // ── click-outside-deselect ──

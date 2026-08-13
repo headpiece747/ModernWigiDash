@@ -453,13 +453,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>
-    /// Delete/Back removes the selected widget — except while typing in an
-    /// inspector text box, where Backspace must edit the field, not delete.
+    /// Delete removes the selected widget — except while typing in an
+    /// inspector text box, where Delete edits the field. Backspace NEVER
+    /// deletes: a field that momentarily lost focus (inspector rebuild)
+    /// would otherwise lose the selection while the user corrects text.
     /// </summary>
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if ((e.Key == Key.Delete || e.Key == Key.Back) &&
-            MainWindowInputPolicy.ShouldHandleDeleteKey(Keyboard.FocusedElement is TextBox))
+        if (MainWindowInputPolicy.ShouldHandleDeleteKey(e.Key, Keyboard.FocusedElement is TextBox))
         {
             DeleteSelectedWidget();
             e.Handled = true;

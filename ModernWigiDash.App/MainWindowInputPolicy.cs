@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 
 namespace ModernWigiDash.App;
 
@@ -10,10 +11,14 @@ namespace ModernWigiDash.App;
 internal static class MainWindowInputPolicy
 {
     /// <summary>
-    /// Whether Delete/Back should delete the selected widget: never while a
-    /// text box owns focus — Backspace must edit the field, not delete.
+    /// Whether a key press should delete the selected widget. Only Delete
+    /// deletes — Backspace never does, because typing in a field that
+    /// momentarily lost focus (e.g. an inspector rebuild) would otherwise
+    /// nuke the selection while the user corrects text. Delete is also
+    /// suppressed while a text box owns focus (it edits the field instead).
     /// </summary>
-    public static bool ShouldHandleDeleteKey(bool focusIsTextBox) => !focusIsTextBox;
+    public static bool ShouldHandleDeleteKey(Key key, bool focusIsTextBox)
+        => key == Key.Delete && !focusIsTextBox;
 
     /// <summary>
     /// Whether a mouse-down outside both panels should deselect the selected
