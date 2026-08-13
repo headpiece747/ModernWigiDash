@@ -128,13 +128,26 @@ public partial class MainWindow
         {
             string installDir = AppContext.BaseDirectory;
             string stageDir = System.IO.Path.Combine(_updateService.UpdatesRoot, "staged", _pendingUpdate.Version);
-            string cmd = _updateService.StagedCmdPath(_pendingUpdate);
+            string stagedCmd = _updateService.StagedCmdPath(_pendingUpdate);
             // AppContext.BaseDirectory ends with a separator — Path.Combine
             // (not string concat) so the relaunch path never doubles the
             // backslash (start "" "<path>\\exe" fails with "cannot find the
             // path specified" and silently skips the relaunch).
             string relaunchExe = System.IO.Path.Combine(installDir, "ModernWigiDash.App.exe");
             string relaunch = $"start \"\" \"{relaunchExe}\"";
+
+            // Replace the {{RELAUNCH}} marker inside the staged cmd with the
+            // relaunch line, and write the result OUTSIDE the stage: the cmd
+            // deletes its own stage (rd /S /Q "%STAGE%"), and a batch that
+            // deletes itself while running loses the rest of its script —
+            // "swap complete" never logs and the relaunch never fires. A copy
+            // outside the stage survives the cleanup.
+            string body = System.IO.File.ReadAllText(stagedCmd);
+            string substituted = body.Replace("{{RELAUNCH}}", relaunch);
+            if (substituted.Length == body.Length)
+                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
+            string liveCmd = System.IO.Path.Combine(_updateService.UpdatesRoot, "apply-update-live.cmd");
+            System.IO.File.WriteAllText(liveCmd, substituted);
 
             // UseShellExecute=true detaches the updater from this process's job
             // object: without it the child is reaped when the app closes on the
@@ -143,18 +156,12 @@ public partial class MainWindow
             // the slash-S slash-C doubled-quote form fails silently; the whole
             // command must be a single quoted argument to slash-c.
             string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            string inner = $"\"{cmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
+            string inner = $"\"{liveCmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
             var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
             {
                 UseShellExecute = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
             };
-            // Replace the {{RELAUNCH}} marker inside the staged cmd with the relaunch line.
-            string body = System.IO.File.ReadAllText(cmd);
-            string substituted = body.Replace("{{RELAUNCH}}", relaunch);
-            if (substituted.Length == body.Length)
-                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
-            System.IO.File.WriteAllText(cmd, substituted);
             System.Diagnostics.Process.Start(psi);
         }
         catch (Exception ex)
