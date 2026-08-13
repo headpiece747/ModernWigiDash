@@ -49,11 +49,18 @@ public class UpdateServiceTests
     [TestMethod]
     public async Task CheckForUpdate_HttpFailure_ReturnsNull()
     {
+        bool downloadCalled = false;
         var service = new UpdateService(
-            downloadText: (_, _) => Task.FromResult<string?>(null),
-            updatesRoot: NewDir());
+            downloadText: (_, _) =>
+            {
+                downloadCalled = true;
+                return Task.FromResult<string?>(null);
+            },
+            updatesRoot: NewDir(),
+            currentVersion: new Version(1, 0, 0)); // pin a release version so the null-version short-circuit can't mask the HTTP path
 
         Assert.IsNull(await service.CheckForUpdateAsync());
+        Assert.IsTrue(downloadCalled, "the HTTP failure path must be exercised, not skipped by a null dev version");
     }
 
     [TestMethod]
