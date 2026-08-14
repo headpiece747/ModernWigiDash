@@ -1,11 +1,12 @@
-﻿using SkiaSharp;
+﻿using System.Globalization;
+using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
-public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
+public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch
 {
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
 
@@ -80,6 +81,19 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     private readonly WeatherClient _client;
 
+    // ── IWidgetLocationSearch ────────────────────────────────────────────────
+
+    public Task<IReadOnlyList<GeocodeCandidate>> SearchAsync(string query, CancellationToken ct)
+        => _client.SearchCitiesAsync(query, ct);
+
+    public void CommitPick(GeocodeCandidate candidate)
+    {
+        SetProperty(nameof(Location), candidate.Label);
+        SetProperty(nameof(Latitude), candidate.Lat.ToString("F5", CultureInfo.InvariantCulture));
+        SetProperty(nameof(Longitude), candidate.Lon.ToString("F5", CultureInfo.InvariantCulture));
+        SetProperty(nameof(LocationMatch), "");
+    }
+
     public WeatherForecastWidget()
     {
         _client = new WeatherClient(CacheDir, $"weather_{InstanceId}.json", logError: (message, exception) => Context?.LogError(message, exception));
@@ -127,6 +141,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private int _forecastVersion;
     private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
+
+    /// <summary>The "select which one" gate state (test seam): true while the
+    /// last resolution was an ambiguous tie the user must pick from — the
+    /// render draws the prompt instead of any data. Cleared by a successful
+    /// fetch and by any location property change before the forced re-fetch.</summary>
+    internal bool _needsLocationSelection;
 
     // The render-model cache: every formatted string the draw paths need is
     // rebuilt only when (data version, bounds, property snapshot) changes —
@@ -194,6 +214,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
         else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
         {
+            // A location change is the user answering the "select which one"
+            // prompt — drop the gate state before the forced re-fetch so the
+            // widget renders live data again (or re-enters the prompt if the
+            // new location is ambiguous too).
+            _needsLocationSelection = false;
             _client.InvalidateLocation();
             RequestRefresh(force: true);
         }
@@ -202,6 +227,20 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor textPrimary = SKColors.White;
+        SKColor textSecondary = SKColors.White;
+
+        // The select-which-one prompt replaces the whole data render — and it
+        // skips the fetch kick too (the ambiguous resolution already ran; a
+        // pick or a location change clears the flag before forcing a re-fetch).
+        if (_needsLocationSelection)
+        {
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, $"{Location} — select which one",
+                "Open the inspector and pick the exact place", textPrimary);
+            return;
+        }
+
         // Kick the fetch through the one cadence gate: the static-snapshot
         // rule and the client's throttle window are applied in RequestRefresh,
         // so the per-frame async allocation is skipped while the window is
@@ -222,10 +261,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
             }
         }
-
-        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
-        SKColor textPrimary = SKColors.White;
-        SKColor textSecondary = SKColors.White;
 
         var (sx, sy, s) = WeatherLayout.Scale(bounds);
         var header = WeatherLayout.ComputeHeader(bounds, s, sy);
@@ -687,7 +722,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         if (IsStaticSnapshotBlocking && !force) return;
 
         var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
-        if (snapshot is null) return;
+        if (snapshot is null)
+        {
+            // The ambiguity gate: an untrusted location tie never shows weather.
+            if (_client.LastResolutionAmbiguous)
+            {
+                _needsLocationSelection = true;
+                Context?.RequestRender();
+            }
+            return;
+        }
+        _needsLocationSelection = false;
 
         ApplySnapshot(snapshot);
 

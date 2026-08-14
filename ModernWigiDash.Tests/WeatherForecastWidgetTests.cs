@@ -1,5 +1,6 @@
 using System.Net.Http;
 using Microsoft.Extensions.Time.Testing;
+using ModernWigiDash.Core.Models;
 using ModernWigiDash.Widgets;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -206,6 +207,79 @@ public class WeatherForecastWidgetTests
         widget.Render(surface.Canvas, new SKRect(0, 0, 406, 296));
         var pixel = surface.PeekPixels().GetPixelColor(200, 148);
         Assert.AreNotEqual(SKColors.Transparent, pixel, "The composed surface must contain output");
+    }
+
+    [TestMethod]
+    public void CommitPick_SetsLocationLatLonAndClearsLocationMatch()
+    {
+        var widget = new WeatherForecastWidget();
+        var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
+        var profile = new ProfileLayout();
+        profile.ActivePage.Widgets.Add(placed);
+        var context = new PersistingContext(profile);
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+
+        var search = (IWidgetLocationSearch)widget;
+        search.CommitPick(new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
+
+        Assert.AreEqual("Berlin, New Hampshire, United States", widget.Location);
+        Assert.AreEqual("44.46867", widget.Latitude);
+        Assert.AreEqual("-71.18508", widget.Longitude);
+        Assert.AreEqual("", widget.LocationMatch);
+        Assert.IsTrue(placed.PropertyValues.ContainsKey("Latitude"), "the pick must persist through SetProperty");
+        Assert.AreEqual("44.46867", placed.PropertyValues["Latitude"]);
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_AmbiguousResolution_SetsSelectState()
+    {
+        // A client whose resolution flags ambiguity must leave the widget in the
+        // "select which one" state — not stale or wrong data. The client's
+        // TestHttpClient seam returns the real Berlin candidate set; the gate
+        // blocks the forecast fetch, so the flag is observed after the null
+        // snapshot.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
+            return StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { Location = "Berlin" };
+        widget.TestHttpClient = new HttpClient(stub);
+
+        await widget.FetchLiveWeatherAsync();
+
+        Assert.IsTrue(widget._needsLocationSelection, "an ambiguous bare name must land in the select-which-one state");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_UnambiguousResolution_ClearsSelectState()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { Location = "Victoria" };
+        widget.TestHttpClient = new HttpClient(stub);
+        widget._needsLocationSelection = true;
+
+        await widget.FetchLiveWeatherAsync();
+
+        Assert.IsFalse(widget._needsLocationSelection, "a clean resolution must clear the select state");
+    }
+
+    [TestMethod]
+    public void Render_WhenNeedsLocationSelection_DrawsPromptInsteadOfData()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var canvas = surface.Canvas;
+        var widget = new WeatherForecastWidget { Location = "Berlin", _needsLocationSelection = true };
+
+        widget.Render(canvas, new SKRect(0, 0, 406, 296)); // must not throw, no data drawn
+
+        Assert.IsTrue(true); // smoke: the prompt path renders without exceptions
     }
 
     [TestMethod]

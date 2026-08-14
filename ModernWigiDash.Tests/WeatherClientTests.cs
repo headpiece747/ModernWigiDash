@@ -56,7 +56,7 @@ public class WeatherClientTests
 
     // Two same-named cities across countries: the exact-name match must beat
     // the higher-population fuzzy match (the Vitoria/Victoria bug).
-    private const string SampleSameNameMultiCountry = """
+    internal const string SampleSameNameMultiCountry = """
     {
       "results": [
         { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
@@ -92,7 +92,7 @@ public class WeatherClientTests
     // so without a suffix or country hint the population tiebreak picks Berlin,
     // Germany (the reported on-device symptom: a US Berlin user saw Berlin DE's
     // weather). The suffix and country-hint tests below pin the escape routes.
-    private const string SampleBerlines = """
+    internal const string SampleBerlines = """
     {
       "results": [
         { "name": "Berlin", "admin1": "State of Berlin", "country": "Germany", "country_code": "DE", "population": 3426354, "latitude": 52.52437, "longitude": 13.41053 },
