@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -367,46 +369,63 @@ public static class InspectorPanelRenderer
     private static StackPanel BuildLocationSearchEditor(EditorDescription desc, IWidgetLocationSearch search, InspectorCallbacks callbacks)
     {
         var box = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
-        var results = new ListBox { MaxHeight = 160, Visibility = Visibility.Collapsed };
+        var results = new ListBox
+        {
+            MaxHeight = 160,
+            Visibility = Visibility.Collapsed,
+            ItemTemplate = BuildCandidateLineTemplate()
+        };
+        var content = new Border
+        {
+            Background = Brushes.White,
+            BorderBrush = Brushes.Gray,
+            BorderThickness = new Thickness(1),
+            Child = results
+        };
         var popup = new Popup
         {
             PlacementTarget = box,
             Placement = PlacementMode.Bottom,
             StaysOpen = false,
             AllowsTransparency = true,
-            Child = new Border
-            {
-                Background = Brushes.White,
-                BorderBrush = Brushes.Gray,
-                BorderThickness = new Thickness(1),
-                Child = results
-            }
+            Child = content
         };
 
         var version = new SearchVersionToken();
+        bool popupPressed = false;
+        bool syncingText = false;
+        // A mouse press inside the popup (a pick gesture) steals focus from the
+        // box BEFORE the ListBox processes the click — mark it so the LostFocus
+        // commit is skipped (committing would overwrite the pending pick and
+        // close the popup mid-gesture). Refocusing the box clears the mark.
+        content.AddHandler(UIElement.PreviewMouseDownEvent, new MouseButtonEventHandler((_, _) => popupPressed = true), handledEventsToo: true);
+        box.GotFocus += (_, _) => popupPressed = false;
+
         var debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         debounce.Tick += async (_, _) =>
         {
             debounce.Stop();
             string query = box.Text.Trim();
             var (outcome, candidates) = await RunSearchTickAsync(search, query, version);
-            if (outcome == LocationSearchTick.Stale) return; // a newer tick owns the UI
-            if (outcome == LocationSearchTick.NoSearch || candidates!.Count == 0)
-            {
-                results.ItemsSource = null;
-                popup.IsOpen = false;
-                return;
-            }
-
-            results.ItemsSource = candidates;
-            popup.IsOpen = true;
+            ApplySearchResults(results, popup, outcome, candidates);
         };
-        box.TextChanged += (_, _) => { debounce.Stop(); debounce.Start(); }; // restart the debounce window
+        box.TextChanged += (_, _) =>
+        {
+            if (syncingText) return; // a pick-sync must not restart the search debounce
+            debounce.Stop();
+            debounce.Start();
+        };
         results.SelectionChanged += (_, _) =>
         {
             if (results.SelectedItem is GeocodeCandidate picked)
             {
                 popup.IsOpen = false;
+                results.Visibility = Visibility.Collapsed;
+                // Keep the box in sync with the pick so a later focus-loss
+                // commit writes the picked label, not the stale typed query.
+                syncingText = true;
+                try { box.Text = picked.Label; }
+                finally { syncingText = false; }
                 callbacks.CommitLocationPick?.Invoke(picked);
             }
         };
@@ -415,6 +434,7 @@ public static class InspectorPanelRenderer
             // Commit the typed text (the ambiguity gate decides the fetch).
             callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
             popup.IsOpen = false;
+            results.Visibility = Visibility.Collapsed;
         }
         box.KeyDown += (_, e) =>
         {
@@ -423,9 +443,59 @@ public static class InspectorPanelRenderer
         // Focus loss commits too: without it, typed-but-unfocused text would be
         // silently discarded by the next inspector refresh and the ambiguity
         // gate would never evaluate the typed name.
-        box.LostFocus += (_, _) => CommitTypedText();
+        box.LostFocus += (_, _) =>
+        {
+            // A click inside the popup is a pick in progress: do not commit and
+            // do not close — the ListBox must finish the selection. (The
+            // IsMouseOver check covers focus steals that arrive without a
+            // mouse press, e.g. keyboard navigation.)
+            if (popupPressed || (popup.IsOpen && popup.IsMouseOver)) return;
+            CommitTypedText();
+        };
 
         return new StackPanel { Children = { box, popup } };
+    }
+
+    /// <summary>
+    /// The results list's item template: the candidate label plus a compact
+    /// population suffix when the geocoder reported one ("Berlin, New
+    /// Hampshire, United States · 9k") — never the record's ToString dump.
+    /// </summary>
+    private static DataTemplate BuildCandidateLineTemplate()
+    {
+        var template = new DataTemplate();
+        var text = new FrameworkElementFactory(typeof(TextBlock));
+        text.SetBinding(TextBlock.TextProperty, new MultiBinding
+        {
+            Converter = new CandidateLineConverter(),
+            Bindings = { new Binding(nameof(GeocodeCandidate.Label)), new Binding(nameof(GeocodeCandidate.Population)) }
+        });
+        text.SetValue(TextBlock.ForegroundProperty, Brushes.Black);
+        text.SetValue(TextBlock.FontSizeProperty, 12.0);
+        text.SetValue(TextBlock.PaddingProperty, new Thickness(4, 2, 4, 2));
+        template.VisualTree = text;
+        return template;
+    }
+
+    /// <summary>
+    /// Applies one tick decision to the results list and popup: Visible + open
+    /// when candidates arrived, Collapsed + closed otherwise. A stale response
+    /// (a newer tick owns the UI) touches nothing.
+    /// </summary>
+    internal static void ApplySearchResults(ListBox results, Popup popup, LocationSearchTick outcome, IReadOnlyList<GeocodeCandidate>? candidates)
+    {
+        if (outcome == LocationSearchTick.Stale) return;
+        if (outcome == LocationSearchTick.NoSearch || candidates is null || candidates.Count == 0)
+        {
+            results.ItemsSource = null;
+            results.Visibility = Visibility.Collapsed;
+            popup.IsOpen = false;
+            return;
+        }
+
+        results.ItemsSource = candidates;
+        results.Visibility = Visibility.Visible;
+        popup.IsOpen = true;
     }
 
     /// <summary>
@@ -471,5 +541,28 @@ public static class InspectorPanelRenderer
         public int Value { get; private set; }
 
         public int Next() => ++Value;
+    }
+
+    /// <summary>
+    /// Formats one search result line: the candidate label plus a compact
+    /// population suffix when the geocoder reported one ("Berlin, New
+    /// Hampshire, United States · 9k"); the bare label when population is 0.
+    /// </summary>
+    internal sealed class CandidateLineConverter : IMultiValueConverter
+    {
+        public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+        {
+            string label = values[0] as string ?? "";
+            double population = values[1] is double p ? p : 0;
+            return population > 0 ? $"{label} · {CompactPopulation(population)}" : label;
+        }
+
+        public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
+            => throw new NotSupportedException();
+
+        private static string CompactPopulation(double population)
+            => population >= 1_000_000 ? $"{population / 1_000_000:0.#}M"
+             : population >= 1_000 ? $"{population / 1_000:0.#}k"
+             : population.ToString("0");
     }
 }

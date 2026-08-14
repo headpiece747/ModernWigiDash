@@ -213,6 +213,9 @@ public class WeatherForecastWidgetTests
     public void CommitPick_SetsLocationLatLonAndClearsLocationMatch()
     {
         var widget = new WeatherForecastWidget();
+        // Every SetProperty kicks a forced fetch — it must never reach the
+        // real shared HttpClient (the fetch path is covered separately).
+        widget.TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound()));
         var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
         var profile = new ProfileLayout();
         profile.ActivePage.Widgets.Add(placed);
@@ -228,6 +231,45 @@ public class WeatherForecastWidgetTests
         Assert.AreEqual("", widget.LocationMatch);
         Assert.IsTrue(placed.PropertyValues.ContainsKey("Latitude"), "the pick must persist through SetProperty");
         Assert.AreEqual("44.46867", placed.PropertyValues["Latitude"]);
+    }
+
+    [TestMethod]
+    public async Task CommitPick_ForcesFetchWithExactCoordinates_AfterAllPropertiesCommit()
+    {
+        // The pick must land as ONE exact-coordinates fetch: no intermediate
+        // SetProperty write may claim the in-flight slot with mixed state
+        // (the new label with the old coordinates — the "exact-coordinates
+        // fetch never runs" bug).
+        var forecastUrls = new List<string>();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/forecast", StringComparison.Ordinal))
+            {
+                lock (forecastUrls) forecastUrls.Add(url);
+                return StubHttpHandler.Ok(SampleForecast);
+            }
+            return StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget();
+        widget.TestHttpClient = new HttpClient(stub);
+        await widget.InitializeAsync(new TestContext());
+        // Let the startup fetch (geocode "New York" -> 404) settle so its claim
+        // cannot mask the pick's fetch in the wait below.
+        SpinWait.SpinUntil(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
+        int before = widget.FetchCompletedCount;
+
+        var search = (IWidgetLocationSearch)widget;
+        search.CommitPick(new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
+        SpinWait.SpinUntil(() => widget.FetchCompletedCount > before, TimeSpan.FromSeconds(5));
+
+        lock (forecastUrls)
+        {
+            Assert.AreEqual(1, forecastUrls.Count,
+                "the pick must produce exactly one fetch — no intermediate property write may claim the slot with mixed state");
+            Assert.IsTrue(forecastUrls[0].Contains("latitude=44.4687&longitude=-71.1851", StringComparison.Ordinal),
+                "the post-pick fetch must run with the picked exact coordinates");
+        }
     }
 
     [TestMethod]
@@ -250,6 +292,25 @@ public class WeatherForecastWidgetTests
         await widget.FetchLiveWeatherAsync();
 
         Assert.IsTrue(widget._needsLocationSelection, "an ambiguous bare name must land in the select-which-one state");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_AmbiguousResolution_FiresRequestRender()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
+            return StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { Location = "Berlin" };
+        widget.TestHttpClient = new HttpClient(stub);
+        var context = new TestContext();
+        await widget.InitializeAsync(context);
+
+        await widget.FetchLiveWeatherAsync();
+
+        Assert.IsTrue(context.Renders > 0, "entering the select-which-one state must repaint the widget");
     }
 
     [TestMethod]

@@ -609,8 +609,12 @@ public sealed class WeatherClient
     /// candidates and ranks them: exact name match first, then a comma-suffix
     /// match ("Springfield, MA" / "Victoria, BC" / "San Jose, Costa Rica")
     /// against admin1/country/country_code, then the <see cref="WeatherLocation.CountryCode"/>
-    /// hint, with population as the tiebreak. The resolved name carries
-    /// "Name, Admin1, Country" so the widget title shows what was picked.
+    /// hint. A tie at the top score is deliberately left unresolved — the
+    /// ambiguity gate blocks the fetch until the user picks from the
+    /// candidates; population never decides the winner (an untrusted
+    /// population-decided tie would show wrong-city weather). The resolved
+    /// name carries "Name, Admin1, Country" so the widget title shows what
+    /// was picked.
     /// </summary>
     private async Task GeocodeCityLocationAsync(WeatherLocation location)
     {
@@ -678,13 +682,17 @@ public sealed class WeatherClient
                 var ranked = results.EnumerateArray()
                     .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, location.CountryCode)))
                     .ToList();
-                int bestScore = ranked.Max(r => r.Rank.Score);
-                var topTied = ranked.Where(r => r.Rank.Score == bestScore).ToList();
+                int bestScore = ranked.Max(r => r.Rank);
+                var topTied = ranked.Where(r => r.Rank == bestScore).ToList();
                 if (topTied.Count > 1)
                 {
                     LastResolutionAmbiguous = true;
                     _lat = null;
                     _lon = null;
+                    // Drop the stale resolved name too: a previous resolution's
+                    // name must never trap the next editor with a place the
+                    // fetch never reached.
+                    _resolvedCityName = "";
                 }
                 else
                 {
@@ -713,24 +721,20 @@ public sealed class WeatherClient
     /// <summary>
     /// Pure geocode-candidate ranking: exact name match dominates; the
     /// comma-suffix (state/country) and the country-code hint add weighted
-    /// matches; population breaks ties. Returns the score and population so
-    /// the caller can pick the best.
+    /// matches. Returns the score only — the caller deliberately leaves a tie
+    /// at the top score unresolved (the ambiguity gate), so population never
+    /// decides the winner.
     /// </summary>
-    private static (int Score, double Population) RankGeocodeCandidate(JsonElement candidate, string namePart, string? suffixPart, string? countryCode)
+    private static int RankGeocodeCandidate(JsonElement candidate, string namePart, string? suffixPart, string? countryCode)
     {
         string name = GetString(candidate, "name");
         string admin1 = GetString(candidate, "admin1");
         string country = GetString(candidate, "country");
         string code = GetString(candidate, "country_code");
 
-        int score = ScoreExactName(name, namePart)
+        return ScoreExactName(name, namePart)
             + ScoreSuffixMatch(admin1, country, code, suffixPart)
             + ScoreCountryHint(code, country, countryCode);
-
-        double population = candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
-            ? p.GetDouble()
-            : 0;
-        return (score, population);
     }
 
     private static string GetString(JsonElement element, string property)

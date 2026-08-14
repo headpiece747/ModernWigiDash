@@ -89,10 +89,24 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public void CommitPick(GeocodeCandidate candidate)
     {
-        SetProperty(nameof(Location), candidate.Label);
-        SetProperty(nameof(Latitude), candidate.Lat.ToString("F5", CultureInfo.InvariantCulture));
-        SetProperty(nameof(Longitude), candidate.Lon.ToString("F5", CultureInfo.InvariantCulture));
-        SetProperty(nameof(LocationMatch), "");
+        // Commit all four properties before any fetch can claim the in-flight
+        // slot: a single-property fetch mid-sequence would race the pick with
+        // mixed state (the new label with the old coordinates — the
+        // "exact-coordinates fetch never runs" bug). The one forced fetch
+        // below runs with the full pick committed.
+        _committingLocationPick = true;
+        try
+        {
+            SetProperty(nameof(Location), candidate.Label);
+            SetProperty(nameof(Latitude), candidate.Lat.ToString("F5", CultureInfo.InvariantCulture));
+            SetProperty(nameof(Longitude), candidate.Lon.ToString("F5", CultureInfo.InvariantCulture));
+            SetProperty(nameof(LocationMatch), "");
+        }
+        finally
+        {
+            _committingLocationPick = false;
+        }
+        RequestRefresh(force: true);
     }
 
     // ── IWidgetEditorProvider ────────────────────────────────────────────────
@@ -212,11 +226,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     {
         // A Location Match pick resolves against the candidates it was offered
         // from, so it keeps them (InvalidateCoordinates); every other location
-        // change clears the candidates so a stale pick can never win.
+        // change clears the candidates so a stale pick can never win. The
+        // property fetches are suppressed while CommitPick writes the whole
+        // pick — it fires the one exact-coordinates fetch itself.
         if (propertyName == nameof(LocationMatch))
         {
             _client.InvalidateCoordinates();
-            RequestRefresh(force: true);
+            if (!_committingLocationPick) RequestRefresh(force: true);
         }
         else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
         {
@@ -226,7 +242,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // new location is ambiguous too).
             _needsLocationSelection = false;
             _client.InvalidateLocation();
-            RequestRefresh(force: true);
+            if (!_committingLocationPick) RequestRefresh(force: true);
         }
         base.OnPropertyChanged(propertyName, newValue);
     }
@@ -722,6 +738,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// on every fetch.
     /// </summary>
     private string _lastInspectorCandidatesStamp = "";
+    private bool _committingLocationPick = false;
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
