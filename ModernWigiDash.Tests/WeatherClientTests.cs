@@ -434,14 +434,8 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_AmbiguousBareName_PicksHighestPopulationSameNamedCity()
+    public async Task FetchCurrentAsync_AmbiguousBareName_ReturnsNullAndFlagsAmbiguity()
     {
-        // The reported on-device symptom: a bare "Berlin" resolves to Berlin,
-        // Germany (3.4M) over Berlin, NH (9k) — every candidate ties on the
-        // exact name and has no suffix or country hint, so the population
-        // tiebreak decides. The widget is correct for the resolved place; the
-        // header shows it ("Berlin, State of Berlin, Germany") so the wrong
-        // pick is visible. The two tests below pin the disambiguation routes.
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
@@ -450,13 +444,52 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
+        // A bare "Berlin" ties four candidates on the exact name; without a pick
+        // the population choice is untrustworthy — wrong data must never display.
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
 
+        Assert.IsNull(snapshot, "an ambiguous bare name must not fetch weather");
+        Assert.IsTrue(client.LastResolutionAmbiguous, "the ambiguity must be signalled to the widget");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousName_WithLocationMatch_FetchesThePick()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // A persisted Location Match pick resolves the tie deterministically.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation(
+            "Fixed Location", "Berlin", null, null, null) { LocationMatch = "Berlin, New Hampshire, United States" });
+
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(52.52437, snapshot.Lat);
-        Assert.AreEqual(13.41053, snapshot.Lon);
-        Assert.AreEqual("Berlin, State of Berlin, Germany", snapshot.ResolvedCityName,
-            "the resolved name must carry admin1 + country so a wrong pick is visible in the header");
+        Assert.AreEqual(44.46867, snapshot.Lat, 0.0001, "the picked Berlin, NH must win over the population choice");
+        Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
+        Assert.IsFalse(client.LastResolutionAmbiguous, "a resolved pick is not ambiguous");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_UnambiguousName_DoesNotFlagAmbiguity()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // "Victoria" ties no candidate on the exact name — the exact-match winner
+        // is unambiguous and fetches instantly.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsFalse(client.LastResolutionAmbiguous);
     }
 
     [TestMethod]
@@ -485,7 +518,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_AmbiguousBareName_CountryHintPicksTheUsBerlin()
+    public async Task FetchCurrentAsync_AmbiguousBareName_CountryHintTie_StillFlagsAmbiguity()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -495,14 +528,16 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // A bare "Berlin" with the CountryCode hint US: the three US Berlines
-        // tie on the hint, and the population tiebreak picks New Hampshire.
+        // A country hint that leaves multiple candidates tied is still a
+        // population-decided tie: bare "Berlin" + US ties Berlin NH/NJ/WI on
+        // the hint, and the population choice (NH) is exactly the untrustworthy
+        // winner the gate exists to block — the pick must come from the
+        // "Location Match" dropdown. (The hint still disambiguates when it
+        // leaves a single winner, e.g. San Jose + CR.)
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null, "US"));
 
-        Assert.IsNotNull(snapshot);
-        Assert.AreEqual(44.46867, snapshot.Lat);
-        Assert.AreEqual(-71.18508, snapshot.Lon);
-        Assert.AreEqual("Berlin, New Hampshire, United States", snapshot.ResolvedCityName);
+        Assert.IsNull(snapshot, "a hint that leaves multiple candidates tied must not fetch weather");
+        Assert.IsTrue(client.LastResolutionAmbiguous, "a hint tie is still a population-decided tie");
     }
 
     [TestMethod]

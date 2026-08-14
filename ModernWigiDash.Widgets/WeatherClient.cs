@@ -124,6 +124,11 @@ public sealed class WeatherClient
     /// </summary>
     internal IReadOnlyList<GeocodeCandidate> LastCandidates { get; private set; } = [];
 
+    /// <summary>True when the last geocode resolution ended in a population-decided
+    /// tie with no <see cref="WeatherLocation.LocationMatch"/> pick — the widget
+    /// must not display weather for an ambiguous name.</summary>
+    internal bool LastResolutionAmbiguous { get; private set; }
+
     /// <summary>UTC timestamp of the last successful fetch or cache load (drives throttling).</summary>
     internal DateTime LastFetchTimeUtc => _lastFetchTime;
 
@@ -214,6 +219,11 @@ public sealed class WeatherClient
 
         try
         {
+            // The ambiguity gate's outcome describes this resolution: clear any
+            // stale flag before resolving so a successful fetch can never carry
+            // an old ambiguity forward (the coordinate paths leave it false).
+            LastResolutionAmbiguous = false;
+
             string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.CountryCode}_{location.LocationMatch}";
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
                 await ResolveCoordinatesAsync(location, currentQuery).ConfigureAwait(false);
@@ -637,25 +647,13 @@ public sealed class WeatherClient
                 }
                 LastCandidates = candidates;
 
-                JsonElement best = results[0];
-                int bestScore = int.MinValue;
-                double bestPopulation = -1;
-                foreach (var candidate in results.EnumerateArray())
-                {
-                    var (score, population) = RankGeocodeCandidate(candidate, namePart, suffixPart, location.CountryCode);
-                    if (score > bestScore || (score == bestScore && population > bestPopulation))
-                    {
-                        bestScore = score;
-                        bestPopulation = population;
-                        best = candidate;
-                    }
-                }
-
                 // A persisted Location Match pick must survive restart/import:
                 // candidates are in-memory per instance, so after re-creation
                 // the stored pick cannot resolve from cache. If the pick
                 // matches a freshly geocoded candidate, promote that candidate
                 // to the winner instead of silently reverting to the ranking.
+                // The pick resolves a tie deterministically — it runs before
+                // the ambiguity gate, so a picked place never reads ambiguous.
                 if (!string.IsNullOrWhiteSpace(location.LocationMatch))
                 {
                     var picked = candidates.FirstOrDefault(c =>
@@ -669,10 +667,33 @@ public sealed class WeatherClient
                     }
                 }
 
-                _lat = best.GetProperty("latitude").GetDouble();
-                _lon = best.GetProperty("longitude").GetDouble();
-                _resolvedCityName = ComposeResolvedName(best, namePart);
-                return;
+                // Rank: collect (score, population, candidate) and detect a
+                // population-decided tie — when more than one candidate shares
+                // the top score, the winner is untrustworthy without a pick
+                // (the "Berlin" problem). The widget must not display
+                // wrong-city weather, so coordinates stay unresolved and the
+                // fetch returns null (the existing no-coordinates path in
+                // FetchCurrentAsync). A single top scorer is the unambiguous
+                // winner — population no longer decides anything.
+                var ranked = results.EnumerateArray()
+                    .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, location.CountryCode)))
+                    .ToList();
+                int bestScore = ranked.Max(r => r.Rank.Score);
+                var topTied = ranked.Where(r => r.Rank.Score == bestScore).ToList();
+                if (topTied.Count > 1)
+                {
+                    LastResolutionAmbiguous = true;
+                    _lat = null;
+                    _lon = null;
+                }
+                else
+                {
+                    JsonElement best = topTied[0].Candidate;
+                    _lat = best.GetProperty("latitude").GetDouble();
+                    _lon = best.GetProperty("longitude").GetDouble();
+                    _resolvedCityName = ComposeResolvedName(best, namePart);
+                    return;
+                }
             }
         }
         catch (Exception ex)
@@ -680,11 +701,12 @@ public sealed class WeatherClient
             _logError?.Invoke($"Geocoding failed for '{SanitizeLog(location.Location)}': {ex.Message}", ex);
         }
 
-        // A failed geocode leaves the coordinates unresolved: FetchCurrentAsync
-        // returns null and the widget renders its "no data" state instead of
-        // silently pinning a default location. Stamp the attempt time so the
-        // 5-minute throttle applies even without coordinates — otherwise a
-        // typo'd city or an outage would retry at render rate forever.
+        // A failed or ambiguous geocode leaves the coordinates unresolved:
+        // FetchCurrentAsync returns null and the widget renders its "no data"
+        // state instead of silently pinning a default location. Stamp the
+        // attempt time so the 5-minute throttle applies even without
+        // coordinates — otherwise a typo'd city, an ambiguous tie, or an
+        // outage would retry at render rate forever.
         _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
     }
 
