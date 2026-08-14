@@ -94,6 +94,8 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         SetProperty(nameof(Location), candidate.Label);
     }
 
+    public double? CurrentPopulation => _client.LastResolvedPopulation > 0 ? _client.LastResolvedPopulation : null;
+
     // ── IWidgetEditorProvider ────────────────────────────────────────────────
 
     public EditorKind? GetEditorKind(PropertyInfo property)

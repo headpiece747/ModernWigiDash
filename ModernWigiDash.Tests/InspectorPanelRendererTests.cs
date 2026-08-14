@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -139,6 +140,53 @@ public class InspectorPanelRendererTests
     }
 
     [TestMethod]
+    public void Render_LocationSearchWidget_SeedsBoxWithLabelAndPopulation()
+    {
+        StaRunner.Run(() =>
+        {
+            // Seed the client's last-resolved population through the widget's
+            // client seam: resolving the Berlin NH label sets it to 9367.
+            var resolver = new StubHttpHandler(request =>
+            {
+                string url = request.RequestUri?.AbsoluteUri ?? "";
+                if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
+                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherForecastWidgetTests.SampleForecast) : StubHttpHandler.NotFound();
+            });
+            var widget = new WeatherForecastWidget { Location = "Berlin, New Hampshire, United States" };
+            widget.TestHttpClient = new HttpClient(resolver);
+            var placed = new PlacedWidgetInstance { PluginId = "weather", DisplayName = "Weather", ActiveInstance = widget };
+            var profile = new ProfileLayout();
+            profile.ActivePage.Widgets.Add(placed);
+            var context = new PersistingContext(profile);
+            widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+            // InitializeAsync kicks the startup fetch; wait for it to settle
+            // (the shipped pattern) so the population precondition is stable.
+            TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            widget._suppressLocationWriteback = true;
+            widget.FetchLiveWeatherAsync().GetAwaiter().GetResult();
+            Assert.AreEqual(9367, widget.CurrentPopulation, "precondition: the resolution must expose the population");
+
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+                CommitLocationPick = _ => { },
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+
+            var box = FindVisualChildren<TextBox>(target).First();
+            Assert.IsTrue(box.Text.Contains("Berlin, New Hampshire, United States"), "the box must seed from the Location label");
+            Assert.IsTrue(box.Text.Contains("9.4k"), "the box must append the population suffix from CurrentPopulation (shared formatter: 9367 → 9.4k)");
+        });
+    }
+
+    [TestMethod]
     public void CandidateLineConverter_FormatsLabelAndPopulation()
     {
         var converter = new InspectorPanelRenderer.CandidateLineConverter();
@@ -247,6 +295,8 @@ public class InspectorPanelRendererTests
             => _pending[query].TrySetResult(candidates);
 
         public void CommitPick(GeocodeCandidate candidate) { }
+
+        public double? CurrentPopulation { get; set; }
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject

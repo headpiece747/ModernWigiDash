@@ -897,6 +897,23 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_ResolvedWinner_ExposesPopulation()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(9367, client.LastResolvedPopulation, 0.0001);
+    }
+
+    [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
         var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));

@@ -129,6 +129,10 @@ public sealed class WeatherClient
     /// must not display weather for an ambiguous name.</summary>
     internal bool LastResolutionAmbiguous { get; private set; }
 
+    /// <summary>The last resolved winner's population (0 when the resolution had
+    /// no population, e.g. ZIP/coordinate paths or an ambiguous tie).</summary>
+    internal double LastResolvedPopulation { get; private set; }
+
     /// <summary>UTC timestamp of the last successful fetch or cache load (drives throttling).</summary>
     internal DateTime LastFetchTimeUtc => _lastFetchTime;
 
@@ -364,6 +368,11 @@ public sealed class WeatherClient
     {
         _lastLocationQuery = currentQuery;
 
+        // Only a name resolution carries a population: explicit coordinates, a
+        // coordinate pair, and a ZIP path reset it; the city-resolution winner
+        // and pick paths below set the real value.
+        LastResolvedPopulation = 0;
+
         // Explicit coordinates are authoritative — they must win over a stale
         // Location Match pick from a previous city query.
         if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
@@ -582,15 +591,12 @@ public sealed class WeatherClient
             foreach (var candidate in results.EnumerateArray())
             {
                 string label = ComposeResolvedName(candidate, query);
-                double population = candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
-                    ? p.GetDouble()
-                    : 0;
                 candidates.Add(new GeocodeCandidate(
                     label, label,
                     candidate.GetProperty("latitude").GetDouble(),
                     candidate.GetProperty("longitude").GetDouble())
                 {
-                    Population = population,
+                    Population = ReadPopulation(candidate),
                 });
             }
             return candidates;
@@ -647,7 +653,10 @@ public sealed class WeatherClient
                     candidates.Add(new GeocodeCandidate(
                         label, label,
                         candidate.GetProperty("latitude").GetDouble(),
-                        candidate.GetProperty("longitude").GetDouble()));
+                        candidate.GetProperty("longitude").GetDouble())
+                    {
+                        Population = ReadPopulation(candidate),
+                    });
                 }
                 LastCandidates = candidates;
 
@@ -667,6 +676,7 @@ public sealed class WeatherClient
                         _lat = picked.Lat;
                         _lon = picked.Lon;
                         _resolvedCityName = picked.Label;
+                        LastResolvedPopulation = picked.Population;
                         return;
                     }
                 }
@@ -700,6 +710,7 @@ public sealed class WeatherClient
                     _lat = best.GetProperty("latitude").GetDouble();
                     _lon = best.GetProperty("longitude").GetDouble();
                     _resolvedCityName = ComposeResolvedName(best, namePart);
+                    LastResolvedPopulation = ReadPopulation(best);
                     return;
                 }
             }
@@ -739,6 +750,14 @@ public sealed class WeatherClient
 
     private static string GetString(JsonElement element, string property)
         => element.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
+
+    /// <summary>The candidate's reported population (0 when the geocoder
+    /// omitted it) — the search list's disambiguating label data and the
+    /// resolution winner's exposed population.</summary>
+    private static double ReadPopulation(JsonElement candidate)
+        => candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
+            ? p.GetDouble()
+            : 0;
 
     private static int ScoreExactName(string name, string namePart)
         => name.Equals(namePart, StringComparison.OrdinalIgnoreCase) ? 1000 : 0;

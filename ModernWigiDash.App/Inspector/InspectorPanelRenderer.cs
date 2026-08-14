@@ -368,7 +368,16 @@ public static class InspectorPanelRenderer
     /// </summary>
     private static StackPanel BuildLocationSearchEditor(EditorDescription desc, IWidgetLocationSearch search, InspectorCallbacks callbacks)
     {
-        var box = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
+        // The box seeds from the Location label plus the last resolved
+        // population's compact suffix ("New York, New York, United States ·
+        // 8.4M") — the same shared formatter the search list's lines use, so
+        // the field and the list can never disagree about a population.
+        string seed = desc.CurrentValue?.ToString() ?? "";
+        if (search.CurrentPopulation is > 0)
+        {
+            seed = $"{seed} · {FormatPopulation(search.CurrentPopulation.Value)}";
+        }
+        var box = new TextBox { Text = seed };
         var results = new ListBox
         {
             MaxHeight = 160,
@@ -459,7 +468,7 @@ public static class InspectorPanelRenderer
     /// <summary>
     /// The results list's item template: the candidate label plus a compact
     /// population suffix when the geocoder reported one ("Berlin, New
-    /// Hampshire, United States · 9k") — never the record's ToString dump.
+    /// Hampshire, United States · 9.4k") — never the record's ToString dump.
     /// </summary>
     private static DataTemplate BuildCandidateLineTemplate()
     {
@@ -544,9 +553,19 @@ public static class InspectorPanelRenderer
     }
 
     /// <summary>
+    /// The one compact population format shared by the search list's candidate
+    /// lines and the Location box's seed suffix: "9.4k" / "8.4M", bare number
+    /// below 1000 — one spelling, drift impossible.
+    /// </summary>
+    internal static string FormatPopulation(double population)
+        => population >= 1_000_000 ? $"{population / 1_000_000:0.#}M"
+         : population >= 1_000 ? $"{population / 1_000:0.#}k"
+         : population.ToString("0");
+
+    /// <summary>
     /// Formats one search result line: the candidate label plus a compact
     /// population suffix when the geocoder reported one ("Berlin, New
-    /// Hampshire, United States · 9k"); the bare label when population is 0.
+    /// Hampshire, United States · 9.4k"); the bare label when population is 0.
     /// </summary>
     internal sealed class CandidateLineConverter : IMultiValueConverter
     {
@@ -554,15 +573,10 @@ public static class InspectorPanelRenderer
         {
             string label = values[0] as string ?? "";
             double population = values[1] is double p ? p : 0;
-            return population > 0 ? $"{label} · {CompactPopulation(population)}" : label;
+            return population > 0 ? $"{label} · {FormatPopulation(population)}" : label;
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
             => throw new NotSupportedException();
-
-        private static string CompactPopulation(double population)
-            => population >= 1_000_000 ? $"{population / 1_000_000:0.#}M"
-             : population >= 1_000 ? $"{population / 1_000:0.#}k"
-             : population.ToString("0");
     }
 }
