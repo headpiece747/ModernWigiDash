@@ -15,7 +15,7 @@
 
 </div>
 
-ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, and direct USB access — all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), Twitch chat, media controls, and market tickers at your fingertips.
+ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, direct USB access, and **in-app auto-updates** — all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), Twitch chat, media controls, and market tickers at your fingertips.
 
 <div align="center">
 
@@ -54,6 +54,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 - **Direct-USB Transport** — the App owns the device via `DisplayDeviceEngine` / `DisplayHidTransport`: frames stream over bulk writes and touch is polled at 16 ms, normalized once through the shared `TouchReport.ToEventType` site. No elevation or service installation required.
 - **High-Rate SkiaSharp Rendering** — the App composites at a steady **30 FPS** via `SkiaFrameCompositor`, using a pooled `FrameBufferPool` and zero-allocation hot paths (stack-allocated Z-order sorting, span-based sparklines, array-reuse frame delivery) to keep GC pressure minimal.
+- **In-App Auto-Update** — an amber update button appears in the header when a newer release exists; one click downloads the slim app-only payload (SHA-256 verified), and restarting applies it **in place** — profile and theme are preserved.
+- **Power Lifecycle** — on Windows sleep the frame pump pauses; on resume it restarts and the USB transport reconnects, so the display resumes streaming cleanly.
 - **Standby on Exit** — the display returns to its vendor Welcome screen and sleeps on its own timeout whenever the app closes.
 
 ---
@@ -64,9 +66,11 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 | :--- | :--- |
 | **Hardware Abstraction** | Direct USB HID control via `DisplayHidTransport` — native WinUSB P/Invoke with LibUsbDotNet fallback |
 | **Hardware Telemetry** | Live CPU, GPU, VRAM, RAM, and thermal readouts read from **LibreHardwareService's** shared-memory maps (ADR-0004) — no elevation required |
-| **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003) — the app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy |
+| **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003) — the app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy. The readout drops to **zero when the tracked target isn't actually displayed** (e.g. a backgrounded fullscreen game) instead of showing its hidden render rate |
+| **In-App Auto-Update** | Checks GitHub once at startup; downloads a slim app-only zip (~90 MB, SHA-256 verified) and swaps the executable in place on restart — no manual zip juggling |
+| **Power Lifecycle** | Windows sleep/resume handling: the 30 FPS pump pauses on suspend and restarts with a forced USB reconnect on wake |
 | **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards; loadable from `app_theme.json` |
-| **Profile Persistence** | Auto-saved profile (`profile.json` in `%LocalAppData%\ModernWigiDash`) — widget placements, pages, and property values survive restarts via debounced save + flush-on-close |
+| **Profile Persistence** | Auto-saved profile (`profile.json` in `%LocalAppData%\ModernWigiDash`) — widget placements, pages, and property values survive restarts via debounced save + flush-on-close; `display_device.log` and `crash.log` live in the same folder, never next to the exe |
 | **Profile Import / Export** | Manual JSON profile round-trip with import sanitization — widget/page count caps, ActionCommand stripping, and path checks against malicious profiles |
 | **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
 | **Extensible Plugin SDK** | Build isolated C# widget assemblies targeting `ModernWigiDash.Sdk` |
@@ -78,7 +82,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 | Widget | Description |
 | :--- | :--- |
 | **Hardware Monitor** | Multi-gauge readouts for CPU, GPU, VRAM, memory, and storage utilization (via LibreHardwareService) |
-| **FPS / Frame Time** | Real-time FPS, 1% / 0.1% lows, and GPU-busy metrics with an overlay-style readout (via PresentMon Service) |
+| **FPS / Frame Time** | Real-time FPS, 1% / 0.1% lows, and GPU-busy metrics with an overlay-style readout (via PresentMon Service); reads zero when the tracked app isn't on screen |
 | **Audio Visualizer** | Real-time multi-band spectrum and oscilloscope visualization from WASAPI loopback capture |
 | **Now Playing** | Windows System Media Transport Controls integration with album artwork and transport buttons |
 | **Twitch** | Real-time channel chat viewer and live-channel status with Device-Authorization login |
@@ -122,6 +126,8 @@ Grab the latest `ModernWigiDash-vX.Y.Z-win-x64.zip` from the [Releases page](htt
 
 > **First launch:** the release executable is unsigned (open source — no code-signing certificate), so Windows SmartScreen may show *"Windows protected your PC"* once per machine. Click **More info → Run anyway**.
 
+**Updating:** the app checks for new releases at startup. When one is available, an amber button appears in the header — click it to download, then restart to apply in place. Your profile and theme are preserved. (Dev builds and older release versions without the updater use the manual zip flow.)
+
 ### Option B — Build from Source
 
 ```powershell
@@ -139,9 +145,14 @@ The app connects to the display directly over USB — frames and touch work with
 
 ## Packaging a Release
 
-Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.3.0`) and the **Release** workflow runs `scripts/build-release.ps1 -Version 0.3.0`, then creates a GitHub Release with the versioned `ModernWigiDash-v0.3.0-win-x64.zip` asset attached (the version is also stamped into the zip's `README.txt`). You can also trigger it manually from the **Actions** tab with a tag input.
+Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.6.0`) and the **Release** workflow runs `scripts/build-release.ps1 -Version 0.6.0`, then creates a GitHub Release with the two versioned assets attached. You can also trigger it manually from the **Actions** tab with a tag input.
 
-The app ships as a single-file, self-contained, ReadyToRun executable — end users need no .NET runtime. To build the zip by hand:
+Each release ships two zips:
+
+- **`ModernWigiDash-vX.Y.Z-win-x64.zip`** — the full bundle: the single-file exe + `Resources` + bundled LibreHardwareService and PresentMon installers (used by `setup-telemetry.bat`). Use this for fresh installs.
+- **`ModernWigiDash-vX.Y.Z-app-only.zip`** — the slim exe + `Resources` only (~90 MB). This is the **in-app updater's payload — never use it for a fresh install** (it has no telemetry installers).
+
+The build stamps the exe with the release version (`InformationalVersion` for the updater, `FileVersion` for Explorer's Details tab), auto-resolves the latest upstream telemetry versions (recorded in `telemetry/third-party-licenses/telemetry-versions.txt`), and asserts the stamp before zipping. To build by hand:
 
 ```powershell
 dotnet publish ModernWigiDash.App\ModernWigiDash.App.csproj -c Release -r win-x64 --self-contained `
