@@ -383,6 +383,8 @@ public void Render_LocationSearchWidget_SeedsBoxWithLabelAndPopulation()
         if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
         return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
     });
+```
+(Note: this test lives in `InspectorPanelRendererTests` — `SampleBerlines` is already `internal` in `WeatherClientTests`; make `WeatherForecastWidgetTests.SampleForecast` `internal` too (the same shared-fixture pattern) so this test can reference both.)
     var widget = new WeatherForecastWidget { Location = "Berlin, New Hampshire, United States" };
     widget.TestHttpClient = new HttpClient(resolver);
     var placed = new PlacedWidgetInstance { PluginId = "weather", DisplayName = "Weather", ActiveInstance = widget };
