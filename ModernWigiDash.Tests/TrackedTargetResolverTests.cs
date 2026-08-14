@@ -11,6 +11,27 @@ public class TrackedTargetResolverTests
         new(foregroundPidProvider, childrenProvider);
 
     [TestMethod]
+    public void ForegroundWindowTitle_UsesInjectedTitleProvider()
+    {
+        var resolver = new TrackedTargetResolver(() => 4242, _ => [], () => "Game Window");
+
+        Assert.AreEqual("Game Window", resolver.ForegroundWindowTitle());
+        Assert.IsNull(new TrackedTargetResolver(() => 4242, _ => [], () => null).ForegroundWindowTitle(),
+            "a null title from the provider must pass through");
+    }
+
+    [TestMethod]
+    public void ForegroundWindowTitle_WithoutProvider_DoesNotThrow()
+    {
+        // The defaulted seam falls back to the real user32 query; in a test
+        // host that is at worst the desktop's (or no) foreground window —
+        // the call must never throw either way.
+        var resolver = CreateResolver(() => 4242, _ => []);
+
+        _ = resolver.ForegroundWindowTitle();
+    }
+
+    [TestMethod]
     public void ResolveCandidates_InvokesForegroundProvider()
     {
         int providerCalls = 0;

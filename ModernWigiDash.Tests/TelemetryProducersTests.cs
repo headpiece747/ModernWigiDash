@@ -89,6 +89,32 @@ public class TelemetryProducersTests
     }
 
     [TestMethod]
+    public void FrameTimePollTick_Success_LogsDiagnosticsWithOutcomeAndTitle()
+    {
+        // The diagnostics line is the transition evidence — the outcome kind
+        // must distinguish Live from the settling/frozen Idle shapes, and the
+        // resolver's foreground title must reach the log.
+        List<string> logs = [];
+        using var producers = new TelemetryProducers(
+            new StubPresentMonNative
+            {
+                IsAvailable = true,
+                OpenSessionResult = true,
+                PollResult = new PresentMonDynamicSample(120.0, 100.0, 1.0, 3.0, 119.0, 0, 2.0, 4),
+            },
+            logs.Add,
+            targetResolver: new TrackedTargetResolver(() => 4321, _ => [], () => "My Game Window"));
+
+        producers.FrameTimePollTick();
+
+        string? line = logs.FirstOrDefault(l => l.Contains("[FRAMETIME-DIAG]", StringComparison.Ordinal));
+        Assert.IsNotNull(line, "a poll must produce one diagnostics line");
+        StringAssert.Contains(line, "fg='My Game Window'", "the resolver's title must reach the log");
+        StringAssert.Contains(line, "outcome=Live", "the outcome kind must be logged (settling vs frozen distinguishable)");
+        StringAssert.Contains(line, "liveRoot=4321", "the trusted target must be logged");
+    }
+
+    [TestMethod]
     public void SensorPollTick_Success_UpdatesStore()
     {
         byte[] map = LhmSharedMemoryReaderTests.BuildSensorsMapFixture();

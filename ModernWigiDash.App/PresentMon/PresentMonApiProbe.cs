@@ -24,6 +24,7 @@ internal sealed class PresentMonApiProbe
     public PmOpenSession? OpenSessionFn { get; }
     public PmCloseSession? CloseSessionFn { get; }
     public PmStartTrackingProcess? StartTrackingFn { get; }
+    public PmStopTrackingProcess? StopTrackingFn { get; }
     public PmRegisterDynamicQuery? RegisterDynamicQueryFn { get; }
     public PmFreeDynamicQuery? FreeDynamicQueryFn { get; }
     public PmPollDynamicQuery? PollDynamicQueryFn { get; }
@@ -46,6 +47,7 @@ internal sealed class PresentMonApiProbe
         OpenSessionFn = Resolve<PmOpenSession>(loader, lib, "pmOpenSession");
         CloseSessionFn = Resolve<PmCloseSession>(loader, lib, "pmCloseSession");
         StartTrackingFn = Resolve<PmStartTrackingProcess>(loader, lib, "pmStartTrackingProcess");
+        StopTrackingFn = Resolve<PmStopTrackingProcess>(loader, lib, "pmStopTrackingProcess");
         RegisterDynamicQueryFn = Resolve<PmRegisterDynamicQuery>(loader, lib, "pmRegisterDynamicQuery");
         FreeDynamicQueryFn = Resolve<PmFreeDynamicQuery>(loader, lib, "pmFreeDynamicQuery");
         PollDynamicQueryFn = Resolve<PmPollDynamicQuery>(loader, lib, "pmPollDynamicQuery");
@@ -57,6 +59,7 @@ internal sealed class PresentMonApiProbe
         FreeIntrospectionRootFn = Resolve<PmFreeIntrospectionRoot>(loader, lib, "pmFreeIntrospectionRoot");
 
         bool anyMissing = OpenSessionFn is null || CloseSessionFn is null || StartTrackingFn is null
+            || StopTrackingFn is null
             || RegisterDynamicQueryFn is null || FreeDynamicQueryFn is null || PollDynamicQueryFn is null
             || RegisterFrameQueryFn is null || ConsumeFramesFn is null || FreeFrameQueryFn is null
             || GetApiVersionFn is null || GetIntrospectionRootFn is null || FreeIntrospectionRootFn is null;

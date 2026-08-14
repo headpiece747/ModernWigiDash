@@ -1,8 +1,13 @@
+using System.Collections.ObjectModel;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Windows;
 using Windows.Media;
+using LibUsbDotNet;
+using LibUsbDotNet.Info;
+using LibUsbDotNet.LibUsb;
+using LibUsbDotNet.Main;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.Core.Models;
@@ -178,6 +183,7 @@ internal sealed class StubPresentMonNative : IPresentMonNative
     public int CloseSessionCalls { get; private set; }
     public bool Disposed { get; private set; }
     public List<int> TrackedProcessIds { get; } = [];
+    public List<int> StoppedProcessIds { get; } = [];
     public List<int> PolledProcessIds { get; } = [];
 
     public bool OpenSession()
@@ -192,6 +198,12 @@ internal sealed class StubPresentMonNative : IPresentMonNative
     {
         TrackedProcessIds.Add(processId);
         return TrackHandler is null ? TrackProcessResult : TrackHandler(processId);
+    }
+
+    public bool StopTrackProcess(int processId)
+    {
+        StoppedProcessIds.Add(processId);
+        return true;
     }
 
     public PresentMonPollResult PollDynamic(int processId)
@@ -623,4 +635,97 @@ internal static class StaRunner
         }
         return result;
     }
+}
+
+/// <summary>
+/// Scriptable in-memory <see cref="IUsbDevice"/> for the LibUsb connect leg:
+/// the open/claim/endpoint outcomes are settable and every Close is counted,
+/// so the leg's teardown paths are drivable without hardware (the
+/// <see cref="ModernWigiDash.Hardware.Transport.DisplayHidTransport.LibUsbDeviceProvider"/>
+/// seam). Only the members the leg touches are functional; the rest throw
+/// <see cref="NotSupportedException"/> (a third-party boundary — fakes are
+/// appropriate).
+/// </summary>
+internal sealed class FakeLibUsbDevice : IUsbDevice
+{
+    public bool OpenThrows { get; set; }
+    public bool ClaimResult { get; set; } = true;
+    public bool WriterThrows { get; set; }
+    public int CloseCalls { get; private set; }
+
+    public ushort VendorId => 0x28DA;
+    public ushort ProductId => 0xEF01;
+    public bool IsOpen { get; private set; }
+    public UsbDeviceInfo? Info => null; // the endpoint scan falls back on a null descriptor
+    public DeviceHandle? DeviceHandle => null;
+    public int Configuration { get; private set; }
+    public ReadOnlyCollection<UsbConfigInfo> Configs { get; } = new([]);
+    public LocationId LocationId { get; } = default;
+
+    public void Open()
+    {
+        if (OpenThrows) throw new InvalidOperationException("fake open failure");
+        IsOpen = true;
+    }
+
+    public bool TryOpen()
+    {
+        Open();
+        return IsOpen;
+    }
+
+    public void SetConfiguration(int config) => Configuration = (byte)config;
+
+    public bool ClaimInterface(int interfaceID) => ClaimResult;
+
+    public bool ReleaseInterface(int interfaceID) => true;
+
+    public void Close()
+    {
+        IsOpen = false;
+        CloseCalls++;
+    }
+
+    public void ResetDevice() { }
+
+    public bool SetAltInterface(int alternateInterfaceID) => true;
+
+    public void GetAltInterfaceSetting(byte interfaceID, out byte alternateSetting) => alternateSetting = 0;
+
+    public bool GetAltInterface(out int alternateInterfaceID)
+    {
+        alternateInterfaceID = 0;
+        return true;
+    }
+
+    public IUsbDevice Clone() => throw new NotSupportedException();
+
+    public void Dispose() => Close();
+
+    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID endpointID)
+        => OpenEndpointWriter(endpointID, EndpointType.Bulk);
+
+    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID endpointID, EndpointType type)
+    {
+        if (WriterThrows) throw new InvalidOperationException("fake endpoint-writer failure");
+        return null!; // the tests only exercise the failure paths; a success needs a real device
+    }
+
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID) => throw new NotSupportedException();
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID, int readBufferSize) => throw new NotSupportedException();
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID, int readBufferSize, EndpointType endpointType) => throw new NotSupportedException();
+    public UsbEndpointTransferQueueReader OpenEndpointTransferQueueReader(ReadEndpointID endpointID, int readBufferSize, CancellationToken cancellationToken, int queueSize) => throw new NotSupportedException();
+
+    public int ControlTransfer(UsbSetupPacket setupPacket) => throw new NotSupportedException();
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, int timeout) => throw new NotSupportedException();
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
+    public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket) => throw new NotSupportedException();
+    public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, int timeout) => throw new NotSupportedException();
+
+    public bool GetDescriptor(byte descriptorType, byte index, short langId, IntPtr buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
+    public bool GetDescriptor(byte descriptorType, byte index, short langId, object buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
+    public bool GetLangIDs(out short[] langIDs) => throw new NotSupportedException();
+    public bool GetString(out string s, short index, byte langID) => throw new NotSupportedException();
+    public string GetStringDescriptor(byte index, bool isLangID) => throw new NotSupportedException();
+    public bool TryGetConfigDescriptor(byte config, out UsbConfigInfo configInfo) => throw new NotSupportedException();
 }

@@ -18,6 +18,7 @@ public sealed class PresentMonNative : IPresentMonNative
     private readonly PmOpenSession? _openSessionFn;
     private readonly PmCloseSession? _closeSessionFn;
     private readonly PmStartTrackingProcess? _startTrackingFn;
+    private readonly PmStopTrackingProcess? _stopTrackingFn;
     private readonly PmGetIntrospectionRoot? _getIntrospectionRootFn;
     private readonly PmFreeIntrospectionRoot? _freeIntrospectionRootFn;
     private readonly PresentMonQueryRegistry _queryRegistry;
@@ -36,6 +37,7 @@ public sealed class PresentMonNative : IPresentMonNative
         _openSessionFn = probe.OpenSessionFn;
         _closeSessionFn = probe.CloseSessionFn;
         _startTrackingFn = probe.StartTrackingFn;
+        _stopTrackingFn = probe.StopTrackingFn;
         _getIntrospectionRootFn = probe.GetIntrospectionRootFn;
         _freeIntrospectionRootFn = probe.FreeIntrospectionRootFn;
         _queryRegistry = new PresentMonQueryRegistry(
@@ -130,6 +132,17 @@ public sealed class PresentMonNative : IPresentMonNative
 
         PmStatus status = _startTrackingFn(_session, (uint)processId);
         return status == PmStatus.Success || status == PmStatus.AlreadyTrackingProcess;
+    }
+
+    public bool StopTrackProcess(int processId)
+    {
+        if (_session == IntPtr.Zero || _stopTrackingFn is null)
+        {
+            return false;
+        }
+
+        PmStatus status = _stopTrackingFn(_session, (uint)processId);
+        return status == PmStatus.Success || status == PmStatus.InvalidPid;
     }
 
     public PresentMonPollResult PollDynamic(int processId) => _queryRegistry.PollDynamic(processId);

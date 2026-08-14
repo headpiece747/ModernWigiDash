@@ -25,7 +25,7 @@ public class PresentMonApiProbeTests
         // Every export except pmGetApiVersion — the version gate must never run.
         var loader = new FakeLoader(load: _ => (IntPtr?)0x10, failureReason: null);
         loader.AddExports(
-            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
+            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess", "pmStopTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
             "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
             "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");
@@ -41,7 +41,7 @@ public class PresentMonApiProbeTests
     {
         var loader = new FakeLoader(load: _ => (IntPtr?)0x10, failureReason: null);
         loader.AddExports(
-            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
+            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess", "pmStopTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
             "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
             "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");
@@ -72,7 +72,7 @@ public class PresentMonApiProbeTests
     {
         var loader = new FakeLoader(load: _ => (IntPtr?)0x10, failureReason: null);
         loader.AddExports(
-            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess",
+            "pmOpenSession", "pmCloseSession", "pmStartTrackingProcess", "pmStopTrackingProcess",
             "pmRegisterDynamicQuery", "pmFreeDynamicQuery", "pmPollDynamicQuery",
             "pmRegisterFrameQuery", "pmConsumeFrames", "pmFreeFrameQuery",
             "pmGetIntrospectionRoot", "pmFreeIntrospectionRoot");

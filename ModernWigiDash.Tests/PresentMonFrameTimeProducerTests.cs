@@ -143,6 +143,182 @@ public class PresentMonFrameTimeProducerTests
     }
 
     [TestMethod]
+    public void Poll_PidChange_StopsTrackingTheStaleTarget()
+    {
+        // The observed on-device failure: the game stayed tracked after
+        // alt-tab, so the dynamic query kept returning the game's hidden
+        // presents as every polled pid's data. The tracked set must mirror the
+        // candidate set — the stale target is stopped when it leaves.
+        int pid = 100;
+        var native = AvailableNative();
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        producer.Poll();
+        pid = 200;
+        producer.Poll();
+
+        CollectionAssert.Contains(native.StoppedProcessIds, 100,
+            "the target that left the candidate set must be untracked");
+        Assert.IsFalse(native.StoppedProcessIds.Contains(200),
+            "the current target must stay tracked");
+        Assert.AreEqual(1, native.OpenSessionCalls, "untracking must not touch the session");
+    }
+
+    [TestMethod]
+    public void Poll_NoForeground_StopsAllTracking()
+    {
+        int pid = 100;
+        var native = AvailableNative();
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        producer.Poll();
+        pid = 0; // desktop / no foreground window
+        var dto = producer.Poll();
+
+        Assert.AreEqual(-1, dto.ProcessId);
+        Assert.IsTrue(dto.IsAvailable);
+        CollectionAssert.Contains(native.StoppedProcessIds, 100,
+            "with no candidates nothing may stay tracked — a stale target would keep reporting forever");
+    }
+
+    [TestMethod]
+    public void Poll_SamePidAcrossPolls_NeverStopsTracking()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321);
+
+        producer.Poll();
+        producer.Poll();
+        producer.Poll();
+
+        Assert.AreEqual(0, native.StoppedProcessIds.Count,
+            "a stable candidate set must never churn tracking");
+    }
+
+    // ── target-trust policy: foreground switches hold the zero state ──
+
+    [TestMethod]
+    public void Poll_ForegroundSwitch_HoldsZeroWhileSettling()
+    {
+        // The on-device failure: after the game loses the foreground,
+        // PresentMon returns the game's frozen data for every polled pid — so
+        // the new foreground's samples cannot be trusted immediately. The
+        // settling window holds the zero state and only tracks (never polls).
+        int pid = 100;
+        var native = AvailableNative();
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        Assert.AreEqual(100, producer.Poll().ProcessId, "the game reports while foreground");
+
+        pid = 200;
+        var dto = producer.Poll();
+
+        Assert.AreEqual(-1, dto.ProcessId, "the new foreground must not report while settling");
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.IsTrue(dto.CaptureHealthy);
+        Assert.IsFalse(native.PolledProcessIds.Contains(200), "the settling window must not poll the new target");
+        Assert.IsTrue(native.TrackedProcessIds.Contains(200), "the new target is tracked so its data accumulates");
+        Assert.IsTrue(native.StoppedProcessIds.Contains(100), "the departed target is untracked");
+    }
+
+    [TestMethod]
+    public void Poll_ForegroundSwitch_AdoptsNewTargetAfterSettling()
+    {
+        int pid = 100;
+        var native = AvailableNative();
+        // The new target presents with its own data (per-pid sample), so once
+        // adopted it differs from the departed target's values and reports.
+        native.PollHandler = polledPid => new PresentMonPollResult(
+            new PresentMonDynamicSample(
+                polledPid == 100 ? 143.2 : 120.0, 110.4, 4.0, 4.05,
+                polledPid == 100 ? 142.8 : 119.8, 2, 6.1, 4), PmStatus.Success);
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        producer.Poll(); // live 100
+        pid = 200;
+
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "settling poll 1");
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "settling poll 2");
+        var adopted = producer.Poll(); // streak 3 = AdoptAfterPolls → adoption poll
+
+        Assert.AreEqual(200, adopted.ProcessId, "the new target is adopted after the settling window");
+        Assert.AreEqual(120.0, adopted.Fps, 0.001);
+    }
+
+    [TestMethod]
+    public void Poll_AdoptedTargetFrozenData_KeepsZeroUntilItDiffers()
+    {
+        // The frozen-data guard: the adopted target's first samples are still
+        // the departed target's values; the zero state must persist until the
+        // sample differs (the new target actually presents).
+        int pid = 100;
+        var native = AvailableNative();
+        native.PollHandler = _ => new PresentMonPollResult(
+            new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 142.8, 2, 6.1, 4), PmStatus.Success);
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        Assert.AreEqual(100, producer.Poll().ProcessId, "the game reports while foreground");
+
+        pid = 200;
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "settling poll 1");
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "settling poll 2");
+        Assert.AreEqual(-1, producer.Poll().ProcessId,
+            "the adoption poll still reads the departed target's frozen data → zero");
+
+        native.PollHandler = _ => new PresentMonPollResult(
+            new PresentMonDynamicSample(120.0, 100.0, 0.5, 3.0, 119.8, 0, 4.0, 8), PmStatus.Success);
+        var live = producer.Poll();
+
+        Assert.AreEqual(200, live.ProcessId, "once the sample differs, the adopted target reports");
+        Assert.AreEqual(120.0, live.Fps, 0.001);
+    }
+
+    [TestMethod]
+    public void Poll_ReturnToSameTarget_ReportsLiveAfterSettling()
+    {
+        int pid = 100;
+        var native = AvailableNative();
+        native.PollHandler = polledPid => new PresentMonPollResult(
+            new PresentMonDynamicSample(
+                polledPid == 100 ? 143.2 : 120.0, 110.4, 4.0, 4.05,
+                polledPid == 100 ? 142.8 : 119.8, 2, 6.1, 4), PmStatus.Success);
+        var producer = new PresentMonFrameTimeProducer(
+            native,
+            new TrackedTargetResolver(() => pid, _ => []),
+            _ => "game.exe");
+
+        Assert.AreEqual(100, producer.Poll().ProcessId);
+
+        pid = 200;
+        Assert.AreEqual(-1, producer.Poll().ProcessId);
+        Assert.AreEqual(-1, producer.Poll().ProcessId);
+        Assert.AreEqual(200, producer.Poll().ProcessId, "the adopted target reports once its data differs");
+
+        pid = 100; // back to the game
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "the returning game settles first");
+        Assert.AreEqual(-1, producer.Poll().ProcessId);
+        var back = producer.Poll();
+
+        Assert.AreEqual(100, back.ProcessId, "the returning game reports after the settling window");
+        Assert.AreEqual(143.2, back.Fps, 0.001);
+    }
+
+    [TestMethod]
     public void Poll_NoDataYet_ReturnsIdleDto()
     {
         var native = AvailableNative();
@@ -397,6 +573,65 @@ public class PresentMonFrameTimeProducerTests
 
         Assert.AreEqual(4322, dto.ProcessId, "a candidate tracking rejected must be skipped, not fatal");
     }
+    [TestMethod]
+    public void Poll_TargetPresentingButNotDisplayed_ReturnsIdleZeroState()
+    {
+        // Backgrounded fullscreen games keep presenting while nothing of them
+        // reaches the display (and often stay/re-grab the foreground, so the
+        // resolver keeps returning them). DISPLAYED_FPS is the "is it actually
+        // on screen" signal: 0 must read as the idle zero state, never as the
+        // hidden present rate.
+        var native = AvailableNative();
+        native.PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 0, 2, 6.1, 4); // DisplayedFps = 0
+        var producer = CreateProducer(native, 4321);
+
+        var dto = producer.Poll();
+
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.IsTrue(dto.CaptureHealthy, "the capture is fine — the target is simply not displayed");
+        Assert.AreEqual(-1, dto.ProcessId, "not-displayed reads as the idle zero state");
+        Assert.AreEqual(0, dto.Fps);
+        Assert.AreEqual(0, dto.RecentFrameTimesMs.Count, "no frame times are buffered for a not-displayed target");
+    }
+
+    [TestMethod]
+    public void Poll_NotDisplayedThenDisplayed_RecoversToLive()
+    {
+        var native = AvailableNative();
+        var producer = CreateProducer(native, 4321);
+
+        native.PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 0, 2, 6.1, 4);
+        Assert.AreEqual(-1, producer.Poll().ProcessId, "backgrounded: idle zero state");
+
+        native.PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 142.8, 2, 6.1, 4);
+        var dto = producer.Poll();
+
+        Assert.AreEqual(4321, dto.ProcessId, "back in the game: live again");
+        Assert.AreEqual(143.2, dto.Fps, 0.001);
+        Assert.IsTrue(dto.CaptureHealthy);
+    }
+
+    [TestMethod]
+    public void Poll_NotDisplayedAcrossPolls_NeverFlagsCaptureDead()
+    {
+        var native = AvailableNative();
+        native.PollResult = new PresentMonDynamicSample(143.2, 110.4, 4.0, 4.05, 0, 2, 6.1, 4);
+        var producer = CreateProducer(native, 4321);
+
+        FrameTimeSnapshotDto? dto = null;
+        for (int i = 0; i < PresentMonFrameTimeProducer.CaptureHealthGracePolls + 5; i++)
+        {
+            dto = producer.Poll();
+        }
+
+        Assert.IsNotNull(dto);
+        Assert.IsTrue(dto.IsAvailable);
+        Assert.IsTrue(dto.CaptureHealthy,
+            "a backgrounded target is not a dead capture — the zero state must persist, not decay into 'capture inactive'");
+        Assert.AreEqual(-1, dto.ProcessId);
+        Assert.AreEqual(0, dto.Fps);
+    }
+
     [TestMethod]
     public void Poll_NoDataForGracePeriod_FlagsCaptureUnhealthy()
     {

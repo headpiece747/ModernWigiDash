@@ -21,6 +21,7 @@ public sealed class TrackedTargetResolver
 
     private readonly Func<int> _foregroundPidProvider;
     private readonly Func<int, IReadOnlyList<int>>? _childrenProvider;
+    private readonly Func<string?>? _titleProvider;
 
     public TrackedTargetResolver()
         : this(GetForegroundPidFromUser32)
@@ -30,13 +31,18 @@ public sealed class TrackedTargetResolver
     /// <summary>Test seam: injects the foreground lookup and the process-tree
     /// navigation so tests drive the resolution without real processes. When
     /// <paramref name="childrenProvider"/> is omitted the resolver walks the
-    /// real toolhelp snapshot once per resolution (see <see cref="ResolveCandidates"/>).</summary>
+    /// real toolhelp snapshot once per resolution (see <see cref="ResolveCandidates"/>).
+    /// The optional <paramref name="titleProvider"/> makes the diagnostics
+    /// path (<see cref="ForegroundWindowTitle"/>) testable; it defaults to the
+    /// real user32 title query.</summary>
     internal TrackedTargetResolver(
         Func<int> foregroundPidProvider,
-        Func<int, IReadOnlyList<int>>? childrenProvider = null)
+        Func<int, IReadOnlyList<int>>? childrenProvider = null,
+        Func<string?>? titleProvider = null)
     {
         _foregroundPidProvider = foregroundPidProvider;
         _childrenProvider = childrenProvider;
+        _titleProvider = titleProvider;
     }
 
     /// <summary>
@@ -113,6 +119,24 @@ public sealed class TrackedTargetResolver
         return (int)pid;
     }
 
+    /// <summary>
+    /// The foreground window's title, capped (diagnostics only): tells which
+    /// window Windows considers foreground when the resolved target does not
+    /// change as expected — the title identifies the game/app at a glance.
+    /// Injectable via the seam; the default is the real user32 query.
+    /// </summary>
+    internal string? ForegroundWindowTitle()
+        => _titleProvider is not null ? _titleProvider() : GetForegroundWindowTitle();
+
+    private static string? GetForegroundWindowTitle()
+    {
+        IntPtr hwnd = GetForegroundWindow();
+        if (hwnd == IntPtr.Zero) return null;
+        var sb = new System.Text.StringBuilder(64);
+        GetWindowText(hwnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
     /// <summary>Parent → children map from ONE toolhelp snapshot of all
     /// processes, taken per <see cref="ResolveCandidates"/> call.</summary>
     private static Dictionary<int, List<int>> SnapshotParentMap()
@@ -185,4 +209,7 @@ public sealed class TrackedTargetResolver
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
 }

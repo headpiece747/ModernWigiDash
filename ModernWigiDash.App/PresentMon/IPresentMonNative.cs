@@ -53,6 +53,12 @@ public interface IPresentMonNative : IDisposable
     /// success or when the process is already being tracked.</summary>
     bool TrackProcess(int processId);
 
+    /// <summary>Commands the service to stop tracking a process id. Returns
+    /// true on success or when the process was not tracked. The tracked set
+    /// must mirror the current candidate set — a stale target's hidden
+    /// presents would otherwise keep reporting as the polled process's data.</summary>
+    bool StopTrackProcess(int processId);
+
     /// <summary>Polls the dynamic query for the process, returning the first
     /// swap chain's stats plus the service status. Sample is null when the
     /// process has no data yet (Success status) or when the poll failed.</summary>

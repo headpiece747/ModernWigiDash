@@ -25,6 +25,7 @@ public sealed class TelemetryProducers : IDisposable
     // (the old code mirrored the same comparison in both tick bodies).
     private readonly LogOnChange _sensorErrors = new();
     private readonly LogOnChange _frameTimeErrors = new();
+    private readonly LogOnChange _frameTimeDiag = new();
 
     /// <param name="presentMonNative">The runtime-loaded PresentMon interop
     /// (injected so tests never load the real DLL).</param>
@@ -91,6 +92,18 @@ public sealed class TelemetryProducers : IDisposable
         if (_frameTimeErrors.Changed(error) && error != null)
         {
             _log($"[FRAMETIME] frame capture unavailable: {error}");
+        }
+
+        // Target-transition diagnostics: the structured poll record (resolver
+        // report + trust-policy state + outcome) formatted here, once, and
+        // logged on change only (quiet by design). The outcome distinguishes
+        // the settling window from the frozen-data hold — the two Idle shapes
+        // the DTO alone conflates.
+        var diag = _presentMonProducer.LastDiagnostics;
+        string line = $"fg='{diag.ForegroundTitle}' candidates=[{string.Join(',', diag.Candidates)}] liveRoot={diag.LiveRootPid} streak={diag.ForeignStreak} guard={diag.CheckingAdopted} outcome={diag.Outcome} → pid={dto.ProcessId} fps={dto.Fps:F1} disp={dto.DisplayedFps:F1} avail={dto.IsAvailable} healthy={dto.CaptureHealthy}";
+        if (_frameTimeDiag.Changed(line))
+        {
+            _log($"[FRAMETIME-DIAG] {line}");
         }
 
         FrameTimeStore.UpdateFromDto(dto);
