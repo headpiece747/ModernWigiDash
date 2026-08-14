@@ -1,5 +1,4 @@
-﻿using System.Globalization;
-using System.Reflection;
+﻿using System.Reflection;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
@@ -89,24 +88,10 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public void CommitPick(GeocodeCandidate candidate)
     {
-        // Commit all four properties before any fetch can claim the in-flight
-        // slot: a single-property fetch mid-sequence would race the pick with
-        // mixed state (the new label with the old coordinates — the
-        // "exact-coordinates fetch never runs" bug). The one forced fetch
-        // below runs with the full pick committed.
-        _committingLocationPick = true;
-        try
-        {
-            SetProperty(nameof(Location), candidate.Label);
-            SetProperty(nameof(Latitude), candidate.Lat.ToString("F5", CultureInfo.InvariantCulture));
-            SetProperty(nameof(Longitude), candidate.Lon.ToString("F5", CultureInfo.InvariantCulture));
-            SetProperty(nameof(LocationMatch), "");
-        }
-        finally
-        {
-            _committingLocationPick = false;
-        }
-        RequestRefresh(force: true);
+        // The name is the truth: a pick writes only the label. Latitude/Longitude
+        // stay manual-only — the label resolves deterministically (multi-component
+        // suffix matching).
+        SetProperty(nameof(Location), candidate.Label);
     }
 
     // ── IWidgetEditorProvider ────────────────────────────────────────────────
@@ -161,12 +146,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private int _forecastVersion;
     private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
-
-    /// <summary>The "select which one" gate state (test seam): true while the
-    /// last resolution was an ambiguous tie the user must pick from — the
-    /// render draws the prompt instead of any data. Cleared by a successful
-    /// fetch and by any location property change before the forced re-fetch.</summary>
-    internal bool _needsLocationSelection;
 
     // The render-model cache: every formatted string the draw paths need is
     // rebuilt only when (data version, bounds, property snapshot) changes —
@@ -226,23 +205,23 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     {
         // A Location Match pick resolves against the candidates it was offered
         // from, so it keeps them (InvalidateCoordinates); every other location
-        // change clears the candidates so a stale pick can never win. The
-        // property fetches are suppressed while CommitPick writes the whole
-        // pick — it fires the one exact-coordinates fetch itself.
+        // change clears the candidates so a stale pick can never win.
         if (propertyName == nameof(LocationMatch))
         {
             _client.InvalidateCoordinates();
-            if (!_committingLocationPick) RequestRefresh(force: true);
+            RequestRefresh(force: true);
         }
         else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
         {
-            // A location change is the user answering the "select which one"
-            // prompt — drop the gate state before the forced re-fetch so the
-            // widget renders live data again (or re-enters the prompt if the
-            // new location is ambiguous too).
-            _needsLocationSelection = false;
-            _client.InvalidateLocation();
-            if (!_committingLocationPick) RequestRefresh(force: true);
+            // The resolved-label write-back skips the forced re-fetch: the
+            // label was just resolved by the fetch that wrote it, so fetching
+            // again would loop (the write-back converges after one extra
+            // resolution at most).
+            if (!_suppressLocationWriteback)
+            {
+                _client.InvalidateLocation();
+                RequestRefresh(force: true);
+            }
         }
         base.OnPropertyChanged(propertyName, newValue);
     }
@@ -252,16 +231,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
-
-        // The select-which-one prompt replaces the whole data render — and it
-        // skips the fetch kick too (the ambiguous resolution already ran; a
-        // pick or a location change clears the flag before forcing a re-fetch).
-        if (_needsLocationSelection)
-        {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, $"{Location} — select which one",
-                "Open the inspector and pick the exact place", textPrimary);
-            return;
-        }
 
         // Kick the fetch through the one cadence gate: the static-snapshot
         // rule and the client's throttle window are applied in RequestRefresh,
@@ -738,26 +707,37 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// on every fetch.
     /// </summary>
     private string _lastInspectorCandidatesStamp = "";
-    private bool _committingLocationPick = false;
+
+    /// <summary>Suppresses the OnPropertyChanged fetch while the resolved label
+    /// is written back after a successful resolution (the write-back must not
+    /// re-fire a fetch).</summary>
+    internal bool _suppressLocationWriteback;
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
         if (IsStaticSnapshotBlocking && !force) return;
 
         var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
-        if (snapshot is null)
-        {
-            // The ambiguity gate: an untrusted location tie never shows weather.
-            if (_client.LastResolutionAmbiguous)
-            {
-                _needsLocationSelection = true;
-                Context?.RequestRender();
-            }
-            return;
-        }
-        _needsLocationSelection = false;
+        if (snapshot is null) return;
 
         ApplySnapshot(snapshot);
+
+        // The resolved label writes back into Location only when it differs,
+        // under the suppression flag so the write's OnPropertyChanged does not
+        // re-fire a fetch (converges after one extra resolution at most).
+        if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
+            && snapshot.ResolvedCityName != Location)
+        {
+            _suppressLocationWriteback = true;
+            try
+            {
+                SetProperty(nameof(Location), snapshot.ResolvedCityName);
+            }
+            finally
+            {
+                _suppressLocationWriteback = false;
+            }
+        }
 
         // The geocode may have produced new Location Match candidates: refresh
         // the inspector so an already-open panel shows the dropdown (the Twitch

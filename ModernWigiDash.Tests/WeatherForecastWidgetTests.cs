@@ -10,7 +10,7 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class WeatherForecastWidgetTests
 {
-    private const string SampleForecast = """
+    internal const string SampleForecast = """
     {
       "latitude": 40.7128, "longitude": -74.006,
       "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
@@ -161,13 +161,22 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2 && widget.Location == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
+        Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.Location,
+            "the write-back must leave the field showing the picked place");
 
         // Clearing the pick (the empty "Automatic" option) reverts to ranking.
+        // The write-back made Location carry the picked label, so the label
+        // self-resolves to the same city; returning the field to the bare
+        // query then lets the auto ranking of "Victoria" decide — a stale
+        // pick must never win it.
         widget.LocationMatch = "";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), "");
         await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 3, TimeSpan.FromSeconds(5));
+        widget.Location = "Victoria";
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Victoria");
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 4, TimeSpan.FromSeconds(5));
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.ResolvedCityName);
     }
 
@@ -210,12 +219,9 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
-    public void CommitPick_SetsLocationLatLonAndClearsLocationMatch()
+    public void CommitPick_SetsOnlyLocation()
     {
-        var widget = new WeatherForecastWidget();
-        // Every SetProperty kicks a forced fetch — it must never reach the
-        // real shared HttpClient (the fetch path is covered separately).
-        widget.TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound()));
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())) };
         var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
         var profile = new ProfileLayout();
         profile.ActivePage.Widgets.Add(placed);
@@ -226,76 +232,14 @@ public class WeatherForecastWidgetTests
         search.CommitPick(new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
 
         Assert.AreEqual("Berlin, New Hampshire, United States", widget.Location);
-        Assert.AreEqual("44.46867", widget.Latitude);
-        Assert.AreEqual("-71.18508", widget.Longitude);
-        Assert.AreEqual("", widget.LocationMatch);
-        Assert.IsTrue(placed.PropertyValues.ContainsKey("Latitude"), "the pick must persist through SetProperty");
-        Assert.AreEqual("44.46867", placed.PropertyValues["Latitude"]);
+        Assert.AreEqual("", widget.Latitude, "Lat/Lon must stay manual-only — never filled by a pick");
+        Assert.AreEqual("", widget.Longitude);
+        Assert.IsTrue(placed.PropertyValues.ContainsKey("Location"), "the pick must persist the label");
+        Assert.IsFalse(placed.PropertyValues.ContainsKey("Latitude"), "no Lat/Lon may be persisted by a pick");
     }
 
     [TestMethod]
-    public async Task CommitPick_ForcesFetchWithExactCoordinates_AfterAllPropertiesCommit()
-    {
-        // The pick must land as ONE exact-coordinates fetch: no intermediate
-        // SetProperty write may claim the in-flight slot with mixed state
-        // (the new label with the old coordinates — the "exact-coordinates
-        // fetch never runs" bug).
-        var forecastUrls = new List<string>();
-        var stub = new StubHttpHandler(request =>
-        {
-            string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/forecast", StringComparison.Ordinal))
-            {
-                lock (forecastUrls) forecastUrls.Add(url);
-                return StubHttpHandler.Ok(SampleForecast);
-            }
-            return StubHttpHandler.NotFound();
-        });
-        var widget = new WeatherForecastWidget();
-        widget.TestHttpClient = new HttpClient(stub);
-        await widget.InitializeAsync(new TestContext());
-        // Let the startup fetch (geocode "New York" -> 404) settle so its claim
-        // cannot mask the pick's fetch in the wait below.
-        SpinWait.SpinUntil(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
-        int before = widget.FetchCompletedCount;
-
-        var search = (IWidgetLocationSearch)widget;
-        search.CommitPick(new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
-        SpinWait.SpinUntil(() => widget.FetchCompletedCount > before, TimeSpan.FromSeconds(5));
-
-        lock (forecastUrls)
-        {
-            Assert.AreEqual(1, forecastUrls.Count,
-                "the pick must produce exactly one fetch — no intermediate property write may claim the slot with mixed state");
-            Assert.IsTrue(forecastUrls[0].Contains("latitude=44.4687&longitude=-71.1851", StringComparison.Ordinal),
-                "the post-pick fetch must run with the picked exact coordinates");
-        }
-    }
-
-    [TestMethod]
-    public async Task FetchLiveWeatherAsync_AmbiguousResolution_SetsSelectState()
-    {
-        // A client whose resolution flags ambiguity must leave the widget in the
-        // "select which one" state — not stale or wrong data. The client's
-        // TestHttpClient seam returns the real Berlin candidate set; the gate
-        // blocks the forecast fetch, so the flag is observed after the null
-        // snapshot.
-        var stub = new StubHttpHandler(request =>
-        {
-            string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
-            return StubHttpHandler.NotFound();
-        });
-        var widget = new WeatherForecastWidget { Location = "Berlin" };
-        widget.TestHttpClient = new HttpClient(stub);
-
-        await widget.FetchLiveWeatherAsync();
-
-        Assert.IsTrue(widget._needsLocationSelection, "an ambiguous bare name must land in the select-which-one state");
-    }
-
-    [TestMethod]
-    public async Task FetchLiveWeatherAsync_AmbiguousResolution_FiresRequestRender()
+    public async Task FetchLiveWeatherAsync_AmbiguousName_KeepsStateSilently()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -305,16 +249,26 @@ public class WeatherForecastWidgetTests
         });
         var widget = new WeatherForecastWidget { Location = "Berlin" };
         widget.TestHttpClient = new HttpClient(stub);
-        var context = new TestContext();
-        await widget.InitializeAsync(context);
+        var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
+        var profile = new ProfileLayout();
+        profile.ActivePage.Widgets.Add(placed);
+        var context = new PersistingContext(profile);
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+        var renders = context.Renders;
 
+        // The shipped prompt state is gone: an ambiguous resolution must be
+        // silent — no fetch, no state change, no render request.
+        // (Drive the fetch directly; the client's ambiguity flag suppresses it.)
+        widget._suppressLocationWriteback = true; // isolate this test from the write-back path
         await widget.FetchLiveWeatherAsync();
 
-        Assert.IsTrue(context.Renders > 0, "entering the select-which-one state must repaint the widget");
+        Assert.AreEqual(renders, context.Renders, "no render request for an ambiguous resolution");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "no forecast request for an ambiguous name — the gate is silent");
     }
 
     [TestMethod]
-    public async Task FetchLiveWeatherAsync_UnambiguousResolution_ClearsSelectState()
+    public async Task FetchLiveWeatherAsync_ResolvedLabel_IsWrittenBackToLocation()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -324,23 +278,24 @@ public class WeatherForecastWidgetTests
         });
         var widget = new WeatherForecastWidget { Location = "Victoria" };
         widget.TestHttpClient = new HttpClient(stub);
-        widget._needsLocationSelection = true;
+        var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
+        var profile = new ProfileLayout();
+        profile.ActivePage.Widgets.Add(placed);
+        var context = new PersistingContext(profile);
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+        // InitializeAsync kicks the startup fetch; its write-back runs on the
+        // fetch's continuation (after the client's FetchCompletedCount
+        // advances), so wait for the written-back label itself — the same
+        // settle pattern the pick tests use.
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1 && widget.Location == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
 
         await widget.FetchLiveWeatherAsync();
 
-        Assert.IsFalse(widget._needsLocationSelection, "a clean resolution must clear the select state");
-    }
-
-    [TestMethod]
-    public void Render_WhenNeedsLocationSelection_DrawsPromptInsteadOfData()
-    {
-        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
-        var canvas = surface.Canvas;
-        var widget = new WeatherForecastWidget { Location = "Berlin", _needsLocationSelection = true };
-
-        widget.Render(canvas, new SKRect(0, 0, 406, 296)); // must not throw, no data drawn
-
-        Assert.IsTrue(true); // smoke: the prompt path renders without exceptions
+        Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location,
+            "a successful resolution must write the resolved label back into Location");
+        Assert.IsTrue(placed.PropertyValues.ContainsKey("Location"));
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "the write-back must not loop: exactly one forecast request");
     }
 
     [TestMethod]
