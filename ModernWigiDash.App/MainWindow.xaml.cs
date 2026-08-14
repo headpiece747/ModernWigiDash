@@ -186,7 +186,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
             getSelectedWidget: () => _selectedWidget,
             requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
             _dialogHost,
-            onProfileChanged: () => _profilePersistence.MarkDirty());
+            onProfileChanged: () => _profilePersistence.MarkDirty(),
+            commitLocationPick: candidate =>
+            {
+                if (_selectedWidget?.ActiveInstance is IWidgetLocationSearch search)
+                {
+                    search.CommitPick(candidate);
+                }
+            });
 
         // Page-tabs strip module: owns tab construction, the wheel scroll, and
         // scroll-into-view; the window keeps only the page-action seams.

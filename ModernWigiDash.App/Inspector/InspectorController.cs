@@ -66,6 +66,7 @@ public sealed class InspectorController
     private readonly InspectorValuePolicy _policy = new();
     private readonly DialogHost _dialogHost;
     private readonly Action? _onProfileChanged;
+    private readonly Action<GeocodeCandidate>? _commitLocationPick;
     private bool _isUpdatingInspector = false;
 
     /// <param name="host">The window's wiring holder.</param>
@@ -76,14 +77,19 @@ public sealed class InspectorController
     /// <param name="onProfileChanged">Invoked after a write-back lands in the
     /// profile model (transform/opacity/property values) so the owner can arm
     /// profile persistence.</param>
+    /// <param name="commitLocationPick">Invoked when the user picks a location
+    /// search result; the owner resolves the selected widget's
+    /// <see cref="IWidgetLocationSearch"/> and commits the candidate.</param>
     public InspectorController(
         InspectorControllerHost host,
         DialogHost dialogHost,
-        Action? onProfileChanged = null)
+        Action? onProfileChanged = null,
+        Action<GeocodeCandidate>? commitLocationPick = null)
     {
         _host = host;
         _dialogHost = dialogHost;
         _onProfileChanged = onProfileChanged;
+        _commitLocationPick = commitLocationPick;
         // The policy's default warning sink is Debug.WriteLine; the controller
         // routes warnings into the shared file log so conversion failures
         // surface in the field, not only in a debugger.
@@ -149,7 +155,8 @@ public sealed class InspectorController
                         {
                             var dlg = new OpenFolderDialog { Title = title };
                             return dlg.ShowDialog() == true ? dlg.FolderName : null;
-                        }
+                        },
+                        CommitLocationPick = _commitLocationPick
                     });
 
                 // Restore focus to the same property's editor so typing and

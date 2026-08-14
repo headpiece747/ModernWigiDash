@@ -81,6 +81,17 @@ public class InspectorEditorProviderTests
     }
 
     [TestMethod]
+    public void WeatherWidget_LocationProperty_ReportsLocationSearchEditorKind()
+    {
+        var prop = typeof(WeatherForecastWidget).GetProperty("Location")!;
+        var widget = new WeatherForecastWidget();
+
+        var kind = (widget as IWidgetEditorProvider)?.GetEditorKind(prop);
+
+        Assert.AreEqual(EditorKind.LocationSearch, kind);
+    }
+
+    [TestMethod]
     public void HotkeyButtonWidget_MapsSpecialEditors()
     {
         var widget = new HotkeyButtonWidget();

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Reflection;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
@@ -6,7 +7,7 @@ using ModernWigiDash.Core.Rendering;
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
-public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch
+public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider
 {
     public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
 
@@ -93,6 +94,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         SetProperty(nameof(Longitude), candidate.Lon.ToString("F5", CultureInfo.InvariantCulture));
         SetProperty(nameof(LocationMatch), "");
     }
+
+    // ── IWidgetEditorProvider ────────────────────────────────────────────────
+
+    public EditorKind? GetEditorKind(PropertyInfo property)
+        => property.Name == nameof(Location) ? EditorKind.LocationSearch : null;
 
     public WeatherForecastWidget()
     {

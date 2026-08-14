@@ -8,7 +8,8 @@ namespace ModernWigiDash.Widgets;
 public enum EditorKind
 {
     IconPicker,
-    ActionCommand
+    ActionCommand,
+    LocationSearch
 }
 
 /// <summary>

@@ -1,7 +1,10 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
@@ -36,6 +39,10 @@ public sealed class InspectorCallbacks
 
     /// <summary>Opens a folder picker; returns the chosen path or null when cancelled.</summary>
     public required Func<string, string?> BrowseFolder { get; init; }
+
+    /// <summary>Commits a location-search pick (label + exact coordinates) to the
+    /// selected widget through its IWidgetLocationSearch contract.</summary>
+    public Action<GeocodeCandidate>? CommitLocationPick { get; init; }
 }
 
 /// <summary>
@@ -120,6 +127,13 @@ public static class InspectorPanelRenderer
                 case WidgetPropertyType.SensorSelector:
                     propPanel.Children.Add(BuildSensorSelector(desc, isUpdatingInspector, callbacks));
                     break;
+                case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.LocationSearch:
+                    if (widget.ActiveInstance is IWidgetLocationSearch search)
+                    {
+                        propPanel.Children.Add(BuildLocationSearchEditor(desc, search, callbacks));
+                        break;
+                    }
+                    goto default;
                 default:
                     // Text or Number
                     propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
@@ -341,5 +355,72 @@ public static class InspectorPanelRenderer
             callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
         };
         return txt;
+    }
+
+    /// <summary>
+    /// The search-as-you-type Location editor: a TextBox with a results popup,
+    /// debounced (300 ms), stale responses discarded by a version token. Enter or
+    /// focus loss commits the typed text as the property value (the ambiguity
+    /// gate then decides whether it may fetch); picking a result commits the
+    /// candidate's exact place through <see cref="InspectorCallbacks.CommitLocationPick"/>.
+    /// </summary>
+    private static StackPanel BuildLocationSearchEditor(EditorDescription desc, IWidgetLocationSearch search, InspectorCallbacks callbacks)
+    {
+        var box = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
+        var results = new ListBox { MaxHeight = 160, Visibility = Visibility.Collapsed };
+        var popup = new Popup
+        {
+            PlacementTarget = box,
+            Placement = PlacementMode.Bottom,
+            StaysOpen = false,
+            AllowsTransparency = true,
+            Child = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1),
+                Child = results
+            }
+        };
+
+        int version = 0;
+        var debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        debounce.Tick += async (_, _) =>
+        {
+            debounce.Stop();
+            string query = box.Text.Trim();
+            if (query.Length < 2)
+            {
+                results.ItemsSource = null;
+                popup.IsOpen = false;
+                return;
+            }
+
+            int current = ++version;
+            var candidates = await search.SearchAsync(query, CancellationToken.None);
+            if (current != version) return; // a newer keystroke superseded this response
+            results.ItemsSource = candidates;
+            popup.IsOpen = candidates.Count > 0;
+        };
+        box.TextChanged += (_, _) => { debounce.Stop(); debounce.Start(); }; // restart the debounce window
+        results.SelectionChanged += (_, _) =>
+        {
+            if (results.SelectedItem is GeocodeCandidate picked)
+            {
+                popup.IsOpen = false;
+                callbacks.CommitLocationPick?.Invoke(picked);
+            }
+        };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                // Commit the typed text (the ambiguity gate decides the fetch).
+                callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
+                popup.IsOpen = false;
+            }
+        };
+
+        return new StackPanel { Children = { box, popup } };
     }
 }
