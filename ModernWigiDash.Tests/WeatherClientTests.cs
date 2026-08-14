@@ -541,6 +541,65 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_FullLabelSuffix_PicksTheUniquePlace()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // The full label "Berlin, New Hampshire, United States" (what a pick
+        // persists) must resolve deterministically: both suffix components match
+        // Berlin NH only — the population tiebreak must not come into play.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(44.46867, snapshot.Lat, 0.0001);
+        Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
+        Assert.IsFalse(client.LastResolutionAmbiguous);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_TwoPartStateAndCountryLabel_MatchesAdmin1AndCountry()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(44.46867, snapshot.Lat, 0.0001, "admin1 'New Hampshire' and country 'United States' must both match");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_LabelWithNonMatchingComponent_DoesNotResolveToIt()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // "Berlin, Ontario, United States": no candidate has admin1/country
+        // "Ontario" — every component must match, so no suffix score; the bare
+        // name tie then flags ambiguity (no fetch).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, Ontario, United States", null, null, null));
+
+        Assert.IsNull(snapshot, "a non-matching suffix component must not resolve to a population pick");
+        Assert.IsTrue(client.LastResolutionAmbiguous);
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_ZipGeocode_ResolvesViaZippopotam()
     {
         var stub = new StubHttpHandler(Respond);

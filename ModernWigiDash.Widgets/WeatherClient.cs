@@ -746,19 +746,32 @@ public sealed class WeatherClient
     private static int ScoreSuffixMatch(string admin1, string country, string code, string? suffixPart)
     {
         if (string.IsNullOrWhiteSpace(suffixPart)) return 0;
-        if (admin1.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
-            || country.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
-            || code.Equals(suffixPart, StringComparison.OrdinalIgnoreCase))
+
+        // A full label suffix ("New Hampshire, United States" — what a pick
+        // persists) must match component by component: every component must hit
+        // admin1/country/code, else the place does not match the label at all
+        // (the population tiebreak must never re-pick a wrong city from a
+        // persisted label).
+        string[] components = suffixPart.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        int score = 0;
+        foreach (string component in components)
         {
-            return 500;
+            if (EqualsAny(admin1, country, code, component)) score += 500;
+            else if (StartsWithAny(admin1, country, code, component)) score += 250;
+            else return 0;
         }
-        // abbreviation ("MA" -> Massachusetts)
-        return admin1.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
-            || country.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
-            || code.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
-            ? 250
-            : 0;
+        return score;
     }
+
+    private static bool EqualsAny(string admin1, string country, string code, string component)
+        => admin1.Equals(component, StringComparison.OrdinalIgnoreCase)
+            || country.Equals(component, StringComparison.OrdinalIgnoreCase)
+            || code.Equals(component, StringComparison.OrdinalIgnoreCase);
+
+    private static bool StartsWithAny(string admin1, string country, string code, string component)
+        => admin1.StartsWith(component, StringComparison.OrdinalIgnoreCase)
+            || country.StartsWith(component, StringComparison.OrdinalIgnoreCase)
+            || code.StartsWith(component, StringComparison.OrdinalIgnoreCase);
 
     private static int ScoreCountryHint(string code, string country, string? countryCode)
     {
