@@ -10,8 +10,6 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private const string AnonymousNickPrefix = "justinfan";
     private const string AnonymousPass = "SCHMOOPIIE";
     private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
-    /// <summary>The maximum Twitch channel-name length (Twitch's 25-char cap).</summary>
-    private const int MaxChannelNameLength = 25;
 
     public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
 
@@ -369,14 +367,15 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// drops the leading '#', and lowercases. Invalid names — empty,
     /// over-length (Twitch's 25-char cap), or carrying an embedded CR/LF
     /// (which could inject extra IRC lines into the JOIN command) — fall back
-    /// to "twitch", the existing empty-channel fallback.
+    /// to "twitch", the existing empty-channel fallback. The validity rule is
+    /// the shared Sdk <see cref="TwitchChannelRule"/> the profile sanitizer
+    /// also applies (one rule, both entry points).
     /// </summary>
     private static string NormalizeChannel(string channel)
     {
         var c = channel.Trim().TrimStart('#');
         if (c.Length == 0) return "twitch";
-        if (c.IndexOfAny(['\r', '\n']) >= 0) return "twitch";
-        return c.Length > MaxChannelNameLength ? "twitch" : c.ToLowerInvariant();
+        return TwitchChannelRule.IsValid(c) ? c.ToLowerInvariant() : "twitch";
     }
 
     // The header strings are memoized per input (the WrapCache shape): Render

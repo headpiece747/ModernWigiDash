@@ -116,7 +116,7 @@ public class InspectorModelBuilderTests
     public void Describe_SensorSelector_OptionsComeFromLiveStore()
     {
         LhmSensorStore.Reset();
-        LhmSensorStore.Update(new SensorSnapshotDto
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
             LastUpdate = DateTime.UtcNow,

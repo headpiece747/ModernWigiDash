@@ -95,70 +95,18 @@ namespace ModernWigiDash.App.LibreHardwareService;
     {
         try
         {
-            if (mapBytes.Length < FixedHeaderSize)
+            if (!TryReadHeader(mapBytes, out long lastUpdate, out int msb))
+                return DisconnectedSnapshot();
+            if (!TryReadFields(mapBytes, msb, out int indexLength, out int indexOffset, out int indexFormat, out int dataLength, out int dataOffset))
                 return DisconnectedSnapshot();
 
-            int metaDataSize = BitConverter.ToInt32(mapBytes, OffsetMetaDataSize);
-            long lastUpdate = BitConverter.ToInt64(mapBytes, OffsetLastUpdate);
-
-            if (lastUpdate <= 0 || metaDataSize < 0)
+            List<IndexEntry>? entries = ParseIndex(mapBytes, indexFormat, indexOffset, indexLength);
+            if (entries is null || entries.Count > MaxSensorEntries)
                 return DisconnectedSnapshot();
 
-            long msb = 4L + metaDataSize;
-            if (msb + FieldsBlockSize > mapBytes.Length)
+            List<SensorReadingDto>? readings = MapReadings(mapBytes, dataOffset, dataLength, entries);
+            if (readings is null)
                 return DisconnectedSnapshot();
-
-            int indexLength = BitConverter.ToInt32(mapBytes, (int)msb + 0);
-            int indexOffset = BitConverter.ToInt32(mapBytes, (int)msb + 4);
-            int indexFormat = BitConverter.ToInt32(mapBytes, (int)msb + 8);
-            int dataLength = BitConverter.ToInt32(mapBytes, (int)msb + 12);
-            int dataOffset = BitConverter.ToInt32(mapBytes, (int)msb + 16);
-
-            if (indexLength < 0 || indexOffset < 0 || dataLength < 0 || dataOffset < 0)
-                return DisconnectedSnapshot();
-            if ((long)indexOffset + indexLength > mapBytes.Length)
-                return DisconnectedSnapshot();
-            if ((long)dataOffset + dataLength > mapBytes.Length)
-                return DisconnectedSnapshot();
-
-            List<IndexEntry>? entries = indexFormat switch
-            {
-                IndexFormatJson => JsonSerializer.Deserialize<List<IndexEntry>>(
-                    mapBytes.AsSpan(indexOffset, indexLength), SensorJsonOptions) ?? [],
-                IndexFormatMessagePack => MessagePackSerializer.Deserialize<List<IndexEntry>>(
-                    mapBytes.AsMemory(indexOffset, indexLength)),
-                _ => null,
-            };
-            if (entries is null)
-                return DisconnectedSnapshot();
-            if (entries.Count > MaxSensorEntries)
-                return DisconnectedSnapshot();
-
-            List<SensorReadingDto> readings = new(entries.Count);
-            foreach (IndexEntry entry in entries)
-            {
-                if (entry.Offset < 0 || entry.Size < 0 || (long)entry.Offset + entry.Size > dataLength)
-                    return DisconnectedSnapshot();
-                if (entry.Size > MaxSensorBlockBytes)
-                    return DisconnectedSnapshot();
-
-                byte[] json = mapBytes.AsSpan(dataOffset + entry.Offset, entry.Size).ToArray();
-                SensorBlock block = JsonSerializer.Deserialize<SensorBlock>(json, SensorJsonOptions)
-                    ?? throw new JsonException("empty sensor block");
-
-                readings.Add(new SensorReadingDto
-                {
-                    SensorId = block.Identifier,
-                    SensorName = block.Name,
-                    HardwareName = block.HardwareName,
-                    HardwareType = block.HardwareType,
-                    SensorType = block.SensorType,
-                    Unit = UnitFor(block.SensorType),
-                    Value = block.Value,
-                    Min = block.Min,
-                    Max = block.Max,
-                });
-            }
 
             return new SensorSnapshotDto
             {
@@ -171,6 +119,83 @@ namespace ModernWigiDash.App.LibreHardwareService;
         {
             return DisconnectedSnapshot();
         }
+    }
+
+    /// <summary>The fixed header block: metadata size and last-update stamp,
+    /// both validated before the variable metadata block is addressed.</summary>
+    private static bool TryReadHeader(byte[] mapBytes, out long lastUpdate, out int msb)
+    {
+        lastUpdate = 0;
+        msb = 0;
+        if (mapBytes.Length < FixedHeaderSize) return false;
+
+        int metaDataSize = BitConverter.ToInt32(mapBytes, OffsetMetaDataSize);
+        lastUpdate = BitConverter.ToInt64(mapBytes, OffsetLastUpdate);
+        if (lastUpdate <= 0 || metaDataSize < 0) return false;
+
+        msb = 4 + metaDataSize;
+        return msb + FieldsBlockSize <= mapBytes.Length;
+    }
+
+    /// <summary>The 20-byte index/data descriptor block, bounds-checked against
+    /// the map length — declared sizes from an untrusted map never address past
+    /// the copy.</summary>
+    private static bool TryReadFields(byte[] mapBytes, int msb, out int indexLength, out int indexOffset, out int indexFormat, out int dataLength, out int dataOffset)
+    {
+        indexLength = BitConverter.ToInt32(mapBytes, msb + 0);
+        indexOffset = BitConverter.ToInt32(mapBytes, msb + 4);
+        indexFormat = BitConverter.ToInt32(mapBytes, msb + 8);
+        dataLength = BitConverter.ToInt32(mapBytes, msb + 12);
+        dataOffset = BitConverter.ToInt32(mapBytes, msb + 16);
+
+        if (indexLength < 0 || indexOffset < 0 || dataLength < 0 || dataOffset < 0) return false;
+        if ((long)indexOffset + indexLength > mapBytes.Length) return false;
+        if ((long)dataOffset + dataLength > mapBytes.Length) return false;
+        return true;
+    }
+
+    /// <summary>Decodes the index per the declared format; null for an unknown
+    /// format.</summary>
+    private static List<IndexEntry>? ParseIndex(byte[] mapBytes, int indexFormat, int indexOffset, int indexLength)
+        => indexFormat switch
+        {
+            IndexFormatJson => JsonSerializer.Deserialize<List<IndexEntry>>(
+                mapBytes.AsSpan(indexOffset, indexLength), SensorJsonOptions) ?? [],
+            IndexFormatMessagePack => MessagePackSerializer.Deserialize<List<IndexEntry>>(
+                mapBytes.AsMemory(indexOffset, indexLength)),
+            _ => null,
+        };
+
+    /// <summary>Reads each sensor block; null when any entry escapes the data
+    /// bounds or exceeds the per-block cap.</summary>
+    private static List<SensorReadingDto>? MapReadings(byte[] mapBytes, int dataOffset, int dataLength, List<IndexEntry> entries)
+    {
+        List<SensorReadingDto> readings = new(entries.Count);
+        foreach (IndexEntry entry in entries)
+        {
+            if (entry.Offset < 0 || entry.Size < 0 || (long)entry.Offset + entry.Size > dataLength)
+                return null;
+            if (entry.Size > MaxSensorBlockBytes)
+                return null;
+
+            byte[] json = mapBytes.AsSpan(dataOffset + entry.Offset, entry.Size).ToArray();
+            SensorBlock block = JsonSerializer.Deserialize<SensorBlock>(json, SensorJsonOptions)
+                ?? throw new JsonException("empty sensor block");
+
+            readings.Add(new SensorReadingDto
+            {
+                SensorId = block.Identifier,
+                SensorName = block.Name,
+                HardwareName = block.HardwareName,
+                HardwareType = block.HardwareType,
+                SensorType = block.SensorType,
+                Unit = UnitFor(block.SensorType),
+                Value = block.Value,
+                Min = block.Min,
+                Max = block.Max,
+            });
+        }
+        return readings;
     }
 
     /// <summary>

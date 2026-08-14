@@ -1,5 +1,4 @@
 using System.IO;
-using System.Runtime.InteropServices;
 using ModernWigiDash.App.PresentMon;
 
 namespace ModernWigiDash.Tests;

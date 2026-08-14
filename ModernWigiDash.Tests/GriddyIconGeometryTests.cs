@@ -1,6 +1,4 @@
-using System.Windows.Media;
 using ModernWigiDash.App.Update;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

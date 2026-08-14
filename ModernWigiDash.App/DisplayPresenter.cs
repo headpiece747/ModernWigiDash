@@ -25,9 +25,14 @@ public sealed class DisplayPresenter : IDisposable
     /// <summary>Queues the freshly composed frame for encode→coalesce→pace→send.</summary>
     public void Send(SKBitmap frame) => _delivery.Push(frame);
 
-    /// <summary>True while the delivery's sender is inside the transport write
-    /// (the FramePump compose gate — composing during the write is dead CPU).</summary>
-    internal bool IsSending => _delivery.IsSendInFlight;
+    /// <summary>
+    /// The compose-gate decision: true when a new frame may be composed — the
+    /// previous send is finished and the transport is ready. The FramePump
+    /// consults this each tick instead of re-deriving the delivery's send
+    /// state at its wiring; composing during the write is dead CPU (the
+    /// display cannot take another frame anyway).
+    /// </summary>
+    public bool ShouldCompose => !_delivery.IsSendInFlight;
 
     public void Dispose() => _delivery.Dispose();
 }

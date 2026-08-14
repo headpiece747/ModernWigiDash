@@ -16,6 +16,24 @@ public partial class App : Application
 
     public App()
     {
+        // Logs live next to the profile, never next to the exe: a Program
+        // Files install is read-only for standard users, and a single-file
+        // host's BaseDirectory is the extraction dir under %TEMP%. Both paths
+        // are pinned here before the first write below.
+        string appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ModernWigiDash");
+        try
+        {
+            Directory.CreateDirectory(appDataDir);
+        }
+        catch (IOException)
+        {
+            // Best-effort; the log write below surfaces the failure.
+        }
+        FileLog.LogPath = Path.Combine(appDataDir, "display_device.log");
+        CrashLog.LogPath = Path.Combine(appDataDir, "crash.log");
+
         // Log startup so we know the app actually launched
         try
         {

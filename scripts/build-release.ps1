@@ -91,6 +91,12 @@ if (-not [string]::IsNullOrWhiteSpace($Version)) {
 }
 & dotnet publish (Join-Path $Root "ModernWigiDash.App\ModernWigiDash.App.csproj") @publishArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    # Enforce the stamp: a missing FileVersion (csproj 0.0.0) shipped once
+    # as a silent regression — fail the build instead of the eyeball pass.
+    $fileVersion = (Get-Item (Join-Path $publishOut "ModernWigiDash.App.exe")).VersionInfo.FileVersion
+    if ($fileVersion -ne $Version) { throw "Version stamp check failed: exe FileVersion is '$fileVersion', expected '$Version'" }
+}
 
 # --- 2. Assemble the zip root ---
 New-Item -ItemType Directory -Path $ZipDir -Force | Out-Null

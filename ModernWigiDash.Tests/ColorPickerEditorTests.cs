@@ -1,6 +1,5 @@
 using System.Windows.Media;
 using ModernWigiDash.App.Controls;
-using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.Tests;
 

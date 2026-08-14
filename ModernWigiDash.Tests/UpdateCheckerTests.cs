@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ModernWigiDash.App.Update;
 
 namespace ModernWigiDash.Tests;

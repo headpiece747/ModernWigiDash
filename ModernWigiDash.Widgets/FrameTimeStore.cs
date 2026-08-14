@@ -8,16 +8,17 @@ namespace ModernWigiDash.Widgets;
 /// <see cref="UpdateFromDto"/>; widgets read the cached snapshot on the render
 /// thread. The store owns the staleness decision — consumers ask
 /// <see cref="TryReadFresh"/> and cannot skip the check.
+/// One instance of the shared <see cref="TelemetryStoreFacade{TRecord}"/>.
 /// </summary>
 public static class FrameTimeStore
 {
+    private static readonly TelemetryStoreFacade<FrameTimeSnapshotDto> Facade = new(
+        new FrameTimeSnapshotDto(),
+        defaultMaxAge: TimeSpan.FromSeconds(5),
+        lastUpdateOf: dto => dto.LastUpdate);
+
     /// <summary>Default staleness window for frame-time data (~1s poll cadence).</summary>
-    public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(5);
-
-    private static StaticTelemetryStore<FrameTimeSnapshotDto> _store = CreateStore(TimeProvider.System);
-
-    private static StaticTelemetryStore<FrameTimeSnapshotDto> CreateStore(TimeProvider timeProvider)
-        => new(new FrameTimeSnapshotDto(), defaultMaxAge: DefaultMaxAge, timeProvider: timeProvider);
+    public static TimeSpan DefaultMaxAge => Facade.DefaultMaxAge;
 
     /// <summary>
     /// Internal test seam: builds a store bound to a fake clock (and optional
@@ -25,38 +26,30 @@ public static class FrameTimeStore
     /// singleton binds <see cref="TimeProvider.System"/> at construction.
     /// </summary>
     internal static StaticTelemetryStore<FrameTimeSnapshotDto> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
-        => new(new FrameTimeSnapshotDto(), maxAge ?? DefaultMaxAge, timeProvider);
+        => Facade.CreateStoreForTest(timeProvider, maxAge);
 
     /// <summary>Internal test seam: installs the store behind the static
     /// read/update surface (see <see cref="CreateStoreForTest"/>).</summary>
     internal static StaticTelemetryStore<FrameTimeSnapshotDto> StoreForTest
     {
-        get => _store;
-        set => _store = value ?? throw new ArgumentNullException(nameof(value));
+        get => Facade.StoreForTest;
+        set => Facade.StoreForTest = value;
     }
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
     /// staleness window and the clock bind at construction.
     /// </summary>
-    public static FrameTimeSnapshotDto? TryReadFresh() => _store.TryReadFresh();
-
-    /// <summary>
-    /// Stores a snapshot. A default/empty producer timestamp is resolved to the
-    /// store's receive time.
-    /// </summary>
-    public static void Update(FrameTimeSnapshotDto snapshot) => _store.Update(snapshot, snapshot.LastUpdate);
+    public static FrameTimeSnapshotDto? TryReadFresh() => Facade.TryReadFresh();
 
     /// <summary>
     /// Stores a snapshot from the producer, tolerating a null DTO (treated as
-    /// the unavailable state). Keeps the null-tolerant entry point the poll
-    /// loop and the tests rely on.
+    /// the unavailable state). The single write entry point.
     /// </summary>
-    public static void UpdateFromDto(FrameTimeSnapshotDto? dto)
-        => _store.Update(dto ?? new FrameTimeSnapshotDto(), dto?.LastUpdate ?? default);
+    public static void UpdateFromDto(FrameTimeSnapshotDto? dto) => Facade.UpdateFromDto(dto);
 
     /// <summary>
     /// Resets the cache to the unavailable state. Intended for test isolation.
     /// </summary>
-    public static void Reset() => _store.Reset();
+    public static void Reset() => Facade.Reset();
 }

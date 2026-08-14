@@ -650,35 +650,52 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         switch (NowPlayingLayout.GetAction(_layout, hitPoint))
         {
             case NowPlayingHitAction.Shuffle when snap.CanShuffle:
-                _mediaMonitor?.SetShuffle(!snap.Shuffle);
+                ToggleShuffle(snap);
                 break;
             case NowPlayingHitAction.Previous when snap.CanPrev:
                 _mediaMonitor?.Previous();
                 break;
             case NowPlayingHitAction.PlayPause:
-                if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
-                else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
+                TogglePlayPause(snap);
                 break;
             case NowPlayingHitAction.Next when snap.CanNext:
                 _mediaMonitor?.Next();
                 break;
             case NowPlayingHitAction.Repeat when snap.CanRepeat:
-                var next = snap.Repeat switch
-                {
-                    MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
-                    MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
-                    _ => MediaPlaybackAutoRepeatMode.None
-                };
-                _mediaMonitor?.SetRepeat(next);
+                CycleRepeat(snap);
                 break;
             case NowPlayingHitAction.SourceBadge:
                 _mediaMonitor?.CycleSession();
                 break;
             case NowPlayingHitAction.Seek when snap.CanSeek && snap.Duration.TotalSeconds > 0:
-                double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
-                _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
+                SeekTo(hitPoint, snap);
                 break;
         }
+    }
+
+    private void ToggleShuffle(MediaSnapshot snap) => _mediaMonitor?.SetShuffle(!snap.Shuffle);
+
+    private void TogglePlayPause(MediaSnapshot snap)
+    {
+        if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
+        else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
+    }
+
+    private void CycleRepeat(MediaSnapshot snap)
+    {
+        var next = snap.Repeat switch
+        {
+            MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
+            MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
+            _ => MediaPlaybackAutoRepeatMode.None
+        };
+        _mediaMonitor?.SetRepeat(next);
+    }
+
+    private void SeekTo(SKPoint hitPoint, MediaSnapshot snap)
+    {
+        double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
+        _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ public class HardwareMonitorWidgetTests
 
     private static void SeedFreshSnapshot()
     {
-        LhmSensorStore.Update(new SensorSnapshotDto
+        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
         {
             IsConnected = true,
             LastUpdate = DateTime.UtcNow,

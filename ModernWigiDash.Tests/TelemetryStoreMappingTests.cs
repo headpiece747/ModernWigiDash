@@ -246,7 +246,7 @@ public class TelemetryStoreMappingTests
             RecentFrameTimesMs = [6.9, 7.0, 7.1, 6.8],
         };
 
-        FrameTimeStore.Update(record);
+        FrameTimeStore.UpdateFromDto(record);
         FrameTimeSnapshotDto read = FrameTimeStore.TryReadFresh()!;
 
         Assert.IsTrue(read.IsAvailable);

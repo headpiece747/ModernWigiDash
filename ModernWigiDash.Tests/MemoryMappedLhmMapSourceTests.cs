@@ -1,6 +1,5 @@
 using System.IO;
 using System.IO.MemoryMappedFiles;
-using System.Threading;
 using ModernWigiDash.App.LibreHardwareService;
 
 namespace ModernWigiDash.Tests;

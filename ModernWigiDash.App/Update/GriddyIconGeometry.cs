@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Windows.Media;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Update;
@@ -7,20 +7,19 @@ namespace ModernWigiDash.App.Update;
 /// <summary>
 /// WPF geometry for the bundled Griddy icon paths: parses the SVG path data
 /// from <see cref="GriddyIconPaths.Map"/> via <see cref="Geometry.Parse"/> and
-/// caches per name — one parse per icon, shared by every header button.
+/// caches per name — one parse per icon, shared by every header button. The
+/// cache rule is the shared Sdk <see cref="SvgPathParseCache{T}"/>; the
+/// WPF-specific part is only the parser and the null fallback.
 /// </summary>
 public static class GriddyIconGeometry
 {
-    private static readonly ConcurrentDictionary<string, Geometry?> Cache = new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>Parsed geometry for <paramref name="name"/>, or null when unknown.</summary>
     public static Geometry? FromName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
-        return Cache.GetOrAdd(name.Trim(), static key =>
-            GriddyIconPaths.Map.TryGetValue(key, out string? pathData)
-                ? ParsePathData(pathData)
-                : null);
+        string key = name.Trim();
+        if (!GriddyIconPaths.Map.TryGetValue(key, out string? pathData)) return null;
+        return SvgPathParseCache<Geometry>.GetOrParse(key, () => ParsePathData(pathData));
     }
 
     internal static Geometry? ParsePathData(string pathData)
@@ -34,6 +33,4 @@ public static class GriddyIconGeometry
             return null;
         }
     }
-
-    internal static int CacheCount => Cache.Count;
 }

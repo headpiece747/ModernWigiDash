@@ -120,6 +120,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 
 Grab the latest `ModernWigiDash-vX.Y.Z-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest). It contains a single, self-contained, ReadyToRun executable — unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
 
+> **First launch:** the release executable is unsigned (open source — no code-signing certificate), so Windows SmartScreen may show *"Windows protected your PC"* once per machine. Click **More info → Run anyway**.
+
 ### Option B — Build from Source
 
 ```powershell

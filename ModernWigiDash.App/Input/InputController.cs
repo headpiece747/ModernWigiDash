@@ -66,6 +66,7 @@ public sealed class InputController
     private readonly Action<PageLayout, float, float, TouchEventType> _routeTouch;
     private readonly Func<PageLayout, float, float, PlacedWidgetInstance?> _hitTest;
     private readonly Action<PlacedWidgetInstance?>? _select;
+    private readonly Action<ManipulationChange>? _onManipulation;
 
     private ManipulationKind _manipulation;
     private PlacedWidgetInstance? _manipulationTarget;
@@ -85,13 +86,20 @@ public sealed class InputController
     /// Tests inject a fake page.</param>
     /// <param name="select">Selection seam; MainWindow selects the hit widget
     /// and refreshes the inspector/canvas. Tests inject a spy.</param>
+    /// <param name="onManipulation">One refresh funnel: invoked whenever an
+    /// edit-mode manipulation changes a widget or ends (including the release
+    /// snap-to-grid), with what changed. MainWindow binds one handler here so
+    /// the refresh-after-manipulation policy is declared once instead of being
+    /// re-derived at every mouse call site. The device-touch path never
+    /// manipulates, so it never fires this.</param>
     public InputController(
         Func<InputState> stateProvider,
         Action<int>? navigateTo = null,
         Action? requestRender = null,
         Action<PageLayout, float, float, TouchEventType>? routeTouch = null,
         Func<PageLayout, float, float, PlacedWidgetInstance?>? hitTest = null,
-        Action<PlacedWidgetInstance?>? select = null)
+        Action<PlacedWidgetInstance?>? select = null,
+        Action<ManipulationChange>? onManipulation = null)
     {
         _state = stateProvider;
         _navigateTo = navigateTo;
@@ -99,6 +107,7 @@ public sealed class InputController
         _routeTouch = routeTouch ?? SkiaFrameCompositor.RouteTouch;
         _hitTest = hitTest ?? SkiaFrameCompositor.HitTest;
         _select = select;
+        _onManipulation = onManipulation;
     }
 
     /// <summary>
@@ -168,6 +177,13 @@ public sealed class InputController
         changed = false;
         if (MoveManipulation(_manipulationTarget, x, y, editMode, out changed))
         {
+            if (changed)
+            {
+                // Icon-moved mid-grab is deliberately not reported here: the
+                // window refreshes the inspector once, on release (the release
+                // outcome carries IconMoved).
+                _onManipulation?.Invoke(new ManipulationChange(Changed: true, IconMoved: false));
+            }
             return true;
         }
 
@@ -187,7 +203,13 @@ public sealed class InputController
         bool wasManipulating = EndManipulation(_manipulationTarget, editMode, out iconMoved);
         _manipulationTarget = null;
 
-        if (!wasManipulating)
+        if (wasManipulating)
+        {
+            // The release is where snap-to-grid lands: the funnel fires with
+            // Changed=true so the caller persists and refreshes once.
+            _onManipulation?.Invoke(new ManipulationChange(Changed: true, IconMoved: iconMoved));
+        }
+        else
         {
             Feed(TouchEventType.TouchUp, x, y, suppressWidgetRouting: source == InputSource.DesktopEdit && editMode);
         }

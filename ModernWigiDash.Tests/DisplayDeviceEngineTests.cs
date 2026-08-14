@@ -252,6 +252,22 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
+    public void TryConnect_ConnectFails_DisposesTheUnAdoptedTransport()
+    {
+        // The orphan rule: a transport the engine never adopted (Connect()
+        // returned false) must be released — the disposed-during-connect
+        // branch already enforces it, and a future transport that allocates
+        // on a failed connect would otherwise leak its handle.
+        var fake = new FakeTransport { ConnectResult = false };
+        using var engine = new DisplayDeviceEngine(() => fake);
+
+        bool ok = engine.TryConnect();
+
+        Assert.IsFalse(ok);
+        Assert.IsTrue(fake.Disposed, "a failed-connect transport must be released, never leaked");
+    }
+
+    [TestMethod]
     public void TryConnect_DisposedDuringConnect_DoesNotAdoptTransport()
     {
         var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };

@@ -9,16 +9,17 @@ namespace ModernWigiDash.Widgets;
 /// render thread. The store owns the staleness decision — consumers ask
 /// <see cref="TryReadFresh"/> and cannot skip the check. The snapshot shape is
 /// the DTO itself (no shadow record); the reading label derives on the DTO.
+/// One instance of the shared <see cref="TelemetryStoreFacade{TRecord}"/>.
 /// </summary>
 public static class LhmSensorStore
 {
+    private static readonly TelemetryStoreFacade<SensorSnapshotDto> Facade = new(
+        new SensorSnapshotDto(),
+        defaultMaxAge: TimeSpan.FromSeconds(10),
+        lastUpdateOf: dto => dto.LastUpdate);
+
     /// <summary>Default staleness window for sensor data (~1s poll cadence).</summary>
-    public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromSeconds(10);
-
-    private static StaticTelemetryStore<SensorSnapshotDto> _store = CreateStore(TimeProvider.System);
-
-    private static StaticTelemetryStore<SensorSnapshotDto> CreateStore(TimeProvider timeProvider)
-        => new(new SensorSnapshotDto(), defaultMaxAge: DefaultMaxAge, timeProvider: timeProvider);
+    public static TimeSpan DefaultMaxAge => Facade.DefaultMaxAge;
 
     /// <summary>
     /// Internal test seam: builds a store bound to a fake clock (and optional
@@ -26,14 +27,14 @@ public static class LhmSensorStore
     /// singleton binds <see cref="TimeProvider.System"/> at construction.
     /// </summary>
     internal static StaticTelemetryStore<SensorSnapshotDto> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
-        => new(new SensorSnapshotDto(), maxAge ?? DefaultMaxAge, timeProvider);
+        => Facade.CreateStoreForTest(timeProvider, maxAge);
 
     /// <summary>Internal test seam: installs the store behind the static
     /// read/update surface (see <see cref="CreateStoreForTest"/>).</summary>
     internal static StaticTelemetryStore<SensorSnapshotDto> StoreForTest
     {
-        get => _store;
-        set => _store = value ?? throw new ArgumentNullException(nameof(value));
+        get => Facade.StoreForTest;
+        set => Facade.StoreForTest = value;
     }
 
     /// <summary>
@@ -41,30 +42,22 @@ public static class LhmSensorStore
     /// live sensor picker uses this — it needs the full reading list even when
     /// stale; every other consumer must go through <see cref="TryReadFresh"/>.
     /// </summary>
-    public static SensorSnapshotDto ReadSnapshot() => _store.ReadSnapshot();
+    public static SensorSnapshotDto ReadSnapshot() => Facade.ReadSnapshot();
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The
     /// staleness window and the clock bind at construction.
     /// </summary>
-    public static SensorSnapshotDto? TryReadFresh() => _store.TryReadFresh();
-
-    /// <summary>
-    /// Stores a snapshot. A default/empty producer timestamp is resolved to the
-    /// store's receive time.
-    /// </summary>
-    public static void Update(SensorSnapshotDto snapshot) => _store.Update(snapshot, snapshot.LastUpdate);
+    public static SensorSnapshotDto? TryReadFresh() => Facade.TryReadFresh();
 
     /// <summary>
     /// Stores a snapshot from the producer, tolerating a null DTO (treated as
-    /// the disconnected state). Keeps the null-tolerant entry point the poll
-    /// loop and the tests rely on.
+    /// the disconnected state). The single write entry point.
     /// </summary>
-    public static void UpdateFromDto(SensorSnapshotDto? dto)
-        => _store.Update(dto ?? new SensorSnapshotDto(), dto?.LastUpdate ?? default);
+    public static void UpdateFromDto(SensorSnapshotDto? dto) => Facade.UpdateFromDto(dto);
 
     /// <summary>
     /// Resets the cache to the disconnected state. Intended for test isolation.
     /// </summary>
-    public static void Reset() => _store.Reset();
+    public static void Reset() => Facade.Reset();
 }

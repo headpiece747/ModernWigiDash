@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Media;
-using System.Windows.Shapes;
 using System.Windows.Threading;
 using ModernWigiDash.App.Update;
 using ModernWigiDash.Sdk;
@@ -38,11 +37,11 @@ public partial class MainWindow
         // Startup recovery runs once, before the check: heal an interrupted
         // swap (.old restore) and clear stale stage/download dirs from failed
         // downloads — otherwise a crash between rename-aside and copy-complete
-        // leaves the install with no exe and no automatic restore.
+        // leaves the install with no exe and no automatic restore. One call,
+        // owned by the service.
         try
         {
-            _updateService.CleanupStale();
-            UpdateService.RecoverInterruptedSwap(AppContext.BaseDirectory);
+            _updateService.RecoverAtStartup(AppContext.BaseDirectory);
         }
         catch (Exception ex)
         {
@@ -119,54 +118,12 @@ public partial class MainWindow
         if (!restart) return;
 
         // Spawn the updater hidden, then close normally (standby teardown).
-        // The staged cmd can vanish between staging and this click (cleanup
-        // tools, AV, external wipe) — the read/substitute/start must not throw
-        // on the UI thread (DispatcherUnhandledException does not mark
-        // non-benign exceptions handled). Log, hide the button again (the
-        // download-failure path's shape), and keep the window open.
-        try
+        // The launch protocol — staged-cmd read, {{RELAUNCH}} substitution,
+        // live-cmd write outside the stage, ShellExecute detach — is owned by
+        // the service, and a failure keeps the window open (the button hides
+        // again instead of the app dying on the UI thread).
+        if (!_updateService.LaunchUpdater(_pendingUpdate, AppContext.BaseDirectory))
         {
-            string installDir = AppContext.BaseDirectory;
-            string stageDir = System.IO.Path.Combine(_updateService.UpdatesRoot, "staged", _pendingUpdate.Version);
-            string stagedCmd = _updateService.StagedCmdPath(_pendingUpdate);
-            // AppContext.BaseDirectory ends with a separator — Path.Combine
-            // (not string concat) so the relaunch path never doubles the
-            // backslash (start "" "<path>\\exe" fails with "cannot find the
-            // path specified" and silently skips the relaunch).
-            string relaunchExe = System.IO.Path.Combine(installDir, "ModernWigiDash.App.exe");
-            string relaunch = $"start \"\" \"{relaunchExe}\"";
-
-            // Replace the {{RELAUNCH}} marker inside the staged cmd with the
-            // relaunch line, and write the result OUTSIDE the stage: the cmd
-            // deletes its own stage (rd /S /Q "%STAGE%"), and a batch that
-            // deletes itself while running loses the rest of its script —
-            // "swap complete" never logs and the relaunch never fires. A copy
-            // outside the stage survives the cleanup.
-            string body = System.IO.File.ReadAllText(stagedCmd);
-            string substituted = body.Replace("{{RELAUNCH}}", relaunch);
-            if (substituted.Length == body.Length)
-                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
-            string liveCmd = System.IO.Path.Combine(_updateService.UpdatesRoot, "apply-update-live.cmd");
-            System.IO.File.WriteAllText(liveCmd, substituted);
-
-            // UseShellExecute=true detaches the updater from this process's job
-            // object: without it the child is reaped when the app closes on the
-            // next line, and the swap never runs (seen in the on-device loop).
-            // With ShellExecute, cmd receives the arguments as one string, so
-            // the slash-S slash-C doubled-quote form fails silently; the whole
-            // command must be a single quoted argument to slash-c.
-            string cmdExe = System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            string inner = $"\"{liveCmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
-            var psi = new System.Diagnostics.ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
-            {
-                UseShellExecute = true,
-                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
-            };
-            System.Diagnostics.Process.Start(psi);
-        }
-        catch (Exception ex)
-        {
-            FileLog.Write($"[UPDATE] launch failed: {ex.Message}");
             ApplyUpdateState(UpdateState.Hidden, "", null);
             return;
         }

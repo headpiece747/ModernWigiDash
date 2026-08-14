@@ -498,16 +498,15 @@ public static class ProfileOps
 
         // TwitchChatStreamWidget's channel name rides the IRC JOIN command:
         // an embedded CR/LF would inject extra IRC lines on connect. Apply
-        // the widget's own normalization rule here (Core cannot reference
-        // the Widgets assembly, so the rule — reject CR/LF and over-25-char
-        // names — is mirrored; the widget's NormalizeChannel is
-        // defense-in-depth at connect time). Invalid names are cleared to
-        // empty — the widget's empty-channel fallback then applies.
+        // the shared rule (Sdk's TwitchChannelRule — Core cannot reference
+        // the Widgets assembly, so the rule lives in the lowest common layer;
+        // the widget's NormalizeChannel is defense-in-depth at connect time).
+        // Invalid names are cleared to empty — the widget's empty-channel
+        // fallback then applies.
         if (placed.PropertyValues.TryGetValue("ChannelName", out var channelRaw) &&
             ConvertPropertyValue(channelRaw, typeof(string)) is string channel)
         {
-            placed.PropertyValues["ChannelName"] =
-                channel.Contains('\r') || channel.Contains('\n') || channel.Length > 25 ? "" : channel;
+            placed.PropertyValues["ChannelName"] = TwitchChannelRule.Sanitize(channel, "");
         }
     }
 

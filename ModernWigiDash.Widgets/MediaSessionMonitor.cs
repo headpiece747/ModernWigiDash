@@ -216,16 +216,19 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         PlaybackInfoData? info,
         TimelinePropertiesData? timeline)
     {
+        var (title, artist, album, albumArtist, trackNumber, albumTrackCount, genres) = ExtractMeta(props);
+        var (canPlay, canPause, canStop, canNext, canPrev, canSeek, canShuffle, canRepeat) = ExtractControls(info);
+
         return new MediaSnapshot
         {
             SourceAppId = session.SourceAppUserModelId ?? "",
-            Title = Sanitize(props?.Title, ""),
-            Artist = Sanitize(props?.Artist, ""),
-            Album = Sanitize(props?.AlbumTitle, ""),
-            AlbumArtist = Sanitize(props?.AlbumArtist, ""),
-            TrackNumber = props?.TrackNumber ?? 0,
-            AlbumTrackCount = props?.AlbumTrackCount ?? 0,
-            Genres = props?.Genres?.ToArray() ?? [],
+            Title = title,
+            Artist = artist,
+            Album = album,
+            AlbumArtist = albumArtist,
+            TrackNumber = trackNumber,
+            AlbumTrackCount = albumTrackCount,
+            Genres = genres,
             Status = info?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed,
             Position = timeline?.Position ?? TimeSpan.Zero,
             Duration = timeline?.EndTime ?? TimeSpan.Zero,
@@ -233,16 +236,41 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             Shuffle = info?.IsShuffleActive ?? false,
             Repeat = info?.AutoRepeatMode ?? MediaPlaybackAutoRepeatMode.None,
             PlaybackRate = info?.PlaybackRate is > 0 ? info.PlaybackRate.Value : 1.0,
-            CanPlay = info?.Controls.IsPlayEnabled ?? false,
-            CanPause = info?.Controls.IsPauseEnabled ?? false,
-            CanStop = info?.Controls.IsStopEnabled ?? false,
-            CanNext = info?.Controls.IsNextEnabled ?? false,
-            CanPrev = info?.Controls.IsPreviousEnabled ?? false,
-            CanSeek = info?.Controls.IsPlaybackPositionEnabled ?? false,
-            CanShuffle = info?.Controls.IsShuffleEnabled ?? false,
-            CanRepeat = info?.Controls.IsRepeatEnabled ?? false
+            CanPlay = canPlay,
+            CanPause = canPause,
+            CanStop = canStop,
+            CanNext = canNext,
+            CanPrev = canPrev,
+            CanSeek = canSeek,
+            CanShuffle = canShuffle,
+            CanRepeat = canRepeat
         };
     }
+
+    /// <summary>The metadata group of the snapshot, sanitized and defaulted in
+    /// one place.</summary>
+    private static (string Title, string Artist, string Album, string AlbumArtist, int TrackNumber, int AlbumTrackCount, string[] Genres) ExtractMeta(MediaPropertiesData? props)
+        => (
+            Sanitize(props?.Title, ""),
+            Sanitize(props?.Artist, ""),
+            Sanitize(props?.AlbumTitle, ""),
+            Sanitize(props?.AlbumArtist, ""),
+            props?.TrackNumber ?? 0,
+            props?.AlbumTrackCount ?? 0,
+            props?.Genres?.ToArray() ?? []);
+
+    /// <summary>The transport-control capability group, defaulted to disabled
+    /// when the session reports no controls.</summary>
+    private static (bool Play, bool Pause, bool Stop, bool Next, bool Prev, bool Seek, bool Shuffle, bool Repeat) ExtractControls(PlaybackInfoData? info)
+        => (
+            info?.Controls.IsPlayEnabled ?? false,
+            info?.Controls.IsPauseEnabled ?? false,
+            info?.Controls.IsStopEnabled ?? false,
+            info?.Controls.IsNextEnabled ?? false,
+            info?.Controls.IsPreviousEnabled ?? false,
+            info?.Controls.IsPlaybackPositionEnabled ?? false,
+            info?.Controls.IsShuffleEnabled ?? false,
+            info?.Controls.IsRepeatEnabled ?? false);
 
     /// <summary>Strips control characters (space kept) and caps at 256 chars;
     /// falls back when nothing survives. Internal so the rule is testable.</summary>

@@ -270,6 +270,35 @@ public sealed class DialogHost
             selectedName.Text = name;
         }
 
+        Button BuildIconCell(string name)
+        {
+            var cell = new Button
+            {
+                Width = 36,
+                Height = 36,
+                Margin = new Thickness(2),
+                Padding = new Thickness(0),
+                Tag = name,
+                ToolTip = name,
+                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent
+            };
+            if (GriddyIcons.TryGetPathData(name, out string? pathData))
+            {
+                cell.Content = TryBuildIconGeometry(pathData);
+            }
+            if (name.Equals(chosen, StringComparison.OrdinalIgnoreCase))
+                cell.BorderBrush = accentBrush;
+            cell.Click += (_, _) =>
+            {
+                UpdateSelected(name);
+                foreach (var child in grid.Children.OfType<Button>())
+                    child.BorderBrush = Brushes.Transparent;
+                cell.BorderBrush = accentBrush;
+            };
+            return cell;
+        }
+
         void RenderGrid()
         {
             grid.Children.Clear();
@@ -279,45 +308,29 @@ public sealed class DialogHost
                 : GriddyIcons.Names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
             foreach (var name in names)
             {
-                var cell = new Button
+                grid.Children.Add(BuildIconCell(name));
+            }
+        }
+
+        /// <summary>The 22×22 white path glyph for a Griddy icon, or null when
+        /// the path data does not parse (a malformed name degrades to an empty
+        /// cell, never a crash).</summary>
+        static Path? TryBuildIconGeometry(string pathData)
+        {
+            try
+            {
+                return new Path
                 {
-                    Width = 36,
-                    Height = 36,
-                    Margin = new Thickness(2),
-                    Padding = new Thickness(0),
-                    Tag = name,
-                    ToolTip = name,
-                    BorderThickness = new Thickness(1),
-                    BorderBrush = Brushes.Transparent
+                    Width = 22,
+                    Height = 22,
+                    Stretch = Stretch.Uniform,
+                    Fill = Brushes.White,
+                    Data = Geometry.Parse(pathData)
                 };
-                if (GriddyIcons.TryGetPathData(name, out string? pathData))
-                {
-                    try
-                    {
-                        cell.Content = new Path
-                        {
-                            Width = 22,
-                            Height = 22,
-                            Stretch = Stretch.Uniform,
-                            Fill = Brushes.White,
-                            Data = Geometry.Parse(pathData)
-                        };
-                    }
-                    catch
-                    {
-                        cell.Content = null;
-                    }
-                }
-                if (name.Equals(chosen, StringComparison.OrdinalIgnoreCase))
-                    cell.BorderBrush = accentBrush;
-                cell.Click += (_, _) =>
-                {
-                    UpdateSelected(name);
-                    foreach (var child in grid.Children.OfType<Button>())
-                        child.BorderBrush = Brushes.Transparent;
-                    cell.BorderBrush = accentBrush;
-                };
-                grid.Children.Add(cell);
+            }
+            catch
+            {
+                return null;
             }
         }
 

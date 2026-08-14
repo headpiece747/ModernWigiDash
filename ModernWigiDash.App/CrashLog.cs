@@ -1,20 +1,22 @@
 using System.IO;
 using System.Text.RegularExpressions;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// The crash-log writer (crash.log next to the executable): appends a
-/// sanitized exception line — type name + message — and rotates the file
-/// past 5 MB to crash.log.1, mirroring FileLog's rotation. The message is
-/// sanitized before it lands: exception text may embed a URL carrying a
-/// token, and crash.log is plaintext. Best-effort: a locked file just keeps
-/// failing silently (surfaced to debug output).
+/// The crash-log writer: appends a sanitized exception line — type name +
+/// message — and rotates the file past 5 MB to crash.log.1, mirroring
+/// FileLog's rotation. The message is sanitized before it lands: exception
+/// text may embed a URL carrying a token, and crash.log is plaintext.
+/// Best-effort: a locked file just keeps failing silently (surfaced to debug
+/// output). The path is pinned by the App to %LOCALAPPDATA%\ModernWigiDash\
+/// (never next to the exe: Program Files is read-only for standard users).
 /// </summary>
 internal static class CrashLog
 {
-    private static readonly string LogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
+    /// <summary>The crash log path; pinned by the App at startup (see the
+    /// type doc). Tests override it for isolation.</summary>
+    internal static string LogPath { get; set; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
 
     /// <summary>crash.log rotates to crash.log.1 past this size (FileLog's cap).</summary>
     private const long RotationCapBytes = 5 * 1024 * 1024;

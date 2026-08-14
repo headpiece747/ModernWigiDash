@@ -44,6 +44,7 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
   Profile + settings:  %LOCALAPPDATA%\ModernWigiDash\
   Theme:               app_theme.json  (same folder)
+  Logs:                display_device.log + crash.log  (same folder)
   Twitch tokens:       DPAPI-encrypted, same folder (keyed to your Windows user)
   Reset:               close the app, delete that folder, relaunch.
 

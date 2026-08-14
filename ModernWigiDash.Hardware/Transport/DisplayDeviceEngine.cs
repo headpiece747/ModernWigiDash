@@ -119,17 +119,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // connect (WinUSB probe + init, ~100-150ms) must run off the calling
         // thread — Start() is invoked from the window ctor on the UI thread.
         // ReconnectTick below already runs on the Timer thread.
-        _ = Task.Run(() => TryConnect()).ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                Log($"Initial connection faulted: {t.Exception?.GetBaseException().Message}");
-            }
-            else if (!t.Result)
-            {
-                Log("Initial connection failed, will retry via reconnect timer");
-            }
-        }, TaskContinuationOptions.ExecuteSynchronously);
+        RunConnectAttempt("Initial connection faulted", "Initial connection failed, will retry via reconnect timer");
 
         _reconnectTimer.Change(ReconnectPeriod, ReconnectPeriod);
     }
@@ -152,13 +142,25 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         if (!shouldReconnect) return;
 
-        _ = Task.Run(() => TryConnect()).ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-                Log($"[Reconnect] Connection attempt faulted: {t.Exception?.GetBaseException().Message}");
-        }, TaskContinuationOptions.ExecuteSynchronously);
+        RunConnectAttempt("[Reconnect] Connection attempt faulted");
     }
 #pragma warning restore S1172
+
+    /// <summary>One fire-and-forget connect attempt with fault logging — the
+    /// Start and reconnect-timer scaffolding share this shape (the connect
+    /// itself is synchronous per ADR-0001, so it runs off the caller's thread).</summary>
+    private void RunConnectAttempt(string faultPrefix, string? failureLog = null)
+        => _ = Task.Run(() => TryConnect()).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                Log($"{faultPrefix}: {t.Exception?.GetBaseException().Message}");
+            }
+            else if (failureLog is not null && !t.Result)
+            {
+                Log(failureLog);
+            }
+        }, TaskContinuationOptions.ExecuteSynchronously);
 
     private PollLoop CreateTouchPollLoop() => new(
         "TOUCH-DIRECT",
@@ -230,50 +232,53 @@ public sealed class DisplayDeviceEngine : IDisposable
             {
                 transport = _transportFactory();
                 connected = transport.Connect();
-
-                if (connected)
-                {
-                    // Dispose() can run while this connect is in flight (the
-                    // entry guard predates the assignment). Re-check under the
-                    // lock: a disposed engine must not adopt a live transport —
-                    // it would never reach standby and the handle would leak.
-                    lock (_lock)
-                    {
-                        disposedDuringConnect = Volatile.Read(ref _isDisposed) != 0;
-                        if (!disposedDuringConnect)
-                        {
-                            _transport = transport;
-                        }
-                    }
-
-                    if (disposedDuringConnect)
-                    {
-#pragma warning disable S6966 // Sync dispose of an orphan transport; async not needed here
-                        transport?.Dispose();
-#pragma warning restore S6966
-                        connected = false;
-                    }
-                    else
-                    {
-                        // Connect() is the single init owner: it already ran
-                        // SendInitCommands (PING + SetBrightness + ClearPage +
-                        // AddWidget + blank framebuffer + GoToScreen) on both the
-                        // WinUSB and LibUsb paths.
-                        State = ConnectionState.Connected;
-                        Log("Hardware connection successful!");
-                    }
-                }
-                else
-                {
-                    Log("Transport connection failed - falling back to simulation");
-                }
             }
             catch (Exception ex)
             {
                 Log($"[Connect] Connection exception: {ex.Message}");
-#pragma warning disable S6966 // Cleanup transport in catch; no async dispose needed here
-                transport?.Dispose();
-#pragma warning restore S6966
+                connected = false;
+            }
+
+            if (connected)
+            {
+                // Dispose() can run while this connect is in flight (the
+                // entry guard predates the assignment). Re-check under the
+                // lock: a disposed engine must not adopt a live transport —
+                // it would never reach standby and the handle would leak.
+                lock (_lock)
+                {
+                    disposedDuringConnect = Volatile.Read(ref _isDisposed) != 0;
+                    if (!disposedDuringConnect)
+                    {
+                        _transport = transport;
+                    }
+                }
+
+                if (disposedDuringConnect)
+                {
+                    DisposeTransport(transport);
+                    connected = false;
+                }
+                else
+                {
+                    // Connect() is the single init owner: it already ran
+                    // SendInitCommands (PING + SetBrightness + ClearPage +
+                    // AddWidget + blank framebuffer + GoToScreen) on both the
+                    // WinUSB and LibUsb paths.
+                    State = ConnectionState.Connected;
+                    Log("Hardware connection successful!");
+                }
+            }
+            else
+            {
+                // The un-adopted transport is released whether Connect()
+                // returned false or the attempt threw — the orphan rule a
+                // transport that would never reach standby must not leak its
+                // handle (the production transport self-cleans on a false
+                // return; Dispose is idempotent for it, and the rule holds for
+                // any future transport that allocates on connect).
+                DisposeTransport(transport);
+                Log("Transport connection failed - falling back to simulation");
             }
 
             if (!connected && !disposedDuringConnect)
@@ -295,6 +300,16 @@ public sealed class DisplayDeviceEngine : IDisposable
                 _connecting = false;
             }
         }
+    }
+
+    /// <summary>Releases an un-adopted transport (the orphan rule): a
+    /// transport the engine never took ownership of must be disposed — it
+    /// would never reach standby and its handle would leak. Safe on null.</summary>
+    private static void DisposeTransport(IDisplayTransport? transport)
+    {
+#pragma warning disable S6966 // Sync dispose of an orphan transport; async not needed here
+        transport?.Dispose();
+#pragma warning restore S6966
     }
 
     /// <summary>

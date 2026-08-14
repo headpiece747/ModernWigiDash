@@ -46,6 +46,13 @@ public class PictureAndGifWidget : ModernWidgetBase
     /// <summary>How often a cycling folder is rescanned for new files.</summary>
     private static readonly TimeSpan FolderRescanPeriod = TimeSpan.FromSeconds(30);
 
+    // Decompression-bomb caps: refuse media whose raw byte size, frame count,
+    // or decoded pixel footprint would exhaust memory.
+    private const int MaxFileBytes = 32 * 1024 * 1024;
+    private const int MaxFrames = 256;
+    private const long MaxPixelsPerFrame = 4096L * 4096;
+    private const long MaxTotalFrameBytes = 512L * 1024 * 1024;
+
     /// <summary>The currently listed folder images (test seam).</summary>
     internal string[] _folderImagesForTest => _folderImages;
 
@@ -151,14 +158,6 @@ public class PictureAndGifWidget : ModernWidgetBase
             // decodes read from memory, the source file can be replaced or the
             // tests can delete it without racing an open handle.
             byte[] data = await File.ReadAllBytesAsync(path);
-
-            // Decompression-bomb caps: refuse media whose raw byte size, frame
-            // count, or decoded pixel footprint would exhaust memory.
-            const int MaxFileBytes = 32 * 1024 * 1024;
-            const int MaxFrames = 256;
-            const long MaxPixelsPerFrame = 4096L * 4096;
-            const long MaxTotalFrameBytes = 512L * 1024 * 1024;
-
             if (data.Length > MaxFileBytes)
             {
                 Context?.LogError($"PictureAndGifWidget: refusing {data.Length} byte media (cap {MaxFileBytes} bytes)");
@@ -169,80 +168,15 @@ public class PictureAndGifWidget : ModernWidgetBase
             using var codec = SKCodec.Create(dataRef);
             if (codec != null && codec.FrameCount > 1)
             {
-                if (codec.FrameCount > MaxFrames ||
-                    (long)codec.Info.Width * codec.Info.Height > MaxPixelsPerFrame ||
-                    (long)codec.Info.Width * codec.Info.Height * codec.FrameCount * 4L > MaxTotalFrameBytes)
+                (frames, durations) = DecodeAnimated(codec);
+                if (frames is null)
                 {
-                    Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height}x{codec.FrameCount} decode (cap {MaxFrames} frames, {MaxPixelsPerFrame} px/frame, {MaxTotalFrameBytes} total bytes)");
                     return;
-                }
-
-                int frameCount = codec.FrameCount;
-                SKImageInfo info = codec.Info;
-
-                // Force RGBA8888 frame buffers: Skia composites frames with
-                // PriorFrame in RGBA regardless of the codec's native format,
-                // and writing 4 bytes/pixel into an Index8/palette-sized buffer
-                // (codec.Info's natural format for GIFs) overruns the heap.
-                SKImageInfo frameInfo = info.ColorType == SKColorType.Rgba8888
-                    ? info
-                    : info.WithColorType(SKColorType.Rgba8888);
-                frames = new SKBitmap[frameCount];
-                durations = new long[frameCount];
-
-                for (int i = 0; i < frameCount; i++)
-                {
-                    var frame = new SKBitmap(frameInfo);
-
-                    // GIF frames are deltas: the codec needs the previous
-                    // frame's pixels already in the destination to composite
-                    // correctly. Without it, delta frames decode as mostly
-                    // empty/black regions and the animation flashes black.
-                    //
-                    // NOTE: CopyTo REPLACES the destination's pixel buffer
-                    // (draws into a temp, then Swap), so GetPixels must read
-                    // frame.GetPixels() AFTER the copy — a pointer captured
-                    // beforehand dangles (the buffer is freed) and the codec
-                    // writes into freed memory (heap corruption 0xc0000374).
-                    if (i > 0)
-                    {
-                        frames[i - 1].CopyTo(frame);
-                    }
-
-                    var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
-                    if (codec.GetPixels(frameInfo, frame.GetPixels(), options) != SKCodecResult.Success)
-                    {
-                        // Never install a garbage buffer: the replacement was
-                        // never composited from the prior frame, so re-seed it
-                        // from the previous frame's pixels (or erase frame 0)
-                        // to keep the fallback deterministic.
-                        frame.Dispose();
-                        frame = new SKBitmap(frameInfo);
-                        if (i > 0)
-                        {
-                            frames[i - 1].CopyTo(frame);
-                        }
-                        else
-                        {
-                            frame.Erase(new SKColor(0, 0, 0, 0));
-                        }
-                    }
-                    frames[i] = frame;
-                    durations[i] = codec.FrameInfo[i].Duration > 0 ? codec.FrameInfo[i].Duration : 100L;
                 }
             }
             else
             {
-                // Still image: probe the codec created above; only decode when
-                // the frame is within the per-frame pixel cap.
-                if (codec == null || (long)codec.Info.Width * codec.Info.Height <= MaxPixelsPerFrame)
-                {
-                    staticBitmap = SKBitmap.Decode(data);
-                }
-                else
-                {
-                    Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height} still image (cap {MaxPixelsPerFrame} px)");
-                }
+                staticBitmap = DecodeStill(data, codec);
             }
         }
         catch
@@ -262,6 +196,87 @@ public class PictureAndGifWidget : ModernWidgetBase
         }
 
         PublishMedia(frames, durations, staticBitmap);
+    }
+
+    /// <summary>Decodes a multi-frame codec under the bomb caps; null when the
+    /// media is refused (the caller then installs nothing).</summary>
+    private (SKBitmap[]? Frames, long[]? Durations) DecodeAnimated(SKCodec codec)
+    {
+        if (codec.FrameCount > MaxFrames ||
+            (long)codec.Info.Width * codec.Info.Height > MaxPixelsPerFrame ||
+            (long)codec.Info.Width * codec.Info.Height * codec.FrameCount * 4L > MaxTotalFrameBytes)
+        {
+            Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height}x{codec.FrameCount} decode (cap {MaxFrames} frames, {MaxPixelsPerFrame} px/frame, {MaxTotalFrameBytes} total bytes)");
+            return (null, null);
+        }
+
+        int frameCount = codec.FrameCount;
+        SKImageInfo info = codec.Info;
+
+        // Force RGBA8888 frame buffers: Skia composites frames with
+        // PriorFrame in RGBA regardless of the codec's native format,
+        // and writing 4 bytes/pixel into an Index8/palette-sized buffer
+        // (codec.Info's natural format for GIFs) overruns the heap.
+        SKImageInfo frameInfo = info.ColorType == SKColorType.Rgba8888
+            ? info
+            : info.WithColorType(SKColorType.Rgba8888);
+        var frames = new SKBitmap[frameCount];
+        var durations = new long[frameCount];
+
+        for (int i = 0; i < frameCount; i++)
+        {
+            var frame = new SKBitmap(frameInfo);
+
+            // GIF frames are deltas: the codec needs the previous
+            // frame's pixels already in the destination to composite
+            // correctly. Without it, delta frames decode as mostly
+            // empty/black regions and the animation flashes black.
+            //
+            // NOTE: CopyTo REPLACES the destination's pixel buffer
+            // (draws into a temp, then Swap), so GetPixels must read
+            // frame.GetPixels() AFTER the copy — a pointer captured
+            // beforehand dangles (the buffer is freed) and the codec
+            // writes into freed memory (heap corruption 0xc0000374).
+            if (i > 0)
+            {
+                frames[i - 1].CopyTo(frame);
+            }
+
+            var options = new SKCodecOptions { FrameIndex = i, PriorFrame = i > 0 ? i - 1 : -1 };
+            if (codec.GetPixels(frameInfo, frame.GetPixels(), options) != SKCodecResult.Success)
+            {
+                // Never install a garbage buffer: the replacement was
+                // never composited from the prior frame, so re-seed it
+                // from the previous frame's pixels (or erase frame 0)
+                // to keep the fallback deterministic.
+                frame.Dispose();
+                frame = new SKBitmap(frameInfo);
+                if (i > 0)
+                {
+                    frames[i - 1].CopyTo(frame);
+                }
+                else
+                {
+                    frame.Erase(new SKColor(0, 0, 0, 0));
+                }
+            }
+            frames[i] = frame;
+            durations[i] = codec.FrameInfo[i].Duration > 0 ? codec.FrameInfo[i].Duration : 100L;
+        }
+
+        return (frames, durations);
+    }
+
+    /// <summary>Decodes a still image when within the per-frame pixel cap; null
+    /// (with a log line) when refused.</summary>
+    private SKBitmap? DecodeStill(byte[] data, SKCodec? codec)
+    {
+        if (codec is null || (long)codec.Info.Width * codec.Info.Height <= MaxPixelsPerFrame)
+        {
+            return SKBitmap.Decode(data);
+        }
+        Context?.LogError($"PictureAndGifWidget: refusing {codec.Info.Width}x{codec.Info.Height} still image (cap {MaxPixelsPerFrame} px)");
+        return null;
     }
 
     /// <summary>

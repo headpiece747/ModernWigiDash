@@ -155,7 +155,21 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         return ValueTask.CompletedTask;
     }
 
-    private void WeatherRefreshTick() => _ = FetchLiveWeatherAsync();
+    private void WeatherRefreshTick() => RequestRefresh();
+
+    /// <summary>
+    /// The single "fetch if due" gate for every cadence source: the 15-min
+    /// refresh PollLoop, the per-frame render kick, and the property-change
+    /// force paths all call this. The static-snapshot rule and the client's
+    /// throttle-window pre-check are applied here, once, instead of being
+    /// re-derived at each call site; the client's atomic in-flight claim
+    /// remains the authority (see <see cref="WeatherClient.TryBeginFetch"/>).
+    /// </summary>
+    private void RequestRefresh(bool force = false)
+    {
+        if (!force && (IsStaticSnapshotBlocking || !_client.IsFetchWindowElapsed())) return;
+        _ = FetchLiveWeatherAsync(force);
+    }
 
     public override async ValueTask DisposeAsync()
     {
@@ -176,26 +190,23 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         if (propertyName == nameof(LocationMatch))
         {
             _client.InvalidateCoordinates();
-            _ = FetchLiveWeatherAsync(force: true);
+            RequestRefresh(force: true);
         }
         else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
         {
             _client.InvalidateLocation();
-            _ = FetchLiveWeatherAsync(force: true);
+            RequestRefresh(force: true);
         }
         base.OnPropertyChanged(propertyName, newValue);
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        // Kick the fetch only when the static-snapshot rule allows and the
-        // client's sync throttle window has elapsed — the per-frame async
-        // allocation is skipped while the 5-min window is open. The client's
-        // atomic claim still decides throttling/in-flight.
-        if (!IsStaticSnapshotBlocking && _client.IsFetchWindowElapsed())
-        {
-            _ = FetchLiveWeatherAsync();
-        }
+        // Kick the fetch through the one cadence gate: the static-snapshot
+        // rule and the client's throttle window are applied in RequestRefresh,
+        // so the per-frame async allocation is skipped while the window is
+        // open, and the render tick never re-derives the fetch policy.
+        RequestRefresh();
 
         _lastBounds = bounds;
 
@@ -762,18 +773,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             lowTempC = _lowTempC;
         }
 
-        if (_renderModel is { } cached
-            && cached.DataVersion == dataVersion
-            && cached.Bounds == bounds
-            && cached.LayoutMode == LayoutMode
-            && cached.UnitSystem == UnitSystem
-            && cached.CustomLabel == CustomLabel
-            && cached.ResolvedCity == _client.ResolvedCityName
-            && cached.ShowFeelsLike == ShowFeelsLike
-            && cached.ShowHumidity == ShowHumidity
-            && cached.ShowWind == ShowWind
-            && cached.ShowHighLow == ShowHighLow
-            && cached.ShowForecast == ShowForecast)
+        if (_renderModel is { } cached && IsCacheValid(cached, dataVersion, bounds))
         {
             return cached;
         }
@@ -812,38 +812,70 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         // Pill widths: measured with the pill font the draw path derives from
         // the same bounds (the pill shrink re-measures when it triggers).
-        float s2 = Math.Min(sx, sy);
-        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(13f * s2, 8f, 24f));
-        float pillPadX = Math.Clamp(10f * s2, 4f, 20f);
-        float[] widths = new float[model.Metrics.Count];
-        for (int i = 0; i < widths.Length; i++)
-        {
-            widths[i] = metricFont.MeasureText(model.Metrics[i]) + pillPadX * 2;
-        }
-        model.MetricWidths = widths;
+        model.MetricWidths = MeasurePillWidths(model.Metrics, Math.Min(sx, sy));
 
-        int dailyCount = Math.Min(_dailyForecastSnapshot.Count, 5);
-        var ranges = new string[dailyCount];
-        var highLows = new string[dailyCount];
-        for (int i = 0; i < dailyCount; i++)
-        {
-            var day = _dailyForecastSnapshot[i];
-            ranges[i] = WeatherPresentation.ForecastRangeText(day.MaxTempC, day.MinTempC, tempUnit);
-            highLows[i] = WeatherPresentation.DailyHighLowText(day.MaxTempC, day.MinTempC, tempUnit);
-        }
+        var (ranges, highLows) = BuildForecastStrings(_dailyForecastSnapshot, Math.Min(_dailyForecastSnapshot.Count, 5), tempUnit);
         model.ForecastRanges = ranges;
         model.DailyHighLows = highLows;
 
-        int hourlyCount = Math.Min(_hourlyForecastSnapshot.Count, 6);
-        var temps = new string[hourlyCount];
-        for (int i = 0; i < hourlyCount; i++)
-        {
-            temps[i] = WeatherPresentation.FormatTemp(_hourlyForecastSnapshot[i].TempC, tempUnit);
-        }
-        model.HourlyTemps = temps;
+        model.HourlyTemps = BuildHourlyStrings(_hourlyForecastSnapshot, tempUnit);
 
         _renderModel = model;
         return model;
+    }
+
+    /// <summary>The render-model cache key: the data version, the bounds
+    /// (layout-derived font sizes), and the property snapshot that changes any
+    /// formatted string.</summary>
+    private bool IsCacheValid(WeatherRenderModel cached, int dataVersion, SKRect bounds)
+        => cached.DataVersion == dataVersion
+            && cached.Bounds == bounds
+            && cached.LayoutMode == LayoutMode
+            && cached.UnitSystem == UnitSystem
+            && cached.CustomLabel == CustomLabel
+            && cached.ResolvedCity == _client.ResolvedCityName
+            && cached.ShowFeelsLike == ShowFeelsLike
+            && cached.ShowHumidity == ShowHumidity
+            && cached.ShowWind == ShowWind
+            && cached.ShowHighLow == ShowHighLow
+            && cached.ShowForecast == ShowForecast;
+
+    /// <summary>Measured pill widths (text + padding) in the pill font the draw
+    /// path derives from the same scale.</summary>
+    private static float[] MeasurePillWidths(IReadOnlyList<string> metrics, float scale)
+    {
+        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(13f * scale, 8f, 24f));
+        float pillPadX = Math.Clamp(10f * scale, 4f, 20f);
+        var widths = new float[metrics.Count];
+        for (int i = 0; i < widths.Length; i++)
+        {
+            widths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
+        }
+        return widths;
+    }
+
+    private static (string[] Ranges, string[] HighLows) BuildForecastStrings(IReadOnlyList<DailyForecastItem> daily, int count, string tempUnit)
+    {
+        var ranges = new string[count];
+        var highLows = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            var day = daily[i];
+            ranges[i] = WeatherPresentation.ForecastRangeText(day.MaxTempC, day.MinTempC, tempUnit);
+            highLows[i] = WeatherPresentation.DailyHighLowText(day.MaxTempC, day.MinTempC, tempUnit);
+        }
+        return (ranges, highLows);
+    }
+
+    private static string[] BuildHourlyStrings(IReadOnlyList<HourlyForecastItem> hourly, string tempUnit)
+    {
+        int count = Math.Min(hourly.Count, 6);
+        var temps = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            temps[i] = WeatherPresentation.FormatTemp(hourly[i].TempC, tempUnit);
+        }
+        return temps;
     }
 
     /// <summary>

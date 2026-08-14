@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
@@ -27,14 +28,16 @@ public sealed class UpdateService
 
     private readonly Func<string, string?, Task<string?>> _downloadText;
     private readonly Func<string, string, IProgress<double>, CancellationToken, Task> _downloadFile;
-    private readonly Func<string, bool> _sha256Matches;
+    private readonly Func<string, string, bool> _sha256Matches;
+    private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly string _updatesRoot;
     private readonly Version? _currentVersion;
 
     public UpdateService(
         Func<string, string?, Task<string?>>? downloadText = null,
         Func<string, string, IProgress<double>, CancellationToken, Task>? downloadFile = null,
-        Func<string, bool>? sha256Matches = null,
+        Func<string, string, bool>? sha256Matches = null,
+        Func<ProcessStartInfo, Process?>? startProcess = null,
         string? updatesRoot = null,
         Version? currentVersion = null)
     {
@@ -43,9 +46,17 @@ public sealed class UpdateService
             "ModernWigiDash", "updates");
         _downloadText = downloadText ?? DownloadTextAsync;
         _downloadFile = downloadFile ?? DownloadFileAsync;
-        _sha256Matches = sha256Matches ?? (actual => true); // digest verified by DownloadAndStage
+        // The single digest-check expression: the seam IS the verification
+        // (tests veto or accept via the same predicate the default implements).
+        _sha256Matches = sha256Matches ?? DigestMatches;
+        _startProcess = startProcess ?? StartProcess;
         _currentVersion = currentVersion;
     }
+
+    private static bool DigestMatches(string actual, string expected)
+        => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static Process? StartProcess(ProcessStartInfo psi) => Process.Start(psi);
 
     public string StagedCmdPath(UpdateInfo info) => Path.Combine(_updatesRoot, "staged", info.Version, "apply-update.cmd");
 
@@ -83,7 +94,7 @@ public sealed class UpdateService
             if (!File.Exists(zipPath)) return false;
 
             string actual = ComputeSha256(zipPath);
-            if (!_sha256Matches(actual) || !string.Equals(actual, info.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (!_sha256Matches(actual, info.Sha256))
             {
                 TryDeleteDirectory(downloadDir);
                 FileLog.Write($"[UPDATE] download digest mismatch for v{info.Version}; download deleted");
@@ -113,6 +124,65 @@ public sealed class UpdateService
             if (Directory.Exists(dir)) TryDeleteDirectory(dir);
         }
         TryDeleteFile(Path.Combine(_updatesRoot, "apply-update-live.cmd"));
+    }
+
+    /// <summary>One startup recovery call: heal an interrupted swap and clear
+    /// stale stages/downloads (what the window used to do in two steps).</summary>
+    public void RecoverAtStartup(string installDir)
+    {
+        CleanupStale();
+        RecoverInterruptedSwap(installDir);
+    }
+
+    /// <summary>
+    /// Launches the staged updater: reads the staged apply-update.cmd,
+    /// substitutes the {{RELAUNCH}} marker, writes the result OUTSIDE the stage
+    /// (the cmd deletes its own stage — a batch that deletes itself while
+    /// running loses the rest of its script), and spawns cmd.exe hidden,
+    /// detached from this process's job object (without ShellExecute the child
+    /// is reaped when the app closes, and the swap never runs). Returns false
+    /// (with a log line) when any step fails — the caller keeps the window
+    /// open and hides the button. The whole launch protocol lives here; the
+    /// window only confirms and closes.
+    /// </summary>
+    public bool LaunchUpdater(UpdateInfo info, string installDir)
+    {
+        try
+        {
+            string stageDir = Path.Combine(_updatesRoot, "staged", info.Version);
+            string stagedCmd = StagedCmdPath(info);
+            // AppContext.BaseDirectory ends with a separator — Path.Combine
+            // (not string concat) so the relaunch path never doubles the
+            // backslash (start "" "<path>\\exe" fails with "cannot find the
+            // path specified" and silently skips the relaunch).
+            string relaunch = $"start \"\" \"{Path.Combine(installDir, "ModernWigiDash.App.exe")}\"";
+
+            string body = File.ReadAllText(stagedCmd);
+            string substituted = body.Replace("{{RELAUNCH}}", relaunch);
+            if (substituted.Length == body.Length)
+                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
+            string liveCmd = Path.Combine(_updatesRoot, "apply-update-live.cmd");
+            File.WriteAllText(liveCmd, substituted);
+
+            // UseShellExecute=true detaches the updater from this process's job
+            // object. With ShellExecute, cmd receives the arguments as one
+            // string, so the slash-S slash-C doubled-quote form fails silently;
+            // the whole command must be a single quoted argument to slash-c.
+            string cmdExe = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            string inner = $"\"{liveCmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
+            var psi = new ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
+            {
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            _startProcess(psi);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"[UPDATE] launch failed: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>Repairs an interrupted swap: restores exe.old when the new exe is

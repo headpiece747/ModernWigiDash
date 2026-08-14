@@ -63,6 +63,14 @@ public sealed class DisplayHidTransport : IDisplayTransport
     /// </summary>
     internal ConnectProvider[] ProviderFactories { get; set; }
 
+    /// <summary>
+    /// Test seam: the LibUsb leg's device lookup. Defaults to the shared-context
+    /// find (VID/PID); tests inject a fake <see cref="IUsbDevice"/> so the
+    /// open/config/claim/endpoint sequence and its teardown are drivable
+    /// without hardware (the <see cref="WinUsbApi"/> delegate-bag precedent).
+    /// </summary>
+    internal Func<IUsbDevice?>? LibUsbDeviceProvider { get; set; }
+
     /// <summary>The real WinUSB leg. Internal so tests can keep it in a
     /// fake provider list (e.g. <c>[transport.WinUsbProvider, fakeLibUsb]</c>).</summary>
     internal ConnectProvider WinUsbProvider => new(
@@ -165,12 +173,14 @@ public sealed class DisplayHidTransport : IDisplayTransport
     /// pre-PING that used to run in <see cref="Connect"/> duplicated it and had
     /// drifted). Partial-state teardown is owned here: a failed open disposes
     /// the device under <c>_usbLock</c> (same rule as <see cref="Cleanup"/>).
+    /// Both failure exits dispose the LOCAL device — never the adopted global
+    /// backend, which belongs to a previous provider attempt.
     /// </summary>
     private ITransferBackend? TryCreateWinUsbBackend()
     {
+        var winUsb = new WinUsbBulkDevice();
         try
         {
-            var winUsb = new WinUsbBulkDevice();
             if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
                 LogToFile("[USB-WINUSB] Direct WinUSB connection opened");
@@ -186,7 +196,7 @@ public sealed class DisplayHidTransport : IDisplayTransport
             LogToFile($"[USB-WINUSB] Exception: {ex.Message}, falling back to LibUsbDotNet");
             lock (_usbLock)
             {
-                _backend?.Dispose();
+                winUsb.Dispose();
                 _backend = null;
             }
             return null;
@@ -195,23 +205,20 @@ public sealed class DisplayHidTransport : IDisplayTransport
 
     /// <summary>
     /// LibUsbDotNet attempt: find → open → configure → claim → endpoint →
-    /// backend. Partial-state teardown is owned here (device.Close on claim
-    /// failure; the terminal connect-exception handling on any throw).
+    /// backend. Partial-state teardown is owned here: every failure path
+    /// closes the LOCAL device — the claim-failure path closes it directly,
+    /// the terminal catch closes the open/config/claimed device it created.
+    /// Never the adopted global backend, which belongs to a previous provider
+    /// attempt (the old catch disposed <c>_backend</c> and leaked this device).
     /// </summary>
     private ITransferBackend? TryCreateLibUsbBackend()
     {
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
 
+        IUsbDevice? device = null;
         try
         {
-            var context = SharedContext.Value;
-            var finder = new UsbDeviceFinder
-            {
-                Vid = DisplayProtocolConstants.VendorId,
-                Pid = DisplayProtocolConstants.ProductId
-            };
-
-            IUsbDevice? device = context.Find(finder);
+            device = LibUsbDeviceProvider is not null ? LibUsbDeviceProvider() : FindLibUsbDevice();
 
             if (device is null)
             {
@@ -266,9 +273,33 @@ public sealed class DisplayHidTransport : IDisplayTransport
         {
             LogToFile($"[USB-LIBUSB] Connect exception: {ex.GetType().FullName}: {ex.Message}");
             _logger.LogError(ex, "Failed to connect to WigiDash");
-            Cleanup();
+            // Terminal teardown of the LOCAL device: an opened (and possibly
+            // configured + claimed) device must be released — under _usbLock,
+            // the same never-free-while-in-flight rule as Cleanup. If the
+            // backend was already constructed, its dispose path closes the
+            // device; here the construction never completed.
+            if (device is not null)
+            {
+                lock (_usbLock)
+                {
+                    device.Close();
+                }
+            }
             return null;
         }
+    }
+
+    /// <summary>Finds the WigiDash device via the shared LibUsbDotNet context
+    /// (the production default behind <see cref="LibUsbDeviceProvider"/>).</summary>
+    private static IUsbDevice? FindLibUsbDevice()
+    {
+        var context = SharedContext.Value;
+        var finder = new UsbDeviceFinder
+        {
+            Vid = DisplayProtocolConstants.VendorId,
+            Pid = DisplayProtocolConstants.ProductId
+        };
+        return context.Find(finder);
     }
 
     /// <summary>
@@ -389,10 +420,10 @@ public sealed class DisplayHidTransport : IDisplayTransport
             byte[] blankFrame = new byte[DisplayProtocolConstants.FrameBufferSize];
             LogToFile($"[HW-INIT] Writing blank framebuffer ({blankFrame.Length} bytes) to page={page} widget={widgetId}");
 
-            // Control transfer header: offset=0, length=FrameBufferSize
+            // Control transfer header: offset=0, length=FrameBufferSize (the
+            // single wire-format owner, shared with the 30 FPS send path).
             byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-            BitConverter.GetBytes((uint)0).CopyTo(header, 0);
-            BitConverter.GetBytes((uint)blankFrame.Length).CopyTo(header, 4);
+            BuildFrameHeader(header, blankFrame.Length);
 
             ushort wValue = (ushort)((page << 8) | widgetId);
             bool headerOk = ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header);
@@ -408,6 +439,23 @@ public sealed class DisplayHidTransport : IDisplayTransport
         {
             LogToFile($"[HW-INIT] Blank framebuffer write exception: {ex.Message}");
         }
+    }
+
+    /// <summary>Writes the 8-byte frame-header wire format [offset(4 LE),
+    /// length(4 LE)] into <paramref name="dest"/> — the single owner of the
+    /// layout, shared by the cold blank-framebuffer path and the 30 FPS send
+    /// path (the layout is documented in <see cref="DisplayProtocolConstants"/>;
+    /// a protocol change edits one method).</summary>
+    internal static void BuildFrameHeader(byte[] dest, int length)
+    {
+        dest[0] = 0;
+        dest[1] = 0;
+        dest[2] = 0;
+        dest[3] = 0;
+        dest[4] = (byte)length;
+        dest[5] = (byte)(length >> 8);
+        dest[6] = (byte)(length >> 16);
+        dest[7] = (byte)(length >> 24);
     }
 
     /// <summary>
@@ -590,17 +638,11 @@ public sealed class DisplayHidTransport : IDisplayTransport
                 // bookkeeping to consult here.
 
                 // Reused header buffer: SendFrame is serialized by _usbLock, so
-                // no per-frame allocation on the 30 FPS path. The uint header
-                // fields are written in place — BitConverter.GetBytes would
-                // allocate two byte[4] per frame.
-                _frameHeader[0] = 0;
-                _frameHeader[1] = 0;
-                _frameHeader[2] = 0;
-                _frameHeader[3] = 0;
-                _frameHeader[4] = (byte)frameArray.Length;
-                _frameHeader[5] = (byte)(frameArray.Length >> 8);
-                _frameHeader[6] = (byte)(frameArray.Length >> 16);
-                _frameHeader[7] = (byte)(frameArray.Length >> 24);
+                // no per-frame allocation on the 30 FPS path. The wire format
+                // is owned once by BuildFrameHeader (the cold blank-framebuffer
+                // path shares it); the in-place byte writes avoid BitConverter's
+                // per-field byte[4] allocations.
+                BuildFrameHeader(_frameHeader, frameArray.Length);
 
                 if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue: 0, _frameHeader))
                 {

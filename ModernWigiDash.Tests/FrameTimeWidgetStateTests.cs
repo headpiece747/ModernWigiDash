@@ -75,11 +75,11 @@ public class FrameTimeWidgetStateTests
         var bounds = new SKRect(0, 0, 406, 296);
 
         var unavailable = new FrameTimeWidget();
-        FrameTimeStore.Update(new FrameTimeSnapshotDto());
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto());
         unavailable.Render(canvas, bounds);
 
         var waiting = new FrameTimeWidget();
-        FrameTimeStore.Update(new FrameTimeSnapshotDto { IsAvailable = true, CaptureHealthy = true });
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto { IsAvailable = true, CaptureHealthy = true });
         waiting.Render(canvas, bounds);
 
         var live = new FrameTimeWidget { AccentColorHex = "#22C55E" };
@@ -88,7 +88,7 @@ public class FrameTimeWidgetStateTests
         {
             samples.Add(6.5 + (i % 20) * 0.05);
         }
-        FrameTimeStore.Update(new FrameTimeSnapshotDto
+        FrameTimeStore.UpdateFromDto(new FrameTimeSnapshotDto
         {
             IsAvailable = true,
             CaptureHealthy = true,

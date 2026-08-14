@@ -77,6 +77,11 @@ public sealed class WeatherClient
         EnableMultipleHttp2Connections = true
     });
 
+    /// <summary>The fetch throttle window — the one spelling shared by the
+    /// atomic claim (<see cref="TryBeginFetch"/>) and the render-tick pre-check
+    /// (<see cref="IsFetchWindowElapsed"/>); a change edits one constant.</summary>
+    private static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
+
     private readonly string _cachePath;
     private readonly Action<string, Exception?>? _logError;
 
@@ -140,7 +145,7 @@ public sealed class WeatherClient
     internal bool TryBeginFetch(bool force = false)
     {
         if (Interlocked.CompareExchange(ref _fetchClaim, 1, 0) != 0) return false;
-        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime).TotalMinutes < 5)
+        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime) < FetchWindow)
         {
             Interlocked.Exchange(ref _fetchClaim, 0);
             return false;
@@ -156,11 +161,13 @@ public sealed class WeatherClient
     /// kick gates on this to avoid the per-frame async allocation of
     /// <see cref="TryBeginFetch"/>; the atomic claim remains the authority.
     /// </summary>
-    /// <summary>Synchronous render-tick pre-check: has the 5-minute throttle
-    /// window elapsed? The first attempt (never-fetched) reads as elapsed; a
-    /// failed attempt stamps the time, so failures cool down like successes.</summary>
+    /// <summary>Synchronous render-tick pre-check: has the throttle window
+    /// elapsed? The first attempt (never-fetched) reads as elapsed; a failed
+    /// attempt stamps the time, so failures cool down like successes. The
+    /// window is the single <see cref="FetchWindow"/> both this check and the
+    /// atomic claim share — one spelling, drift impossible.</summary>
     internal bool IsFetchWindowElapsed()
-        => Clock.GetUtcNow().UtcDateTime - _lastFetchTime >= TimeSpan.FromMinutes(5);
+        => Clock.GetUtcNow().UtcDateTime - _lastFetchTime >= FetchWindow;
 
     /// <summary>
     /// Resets resolved coordinates and the throttle so the next fetch
@@ -485,18 +492,17 @@ public sealed class WeatherClient
 
     private static (double? HighTempC, double? LowTempC, IReadOnlyList<DailyForecastItem>? Daily) ParseDailyForecast(JsonElement root)
     {
-        double? highTempC = null;
-        double? lowTempC = null;
-        IReadOnlyList<DailyForecastItem>? dailyForecasts = null;
-
         if (!root.TryGetProperty("daily", out var daily)) return (null, null, null);
 
+        double? highTempC = null;
+        double? lowTempC = null;
         if (daily.TryGetProperty("temperature_2m_max", out var maxes) && maxes.GetArrayLength() > 0)
             highTempC = maxes[0].GetDouble();
         if (daily.TryGetProperty("temperature_2m_min", out var mins) && mins.GetArrayLength() > 0)
             lowTempC = mins[0].GetDouble();
 
-        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("temperature_2m_max", out _))
+        IReadOnlyList<DailyForecastItem>? dailyForecasts = null;
+        if (daily.TryGetProperty("time", out var dTimes) && daily.TryGetProperty("temperature_2m_max", out maxes))
         {
             // Both the modern (weather_code) and legacy (weathercode) names are
             // honored so either response shape parses.
@@ -504,22 +510,29 @@ public sealed class WeatherClient
             bool legacyCodes = !modernCodes && daily.TryGetProperty("weathercode", out dCodes);
             if (modernCodes || legacyCodes)
             {
-                int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
-                List<DailyForecastItem> items = [];
-                for (int i = 0; i < Math.Min(dLen, 7); i++)
-                {
-                    string dateStr = dTimes[i].GetString() ?? "";
-                    string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate) ? parsedDate.DayOfWeek.ToString() : $"Day {i + 1}";
-                    items.Add(new DailyForecastItem(
-                        i == 0 ? "Today" : dayName,
-                        maxes[i].GetDouble(),
-                        mins[i].GetDouble(),
-                        dCodes[i].GetInt32()));
-                }
-                dailyForecasts = items;
+                dailyForecasts = BuildDailyItems(dTimes, maxes, mins, dCodes);
             }
         }
         return (highTempC, lowTempC, dailyForecasts);
+    }
+
+    private static List<DailyForecastItem> BuildDailyItems(JsonElement dTimes, JsonElement maxes, JsonElement mins, JsonElement codes)
+    {
+        int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
+        List<DailyForecastItem> items = [];
+        for (int i = 0; i < Math.Min(dLen, 7); i++)
+        {
+            string dateStr = dTimes[i].GetString() ?? "";
+            string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)
+                ? parsedDate.DayOfWeek.ToString()
+                : $"Day {i + 1}";
+            items.Add(new DailyForecastItem(
+                i == 0 ? "Today" : dayName,
+                maxes[i].GetDouble(),
+                mins[i].GetDouble(),
+                codes[i].GetInt32()));
+        }
+        return items;
     }
 
     /// <summary>
@@ -628,41 +641,52 @@ public sealed class WeatherClient
     /// </summary>
     private static (int Score, double Population) RankGeocodeCandidate(JsonElement candidate, string namePart, string? suffixPart, string? countryCode)
     {
-        int score = 0;
-        string name = candidate.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-        if (name.Equals(namePart, StringComparison.OrdinalIgnoreCase)) score += 1000;
+        string name = GetString(candidate, "name");
+        string admin1 = GetString(candidate, "admin1");
+        string country = GetString(candidate, "country");
+        string code = GetString(candidate, "country_code");
 
-        string admin1 = candidate.TryGetProperty("admin1", out var a1) ? a1.GetString() ?? "" : "";
-        string country = candidate.TryGetProperty("country", out var c) ? c.GetString() ?? "" : "";
-        string code = candidate.TryGetProperty("country_code", out var cc) ? cc.GetString() ?? "" : "";
-
-        if (!string.IsNullOrWhiteSpace(suffixPart))
-        {
-            if (admin1.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
-                || country.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
-                || code.Equals(suffixPart, StringComparison.OrdinalIgnoreCase))
-            {
-                score += 500;
-            }
-            else if (admin1.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
-                || country.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
-                || code.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase))
-            {
-                score += 250; // abbreviation ("MA" -> Massachusetts)
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(countryCode)
-            && (code.Equals(countryCode.Trim(), StringComparison.OrdinalIgnoreCase)
-                || country.Equals(countryCode.Trim(), StringComparison.OrdinalIgnoreCase)))
-        {
-            score += 500;
-        }
+        int score = ScoreExactName(name, namePart)
+            + ScoreSuffixMatch(admin1, country, code, suffixPart)
+            + ScoreCountryHint(code, country, countryCode);
 
         double population = candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
             ? p.GetDouble()
             : 0;
         return (score, population);
+    }
+
+    private static string GetString(JsonElement element, string property)
+        => element.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
+
+    private static int ScoreExactName(string name, string namePart)
+        => name.Equals(namePart, StringComparison.OrdinalIgnoreCase) ? 1000 : 0;
+
+    private static int ScoreSuffixMatch(string admin1, string country, string code, string? suffixPart)
+    {
+        if (string.IsNullOrWhiteSpace(suffixPart)) return 0;
+        if (admin1.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
+            || country.Equals(suffixPart, StringComparison.OrdinalIgnoreCase)
+            || code.Equals(suffixPart, StringComparison.OrdinalIgnoreCase))
+        {
+            return 500;
+        }
+        // abbreviation ("MA" -> Massachusetts)
+        return admin1.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
+            || country.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
+            || code.StartsWith(suffixPart, StringComparison.OrdinalIgnoreCase)
+            ? 250
+            : 0;
+    }
+
+    private static int ScoreCountryHint(string code, string country, string? countryCode)
+    {
+        if (string.IsNullOrWhiteSpace(countryCode)) return 0;
+        string hint = countryCode.Trim();
+        return code.Equals(hint, StringComparison.OrdinalIgnoreCase)
+            || country.Equals(hint, StringComparison.OrdinalIgnoreCase)
+            ? 500
+            : 0;
     }
 
     /// <summary>"Name, Admin1, Country" (omitting missing parts) so the widget

@@ -1,10 +1,8 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
-using System.Net;
-using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using ModernWigiDash.App.Update;
 
 namespace ModernWigiDash.Tests;
@@ -109,7 +107,7 @@ public class UpdateServiceTests
         string dir = NewDir();
         var service = new UpdateService(
             downloadFile: async (_, dest, _, _) => await File.WriteAllTextAsync(dest, "corrupt"),
-            sha256Matches: _ => false,
+            sha256Matches: (_, _) => false,
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", "expected-digest");
 
@@ -140,7 +138,7 @@ public class UpdateServiceTests
 
         var service = new UpdateService(
             downloadFile: async (_, dest, _, _) => await File.WriteAllBytesAsync(dest, zipBytes),
-            sha256Matches: actual => actual == digest,
+            sha256Matches: (actual, expected) => actual == expected,
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", digest);
 
@@ -214,5 +212,84 @@ public class UpdateServiceTests
         service.CleanupStale();
 
         Assert.IsFalse(Directory.Exists(Path.Combine(dir, "staged")), "any stage present at startup is stale");
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_SubstitutesRelaunchAndSpawns()
+    {
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        // Production stages the cmd with {{VERSION}} already substituted
+        // (WriteUpdaterCmd); LaunchUpdater resolves only {{RELAUNCH}}.
+        File.WriteAllText(
+            Path.Combine(stageDir, "apply-update.cmd"),
+            "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+
+        ProcessStartInfo? started = null;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: psi =>
+            {
+                started = psi;
+                return null;
+            });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+        string installDir = Path.Combine(Path.GetTempPath(), "wmd-install");
+
+        bool ok = service.LaunchUpdater(info, installDir);
+
+        Assert.IsTrue(ok);
+        string liveCmd = Path.Combine(dir, "apply-update-live.cmd");
+        Assert.IsTrue(File.Exists(liveCmd), "the substituted cmd must be written outside the stage");
+        string body = File.ReadAllText(liveCmd);
+        Assert.IsTrue(body.Contains("echo 0.5.0"), "{{VERSION}} must be substituted");
+        Assert.IsTrue(body.Contains($"start \"\" \"{Path.Combine(installDir, "ModernWigiDash.App.exe")}\""),
+            "{{RELAUNCH}} must be substituted with the install-dir relaunch line");
+        Assert.IsFalse(body.Contains("{{RELAUNCH}}"));
+        Assert.IsNotNull(started, "the launch seam must be invoked");
+        Assert.IsTrue(started!.UseShellExecute, "ShellExecute detaches the updater from the app's job object");
+        Assert.IsTrue(started.Arguments.Contains(installDir), "the install dir must reach the updater");
+        Assert.IsTrue(started.Arguments.Contains(stageDir), "the stage dir must reach the updater");
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_MissingStagedCmd_ReturnsFalse()
+    {
+        string dir = NewDir();
+        int spawns = 0;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: _ =>
+            {
+                spawns++;
+                return null;
+            });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+        bool ok = service.LaunchUpdater(info, Path.Combine(Path.GetTempPath(), "wmd-install"));
+
+        Assert.IsFalse(ok, "a vanished stage must fail the launch, not the UI thread");
+        Assert.AreEqual(0, spawns);
+        Assert.IsFalse(File.Exists(Path.Combine(dir, "apply-update-live.cmd")));
+    }
+
+    [TestMethod]
+    public void RecoverAtStartup_HealsInterruptedSwapAndCleansStale()
+    {
+        string dir = NewDir();
+        string installDir = Path.Combine(dir, "install");
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(Path.Combine(installDir, "ModernWigiDash.App.exe.old"), "old-exe");
+        string staged = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(staged);
+        var service = new UpdateService(updatesRoot: dir);
+
+        service.RecoverAtStartup(installDir);
+
+        Assert.IsTrue(File.Exists(Path.Combine(installDir, "ModernWigiDash.App.exe")),
+            "an interrupted swap must be restored at startup");
+        Assert.IsFalse(File.Exists(Path.Combine(installDir, "ModernWigiDash.App.exe.old")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(dir, "staged")), "stale stages must be cleaned at startup");
     }
 }

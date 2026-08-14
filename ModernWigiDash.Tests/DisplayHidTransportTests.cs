@@ -409,4 +409,69 @@ public class DisplayHidTransportTests
 
         Assert.IsFalse(backend.IsOpen);
     }
+
+    // ── LibUsb leg: teardown through the real provider + the device seam ──
+
+    private static DisplayHidTransport TransportWithLibUsbDevice(FakeLibUsbDevice device)
+    {
+        var transport = new DisplayHidTransport();
+        transport.LibUsbDeviceProvider = () => device;
+        transport.ProviderFactories = [transport.LibUsbProvider];
+        return transport;
+    }
+
+    [TestMethod]
+    public void BuildFrameHeader_WritesLittleEndianOffsetAndLength()
+    {
+        // The wire format is owned once (the cold blank-framebuffer path and
+        // the 30 FPS send path share BuildFrameHeader) — pin the layout here.
+        byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
+
+        DisplayHidTransport.BuildFrameHeader(header, 0x01020304);
+
+        CollectionAssert.AreEqual(new byte[] { 0, 0, 0, 0, 0x04, 0x03, 0x02, 0x01 }, header,
+            "the header is [offset(4 LE), length(4 LE)] with a zero offset");
+    }
+
+    [TestMethod]
+    public void Connect_LibUsbOpenThrows_ClosesTheDevice()
+    {
+        // The open/config/claimed local must be released on the terminal
+        // exception path — the old catch disposed the adopted global backend
+        // (null on the first attempt) and leaked this device until process exit.
+        var device = new FakeLibUsbDevice { OpenThrows = true };
+        using var transport = TransportWithLibUsbDevice(device);
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, device.CloseCalls, "the device whose open threw must be released, not leaked");
+    }
+
+    [TestMethod]
+    public void Connect_LibUsbClaimFails_ClosesTheDevice()
+    {
+        var device = new FakeLibUsbDevice { ClaimResult = false };
+        using var transport = TransportWithLibUsbDevice(device);
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, device.CloseCalls, "an unclaimed device must be released");
+    }
+
+    [TestMethod]
+    public void Connect_LibUsbEndpointWriterThrows_ClosesTheDevice()
+    {
+        // The endpoint writer is opened inside the backend construction — a
+        // throw leaves the open+claimed device orphaned unless the terminal
+        // catch releases it.
+        var device = new FakeLibUsbDevice { WriterThrows = true };
+        using var transport = TransportWithLibUsbDevice(device);
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, device.CloseCalls, "an endpoint-writer failure must release the open+claimed device");
+    }
 }

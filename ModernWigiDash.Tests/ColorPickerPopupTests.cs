@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Theming;

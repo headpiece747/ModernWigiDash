@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opportunity Scan — ModernWigiDash · 2026-08-13</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #1a2332; background: #f6f8fa; line-height: 1.55; padding: 2.5rem 1rem 4rem; }
+  main { max-width: 860px; margin: 0 auto; }
+  header { margin-bottom: 2.2rem; }
+  h1 { font-size: 1.7rem; letter-spacing: -0.02em; }
+  .sub { color: #5b6774; margin-top: .35rem; font-size: .95rem; }
+  .badge { display: inline-block; font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: .18rem .6rem; border-radius: 999px; margin-right: .45rem; vertical-align: 2px; }
+  .badge.reactive { background: #e3edfb; color: #1d4ed8; }
+  .finding { background: #fff; border: 1px solid #e3e8ee; border-radius: 12px; padding: 1.4rem 1.6rem; margin-bottom: 1.4rem; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+  .finding h2 { font-size: 1.12rem; margin-bottom: .6rem; letter-spacing: -0.01em; }
+  .rank { font-size: .7rem; font-weight: 700; color: #fff; background: #4b5563; border-radius: 999px; padding: .14rem .55rem; margin-right: .5rem; vertical-align: 2px; }
+  .rank.hot { background: #b42318; }
+  .rank.warm { background: #b54708; }
+  .rank.cool { background: #175cd3; }
+  .rank.fixed { background: #067647; }
+  .evidence { background: #f8fafc; border-left: 3px solid #cbd5e1; border-radius: 0 8px 8px 0; padding: .8rem 1rem; margin: .7rem 0; font-size: .9rem; color: #334155; }
+  .evidence code { background: #eef2f7; border-radius: 4px; padding: 0 .3rem; font-size: .85em; }
+  ul { padding-left: 1.2rem; margin: .5rem 0; }
+  li { margin: .28rem 0; }
+  .primitive { margin-top: .8rem; font-size: .92rem; }
+  .primitive b { color: #0f4a8f; }
+  .muted { color: #5b6774; font-size: .9rem; }
+  footer { margin-top: 2.5rem; color: #8a94a0; font-size: .82rem; border-top: 1px solid #e3e8ee; padding-top: 1rem; }
+  .note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: .9rem 1.1rem; margin-bottom: 1.6rem; font-size: .92rem; color: #78350f; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Opportunity Scan — ModernWigiDash</h1>
+    <div class="sub"><span class="badge reactive">Reactive — run artifacts</span>Target: the in-app auto-update run (v0.4.1..HEAD, 39 commits) · Steer: build / test / release loop · 2026-08-13</div>
+  </header>
+
+  <div class="note"><b>Target note:</b> the proactive target (agentmemory sessions) was empty — <code>memory_sessions</code> and <code>memory_recall</code> returned zero observations. Per the skill, the scan did not invent evidence; it switched to the reactive variant over the run's real artifacts (git history, <code>docs/superpowers/plans/2026-08-13-in-app-update.md</code>, <code>scripts/build-release.ps1</code>, this session's on-device validation loop).</div>
+
+  <section class="finding">
+    <h2><span class="rank hot">1</span>The on-device validation loop caught 4 real bugs unit tests could not — and it is still a manual, un-encoded process</h2>
+    <p>The updater's launch/swap path shipped with tests green, then failed on the physical device four times in sequence — job-object reaping, doubled backslash, <code>/S /C</code> cmd quoting, batch self-delete — each found only in the elevated on-device loop and each fixed by a follow-up commit.</p>
+    <div class="evidence">Fix chain on one feature: <code>24499bd</code> digest normalize · <code>41d8b82</code> Path.Combine · <code>78a66da</code> job detachment · <code>d71fe9d</code> ShellExecute quoting · <code>5353106</code> run outside stage · <code>df17866</code>/<code>e8b8443</code> stale-cmd cleanup. The loop that caught them lives only in plan Task&nbsp;7 ("Full verification + smoke on the physical WigiDash") and in scripts kept in <code>%TEMP%\opencode\wmd-elevated\</code> — outside the repo.</div>
+    <div class="primitive"><b>Best-fit primitive: a skill.</b> A <code>hardware-e2e-validation</code> skill in this repo's house style (like the SDD loop): elevated launcher via <code>run-elevated.ps1</code>, UIA driver scripts (<code>uia-dump</code>, <code>upd-check</code>, <code>upd-click</code>, <code>upd-ok2</code>), and the smoke checklist (fresh profile → button hidden → stream log lines → full update cycle → profile/theme survive), plus the rule "any on-device finding gets a regression test before the fix ships". <b>Second change:</b> move the <code>wmd-elevated</code> scripts into <code>scripts/e2e/</code> so the loop is versioned, not temp-resident.</div>
+  </section>
+
+  <section class="finding">
+    <h2><span class="rank warm">2</span>Release verification was a manual eyeball pass; the FileVersion stamp slipped through to shipped exes</h2>
+    <p><code>build-release.ps1</code> stamped <code>InformationalVersion</code> but the Windows <code>FileVersion</code> resource silently came from the csproj's deliberate 0.0.0 dev pin — every release exe since showed 0.0.0 in Explorer Details. The plan's Task 7 verified the zip contained a version-stamped exe but never checked the version resource itself.</p>
+    <div class="evidence">Regression found and fixed <code>be58cb5</code> ("stamp FileVersion on release exes") — one week of shipped v0.5.0 assets carried the wrong file version until the user asked about cosmetic items.</div>
+    <div class="primitive"><b>Best-fit primitive: enforcement, not a rule.</b> A must-always you enforce by hand → a check inside <code>build-release.ps1</code>: after publish, assert <code>(Get-Item exe).VersionInfo.FileVersion -eq $Version</code> and fail the build otherwise. A rule line alone would be the same eyeball pass it already failed.</div>
+  </section>
+
+  <section class="finding">
+    <h2><span class="rank fixed">3</span>Release zips committed to git twice → GitHub rejected the push → filter-branch rewrite</h2>
+    <p>Two 294&nbsp;MB zips entered history (<code>b6a0fcc</code>, <code>fa0f304</code>); GitHub's 100&nbsp;MB blob limit forced a history rewrite (<code>git filter-branch</code> over <code>origin/master..HEAD</code>), a re-pointed <code>v0.5.0</code> tag, and dropped refs. The durable fix now exists: <code>ModernWigiDash-v*.zip</code> is gitignored.</p>
+    <div class="primitive"><b>Verdict: already fixed — no change.</b> The <code>.gitignore</code> entries (<code>c43bcf6</code>, <code>4f4e262</code>) encode the invariant. A pre-commit blob guard was considered and rejected: this repo deliberately has no hooks layer (Windows-native, per <code>.opencode/AGENTS.md</code>).</div>
+  </section>
+
+  <section class="finding">
+    <h2><span class="rank cool">4</span>agentmemory is installed with 15 skills but has zero observations for this project</h2>
+    <p>The proactive scan's target simply did not exist: <code>memory_sessions</code> returned an empty list and <code>memory_recall</code> found nothing. The <code>.agents/skills/</code> set (recall, remember, recap, session-history, …) is fully wired documentation for a capture path that is not running.</p>
+    <div class="primitive"><b>Best-fit primitive: a decision, surfaced.</b> Either wire the agentmemory capture (hooks/plugin per <code>agentmemory-hooks</code> skill) so future proactive scans have evidence, or prune the 15 unused skills. Keeping installed-but-dead memory infrastructure is the exact "facts never written down" failure the second-brain audit warns about — nothing records, so nothing rots visibly.</div>
+  </section>
+
+  <section class="finding">
+    <h2><span class="rank cool">5</span>Full 1025-test suite re-run after every fix commit during fix waves</h2>
+    <p>Fix waves (<code>67f077b</code>, <code>98eca5c</code>, <code>e59bd4d</code>) each closed with a full-suite run; the suite takes minutes. Targeted filters were used mid-iteration and worked.</p>
+    <div class="primitive"><b>Verdict: the process working as designed — no change.</b> Full-suite verification before shipping is this repo's quality gate and it caught real regressions. Encoding "filter during iteration" is a micro-optimization not worth a rule.</div>
+  </section>
+
+  <footer>Generated by the <b>opportunity-scan</b> skill (coleam00/skills, adapted) — reactive variant, steer: build/test/release loop. Evidence: git history v0.4.1..HEAD, implementation plan, release scripts, session records. Report is advisory: each primitive is a recommendation, not an applied change.</footer>
+</main>
+</body>
+</html>

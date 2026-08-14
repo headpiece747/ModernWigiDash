@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
@@ -36,12 +36,13 @@ internal static class SvgIconHelper
 
     /// <summary>
     /// Shared parsed-SVG-path cache with an empty-path fallback. Keyed
-    /// case-insensitively; callers supply the raw path data per key.
+    /// case-insensitively; callers supply the raw path data per key. The cache
+    /// rule is the shared Sdk <see cref="SvgPathParseCache{T}"/>; the
+    /// Skia-specific part is only the parser (bounds check, fill type) and the
+    /// empty-path fallback.
     /// </summary>
     internal static class SvgPathCache
     {
-        private static readonly ConcurrentDictionary<string, SKPath> Cache = new(StringComparer.OrdinalIgnoreCase);
-
         /// <summary>
         /// Returns the cached parsed path for <paramref name="key"/>, parsing
         /// the path data produced by <paramref name="getPathData"/> on first
@@ -58,30 +59,29 @@ internal static class SvgIconHelper
         /// (never null).
         /// </summary>
         internal static SKPath GetOrParse(string key, Func<string> getPathData)
-        {
-            return Cache.GetOrAdd(key, _ =>
-            {
-                try
-                {
-                    string pathData = getPathData();
-                    if (string.IsNullOrWhiteSpace(pathData))
-                        return new SKPath();
+            => SvgPathParseCache<SKPath>.GetOrParse(key, () => TryParse(getPathData())) ?? new SKPath();
 
-                    SKPath? parsed = SKPath.ParseSvgPathData(pathData);
-                    if (parsed != null && parsed.Bounds.Width > 0 && parsed.Bounds.Height > 0)
-                    {
-                        parsed.FillType = SKPathFillType.Winding;
-                        return parsed;
-                    }
-                    parsed?.Dispose();
-                }
-                catch
+        private static SKPath? TryParse(string pathData)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(pathData))
+                    return null;
+
+                SKPath? parsed = SKPath.ParseSvgPathData(pathData);
+                if (parsed != null && parsed.Bounds.Width > 0 && parsed.Bounds.Height > 0)
                 {
-                    // Fall through to an empty path.
-                    System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
+                    parsed.FillType = SKPathFillType.Winding;
+                    return parsed;
                 }
-                return new SKPath();
-            });
+                parsed?.Dispose();
+            }
+            catch
+            {
+                // Fall through to an empty path.
+                System.Diagnostics.Debug.WriteLine("Failed to parse SVG path data; returning empty path");
+            }
+            return null;
         }
     }
 }

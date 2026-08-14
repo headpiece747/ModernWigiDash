@@ -77,69 +77,89 @@ public sealed class GestureInterpreter
     {
         if (type == TouchEventType.TouchDown)
         {
-            // Only record the start position on the first Down; the hardware
-            // sends Down(1) for both contact and intermediate movement points.
-            if (!_active)
-            {
-                _startX = x;
-                _startY = y;
-                _active = true;
-            }
-
-            bool moved = Math.Abs(_startX - x) > MoveSensitivity || Math.Abs(_startY - y) > MoveSensitivity;
-            return new GestureOutcome(GesturePageAction.None, true,
-                moved ? TouchEventType.TouchMove : TouchEventType.TouchDown);
+            return HandleDown(x, y);
         }
 
         if (type == TouchEventType.TouchUp)
         {
-            if (!_active)
-            {
-                // The display reports the release state for more than one poll.
-                // Ignore subsequent releases so one physical tap becomes one action.
-                return new GestureOutcome(GesturePageAction.None, false, TouchEventType.TouchUp);
-            }
-
-            _active = false;
-            float deltaX = x - _startX;
-            float deltaY = y - _startY;
-
-            if (pageCount > 1)
-            {
-                // Horizontal swipe with a tight vertical tolerance.
-                if (Math.Abs(deltaX) > SwipeThresholdX && Math.Abs(deltaY) < SwipeToleranceY)
-                {
-                    if (deltaX < -SwipeThresholdX && activePageIndex < pageCount - 1)
-                    {
-                        return new GestureOutcome(GesturePageAction.NextPage, false, TouchEventType.TouchUp);
-                    }
-
-                    if (deltaX > SwipeThresholdX && activePageIndex > 0)
-                    {
-                        return new GestureOutcome(GesturePageAction.PrevPage, false, TouchEventType.TouchUp);
-                    }
-                }
-
-                // Arrow-tap fallback: stationary tap near the left/right edges
-                // (the canonical 60/964 × 200–400 zone owned by IsInArrowTapZone).
-                if (Math.Abs(deltaX) < TapThreshold && Math.Abs(deltaY) < TapThreshold &&
-                    IsInArrowTapZone(x, y))
-                {
-                    if (x <= EdgeLeftX && activePageIndex > 0)
-                    {
-                        return new GestureOutcome(GesturePageAction.PrevPage, false, TouchEventType.TouchUp);
-                    }
-
-                    if (x >= EdgeRightX && activePageIndex < pageCount - 1)
-                    {
-                        return new GestureOutcome(GesturePageAction.NextPage, false, TouchEventType.TouchUp);
-                    }
-                }
-            }
-
-            return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchUp);
+            return HandleUp(x, y, pageCount, activePageIndex);
         }
 
         return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchMove);
+    }
+
+    private GestureOutcome HandleDown(float x, float y)
+    {
+        // Only record the start position on the first Down; the hardware
+        // sends Down(1) for both contact and intermediate movement points.
+        if (!_active)
+        {
+            _startX = x;
+            _startY = y;
+            _active = true;
+        }
+
+        bool moved = Math.Abs(_startX - x) > MoveSensitivity || Math.Abs(_startY - y) > MoveSensitivity;
+        return new GestureOutcome(GesturePageAction.None, true,
+            moved ? TouchEventType.TouchMove : TouchEventType.TouchDown);
+    }
+
+    private GestureOutcome HandleUp(float x, float y, int pageCount, int activePageIndex)
+    {
+        if (!_active)
+        {
+            // The display reports the release state for more than one poll.
+            // Ignore subsequent releases so one physical tap becomes one action.
+            return new GestureOutcome(GesturePageAction.None, false, TouchEventType.TouchUp);
+        }
+
+        _active = false;
+        float deltaX = x - _startX;
+        float deltaY = y - _startY;
+
+        if (pageCount > 1)
+        {
+            GesturePageAction swipe = SwipeAction(deltaX, deltaY, pageCount, activePageIndex);
+            if (swipe != GesturePageAction.None)
+            {
+                return new GestureOutcome(swipe, false, TouchEventType.TouchUp);
+            }
+
+            GesturePageAction arrowTap = ArrowTapAction(x, y, deltaX, deltaY, pageCount, activePageIndex);
+            if (arrowTap != GesturePageAction.None)
+            {
+                return new GestureOutcome(arrowTap, false, TouchEventType.TouchUp);
+            }
+        }
+
+        return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchUp);
+    }
+
+    /// <summary>Horizontal swipe with a tight vertical tolerance, bounded by the
+    /// page index: NextPage for a left swipe on a non-last page, PrevPage for a
+    /// right swipe on a non-first page.</summary>
+    private static GesturePageAction SwipeAction(float deltaX, float deltaY, int pageCount, int activePageIndex)
+    {
+        if (Math.Abs(deltaX) <= SwipeThresholdX || Math.Abs(deltaY) >= SwipeToleranceY)
+        {
+            return GesturePageAction.None;
+        }
+        if (deltaX < -SwipeThresholdX && activePageIndex < pageCount - 1) return GesturePageAction.NextPage;
+        if (deltaX > SwipeThresholdX && activePageIndex > 0) return GesturePageAction.PrevPage;
+        return GesturePageAction.None;
+    }
+
+    /// <summary>Arrow-tap fallback: stationary tap in the left/right edge zones
+    /// (the canonical 60/964 × 200–400 band owned by <see cref="IsInArrowTapZone"/>),
+    /// page-bounded like the swipe.</summary>
+    private GesturePageAction ArrowTapAction(float x, float y, float deltaX, float deltaY, int pageCount, int activePageIndex)
+    {
+        if (Math.Abs(deltaX) >= TapThreshold || Math.Abs(deltaY) >= TapThreshold || !IsInArrowTapZone(x, y))
+        {
+            return GesturePageAction.None;
+        }
+        if (x <= EdgeLeftX && activePageIndex > 0) return GesturePageAction.PrevPage;
+        if (x >= EdgeRightX && activePageIndex < pageCount - 1) return GesturePageAction.NextPage;
+        return GesturePageAction.None;
     }
 }

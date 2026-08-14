@@ -22,7 +22,9 @@ public sealed class PollLoop : IDisposable
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _stoppedCts;
     private Task? _loopTask;
-    private string? _lastFailureMessage;
+    // The failure-message dedup rule, owned once (the LogOnChange module —
+    // the hand-rolled field comparison this used to carry is the same rule).
+    private readonly LogOnChange _failureDedup = new();
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
     /// <param name="interval">Delay between ticks.</param>
@@ -108,7 +110,7 @@ public sealed class PollLoop : IDisposable
                 }
 
                 _tick();
-                _lastFailureMessage = null;
+                _failureDedup.Changed(null); // a successful tick resets the dedup
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -116,11 +118,9 @@ public sealed class PollLoop : IDisposable
             }
             catch (Exception ex)
             {
-                string message = ex.Message;
-                if (message != _lastFailureMessage)
+                if (_failureDedup.Changed(ex.Message))
                 {
-                    _lastFailureMessage = message;
-                    _log($"[{_name}] poll failed: {message}");
+                    _log($"[{_name}] poll failed: {ex.Message}");
                 }
                 _onTickFailure();
             }

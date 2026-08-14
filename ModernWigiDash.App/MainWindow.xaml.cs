@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using ModernWigiDash.App.Power;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Models;
@@ -27,6 +28,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
     private readonly FramePump _framePump;
+
+    /// <summary>Windows sleep/resume lifecycle: pauses the pump on suspend and
+    /// restarts it (plus a forced USB reconnect) on resume.</summary>
+    private readonly Power.PowerLifecycle _powerLifecycle;
 
     /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
     /// The PresentMon interop is injected as a ctor parameter so the window
@@ -77,21 +82,29 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private static readonly SKSamplingOptions FrameSamplingOptions = new(SKFilterMode.Linear);
 
     public MainWindow()
-        : this(new PresentMonNative())
+        : this(new PresentMonNative(), ProfilePersistence.DefaultProfilePath(), new SystemPowerModeSource())
     {
     }
 
     /// <summary>Test seam: the native PresentMon interop is injected so window
-    /// construction never loads the real DLL in the test host.</summary>
+    /// construction never loads the real DLL in the test host. Power events
+    /// stay inert (a test host must never subscribe to real SystemEvents).</summary>
     internal MainWindow(IPresentMonNative presentMonNative)
-        : this(presentMonNative, ProfilePersistence.DefaultProfilePath())
+        : this(presentMonNative, ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource())
     {
     }
 
     /// <summary>Test seam: injects the native PresentMon interop AND the
     /// persisted-profile path so window-level tests never read/write the real
-    /// LocalAppData profile file.</summary>
+    /// LocalAppData profile file. Power events stay inert.</summary>
     internal MainWindow(IPresentMonNative presentMonNative, string profilePath)
+        : this(presentMonNative, profilePath, new NoopPowerModeSource())
+    {
+    }
+
+    /// <summary>Full seam: the power-mode source is injectable so production
+    /// subscribes to SystemEvents and test hosts pass a no-op.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource)
     {
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
@@ -148,7 +161,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             () => new Input.InputState(_profile!.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
             navigateTo: SwitchToPage,
             requestRender: () => SkiaCanvas.InvalidateVisual(),
-            select: SelectWidget);
+            select: SelectWidget,
+            onManipulation: HandleManipulationChange);
 
         // One stateful DialogHost for the whole window: the inspector receives
         // this instance (it must never build its own — a second instance could
@@ -238,8 +252,23 @@ public partial class MainWindow : Window, IModernWigiDashContext
             },
             requestRepaint: () => SkiaCanvas.InvalidateVisual(),
             onTick: UpdateUsbBadge,
-            composeGate: () => !_presenter.IsSending);
+            composeGate: () => _presenter.ShouldCompose);
         _framePump.Start(); // Start the render loop immediately
+
+        // 6b. Power lifecycle: SystemEvents fires on a system thread, so both
+        // actions hop to the dispatcher via the single Hop helper. Suspend
+        // stops the pump (no dead compose ticks while the display is powered
+        // down); resume restarts it and forces the USB engine to reconnect —
+        // Start() is guarded, so the extra call is harmless when the transport
+        // never dropped.
+        _powerLifecycle = new Power.PowerLifecycle(
+            powerModeSource,
+            onSuspend: () => Hop(() => _framePump.Stop()),
+            onResume: () => Hop(() =>
+            {
+                _framePump.Start();
+                _usbDevice.Start();
+            }));
 
         // 7. Clean lifecycle shutdown on window close / debugging stop
         Closed += (s, e) =>
@@ -254,6 +283,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _profilePersistence.Flush();
                 _profilePersistence.Dispose();
                 _framePump.Dispose();
+                _powerLifecycle.Dispose();
                 _telemetry.Dispose();
                 _presenter.Dispose();
                 ProfileOps.DisposeProfile(_profile);
@@ -377,13 +407,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var pos = e.GetPosition(SkiaCanvas);
 
         // A manipulation consumes the sample; otherwise the controller feeds
-        // the machine (page navigation + widget touch routing).
-        if (_inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool changed) && changed)
-        {
-            _profilePersistence.MarkDirty();
-            _inspector.RefreshTransforms();
-            SkiaCanvas.InvalidateVisual();
-        }
+        // the machine (page navigation + widget touch routing). The refresh
+        // after a manipulation is the controller's onManipulation funnel.
+        _inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out _);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -392,27 +418,46 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // A manipulation gesture never reaches the gesture machine — it stays
         // wholly in the input controller (resize / drag / icon-drag). A plain
-        // release feeds the machine's TouchUp.
-        bool wasManipulating = _inputController.Release(
-            (float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out bool iconMoved);
+        // release feeds the machine's TouchUp. The release funnel persists and
+        // refreshes when a manipulation ended (including snap-to-grid).
+        _inputController.Release(
+            (float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out _);
 
         _isMouseDown = false;
+        SkiaCanvas.ReleaseMouseCapture();
+    }
 
-        if (wasManipulating)
+    /// <summary>
+    /// One dispatcher-hop convention for callbacks raised on non-UI threads
+    /// (SystemEvents, the USB engine): hop to the dispatcher and, unless the
+    /// source is exempted, skip work after the close/teardown sequence began.
+    /// </summary>
+    private void Hop(Action action, bool guardClose = true)
+        => Dispatcher.BeginInvoke(() =>
         {
+            if (guardClose && App.IsClosing) return;
+            action();
+        });
+
+    /// <summary>
+    /// One refresh funnel for every manipulation outcome: the input controller
+    /// reports what changed; the window applies the same post-condition at
+    /// every call site (move + release), so the device-touch path (which never
+    /// manipulates) needs no special case.
+    /// </summary>
+    private void HandleManipulationChange(Input.ManipulationChange change)
+    {
+        if (change.Changed)
+        {
+            _profilePersistence.MarkDirty();
             _inspector.RefreshTransforms();
             SkiaCanvas.InvalidateVisual();
         }
 
-        if (iconMoved)
-            _inspector.Refresh();
-
-        if (wasManipulating)
+        if (change.IconMoved)
         {
-            _profilePersistence.MarkDirty();
+            _inspector.Refresh();
         }
-
-        SkiaCanvas.ReleaseMouseCapture();
     }
 
     #endregion

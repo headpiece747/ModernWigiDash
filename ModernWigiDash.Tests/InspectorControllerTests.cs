@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using ModernWigiDash.App;
 using ModernWigiDash.App.Inspector;
 using ModernWigiDash.App.Theming;

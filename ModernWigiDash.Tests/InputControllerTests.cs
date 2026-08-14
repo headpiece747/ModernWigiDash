@@ -489,4 +489,87 @@ public class InputControllerTests
 
         Assert.AreEqual(2, renders, "Both routed samples request a canvas refresh");
     }
+
+    // ── manipulation-outcome funnel ─────────────────────────
+
+    [TestMethod]
+    public void Move_ConsumedByDrag_ReportsChangedThroughFunnel()
+    {
+        var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
+        var page = PageWith(widget);
+        var changes = new List<ManipulationChange>();
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 1),
+            hitTest: (_, _, _) => widget,
+            onManipulation: changes.Add);
+
+        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
+        controller.Move(160, 110, InputSource.DesktopEdit, editMode: true, out _);
+
+        Assert.AreEqual(1, changes.Count);
+        Assert.IsTrue(changes[0].Changed, "A drag move must report Changed");
+        Assert.IsFalse(changes[0].IconMoved, "Mid-grab icon moves are reported on release, not move");
+    }
+
+    [TestMethod]
+    public void Release_EndingDrag_ReportsChangedThroughFunnel()
+    {
+        var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
+        var page = PageWith(widget);
+        var changes = new List<ManipulationChange>();
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 1),
+            hitTest: (_, _, _) => widget,
+            onManipulation: changes.Add);
+
+        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
+        controller.Move(160, 110, InputSource.DesktopEdit, editMode: true, out _);
+        controller.Release(160, 110, InputSource.DesktopEdit, editMode: true, out _);
+
+        Assert.AreEqual(2, changes.Count, "Move and release each report through the funnel");
+        Assert.IsTrue(changes[1].Changed, "The release ends the manipulation and must persist/refresh");
+        Assert.IsFalse(changes[1].IconMoved, "A plain drag moves no icon");
+    }
+
+    [TestMethod]
+    public void Release_EndingIconGrab_ReportsIconMoved()
+    {
+        var hotkey = new HotkeyButtonWidget { Icon = GriddyIcons.Names.First() };
+        var widget = PlaceWidget(0, 0, 406, 148, hotkey);
+        var profile = new ProfileLayout();
+        profile.ActivePage.Widgets.Add(widget);
+        var context = new PersistingContext(profile);
+        hotkey.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+
+        var changes = new List<ManipulationChange>();
+        var controller = new InputController(
+            () => StateOf(PageWith(widget), 0, count: 1),
+            hitTest: (_, _, _) => widget,
+            onManipulation: changes.Add);
+
+        controller.Press(203, 46, InputSource.DesktopEdit, editMode: true);
+        controller.Move(253, 76, InputSource.DesktopEdit, editMode: true, out _);
+        controller.Release(253, 76, InputSource.DesktopEdit, editMode: true, out _);
+
+        Assert.IsTrue(changes[^1].IconMoved, "An icon grab that moved must report IconMoved on release");
+        Assert.IsTrue(changes[^1].Changed);
+    }
+
+    [TestMethod]
+    public void DeviceTouch_NeverReportsThroughFunnel()
+    {
+        var page = TwoPages();
+        int funnelCalls = 0;
+        var controller = new InputController(
+            () => StateOf(page, 0),
+            routeTouch: (_, _, _, _) => { },
+            hitTest: (_, _, _) => null,
+            onManipulation: _ => funnelCalls++);
+
+        controller.Press(100, 100, InputSource.Device, editMode: false);
+        controller.Move(120, 120, InputSource.Device, editMode: false, out _);
+        controller.Release(120, 120, InputSource.Device, editMode: false, out _);
+
+        Assert.AreEqual(0, funnelCalls, "Device touches never manipulate, so the funnel never fires");
+    }
 }
