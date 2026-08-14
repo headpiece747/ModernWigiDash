@@ -230,6 +230,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        // The UI-thread flush of a deferred resolved-label write-back: the
+        // fetch continuation only sets the pending field, so Context.
+        // PersistProperty runs here on the UI thread (see
+        // ApplyPendingLocationWriteback).
+        ApplyPendingLocationWriteback();
+
         SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
@@ -715,30 +721,37 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// re-fire a fetch).</summary>
     internal bool _suppressLocationWriteback;
 
+    /// <summary>
+    /// The resolved label awaiting its UI-thread write-back: the fetch
+    /// continuation (thread pool) only sets this; <see cref="Render"/> (UI
+    /// thread, 30 FPS) performs the actual SetProperty via
+    /// <see cref="ApplyPendingLocationWriteback"/>, so Context.PersistProperty
+    /// stays on the UI thread and a stale fetch can never clobber a newer edit.
+    /// </summary>
+    private string? _pendingLocationWriteback;
+
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
         if (IsStaticSnapshotBlocking && !force) return;
 
+        // The location the fetch started from: a fetch that was in flight while
+        // the user edited Location must never write the stale resolved label
+        // over the newer edit.
+        string fetchLocation = Location;
         var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
         if (snapshot is null) return;
 
         ApplySnapshot(snapshot);
 
-        // The resolved label writes back into Location only when it differs,
-        // under the suppression flag so the write's OnPropertyChanged does not
-        // re-fire a fetch (converges after one extra resolution at most).
+        // The resolved label's write-back is deferred to the UI thread (Render
+        // flushes the pending field): Context.PersistProperty stays on the UI
+        // thread, and the staleness guard skips a fetch whose Location changed
+        // while it was in flight.
         if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-            && snapshot.ResolvedCityName != Location)
+            && snapshot.ResolvedCityName != Location
+            && Location == fetchLocation)
         {
-            _suppressLocationWriteback = true;
-            try
-            {
-                SetProperty(nameof(Location), snapshot.ResolvedCityName);
-            }
-            finally
-            {
-                _suppressLocationWriteback = false;
-            }
+            _pendingLocationWriteback = snapshot.ResolvedCityName;
         }
 
         // The geocode may have produced new Location Match candidates: refresh
@@ -753,6 +766,30 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
 
         Context?.RequestRender();
+    }
+
+    /// <summary>
+    /// Performs the deferred resolved-label write-back on the UI thread (called
+    /// by <see cref="Render"/> at 30 FPS; also an internal test seam for
+    /// direct-drive tests). The pending field is cleared before the write so a
+    /// re-entrant render cannot double-write; the suppression flag keeps the
+    /// write's OnPropertyChanged from re-firing a fetch.
+    /// </summary>
+    internal void ApplyPendingLocationWriteback()
+    {
+        if (_pendingLocationWriteback is not { } pending) return;
+        _pendingLocationWriteback = null;
+        if (string.IsNullOrWhiteSpace(pending) || pending == Location || _suppressLocationWriteback) return;
+
+        _suppressLocationWriteback = true;
+        try
+        {
+            SetProperty(nameof(Location), pending);
+        }
+        finally
+        {
+            _suppressLocationWriteback = false;
+        }
     }
 
     private WeatherLocation BuildLocation()

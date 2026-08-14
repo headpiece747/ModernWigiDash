@@ -411,6 +411,7 @@ public sealed class WeatherClient
                     _lat = match.Lat;
                     _lon = match.Lon;
                     _resolvedCityName = string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel;
+                    LastResolvedPopulation = match.Population;
                     return;
                 }
             }

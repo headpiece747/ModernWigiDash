@@ -42,7 +42,7 @@ public sealed class InspectorCallbacks
     /// <summary>Opens a folder picker; returns the chosen path or null when cancelled.</summary>
     public required Func<string, string?> BrowseFolder { get; init; }
 
-    /// <summary>Commits a location-search pick (label + exact coordinates) to the
+    /// <summary>Commits a location-search pick (the picked label) to the
     /// selected widget through its IWidgetLocationSearch contract.</summary>
     public Action<GeocodeCandidate>? CommitLocationPick { get; init; }
 }
@@ -364,18 +364,22 @@ public static class InspectorPanelRenderer
     /// debounced (300 ms), stale responses discarded by a version token. Enter or
     /// focus loss commits the typed text as the property value (the ambiguity
     /// gate then decides whether it may fetch); picking a result commits the
-    /// candidate's exact place through <see cref="InspectorCallbacks.CommitLocationPick"/>.
+    /// candidate's label through <see cref="InspectorCallbacks.CommitLocationPick"/>.
     /// </summary>
     private static StackPanel BuildLocationSearchEditor(EditorDescription desc, IWidgetLocationSearch search, InspectorCallbacks callbacks)
     {
         // The box seeds from the Location label plus the last resolved
         // population's compact suffix ("New York, New York, United States ·
         // 8.4M") — the same shared formatter the search list's lines use, so
-        // the field and the list can never disagree about a population.
-        string seed = desc.CurrentValue?.ToString() ?? "";
-        if (search.CurrentPopulation is > 0)
+        // the field and the list can never disagree about a population. The
+        // suffix is display-only: an empty label never seeds " · 8.4M" with no
+        // label, and the base label is what commits and searches while the box
+        // still holds the seeded text (a real user edit takes over verbatim).
+        string baseLabel = desc.CurrentValue?.ToString() ?? "";
+        string seed = baseLabel;
+        if (baseLabel.Length > 0 && search.CurrentPopulation is > 0)
         {
-            seed = $"{seed} · {FormatPopulation(search.CurrentPopulation.Value)}";
+            seed = $"{baseLabel} · {FormatPopulation(search.CurrentPopulation.Value)}";
         }
         var box = new TextBox { Text = seed };
         var results = new ListBox
@@ -414,7 +418,10 @@ public static class InspectorPanelRenderer
         debounce.Tick += async (_, _) =>
         {
             debounce.Stop();
-            string query = box.Text.Trim();
+            // The seed's population suffix searches nothing ("label · 9.4k"
+            // matches no geocoder result) — search the base label while the
+            // box still holds the seeded text (no real user edit yet).
+            string query = box.Text == seed ? baseLabel : box.Text.Trim();
             var (outcome, candidates) = await RunSearchTickAsync(search, query, version);
             ApplySearchResults(results, popup, outcome, candidates);
         };
@@ -440,8 +447,14 @@ public static class InspectorPanelRenderer
         };
         void CommitTypedText()
         {
-            // Commit the typed text (the ambiguity gate decides the fetch).
-            callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
+            // The seed's population suffix is display-only: committing the
+            // seeded text verbatim would persist "label · 9.4k", and the next
+            // resolution's suffix component would match no candidate (the
+            // label degrades to a bare-name tie on every restart). Commit the
+            // base label while the box still holds the seeded text; a real
+            // user edit takes over verbatim.
+            string committed = box.Text == seed ? baseLabel : box.Text;
+            callbacks.ApplyInspectorPropertyValue(desc.Property, committed);
             popup.IsOpen = false;
             results.Visibility = Visibility.Collapsed;
         }
@@ -555,12 +568,12 @@ public static class InspectorPanelRenderer
     /// <summary>
     /// The one compact population format shared by the search list's candidate
     /// lines and the Location box's seed suffix: "9.4k" / "8.4M", bare number
-    /// below 1000 — one spelling, drift impossible.
+    /// below 1000, invariant culture — one spelling, drift impossible.
     /// </summary>
     internal static string FormatPopulation(double population)
-        => population >= 1_000_000 ? $"{population / 1_000_000:0.#}M"
-         : population >= 1_000 ? $"{population / 1_000:0.#}k"
-         : population.ToString("0");
+        => population >= 1_000_000 ? $"{(population / 1_000_000).ToString("0.#", CultureInfo.InvariantCulture)}M"
+         : population >= 1_000 ? $"{(population / 1_000).ToString("0.#", CultureInfo.InvariantCulture)}k"
+         : population.ToString("0", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Formats one search result line: the candidate label plus a compact

@@ -187,6 +187,55 @@ public class InspectorPanelRendererTests
     }
 
     [TestMethod]
+    public void Render_LocationSearchWidget_LostFocus_CommitsBaseLabelNotPopulationSuffix()
+    {
+        StaRunner.Run(() =>
+        {
+            var resolver = new StubHttpHandler(request =>
+            {
+                string url = request.RequestUri?.AbsoluteUri ?? "";
+                if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
+                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherForecastWidgetTests.SampleForecast) : StubHttpHandler.NotFound();
+            });
+            var widget = new WeatherForecastWidget { Location = "Berlin, New Hampshire, United States" };
+            widget.TestHttpClient = new HttpClient(resolver);
+            var placed = new PlacedWidgetInstance { PluginId = "weather", DisplayName = "Weather", ActiveInstance = widget };
+            var profile = new ProfileLayout();
+            profile.ActivePage.Widgets.Add(placed);
+            var context = new PersistingContext(profile);
+            widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+            TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            widget._suppressLocationWriteback = true;
+            widget.FetchLiveWeatherAsync().GetAwaiter().GetResult();
+            Assert.AreEqual(9367, widget.CurrentPopulation, "precondition: the resolution must expose the population");
+
+            var target = new StackPanel();
+            object? committed = null;
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, value) => committed = value,
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+
+            var box = FindVisualChildren<TextBox>(target).First();
+            Assert.IsTrue(box.Text.Contains(" · 9.4k"), "precondition: the box must seed with the population suffix");
+            box.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
+
+            string committedText = (committed as string)!;
+            Assert.IsFalse(committedText.Contains(" · "),
+                "the committed Location must never carry the display-only population suffix");
+            Assert.AreEqual("Berlin, New Hampshire, United States", committed,
+                "focus loss on the seeded box must commit the base label");
+        });
+    }
+
+    [TestMethod]
     public void CandidateLineConverter_FormatsLabelAndPopulation()
     {
         var converter = new InspectorPanelRenderer.CandidateLineConverter();

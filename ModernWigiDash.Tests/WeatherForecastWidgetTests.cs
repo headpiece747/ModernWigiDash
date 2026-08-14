@@ -161,7 +161,11 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2 && widget.Location == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
+        // The write-back lands on the UI thread (the Render flush), never on
+        // the fetch continuation — Context.PersistProperty stays on the UI
+        // thread and a stale fetch cannot clobber a newer edit.
+        widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.Location,
             "the write-back must leave the field showing the picked place");
@@ -177,6 +181,7 @@ public class WeatherForecastWidgetTests
         widget.Location = "Victoria";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Victoria");
         await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 4, TimeSpan.FromSeconds(5));
+        widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.ResolvedCityName);
     }
 
@@ -283,19 +288,72 @@ public class WeatherForecastWidgetTests
         profile.ActivePage.Widgets.Add(placed);
         var context = new PersistingContext(profile);
         widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
-        // InitializeAsync kicks the startup fetch; its write-back runs on the
-        // fetch's continuation (after the client's FetchCompletedCount
-        // advances), so wait for the written-back label itself — the same
-        // settle pattern the pick tests use.
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1 && widget.Location == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
-
-        await widget.FetchLiveWeatherAsync();
+        // InitializeAsync kicks the startup fetch; wait for it to complete.
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
+        // The write-back lands on the UI thread (the Render flush), never on
+        // the fetch continuation — Context.PersistProperty stays on the UI
+        // thread and a stale fetch cannot clobber a newer edit.
+        widget.ApplyPendingLocationWriteback();
 
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location,
             "a successful resolution must write the resolved label back into Location");
         Assert.IsTrue(placed.PropertyValues.ContainsKey("Location"));
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
             "the write-back must not loop: exactly one forecast request");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_InFlightLocationEdit_DoesNotClobberTheEdit()
+    {
+        // A fetch that was in flight while the user edited Location must never
+        // write the stale resolved label over the newer edit.
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry)
+                : StubHttpHandler.Ok(SampleForecast);
+        }, gate);
+        var widget = new WeatherForecastWidget { Location = "Victoria" };
+        widget.TestHttpClient = new HttpClient(stub);
+
+        var fetching = widget.FetchLiveWeatherAsync(force: true);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+        widget.Location = "Tokyo"; // the user edits while the fetch is in flight
+        gate.SetResult();
+        await fetching;
+        widget.ApplyPendingLocationWriteback();
+
+        Assert.AreEqual("Tokyo", widget.Location,
+            "a stale in-flight resolution must never clobber a newer edit");
+    }
+
+    [TestMethod]
+    public async Task CommitPick_ResolvesAsExactlyOneForecastFetch()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { Location = "Berlin" };
+        widget.TestHttpClient = new HttpClient(stub);
+        var placed = new PlacedWidgetInstance { PluginId = "weather", ActiveInstance = widget };
+        var profile = new ProfileLayout();
+        profile.ActivePage.Widgets.Add(placed);
+        var context = new PersistingContext(profile);
+        widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
+        // Startup: the bare "Berlin" ties on the exact name (search only, no
+        // forecast) — wait for that to settle before the pick.
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
+
+        ((IWidgetLocationSearch)widget).CommitPick(new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "a pick must resolve with exactly one forecast request (search + forecast, no loop)");
     }
 
     [TestMethod]

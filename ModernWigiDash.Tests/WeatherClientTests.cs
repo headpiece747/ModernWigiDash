@@ -914,6 +914,48 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_WarmLocationMatchPick_ExposesPickedPopulation()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // First resolution populates the candidates; the warm in-memory pick
+        // path resolves against them (no re-geocode).
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil (population 1962476)
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(1962476, client.LastResolvedPopulation, 0.0001,
+            "the warm in-memory pick path must expose the picked candidate's population");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_PartialSuffixMatch_TiesAndFlagsAmbiguity()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSanJoses);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // "California" matches only the US candidate's admin1; "Germany"
+        // matches neither. The all-or-nothing rule scores the whole suffix 0
+        // for both — a partial-sum tiebreak must NOT resolve this uniquely.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose, California, Germany", null, null, null));
+
+        Assert.IsNull(snapshot, "a partial suffix match must not resolve — the suffix is all-or-nothing");
+        Assert.IsTrue(client.LastResolutionAmbiguous);
+    }
+
+    [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
         var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));
