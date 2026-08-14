@@ -383,24 +383,23 @@ public static class InspectorPanelRenderer
             }
         };
 
-        int version = 0;
+        var version = new SearchVersionToken();
         var debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         debounce.Tick += async (_, _) =>
         {
             debounce.Stop();
             string query = box.Text.Trim();
-            if (query.Length < 2)
+            var (outcome, candidates) = await RunSearchTickAsync(search, query, version);
+            if (outcome == LocationSearchTick.Stale) return; // a newer tick owns the UI
+            if (outcome == LocationSearchTick.NoSearch || candidates!.Count == 0)
             {
                 results.ItemsSource = null;
                 popup.IsOpen = false;
                 return;
             }
 
-            int current = ++version;
-            var candidates = await search.SearchAsync(query, CancellationToken.None);
-            if (current != version) return; // a newer keystroke superseded this response
             results.ItemsSource = candidates;
-            popup.IsOpen = candidates.Count > 0;
+            popup.IsOpen = true;
         };
         box.TextChanged += (_, _) => { debounce.Stop(); debounce.Start(); }; // restart the debounce window
         results.SelectionChanged += (_, _) =>
@@ -411,16 +410,66 @@ public static class InspectorPanelRenderer
                 callbacks.CommitLocationPick?.Invoke(picked);
             }
         };
+        void CommitTypedText()
+        {
+            // Commit the typed text (the ambiguity gate decides the fetch).
+            callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
+            popup.IsOpen = false;
+        }
         box.KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter)
-            {
-                // Commit the typed text (the ambiguity gate decides the fetch).
-                callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
-                popup.IsOpen = false;
-            }
+            if (e.Key == Key.Enter) CommitTypedText();
         };
+        // Focus loss commits too: without it, typed-but-unfocused text would be
+        // silently discarded by the next inspector refresh and the ambiguity
+        // gate would never evaluate the typed name.
+        box.LostFocus += (_, _) => CommitTypedText();
 
         return new StackPanel { Children = { box, popup } };
+    }
+
+    /// <summary>
+    /// Outcome of one debounced search tick, decided by
+    /// <see cref="RunSearchTickAsync"/>: <see cref="NoSearch"/> when the query
+    /// is too short to search, <see cref="Stale"/> when a newer tick superseded
+    /// this response (the caller must not touch the UI), and
+    /// <see cref="Success"/> with the candidates.
+    /// </summary>
+    internal enum LocationSearchTick
+    {
+        NoSearch,
+        Stale,
+        Success
+    }
+
+    /// <summary>
+    /// One debounced search tick's decision (pure — no UI). The version token
+    /// is bumped BEFORE the length check, so a tick that skips the search
+    /// still invalidates any response in flight from an earlier query — the
+    /// popup must never reopen with results for a query the box no longer
+    /// contains. Stale responses (a newer tick bumped the version while the
+    /// search was in flight) are discarded.
+    /// </summary>
+    internal static async Task<(LocationSearchTick Outcome, IReadOnlyList<GeocodeCandidate>? Candidates)> RunSearchTickAsync(
+        IWidgetLocationSearch search, string query, SearchVersionToken version)
+    {
+        int current = version.Next();
+        string trimmed = query.Trim();
+        if (trimmed.Length < 2) return (LocationSearchTick.NoSearch, null);
+        var candidates = await search.SearchAsync(trimmed, CancellationToken.None);
+        if (current != version.Value) return (LocationSearchTick.Stale, null);
+        return (LocationSearchTick.Success, candidates);
+    }
+
+    /// <summary>
+    /// Monotonic version token for one search editor: bumped before every tick
+    /// decides whether to search, so any response still in flight from an
+    /// earlier tick — including one whose query was too short — is discarded.
+    /// </summary>
+    internal sealed class SearchVersionToken
+    {
+        public int Value { get; private set; }
+
+        public int Next() => ++Value;
     }
 }
