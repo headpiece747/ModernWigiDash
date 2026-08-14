@@ -82,6 +82,24 @@ public class WeatherClientTests
       "results": [
         { "name": "San Jose", "latitude": 37.33939, "longitude": -121.89496, "admin1": "California", "country": "United States", "country_code": "US", "population": 1026908 },
         { "name": "San Jose", "latitude": 9.92807, "longitude": -84.09072, "admin1": "San Jos\u00e9 Province", "country": "Costa Rica", "country_code": "CR", "population": 335007 }
+
+      ]
+    }
+    """;
+
+    // The real Open-Meteo candidate set for a bare "Berlin" (captured from the
+    // live API): five places share the exact name, Germany has the population —
+    // so without a suffix or country hint the population tiebreak picks Berlin,
+    // Germany (the reported on-device symptom: a US Berlin user saw Berlin DE's
+    // weather). The suffix and country-hint tests below pin the escape routes.
+    private const string SampleBerlines = """
+    {
+      "results": [
+        { "name": "Berlin", "admin1": "State of Berlin", "country": "Germany", "country_code": "DE", "population": 3426354, "latitude": 52.52437, "longitude": 13.41053 },
+        { "name": "Berlin", "admin1": "New Hampshire", "country": "United States", "country_code": "US", "population": 9367, "latitude": 44.46867, "longitude": -71.18508 },
+        { "name": "Berlin", "admin1": "New Jersey", "country": "United States", "country_code": "US", "population": 7590, "latitude": 39.79123, "longitude": -74.92905 },
+        { "name": "Brunswick", "admin1": "Maryland", "country": "United States", "country_code": "US", "population": 6116, "latitude": 39.31427, "longitude": -77.62777 },
+        { "name": "Berlin", "admin1": "Wisconsin", "country": "United States", "country_code": "US", "population": 5420, "latitude": 43.96804, "longitude": -88.94345 }
       ]
     }
     """;
@@ -416,6 +434,78 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousBareName_PicksHighestPopulationSameNamedCity()
+    {
+        // The reported on-device symptom: a bare "Berlin" resolves to Berlin,
+        // Germany (3.4M) over Berlin, NH (9k) — every candidate ties on the
+        // exact name and has no suffix or country hint, so the population
+        // tiebreak decides. The widget is correct for the resolved place; the
+        // header shows it ("Berlin, State of Berlin, Germany") so the wrong
+        // pick is visible. The two tests below pin the disambiguation routes.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(52.52437, snapshot.Lat);
+        Assert.AreEqual(13.41053, snapshot.Lon);
+        Assert.AreEqual("Berlin, State of Berlin, Germany", snapshot.ResolvedCityName,
+            "the resolved name must carry admin1 + country so a wrong pick is visible in the header");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousBareName_StateSuffixPicksTheUsBerlin()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // The full-state suffix "Berlin, New Hampshire" must pick Berlin, NH —
+        // the suffix beats the population tiebreak (note: the two-letter
+        // abbreviation "NH" does NOT match — the abbreviation support only
+        // covers state names that start with their abbreviation, e.g. "MA";
+        // the working escape routes are the full state name, the CountryCode
+        // hint, or the Location Match dropdown).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(44.46867, snapshot.Lat);
+        Assert.AreEqual(-71.18508, snapshot.Lon);
+        Assert.AreEqual("Berlin, New Hampshire, United States", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousBareName_CountryHintPicksTheUsBerlin()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // A bare "Berlin" with the CountryCode hint US: the three US Berlines
+        // tie on the hint, and the population tiebreak picks New Hampshire.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null, "US"));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(44.46867, snapshot.Lat);
+        Assert.AreEqual(-71.18508, snapshot.Lon);
+        Assert.AreEqual("Berlin, New Hampshire, United States", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_ZipGeocode_ResolvesViaZippopotam()
     {
         var stub = new StubHttpHandler(Respond);
@@ -710,5 +800,44 @@ public class WeatherClientTests
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
+    }
+
+    [TestMethod]
+    public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
+    {
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));
+        var client = CreateClient(stub);
+
+        var results = await client.SearchCitiesAsync("Berl", CancellationToken.None);
+
+        Assert.AreEqual(5, results.Count);
+        var first = results[0];
+        Assert.AreEqual("Berlin, State of Berlin, Germany", first.Label);
+        Assert.AreEqual(52.52437, first.Lat, 0.0001);
+        Assert.AreEqual(3426354, first.Population);
+    }
+
+    [TestMethod]
+    public async Task SearchCitiesAsync_HttpError_ReturnsEmptyList()
+    {
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var results = await client.SearchCitiesAsync("Berlin", CancellationToken.None);
+
+        Assert.IsNotNull(results);
+        Assert.AreEqual(0, results.Count, "a failed search must not throw");
+    }
+
+    [TestMethod]
+    public async Task SearchCitiesAsync_Cancelled_ThrowsOperationCanceled()
+    {
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));
+        var client = CreateClient(stub);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => client.SearchCitiesAsync("Berlin", cts.Token));
     }
 }

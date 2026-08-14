@@ -62,7 +62,12 @@ public sealed record WeatherSnapshot(
 /// coordinates it resolves to. When the user picks one, the widget re-fetches
 /// with its query so the pick is honored deterministically.
 /// </summary>
-public sealed record GeocodeCandidate(string Label, string Query, double Lat, double Lon);
+public sealed record GeocodeCandidate(string Label, string Query, double Lat, double Lon)
+{
+    /// <summary>Candidate population (the search list's disambiguating label
+    /// data; 0 when the geocoder omitted it).</summary>
+    public double Population { get; init; }
+}
 
 /// <summary>
 /// Deep weather data module: geocode → fetch → parse → disk cache, with an
@@ -535,6 +540,58 @@ public sealed class WeatherClient
         return items;
     }
 
+    /// <summary>The geocoder search URL — the single URL builder shared by the
+    /// resolution flow and the inspector's search-as-you-type (cities and postal
+    /// codes both resolve as a name query).</summary>
+    private static Uri BuildGeocodeSearchUri(string query, string? countryCode)
+    {
+        string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=10&language=en&format=json";
+        if (!string.IsNullOrWhiteSpace(countryCode))
+            url += $"&countryCode={Uri.EscapeDataString(countryCode.Trim())}";
+        return new Uri(url);
+    }
+
+    /// <summary>
+    /// The inspector's search-as-you-type surface: geocodes <paramref name="query"/>
+    /// (a city name or a postal code) into ranked candidates with their exact
+    /// coordinates and population. Returns an empty list on any failure — never
+    /// throws; cancellation propagates so the editor can discard stale responses.
+    /// </summary>
+    public async Task<IReadOnlyList<GeocodeCandidate>> SearchCitiesAsync(string query, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            string json = await Http.GetStringAsync(BuildGeocodeSearchUri(query, null), cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("results", out var results))
+            {
+                return [];
+            }
+
+            var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
+            foreach (var candidate in results.EnumerateArray())
+            {
+                string label = ComposeResolvedName(candidate, query);
+                double population = candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
+                    ? p.GetDouble()
+                    : 0;
+                candidates.Add(new GeocodeCandidate(
+                    label, label,
+                    candidate.GetProperty("latitude").GetDouble(),
+                    candidate.GetProperty("longitude").GetDouble())
+                {
+                    Population = population,
+                });
+            }
+            return candidates;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logError?.Invoke($"Location search failed for '{SanitizeLog(query)}': {ex.Message}", ex);
+            return [];
+        }
+    }
+
     /// <summary>
     /// Resolves a city-name query via the Open-Meteo geocoding API. The API
     /// ranks by population, so a bare name can resolve to the wrong same-named
@@ -560,9 +617,7 @@ public sealed class WeatherClient
                 if (suffixPart.Length == 0) suffixPart = null;
             }
 
-            string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(namePart)}&count=10&language=en&format=json";
-            if (!string.IsNullOrWhiteSpace(location.CountryCode))
-                url += $"&countryCode={Uri.EscapeDataString(location.CountryCode.Trim())}";
+            string url = BuildGeocodeSearchUri(namePart, location.CountryCode).ToString();
 
             string json = await Http.GetStringAsync(url).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
