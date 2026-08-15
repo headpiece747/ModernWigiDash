@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
@@ -402,6 +403,8 @@ public sealed class WeatherClient
         }
         else if (IsZipCode(location.Location))
         {
+            // The ZIP path routes by the country hint (zippopotam /de/, /us/,
+            // ...); unsupported countries 404 and fall back to the geocoder.
             await GeocodeZipCodeAsync(location, cancellationToken).ConfigureAwait(false);
         }
         else
@@ -687,7 +690,12 @@ public sealed class WeatherClient
                 // wrong-city weather, so coordinates stay unresolved and the
                 // fetch returns null (the existing no-coordinates path in
                 // FetchCurrentAsync). A single top scorer is the unambiguous
-                // winner — population no longer decides anything.
+                // winner — population no longer decides anything, EXCEPT one
+                // narrow case: a tie where every candidate is in the SAME
+                // country (the geocoder lists the capital plus same-named
+                // towns — "Accra, Ghana" ties across two GH entries). The
+                // suffix already pinned the country, so the tie cannot pick a
+                // wrong country; the highest-population entry is the place.
                 var ranked = results.EnumerateArray()
                     .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, location.CountryCode)))
                     .ToList();
@@ -695,6 +703,37 @@ public sealed class WeatherClient
                 var topTied = ranked.Where(r => r.Rank == bestScore).ToList();
                 if (topTied.Count > 1)
                 {
+                    // The population tiebreak applies only when the suffix
+                    // actually pinned the place: every tied candidate must
+                    // have matched the suffix (all-or-nothing, so they share
+                    // the intended country) AND share one country_code. A
+                    // bare-name tie ("Berlin" + US hint) or a tie where the
+                    // suffix matched NOBODY ("Washington, District of
+                    // Columbia" — the DC candidate's name differs, so the
+                    // state Washingtons tie at the bare score) stays gated.
+                    string? tieCountry = GetString(topTied[0].Candidate, "country_code");
+                    bool sameCountryTie = !string.IsNullOrWhiteSpace(tieCountry)
+                        && topTied.All(t => GetString(t.Candidate, "country_code").Equals(tieCountry, StringComparison.OrdinalIgnoreCase))
+                        && topTied.All(t => ScoreSuffixMatch(
+                            GetString(t.Candidate, "admin1"),
+                            GetString(t.Candidate, "country"),
+                            GetString(t.Candidate, "country_code"),
+                            suffixPart) > 0);
+                    if (sameCountryTie)
+                    {
+                        var best = topTied
+                            .Select(t => (Candidate: t.Candidate, Population: ReadPopulation(t.Candidate)))
+                            .OrderByDescending(x => x.Population)
+                            .First();
+                        if (best.Population > 0)
+                        {
+                            _lat = best.Candidate.GetProperty("latitude").GetDouble();
+                            _lon = best.Candidate.GetProperty("longitude").GetDouble();
+                            _resolvedCityName = ComposeResolvedName(best.Candidate, namePart);
+                            LastResolvedPopulation = best.Population;
+                            return;
+                        }
+                    }
                     _lat = null;
                     _lon = null;
                     // Drop the stale resolved name too: a previous resolution's
@@ -775,7 +814,7 @@ public sealed class WeatherClient
             : 0;
 
     private static int ScoreExactName(string name, string namePart)
-        => name.Equals(namePart, StringComparison.OrdinalIgnoreCase) ? 1000 : 0;
+        => EqualsInsensitive(name, namePart) ? 1000 : 0;
 
     private static int ScoreSuffixMatch(string admin1, string country, string code, string? suffixPart)
     {
@@ -798,26 +837,96 @@ public sealed class WeatherClient
             // lowest tier — it only breaks a tie between a renamed-country
             // candidate and same-named places elsewhere; the all-or-nothing
             // rule above still requires every component to match at some tier.
-            else if (ContainsAny(admin1, country, code, component)) score += 125;
+            // Components shorter than 4 chars skip contains: a 2-letter code
+            // like "PR" must never substring-match "Province".
+            else if (component.Length >= 4 && ContainsAny(admin1, country, code, component)) score += 125;
+            // A renamed-country that even contains-matching cannot reach —
+            // the letters differ ("Türkiye" vs "Turkey", "Cabo Verde" vs
+            // "Cape Verde") — resolves through the alias table.
+            else if (AliasMatches(admin1, country, code, component)) score += 125;
             else return 0;
         }
         return score;
     }
 
     private static bool EqualsAny(string admin1, string country, string code, string component)
-        => admin1.Equals(component, StringComparison.OrdinalIgnoreCase)
-            || country.Equals(component, StringComparison.OrdinalIgnoreCase)
-            || code.Equals(component, StringComparison.OrdinalIgnoreCase);
+        => EqualsInsensitive(admin1, component)
+            || EqualsInsensitive(country, component)
+            || EqualsInsensitive(code, component);
 
     private static bool StartsWithAny(string admin1, string country, string code, string component)
-        => admin1.StartsWith(component, StringComparison.OrdinalIgnoreCase)
-            || country.StartsWith(component, StringComparison.OrdinalIgnoreCase)
-            || code.StartsWith(component, StringComparison.OrdinalIgnoreCase);
+        => StartsWithInsensitive(admin1, component)
+            || StartsWithInsensitive(country, component)
+            || StartsWithInsensitive(code, component);
 
     private static bool ContainsAny(string admin1, string country, string code, string component)
-        => admin1.Contains(component, StringComparison.OrdinalIgnoreCase)
-            || country.Contains(component, StringComparison.OrdinalIgnoreCase)
-            || code.Contains(component, StringComparison.OrdinalIgnoreCase);
+        => ContainsInsensitive(admin1, component)
+            || ContainsInsensitive(country, component)
+            || ContainsInsensitive(code, component);
+
+    /// <summary>Diacritic-insensitive comparison: the user's ASCII spelling
+    /// ("Asuncion", "Bogota", "Sao Paulo") must match the geocoder's accented
+    /// names ("Asunción", "Bogotá", "São Paulo") — otherwise the exact-name
+    /// bonus goes to a same-named ASCII town elsewhere and the accented
+    /// capital never wins. Normalization strips combining marks (FormD).</summary>
+    private static string NormalizeForMatch(string value)
+    {
+        string normalized = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (char c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(c);
+            }
+        }
+        return builder.ToString();
+    }
+
+    private static bool EqualsInsensitive(string a, string b)
+        => NormalizeForMatch(a).Equals(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
+
+    private static bool StartsWithInsensitive(string a, string b)
+        => NormalizeForMatch(a).StartsWith(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsInsensitive(string a, string b)
+        => NormalizeForMatch(a).Contains(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Common English country/territory names the geocoder reports
+    /// under an official/renamed name whose letters differ (the contains tier
+    /// cannot reach these) — the user's spelling is matched against the
+    /// aliased form of each candidate's country. US-territory entries often
+    /// carry an EMPTY country field with only the code ("San Juan" is PR with
+    /// no country), so the alias resolves to the code as well.</summary>
+    private static readonly Dictionary<string, string> CountryAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Turkey"] = "Türkiye",
+        ["Cape Verde"] = "Cabo Verde",
+        ["Czech Republic"] = "Czechia",
+        ["Republic of the Congo"] = "Congo Republic",
+        ["Puerto Rico"] = "PR",
+        ["Guam"] = "GU",
+        ["US Virgin Islands"] = "VI",
+        ["American Samoa"] = "AS",
+        ["Northern Mariana Islands"] = "MP",
+    };
+
+    private static bool AliasMatches(string admin1, string country, string code, string component)
+    {
+        if (!CountryAliases.TryGetValue(component, out string? official)) return false;
+        if (EqualsInsensitive(admin1, official)
+            || EqualsInsensitive(country, official)
+            || EqualsInsensitive(code, official))
+        {
+            return true;
+        }
+        // Contains only for real names — a short alias value ("PR") must
+        // never substring-match "Province".
+        return official.Length >= 4
+            && (ContainsInsensitive(admin1, official)
+                || ContainsInsensitive(country, official)
+                || ContainsInsensitive(code, official));
+    }
 
     private static int ScoreCountryHint(string code, string country, string? countryCode)
     {
@@ -846,7 +955,14 @@ public sealed class WeatherClient
         string zipCode = location.Location.Trim();
         try
         {
-            string url = $"https://api.zippopotam.us/us/{Uri.EscapeDataString(zipCode)}";
+            // zippopotam routes by country code: the hint selects the route
+            // ("/de/" for a German ZIP — "10115" is both Berlin's district
+            // and a Manhattan ZIP, so the US default would resolve the wrong
+            // country). Unsupported countries 404 and fall back below.
+            string country = string.IsNullOrWhiteSpace(location.CountryCode)
+                ? "us"
+                : location.CountryCode.Trim().ToLowerInvariant();
+            string url = $"https://api.zippopotam.us/{country}/{Uri.EscapeDataString(zipCode)}";
             string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;

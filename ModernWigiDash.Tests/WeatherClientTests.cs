@@ -1043,6 +1043,256 @@ public class WeatherClientTests
         Assert.AreEqual("Amsterdam, North Holland, The Netherlands", snapshot.ResolvedCityName);
     }
 
+    // The duplicate-entry shape that gates capitals: the geocoder lists the
+    // capital plus same-named towns in the SAME country — "Accra, Ghana"
+    // ties across two GH entries unless the same-country population
+    // tiebreak picks the city (1.96M) over the nameless town (no population).
+    internal const string SampleAccras = """
+    {
+      "results": [
+        { "name": "Accra", "latitude": 5.55602, "longitude": -0.1969, "admin1": "Greater Accra Region", "country": "Ghana", "country_code": "GH", "population": 1963264 },
+        { "name": "Accra", "latitude": 6.10000, "longitude": -2.80000, "admin1": "Western North", "country": "Ghana", "country_code": "GH" }
+      ]
+    }
+    """;
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_SameCountryDuplicateTie_PicksThePopulatedCity()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleAccras);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // Both candidates tie at the top score with the same name in the
+        // same country — the same-country tiebreak must pick the populated
+        // city, or "Accra, Ghana" would never resolve.
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(5.55602, snapshot.Lat, 0.0001);
+        Assert.AreEqual(-0.1969, snapshot.Lon, 0.0001);
+        Assert.AreEqual("Accra, Greater Accra Region, Ghana", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_SameCountryTieWithoutPopulation_StillGates()
+    {
+        // Two same-country ties with NO population anywhere: nothing
+        // distinguishes them, so the ambiguity gate must hold (the pick
+        // dropdown remains the escape).
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Accra", "latitude": 5.55602, "longitude": -0.1969, "admin1": "Greater Accra Region", "country": "Ghana", "country_code": "GH" },
+            { "name": "Accra", "latitude": 6.10000, "longitude": -2.80000, "admin1": "Western North", "country": "Ghana", "country_code": "GH" }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null));
+
+        Assert.IsNull(snapshot, "a same-country tie with no population must not resolve");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_RenamedCountryAlias_ResolvesTheCommonEnglishName()
+    {
+        // The geocoder reports "Republic of Türkiye"; the user types
+        // "Turkey" — letters differ, so even the contains tier cannot reach
+        // it; the alias table must. The Madagascar "Ankara" keeps the test
+        // honest: without the alias, both tie at the bare-name score.
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Ankara", "latitude": 39.93336, "longitude": 32.85974, "admin1": "Ankara", "country": "Republic of Türkiye", "country_code": "TR", "population": 3517182 },
+            { "name": "Ankara", "latitude": -24.80000, "longitude": 45.20000, "admin1": "Androy Region", "country": "Madagascar", "country_code": "MG" }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Ankara, Turkey", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(39.93336, snapshot.Lat, 0.0001);
+        Assert.AreEqual(32.85974, snapshot.Lon, 0.0001);
+        Assert.AreEqual("Ankara, Ankara, Republic of Türkiye", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_SuffixTieWithoutSuffixMatch_StillGates()
+    {
+        // "Washington, District of Columbia": the DC candidate's name is
+        // "Washington D.C." (no exact-name points), so the state Washingtons
+        // tie at the bare score — the suffix matched NOBODY in the tie, and
+        // the population tiebreak must NOT pick Washington, PA for a user who
+        // asked for DC.
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Washington D.C.", "latitude": 38.89511, "longitude": -77.03637, "admin1": "District of Columbia", "country": "United States", "country_code": "US", "population": 689545 },
+            { "name": "Washington", "latitude": 40.17396, "longitude": -80.24617, "admin1": "Pennsylvania", "country": "United States", "country_code": "US", "population": 13176 },
+            { "name": "Washington", "latitude": 35.54655, "longitude": -77.05217, "admin1": "North Carolina", "country": "United States", "country_code": "US", "population": 9854 }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Washington, District of Columbia", null, null, null));
+
+        Assert.IsNull(snapshot, "a suffix that matched no tied candidate must not let population pick a wrong city");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_DiacriticCapitalTie_PicksThePopulatedCity()
+    {
+        // The geocoder lists the accented capital twice within Paraguay
+        // (city + duplicate entry): both tie on the suffix at 500 — the
+        // same-country tiebreak must pick the populated one, or
+        // "Asuncion, Paraguay" (ASCII spelling) never resolves.
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Asunci\u00f3n", "latitude": -25.26374, "longitude": -57.57593, "admin1": "Asuncion", "country": "Paraguay", "country_code": "PY", "population": 1482200 },
+            { "name": "Asunci\u00f3n", "latitude": -25.28000, "longitude": -57.63000, "admin1": "Asuncion", "country": "Paraguay", "country_code": "PY" }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(-25.26374, snapshot.Lat, 0.0001);
+        Assert.AreEqual(-57.57593, snapshot.Lon, 0.0001);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_ZipWithCountryHint_RoutesToThatCountrysZipService()
+    {
+        // 10115 is both Berlin's postal district and a valid Manhattan ZIP:
+        // the DE hint must route to zippopotam's /de/ service (Berlin), never
+        // the /us/ default (which would resolve New York City).
+        const string berlinZip = """
+        {
+          "country": "Germany",
+          "post code": "10115",
+          "places": [
+            { "place name": "Berlin", "longitude": "13.3922", "latitude": "52.532", "state": "Berlin" }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("zippopotam.us/de/", StringComparison.Ordinal)) return StubHttpHandler.Ok(berlinZip);
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE"));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(52.532, snapshot.Lat, 0.0001, "the DE hint must route the ZIP to the /de/ service");
+        Assert.AreEqual(13.3922, snapshot.Lon, 0.0001);
+        Assert.AreEqual("Berlin, Berlin", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_TerritorySuffix_ResolvesViaTheCountryCode()
+    {
+        // US-territory candidates carry an EMPTY country field with only the
+        // code ("San Juan" is PR) — "San Juan, Puerto Rico" must resolve via
+        // the alias to the PR code, not tie with the same-named cities. The
+        // Dominican "San Juan Province" traps the alias: the PR code must
+        // never substring-match "Province".
+        const string fixture = """
+        {
+          "results": [
+            { "name": "San Juan", "latitude": 18.46554, "longitude": -66.10574, "admin1": "San Juan", "country": "", "country_code": "PR", "population": 418140 },
+            { "name": "San Juan", "latitude": -31.53750, "longitude": -68.53639, "admin1": "San Juan", "country": "Argentina", "country_code": "AR", "population": 109123 },
+            { "name": "San Juan", "latitude": 26.18924, "longitude": -98.15529, "admin1": "Texas", "country": "United States", "country_code": "US", "population": 36556 },
+            { "name": "San Juan", "latitude": 18.81000, "longitude": -71.23000, "admin1": "San Juan Province", "country": "Dominican Republic", "country_code": "DO", "population": 72950 }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Juan, Puerto Rico", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(18.46554, snapshot.Lat, 0.0001, "the PR alias must resolve over the same-named AR/US cities");
+        Assert.AreEqual(-66.10574, snapshot.Lon, 0.0001);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_DiacriticCapital_BeatsSameNamedAsciiTowns()
+    {
+        // The geocoder's top-10 for "Asuncion" includes unaccented towns in
+        // the Philippines — without diacritic-insensitive matching they win
+        // the exact-name bonus over the accented Paraguayan capital, and
+        // "Asuncion, Paraguay" never resolves.
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Asuncion", "latitude": 15.69390, "longitude": 120.81290, "admin1": "Central Luzon", "country": "Philippines", "country_code": "PH" },
+            { "name": "Asuncion", "latitude": 9.60000, "longitude": 125.60000, "admin1": "Eastern Visayas", "country": "Philippines", "country_code": "PH" },
+            { "name": "Asunci\u00f3n", "latitude": -25.26374, "longitude": -57.57593, "admin1": "Asuncion", "country": "Paraguay", "country_code": "PY", "population": 1482200 }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(-25.26374, snapshot.Lat, 0.0001, "the ASCII spelling must resolve the accented capital, not a same-named PH town");
+        Assert.AreEqual(-57.57593, snapshot.Lon, 0.0001);
+        Assert.AreEqual("Asunción, Asuncion, Paraguay", snapshot.ResolvedCityName);
+    }
+
     [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {

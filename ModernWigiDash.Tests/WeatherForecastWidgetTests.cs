@@ -157,6 +157,14 @@ public class WeatherForecastWidgetTests
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
 
         await widget.FetchLiveWeatherAsync(force: true); // geocode(1) + forecast(2)
+        // Deterministic write-back flush: FetchCompletedCount increments in
+        // the client before the widget's continuation sets the pending
+        // write-back, so waiting on the count alone lets fetch #1's
+        // continuation land late and clobber fetch #2's — wait for the
+        // applied state, then flush.
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
+        widget.ApplyPendingLocationWriteback();
+        Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location);
 
         // options[0] = "Automatic", options[1] = Victoria (Canada), options[2] = Vitoria (Brazil)
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
