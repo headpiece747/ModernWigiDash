@@ -74,6 +74,29 @@ public class WeatherPresentationTests
     }
 
     [TestMethod]
+    public void MapWmoIcon_Day_MatchesTheDayIconSet()
+    {
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(0).Icon, WeatherPresentation.MapWmoIcon(0, true));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(61).Icon, WeatherPresentation.MapWmoIcon(61, true));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(95).Icon, WeatherPresentation.MapWmoIcon(95, true));
+    }
+
+    [TestMethod]
+    public void MapWmoIcon_Night_ClearSkiesReadAsAMoon()
+    {
+        Assert.AreEqual("🌙", WeatherPresentation.MapWmoIcon(0, false), "clear at night shows the moon");
+        Assert.AreEqual("🌙", WeatherPresentation.MapWmoIcon(1, false), "mainly clear at night shows the moon");
+        Assert.AreEqual("🌃", WeatherPresentation.MapWmoIcon(2, false), "partly cloudy at night shows the night city");
+    }
+
+    [TestMethod]
+    public void MapWmoIcon_Night_PrecipitationKeepsItsDayIcon()
+    {
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(61).Icon, WeatherPresentation.MapWmoIcon(61, false));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(77).Icon, WeatherPresentation.MapWmoIcon(77, false));
+    }
+
+    [TestMethod]
     public void MetricPills_OnlyEnabledPillsInFixedOrder()
     {
         var input = new WeatherMetricsInput(

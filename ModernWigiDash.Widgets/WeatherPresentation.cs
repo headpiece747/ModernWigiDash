@@ -46,6 +46,20 @@ public static class WeatherPresentation
         };
     }
 
+    /// <summary>The current-condition icon for a code at a given day/night:
+    /// clear skies read as a moon after dark (the description stays the
+    /// day-neutral text).</summary>
+    public static string MapWmoIcon(int code, bool isDay)
+    {
+        if (isDay) return MapWmoCode(code).Icon;
+        return code switch
+        {
+            0 or 1 => "🌙",
+            2 => "🌃",
+            _ => MapWmoCode(code).Icon,
+        };
+    }
+
     /// <summary>The default unit-system choice — the single source for the
     /// widget's property default and the tap-toggle.</summary>
     public const string DefaultUnitSystem = "Fahrenheit (°F, mph)";

@@ -138,6 +138,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private double _humidity = 87.0;
     private double _windSpeedKmH = 16.1; // 10 mph default
     private int _weatherCode = 51;      // Drizzle default
+    private bool _isDay = true;         // Cached snapshots carry no is_day — render as day
     private double _highTempC = 26.6;   // 80°F default
     private double _lowTempC = 20.5;    // 69°F default
 
@@ -344,7 +345,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     private void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
-        var (icon, desc) = WeatherPresentation.MapWmoCode(_weatherCode);
+        var (icon, desc) = (WeatherPresentation.MapWmoIcon(_weatherCode, _isDay), WeatherPresentation.MapWmoCode(_weatherCode).Description);
         float s = Math.Min(sx, sy);
         float w = bounds.Width;
         float h = bounds.Height;
@@ -701,7 +702,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
-        var (icon, _) = WeatherPresentation.MapWmoCode(_weatherCode);
+        string icon = WeatherPresentation.MapWmoIcon(_weatherCode, _isDay);
         float s = Math.Min(sx, sy);
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, Math.Clamp(26f * s, 14f, 32f));
@@ -871,6 +872,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
             if (snapshot.WindSpeedKmH is not null) _windSpeedKmH = snapshot.WindSpeedKmH.Value;
             if (snapshot.WeatherCode is not null) _weatherCode = snapshot.WeatherCode.Value;
+            _isDay = snapshot.IsDay;
             if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
             if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
             if (snapshot.DailyForecasts is not null)

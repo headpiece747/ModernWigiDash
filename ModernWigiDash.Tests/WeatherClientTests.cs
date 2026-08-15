@@ -1325,6 +1325,54 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_NightForecast_ReadsIsDayFalse()
+    {
+        const string night = """
+        {
+          "latitude": 40.7128, "longitude": -74.006,
+          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 0, "wind_speed_10m": 8.2, "is_day": 0, "precipitation": 0, "cloud_cover": 10 },
+          "hourly": {
+            "time": ["2026-08-07T00:00", "2026-08-07T01:00"],
+            "temperature_2m": [12.5, 13.1],
+            "relative_humidity_2m": [40, 45],
+            "weather_code": [0, 0]
+          },
+          "daily": {
+            "time": ["2026-08-07", "2026-08-08"],
+            "weather_code": [0, 0],
+            "temperature_2m_max": [18.0, 20.0],
+            "temperature_2m_min": [9.0, 11.0]
+          }
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
+                ? StubHttpHandler.Ok(night)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsFalse(snapshot.IsDay, "is_day 0 must read as night so the icon can flip");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_DayForecast_ReadsIsDayTrue()
+    {
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
+                ? StubHttpHandler.Ok(SampleForecast)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsTrue(snapshot.IsDay, "a forecast without is_day (or with 1) reads as day");
+    }
+
+    [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
         var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));

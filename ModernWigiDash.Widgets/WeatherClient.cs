@@ -55,7 +55,10 @@ public sealed record WeatherSnapshot(
     IReadOnlyList<HourlyForecastItem>? HourlyForecasts,
     string ResolvedCityName,
     double Lat,
-    double Lon);
+    double Lon,
+    /// <summary>Day/night flag from the API's is_day (absent in the disk
+    /// cache — cached snapshots default to day).</summary>
+    bool IsDay = true);
 
 /// <summary>
 /// One geocoding candidate the user can pick from the widget's "Location
@@ -251,12 +254,12 @@ public sealed class WeatherClient
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = ParseCurrentWeather(root);
+            var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = ParseCurrentWeather(root);
             var (humidity, hourlyForecasts) = ParseHourlyForecast(root);
             var (highTempC, lowTempC, dailyForecasts) = ParseDailyForecast(root);
             var snapshot = new WeatherSnapshot(
                 tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
-                dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon);
+                dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon, isDay);
 
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             await SaveCacheAsync(snapshot, cancellationToken).ConfigureAwait(false);
@@ -439,12 +442,13 @@ public sealed class WeatherClient
     /// still parse. The legacy block never carried apparent_temperature or
     /// humidity, which is why this reads them from <c>current</c>.
     /// </summary>
-    private static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode) ParseCurrentWeather(JsonElement root)
+    private static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode, bool IsDay) ParseCurrentWeather(JsonElement root)
     {
         double? tempC = null;
         double? feelsLikeC = null;
         double? windSpeedKmH = null;
         int? weatherCode = null;
+        bool isDay = true;
 
         if (root.TryGetProperty("current", out var current))
         {
@@ -456,10 +460,14 @@ public sealed class WeatherClient
                 windSpeedKmH = windEl.GetDouble();
             if (current.TryGetProperty("weather_code", out var codeEl))
                 weatherCode = codeEl.GetInt32();
-            return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
+            // is_day is 1 when the sun is up at the location — the current
+            // condition icon flips to a moon at night.
+            if (current.TryGetProperty("is_day", out var dayEl))
+                isDay = dayEl.GetInt32() == 1;
+            return (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay);
         }
 
-        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null);
+        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null, true);
 
         if (currentWeather.TryGetProperty("temperature", out var legacyTemp))
             tempC = legacyTemp.GetDouble();
@@ -472,8 +480,10 @@ public sealed class WeatherClient
             windSpeedKmH = legacyWind.GetDouble();
         if (currentWeather.TryGetProperty("weathercode", out var legacyCode))
             weatherCode = legacyCode.GetInt32();
+        if (currentWeather.TryGetProperty("is_day", out var legacyDay))
+            isDay = legacyDay.GetInt32() == 1;
 
-        return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
+        return (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay);
     }
 
     private static (double? Humidity, IReadOnlyList<HourlyForecastItem>? Hourly) ParseHourlyForecast(JsonElement root)
