@@ -194,7 +194,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             "WEATHER", WeatherClient.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
-        _ = FetchLiveWeatherAsync();
+        // NO boot fetch here: InitializeAsync runs BEFORE the profile applies
+        // this widget's properties (RehydrateWidget), so a boot fetch would
+        // resolve the pre-hydration DEFAULT location and write the wrong
+        // city's cache at every startup. The first fetch comes from the
+        // render kick (post-hydration) or the poll tick — both use the
+        // hydrated location.
         return ValueTask.CompletedTask;
     }
 

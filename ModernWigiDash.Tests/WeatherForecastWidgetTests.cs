@@ -195,6 +195,34 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task InitializeAsync_DoesNotFetchWithPreHydrationState()
+    {
+        // RehydrateWidget calls InitializeAsync BEFORE applying the profile's
+        // properties, so a boot fetch would resolve the pre-hydration DEFAULT
+        // location and write the wrong city's cache at every startup (the
+        // on-device symptom: every profile cached Miami at boot). The first
+        // fetch must come from the post-hydration render kick instead.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok("""{"results":[{"name":"Paris","latitude":48.85,"longitude":2.35,"admin1":"Ile-de-France","country":"France","country_code":"FR"}]}""");
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Paris, France" };
+
+        widget.InitializeAsync(new TestContext()).AsTask().GetAwaiter().GetResult();
+
+        Assert.AreEqual(0, stub.Calls, "InitializeAsync must not fetch before the profile properties are applied");
+
+        // The render kick fetches with the CURRENT (hydrated) location.
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        widget.Render(surface.Canvas, new SKRect(0, 0, 406, 296));
+        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
+        Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("name=Paris", StringComparison.Ordinal)),
+            "the first fetch must use the hydrated location, never the default");
+    }
+
+    [TestMethod]
     public async Task FetchLiveWeather_Throttle_UsesInjectedClock()
     {
         var stub = new StubHttpHandler(request =>
