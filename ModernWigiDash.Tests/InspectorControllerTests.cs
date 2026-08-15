@@ -5,8 +5,6 @@ using ModernWigiDash.App;
 using ModernWigiDash.App.Inspector;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
@@ -18,14 +16,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class InspectorControllerTests
 {
-    private sealed class TestWidget : ModernWidgetBase
-    {
-        [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "seed")]
-        public string Label { get; set; } = "seed";
-
-        public override void Render(SKCanvas canvas, SKRect bounds) { }
-    }
-
     [TestMethod]
     public void Refresh_WithSelection_PopulatesHostControls()
     {

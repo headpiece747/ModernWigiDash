@@ -12,16 +12,6 @@ namespace ModernWigiDash.Tests;
 public class ProfileOpsTests
 {
 
-    [WidgetMetadata("profile_test_widget", "Profile Test")]
-    private sealed class TestWidget : ModernWidgetBase
-    {
-        [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "default")]
-        public string Label { get; set; } = "default";
-
-        public override SKSize DefaultSize => new(406, 148);
-        public override void Render(SKCanvas canvas, SKRect bounds) { }
-    }
-
     /// <summary>A widget that toggles its own property via SetProperty on touch — the
     /// WeatherForecastWidget OnTouch shape. The property is [WidgetProperty] with
     /// a public setter, exactly like rehydration requires.</summary>
@@ -102,6 +92,23 @@ public class ProfileOpsTests
 
         Assert.IsFalse(ProfileOps.DeletePage(profile, 0));
         Assert.AreEqual(1, profile.Pages.Count);
+    }
+
+    [TestMethod]
+    public void CanDeletePage_SinglePage_False()
+    {
+        var profile = new ProfileLayout();
+
+        Assert.IsFalse(ProfileOps.CanDeletePage(profile));
+    }
+
+    [TestMethod]
+    public void CanDeletePage_MultiplePages_True()
+    {
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "B");
+
+        Assert.IsTrue(ProfileOps.CanDeletePage(profile));
     }
 
     [TestMethod]

@@ -144,7 +144,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void DrawIdle(SKCanvas canvas, SKRect bounds, float scale)
     {
-        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 64f * scale);
         using var iconPaint = new SKPaint { Color = accent.WithAlpha(200), IsAntialias = true };
@@ -217,7 +217,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
         else
         {
-            using var fill = new SKPaint { Color = ColorOf(AccentColorHex, new SKColor(255, 205, 133)).WithAlpha(80), IsAntialias = true };
+            using var fill = new SKPaint { Color = ColorOf(AccentColorHex, WidgetPalette.Accent).WithAlpha(80), IsAntialias = true };
             canvas.DrawRoundRect(artRect, r, r, fill);
 
             var font = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, artSide * 0.45f);
@@ -242,7 +242,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         // Shift text stack down approx 3 lines total from top pad (2 lines lower than before)
         float textTop = bounds.Top + pad + Math.Max(0f, (artSide - 160f * scale) / 2f);
         SKColor text = ColorOf(TextColorHex, SKColors.White);
-        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 40f * scale);
         var artistFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 28f * scale);
@@ -298,7 +298,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             posSec += (Clock.GetUtcNow() - snap.LastUpdated).TotalSeconds;
 
         double ratio = NowPlayingPresentation.ProgressRatio(posSec, durSec);
-        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
@@ -336,7 +336,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private void DrawControls(SKCanvas canvas, MediaSnapshot snap, float scale)
     {
         SKColor text = ColorOf(TextColorHex, SKColors.White);
-        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
         bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
         bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;

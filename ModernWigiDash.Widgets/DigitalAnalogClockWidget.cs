@@ -43,7 +43,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var now = Clock.GetLocalNow().LocalDateTime;
-        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(135, 0, 0));
+        SKColor accentColor = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
 
         if (ClockMode == "Analog")

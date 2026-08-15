@@ -135,7 +135,11 @@ public static class InspectorPanelRenderer
                         propPanel.Children.Add(BuildLocationSearchEditor(desc, search, callbacks));
                         break;
                     }
-                    goto default;
+                    // The widget advertises the location-search editor without
+                    // implementing the contract: degrade to the plain text
+                    // editor (the fallthrough the former goto default expressed).
+                    propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
+                    break;
                 default:
                     // Text or Number
                     propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
@@ -571,9 +575,12 @@ public static class InspectorPanelRenderer
     /// below 1000, invariant culture — one spelling, drift impossible.
     /// </summary>
     internal static string FormatPopulation(double population)
-        => population >= 1_000_000 ? $"{(population / 1_000_000).ToString("0.#", CultureInfo.InvariantCulture)}M"
-         : population >= 1_000 ? $"{(population / 1_000).ToString("0.#", CultureInfo.InvariantCulture)}k"
-         : population.ToString("0", CultureInfo.InvariantCulture);
+        => population switch
+        {
+            >= 1_000_000 => $"{(population / 1_000_000).ToString("0.#", CultureInfo.InvariantCulture)}M",
+            >= 1_000 => $"{(population / 1_000).ToString("0.#", CultureInfo.InvariantCulture)}k",
+            _ => population.ToString("0", CultureInfo.InvariantCulture)
+        };
 
     /// <summary>
     /// Formats one search result line: the candidate label plus a compact
@@ -582,14 +589,14 @@ public static class InspectorPanelRenderer
     /// </summary>
     internal sealed class CandidateLineConverter : IMultiValueConverter
     {
-        public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+        public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
         {
             string label = values[0] as string ?? "";
             double population = values[1] is double p ? p : 0;
             return population > 0 ? $"{label} · {FormatPopulation(population)}" : label;
         }
 
-        public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
+        public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture)
             => throw new NotSupportedException();
     }
 }

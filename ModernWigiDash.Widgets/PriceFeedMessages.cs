@@ -144,6 +144,40 @@ public static class PriceFeedMessages
         }
     }
 
+    /// <summary>
+    /// CoinGecko simple-price batch: id → (price, change). Parses the
+    /// document once for the fallback loop that stores every subscribed
+    /// alias — the per-id spelling would re-parse the same JSON per alias.
+    /// Entries missing their id (or a null usd) are absent from the result;
+    /// a malformed document yields an empty result.
+    /// </summary>
+    public static IReadOnlyDictionary<string, (decimal Price, decimal? ChangePercent)> ParseCoinGeckoSimplePriceBatch(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var result = new Dictionary<string, (decimal, decimal?)>();
+            foreach (var coin in doc.RootElement.EnumerateObject())
+            {
+                if (!coin.Value.TryGetProperty("usd", out var usdEl) || usdEl.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+                decimal? change = null;
+                if (coin.Value.TryGetProperty("usd_24h_change", out var changeEl) && changeEl.ValueKind != JsonValueKind.Null)
+                {
+                    change = changeEl.GetDecimal();
+                }
+                result[coin.Name] = (usdEl.GetDecimal(), change);
+            }
+            return result;
+        }
+        catch
+        {
+            return new Dictionary<string, (decimal, decimal?)>();
+        }
+    }
+
     /// <summary>CoinGecko simple-price response: <c>usd</c> plus a nullable <c>usd_24h_change</c>.</summary>
     public static bool TryParseCoinGeckoSimplePrice(string json, string coinGeckoId, out decimal price, out decimal? changePercent)
     {

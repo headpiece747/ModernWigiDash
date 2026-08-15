@@ -11,11 +11,19 @@ public sealed class NoopPowerModeSource : IPowerModeSource
 {
     public event Action<PowerModes>? ModeChanged
     {
-        add { }
-        remove { }
+        add
+        {
+            // Intentional no-op: a test host must never subscribe to the real
+            // SystemEvents (a hidden message window in a test run).
+        }
+        remove
+        {
+            // Intentional no-op: nothing was ever subscribed.
+        }
     }
 
     public void Dispose()
     {
+        // Intentional no-op: nothing was acquired.
     }
 }

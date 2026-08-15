@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using MessagePack;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.Sdk;
 using IndexEntry = ModernWigiDash.App.LibreHardwareService.LhmSharedMemoryReader.IndexEntry;
@@ -270,6 +271,19 @@ public class LhmSharedMemoryReaderTests
 
         Assert.IsFalse(dto.IsConnected);
         StringAssert.Contains(reader.LastError, "unavailable");
+    }
+
+    [TestMethod]
+    public void Poll_DisconnectedSnapshot_StampsTheInjectedClockTime()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var reader = new LhmSharedMemoryReader(new StubLhmMapSource(), clock);
+
+        SensorSnapshotDto dto = reader.Poll();
+
+        Assert.IsFalse(dto.IsConnected);
+        Assert.AreEqual(new DateTime(2026, 8, 14, 12, 0, 0, DateTimeKind.Utc), dto.LastUpdate,
+            "the disconnected snapshot's timestamp must come from the injected clock");
     }
 
     [TestMethod]

@@ -46,4 +46,24 @@ public class TwitchChatPresentationTests
         Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Connecting));
         Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Disconnected));
     }
+
+    [TestMethod]
+    public void ClampMaxMessages_WithinRange_PassesThrough()
+    {
+        Assert.AreEqual(30, TwitchChatPresentation.ClampMaxMessages(30));
+    }
+
+    [TestMethod]
+    public void ClampMaxMessages_BelowMinimum_ClampsToFive()
+    {
+        Assert.AreEqual(5, TwitchChatPresentation.ClampMaxMessages(0));
+        Assert.AreEqual(5, TwitchChatPresentation.ClampMaxMessages(5));
+    }
+
+    [TestMethod]
+    public void ClampMaxMessages_AboveMaximum_ClampsToOneHundred()
+    {
+        Assert.AreEqual(100, TwitchChatPresentation.ClampMaxMessages(500));
+        Assert.AreEqual(100, TwitchChatPresentation.ClampMaxMessages(100));
+    }
 }

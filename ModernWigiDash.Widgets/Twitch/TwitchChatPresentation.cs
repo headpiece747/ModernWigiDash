@@ -56,4 +56,10 @@ public static class TwitchChatPresentation
     /// <summary>The header status color: green when the chat is live, white otherwise.</summary>
     public static SKColor StatusColor(ChatStatus status)
         => status == ChatStatus.Connected ? new SKColor(0x10, 0xB9, 0x81) : SKColors.White;
+
+    /// <summary>The message-buffer trim rule: the chat holds at most the
+    /// clamped MaxMessages (5..100) — one spelling shared by the receive path
+    /// and the property-change trim, so the bound can never drift between
+    /// them.</summary>
+    public static int ClampMaxMessages(int value) => Math.Clamp(value, 5, 100);
 }

@@ -16,9 +16,9 @@ public sealed record PageTabItem(string PageName, int Index, bool IsActive, bool
 public static class PageTabsViewModel
 {
     /// <summary>The single delete-page rule: the last page can never be
-    /// deleted. Shared by the tab strip and the window's delete flow — the
-    /// rule is derived in exactly one place.</summary>
-    public static bool CanDelete(ProfileLayout profile) => profile.Pages.Count > 1;
+    /// deleted. The rule lives in ProfileOps beside DeletePage; this delegates
+    /// so the tab strip and the delete operation can never drift.</summary>
+    public static bool CanDelete(ProfileLayout profile) => ProfileOps.CanDeletePage(profile);
 
     public static IReadOnlyList<PageTabItem> Build(ProfileLayout profile)
     {

@@ -24,11 +24,14 @@ public class TrackedTargetResolverTests
     public void ForegroundWindowTitle_WithoutProvider_DoesNotThrow()
     {
         // The defaulted seam falls back to the real user32 query; in a test
-        // host that is at worst the desktop's (or no) foreground window —
+        // host that is at worst the desktop's (or no) foreground window —?"
         // the call must never throw either way.
         var resolver = CreateResolver(() => 4242, _ => []);
 
-        _ = resolver.ForegroundWindowTitle();
+        string? title = resolver.ForegroundWindowTitle();
+
+        Assert.IsTrue(title is null || title.Length > 0,
+            "the real query must return null (no foreground window) or a real non-empty title");
     }
 
     [TestMethod]

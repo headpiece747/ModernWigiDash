@@ -49,7 +49,7 @@ public class InspectorPanelRendererTests
             listBox.SelectedItem = listBox.Items[0];
 
             Assert.IsNotNull(committed, "picking from the search list must reach the commit callback");
-            Assert.AreEqual("Berlin, New Hampshire, United States", committed!.Label);
+            Assert.AreEqual("Berlin, New Hampshire, United States", committed.Label);
             Assert.AreEqual("Berlin, New Hampshire, United States", box.Text,
                 "the box must show the picked label so a later focus-loss commit cannot write the stale typed query");
         });
@@ -124,7 +124,7 @@ public class InspectorPanelRendererTests
             // A mouse press inside the popup (a pick gesture) precedes the box's
             // focus loss; the LostFocus commit must be suppressed or the pick
             // dies mid-gesture.
-            var content = (UIElement)popup.Child!;
+            var content = popup.Child;
             content.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseDownEvent });
             box.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
 
@@ -241,11 +241,11 @@ public class InspectorPanelRendererTests
         var converter = new InspectorPanelRenderer.CandidateLineConverter();
 
         string withPopulation = (string)converter.Convert(
-            ["Berlin, New Hampshire, United States", 10000.0], typeof(string), null, CultureInfo.InvariantCulture)!;
+            ["Berlin, New Hampshire, United States", 10000.0], typeof(string), null, CultureInfo.InvariantCulture);
         string withMillions = (string)converter.Convert(
-            ["Berlin, Germany", 3_600_000.0], typeof(string), null, CultureInfo.InvariantCulture)!;
+            ["Berlin, Germany", 3_600_000.0], typeof(string), null, CultureInfo.InvariantCulture);
         string noPopulation = (string)converter.Convert(
-            ["Berlin, New Hampshire, United States", 0.0], typeof(string), null, CultureInfo.InvariantCulture)!;
+            ["Berlin, New Hampshire, United States", 0.0], typeof(string), null, CultureInfo.InvariantCulture);
 
         Assert.AreEqual("Berlin, New Hampshire, United States · 10k", withPopulation);
         Assert.AreEqual("Berlin, Germany · 3.6M", withMillions);

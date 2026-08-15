@@ -26,12 +26,12 @@ public static class LhmSensorStore
     /// max age) so the facade freshness tests can drive time. The production
     /// singleton binds <see cref="TimeProvider.System"/> at construction.
     /// </summary>
-    internal static StaticTelemetryStore<SensorSnapshotDto> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
+    internal static TelemetryStore<SensorSnapshotDto> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
         => Facade.CreateStoreForTest(timeProvider, maxAge);
 
     /// <summary>Internal test seam: installs the store behind the static
     /// read/update surface (see <see cref="CreateStoreForTest"/>).</summary>
-    internal static StaticTelemetryStore<SensorSnapshotDto> StoreForTest
+    internal static TelemetryStore<SensorSnapshotDto> StoreForTest
     {
         get => Facade.StoreForTest;
         set => Facade.StoreForTest = value;

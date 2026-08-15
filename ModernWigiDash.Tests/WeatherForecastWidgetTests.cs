@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Reflection;
 using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Core.Models;
 using ModernWigiDash.Widgets;
@@ -330,6 +331,86 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task FetchLiveWeatherAsync_InFlightCountryCodeEdit_DoesNotClobberTheEditOrApplyStaleWeather()
+    {
+        // A fetch in flight while the user edited CountryCode must neither
+        // apply the stale resolution's weather nor write its stale label —
+        // the identity guard covers every invalidation source, not just
+        // Location edits. The stale result is dropped and the new identity
+        // (with the country hint) is fetched immediately, because the edit's
+        // force refresh was swallowed by the in-flight claim.
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (!url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+            return url.Contains("countryCode=DE", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherClientTests.SampleSanJoses)
+                : StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
+        }, gate);
+        var widget = new WeatherForecastWidget { Location = "Victoria" };
+        widget.TestHttpClient = new HttpClient(stub);
+
+        var fetching = widget.FetchLiveWeatherAsync(force: true);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+        widget.CountryCode = "DE"; // the user adds a country hint while the fetch is in flight
+        gate.SetResult();
+        await fetching;
+        widget.ApplyPendingLocationWriteback();
+
+        Assert.AreEqual("Victoria", widget.Location,
+            "a stale in-flight resolution must never write its label over the newer edit");
+        Assert.AreEqual("DE", widget.CountryCode, "the country hint edit must survive");
+        // The stale result was dropped and the new identity re-fetched: the
+        // second search carries the country hint (the old identity's search
+        // did not), and its unresolvable result applied nothing.
+        Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("/v1/search", StringComparison.Ordinal) && u.Contains("countryCode=DE", StringComparison.Ordinal)),
+            "the new identity must be fetched with the country hint");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_CancelledToken_ReturnsSilently()
+    {
+        // Teardown (dispose cancels the poll CTS) must abort a fetch without
+        // logging an error or touching the network — the geocode and forecast
+        // legs propagate the cancellation, and the widget swallows it.
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast));
+        var widget = new WeatherForecastWidget { Location = "Victoria" };
+        widget.TestHttpClient = new HttpClient(stub);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        widget._pollCts = cts;
+
+        await widget.FetchLiveWeatherAsync(force: true);
+
+        // The cancellation is swallowed by the widget (teardown is not a
+        // failure): awaiting the fetch completes without throwing.
+        widget.ApplyPendingLocationWriteback();
+        Assert.AreEqual("Victoria", widget.Location, "a cancelled fetch must not apply or write back anything");
+    }
+
+    [TestMethod]
+    public void OnPropertyChanged_InvalidationSet_MatchesWeatherLocationKeyFields()
+    {
+        // BuildQueryKey interpolates every WeatherLocation property except
+        // CustomLabel; the widget's invalidation guard (plus LocationMatch's
+        // own branch) must cover exactly those fields — otherwise a new
+        // resolution input would change the identity without forcing a
+        // re-fetch, and the "one guard covers every source" claim rots.
+        var keyFields = typeof(WeatherLocation)
+            .GetProperties()
+            .Select(p => p.Name)
+            .Where(name => name != nameof(WeatherLocation.CustomLabel))
+            .ToHashSet();
+        var guarded = WeatherForecastWidget.ResolutionInvalidationProperties
+            .Append(nameof(WeatherLocation.LocationMatch))
+            .ToHashSet();
+
+        CollectionAssert.AreEquivalent(keyFields.ToList(), guarded.ToList(),
+            "every WeatherLocation key field must be covered by the invalidation guard or LocationMatch's branch");
+    }
+
+    [TestMethod]
     public async Task CommitPick_ResolvesAsExactlyOneForecastFetch()
     {
         var stub = new StubHttpHandler(request =>
@@ -361,7 +442,7 @@ public class WeatherForecastWidgetTests
     {
         var widget = new WeatherForecastWidget();
 
-        Assert.AreEqual("New York", widget.Location);
+        Assert.AreEqual("Miami, Florida", widget.Location);
         Assert.AreEqual("Fixed Location", widget.LocationType);
         Assert.AreEqual("Detailed", widget.LayoutMode);
         Assert.AreEqual("Fahrenheit (°F, mph)", widget.UnitSystem);
@@ -375,6 +456,51 @@ public class WeatherForecastWidgetTests
         // Property Change resets geocode cache flag
         widget.Location = "Tokyo";
         Assert.AreEqual("Tokyo", widget.Location);
+    }
+
+    [TestMethod]
+    public void CacheFileName_KeysBy_CurrentInstanceId()
+    {
+        var widget = new WeatherForecastWidget();
+        string placedId = Guid.NewGuid().ToString();
+
+        // RehydrateWidget assigns the placed InstanceId only after the widget
+        // is constructed; the cache name must follow that final identity, so
+        // the file round-trips across restarts (a construction-time GUID would
+        // orphan every write under a never-reused filename).
+        widget.InstanceId = placedId;
+
+        Assert.AreEqual($"weather_{placedId}.json", widget.CacheFileName);
+    }
+
+    [TestMethod]
+    public void UnitSystemAttribute_Options_AllParseToTheirOwnUnits()
+    {
+        // The inspector's choice list must stay in lockstep with the parser:
+        // a corrupted or renamed option (the °→U+FFFD corruption that made
+        // re-selecting Fahrenheit silently render Celsius) falls through to
+        // the default units.
+        var attribute = typeof(WeatherForecastWidget)
+            .GetProperty(nameof(WeatherForecastWidget.UnitSystem))!
+            .GetCustomAttribute<WidgetPropertyAttribute>()!;
+        var expected = new Dictionary<string, (string, string)>
+        {
+            ["Fahrenheit (°F, mph)"] = ("°F", "mph"),
+            ["Celsius (°C, km/h)"] = ("°C", "km/h"),
+            ["Celsius (°C, mph)"] = ("°C", "mph"),
+            ["Celsius (°C, m/s)"] = ("°C", "m/s"),
+            ["Kelvin (K, m/s)"] = ("K", "m/s"),
+        };
+
+        Assert.AreEqual(expected.Count, attribute.Options.Length, "every choice option must be pinned");
+        foreach (string option in attribute.Options)
+        {
+            Assert.IsTrue(expected.TryGetValue(option, out var units),
+                $"option '{option}' must be a known parseable string");
+            Assert.AreEqual(units, WeatherPresentation.ParseUnitSystem(option));
+        }
+        Assert.AreEqual(WeatherPresentation.DefaultUnitSystem, attribute.DefaultValue,
+            "the attribute default must match the property default and the parser's primary case");
     }
 
     [TestMethod]

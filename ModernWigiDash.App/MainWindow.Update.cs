@@ -65,21 +65,10 @@ public partial class MainWindow
     {
         _updateState = state;
         UpdateButton.ToolTip = tooltip;
-        string icon = state switch
-        {
-            UpdateState.Available => "arrow-circle-down",
-            UpdateState.Downloading => "swap-horizontal",
-            UpdateState.Ready => "refresh",
-            _ => ""
-        };
-        UpdateIconPath.Data = GriddyIconGeometry.FromName(icon);
-        UpdateButton.Visibility = state == UpdateState.Hidden ? Visibility.Collapsed : Visibility.Visible;
-        UpdateIconPath.Fill = state switch
-        {
-            UpdateState.Ready => new SolidColorBrush(Color.FromRgb(16, 185, 129)), // green
-            UpdateState.Available => new SolidColorBrush(Color.FromRgb(245, 158, 11)), // amber
-            _ => new SolidColorBrush(Color.FromRgb(250, 250, 250))
-        };
+        UpdateBadgeModel badge = UpdateBadgeModel.From(state);
+        UpdateIconPath.Data = GriddyIconGeometry.FromName(badge.IconName);
+        UpdateButton.Visibility = badge.IsVisible ? Visibility.Visible : Visibility.Collapsed;
+        UpdateIconPath.Fill = new SolidColorBrush(Color.FromRgb(badge.Red, badge.Green, badge.Blue));
     }
 
     private void UpdateButton_Click(object sender, RoutedEventArgs e)

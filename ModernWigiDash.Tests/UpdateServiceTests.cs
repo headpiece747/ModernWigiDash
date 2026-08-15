@@ -248,7 +248,7 @@ public class UpdateServiceTests
             "{{RELAUNCH}} must be substituted with the install-dir relaunch line");
         Assert.IsFalse(body.Contains("{{RELAUNCH}}"));
         Assert.IsNotNull(started, "the launch seam must be invoked");
-        Assert.IsTrue(started!.UseShellExecute, "ShellExecute detaches the updater from the app's job object");
+        Assert.IsTrue(started.UseShellExecute, "ShellExecute detaches the updater from the app's job object");
         Assert.IsTrue(started.Arguments.Contains(installDir), "the install dir must reach the updater");
         Assert.IsTrue(started.Arguments.Contains(stageDir), "the stage dir must reach the updater");
     }

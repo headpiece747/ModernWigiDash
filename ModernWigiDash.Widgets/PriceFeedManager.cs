@@ -14,6 +14,10 @@ public enum AssetKind
 
 public class PriceInfo
 {
+    /// <summary>The freshness window in seconds — the one spelling shared by
+    /// <see cref="IsStale"/> and the CoinGecko downgrade guard.</summary>
+    internal const double FreshnessSeconds = 60;
+
     public decimal Price { get; set; }
     public decimal ChangePercent { get; set; }
     public string CurrencySymbol { get; set; } = "$";
@@ -22,7 +26,7 @@ public class PriceInfo
     public string FormattedChange =>
         $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%";
     public bool IsPositive => ChangePercent >= 0;
-    public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > 60;
+    public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > FreshnessSeconds;
 
     /// <summary>Test seam: clock for the staleness decision.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -46,9 +50,16 @@ public sealed class PriceFeedManager : IDisposable
     private readonly HttpClient _http;
     private readonly TimeSpan _stockRestInterval = TimeSpan.FromSeconds(30);
     private readonly TimeSpan _cryptoRestInterval = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _fxRestInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>The freshness guard's source discriminator — the one spelling
+    /// shared by the store site and the downgrade rule (a rename must touch
+    /// both or the guard silently disarms).</summary>
+    internal const string SourceBinanceUs = "BinanceUS";
 
     private readonly Func<FeedKind, IWebSocketFeed> _feedFactory;
     private readonly TimeSpan _reconnectDelay;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private CancellationTokenSource _cts = new();
     private FeedLoop? _binanceLoop;
     private FeedLoop? _finnhubLoop;
@@ -80,16 +91,20 @@ public sealed class PriceFeedManager : IDisposable
     {
     }
 
-    /// <summary>Internal constructor with injectable seams: HttpClient, WebSocket feed factory, reconnect delay.</summary>
+    /// <summary>Internal constructor with injectable seams: HttpClient, WebSocket feed factory, reconnect delay, loop delay.</summary>
     internal PriceFeedManager(
         HttpClient httpClient,
         string? finnhubApiKey = null,
         Func<FeedKind, IWebSocketFeed>? feedFactory = null,
-        TimeSpan? reconnectDelay = null)
+        TimeSpan? reconnectDelay = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _http = httpClient;
         _feedFactory = feedFactory ?? (_ => new ClientWebSocketFeed());
         _reconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(5);
+        // The loop-delay seam (the FeedLoop pattern): tests drive the REST
+        // loop's cadence with a fake clock; production uses real delays.
+        _delay = delay ?? Task.Delay;
         // The Finnhub key must come from an explicit argument or the
         // FINNHUB_API_KEY environment variable — never from source control.
         _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "";
@@ -276,13 +291,7 @@ public sealed class PriceFeedManager : IDisposable
             string json = await _http.GetStringAsync(url, _cts.Token);
             if (PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, geckoId, out var price, out var change))
             {
-                _prices[baseCoin] = new PriceInfo
-                {
-                    Price = price,
-                    ChangePercent = change ?? 0m,
-                    Source = "CoinGecko",
-                    Timestamp = Clock.GetUtcNow().UtcDateTime
-                };
+                _prices[baseCoin] = NewPrice(price, change, "CoinGecko");
             }
         }
         else if (kind == AssetKind.Stock)
@@ -293,16 +302,41 @@ public sealed class PriceFeedManager : IDisposable
             string json = await _http.GetStringAsync(url, _cts.Token);
             if (PriceFeedMessages.TryParseYahooChart(json, out var price, out var changePct))
             {
-                _prices[stockSym] = new PriceInfo
-                {
-                    Price = price,
-                    ChangePercent = changePct,
-                    Source = "Yahoo",
-                    Timestamp = Clock.GetUtcNow().UtcDateTime
-                };
+                _prices[stockSym] = NewPrice(price, changePct, "Yahoo");
             }
         }
     }
+
+    /// <summary>Builds a fresh price record for the shared map: the timestamp
+    /// is always "now" and the source labels the record — one spelling for
+    /// the store sites (the per-feed currency symbol stays parameterized,
+    /// e.g. Frankfurter's empty symbol for cross rates).</summary>
+    private PriceInfo NewPrice(decimal price, decimal? changePercent, string source, string currencySymbol = "$")
+        => new()
+        {
+            Price = price,
+            ChangePercent = changePercent ?? 0m,
+            Source = source,
+            Timestamp = Clock.GetUtcNow().UtcDateTime,
+            CurrencySymbol = currencySymbol
+        };
+
+    /// <summary>The CoinGecko downgrade rule: a fresh BinanceUS price is never
+    /// replaced by a CoinGecko fallback — the fallback's slower cadence must
+    /// not overwrite live feed data. Pure over the existing record and the
+    /// clock so the freshness window is directly testable.</summary>
+    internal static bool ShouldKeepFreshBinanceUs(PriceInfo existing, DateTime now)
+        => existing.Source == SourceBinanceUs && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
+
+    /// <summary>Diagnostic log with cadence dedup for the per-tick feed
+    /// failures — the module's runtime surface (configuration paths use
+    /// FileLog directly). Every Nth failure writes, so a dead feed is
+    /// diagnosable in the field without a per-tick log storm.</summary>
+    private readonly DiagLog _failLog = new("PRICE-FEED", 20, logFirst: true);
+
+    /// <summary>Flattens user-provided strings before interpolation into log
+    /// lines so embedded newlines cannot inject fake log entries.</summary>
+    private static string SanitizeLog(string value) => value.Replace('\r', ' ').Replace('\n', ' ');
 
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),
@@ -331,18 +365,12 @@ public sealed class PriceFeedManager : IDisposable
         var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
         if (PriceFeedMessages.TryParseFinnhubQuote(json, out var price, out var change))
         {
-            _prices[sym] = new PriceInfo
-            {
-                Price = price,
-                ChangePercent = change ?? 0m,
-                Source = "Finnhub",
-                Timestamp = Clock.GetUtcNow().UtcDateTime
-            };
+            _prices[sym] = NewPrice(price, change, "Finnhub");
         }
     }
 
     private async Task RunFxRestPollerAsync()
-        => await RunRestPollLoopAsync(_stockRestInterval, _subscribedFx.Keys, PollFxPairAsync);
+        => await RunRestPollLoopAsync(_fxRestInterval, _subscribedFx.Keys, PollFxPairAsync);
 
     internal async Task PollFxPairAsync(string key)
     {
@@ -358,14 +386,7 @@ public sealed class PriceFeedManager : IDisposable
         var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
         if (PriceFeedMessages.TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
         {
-            _prices[key] = new PriceInfo
-            {
-                Price = price,
-                ChangePercent = change,
-                Source = "Frankfurter",
-                Timestamp = Clock.GetUtcNow().UtcDateTime,
-                CurrencySymbol = ""
-            };
+            _prices[key] = NewPrice(price, change, "Frankfurter", "");
         }
     }
 
@@ -374,14 +395,17 @@ public sealed class PriceFeedManager : IDisposable
     /// <paramref name="pollSymbol"/> (individual failures are non-fatal),
     /// then run the optional <paramref name="afterBatch"/> action at the same
     /// point of the cycle (e.g. the crypto loop's CoinGecko fallback).
+    /// Internal test seam: the delay rides the injected <see cref="_delay"/>
+    /// delegate, so a fake clock drives the cadence, the failure isolation,
+    /// and the afterBatch ordering without waiting real seconds.
     /// </summary>
-    private async Task RunRestPollLoopAsync(TimeSpan interval, IEnumerable<string> subscribed, Func<string, Task> pollSymbol, Func<Task>? afterBatch = null)
+    internal async Task RunRestPollLoopAsync(TimeSpan interval, IEnumerable<string> subscribed, Func<string, Task> pollSymbol, Func<Task>? afterBatch = null)
     {
         while (!_disposed)
         {
             try
             {
-                await Task.Delay(interval, _cts.Token);
+                await _delay(interval, _cts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -398,7 +422,7 @@ public sealed class PriceFeedManager : IDisposable
                 catch
                 {
                     // Individual symbol failure is non-fatal.
-                    System.Diagnostics.Debug.WriteLine($"REST poll failed for {symbol}; continuing");
+                    _failLog.Write(() => $"REST poll failed for '{SanitizeLog(symbol)}'; continuing");
                 }
             }
             if (afterBatch is not null)
@@ -421,13 +445,7 @@ public sealed class PriceFeedManager : IDisposable
         var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token);
         if (PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change))
         {
-            _prices[sym] = new PriceInfo
-            {
-                Price = price,
-                ChangePercent = change,
-                Source = "BinanceUS",
-                Timestamp = Clock.GetUtcNow().UtcDateTime
-            };
+            _prices[sym] = NewPrice(price, change, SourceBinanceUs);
         }
     }
 
@@ -438,35 +456,26 @@ public sealed class PriceFeedManager : IDisposable
             var ids = string.Join(",", _subscribedCrypto.Keys.Select(SymbolCatalog.CoinGeckoIdFor).OfType<string>());
             if (string.IsNullOrEmpty(ids)) return;
             var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token);
+            // Parse the batch once, index by id — the per-alias spelling would
+            // re-parse the same JSON document for every subscribed alias.
+            var parsed = PriceFeedMessages.ParseCoinGeckoSimplePriceBatch(json);
             foreach (var alias in SymbolCatalog.CryptoAliases.Values.DistinctBy(a => a.Symbol))
             {
-                if (!PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, alias.CoinGeckoId, out var price, out var change))
+                if (!parsed.TryGetValue(alias.CoinGeckoId, out var quote))
                 {
                     continue;
                 }
-                _prices.AddOrUpdate(alias.Symbol, _ => new PriceInfo
+                _prices.AddOrUpdate(alias.Symbol, _ => NewPrice(quote.Price, quote.ChangePercent, "CoinGecko"), (_, existing) =>
                 {
-                    Price = price,
-                    ChangePercent = change ?? 0,
-                    Source = "CoinGecko",
-                    Timestamp = Clock.GetUtcNow().UtcDateTime
-                }, (_, existing) =>
-                {
-                    if (existing.Source == "BinanceUS" && (Clock.GetUtcNow().UtcDateTime - existing.Timestamp).TotalSeconds < 60)
+                    if (ShouldKeepFreshBinanceUs(existing, Clock.GetUtcNow().UtcDateTime))
                         return existing;
-                    return new PriceInfo
-                    {
-                        Price = price,
-                        ChangePercent = change ?? existing.ChangePercent,
-                        Source = "CoinGecko",
-                        Timestamp = Clock.GetUtcNow().UtcDateTime
-                    };
+                    return NewPrice(quote.Price, quote.ChangePercent ?? existing.ChangePercent, "CoinGecko");
                 });
             }
         }
         catch
         {
-            System.Diagnostics.Debug.WriteLine("CoinGecko fallback price fetch failed; continuing");
+            _failLog.Write("CoinGecko fallback price fetch failed; continuing");
         }
     }
 
@@ -474,29 +483,23 @@ public sealed class PriceFeedManager : IDisposable
     {
         if (!PriceFeedMessages.TryParseBinanceTicker(json, out var coin, out var price, out var change))
         {
-            System.Diagnostics.Debug.WriteLine("Failed to parse Binance ticker message; ignoring");
+            _failLog.Write("Failed to parse Binance ticker message; ignoring");
             return;
         }
-        _prices[coin] = new PriceInfo
-        {
-            Price = price,
-            ChangePercent = change,
-            Source = "Binance",
-            Timestamp = Clock.GetUtcNow().UtcDateTime
-        };
+        _prices[coin] = NewPrice(price, change, "Binance");
     }
 
     private void ParseFinnhubMessage(string json)
     {
         if (!PriceFeedMessages.TryParseFinnhubTrades(json, out var trades))
         {
-            System.Diagnostics.Debug.WriteLine("Failed to parse Finnhub message; ignoring");
+            _failLog.Write("Failed to parse Finnhub message; ignoring");
             return;
         }
         foreach (var trade in trades)
         {
-            _prices.AddOrUpdate(trade.Symbol, _ => new PriceInfo { Price = trade.Price, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime },
-                (_, existing) => new PriceInfo { Price = trade.Price, ChangePercent = existing.ChangePercent, Source = "Finnhub", Timestamp = Clock.GetUtcNow().UtcDateTime });
+            _prices.AddOrUpdate(trade.Symbol, _ => NewPrice(trade.Price, null, "Finnhub"),
+                (_, existing) => NewPrice(trade.Price, existing.ChangePercent, "Finnhub"));
         }
     }
 

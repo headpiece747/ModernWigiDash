@@ -119,6 +119,35 @@ public class PriceFeedMessagesTests
     }
 
     [TestMethod]
+    public void ParseCoinGeckoSimplePriceBatch_MultipleIds_ParsesAll()
+    {
+        var parsed = PriceFeedMessages.ParseCoinGeckoSimplePriceBatch(
+            """{"bitcoin":{"usd":61234.5,"usd_24h_change":2.1},"ethereum":{"usd":3100.25}}""");
+
+        Assert.AreEqual(2, parsed.Count);
+        Assert.AreEqual(61234.5m, parsed["bitcoin"].Price);
+        Assert.AreEqual(2.1m, parsed["bitcoin"].ChangePercent);
+        Assert.AreEqual(3100.25m, parsed["ethereum"].Price);
+        Assert.IsNull(parsed["ethereum"].ChangePercent);
+    }
+
+    [TestMethod]
+    public void ParseCoinGeckoSimplePriceBatch_NullUsd_SkipsEntry()
+    {
+        var parsed = PriceFeedMessages.ParseCoinGeckoSimplePriceBatch("""{"bitcoin":{"usd":null}}""");
+
+        Assert.AreEqual(0, parsed.Count);
+    }
+
+    [TestMethod]
+    public void ParseCoinGeckoSimplePriceBatch_Malformed_ReturnsEmpty()
+    {
+        var parsed = PriceFeedMessages.ParseCoinGeckoSimplePriceBatch("not json");
+
+        Assert.AreEqual(0, parsed.Count);
+    }
+
+    [TestMethod]
     public void TryParseFrankfurterSeries_LastEntryIsPrice_ChangeFromPreviousEntry()
     {
         const string json = """

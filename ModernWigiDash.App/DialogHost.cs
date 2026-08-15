@@ -17,12 +17,12 @@ namespace ModernWigiDash.App;
 public sealed class DialogHost
 {
     private readonly Window _owner;
-    private readonly IThemeApplicator _themeApplicator;
+    private readonly ThemeApplicator _themeApplicator;
     private readonly Func<string, object?> _tryFindResource;
     private readonly Action<string, Exception?> _logError;
     private Window? _deviceAuthorizationWindow;
 
-    public DialogHost(Window owner, IThemeApplicator themeApplicator, Func<string, object?> tryFindResource, Action<string, Exception?> logError)
+    public DialogHost(Window owner, ThemeApplicator themeApplicator, Func<string, object?> tryFindResource, Action<string, Exception?> logError)
     {
         _owner = owner;
         _themeApplicator = themeApplicator;

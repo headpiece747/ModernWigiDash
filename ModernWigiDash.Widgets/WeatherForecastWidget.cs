@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
@@ -13,8 +13,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
 
-    [WidgetProperty("Location", WidgetPropertyType.Text, "City name, ZIP/postal code, or lat,lon (e.g. 40.71,-74.00)", "New York")]
-    public string Location { get; set; } = "New York";
+    // The default carries a state suffix on purpose: a bare city name (the old
+    // "New York") ties across many exact-name geocoder candidates, so the
+    // ambiguity gate leaves it unresolved and the widget starts blank.
+    // "Miami, Florida" is the single unique top scorer — it fetches out of the
+    // box on a fresh profile.
+    [WidgetProperty("Location", WidgetPropertyType.Text, "City name, ZIP/postal code, or lat,lon (e.g. 40.71,-74.00)", "Miami, Florida")]
+    public string Location { get; set; } = "Miami, Florida";
 
     [WidgetProperty("Custom Label", WidgetPropertyType.Text, "Custom title display name override", "")]
     public string CustomLabel { get; set; } = "";
@@ -81,7 +86,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     private readonly WeatherClient _client;
 
-    // ── IWidgetLocationSearch ────────────────────────────────────────────────
+    // -- IWidgetLocationSearch ------------------------------------------------
 
     public Task<IReadOnlyList<GeocodeCandidate>> SearchAsync(string query, CancellationToken ct)
         => _client.SearchCitiesAsync(query, ct);
@@ -89,21 +94,26 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     public void CommitPick(GeocodeCandidate candidate)
     {
         // The name is the truth: a pick writes only the label. Latitude/Longitude
-        // stay manual-only — the label resolves deterministically (multi-component
+        // stay manual-only ° the label resolves deterministically (multi-component
         // suffix matching).
         SetProperty(nameof(Location), candidate.Label);
     }
 
     public double? CurrentPopulation => _client.LastResolvedPopulation > 0 ? _client.LastResolvedPopulation : null;
 
-    // ── IWidgetEditorProvider ────────────────────────────────────────────────
+    // -- IWidgetEditorProvider ------------------------------------------------
 
     public EditorKind? GetEditorKind(PropertyInfo property)
         => property.Name == nameof(Location) ? EditorKind.LocationSearch : null;
 
     public WeatherForecastWidget()
     {
-        _client = new WeatherClient(CacheDir, $"weather_{InstanceId}.json", logError: (message, exception) => Context?.LogError(message, exception));
+        // The cache name is resolved lazily from the CURRENT InstanceId, not
+        // baked at construction: RehydrateWidget assigns the placed InstanceId
+        // only after the widget is built, so a baked name would key every
+        // load/save by a fresh never-reused GUID (the cache would never round
+        // trip across restarts).
+        _client = new WeatherClient(CacheDir, () => $"weather_{InstanceId}.json", logError: (message, exception) => Context?.LogError(message, exception));
     }
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
@@ -114,6 +124,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     /// <summary>The last resolved display name (test/UI seam into the client).</summary>
     internal string ResolvedCityName => _client.ResolvedCityName;
+
+    /// <summary>The client's cache file name as currently resolved (test seam:
+    /// pins the placed-InstanceId keying ° the name must follow the InstanceId
+    /// assigned by rehydration, never the construction-time default GUID).</summary>
+    internal string CacheFileName => _client.CacheFileName;
 
     /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
     internal int FetchCompletedCount => _client.FetchCompletedCount;
@@ -126,7 +141,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private double _highTempC = 26.6;   // 80°F default
     private double _lowTempC = 20.5;    // 69°F default
 
-    // The card fill/stroke paints behind every pill, row, and column — one
+    // The card fill/stroke paints behind every pill, row, and column ° one
     // shared pair, colors swapped via Paint.Color mutation (hoisted out of the
     // per-card loops).
     private readonly SKPaint _cardFillPaint = new() { IsAntialias = true };
@@ -150,7 +165,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private SKRect _lastBounds;
 
     // The render-model cache: every formatted string the draw paths need is
-    // rebuilt only when (data version, bounds, property snapshot) changes —
+    // rebuilt only when (data version, bounds, property snapshot) changes °
     // weather data moves at most every 15 minutes, so the static scene
     // allocates nothing on the 30 FPS render path.
     private int _dataVersion;
@@ -158,18 +173,25 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
     private PollLoop? _refreshPoll;
-    private CancellationTokenSource? _pollCts;
+    /// <summary>The fetch-cancellation CTS (internal test seam: direct-drive
+    /// tests inject a cancelled token to pin the silent-teardown path).</summary>
+    internal CancellationTokenSource? _pollCts;
 
     public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         base.InitializeAsync(context, cancellationToken);
-        _ = LoadCachedWeatherAsync();
+        // The poll CTS is created before the boot cache load so the load can
+        // take the same teardown token every other fetch leg gets.
         _pollCts = new CancellationTokenSource();
-        // The 15-min refresh rides the repo's one loop shape (the old code
-        // used the last raw System.Threading.Timer: fire-and-forget async
-        // callback, no readiness guard, no failure logging).
+        _ = LoadCachedWeatherAsync(_pollCts.Token);
+        // The refresh loop rides the repo's one loop shape at the client's
+        // fetch-window cadence ° the one cadence constant (visible pages are
+        // driven by the render kick at the same window; the loop is the sole
+        // driver for hidden pages, whose reveal-kick then refreshes anyway).
+        // The old code used the last raw System.Threading.Timer: fire-and-
+        // forget async callback, no readiness guard, no failure logging.
         _refreshPoll = new PollLoop(
-            "WEATHER", TimeSpan.FromMinutes(15), () => true,
+            "WEATHER", WeatherClient.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
         _ = FetchLiveWeatherAsync();
@@ -179,9 +201,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private void WeatherRefreshTick() => RequestRefresh();
 
     /// <summary>
-    /// The single "fetch if due" gate for every cadence source: the 15-min
-    /// refresh PollLoop, the per-frame render kick, and the property-change
-    /// force paths all call this. The static-snapshot rule and the client's
+    /// The single "fetch if due" gate for every cadence source: the refresh
+    /// PollLoop, the per-frame render kick, and the property-change force
+    /// paths all call this. The static-snapshot rule and the client's
     /// throttle-window pre-check are applied here, once, instead of being
     /// re-derived at each call site; the client's atomic in-flight claim
     /// remains the authority (see <see cref="WeatherClient.TryBeginFetch"/>).
@@ -203,6 +225,16 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         await base.DisposeAsync();
     }
 
+    /// <summary>
+    /// The resolution inputs that force a re-fetch on change ° the widget-side
+    /// mirror of <see cref="WeatherClient.BuildQueryKey"/> (every key field
+    /// except LocationMatch, which has its own branch in OnPropertyChanged).
+    /// The drift test pins this set to the WeatherLocation record, so a new
+    /// resolution input can never change the identity without a re-fetch.
+    /// </summary>
+    internal static readonly string[] ResolutionInvalidationProperties =
+        [nameof(Location), nameof(Latitude), nameof(Longitude), nameof(CountryCode), nameof(LocationType)];
+
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
         // A Location Match pick resolves against the candidates it was offered
@@ -213,17 +245,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             _client.InvalidateCoordinates();
             RequestRefresh(force: true);
         }
-        else if (propertyName is nameof(Location) or nameof(Latitude) or nameof(Longitude) or nameof(CountryCode))
+        else if (!_suppressLocationWriteback && ResolutionInvalidationProperties.Contains(propertyName))
         {
             // The resolved-label write-back skips the forced re-fetch: the
             // label was just resolved by the fetch that wrote it, so fetching
             // again would loop (the write-back converges after one extra
             // resolution at most).
-            if (!_suppressLocationWriteback)
-            {
-                _client.InvalidateLocation();
-                RequestRefresh(force: true);
-            }
+            _client.InvalidateLocation();
+            RequestRefresh(force: true);
         }
         base.OnPropertyChanged(propertyName, newValue);
     }
@@ -236,7 +265,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // ApplyPendingLocationWriteback).
         ApplyPendingLocationWriteback();
 
-        SKColor accentColor = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accentColor = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
@@ -249,7 +278,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _lastBounds = bounds;
 
         // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render — but only when the source actually changed (the
+        // a list mid-render ° but only when the source actually changed (the
         // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
@@ -417,11 +446,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         float w = bounds.Width;
         float pillY = heroBottom + 4f * sy;
         float pillHeight = metricsH;
-        float metricFontSize = Math.Clamp(13f * s, 8f, 24f);
+        float metricFontSize = WeatherLayout.PillFontSize(s);
         var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, metricFontSize);
 
-        float pillPadX = Math.Clamp(10f * s, 4f, 20f);
-        float pillGap = Math.Clamp(8f * s, 3f, 16f);
+        float pillPadX = WeatherLayout.PillPadX(s);
+        float pillGap = WeatherLayout.PillGap(s);
         float totalPillsW = 0f;
         float[] metricWidths = model.MetricWidths;
         for (int i = 0; i < metricWidths.Length; i++)
@@ -681,7 +710,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         // Hit-test against the last rendered bounds so touches line up with the
         // drawn controls at any widget size, not just the design size. The zones
-        // come from WeatherLayout — the same geometry the render path draws.
+        // come from WeatherLayout ° the same geometry the render path draws.
         var b = _lastBounds.Width > 0 ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
         var scale = WeatherLayout.Scale(b);
 
@@ -695,22 +724,22 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                     WeatherLayout.NextMode(LayoutMode)));
                 return;
             default:
-                _ = FetchLiveWeatherAsync(force: true);
+                RequestRefresh(force: true);
                 break;
         }
     }
 
     /// <summary>
-    /// Fetches live weather through the client's atomic fetch claim — the
-    /// in-flight/throttle decision is the client's, single-sourced. While a
-    /// static snapshot is showing, non-forced fetches are blocked.
+    /// Whether the fetch cadence gate blocks a non-forced fetch: while a
+    /// static snapshot is showing (after a boot load), the render tick's
+    /// request is skipped until the snapshot is dismissed.
     /// </summary>
     private bool IsStaticSnapshotBlocking => StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue;
 
     /// <summary>
     /// The candidate labels last pushed to the inspector. Refreshing the
     /// inspector rebuilds the panel, which steals focus from the field the
-    /// user is typing in — so a refresh fires only when the pickable options
+    /// user is typing in ° so a refresh fires only when the pickable options
     /// actually changed (e.g. the first geocode after a Location edit), never
     /// on every fetch.
     /// </summary>
@@ -732,32 +761,52 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
-        if (IsStaticSnapshotBlocking && !force) return;
-
-        // The location the fetch started from: a fetch that was in flight while
-        // the user edited Location must never write the stale resolved label
-        // over the newer edit.
-        string fetchLocation = Location;
-        var snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+        // The identity this fetch was started for: a fetch that was in flight
+        // while the user edited any resolution input (Location, Latitude,
+        // Longitude, CountryCode, LocationMatch) must never apply the stale
+        // weather or write the stale resolved label over the newer edit. The
+        // key mirrors the client's query identity, so one guard covers every
+        // invalidation source.
+        string fetchKey = WeatherClient.BuildQueryKey(BuildLocation());
+        WeatherSnapshot? snapshot;
+        try
+        {
+            snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Teardown: the widget's poll CTS was cancelled (dispose) ° a
+            // cancelled fetch is not a failure, so nothing is logged or applied.
+            return;
+        }
         if (snapshot is null) return;
+
+        if (fetchKey != WeatherClient.BuildQueryKey(BuildLocation()))
+        {
+            // The identity changed while the fetch was in flight: drop the
+            // stale result (weather and label) and re-fetch the new identity °
+            // the edit-time force refresh was swallowed by the client's
+            // in-flight claim, which this fetch's completion has now released.
+            RequestRefresh(force: true);
+            return;
+        }
 
         ApplySnapshot(snapshot);
 
         // The resolved label's write-back is deferred to the UI thread (Render
         // flushes the pending field): Context.PersistProperty stays on the UI
-        // thread, and the staleness guard skips a fetch whose Location changed
-        // while it was in flight.
+        // thread, and the identity guard above already dropped any fetch whose
+        // resolution inputs changed while it was in flight.
         if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-            && snapshot.ResolvedCityName != Location
-            && Location == fetchLocation)
+            && snapshot.ResolvedCityName != Location)
         {
             _pendingLocationWriteback = snapshot.ResolvedCityName;
         }
 
         // The geocode may have produced new Location Match candidates: refresh
         // the inspector so an already-open panel shows the dropdown (the Twitch
-        // pattern — the renderer only builds a ComboBox when options exist).
-        // Only when the option set changed — see _lastInspectorCandidatesStamp.
+        // pattern ° the renderer only builds a ComboBox when options exist).
+        // Only when the option set changed ° see _lastInspectorCandidatesStamp.
         string stamp = string.Join('\n', _client.LastCandidates.Select(c => c.Query));
         if (stamp != _lastInspectorCandidatesStamp)
         {
@@ -800,7 +849,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the
-    /// "response omitted this section → keep the previous value" semantics.
+    /// "response omitted this section ? keep the previous value" semantics.
     /// </summary>
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
@@ -829,10 +878,18 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
-    private async Task LoadCachedWeatherAsync()
+    private async Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
     {
-        var cached = await _client.LoadCacheAsync().ConfigureAwait(false);
-        if (cached is not null) ApplySnapshot(cached);
+        try
+        {
+            var cached = await _client.LoadCacheAsync(cancellationToken).ConfigureAwait(false);
+            if (cached is not null) ApplySnapshot(cached);
+        }
+        catch (OperationCanceledException)
+        {
+            // Teardown: the poll CTS was cancelled (dispose) ° a cancelled
+            // cache load is not a failure, so nothing is logged or applied.
+        }
     }
 
     /// <summary>
@@ -928,11 +985,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             && cached.ShowForecast == ShowForecast;
 
     /// <summary>Measured pill widths (text + padding) in the pill font the draw
-    /// path derives from the same scale.</summary>
+    /// path derives from the same WeatherLayout formulas — one spelling, so
+    /// the model's cached widths can never drift from the drawn pills.</summary>
     private static float[] MeasurePillWidths(IReadOnlyList<string> metrics, float scale)
     {
-        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(13f * scale, 8f, 24f));
-        float pillPadX = Math.Clamp(10f * scale, 4f, 20f);
+        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, WeatherLayout.PillFontSize(scale));
+        float pillPadX = WeatherLayout.PillPadX(scale);
         var widths = new float[metrics.Count];
         for (int i = 0; i < widths.Length; i++)
         {
@@ -968,7 +1026,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>
     /// The cached render model: every formatted string the five layout modes
     /// draw, recomputed only when its key components change. The key covers
-    /// everything that can change the strings — the data version, the bounds
+    /// everything that can change the strings ° the data version, the bounds
     /// (layout-derived font sizes), and the property snapshot (mode, unit
     /// system, custom label, visibility toggles).
     /// </summary>

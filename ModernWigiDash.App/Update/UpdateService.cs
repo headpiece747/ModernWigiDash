@@ -54,7 +54,10 @@ public sealed class UpdateService
     }
 
     private static bool DigestMatches(string actual, string expected)
-        => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+        => actual.Length == expected.Length
+           && CryptographicOperations.FixedTimeEquals(
+               System.Text.Encoding.ASCII.GetBytes(actual),
+               System.Text.Encoding.ASCII.GetBytes(expected));
 
     private static Process? StartProcess(ProcessStartInfo psi) => Process.Start(psi);
 
@@ -166,8 +169,8 @@ public sealed class UpdateService
 
             // UseShellExecute=true detaches the updater from this process's job
             // object. With ShellExecute, cmd receives the arguments as one
-            // string, so the slash-S slash-C doubled-quote form fails silently;
-            // the whole command must be a single quoted argument to slash-c.
+            // string, so the doubled-quote form fails silently and the whole
+            // command must be a single quoted argument to slash-c.
             string cmdExe = Path.Combine(Environment.SystemDirectory, "cmd.exe");
             string inner = $"\"{liveCmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
             var psi = new ProcessStartInfo(cmdExe, $"/c \"{inner}\"")

@@ -36,12 +36,20 @@ public static class ProfileOps
     }
 
     /// <summary>
+    /// The single delete-page rule: the last page can never be deleted. Owned
+    /// here with <see cref="DeletePage"/> so the UI gate and the operation
+    /// share one predicate — the tab strip consults this, it never re-derives
+    /// the rule.
+    /// </summary>
+    public static bool CanDeletePage(ProfileLayout profile) => profile.Pages.Count > 1;
+
+    /// <summary>
     /// Deletes the page at <paramref name="index"/>. Refuses when it is the
     /// last page. Returns true when deleted.
     /// </summary>
     public static bool DeletePage(ProfileLayout profile, int index)
     {
-        if (index < 0 || index >= profile.Pages.Count || profile.Pages.Count <= 1) return false;
+        if (index < 0 || index >= profile.Pages.Count || !CanDeletePage(profile)) return false;
         foreach (var placed in profile.Pages[index].Widgets)
         {
             DisposeWidgetInstance(placed);

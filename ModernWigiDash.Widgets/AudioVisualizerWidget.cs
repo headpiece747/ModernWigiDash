@@ -144,7 +144,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         _lastRenderTimestamp = Time.GetTimestamp();
         EnsureLiveAudioCapture();
 
-        SKColor barColor = ColorOf(PrimaryColorHex, new SKColor(255, 205, 133));
+        SKColor barColor = ColorOf(PrimaryColorHex, WidgetPalette.Accent);
 
         // One locked copy per frame (smooth + double-buffered snapshot); the
         // draw methods below read the copy without holding the gate.

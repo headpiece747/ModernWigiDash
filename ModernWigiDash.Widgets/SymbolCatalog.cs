@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.RegularExpressions;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 
@@ -153,7 +154,9 @@ internal static class SymbolCatalog
         if (symbol is null) preview = "<null>";
         else if (symbol.Length > 48) preview = symbol[..48] + "…";
         else preview = symbol;
-        System.Diagnostics.Debug.WriteLine($"Skipping invalid feed symbol '{preview}'");
+        // Config path: a wrongly-typed symbol must be diagnosable in the
+        // field — the shared log, not a Debug-only line.
+        FileLog.Write($"[PRICE-FEED] Skipping invalid feed symbol '{preview.Replace('\r', ' ').Replace('\n', ' ')}'");
     }
 
     internal static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);

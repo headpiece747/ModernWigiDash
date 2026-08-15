@@ -83,11 +83,13 @@ public sealed class WeatherClient
     });
 
     /// <summary>The fetch throttle window — the one spelling shared by the
-    /// atomic claim (<see cref="TryBeginFetch"/>) and the render-tick pre-check
-    /// (<see cref="IsFetchWindowElapsed"/>); a change edits one constant.</summary>
-    private static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
+    /// atomic claim (<see cref="TryBeginFetch"/>), the render-tick pre-check
+    /// (<see cref="IsFetchWindowElapsed"/>), and the widget's hidden-page
+    /// refresh loop; a change edits one constant.</summary>
+    internal static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
 
-    private readonly string _cachePath;
+    private readonly string _cacheDirectory;
+    private readonly Func<string> _cacheNameProvider;
     private readonly Action<string, Exception?>? _logError;
 
     private DateTime _lastFetchTime = DateTime.MinValue;
@@ -124,11 +126,6 @@ public sealed class WeatherClient
     /// </summary>
     internal IReadOnlyList<GeocodeCandidate> LastCandidates { get; private set; } = [];
 
-    /// <summary>True when the last geocode resolution ended in a population-decided
-    /// tie with no <see cref="WeatherLocation.LocationMatch"/> pick — the widget
-    /// must not display weather for an ambiguous name.</summary>
-    internal bool LastResolutionAmbiguous { get; private set; }
-
     /// <summary>The last resolved winner's population (0 when the resolution had
     /// no population, e.g. ZIP/coordinate paths or an ambiguous tie).</summary>
     internal double LastResolvedPopulation { get; private set; }
@@ -142,13 +139,32 @@ public sealed class WeatherClient
     /// <param name="http">Test seam: substitute HTTP transport (defaults to the shared client).</param>
     /// <param name="logError">Optional error sink; when omitted, failures are silent.</param>
     public WeatherClient(string cacheDirectory, string? cacheFileName = null, TimeProvider? timeProvider = null, HttpClient? http = null, Action<string, Exception?>? logError = null)
+        : this(cacheDirectory, () => cacheFileName ?? "weather_default.json", timeProvider, http, logError)
     {
-        _cachePath = Path.Combine(cacheDirectory, cacheFileName ?? "weather_default.json");
+    }
+
+    /// <summary>
+    /// Test/Internal seam: resolves the cache file name lazily, at each
+    /// load/save, from a provider. A widget whose <c>InstanceId</c> is assigned
+    /// after construction (RehydrateWidget sets it before InitializeAsync)
+    /// must key its cache by that final identity — baking the name at
+    /// construction would orphan every write under a never-reused GUID.
+    /// </summary>
+    internal WeatherClient(string cacheDirectory, Func<string> cacheFileNameProvider, TimeProvider? timeProvider = null, HttpClient? http = null, Action<string, Exception?>? logError = null)
+    {
+        _cacheDirectory = cacheDirectory;
+        _cacheNameProvider = cacheFileNameProvider ?? (() => "weather_default.json");
         Clock = timeProvider ?? TimeProvider.System;
         TestHttpClient = http;
         _logError = logError;
         Directory.CreateDirectory(cacheDirectory);
     }
+
+    /// <summary>The current cache file path, derived from the live name provider.</summary>
+    private string CachePath => Path.Combine(_cacheDirectory, _cacheNameProvider());
+
+    /// <summary>The cache file name the provider currently resolves (test seam).</summary>
+    internal string CacheFileName => _cacheNameProvider();
 
     /// <summary>
     /// Atomically claims a fetch slot: true when a fetch may start (not
@@ -170,16 +186,13 @@ public sealed class WeatherClient
     private void EndFetch() => Interlocked.Exchange(ref _fetchClaim, 0);
 
     /// <summary>
-    /// Sync throttle pre-check for the render tick: true when no coordinates
-    /// are resolved yet or the 5-minute fetch window has elapsed. The render
-    /// kick gates on this to avoid the per-frame async allocation of
-    /// <see cref="TryBeginFetch"/>; the atomic claim remains the authority.
+    /// Sync throttle pre-check for the render tick: true when the throttle
+    /// window has elapsed since the last attempt. The first attempt
+    /// (never-fetched) reads as elapsed; a failed attempt stamps the time,
+    /// so failures cool down like successes. The window is the single
+    /// <see cref="FetchWindow"/> both this check and the atomic claim share —
+    /// one spelling, drift impossible.
     /// </summary>
-    /// <summary>Synchronous render-tick pre-check: has the throttle window
-    /// elapsed? The first attempt (never-fetched) reads as elapsed; a failed
-    /// attempt stamps the time, so failures cool down like successes. The
-    /// window is the single <see cref="FetchWindow"/> both this check and the
-    /// atomic claim share — one spelling, drift impossible.</summary>
     internal bool IsFetchWindowElapsed()
         => Clock.GetUtcNow().UtcDateTime - _lastFetchTime >= FetchWindow;
 
@@ -223,14 +236,9 @@ public sealed class WeatherClient
 
         try
         {
-            // The ambiguity gate's outcome describes this resolution: clear any
-            // stale flag before resolving so a successful fetch can never carry
-            // an old ambiguity forward (the coordinate paths leave it false).
-            LastResolutionAmbiguous = false;
-
-            string currentQuery = $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.CountryCode}_{location.LocationMatch}";
+            string currentQuery = BuildQueryKey(location);
             if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
-                await ResolveCoordinatesAsync(location, currentQuery).ConfigureAwait(false);
+                await ResolveCoordinatesAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
 
             if (!_lat.HasValue || !_lon.HasValue) return null;
 
@@ -250,10 +258,10 @@ public sealed class WeatherClient
                 dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon);
 
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            await SaveCacheAsync(snapshot).ConfigureAwait(false);
+            await SaveCacheAsync(snapshot, cancellationToken).ConfigureAwait(false);
             return snapshot;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logError?.Invoke($"Weather fetch failed: {ex.Message}", ex);
             // Stamp the attempt time so a failure cools down like a success —
@@ -272,15 +280,16 @@ public sealed class WeatherClient
     /// <summary>
     /// Loads the disk cache and returns the stored snapshot (if any). On success
     /// the fetch throttle is primed to "now" so a freshly cached widget does not
-    /// immediately re-fetch — matching the widget's boot semantics.
+    /// immediately re-fetch — matching the widget's boot semantics. The token
+    /// aborts the read on teardown, like every other fetch leg.
     /// </summary>
-    public async Task<WeatherSnapshot?> LoadCacheAsync()
+    public async Task<WeatherSnapshot?> LoadCacheAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            string path = _cachePath;
+            string path = CachePath;
             if (!File.Exists(path)) return null;
-            string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
+            string json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
             var data = JsonSerializer.Deserialize<WeatherCacheData>(json);
             if (data == null) return null;
             // A cache without a resolved name must not invent one (the old
@@ -315,7 +324,7 @@ public sealed class WeatherClient
                 data.Lat ?? 0,
                 data.Lon ?? 0);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logError?.Invoke($"Weather cache load failed: {ex.Message}", ex);
             return null;
@@ -328,7 +337,7 @@ public sealed class WeatherClient
     {
         try
         {
-            if (File.Exists(_cachePath)) File.Delete(_cachePath);
+            if (File.Exists(CachePath)) File.Delete(CachePath);
         }
         catch (Exception ex)
         {
@@ -336,7 +345,7 @@ public sealed class WeatherClient
         }
     }
 
-    private async Task SaveCacheAsync(WeatherSnapshot snapshot)
+    private async Task SaveCacheAsync(WeatherSnapshot snapshot, CancellationToken cancellationToken)
     {
         try
         {
@@ -356,15 +365,15 @@ public sealed class WeatherClient
                 HourlyForecasts = (snapshot.HourlyForecasts ?? []).Select(h => new HourlyForecastData { TimeLabel = h.TimeLabel, TempC = h.TempC, WeatherCode = h.WeatherCode }).ToList()
             };
             string json = JsonSerializer.Serialize(data);
-            await File.WriteAllTextAsync(_cachePath, json).ConfigureAwait(false);
+            await File.WriteAllTextAsync(CachePath, json, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logError?.Invoke($"Weather cache save failed: {ex.Message}", ex);
         }
     }
 
-    private async Task ResolveCoordinatesAsync(WeatherLocation location, string currentQuery)
+    private async Task ResolveCoordinatesAsync(WeatherLocation location, string currentQuery, CancellationToken cancellationToken)
     {
         _lastLocationQuery = currentQuery;
 
@@ -393,7 +402,7 @@ public sealed class WeatherClient
         }
         else if (IsZipCode(location.Location))
         {
-            await GeocodeZipCodeAsync(location).ConfigureAwait(false);
+            await GeocodeZipCodeAsync(location, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -416,7 +425,7 @@ public sealed class WeatherClient
                 }
             }
 
-            await GeocodeCityLocationAsync(location).ConfigureAwait(false);
+            await GeocodeCityLocationAsync(location, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -560,6 +569,13 @@ public sealed class WeatherClient
         return items;
     }
 
+    /// <summary>The resolution identity key — one spelling for the client's
+    /// per-query geocode cache and the widget's in-flight staleness guard:
+    /// a change in any resolution input (Location, Latitude, Longitude,
+    /// CountryCode, LocationMatch) yields a different key.</summary>
+    internal static string BuildQueryKey(WeatherLocation location)
+        => $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.CountryCode}_{location.LocationMatch}";
+
     /// <summary>The geocoder search URL — the single URL builder shared by the
     /// resolution flow and the inspector's search-as-you-type (cities and postal
     /// codes both resolve as a name query).</summary>
@@ -590,16 +606,7 @@ public sealed class WeatherClient
 
             var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
             foreach (var candidate in results.EnumerateArray())
-            {
-                string label = ComposeResolvedName(candidate, query);
-                candidates.Add(new GeocodeCandidate(
-                    label, label,
-                    candidate.GetProperty("latitude").GetDouble(),
-                    candidate.GetProperty("longitude").GetDouble())
-                {
-                    Population = ReadPopulation(candidate),
-                });
-            }
+                candidates.Add(BuildGeocodeCandidate(candidate, query));
             return candidates;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -623,7 +630,7 @@ public sealed class WeatherClient
     /// name carries "Name, Admin1, Country" so the widget title shows what
     /// was picked.
     /// </summary>
-    private async Task GeocodeCityLocationAsync(WeatherLocation location)
+    private async Task GeocodeCityLocationAsync(WeatherLocation location, CancellationToken cancellationToken)
     {
         try
         {
@@ -640,7 +647,7 @@ public sealed class WeatherClient
 
             string url = BuildGeocodeSearchUri(namePart, location.CountryCode).ToString();
 
-            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
+            string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
             {
@@ -649,16 +656,7 @@ public sealed class WeatherClient
                 // text so a pick re-resolves deterministically to this place.
                 var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
                 foreach (var candidate in results.EnumerateArray())
-                {
-                    string label = ComposeResolvedName(candidate, namePart);
-                    candidates.Add(new GeocodeCandidate(
-                        label, label,
-                        candidate.GetProperty("latitude").GetDouble(),
-                        candidate.GetProperty("longitude").GetDouble())
-                    {
-                        Population = ReadPopulation(candidate),
-                    });
-                }
+                    candidates.Add(BuildGeocodeCandidate(candidate, namePart));
                 LastCandidates = candidates;
 
                 // A persisted Location Match pick must survive restart/import:
@@ -697,7 +695,6 @@ public sealed class WeatherClient
                 var topTied = ranked.Where(r => r.Rank == bestScore).ToList();
                 if (topTied.Count > 1)
                 {
-                    LastResolutionAmbiguous = true;
                     _lat = null;
                     _lon = null;
                     // Drop the stale resolved name too: a previous resolution's
@@ -716,7 +713,7 @@ public sealed class WeatherClient
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logError?.Invoke($"Geocoding failed for '{SanitizeLog(location.Location)}': {ex.Message}", ex);
         }
@@ -751,6 +748,23 @@ public sealed class WeatherClient
 
     private static string GetString(JsonElement element, string property)
         => element.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
+
+    /// <summary>One geocoder result → a pickable candidate: the resolved
+    /// label doubles as the query so a pick re-resolves deterministically,
+    /// and the population rides along for the search list's disambiguating
+    /// suffix — the single spelling shared by the search and resolution
+    /// paths.</summary>
+    private static GeocodeCandidate BuildGeocodeCandidate(JsonElement candidate, string fallbackName)
+    {
+        string label = ComposeResolvedName(candidate, fallbackName);
+        return new GeocodeCandidate(
+            label, label,
+            candidate.GetProperty("latitude").GetDouble(),
+            candidate.GetProperty("longitude").GetDouble())
+        {
+            Population = ReadPopulation(candidate),
+        };
+    }
 
     /// <summary>The candidate's reported population (0 when the geocoder
     /// omitted it) — the search list's disambiguating label data and the
@@ -815,13 +829,13 @@ public sealed class WeatherClient
         return string.IsNullOrWhiteSpace(country) ? $"{name}, {admin1}" : $"{name}, {admin1}, {country}";
     }
 
-    private async Task GeocodeZipCodeAsync(WeatherLocation location)
+    private async Task GeocodeZipCodeAsync(WeatherLocation location, CancellationToken cancellationToken)
     {
         string zipCode = location.Location.Trim();
         try
         {
             string url = $"https://api.zippopotam.us/us/{Uri.EscapeDataString(zipCode)}";
-            string json = await Http.GetStringAsync(url).ConfigureAwait(false);
+            string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             _lat = root.GetProperty("latitude").GetDouble();
@@ -831,7 +845,7 @@ public sealed class WeatherClient
             _resolvedCityName = string.IsNullOrWhiteSpace(state) ? city : $"{city}, {state}";
             return;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logError?.Invoke($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
         }
@@ -839,7 +853,7 @@ public sealed class WeatherClient
         // The zippopotam path is US-only; fall back to the worldwide Open-Meteo
         // geocoder WITH the original location (so the CountryCode hint is
         // carried — e.g. "10115" + "DE" resolves the Berlin postal district).
-        await GeocodeCityLocationAsync(location).ConfigureAwait(false);
+        await GeocodeCityLocationAsync(location, cancellationToken).ConfigureAwait(false);
     }
 
     private static bool IsZipCode(string query)

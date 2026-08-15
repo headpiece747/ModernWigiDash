@@ -5,14 +5,16 @@ namespace ModernWigiDash.Sdk;
 /// staleness tracking, a null-tolerant producer write, and the test seams
 /// (fake-clock store, install). LhmSensorStore and FrameTimeStore bind one
 /// instance each with their record's empty value, staleness window, and
-/// timestamp extractor — the 7-member pattern is declared once instead of
-/// twice, and the write surface has one shape (no test-only twin).
+/// timestamp extractor — the pattern is declared once instead of twice, and
+/// the write surface has one shape (no test-only twin). The staleness policy
+/// itself lives in <see cref="TelemetryStore{TRecord}"/>; this facade binds
+/// one instance and owns the DTO-tolerant write.
 /// </summary>
 public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
 {
     private readonly TRecord _emptyValue;
     private readonly Func<TRecord, DateTime> _lastUpdateOf;
-    private StaticTelemetryStore<TRecord> _store;
+    private TelemetryStore<TRecord> _store;
 
     /// <param name="emptyValue">The disconnected/unavailable state the store
     /// resets to and a null producer write falls back to.</param>
@@ -31,7 +33,7 @@ public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
     /// <summary>Default staleness window for the store's data.</summary>
     public TimeSpan DefaultMaxAge { get; }
 
-    private StaticTelemetryStore<TRecord> Create(TimeProvider timeProvider, TimeSpan maxAge)
+    private TelemetryStore<TRecord> Create(TimeProvider timeProvider, TimeSpan maxAge)
         => new(_emptyValue, defaultMaxAge: maxAge, timeProvider: timeProvider);
 
     /// <summary>
@@ -39,12 +41,12 @@ public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
     /// max age) so the facade freshness tests can drive time. The production
     /// singleton binds <see cref="TimeProvider.System"/> at construction.
     /// </summary>
-    public StaticTelemetryStore<TRecord> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
+    public TelemetryStore<TRecord> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
         => Create(timeProvider, maxAge ?? DefaultMaxAge);
 
     /// <summary>Internal test seam: installs the store behind the read/update
     /// surface (see <see cref="CreateStoreForTest"/>).</summary>
-    public StaticTelemetryStore<TRecord> StoreForTest
+    public TelemetryStore<TRecord> StoreForTest
     {
         get => _store;
         set => _store = value ?? throw new ArgumentNullException(nameof(value));
@@ -55,7 +57,7 @@ public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
     /// live sensor picker uses this — it needs the full reading list even when
     /// stale; every other consumer must go through <see cref="TryReadFresh"/>.
     /// </summary>
-    public TRecord ReadSnapshot() => _store.ReadSnapshot();
+    public TRecord ReadSnapshot() => _store.Current!;
 
     /// <summary>
     /// Returns the cached snapshot when it is fresh enough, else null. The

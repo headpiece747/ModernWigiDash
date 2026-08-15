@@ -41,7 +41,7 @@ public class UpdateCheckerTests
         var info = UpdateChecker.ParseLatestRelease(prefixed, new Version(0, 4, 1));
 
         Assert.IsNotNull(info);
-        Assert.AreEqual("05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070", info!.Sha256,
+        Assert.AreEqual("05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070", info.Sha256,
             "the sha256: prefix must be stripped before the hex comparison");
     }
 

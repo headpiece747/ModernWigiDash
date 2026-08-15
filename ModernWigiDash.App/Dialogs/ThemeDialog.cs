@@ -15,14 +15,14 @@ namespace ModernWigiDash.App.Dialogs;
 /// </summary>
 public sealed class ThemeDialog : Window
 {
-    private readonly IThemeApplicator _themeApplicator;
+    private readonly ThemeApplicator _themeApplicator;
     private readonly List<(string Key, ColorPickerEditor Editor)> _entries = [];
     private Button _btnApply = null!;
 
     /// <param name="owner">Owner window for modal centering.</param>
     /// <param name="themeApplicator">Applies the current <see cref="ThemeSettings.Theme"/>
     /// (resources, preview shadow, title bar, log).</param>
-    public ThemeDialog(Window owner, IThemeApplicator themeApplicator)
+    public ThemeDialog(Window owner, ThemeApplicator themeApplicator)
     {
         _themeApplicator = themeApplicator;
 

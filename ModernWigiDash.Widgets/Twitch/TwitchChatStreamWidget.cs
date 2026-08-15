@@ -31,7 +31,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Auto Connect", WidgetPropertyType.Boolean, "Connect automatically when the widget loads", true)]
     public bool AutoConnect { get; set; } = true;
 
-    [WidgetProperty("Header Color", WidgetPropertyType.Color, "Channel header text color", "#FFFFFF")]
+    [WidgetProperty("Header Color", WidgetPropertyType.Color, "Channel header text color", "#F59E0B")]
     public string HeaderColorHex { get; set; } = "#F59E0B";
 
     [WidgetProperty("Message Color", WidgetPropertyType.Color, "Chat message text color", "#F8FAFC")]
@@ -139,7 +139,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             case nameof(MaxMessages):
                 lock (_messagesLock)
                 {
-                    while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
+                    while (_messages.Count > TwitchChatPresentation.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
                     _renderSnapshot = [.. _messages];
                 }
                 break;
@@ -346,7 +346,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         lock (_messagesLock)
         {
             _messages.Add(new ChatMessage(message.Username, message.Text, color));
-            while (_messages.Count > Math.Clamp(MaxMessages, 5, 100)) _messages.RemoveAt(0);
+            while (_messages.Count > TwitchChatPresentation.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
             _renderSnapshot = [.. _messages];
         }
         Context?.RequestRender();
@@ -378,38 +378,23 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         return TwitchChannelRule.IsValid(c) ? c.ToLowerInvariant() : "twitch";
     }
 
-    // The header strings are memoized per input (the WrapCache shape): Render
-    // composes the badge and status line every frame, but both change only via
-    // the inspector or the IRC loop. Single-slot caches keyed by the source
-    // value, so the per-frame path allocates nothing for the static header.
-    private string _badgeChannelKey = "";
-    private string _badgeText = "";
-    private ChatStatus _statusKey = ChatStatus.Disconnected;
-    private string _statusDetailKey = "";
-    private string _statusText = "";
+    // The header strings are memoized per input (the shared MemoSlot shape):
+    // Render composes the badge and status line every frame, but both change
+    // only via the inspector or the IRC loop. Single-slot memos keyed by the
+    // source value, so the per-frame path allocates nothing for the static
+    // header.
+    private readonly MemoSlot<string, string> _badgeMemo = new();
+    private readonly MemoSlot<(ChatStatus Status, string Detail), string> _statusMemo = new();
 
     private string ChannelBadge()
-    {
-        if (ChannelName != _badgeChannelKey)
-        {
-            _badgeChannelKey = ChannelName;
-            _badgeText = "#" + NormalizeChannel(ChannelName).ToUpperInvariant();
-        }
-        return _badgeText;
-    }
+        => _badgeMemo.GetOrCompute(ChannelName, () => "#" + NormalizeChannel(ChannelName).ToUpperInvariant());
 
     private string StatusLine()
     {
         ChatState state = _chatState;
-        ChatStatus status = state.Status;
-        string statusDetail = state.Detail;
-        if (status != _statusKey || statusDetail != _statusDetailKey)
-        {
-            _statusKey = status;
-            _statusDetailKey = statusDetail;
-            _statusText = TwitchChatPresentation.StatusText(status, statusDetail);
-        }
-        return _statusText;
+        return _statusMemo.GetOrCompute(
+            (state.Status, state.Detail),
+            () => TwitchChatPresentation.StatusText(state.Status, state.Detail));
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -417,7 +402,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
         if (float.IsNaN(scale) || scale <= 0) scale = 1f;
 
-        var bg = ColorOf(BackgroundHex, new SKColor(15, 17, 23, 235));
+        var bg = ColorOf(BackgroundHex, WidgetPalette.ChatBackground);
         var headerColor = ColorOf(HeaderColorHex, SKColors.White);
         var msgColor = ColorOf(MessageColorHex, new SKColor(248, 250, 252));
 

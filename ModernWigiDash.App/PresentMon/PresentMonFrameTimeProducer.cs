@@ -217,12 +217,9 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// </summary>
     private void ReconcileTracking(List<int> candidates)
     {
-        foreach (int tracked in _trackedPids)
+        foreach (int tracked in _trackedPids.Where(tracked => !candidates.Contains(tracked)))
         {
-            if (!candidates.Contains(tracked))
-            {
-                _native.StopTrackProcess(tracked);
-            }
+            _native.StopTrackProcess(tracked);
         }
         _trackedPids.Clear();
     }
@@ -231,12 +228,12 @@ public sealed class PresentMonFrameTimeProducer : IDisposable
     /// (the settling window: their samples are untrustworthy until adoption).</summary>
     private void TrackOnly(List<int> candidates)
     {
+        // The native track call is a side effect, so it stays an explicit
+        // statement instead of hiding inside a LINQ predicate.
         foreach (int pid in candidates)
         {
-            if (_native.TrackProcess(pid))
-            {
-                _trackedPids.Add(pid);
-            }
+            if (!_native.TrackProcess(pid)) continue;
+            _trackedPids.Add(pid);
         }
     }
 

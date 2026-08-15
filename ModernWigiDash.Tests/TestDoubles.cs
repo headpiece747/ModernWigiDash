@@ -14,6 +14,7 @@ using ModernWigiDash.Core.Models;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
+using SkiaSharp;
 using AppClass = ModernWigiDash.App.App;
 
 namespace ModernWigiDash.Tests;
@@ -60,6 +61,26 @@ internal sealed class PersistingContext(ProfileLayout profile) : TestContext
             placed.PropertyValues[propertyName] = value;
         }
     }
+}
+
+/// <summary>
+/// The shared minimal widget for tests that need a concrete instance — the
+/// former per-file TestWidget copies: a [WidgetProperty] Label (inspector
+/// write-back and rehydration round-trip tests), a small DefaultSize (profile
+/// layout), the loader metadata profile tests register, and the one
+/// protected-member accessor the color tests need.
+/// </summary>
+[WidgetMetadata("profile_test_widget", "Profile Test")]
+internal sealed class TestWidget : ModernWidgetBase
+{
+    [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "seed")]
+    public string Label { get; set; } = "seed";
+
+    public override SKSize DefaultSize => new(406, 148);
+
+    public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+    public SKColor GetColor(string hex, SKColor fallback) => ColorOf(hex, fallback);
 }
 
 /// <summary>
@@ -688,13 +709,13 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
 
     public void ResetDevice() { }
 
-    public bool SetAltInterface(int alternateInterfaceID) => true;
+    public bool SetAltInterface(int alternateID) => true;
 
-    public void GetAltInterfaceSetting(byte interfaceID, out byte alternateSetting) => alternateSetting = 0;
+    public void GetAltInterfaceSetting(byte interfaceID, out byte selectedAltInterfaceID) => selectedAltInterfaceID = 0;
 
-    public bool GetAltInterface(out int alternateInterfaceID)
+    public bool GetAltInterface(out int alternateID)
     {
-        alternateInterfaceID = 0;
+        alternateID = 0;
         return true;
     }
 
@@ -702,30 +723,30 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
 
     public void Dispose() => Close();
 
-    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID endpointID)
-        => OpenEndpointWriter(endpointID, EndpointType.Bulk);
+    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID writeEndpointID)
+        => OpenEndpointWriter(writeEndpointID, EndpointType.Bulk);
 
-    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID endpointID, EndpointType type)
+    public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID writeEndpointID, EndpointType endpointType)
     {
         if (WriterThrows) throw new InvalidOperationException("fake endpoint-writer failure");
         return null!; // the tests only exercise the failure paths; a success needs a real device
     }
 
-    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID) => throw new NotSupportedException();
-    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID, int readBufferSize) => throw new NotSupportedException();
-    public UsbEndpointReader OpenEndpointReader(ReadEndpointID endpointID, int readBufferSize, EndpointType endpointType) => throw new NotSupportedException();
-    public UsbEndpointTransferQueueReader OpenEndpointTransferQueueReader(ReadEndpointID endpointID, int readBufferSize, CancellationToken cancellationToken, int queueSize) => throw new NotSupportedException();
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID readEndpointID) => throw new NotSupportedException();
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID readEndpointID, int readBufferSize) => throw new NotSupportedException();
+    public UsbEndpointReader OpenEndpointReader(ReadEndpointID readEndpointID, int readBufferSize, EndpointType endpointType) => throw new NotSupportedException();
+    public UsbEndpointTransferQueueReader OpenEndpointTransferQueueReader(ReadEndpointID readEndpointId, int readBufferSize, CancellationToken token, int transferQueueSize = 1) => throw new NotSupportedException();
 
     public int ControlTransfer(UsbSetupPacket setupPacket) => throw new NotSupportedException();
-    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, int timeout) => throw new NotSupportedException();
-    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, int length) => throw new NotSupportedException();
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, out int transferLength) => throw new NotSupportedException();
     public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket) => throw new NotSupportedException();
-    public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket, byte[] buffer, int bufferLength, int timeout) => throw new NotSupportedException();
+    public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket, byte[] buffer, int offset, int length) => throw new NotSupportedException();
 
-    public bool GetDescriptor(byte descriptorType, byte index, short langId, IntPtr buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
-    public bool GetDescriptor(byte descriptorType, byte index, short langId, object buffer, int bufferLength, out int transferredLength) => throw new NotSupportedException();
+    public bool GetDescriptor(byte descriptorType, byte index, short langId, IntPtr buffer, int bufferLength, out int transferLength) => throw new NotSupportedException();
+    public bool GetDescriptor(byte descriptorType, byte index, short langId, object buffer, int bufferLength, out int transferLength) => throw new NotSupportedException();
     public bool GetLangIDs(out short[] langIDs) => throw new NotSupportedException();
-    public bool GetString(out string s, short index, byte langID) => throw new NotSupportedException();
-    public string GetStringDescriptor(byte index, bool isLangID) => throw new NotSupportedException();
-    public bool TryGetConfigDescriptor(byte config, out UsbConfigInfo configInfo) => throw new NotSupportedException();
+    public bool GetString(out string stringData, short langId, byte stringIndex) => throw new NotSupportedException();
+    public string GetStringDescriptor(byte descriptorIndex, bool failSilently = false) => throw new NotSupportedException();
+    public bool TryGetConfigDescriptor(byte configIndex, out UsbConfigInfo descriptor) => throw new NotSupportedException();
 }

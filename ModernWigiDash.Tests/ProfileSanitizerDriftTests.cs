@@ -69,11 +69,11 @@ public class ProfileSanitizerDriftTests
     {
         // The import sanitizer and the widget's IRC JOIN path must agree on
         // what a channel may look like: both now call Sdk's TwitchChannelRule,
-        // so pin the rule's contract (cap + CR/LF rejection + fallback), not
-        // just the property name — a rule drift now fails this test instead of
-        // silently disagreeing between the two call sites.
-        Assert.AreEqual(25, TwitchChannelRule.MaxChannelNameLength,
-            "Twitch's 25-char channel cap must stay the shared rule's cap");
+        // so pin the rule's contract behaviorally (cap, CR/LF rejection,
+        // fallback) — a rule drift now fails this test instead of silently
+        // disagreeing between the two call sites. (The cap constant is a
+        // compile-time constant, so the over-cap rejection below is the pin,
+        // not a constant comparison.)
         Assert.IsTrue(TwitchChannelRule.IsValid("somechannel"));
         Assert.IsFalse(TwitchChannelRule.IsValid(new string('x', 26)), "over-cap names must be rejected");
         Assert.IsFalse(TwitchChannelRule.IsValid("legit\rchannel"), "embedded CR must be rejected");

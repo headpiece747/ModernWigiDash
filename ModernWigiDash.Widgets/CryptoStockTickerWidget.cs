@@ -43,11 +43,15 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     private static readonly PriceFeedManager SharedFeed = new();
     private readonly FeedSubscription _subscription;
-    private DateTime _lastFallback = DateTime.MinValue;
+    private readonly TickerFallbackPolicy _fallbackPolicy;
+    private bool _lastChangePositive;
 
     public CryptoStockTickerWidget()
     {
         _subscription = new(() => _ = FallbackFetchAsync());
+        // The policy reads the Clock seam lazily, so tests that swap Clock
+        // after construction still drive the cadence.
+        _fallbackPolicy = new(() => Clock);
     }
 
     /// <summary>Test seam for the fallback-fetch throttle.</summary>
@@ -117,22 +121,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         }
     }
 
-    private decimal _lastPrice;
-    private string _lastPriceDecimals = "";
-    private string _lastPriceCurrency = "";
-    private string _lastPriceText = "";
+    private readonly MemoSlot<(decimal Price, string Decimals, string Currency), string> _priceMemo = new();
 
     private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
-    {
-        if (rawPrice != _lastPrice || PriceDecimals != _lastPriceDecimals || currencySymbol != _lastPriceCurrency)
-        {
-            _lastPrice = rawPrice;
-            _lastPriceDecimals = PriceDecimals;
-            _lastPriceCurrency = currencySymbol;
-            _lastPriceText = TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol);
-        }
-        return _lastPriceText;
-    }
+        => _priceMemo.GetOrCompute(
+            (rawPrice, PriceDecimals, currencySymbol),
+            () => TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol));
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -144,21 +138,22 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
         AssetKind kind = AssetKindValue;
         var info = Feed.GetPrice(Symbol, kind);
-        bool isStale = info?.IsStale ?? true;
+        bool isStale = TickerStalenessPresentation.IsStale(info);
         if (info != null)
         {
             Price = FormatPrice(info.Price, info.CurrencySymbol);
             ChangeBadge = info.FormattedChange;
+            _lastChangePositive = info.IsPositive;
         }
-        else if ((Clock.GetUtcNow().UtcDateTime - _lastFallback).TotalSeconds >= 15)
+        else if (_fallbackPolicy.TryBeginFallback())
         {
             // Read-side freshness policy: seed/re-seed the price when the live
-            // feed has nothing yet, at most once per 15s.
-            _lastFallback = Clock.GetUtcNow().UtcDateTime;
+            // feed has nothing yet, at most once per 15s (the cadence lives in
+            // the policy module, not the pixel path).
             _ = FallbackFetchAsync();
         }
 
-        bool isPositive = info?.IsPositive ?? ChangeBadge.StartsWith('+');
+        bool isPositive = info?.IsPositive ?? _lastChangePositive;
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         SKColor posColor = ColorOf(PositiveColorHex, new SKColor(34, 197, 94));
         SKColor negColor = ColorOf(NegativeColorHex, new SKColor(239, 68, 68));
@@ -180,14 +175,14 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             // Stale prices render in a neutral gray with a freshness dot so the
             // last-known value is never mistaken for live data.
             SKColor badgeColor = isPositive ? posColor : negColor;
-            if (isStale) badgeColor = textColor.WithAlpha(120);
+            if (isStale) badgeColor = textColor.WithAlpha(TickerStalenessPresentation.StaleBadgeAlpha);
             var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
             using var badgePaint = new SKPaint
             {
                 Color = badgeColor,
                 IsAntialias = true
             };
-            string badgeText = isStale ? $"• {ChangeBadge}" : ChangeBadge;
+            string badgeText = TickerStalenessPresentation.BadgeText(ChangeBadge, isStale);
             canvas.DrawTextWithFallback(badgeText, pad, bounds.Bottom - pad, badgeFont, badgePaint);
         }
     }
@@ -218,6 +213,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             {
                 Price = FormatPrice(info.Price, info.CurrencySymbol);
                 ChangeBadge = info.FormattedChange;
+                _lastChangePositive = info.IsPositive;
                 Context?.RequestRender();
             }
         }

@@ -7,25 +7,14 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.App.Theming;
 
 /// <summary>
-/// The theme-application seam: one module that turns the current
+/// The theme-application module: one class that turns the current
 /// <see cref="ThemeSettings.Theme"/> into (a) the application resources,
 /// (b) the preview-shadow accent, (c) the per-window dark DWM title bar, and
 /// (d) the applied-log line. Windows (main + dialogs) call <see cref="Apply"/>
-/// and own none of that themselves.
+/// and own none of that themselves. One implementation, no interface: a
+/// seam with a single adapter is hypothetical (the repo's own rule).
 /// </summary>
-public interface IThemeApplicator
-{
-    /// <summary>
-    /// Applies the current theme to <paramref name="window"/>. The app
-    /// resources and the preview shadow are re-applied only when the theme
-    /// changed since the last application; the DWM title bar is applied on
-    /// every call (each new window needs its own chrome).
-    /// </summary>
-    void Apply(Window window);
-}
-
-/// <inheritdoc cref="IThemeApplicator"/>
-public sealed class ThemeApplicator : IThemeApplicator
+public sealed class ThemeApplicator
 {
     /// <summary>The named preview surface whose shadow must be re-applied on
     /// theme change — DropShadowEffect does not track DynamicResource.</summary>
@@ -35,6 +24,12 @@ public sealed class ThemeApplicator : IThemeApplicator
     /// resources; null until the first application.</summary>
     private string? _appliedFingerprint;
 
+    /// <summary>
+    /// Applies the current theme to <paramref name="window"/>. The app
+    /// resources and the preview shadow are re-applied only when the theme
+    /// changed since the last application; the DWM title bar is applied on
+    /// every call (each new window needs its own chrome).
+    /// </summary>
     public void Apply(Window window)
     {
         string fingerprint = Fingerprint(ThemeSettings.Theme);

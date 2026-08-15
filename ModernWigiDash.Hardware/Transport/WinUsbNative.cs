@@ -203,7 +203,7 @@ internal class WinUsbBulkDevice : ITransferBackend
 
     private static void Log(string msg) => FileLog.Write($"[{LogCategory}] {msg}");
 
-    private readonly DiagLog _bulkDiagLog = new(LogCategory, 30);
+    private readonly DiagLog _bulkDiagLog = new(LogCategory, BackendDiag.BulkWriteCadence);
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.

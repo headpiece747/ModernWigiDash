@@ -12,10 +12,10 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class FramePumpTests
 {
-    private static (Exception? Error, object? Result) RunOnSta(Func<object?> work)
+    private static (Exception? Error, T? Result) RunOnSta<T>(Func<T> work)
     {
         Exception? error = null;
-        object? result = null;
+        T? result = default;
         var thread = new Thread(() =>
         {
             try
@@ -58,7 +58,7 @@ public class FramePumpTests
         });
 
         Assert.IsNull(error);
-        var (c, r, t) = ((int, int, int))counts!;
+        var (c, r, t) = counts;
         Assert.AreEqual(0, c, "The gate veto must skip the compose step");
         Assert.AreEqual(2, r, "The repaint must still fire every tick");
         Assert.AreEqual(2, t, "The badge callback must still fire every tick");
@@ -81,7 +81,7 @@ public class FramePumpTests
         });
 
         Assert.IsNull(error);
-        Assert.AreEqual(1, (int)counts!, "An open gate must not change the compose behavior");
+        Assert.AreEqual(1, counts, "An open gate must not change the compose behavior");
     }
 
     [TestMethod]
@@ -161,7 +161,7 @@ public class FramePumpTests
         });
 
         Assert.IsNull(error, error?.ToString());
-        Assert.IsTrue(result is true, "no ticks may fire after Stop");
+        Assert.IsTrue(result, "no ticks may fire after Stop");
     }
 
     [TestMethod]
@@ -186,7 +186,7 @@ public class FramePumpTests
         });
 
         Assert.IsNull(error, error?.ToString());
-        Assert.AreEqual(0, (int)ticks!, "No callback may fire after Dispose.");
+        Assert.AreEqual(0, ticks, "No callback may fire after Dispose.");
     }
 
     [TestMethod]
@@ -247,6 +247,6 @@ public class FramePumpTests
         });
 
         Assert.IsNull(error, error?.ToString());
-        Assert.AreEqual(0, (int)onTicks!, "No onTick may fire after Dispose.");
+        Assert.AreEqual(0, onTicks, "No onTick may fire after Dispose.");
     }
 }

@@ -77,7 +77,7 @@ public class WeatherClientTests
     """;
 
     // Identical names across countries: the CountryCode hint must decide.
-    private const string SampleSanJoses = """
+    internal const string SampleSanJoses = """
     {
       "results": [
         { "name": "San Jose", "latitude": 37.33939, "longitude": -121.89496, "admin1": "California", "country": "United States", "country_code": "US", "population": 1026908 },
@@ -434,7 +434,23 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_AmbiguousBareName_ReturnsNullAndFlagsAmbiguity()
+    public async Task FetchCurrentAsync_CancelledToken_PropagatesOperationCanceled()
+    {
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast));
+        var client = CreateClient(stub);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        // Teardown cancels the widget's poll CTS: the cancellation must
+        // propagate through the geocode leg — never be swallowed and logged
+        // as a fetch failure (the request may still be dispatched before the
+        // pipeline observes the token; the contract is the propagation).
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), cancellationToken: cts.Token));
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_AmbiguousBareName_ReturnsNullWithoutFetching()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -449,7 +465,6 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
 
         Assert.IsNull(snapshot, "an ambiguous bare name must not fetch weather");
-        Assert.IsTrue(client.LastResolutionAmbiguous, "the ambiguity must be signalled to the widget");
     }
 
     [TestMethod]
@@ -465,16 +480,16 @@ public class WeatherClientTests
 
         // A persisted Location Match pick resolves the tie deterministically.
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation(
-            "Fixed Location", "Berlin", null, null, null) { LocationMatch = "Berlin, New Hampshire, United States" });
+            "Fixed Location", "Berlin", null, null, null)
+        { LocationMatch = "Berlin, New Hampshire, United States" });
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(44.46867, snapshot.Lat, 0.0001, "the picked Berlin, NH must win over the population choice");
         Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
-        Assert.IsFalse(client.LastResolutionAmbiguous, "a resolved pick is not ambiguous");
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_UnambiguousName_DoesNotFlagAmbiguity()
+    public async Task FetchCurrentAsync_UnambiguousName_FetchesTheWinner()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -489,7 +504,6 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
 
         Assert.IsNotNull(snapshot);
-        Assert.IsFalse(client.LastResolutionAmbiguous);
     }
 
     [TestMethod]
@@ -506,7 +520,7 @@ public class WeatherClientTests
         // The full-state suffix "Berlin, New Hampshire" must pick Berlin, NH —
         // the suffix beats the population tiebreak (note: the two-letter
         // abbreviation "NH" does NOT match — the abbreviation support only
-        // covers state names that start with their abbreviation, e.g. "MA";
+        // covers state names that start with their abbreviation, for example "MA"
         // the working escape routes are the full state name, the CountryCode
         // hint, or the Location Match dropdown).
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire", null, null, null));
@@ -518,7 +532,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_AmbiguousBareName_CountryHintTie_StillFlagsAmbiguity()
+    public async Task FetchCurrentAsync_AmbiguousBareName_CountryHintTie_StillReturnsNull()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -537,7 +551,6 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null, "US"));
 
         Assert.IsNull(snapshot, "a hint that leaves multiple candidates tied must not fetch weather");
-        Assert.IsTrue(client.LastResolutionAmbiguous, "a hint tie is still a population-decided tie");
     }
 
     [TestMethod]
@@ -559,7 +572,6 @@ public class WeatherClientTests
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(44.46867, snapshot.Lat, 0.0001);
         Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
-        Assert.IsFalse(client.LastResolutionAmbiguous);
     }
 
     [TestMethod]
@@ -596,7 +608,6 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, Ontario, United States", null, null, null));
 
         Assert.IsNull(snapshot, "a non-matching suffix component must not resolve to a population pick");
-        Assert.IsTrue(client.LastResolutionAmbiguous);
     }
 
     [TestMethod]
@@ -849,6 +860,40 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task LoadCacheAsync_LazyFileName_RoundTrips()
+    {
+        // The provider-based constructor resolves the file name at each
+        // load/save — a writer and reader sharing the provider must round-trip
+        // the same derived file (the widget's placed-InstanceId keying path).
+        string dir = NewTempDir();
+        var stub = new StubHttpHandler(Respond);
+        var writer = new WeatherClient(dir, () => "weather_lazy.json", http: new HttpClient(stub));
+
+        var fetched = await writer.FetchCurrentAsync(CoordinateLocation);
+        Assert.IsNotNull(fetched);
+
+        var reader = new WeatherClient(dir, () => "weather_lazy.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync();
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(12.5, loaded.CurrentTempC);
+        Assert.AreEqual("40.71, -74.00", loaded.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public void CacheFileName_Resolves_Lazily_FromProvider()
+    {
+        string name = "first.json";
+        var client = new WeatherClient(NewTempDir(), () => name);
+
+        Assert.AreEqual("first.json", client.CacheFileName);
+
+        // The name is read at resolution time, not baked at construction.
+        name = "second.json";
+        Assert.AreEqual("second.json", client.CacheFileName);
+    }
+
+    [TestMethod]
     public async Task LoadCacheAsync_NoCacheFile_ReturnsNull()
     {
         var client = new WeatherClient(NewTempDir(), "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
@@ -936,7 +981,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_PartialSuffixMatch_TiesAndFlagsAmbiguity()
+    public async Task FetchCurrentAsync_PartialSuffixMatch_TiesAndReturnsNull()
     {
         var stub = new StubHttpHandler(request =>
         {
@@ -952,7 +997,6 @@ public class WeatherClientTests
         var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose, California, Germany", null, null, null));
 
         Assert.IsNull(snapshot, "a partial suffix match must not resolve — the suffix is all-or-nothing");
-        Assert.IsTrue(client.LastResolutionAmbiguous);
     }
 
     [TestMethod]

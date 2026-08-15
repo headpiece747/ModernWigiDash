@@ -10,6 +10,10 @@ namespace ModernWigiDash.Sdk;
 /// their own parser and map the null result to their stack's fallback (null
 /// vs empty path) — keying and parse-once are declared here, not twice.
 /// </summary>
+// S2743: the per-close-constructed-type cache is the design — each render
+// stack (WPF Geometry, Skia SKPath) owns its own key space, and a shared
+// cache would conflate the two namespaces.
+#pragma warning disable S2743
 public static class SvgPathParseCache<T>
 {
     private sealed class Box
@@ -38,3 +42,4 @@ public static class SvgPathParseCache<T>
     public static T? GetOrParse(string key, Func<T?> parse)
         => Cache.GetOrAdd(key, _ => parse() is { } value ? new Box(value) : Box.Miss).Value;
 }
+#pragma warning restore S2743

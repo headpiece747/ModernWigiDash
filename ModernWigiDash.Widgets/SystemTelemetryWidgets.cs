@@ -63,7 +63,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        SKColor accent = ColorOf(AccentColorHex, new SKColor(255, 205, 133));
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor text = ColorOf(TextColorHex, SKColors.White);
 
         // The store owns the staleness decision; a stale or disconnected

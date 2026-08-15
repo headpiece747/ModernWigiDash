@@ -4,17 +4,17 @@ using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.LibreHardwareService;
 
-    /// <summary>App-side reader for LibreHardwareService's shared-memory sensor
-    /// maps. Owns the poll policy (map source → parse → outcome) and the pure
-    /// parsing (<see cref="TryParse"/>); the mutex/map/copy I/O lives behind
-    /// the injected <see cref="ILhmMapSource"/> seam — the reader never creates
-    /// a map source itself, so the production default is chosen once by the
-    /// owning module. Never throws — every failure yields a disconnected
-    /// snapshot, and <see cref="LastError"/> carries the reason for the poll
-    /// tick to log once per change.
-    /// </summary>
-    public sealed class LhmSharedMemoryReader
-    {
+/// <summary>App-side reader for LibreHardwareService's shared-memory sensor
+/// maps. Owns the poll policy (map source → parse → outcome) and the pure
+/// parsing (<see cref="TryParse"/>); the mutex/map/copy I/O lives behind
+/// the injected <see cref="ILhmMapSource"/> seam — the reader never creates
+/// a map source itself, so the production default is chosen once by the
+/// owning module. Never throws — every failure yields a disconnected
+/// snapshot, and <see cref="LastError"/> carries the reason for the poll
+/// tick to log once per change.
+/// </summary>
+public sealed class LhmSharedMemoryReader
+{
     // LibreHardwareService (epinter) header layout — mirrored from its
     // MemoryMappedSensors source. The metadata block is 4 + MetadataSize
     // (MetadataSize is sizeof(int)+sizeof(long) = 12, so the index/data
@@ -44,12 +44,20 @@ namespace ModernWigiDash.App.LibreHardwareService;
 
     private readonly ILhmMapSource _mapSource;
 
+    /// <summary>The clock for the disconnected-snapshot timestamp (test seam —
+    /// production binds the system clock; tests inject a fake to pin the
+    /// stamp).</summary>
+    internal TimeProvider Clock { get; }
+
     /// <param name="mapSource">The map I/O adapter (memory-mapped production
     /// adapter or an in-memory fake); required — the default is chosen by the
     /// owning module, not the reader.</param>
-    public LhmSharedMemoryReader(ILhmMapSource mapSource)
+    /// <param name="timeProvider">Test seam: clock for the disconnected
+    /// snapshot's timestamp (defaults to the system clock).</param>
+    public LhmSharedMemoryReader(ILhmMapSource mapSource, TimeProvider? timeProvider = null)
     {
         _mapSource = mapSource;
+        Clock = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -234,7 +242,7 @@ namespace ModernWigiDash.App.LibreHardwareService;
         return new SensorSnapshotDto
         {
             IsConnected = false,
-            LastUpdate = DateTime.UtcNow,
+            LastUpdate = Clock.GetUtcNow().UtcDateTime,
             Readings = [],
         };
     }

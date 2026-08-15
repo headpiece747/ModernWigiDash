@@ -75,7 +75,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
-    private readonly IThemeApplicator _themeApplicator = new ThemeApplicator();
+    private readonly ThemeApplicator _themeApplicator = new();
 
     /// <summary>Sampling options for the preview draw — hoisted so the per-frame
     /// paint never allocates a new instance.</summary>
@@ -283,27 +283,24 @@ public partial class MainWindow : Window, IModernWigiDashContext
             // The teardown sequence begins: OCEs raised by the disposes below
             // are expected and benign (see App.DispatcherUnhandledException).
             App.IsClosing = true;
-            try
-            {
+            new ShutdownOrchestrator(
+            [
                 // Persist before teardown: a clean exit always lands the final
                 // profile state (including the last active page index).
-                _profilePersistence.Flush();
-                _profilePersistence.Dispose();
-                _framePump.Dispose();
-                _powerLifecycle.Dispose();
-                _telemetry.Dispose();
-                _presenter.Dispose();
-                ProfileOps.DisposeProfile(_profile);
-                _dialogHost.CloseDeviceAuthorization();
-                _compositor.Dispose();
-            }
-            finally
-            {
-                // The engine dispose is the one step that must never be
-                // skipped: the display must reach standby on every exit, even
-                // when an earlier teardown step throws.
-                _usbDevice.Dispose();
-            }
+                _profilePersistence.Flush,
+                _profilePersistence.Dispose,
+                _framePump.Dispose,
+                _powerLifecycle.Dispose,
+                _telemetry.Dispose,
+                _presenter.Dispose,
+                () => ProfileOps.DisposeProfile(_profile),
+                _dialogHost.CloseDeviceAuthorization,
+                _compositor.Dispose
+            ],
+            // The engine dispose is the one step that must never be skipped:
+            // the display must reach standby on every exit, even when an
+            // earlier teardown step throws (the orchestrator's last resort).
+            lastResort: _usbDevice.Dispose).Run();
         };
 
         // Update USB badge
@@ -334,18 +331,22 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>
-    /// One refresh sequence after a page-structure mutation (add/delete/rename/
-    /// switch/import): rebuild the tab strip (scrolling to the active tab) and
-    /// refresh the selection, count, and canvas. Passing the current selection
-    /// keeps it (rename); null clears it (page add/delete/switch/import).
+    /// One refresh sequence after a mutation: re-selects (null clears),
+    /// refreshes the active count, and repaints the canvas. Structural
+    /// mutations (add/delete/rename/switch/import) also rebuild the tab strip
+    /// and re-sync the page-background picker — a single funnel, so a later
+    /// step can never drift between the two shapes.
     /// </summary>
-    private void RefreshAfterMutation(PlacedWidgetInstance? selection)
+    private void RefreshAfterMutation(PlacedWidgetInstance? selection, bool structural)
     {
-        _pageTabs.Rebuild(_profile);
+        if (structural)
+        {
+            _pageTabs.Rebuild(_profile);
+            PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
+        }
         SelectWidget(selection);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
-        PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
     }
 
     /// <summary>Page-background picker commit: writes the active page's
@@ -356,18 +357,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         _profile.ActivePage.BackgroundHexColor = hex;
         _profilePersistence.MarkDirty();
-        SkiaCanvas.InvalidateVisual();
-    }
-
-    /// <summary>
-    /// One refresh sequence after a selection-only mutation (place/delete/
-    /// clear): selects the given widget (null clears), refreshes the active
-    /// count, and repaints the canvas.
-    /// </summary>
-    private void RefreshSelection(PlacedWidgetInstance? selection)
-    {
-        SelectWidget(selection);
-        UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -500,7 +489,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_selectedWidget != null)
         {
             ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
-            RefreshSelection(null);
+            RefreshAfterMutation(null, structural: false);
             _profilePersistence.MarkDirty();
         }
     }
@@ -540,7 +529,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             var placed = ProfileOps.PlaceCentered(_profile, _loader, this, pluginId);
             if (placed == null) return;
 
-            RefreshSelection(placed);
+            RefreshAfterMutation(placed, structural: false);
             _profilePersistence.MarkDirty();
         }
     }
@@ -554,14 +543,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (string.IsNullOrWhiteSpace(newName)) return;
 
         ProfileOps.RenamePage(page, newName);
-        RefreshAfterMutation(_selectedWidget);
+        RefreshAfterMutation(_selectedWidget, structural: true);
         _profilePersistence.MarkDirty();
     }
 
     private void SwitchToPage(int index)
     {
         if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
-        RefreshAfterMutation(null);
+        RefreshAfterMutation(null, structural: true);
     }
 
     private void DeletePage(int index)
@@ -572,14 +561,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
             return;
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
-        RefreshAfterMutation(null);
+        RefreshAfterMutation(null, structural: true);
         _profilePersistence.MarkDirty();
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
-        RefreshAfterMutation(null);
+        RefreshAfterMutation(null, structural: true);
         _profilePersistence.MarkDirty();
     }
 
@@ -645,7 +634,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     // directly from the import result — no reliance on the
                     // change-handler write-back loop.
                     ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-                    RefreshAfterMutation(null);
+                    RefreshAfterMutation(null, structural: true);
                     _profilePersistence.MarkDirty();
                 }
             }
@@ -661,7 +650,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
             ProfileOps.ClearPage(_profile.ActivePage);
-            RefreshSelection(null);
+            RefreshAfterMutation(null, structural: false);
             _profilePersistence.MarkDirty();
         }
     }

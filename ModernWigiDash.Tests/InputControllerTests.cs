@@ -9,11 +9,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class InputControllerTests
 {
-    private sealed class TestWidget : ModernWidgetBase
-    {
-        public override void Render(SKCanvas canvas, SKRect bounds) { }
-    }
-
     private static PlacedWidgetInstance PlaceWidget(float x, float y, float w, float h, IModernWidget? instance = null)
         => new()
         {

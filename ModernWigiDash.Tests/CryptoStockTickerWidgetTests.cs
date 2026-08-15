@@ -1,4 +1,5 @@
 using System.Net.Http;
+using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
 
@@ -93,5 +94,70 @@ public class CryptoStockTickerWidgetTests
         widget.Render(canvas, new SKRect(0, 0, 200, 150));
 
         Assert.IsNotNull(surface);
+    }
+
+    // ── TickerStalenessPresentation: the stale-price display rules ─────────
+
+    [TestMethod]
+    public void TickerStaleness_IsStale_MissingRecord_True()
+    {
+        Assert.IsTrue(TickerStalenessPresentation.IsStale(null), "no price must never look live");
+    }
+
+    [TestMethod]
+    public void TickerStaleness_IsStale_FreshRecord_False()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime, Clock = clock };
+
+        Assert.IsFalse(TickerStalenessPresentation.IsStale(info));
+    }
+
+    [TestMethod]
+    public void TickerStaleness_IsStale_StaleRecord_True()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61), Clock = clock };
+
+        Assert.IsTrue(TickerStalenessPresentation.IsStale(info));
+    }
+
+    [TestMethod]
+    public void TickerStaleness_BadgeText_Stale_GetsFreshnessDot()
+    {
+        Assert.AreEqual("• +1.5%", TickerStalenessPresentation.BadgeText("+1.5%", isStale: true));
+        Assert.AreEqual("+1.5%", TickerStalenessPresentation.BadgeText("+1.5%", isStale: false));
+    }
+
+    [TestMethod]
+    public void TickerStaleness_StaleBadgeAlpha_NeutralGray()
+    {
+        Assert.AreEqual(120, TickerStalenessPresentation.StaleBadgeAlpha);
+    }
+
+    [TestMethod]
+    public async Task Render_NoPrice_ReseedsAtMostOncePer15Seconds()
+    {
+        // The recovery policy: when the feed has no price yet, Render re-seeds
+        // the one-shot fallback at most once per 15s (the FeedSubscription
+        // seed covers the immediate case; this covers the failed-seed retry).
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
+        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key", feedFactory: _ => new FakeFeed(), reconnectDelay: TimeSpan.FromMilliseconds(10));
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed, Clock = clock };
+        using var surface = SKSurface.Create(new SKImageInfo(203, 148));
+        var rect = new SKRect(0, 0, 203, 148);
+
+        widget.Render(surface.Canvas, rect);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+        int afterFirst = stub.Calls;
+
+        widget.Render(surface.Canvas, rect);
+        await Task.Delay(50);
+        Assert.AreEqual(afterFirst, stub.Calls, "within the 15s window no re-seed may fire");
+
+        clock.Advance(TimeSpan.FromSeconds(16));
+        widget.Render(surface.Canvas, rect);
+        await TestWait.WaitUntilAsync(() => stub.Calls > afterFirst, TimeSpan.FromSeconds(5));
     }
 }

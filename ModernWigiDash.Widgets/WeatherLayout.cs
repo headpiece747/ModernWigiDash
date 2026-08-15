@@ -170,4 +170,13 @@ public static class WeatherLayout
     /// </summary>
     public static float MetricPillShrinkScale(float totalPillsW, float width)
         => totalPillsW > width ? Math.Max(0.6f, width / totalPillsW) : 1f;
+
+    /// <summary>The metric pill's font size at scale <paramref name="s"/>.</summary>
+    public static float PillFontSize(float s) => Math.Clamp(13f * s, 8f, 24f);
+
+    /// <summary>The metric pill's horizontal text padding at scale <paramref name="s"/>.</summary>
+    public static float PillPadX(float s) => Math.Clamp(10f * s, 4f, 20f);
+
+    /// <summary>The gap between metric pills at scale <paramref name="s"/>.</summary>
+    public static float PillGap(float s) => Math.Clamp(8f * s, 3f, 16f);
 }

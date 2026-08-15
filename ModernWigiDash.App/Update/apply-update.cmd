@@ -38,10 +38,11 @@ del "%PROBE%" 2>nul
 goto writable
 :elevate
 echo [%date% %time%] install dir not writable; requesting elevation >> "%LOG%"
-rem Note: the quoted args below break if a path contains a single quote
-rem (e.g. "O'Brien"); paths with spaces are fine. The app's own dirs are
-rem ASCII by construction, so this is accepted rather than worked around.
-powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs" 
+rem Each argument is single-quoted separately, so a path containing spaces,
+rem ampersands, or pipes stays one PowerShell argument (the raw '%*' form
+rem re-parsed the whole command line). A single quote in a path would still
+rem break the quoting, but the app's own dirs are ASCII by construction.
+powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%~1','%~2','%~3' -Verb RunAs" 
 exit /b 0
 :writable
 

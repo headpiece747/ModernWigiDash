@@ -198,4 +198,28 @@ public class WeatherLayoutTests
     {
         Assert.AreEqual(1f, WeatherLayout.MetricPillShrinkScale(150f, 200f), 0.001f);
     }
+
+    [TestMethod]
+    public void PillFontSize_ClampsToTheDrawRange()
+    {
+        Assert.AreEqual(8f, WeatherLayout.PillFontSize(0.1f), "tiny scales clamp to the minimum");
+        Assert.AreEqual(24f, WeatherLayout.PillFontSize(3f), "huge scales clamp to the maximum");
+        Assert.AreEqual(13f, WeatherLayout.PillFontSize(1f), 0.001f, "the design scale uses the base size");
+    }
+
+    [TestMethod]
+    public void PillPadX_ClampsToTheDrawRange()
+    {
+        Assert.AreEqual(4f, WeatherLayout.PillPadX(0.1f));
+        Assert.AreEqual(20f, WeatherLayout.PillPadX(3f));
+        Assert.AreEqual(10f, WeatherLayout.PillPadX(1f), 0.001f);
+    }
+
+    [TestMethod]
+    public void PillGap_ClampsToTheDrawRange()
+    {
+        Assert.AreEqual(3f, WeatherLayout.PillGap(0.1f));
+        Assert.AreEqual(16f, WeatherLayout.PillGap(3f));
+        Assert.AreEqual(8f, WeatherLayout.PillGap(1f), 0.001f);
+    }
 }

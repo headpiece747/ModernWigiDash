@@ -64,7 +64,9 @@ if ($entries.Count -lt 1000) { throw "Only $($entries.Count) icons resolved; exp
 
 $lines = foreach ($entry in $entries) {
     $escaped = $entry.PathData.Replace('\', '\\').Replace('"', '\"')
-    '        ["{0}"] = "{1}",' -f $entry.Name, $escaped
+    # Entries are nested one level under the collection-initializer brace
+    # (12 spaces) so the emitted file is dotnet-format clean on regeneration.
+    '            ["{0}"] = "{1}",' -f $entry.Name, $escaped
 }
 
 $content = @"

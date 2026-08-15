@@ -156,7 +156,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        SKColor btnColor = ColorOf(ButtonColorHex, new SKColor(135, 0, 0));
+        SKColor btnColor = ColorOf(ButtonColorHex, WidgetPalette.Accent);
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         SKColor iconColor = ColorOf(IconColorHex, SKColors.White);
 
