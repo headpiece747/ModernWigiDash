@@ -1,0 +1,27 @@
+# PR-Agent repository configuration.
+# Docs: https://docs.pr-agent.ai/usage-guide/configuration_options/
+
+[config]
+# Any LiteLLM-routed provider works — swap the model + the matching key
+# secret (e.g. deepseek/deepseek-chat with DEEPSEEK_API_KEY, or a local
+# ollama/ model) without touching the workflow.
+model = "openai/gpt-4o-mini"
+
+# The repo's AGENTS.md and CONTEXT.md are fed to the model automatically
+# (v0.39+), so reviews and descriptions follow the project's domain
+# vocabulary and conventions (synchronous transport per ADR-0001, the
+# widget-per-file rule, MSTest patterns).
+
+[github_action_config]
+# Run on every PR: an automated review + a generated description.
+auto_review = true
+auto_describe = true
+# /improve stays on demand so PR threads don't fill with suggestions.
+auto_improve = false
+
+[pr_reviewer]
+num_code_suggestions = 6
+require_score = true
+
+[pr_description]
+use_description_markers = true
