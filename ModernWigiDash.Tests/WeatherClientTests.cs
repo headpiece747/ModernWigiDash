@@ -1294,6 +1294,37 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_DottedName_MatchesTheGeocodersPunctuation()
+    {
+        // The geocoder spells the Grenada capital "St. George's" while the
+        // user types "St George's" — the period must not break the match
+        // (the UK "St George's" places would otherwise steal the exact-name
+        // bonus and the suffix could never disambiguate).
+        const string fixture = """
+        {
+          "results": [
+            { "name": "St. George's", "latitude": 12.05610, "longitude": -61.74880, "admin1": "Saint George Parish", "country": "Grenada", "country_code": "GD", "population": 7500 },
+            { "name": "St George's", "latitude": 51.50000, "longitude": -2.50000, "admin1": "England", "country": "United Kingdom", "country_code": "GB" }
+          ]
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "St George's, Grenada", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(12.05610, snapshot.Lat, 0.0001);
+        Assert.AreEqual(-61.74880, snapshot.Lon, 0.0001);
+        Assert.AreEqual("St. George's, Saint George Parish, Grenada", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
         var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));

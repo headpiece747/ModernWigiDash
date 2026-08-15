@@ -171,9 +171,11 @@ public class WeatherForecastWidgetTests
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
         await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
-        // The write-back lands on the UI thread (the Render flush), never on
-        // the fetch continuation — Context.PersistProperty stays on the UI
-        // thread and a stale fetch cannot clobber a newer edit.
+        // Wait for the APPLIED state, not just the client count: the pending
+        // write-back is set by the widget's continuation, which can lag the
+        // client's finally under parallel load — flushing early would leave
+        // Location unchanged and fail the pick assertion.
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.Location,
@@ -190,18 +192,20 @@ public class WeatherForecastWidgetTests
         widget.Location = "Victoria";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Victoria");
         await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 4, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.ResolvedCityName);
     }
 
     [TestMethod]
-    public async Task InitializeAsync_DoesNotFetchWithPreHydrationState()
+    public async Task InitializeAsync_BootFetch_FiresImmediately()
     {
-        // RehydrateWidget calls InitializeAsync BEFORE applying the profile's
-        // properties, so a boot fetch would resolve the pre-hydration DEFAULT
-        // location and write the wrong city's cache at every startup (the
-        // on-device symptom: every profile cached Miami at boot). The first
-        // fetch must come from the post-hydration render kick instead.
+        // The boot fetch exists so hidden-page widgets (fresh starter
+        // profiles — no property hydration, no render kick) get weather
+        // without waiting for the 5-minute poll tick. The identity guard
+        // (FetchLiveWeatherAsync_InFlightCountryCodeEdit_*) drops any result
+        // whose location changed while in flight, so the boot fetch can
+        // never display a stale city.
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
@@ -210,16 +214,11 @@ public class WeatherForecastWidgetTests
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Paris, France" };
 
-        widget.InitializeAsync(new TestContext()).AsTask().GetAwaiter().GetResult();
+        await widget.InitializeAsync(new TestContext());
 
-        Assert.AreEqual(0, stub.Calls, "InitializeAsync must not fetch before the profile properties are applied");
-
-        // The render kick fetches with the CURRENT (hydrated) location.
-        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
-        widget.Render(surface.Canvas, new SKRect(0, 0, 406, 296));
         await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
         Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("name=Paris", StringComparison.Ordinal)),
-            "the first fetch must use the hydrated location, never the default");
+            "the boot fetch must use the widget's current location");
     }
 
     [TestMethod]

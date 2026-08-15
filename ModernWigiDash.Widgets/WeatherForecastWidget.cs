@@ -194,12 +194,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             "WEATHER", WeatherClient.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
-        // NO boot fetch here: InitializeAsync runs BEFORE the profile applies
-        // this widget's properties (RehydrateWidget), so a boot fetch would
-        // resolve the pre-hydration DEFAULT location and write the wrong
-        // city's cache at every startup. The first fetch comes from the
-        // render kick (post-hydration) or the poll tick — both use the
-        // hydrated location.
+        // The boot fetch: InitializeAsync runs BEFORE the profile applies
+        // this widget's properties (RehydrateWidget), so this fetch uses the
+        // pre-hydration default location. That is deliberate:
+        //   - hidden-page widgets (fresh starter profiles) have no render
+        //     kick and no hydration kick — the boot fetch is their only
+        //     immediate driver (the poll tick comes 5 minutes later)
+        //   - the identity guard below drops any result whose location no
+        //     longer matches when it returns, so the pre-hydration fetch can
+        //     never DISPLAY the wrong city — at most it transiently writes
+        //     the default's cache, which the hydration kick overwrites
+        _ = FetchLiveWeatherAsync();
         return ValueTask.CompletedTask;
     }
 

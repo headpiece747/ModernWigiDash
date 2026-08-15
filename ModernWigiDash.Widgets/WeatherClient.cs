@@ -868,14 +868,16 @@ public sealed class WeatherClient
     /// ("Asuncion", "Bogota", "Sao Paulo") must match the geocoder's accented
     /// names ("Asunción", "Bogotá", "São Paulo") — otherwise the exact-name
     /// bonus goes to a same-named ASCII town elsewhere and the accented
-    /// capital never wins. Normalization strips combining marks (FormD).</summary>
+    /// capital never wins. Normalization strips combining marks (FormD) and
+    /// periods ("St. George's" must match "St George's" — the geocoder
+    /// punctuates the Grenada capital differently than the user types).</summary>
     private static string NormalizeForMatch(string value)
     {
         string normalized = value.Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(normalized.Length);
         foreach (char c in normalized)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            if (c != '.' && CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
             {
                 builder.Append(c);
             }
