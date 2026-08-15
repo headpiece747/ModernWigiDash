@@ -838,10 +838,20 @@ public sealed class WeatherClient
             string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            _lat = root.GetProperty("latitude").GetDouble();
-            _lon = root.GetProperty("longitude").GetDouble();
-            string city = root.TryGetProperty("place name", out var place) ? place.GetString() ?? "" : "";
-            string state = root.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
+            // The real zippopotam shape nests the place under "places[0]"
+            // with string coordinates — the earlier root-level numeric parse
+            // matched a hand-made fixture, not the API, so every real ZIP
+            // threw, logged, and silently fell back to the postal-code
+            // geocoder (which resolves some US ZIPs to area centroids).
+            if (!root.TryGetProperty("places", out var places) || places.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException("zippopotam response has no places");
+            }
+            JsonElement place = places[0];
+            _lat = double.Parse(place.GetProperty("latitude").GetString()!, CultureInfo.InvariantCulture);
+            _lon = double.Parse(place.GetProperty("longitude").GetString()!, CultureInfo.InvariantCulture);
+            string city = place.TryGetProperty("place name", out var name) ? name.GetString() ?? "" : "";
+            string state = place.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
             _resolvedCityName = string.IsNullOrWhiteSpace(state) ? city : $"{city}, {state}";
             return;
         }

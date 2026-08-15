@@ -104,15 +104,22 @@ public class WeatherClientTests
     }
     """;
 
-    // The ZIP parse reads root-level latitude/longitude, so the test body
-    // mirrors the shape the parser expects (numeric root values).
+    // The real zippopotam shape: the place (with string coordinates) lives
+    // under "places[0]" — the fixture mirrors the live API, not a hand-made
+    // root-level shape (the earlier root-level numeric fixture let the parser
+    // drift from the API, so real ZIPs silently fell back).
     private const string SampleZip = """
     {
+      "country": "United States",
       "post code": "10001",
-      "latitude": 40.7505,
-      "longitude": -73.9962,
-      "place name": "New York City",
-      "state": "New York"
+      "places": [
+        {
+          "place name": "New York City",
+          "longitude": "-73.9962",
+          "latitude": "40.7505",
+          "state": "New York"
+        }
+      ]
     }
     """;
 
