@@ -792,6 +792,13 @@ public sealed class WeatherClient
         {
             if (EqualsAny(admin1, country, code, component)) score += 500;
             else if (StartsWithAny(admin1, country, code, component)) score += 250;
+            // The renamed-country tier: the geocoder reports official names
+            // ("The Netherlands", "Republic of Türkiye") while users type the
+            // common English name ("Netherlands", "Turkey"). Contains is the
+            // lowest tier — it only breaks a tie between a renamed-country
+            // candidate and same-named places elsewhere; the all-or-nothing
+            // rule above still requires every component to match at some tier.
+            else if (ContainsAny(admin1, country, code, component)) score += 125;
             else return 0;
         }
         return score;
@@ -806,6 +813,11 @@ public sealed class WeatherClient
         => admin1.StartsWith(component, StringComparison.OrdinalIgnoreCase)
             || country.StartsWith(component, StringComparison.OrdinalIgnoreCase)
             || code.StartsWith(component, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsAny(string admin1, string country, string code, string component)
+        => admin1.Contains(component, StringComparison.OrdinalIgnoreCase)
+            || country.Contains(component, StringComparison.OrdinalIgnoreCase)
+            || code.Contains(component, StringComparison.OrdinalIgnoreCase);
 
     private static int ScoreCountryHint(string code, string country, string? countryCode)
     {

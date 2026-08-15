@@ -1006,6 +1006,43 @@ public class WeatherClientTests
         Assert.IsNull(snapshot, "a partial suffix match must not resolve — the suffix is all-or-nothing");
     }
 
+    // The renamed-country shape: the geocoder reports the official country
+    // name ("The Netherlands") while users type the common English name
+    // ("Netherlands") — the contains tier of the suffix matcher must keep
+    // the NL Amsterdam the unique winner over the same-named US towns.
+    internal const string SampleAmsterdams = """
+    {
+      "results": [
+        { "name": "Amsterdam", "admin1": "North Holland", "country": "The Netherlands", "country_code": "NL", "population": 741636, "latitude": 52.37403, "longitude": 4.88969 },
+        { "name": "Amsterdam", "admin1": "New York", "country": "United States", "country_code": "US", "population": 18620, "latitude": 42.93869, "longitude": -74.18819 },
+        { "name": "Amsterdam", "admin1": "Ohio", "country": "United States", "country_code": "US", "population": 510, "latitude": 40.47368, "longitude": -80.92287 }
+      ]
+    }
+    """;
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_RenamedCountrySuffix_ResolvesTheCommonEnglishName()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleAmsterdams);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // "Netherlands" is not an exact or prefix match of the geocoder's
+        // "The Netherlands" — the contains tier must still pick it over the
+        // US Amsterdams (before the tier, every candidate tied at 1000 and
+        // the suffix gated: "Amsterdam, Netherlands" never resolved).
+        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Amsterdam, Netherlands", null, null, null));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(52.37403, snapshot.Lat, 0.0001);
+        Assert.AreEqual(4.88969, snapshot.Lon, 0.0001);
+        Assert.AreEqual("Amsterdam, North Holland, The Netherlands", snapshot.ResolvedCityName);
+    }
+
     [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
