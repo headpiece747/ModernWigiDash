@@ -31,9 +31,13 @@ public sealed class ColorPickerEditor : UserControl
 
         SwatchButton = new Button
         {
-            Width = 34, Height = 24, Margin = new Thickness(0, 0, 6, 0),
-            Padding = new Thickness(0), BorderBrush = new SolidColorBrush(Color.FromRgb(63, 63, 70)),
-            BorderThickness = new Thickness(1), ToolTip = "Pick a color"
+            Width = 34,
+            Height = 24,
+            Margin = new Thickness(0, 0, 6, 0),
+            Padding = new Thickness(0),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(63, 63, 70)),
+            BorderThickness = new Thickness(1),
+            ToolTip = "Pick a color"
         };
         _swatch = new Border { CornerRadius = new CornerRadius(3), Margin = new Thickness(3) };
         SwatchButton.Content = _swatch;

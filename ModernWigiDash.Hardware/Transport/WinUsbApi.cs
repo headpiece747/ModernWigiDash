@@ -1,4 +1,4 @@
-﻿namespace ModernWigiDash.Hardware.Transport;
+namespace ModernWigiDash.Hardware.Transport;
 
 internal delegate bool WinUsbInitializeFn(IntPtr deviceHandle, out IntPtr interfaceHandle);
 internal delegate bool WinUsbFreeFn(IntPtr interfaceHandle);

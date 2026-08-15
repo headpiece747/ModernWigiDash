@@ -14,17 +14,25 @@ public class GridSizePresetTests
         // through the 2-row spot check.
         var expected = new Dictionary<GridSizePreset, (float Width, float Height)>
         {
-            [GridSizePreset.Size1x1] = (203, 148), [GridSizePreset.Size2x1] = (406, 148),
-            [GridSizePreset.Size3x1] = (609, 148), [GridSizePreset.Size4x1] = (813, 148),
+            [GridSizePreset.Size1x1] = (203, 148),
+            [GridSizePreset.Size2x1] = (406, 148),
+            [GridSizePreset.Size3x1] = (609, 148),
+            [GridSizePreset.Size4x1] = (813, 148),
             [GridSizePreset.Size5x1] = (1016, 148),
-            [GridSizePreset.Size1x2] = (203, 296), [GridSizePreset.Size2x2] = (406, 296),
-            [GridSizePreset.Size3x2] = (609, 296), [GridSizePreset.Size4x2] = (813, 296),
+            [GridSizePreset.Size1x2] = (203, 296),
+            [GridSizePreset.Size2x2] = (406, 296),
+            [GridSizePreset.Size3x2] = (609, 296),
+            [GridSizePreset.Size4x2] = (813, 296),
             [GridSizePreset.Size5x2] = (1016, 296),
-            [GridSizePreset.Size1x3] = (203, 444), [GridSizePreset.Size2x3] = (406, 444),
-            [GridSizePreset.Size3x3] = (609, 444), [GridSizePreset.Size4x3] = (813, 444),
+            [GridSizePreset.Size1x3] = (203, 444),
+            [GridSizePreset.Size2x3] = (406, 444),
+            [GridSizePreset.Size3x3] = (609, 444),
+            [GridSizePreset.Size4x3] = (813, 444),
             [GridSizePreset.Size5x3] = (1016, 444),
-            [GridSizePreset.Size1x4] = (203, 592), [GridSizePreset.Size2x4] = (406, 592),
-            [GridSizePreset.Size3x4] = (609, 592), [GridSizePreset.Size4x4] = (813, 592),
+            [GridSizePreset.Size1x4] = (203, 592),
+            [GridSizePreset.Size2x4] = (406, 592),
+            [GridSizePreset.Size3x4] = (609, 592),
+            [GridSizePreset.Size4x4] = (813, 592),
             [GridSizePreset.Size5x4] = (1016, 592),
         };
 

@@ -66,19 +66,27 @@ public sealed class ColorPickerPopup : UserControl
         _svHueLayer = new Rectangle { Width = 252, Height = 130, IsHitTestVisible = false };
         var svWhiteLayer = new Rectangle
         {
-            Width = 252, Height = 130, IsHitTestVisible = false,
+            Width = 252,
+            Height = 130,
+            IsHitTestVisible = false,
             Fill = new LinearGradientBrush(Colors.White, Colors.Transparent, 0)
         };
         var svBlackLayer = new Rectangle
         {
-            Width = 252, Height = 130, IsHitTestVisible = false,
+            Width = 252,
+            Height = 130,
+            IsHitTestVisible = false,
             Fill = new LinearGradientBrush(Colors.Transparent, Colors.Black, 90)
         };
         _svThumb = new Border
         {
-            Width = 14, Height = 14, CornerRadius = new CornerRadius(7),
-            BorderBrush = Brushes.White, BorderThickness = new Thickness(2),
-            Background = Brushes.Transparent, IsHitTestVisible = false
+            Width = 14,
+            Height = 14,
+            CornerRadius = new CornerRadius(7),
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(2),
+            Background = Brushes.Transparent,
+            IsHitTestVisible = false
         };
         Canvas.SetLeft(_svThumb, -7); Canvas.SetTop(_svThumb, -7);
         _svCanvas.Children.Add(_svHueLayer);
@@ -91,7 +99,8 @@ public sealed class ColorPickerPopup : UserControl
         _hueCanvas = new Canvas { Width = 252, Height = 16, Margin = new Thickness(0, 10, 0, 0), ClipToBounds = true, Background = Brushes.Transparent };
         var hueStrip = new Rectangle
         {
-            Width = 252, Height = 16,
+            Width = 252,
+            Height = 16,
             Fill = new LinearGradientBrush(
             [
                 new GradientStop(Colors.Red, 0),
@@ -105,8 +114,12 @@ public sealed class ColorPickerPopup : UserControl
         };
         _hueThumb = new Border
         {
-            Width = 10, Height = 16, BorderBrush = Brushes.White, BorderThickness = new Thickness(1),
-            Background = Brushes.Transparent, IsHitTestVisible = false
+            Width = 10,
+            Height = 16,
+            BorderBrush = Brushes.White,
+            BorderThickness = new Thickness(1),
+            Background = Brushes.Transparent,
+            IsHitTestVisible = false
         };
         Canvas.SetLeft(_hueThumb, -5);
         _hueCanvas.Children.Add(hueStrip);
