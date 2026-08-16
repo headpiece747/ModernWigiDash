@@ -540,7 +540,26 @@ internal sealed class WeatherClient
 
     private async Task ResolveCoordinatesAsync(WeatherLocation location, string currentQuery, CancellationToken cancellationToken)
     {
-        _lastLocationQuery = currentQuery;
+        // The identity advances BEFORE the outcome is known. If the key
+        // changed (a silent reassignment — hydration, or a direct property
+        // write that bypasses OnPropertyChanged's invalidation — raced a
+        // previous resolution), the OLD identity's coordinates/name must not
+        // survive: a failed geocode for the new identity would otherwise fall
+        // through with the previous place's lat/lon still set, and the
+        // completion check (which compares against THIS new key) would pass —
+        // fetching and caching the wrong city under the new identity.
+        bool identityChanged;
+        lock (_identityGate)
+        {
+            identityChanged = !string.Equals(_lastLocationQuery, currentQuery, StringComparison.Ordinal);
+            _lastLocationQuery = currentQuery;
+            if (identityChanged)
+            {
+                _lat = null;
+                _lon = null;
+                _resolvedCityName = "";
+            }
+        }
 
         // Only a name resolution carries a population: explicit coordinates, a
         // coordinate pair, and a ZIP path reset it; the city-resolution winner
