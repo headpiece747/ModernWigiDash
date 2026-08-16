@@ -7,9 +7,10 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// A stream whose body read never completes: the bounded read's internal
-/// deadline (<see cref="WeatherGeocoder.HttpTimeoutOverride"/>) is what
-/// cancels the leg, so the timeout-conversion path is drivable without
-/// waiting the real 30 s deadline.
+/// deadline (the geocoder's per-instance
+/// <see cref="WeatherGeocoder.HttpTimeoutOverride"/>) is what cancels the
+/// leg, so the timeout-conversion path is drivable without waiting the real
+/// 30 s deadline.
 /// </summary>
 internal sealed class PendingStream : Stream
 {
@@ -66,8 +67,22 @@ internal sealed class ImmediateOceStream : Stream
 [TestClass]
 public class WeatherGeocoderTests
 {
-    private static WeatherGeocoder Geocoder(HttpMessageHandler handler, List<string>? logs = null)
-        => new(new HttpClient(handler), logs is null ? null : (message, ex) => logs.Add(message));
+    private static WeatherGeocoder Geocoder(HttpMessageHandler handler, List<string>? logs = null, TimeSpan? timeout = null)
+        => new(new HttpClient(handler), logs is null ? null : (message, ex) => logs.Add(message), timeout);
+
+    [TestMethod]
+    public void HttpTimeoutOverride_IsPerInstance_NotLeakedAcrossGeocoders()
+    {
+        // The instance-scoped seam: an override set on one geocoder must not
+        // bleed into sibling instances (the old static knob was process-wide,
+        // so a test run's override silently changed every other geocoder's
+        // deadline — and one test's mutation leaked into the next).
+        var overridden = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("{}")), timeout: TimeSpan.FromSeconds(1));
+        var plain = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("{}")));
+
+        Assert.AreEqual(TimeSpan.FromSeconds(1), overridden.HttpTimeoutOverride);
+        Assert.IsNull(plain.HttpTimeoutOverride, "the override must not leak to sibling instances");
+    }
 
     [TestMethod]
     public async Task SearchCitiesAsync_MalformedCandidateRow_IsSkippedNotFatal()
@@ -229,25 +244,17 @@ public class WeatherGeocoderTests
         // shape) and leave a silent retry loop. The deadline converts to a
         // TimeoutException, which the catch turns into the Unresolved shape
         // plus an error-sink line.
-        var original = WeatherGeocoder.HttpTimeoutOverride;
-        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromMilliseconds(50);
-        try
-        {
-            var logs = new List<string>();
-            var geocoder = Geocoder(new StubHttpHandler(_ =>
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }), logs);
+        var logs = new List<string>();
+        var geocoder = Geocoder(new StubHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }),
+            logs, TimeSpan.FromMilliseconds(50));
 
-            var result = await geocoder.GeocodeCityAsync("Berlin", null, null, CancellationToken.None);
+        var result = await geocoder.GeocodeCityAsync("Berlin", null, null, CancellationToken.None);
 
-            Assert.IsInstanceOfType(result, typeof(WeatherCityGeocodeResult.Unresolved),
-                "the deadline must convert to the failure shape, not swallow as OCE");
-            Assert.IsTrue(logs.Any(l => l.Contains("Geocoding failed", StringComparison.Ordinal)),
-                "the timeout must surface through the error sink");
-        }
-        finally
-        {
-            WeatherGeocoder.HttpTimeoutOverride = original;
-        }
+        Assert.IsInstanceOfType(result, typeof(WeatherCityGeocodeResult.Unresolved),
+            "the deadline must convert to the failure shape, not swallow as OCE");
+        Assert.IsTrue(logs.Any(l => l.Contains("Geocoding failed", StringComparison.Ordinal)),
+            "the timeout must surface through the error sink");
     }
 
     [TestMethod]
@@ -257,22 +264,14 @@ public class WeatherGeocoderTests
         // deadline: a pre-cancelled caller token must propagate as the
         // cancellation (TaskCanceledException), never be converted to a
         // TimeoutException and swallowed into the Unresolved shape.
-        var original = WeatherGeocoder.HttpTimeoutOverride;
-        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromMilliseconds(50);
-        try
-        {
-            var geocoder = Geocoder(new StubHttpHandler(_ =>
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }));
-            using var cts = new CancellationTokenSource();
-            await cts.CancelAsync();
+        var geocoder = Geocoder(new StubHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }),
+            timeout: TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
 
-            await Assert.ThrowsAsync<TaskCanceledException>(
-                () => geocoder.GeocodeCityAsync("Berlin", null, null, cts.Token));
-        }
-        finally
-        {
-            WeatherGeocoder.HttpTimeoutOverride = original;
-        }
+        await Assert.ThrowsAsync<TaskCanceledException>(
+            () => geocoder.GeocodeCityAsync("Berlin", null, null, cts.Token));
     }
 
     [TestMethod]
@@ -282,22 +281,14 @@ public class WeatherGeocoderTests
         // the test-seam override set, the message reflects it (1s), never the
         // 30 s default - a stale default in the message would mislead the log
         // reader about how long the leg actually waited.
-        var original = WeatherGeocoder.HttpTimeoutOverride;
-        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromSeconds(1);
-        try
-        {
-            var http = new HttpClient(new StubHttpHandler(_ =>
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }));
+        var geocoder = Geocoder(new StubHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }),
+            timeout: TimeSpan.FromSeconds(1));
 
-            var ex = await Assert.ThrowsAsync<TimeoutException>(
-                () => WeatherGeocoder.ReadBoundedAsync(http, "https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => geocoder.ReadBoundedAsync("https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
 
-            Assert.AreEqual("HTTP leg exceeded the 1s deadline", ex.Message);
-        }
-        finally
-        {
-            WeatherGeocoder.HttpTimeoutOverride = original;
-        }
+        Assert.AreEqual("HTTP leg exceeded the 1s deadline", ex.Message);
     }
 
     [TestMethod]
@@ -309,21 +300,12 @@ public class WeatherGeocoderTests
         // internal deadline and the shared client's own timeout reach - runs
         // without waiting the real deadline; the message is built from the
         // same (HttpTimeoutOverride ?? HttpTimeout) expression.
-        var original = WeatherGeocoder.HttpTimeoutOverride;
-        WeatherGeocoder.HttpTimeoutOverride = null;
-        try
-        {
-            var http = new HttpClient(new StubHttpHandler(_ =>
-                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new ImmediateOceStream()) }));
+        var geocoder = Geocoder(new StubHttpHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new ImmediateOceStream()) }));
 
-            var ex = await Assert.ThrowsAsync<TimeoutException>(
-                () => WeatherGeocoder.ReadBoundedAsync(http, "https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => geocoder.ReadBoundedAsync("https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
 
-            Assert.AreEqual("HTTP leg exceeded the 30s deadline", ex.Message);
-        }
-        finally
-        {
-            WeatherGeocoder.HttpTimeoutOverride = original;
-        }
+        Assert.AreEqual("HTTP leg exceeded the 30s deadline", ex.Message);
     }
 }

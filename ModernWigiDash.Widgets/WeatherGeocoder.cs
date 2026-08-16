@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -53,10 +52,13 @@ internal sealed class WeatherGeocoder
     /// test seam via <see cref="Http"/>, so every leg of the cluster rides the
     /// same transport (and the same 30s timeout / bounded read).</param>
     /// <param name="logError">Optional error sink; when omitted, failures are silent.</param>
-    public WeatherGeocoder(HttpClient http, Action<string, Exception?>? logError = null)
+    /// <param name="httpTimeoutOverride">Test seam: a per-instance override of
+    /// the per-leg body-read deadline (defaults to <see cref="HttpTimeout"/>).</param>
+    public WeatherGeocoder(HttpClient http, Action<string, Exception?>? logError = null, TimeSpan? httpTimeoutOverride = null)
     {
         _http = http;
         _logError = logError;
+        HttpTimeoutOverride = httpTimeoutOverride;
     }
 
     /// <summary>The live transport. The client syncs this whenever its own
@@ -75,23 +77,26 @@ internal sealed class WeatherGeocoder
     /// <summary>The per-leg body-read deadline (the shared client's
     /// <c>Timeout</c> only bounds the header phase under ResponseHeadersRead).</summary>
     internal static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
-    /// <summary>Test seam: overrides the per-leg deadline (see
-    /// <see cref="ReadBoundedAsync"/>) so the timeout path is drivable
-    /// without waiting the real 30 s.</summary>
-    internal static TimeSpan? HttpTimeoutOverride { get; set; }
+    /// <summary>Per-instance test seam: overrides the per-leg deadline (see
+    /// <see cref="ReadBoundedAsync"/>) so the timeout path is drivable without
+    /// waiting the real 30 s. Injected at construction (never a process-wide
+    /// knob — one test's override can no longer leak into every other
+    /// geocoder's deadline).</summary>
+    internal TimeSpan? HttpTimeoutOverride { get; set; }
 
     /// <summary>
     /// The bounded HTTP text read behind every fetch leg, replacing
     /// <see cref="HttpClient.GetStringAsync(string, CancellationToken)"/>:
-    /// headers are read first, then the body is streamed up to the declared
-    /// content length (or the 2 MB cap when the server omits one). A response
-    /// that DECLARES more than the cap is rejected before any body is read; a
-    /// chunked response is truncated at the cap (the JSON parse then fails and
-    /// the caller falls back like any failure). Non-success responses throw
-    /// like <c>GetStringAsync</c>, so the callers' existing catch→log→null
+    /// headers are read first, then the body is streamed through the shared
+    /// <see cref="BoundedRead"/> core up to the declared content length (or
+    /// the 2 MB cap when the server omits one). A response that DECLARES more
+    /// than the cap is rejected before any body is read; a chunked response
+    /// is truncated at the cap (the JSON parse then fails and the caller
+    /// falls back like any failure). Non-success responses throw like
+    /// <c>GetStringAsync</c>, so the callers' existing catch→log→null
     /// semantics are unchanged.
     /// </summary>
-    internal static async Task<string> ReadBoundedAsync(HttpClient http, string url, CancellationToken cancellationToken)
+    internal async Task<string> ReadBoundedAsync(string url, CancellationToken cancellationToken)
     {
         // HttpClient.Timeout only bounds the header phase under
         // ResponseHeadersRead - the streamed body read below needs its own
@@ -104,7 +109,7 @@ internal sealed class WeatherGeocoder
         timeoutCts.CancelAfter(HttpTimeoutOverride ?? HttpTimeout);
         try
         {
-            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
+            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             long? declared = response.Content.Headers.ContentLength;
             if (declared > MaxResponseBytes)
@@ -113,25 +118,8 @@ internal sealed class WeatherGeocoder
             }
             long cap = declared is > 0 ? declared.Value : MaxResponseBytes;
             using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token).ConfigureAwait(false);
-            using var buffer = new MemoryStream();
-            byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
-            try
-            {
-                long total = 0;
-                while (total < cap)
-                {
-                    int remaining = (int)Math.Min(chunk.Length, cap - total);
-                    int read = await stream.ReadAsync(chunk.AsMemory(0, remaining), timeoutCts.Token).ConfigureAwait(false);
-                    if (read == 0) break;
-                    total += read;
-                    await buffer.WriteAsync(chunk.AsMemory(0, read), timeoutCts.Token).ConfigureAwait(false);
-                }
-                return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(chunk);
-            }
+            byte[] body = await BoundedRead.ReadAsync(stream, cap, timeoutCts.Token).ConfigureAwait(false);
+            return Encoding.UTF8.GetString(body);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -156,7 +144,7 @@ internal sealed class WeatherGeocoder
     {
         try
         {
-            string json = await ReadBoundedAsync(_http, WeatherLocationResolver.BuildSearchUri(query, null).ToString(), cancellationToken).ConfigureAwait(false);
+            string json = await ReadBoundedAsync(WeatherLocationResolver.BuildSearchUri(query, null).ToString(), cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (!doc.RootElement.TryGetProperty("results", out var results))
             {
@@ -192,8 +180,7 @@ internal sealed class WeatherGeocoder
             var (namePart, suffixPart) = WeatherLocationResolver.SplitQuery(trimmed);
 
             string url = WeatherLocationResolver.BuildSearchUri(namePart, countryCode).ToString();
-
-            string json = await ReadBoundedAsync(_http, url, cancellationToken).ConfigureAwait(false);
+            string json = await ReadBoundedAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
             {
@@ -235,7 +222,7 @@ internal sealed class WeatherGeocoder
         try
         {
             string url = WeatherLocationResolver.BuildZipLookupUri(trimmed, countryCode).ToString();
-            string json = await ReadBoundedAsync(_http, url, cancellationToken).ConfigureAwait(false);
+            string json = await ReadBoundedAsync(url, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             // The real zippopotam shape nests the place under "places[0]"

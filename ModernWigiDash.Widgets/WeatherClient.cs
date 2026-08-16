@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -139,16 +138,6 @@ internal sealed class WeatherClient
     /// hidden-page refresh loop; a change edits one constant.</summary>
     internal static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
 
-    /// <summary>The maximum daily forecast rows the client ever keeps — the
-    /// parse cap, the deserialized-cache cap, and the API's own response
-    /// length share this one limit.</summary>
-    internal const int MaxFetchDays = 7;
-
-    /// <summary>The maximum hourly forecast rows the client ever keeps — the
-    /// parse cap, the deserialized-cache cap, and the API's own response
-    /// length share this one limit.</summary>
-    internal const int MaxFetchHours = 12;
-
     /// <summary>The disk-cache size bound: a cache file larger than this is
     /// rejected before reading (a corrupted or foreign file must never be
     /// buffered into memory).</summary>
@@ -194,6 +183,11 @@ internal sealed class WeatherClient
     }
 
     private HttpClient Http => TestHttpClient ?? SharedHttpClient;
+
+    /// <summary>The geocoding adapter (test seam: instance-scoped seams like
+    /// <see cref="WeatherGeocoder.HttpTimeoutOverride"/> are reachable through
+    /// this, so the timeout path is drivable per client, never process-wide).</summary>
+    internal WeatherGeocoder Geocoder => _geocoder;
 
     /// <summary>
     /// Number of completed fetches (success or failure) — a test seam for
@@ -353,7 +347,7 @@ internal sealed class WeatherClient
             // invariant F4 formatting — a comma-decimal OS locale must never
             // interpolate "40,7100" into the query.
             string forecastUrl = WeatherLocationResolver.BuildForecastUri(lat, lon).ToString();
-            string json = await WeatherGeocoder.ReadBoundedAsync(Http, forecastUrl, cancellationToken).ConfigureAwait(false);
+            string json = await _geocoder.ReadBoundedAsync(forecastUrl, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -514,8 +508,8 @@ internal sealed class WeatherClient
                 // Deserialized lists are capped at the fetch limits — a
                 // hand-edited or foreign cache cannot smuggle more rows than
                 // the API ever returns.
-                (data.DailyForecasts ?? []).Take(MaxFetchDays).Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
-                (data.HourlyForecasts ?? []).Take(MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
+                (data.DailyForecasts ?? []).Take(WeatherForecastLimits.MaxFetchDays).Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
+                (data.HourlyForecasts ?? []).Take(WeatherForecastLimits.MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
                 resolvedName,
                 data.Lat ?? 0,
                 data.Lon ?? 0);
@@ -531,9 +525,11 @@ internal sealed class WeatherClient
     /// Reads the cache file with a HARD byte cap — the stat-then-read gap is
     /// closed: a file that grows (or is swapped) after the existence check is
     /// still truncated at <see cref="MaxCacheBytes"/> instead of buffered
-    /// whole. Returns null (logged) when the file exceeds the cap mid-read
-    /// (the loop stops at the cap, so a file larger than the cap is detected
-    /// by the total read falling short of the file's length).
+    /// whole. The body is read through the shared <see cref="BoundedRead"/>
+    /// core (the same chunking/limit loop the HTTP legs use). Returns null
+    /// (logged) when the file exceeds the cap mid-read (the loop stops at the
+    /// cap, so a file larger than the cap is detected by the total read
+    /// falling short of the file's length).
     /// </summary>
     private async Task<string?> ReadCacheFileBoundedAsync(string path, CancellationToken cancellationToken)
     {
@@ -550,35 +546,13 @@ internal sealed class WeatherClient
                 _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
                 return null;
             }
-            byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
-            try
+            byte[] body = await BoundedRead.ReadAsync(fs, MaxCacheBytes, cancellationToken).ConfigureAwait(false);
+            if (body.Length < fs.Length)
             {
-                // The capacity hint must never exceed the read bound: the file
-                // can grow between the length check and this allocation (the
-                // stream tolerates a concurrent writer), so an attacker-
-                // influenced length must not size the buffer — the read loop
-                // caps at MaxCacheBytes anyway.
-                using var buffer = new MemoryStream((int)Math.Min(fs.Length, MaxCacheBytes));
-                long total = 0;
-                while (total < MaxCacheBytes)
-                {
-                    int remaining = (int)Math.Min(chunk.Length, MaxCacheBytes - total);
-                    int read = await fs.ReadAsync(chunk.AsMemory(0, remaining), cancellationToken).ConfigureAwait(false);
-                    if (read == 0) break;
-                    total += read;
-                    await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                }
-                if (total < fs.Length)
-                {
-                    _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
-                    return null;
-                }
-                return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+                _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
+                return null;
             }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(chunk);
-            }
+            return Encoding.UTF8.GetString(body);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -877,7 +851,7 @@ internal sealed class WeatherClient
 
         int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
         List<HourlyForecastItem> items = [];
-        for (int i = 0; i < Math.Min(hLen, MaxFetchHours); i++)
+        for (int i = 0; i < Math.Min(hLen, WeatherForecastLimits.MaxFetchHours); i++)
         {
             string timeStr = times[i].GetString() ?? "";
             string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
@@ -917,7 +891,7 @@ internal sealed class WeatherClient
     {
         int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
         List<DailyForecastItem> items = [];
-        for (int i = 0; i < Math.Min(dLen, MaxFetchDays); i++)
+        for (int i = 0; i < Math.Min(dLen, WeatherForecastLimits.MaxFetchDays); i++)
         {
             string dateStr = dTimes[i].GetString() ?? "";
             // Day names render in the INVARIANT calendar (the strip's "Today"

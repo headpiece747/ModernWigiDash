@@ -284,7 +284,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
         float s = Math.Min(sx, sy);
         float w = bounds.Width;
-        int count = Math.Min(model.Daily.Length, WeatherPresentation.MaxStripDays);
+        int count = Math.Min(model.Daily.Length, WeatherForecastLimits.MaxStripDays);
         float stripY = bounds.Bottom - forecastH;
         SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
 
@@ -345,7 +345,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
-        int count = Math.Min(model.Daily.Length, WeatherPresentation.MaxStripDays);
+        int count = Math.Min(model.Daily.Length, WeatherForecastLimits.MaxStripDays);
         if (count == 0) return;
 
         float rowHeight = bounds.Height / count;
@@ -388,7 +388,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
-        int count = Math.Min(model.Hourly.Length, WeatherPresentation.MaxStripHours);
+        int count = Math.Min(model.Hourly.Length, WeatherForecastLimits.MaxStripHours);
         if (count == 0) return;
 
         float itemWidth = bounds.Width / count;

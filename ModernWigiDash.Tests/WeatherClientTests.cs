@@ -10,125 +10,6 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class WeatherClientTests
 {
-    private const string SampleForecast = """
-    {
-      "latitude": 40.7128, "longitude": -74.006,
-      "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 2, "wind_speed_10m": 8.2, "time": "2026-08-07T12:00" },
-      "hourly": {
-        "time": ["2026-08-07T00:00", "2026-08-07T01:00"],
-        "temperature_2m": [12.5, 13.1],
-        "relative_humidity_2m": [40, 45],
-        "weather_code": [2, 2]
-      },
-      "daily": {
-        "time": ["2026-08-07", "2026-08-08"],
-        "weather_code": [2, 3],
-        "temperature_2m_max": [18.0, 20.0],
-        "temperature_2m_min": [9.0, 11.0]
-      }
-    }
-    """;
-
-    // The legacy response shape (current_weather + relativehumidity_2m +
-    // weathercode) must still parse — stale caches and edge responses carry it.
-    // Internal (not private): the widget tests deliberately ride THIS legacy
-    // shape as their forecast fixture (see WeatherForecastWidgetTests), so the
-    // two test classes can never carry a divergent copy.
-    internal const string SampleForecastLegacy = """
-    {
-      "latitude": 40.7128, "longitude": -74.006,
-      "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
-      "hourly": {
-        "time": ["2026-08-07T12:00", "2026-08-07T13:00"],
-        "temperature_2m": [12.5, 13.1],
-        "relativehumidity_2m": [60, 58],
-        "weathercode": [2, 2]
-      },
-      "daily": {
-        "time": ["2026-08-07", "2026-08-08"],
-        "weathercode": [2, 3],
-        "temperature_2m_max": [18.0, 20.0],
-        "temperature_2m_min": [9.0, 11.0]
-      }
-    }
-    """;
-
-    private const string SampleGeocode = """
-    {
-      "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ]
-    }
-    """;
-
-    // Two same-named cities across countries: the exact-name match must beat
-    // the higher-population fuzzy match (the Vitoria/Victoria bug).
-    internal const string SampleSameNameMultiCountry = """
-    {
-      "results": [
-        { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
-        { "name": "Vit\u00f3ria", "latitude": -20.3194, "longitude": -40.3378, "admin1": "Esp\u00edrito Santo", "country": "Brazil", "country_code": "BR", "population": 1962476 }
-      ]
-    }
-    """;
-
-    // Two same-named cities in one country: the state suffix must pick the
-    // right admin1 even when the wrong one is listed first with more people.
-    private const string SampleSpringfields = """
-    {
-      "results": [
-        { "name": "Springfield", "latitude": 37.21533, "longitude": -93.29824, "admin1": "Missouri", "country": "United States", "country_code": "US", "population": 167601 },
-        { "name": "Springfield", "latitude": 42.10148, "longitude": -72.58981, "admin1": "Massachusetts", "country": "United States", "country_code": "US", "population": 155932 }
-      ]
-    }
-    """;
-
-    // Identical names across countries: the CountryCode hint must decide.
-    internal const string SampleSanJoses = """
-    {
-      "results": [
-        { "name": "San Jose", "latitude": 37.33939, "longitude": -121.89496, "admin1": "California", "country": "United States", "country_code": "US", "population": 1026908 },
-        { "name": "San Jose", "latitude": 9.92807, "longitude": -84.09072, "admin1": "San Jos\u00e9 Province", "country": "Costa Rica", "country_code": "CR", "population": 335007 }
-
-      ]
-    }
-    """;
-
-    // The real Open-Meteo candidate set for a bare "Berlin" (captured from the
-    // live API): FOUR places share the exact name (DE, NH, NJ, WI) plus one
-    // Brunswick decoy - the bare-name tie returns null (no fetch) instead of a
-    // population-decided pick, so the reported on-device symptom (a US Berlin
-    // user seeing Berlin DE's weather) cannot recur. The suffix and
-    // country-hint tests below pin the escape routes out of the tie.
-    internal const string SampleBerlines = """
-    {
-      "results": [
-        { "name": "Berlin", "admin1": "State of Berlin", "country": "Germany", "country_code": "DE", "population": 3426354, "latitude": 52.52437, "longitude": 13.41053 },
-        { "name": "Berlin", "admin1": "New Hampshire", "country": "United States", "country_code": "US", "population": 9367, "latitude": 44.46867, "longitude": -71.18508 },
-        { "name": "Berlin", "admin1": "New Jersey", "country": "United States", "country_code": "US", "population": 7590, "latitude": 39.79123, "longitude": -74.92905 },
-        { "name": "Brunswick", "admin1": "Maryland", "country": "United States", "country_code": "US", "population": 6116, "latitude": 39.31427, "longitude": -77.62777 },
-        { "name": "Berlin", "admin1": "Wisconsin", "country": "United States", "country_code": "US", "population": 5420, "latitude": 43.96804, "longitude": -88.94345 }
-      ]
-    }
-    """;
-
-    // The real zippopotam shape: the place (with string coordinates) lives
-    // under "places[0]" — the fixture mirrors the live API, not a hand-made
-    // root-level shape (the earlier root-level numeric fixture let the parser
-    // drift from the API, so real ZIPs silently fell back).
-    private const string SampleZip = """
-    {
-      "country": "United States",
-      "post code": "10001",
-      "places": [
-        {
-          "place name": "New York City",
-          "longitude": "-73.9962",
-          "latitude": "40.7505",
-          "state": "New York"
-        }
-      ]
-    }
-    """;
-
     private static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "wmd-weather-client-tests");
 
     /// <summary>A pre-stamp cache JSON fixture: parses as an unstamped legacy
@@ -157,9 +38,9 @@ public class WeatherClientTests
     private static HttpResponseMessage Respond(HttpRequestMessage request)
     {
         string url = request.RequestUri?.AbsoluteUri ?? "";
-        if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
-        if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleZip);
-        if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+        if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleGeocode);
+        if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleZip);
+        if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleForecast);
         return StubHttpHandler.NotFound();
     }
 
@@ -300,7 +181,7 @@ public class WeatherClientTests
         // by-hours-stale humidity as the only option) rather than fail.
         var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleForecastLegacy)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy)
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
@@ -320,8 +201,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -348,8 +229,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -373,9 +254,9 @@ public class WeatherClientTests
                 // Different name => different candidates (Berlin's geocode).
                 return StubHttpHandler.Ok(url.Contains("name=Berlin", StringComparison.OrdinalIgnoreCase)
                     ? """{ "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ] }"""
-                    : SampleSameNameMultiCountry);
+                    : WeatherTestData.SampleSameNameMultiCountry);
             }
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -401,8 +282,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -428,7 +309,7 @@ public class WeatherClientTests
                 searchUrl = url;
                 return StubHttpHandler.Ok("""{ "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ] }""");
             }
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -453,10 +334,10 @@ public class WeatherClientTests
             if (url.Contains("/v1/search", StringComparison.Ordinal))
             {
                 searchUrl = url;
-                return StubHttpHandler.Ok(SampleGeocode);
+                return StubHttpHandler.Ok(WeatherTestData.SampleGeocode);
             }
-            if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleZip);
-            if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+            if (url.Contains("zippopotam", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleZip);
+            if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleForecast);
             return StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
@@ -478,8 +359,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -499,8 +380,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSpringfields);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSpringfields);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -524,10 +405,10 @@ public class WeatherClientTests
                 Assert.IsTrue(
                     request.RequestUri.AbsoluteUri.Contains("countryCode=CR", StringComparison.OrdinalIgnoreCase),
                     "The CountryCode hint must be passed to the geocoding API");
-                return StubHttpHandler.Ok(SampleSanJoses);
+                return StubHttpHandler.Ok(WeatherTestData.SampleSanJoses);
             }
             return request.RequestUri.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleForecast)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleForecast)
                 : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
@@ -544,7 +425,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_CancelledToken_PropagatesOperationCanceled()
     {
-        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast));
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherTestData.SampleForecast));
         var client = CreateClient(stub);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
@@ -563,8 +444,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -584,8 +465,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -605,8 +486,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -630,8 +511,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -647,8 +528,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -669,8 +550,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -690,8 +571,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -723,7 +604,7 @@ public class WeatherClientTests
     {
         var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleForecast)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleForecast)
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
@@ -781,7 +662,7 @@ public class WeatherClientTests
         // without ever reaching the forecast endpoint.
         var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleForecast)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleForecast)
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
@@ -800,7 +681,7 @@ public class WeatherClientTests
         // retry at frame rate during an outage (request + log storm).
         var stub = new StubHttpHandler(request =>
             request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(SampleGeocode)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleGeocode)
                 : StubHttpHandler.NotFound());
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var client = CreateClient(stub, clock: clock);
@@ -827,8 +708,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -885,7 +766,7 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_InFlight_ReportsInFlightOutcome()
     {
         var gate = new TaskCompletionSource();
-        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast), gate);
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherTestData.SampleForecast), gate);
         var client = CreateClient(stub);
 
         var inFlight = client.FetchCurrentAsync(CoordinateLocation);
@@ -938,8 +819,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         }, gate);
         var client = CreateClient(stub);
 
@@ -990,7 +871,7 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_FetchFailure_ReportsFailedAndRecovers()
     {
         bool fail = true;
-        var stub = new StubHttpHandler(_ => fail ? StubHttpHandler.NotFound() : StubHttpHandler.Ok(SampleForecast));
+        var stub = new StubHttpHandler(_ => fail ? StubHttpHandler.NotFound() : StubHttpHandler.Ok(WeatherTestData.SampleForecast));
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock: clock);
 
@@ -1174,7 +1055,7 @@ public class WeatherClientTests
         // past the cap: without the declared-length pre-check the padded
         // payload would parse and return a snapshot — so a regression in the
         // guard fails this test instead of slipping through on invalid JSON.
-        string padded = SampleForecast + new string(' ', (int)WeatherGeocoder.MaxResponseBytes);
+        string padded = WeatherTestData.SampleForecast + new string(' ', (int)WeatherGeocoder.MaxResponseBytes);
         var stub = new StubHttpHandler(request =>
         {
             if (request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal))
@@ -1200,30 +1081,22 @@ public class WeatherClientTests
         // failure: the fetch reports Failed (the TimeoutException is not
         // swallowed as OCE), and the attempt time is stamped so the render
         // kick cools down instead of retrying at frame rate during an outage.
-        var original = WeatherGeocoder.HttpTimeoutOverride;
-        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromMilliseconds(50);
-        try
+        var stub = new StubHttpHandler(request =>
         {
-            var stub = new StubHttpHandler(request =>
-            {
-                string url = request.RequestUri?.AbsoluteUri ?? "";
-                return url.Contains("/v1/forecast", StringComparison.Ordinal)
-                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }
-                    : StubHttpHandler.NotFound();
-            });
-            var client = CreateClient(stub);
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/forecast", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }
+                : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+        client.Geocoder.HttpTimeoutOverride = TimeSpan.FromMilliseconds(50);
 
-            var result = await client.FetchCurrentAsync(CoordinateLocation);
+        var result = await client.FetchCurrentAsync(CoordinateLocation);
 
-            Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Failed),
-                "the forecast-leg deadline must report Failed, not surface as OCE");
-            Assert.AreNotEqual(DateTime.MinValue, client.LastFetchTimeUtc,
-                "a timed-out fetch must stamp the throttle like any failure");
-        }
-        finally
-        {
-            WeatherGeocoder.HttpTimeoutOverride = original;
-        }
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Failed),
+            "the forecast-leg deadline must report Failed, not surface as OCE");
+        Assert.AreNotEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+            "a timed-out fetch must stamp the throttle like any failure");
     }
 
     [TestMethod]
@@ -1457,8 +1330,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1474,8 +1347,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1496,8 +1369,8 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSanJoses);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSanJoses);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1530,7 +1403,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleAmsterdams);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1566,7 +1439,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleAccras);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1599,7 +1472,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1627,7 +1500,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1660,7 +1533,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1688,7 +1561,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1718,8 +1591,8 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("zippopotam.us/de/", StringComparison.Ordinal)) return StubHttpHandler.Ok(berlinZip);
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1753,7 +1626,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1784,7 +1657,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1815,7 +1688,7 @@ public class WeatherClientTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(fixture);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
@@ -1830,7 +1703,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task SearchCitiesAsync_MapsCandidatesWithPopulation()
     {
-        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherTestData.SampleBerlines));
         var client = CreateClient(stub);
 
         var results = await client.SearchCitiesAsync("Berl", CancellationToken.None);
@@ -1857,7 +1730,7 @@ public class WeatherClientTests
     [TestMethod]
     public async Task SearchCitiesAsync_Cancelled_ThrowsOperationCanceled()
     {
-        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleBerlines));
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherTestData.SampleBerlines));
         var client = CreateClient(stub);
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();

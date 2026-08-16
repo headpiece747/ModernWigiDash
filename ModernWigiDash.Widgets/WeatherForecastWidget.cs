@@ -75,27 +75,27 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         if (!string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal)) return [];
 
         // Empty candidates: no dropdown yet (the geocode may not have run).
-        if (_resolvedCandidates.Count == 0) return [];
+        if (_identity.Candidates.Count == 0) return [];
 
         // The empty "Automatic (by ranking)" entry lets a pick be cleared.
         return
         [
             new WidgetPropertyOption("", "Automatic (by ranking)"),
-            .. _resolvedCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
+            .. _identity.Candidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
         ];
     }
 
     private readonly WeatherClient _client;
 
-    // The widget's own copies of the resolved identity, taken from the
-    // Fetched outcome (or the boot cache load): the client reports the
-    // identity once per fetch, and the widget owns the dropdown, population,
-    // header title, and the render-model cache key from these copies, so it
-    // never re-reads the client's resolution state on the render path.
-    private IReadOnlyList<GeocodeCandidate> _resolvedCandidates = [];
-    private double _resolvedPopulation;
-    // Neutral until a resolution sets a real identity (never a hardcoded city).
-    private string _resolvedCityName = WeatherClient.UnknownLocationLabel;
+    // The widget's own copy of the resolved identity, taken from the Fetched
+    // outcome (or the boot cache load): the client reports the identity once
+    // per fetch, and the widget owns the dropdown, population, header title,
+    // and the render-model cache key from it, so it never re-reads the
+    // client's resolution state on the render path. The identity module owns
+    // the state transitions (Apply / Invalidate* / pending write-back); the
+    // widget keeps only the gate discipline (every mutation runs under
+    // _forecastGate) and the UI-thread flush.
+    private readonly WeatherResolvedIdentity _identity = new(WeatherClient.UnknownLocationLabel);
 
     // -- IWidgetLocationSearch ------------------------------------------------
 
@@ -110,7 +110,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         SetProperty(nameof(Location), candidate.Label);
     }
 
-    public double? CurrentPopulation => _resolvedPopulation > 0 ? _resolvedPopulation : null;
+    public double? CurrentPopulation => _identity.Population > 0 ? _identity.Population : null;
 
     // -- IWidgetEditorProvider ------------------------------------------------
 
@@ -137,7 +137,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     /// <summary>The last resolved display name (test/UI seam: the widget's own
     /// copy of the identity the Fetched outcome reported).</summary>
-    internal string ResolvedCityName => _resolvedCityName;
+    internal string ResolvedCityName => _identity.CityName;
 
     /// <summary>The client's cache file name as currently resolved (test seam:
     /// pins the placed-InstanceId keying — the name must follow the InstanceId
@@ -157,13 +157,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
     internal int FetchCompletedCount => _client.FetchCompletedCount;
 
-    private double _currentTempC = 25.0; // 77°F default
-    private double _feelsLikeC = 22.2;  // 72°F default
-    private double _humidity = 87.0;
-    private double _windSpeedKmH = 16.1; // 10 mph default
-    private int _weatherCode = 51;      // Drizzle default
-    private double _highTempC = 26.6;   // 80°F default
-    private double _lowTempC = 20.5;    // 69°F default
+    // The snapshot display state — the 7 weather scalars, the 2 forecast
+    // lists, and the 2 versions — as one immutable record. The apply policy
+    // module merges a fetched or cached snapshot into it; the widget swaps
+    // the result in under the forecast gate, so a torn write can never be
+    // observed. The record's defaults are the pre-fetch placeholder scene.
+    // Internal: the widget tests read the forecast lists through it.
+    internal WeatherSnapshotState _snapshotState = new();
 
     // The per-mode draw paths live in the renderer (WeatherWidgetRenderer),
     // which owns the card/pill/row paints — one shared pair behind every
@@ -174,12 +174,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private readonly SKPaint _titlePaint = new() { IsAntialias = true };
     private readonly SKPaint _unitPaint = new() { IsAntialias = true };
 
-    internal readonly List<DailyForecastItem> _dailyForecasts = [];
-    internal readonly List<HourlyForecastItem> _hourlyForecasts = [];
     private readonly Lock _forecastGate = new();
     private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
     private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
-    private int _forecastVersion;
     private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
 
@@ -187,7 +184,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // rebuilt only when (data version, bounds, property snapshot) changes —
     // weather data moves at most every 15 minutes, so the static scene
     // allocates nothing on the 30 FPS render path.
-    private int _dataVersion;
     /// <summary>The cached render model (internal test seam: the invalidation
     /// matrix pins which keys force a rebuild).</summary>
     internal WeatherRenderModel? _renderModel;
@@ -261,65 +257,45 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// The resolution inputs that force a re-fetch on change — the widget-side
-    /// mirror of <see cref="WeatherClient.BuildQueryKey"/> (every key field
-    /// except LocationMatch, which has its own branch in OnPropertyChanged).
-    /// The drift test pins this set to the WeatherLocation record, so a new
-    /// resolution input can never change the identity without a re-fetch.
-    /// </summary>
-    internal static readonly string[] ResolutionInvalidationProperties =
-        [nameof(Location), nameof(Latitude), nameof(Longitude), nameof(CountryCode), nameof(LocationType)];
-
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
         // A Location Match pick resolves against the candidates it was offered
         // from, so it keeps them (InvalidateCoordinates); every other location
         // change clears the candidates so a stale pick can never win.
-        // Any resolution-input edit also drops a PENDING resolved-label
-        // write-back: a fetch that completed just before the edit may have set
-        // the pending label, and the next Render tick would otherwise write it
-        // over the newer edit (the client's in-flight stale guard only covers
-        // fetches still in flight at edit time — a completed fetch whose
-        // write-back was not yet flushed is the race the clear closes).
+        // The identity transitions run in the identity module under the SAME
+        // gate ApplySnapshot's guarded apply takes — an in-flight fetch that
+        // passed the identity guard before the edit can still be overwriting
+        // the copies when the edit commits, so the clear must be atomic
+        // against that assignment (either the assignment lands before the
+        // clear and is erased, or the guard re-reads the new location and the
+        // assignment never happens; the edit can never be resurrected over).
+        // Each Invalidate* also drops a PENDING resolved-label write-back: a
+        // fetch that completed just before the edit may have set the pending
+        // label, and the next Render tick would otherwise write it over the
+        // newer edit (the client's in-flight stale guard only covers fetches
+        // still in flight at edit time — a completed fetch whose write-back
+        // was not yet flushed is the race the clear closes). The pending drop
+        // moved inside the gate with the rest — strictly stronger than the
+        // old out-of-lock clear, and safe because the identity re-check is
+        // also under the gate.
         if (string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal))
         {
-            _pendingLocationWriteback = null;
-            // Mirror the client's InvalidateCoordinates: the resolved name and
-            // population drop with the old resolution, but the candidates stay
-            // (the pick resolves against the candidates it was offered from).
-            // The clear takes the SAME gate ApplySnapshot's guarded assignment
-            // does — an in-flight fetch that passed the identity guard before
-            // the edit can still be overwriting the copies when the edit
-            // commits, so the clear must be atomic against that assignment
-            // (either the assignment lands before the clear and is erased, or
-            // the guard re-reads the new location and the assignment never
-            // happens; the edit can never be resurrected over).
             lock (_forecastGate)
             {
-                _resolvedCityName = "";
-                _resolvedPopulation = 0;
+                _identity.InvalidateCoordinates();
             }
             _client.InvalidateCoordinates();
             RequestRefresh(force: true);
         }
-        else if (!_suppressLocationWriteback && ResolutionInvalidationProperties.Contains(propertyName))
+        else if (!_suppressLocationWriteback && WeatherResolvedIdentity.ResolutionInvalidationProperties.Contains(propertyName))
         {
             // The resolved-label write-back skips the forced re-fetch: the
             // label was just resolved by the fetch that wrote it, so fetching
             // again would loop (the write-back converges after one extra
             // resolution at most).
-            _pendingLocationWriteback = null;
-            // Mirror the client's InvalidateLocation: the whole resolved
-            // identity (candidates, population, name) is void until the next
-            // fetch resolves the new input, so the render-model cache key
-            // turns and the header drops the old city immediately. Same-gate
-            // rationale as the LocationMatch branch above.
             lock (_forecastGate)
             {
-                _resolvedCandidates = [];
-                _resolvedCityName = "";
-                _resolvedPopulation = 0;
+                _identity.InvalidateLocation();
             }
             _client.InvalidateLocation();
             RequestRefresh(force: true);
@@ -352,11 +328,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
-            if (_renderedForecastVersion != _forecastVersion)
+            if (_renderedForecastVersion != _snapshotState.ForecastVersion)
             {
-                _renderedForecastVersion = _forecastVersion;
-                _dailyForecastSnapshot = _dailyForecasts.ToArray();
-                _hourlyForecastSnapshot = _hourlyForecasts.ToArray();
+                _renderedForecastVersion = _snapshotState.ForecastVersion;
+                _dailyForecastSnapshot = _snapshotState.DailyForecasts.ToArray();
+                _hourlyForecastSnapshot = _snapshotState.HourlyForecasts.ToArray();
             }
         }
 
@@ -447,15 +423,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// is written back after a successful resolution (the write-back must not
     /// re-fire a fetch).</summary>
     internal bool _suppressLocationWriteback;
-
-    /// <summary>
-    /// The resolved label awaiting its UI-thread write-back: the fetch
-    /// continuation (thread pool) only sets this; <see cref="Render"/> (UI
-    /// thread, 30 FPS) performs the actual SetProperty via
-    /// <see cref="ApplyPendingLocationWriteback"/>, so Context.PersistProperty
-    /// stays on the UI thread and a stale fetch can never clobber a newer edit.
-    /// </summary>
-    private string? _pendingLocationWriteback;
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
@@ -550,7 +517,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             {
                 if (string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
                 {
-                    _pendingLocationWriteback = snapshot.ResolvedCityName;
+                    _identity.SetPendingWriteback(snapshot.ResolvedCityName);
                 }
             }
         }
@@ -559,7 +526,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // the inspector so an already-open panel shows the dropdown (the Twitch
         // pattern — the renderer only builds a ComboBox when options exist).
         // Only when the option set changed — see _lastInspectorCandidatesStamp.
-        string stamp = string.Join('\n', _resolvedCandidates.Select(c => c.Query));
+        string stamp = string.Join('\n', _identity.Candidates.Select(c => c.Query));
         if (!string.Equals(stamp, _lastInspectorCandidatesStamp, StringComparison.Ordinal))
         {
             _lastInspectorCandidatesStamp = stamp;
@@ -578,8 +545,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// </summary>
     internal void ApplyPendingLocationWriteback()
     {
-        if (_pendingLocationWriteback is not { } pending) return;
-        _pendingLocationWriteback = null;
+        if (_identity.TakePendingWriteback() is not { } pending) return;
         if (string.IsNullOrWhiteSpace(pending) || string.Equals(pending, Location, StringComparison.Ordinal) || _suppressLocationWriteback) return;
 
         _suppressLocationWriteback = true;
@@ -600,58 +566,32 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         };
 
     /// <summary>
-    /// Applies a fetched/cached snapshot to the render fields, keeping the
+    /// Applies a fetched/cached snapshot to the display state, keeping the
     /// "response omitted this section — keep the previous value" semantics.
-    /// When <paramref name="expectedVersion"/> is set, the apply is skipped —
-    /// atomically, under the same lock that bumps <see cref="_dataVersion"/>
-    /// — if the data version moved on (a fetch landed while a cache load was
-    /// in flight must never be overwritten by the stale cache).
-    /// <paramref name="identityGuard"/> is evaluated under the same lock:
-    /// the cache may also be skipped when the resolution identity changed
-    /// (the boot load runs pre-hydration). The resolved-identity copies
-    /// (dropdown, population, header name) are assigned under the SAME lock
-    /// when provided — an edit landing between the guard and the copies can
-    /// no longer be resurrected over by the old identity's state (the edit
-    /// cleared the copies under the same lock; the guarded assignment
-    /// re-populates them only when the identity still matches — an edit that
-    /// commits between the guard and the copies still clears them after the
-    /// assignment lands, because the edit's clear takes the same gate).
-    /// <paramref name="population"/> follows the client's no-data sentinel:
-    /// when provided, 0 clears the resolved population (the fetch reported
-    /// none), a non-zero value replaces it — "no data" and "keep previous"
-    /// are distinguishable by null vs. provided. Returns whether the
-    /// snapshot was applied.
+    /// The guard (version-then-identity) and the merge (null-keeps +
+    /// per-list version bump) live in <see cref="WeatherSnapshotApplyPolicy"/>;
+    /// this method adds only the gate discipline: under <see cref="_forecastGate"/>
+    /// it asks the guard, swaps in the merge's new state, and applies the
+    /// resolved-identity copies under the SAME lock — an edit landing between
+    /// the guard and the copies can no longer be resurrected over by the old
+    /// identity's state (the edit cleared the copies under the same lock; the
+    /// guarded assignment re-populates them only when the identity still
+    /// matches — an edit that commits between the guard and the copies still
+    /// clears them after the assignment lands, because the edit's clear takes
+    /// the same gate). <paramref name="population"/> follows the client's
+    /// no-data sentinel: when provided, 0 clears the resolved population (the
+    /// fetch reported none), a non-zero value replaces it — "no data" and
+    /// "keep previous" are distinguishable by null vs. provided. Returns
+    /// whether the snapshot was applied.
     /// </summary>
     private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,
         IReadOnlyList<GeocodeCandidate>? candidates = null, double? population = null, string? resolvedName = null)
     {
         lock (_forecastGate)
         {
-            if (expectedVersion is int expected && _dataVersion != expected) return false;
-            if (identityGuard is not null && !identityGuard()) return false;
-            _dataVersion++;
-            if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
-            if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
-            if (snapshot.Humidity is not null) _humidity = snapshot.Humidity.Value;
-            if (snapshot.WindSpeedKmH is not null) _windSpeedKmH = snapshot.WindSpeedKmH.Value;
-            if (snapshot.WeatherCode is not null) _weatherCode = snapshot.WeatherCode.Value;
-            if (snapshot.HighTempC is not null) _highTempC = snapshot.HighTempC.Value;
-            if (snapshot.LowTempC is not null) _lowTempC = snapshot.LowTempC.Value;
-            if (snapshot.DailyForecasts is not null)
-            {
-                _dailyForecasts.Clear();
-                _dailyForecasts.AddRange(snapshot.DailyForecasts);
-                _forecastVersion++;
-            }
-            if (snapshot.HourlyForecasts is not null)
-            {
-                _hourlyForecasts.Clear();
-                _hourlyForecasts.AddRange(snapshot.HourlyForecasts);
-                _forecastVersion++;
-            }
-            if (candidates is not null) _resolvedCandidates = candidates;
-            if (population is double p) _resolvedPopulation = p;
-            if (resolvedName is not null) _resolvedCityName = resolvedName;
+            if (!WeatherSnapshotApplyPolicy.GuardsPass(expectedVersion, _snapshotState.DataVersion, identityGuard)) return false;
+            _snapshotState = WeatherSnapshotApplyPolicy.Merge(snapshot, _snapshotState);
+            _identity.Apply(candidates, population, resolvedName);
             return true;
         }
     }
@@ -673,7 +613,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         {
             int versionBefore;
             string locationKeyBefore;
-            lock (_forecastGate) { versionBefore = _dataVersion; }
+            lock (_forecastGate) { versionBefore = _snapshotState.DataVersion; }
             locationKeyBefore = WeatherClient.BuildQueryKey(BuildLocation());
 
             // The cache is identity-checked against the CURRENT location: a
@@ -738,14 +678,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         IReadOnlyList<HourlyForecastItem> hourly;
         lock (_forecastGate)
         {
-            dataVersion = _dataVersion;
-            currentTempC = _currentTempC;
-            feelsLikeC = _feelsLikeC;
-            humidity = _humidity;
-            windSpeedKmH = _windSpeedKmH;
-            highTempC = _highTempC;
-            lowTempC = _lowTempC;
-            weatherCode = _weatherCode;
+            dataVersion = _snapshotState.DataVersion;
+            currentTempC = _snapshotState.CurrentTempC;
+            feelsLikeC = _snapshotState.FeelsLikeC;
+            humidity = _snapshotState.Humidity;
+            windSpeedKmH = _snapshotState.WindSpeedKmH;
+            highTempC = _snapshotState.HighTempC;
+            lowTempC = _snapshotState.LowTempC;
+            weatherCode = _snapshotState.WeatherCode;
             daily = _dailyForecastSnapshot;
             hourly = _hourlyForecastSnapshot;
         }
@@ -779,7 +719,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             LayoutMode = LayoutMode,
             UnitSystem = UnitSystem,
             CustomLabel = CustomLabel,
-            ResolvedCity = _resolvedCityName,
+            ResolvedCity = _identity.CityName,
             ShowFeelsLike = ShowFeelsLike,
             ShowHumidity = ShowHumidity,
             ShowWind = ShowWind,
@@ -793,7 +733,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         // Auto-truncated header: the city name uppercased once per model, then
         // truncated to the same max width the draw path uses.
-        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _resolvedCityName : CustomLabel;
+        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _identity.CityName : CustomLabel;
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
         float maxTitleW = WeatherLayout.TitleMaxWidth(bounds.Width, header.Pad, header.BadgeRect.Width);
         model.TruncatedHeader = TextRenderHelper.TruncateText(cityRaw.ToUpperInvariant(), titleFont, maxTitleW);
@@ -819,7 +759,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             && string.Equals(cached.LayoutMode, LayoutMode, StringComparison.Ordinal)
             && string.Equals(cached.UnitSystem, UnitSystem, StringComparison.Ordinal)
             && string.Equals(cached.CustomLabel, CustomLabel, StringComparison.Ordinal)
-            && string.Equals(cached.ResolvedCity, _resolvedCityName, StringComparison.Ordinal)
+            && string.Equals(cached.ResolvedCity, _identity.CityName, StringComparison.Ordinal)
             && cached.ShowFeelsLike == ShowFeelsLike
             && cached.ShowHumidity == ShowHumidity
             && cached.ShowWind == ShowWind

@@ -74,16 +74,6 @@ internal static class WeatherPresentation
     /// widget's property default and the tap-toggle.</summary>
     public const string DefaultUnitSystem = "Fahrenheit (°F, mph)";
 
-    /// <summary>The daily-strip draw cap — the number of day columns the
-    /// renderer can draw. The display model caps at this; the renderer's
-    /// re-caps share the same constant, so a change edits one spelling.</summary>
-    public const int MaxStripDays = 5;
-
-    /// <summary>The hourly-strip draw cap — the number of hour columns the
-    /// renderer can draw. The display model caps at this; the renderer's
-    /// re-caps share the same constant, so a change edits one spelling.</summary>
-    public const int MaxStripHours = 6;
-
     /// <summary>The tap-toggle rule: Fahrenheit ⇄ Celsius (km/h) — the
     /// widget's badge cycles between the two primary systems.</summary>
     public static string ToggleUnitSystem(string current)
@@ -167,18 +157,19 @@ internal static class WeatherPresentation
     /// <summary>
     /// Composes the display facts for one weather data state: the hero
     /// temperature, the metric pills, the daily strip strings (capped at
-    /// <see cref="MaxStripDays"/> days, the strip's draw limit), and the hourly
-    /// temps (capped at <see cref="MaxStripHours"/> columns, the row's draw
-    /// limit). The widget measures and truncates the font-dependent pieces
-    /// (header, pill widths) around this record; the draw paths never re-derive
-    /// a display string from raw data.
+    /// <see cref="WeatherForecastLimits.MaxStripDays"/> days, the strip's draw
+    /// limit), and the hourly temps (capped at
+    /// <see cref="WeatherForecastLimits.MaxStripHours"/> columns, the row's
+    /// draw limit). The widget measures and truncates the font-dependent
+    /// pieces (header, pill widths) around this record; the draw paths never
+    /// re-derive a display string from raw data.
     /// </summary>
     public static WeatherDisplay Build(WeatherDisplayInput input)
     {
         string mainTemp = FormatTemp(input.CurrentTempC, input.Metrics.TempUnit);
         IReadOnlyList<string> metrics = MetricPills(input.Metrics);
 
-        int dayCount = Math.Min(input.DailyForecasts.Count, MaxStripDays);
+        int dayCount = Math.Min(input.DailyForecasts.Count, WeatherForecastLimits.MaxStripDays);
         var ranges = new string[dayCount];
         var highLows = new string[dayCount];
         for (int i = 0; i < dayCount; i++)
@@ -187,7 +178,7 @@ internal static class WeatherPresentation
             highLows[i] = DailyHighLowText(input.DailyForecasts[i].MaxTempC, input.DailyForecasts[i].MinTempC, input.Metrics.TempUnit);
         }
 
-        int hourCount = Math.Min(input.HourlyForecasts.Count, MaxStripHours);
+        int hourCount = Math.Min(input.HourlyForecasts.Count, WeatherForecastLimits.MaxStripHours);
         var temps = new string[hourCount];
         for (int i = 0; i < hourCount; i++)
         {
