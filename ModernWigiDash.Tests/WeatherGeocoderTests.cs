@@ -142,21 +142,26 @@ public class WeatherGeocoderTests
     }
 
     [TestMethod]
-    public async Task GeocodeZipAsync_NullOrMissingLatitude_ReturnsNullForCityFallback()
+    public async Task GeocodeZipAsync_MalformedLatitude_FollowsUnusableCoordinatesPath()
     {
-        // The tolerant getters apply to the ZIP leg: a response with a missing
-        // or null latitude reads as unusable coordinates (the
-        // "unusable coordinates" failure path) - not a raw null-reference into
-        // the caller's catch - so the ZIP falls back to the city geocoder like
-        // any other failure.
+        // The tolerant getters apply to the ZIP leg: a response with a missing,
+        // null, or NON-STRING (numeric) latitude all read as unusable
+        // coordinates - the same "unusable coordinates" failure path, not a raw
+        // exception into the caller's catch - so the leg returns null and the
+        // caller (WeatherClient) falls back to the city geocoder. This test
+        // pins the LEG's failure shape only; the fallback itself lives in
+        // WeatherClient, not here.
         var logs = new List<string>();
         var missing = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("""{"places":[{"longitude":"-97.7431","state":"Texas"}]}""")), logs);
         var nullLat = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("""{"places":[{"latitude":null,"longitude":"-97.7431","state":"Texas"}]}""")));
+        var numericLat = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("""{"places":[{"latitude":30.2672,"longitude":"-97.7431","state":"Texas"}]}""")));
 
         Assert.IsNull(await missing.GeocodeZipAsync("78701", "us", CancellationToken.None),
-            "a missing-latitude ZIP leg must fall back to the city geocoder");
+            "a missing-latitude ZIP leg must return null (the caller falls back to the city geocoder)");
         Assert.IsNull(await nullLat.GeocodeZipAsync("78701", "us", CancellationToken.None),
-            "a null-latitude ZIP leg must fall back to the city geocoder");
+            "a null-latitude ZIP leg must return null (the caller falls back to the city geocoder)");
+        Assert.IsNull(await numericLat.GeocodeZipAsync("78701", "us", CancellationToken.None),
+            "a non-string latitude must read as unusable coordinates, not throw a raw exception");
         Assert.IsTrue(logs.Any(l => l.Contains("unusable coordinates", StringComparison.Ordinal)),
             "the malformed-coordinate failure must surface through the error sink");
     }

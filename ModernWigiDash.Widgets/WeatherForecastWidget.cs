@@ -288,8 +288,18 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // Mirror the client's InvalidateCoordinates: the resolved name and
             // population drop with the old resolution, but the candidates stay
             // (the pick resolves against the candidates it was offered from).
-            _resolvedCityName = "";
-            _resolvedPopulation = 0;
+            // The clear takes the SAME gate ApplySnapshot's guarded assignment
+            // does — an in-flight fetch that passed the identity guard before
+            // the edit can still be overwriting the copies when the edit
+            // commits, so the clear must be atomic against that assignment
+            // (either the assignment lands before the clear and is erased, or
+            // the guard re-reads the new location and the assignment never
+            // happens; the edit can never be resurrected over).
+            lock (_forecastGate)
+            {
+                _resolvedCityName = "";
+                _resolvedPopulation = 0;
+            }
             _client.InvalidateCoordinates();
             RequestRefresh(force: true);
         }
@@ -303,10 +313,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // Mirror the client's InvalidateLocation: the whole resolved
             // identity (candidates, population, name) is void until the next
             // fetch resolves the new input, so the render-model cache key
-            // turns and the header drops the old city immediately.
-            _resolvedCandidates = [];
-            _resolvedCityName = "";
-            _resolvedPopulation = 0;
+            // turns and the header drops the old city immediately. Same-gate
+            // rationale as the LocationMatch branch above.
+            lock (_forecastGate)
+            {
+                _resolvedCandidates = [];
+                _resolvedCityName = "";
+                _resolvedPopulation = 0;
+            }
             _client.InvalidateLocation();
             RequestRefresh(force: true);
         }
@@ -586,12 +600,18 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// (dropdown, population, header name) are assigned under the SAME lock
     /// when provided — an edit landing between the guard and the copies can
     /// no longer be resurrected over by the old identity's state (the edit
-    /// cleared the copies; the guarded assignment re-populates them only
-    /// when the identity still matches). Returns whether the snapshot was
-    /// applied.
+    /// cleared the copies under the same lock; the guarded assignment
+    /// re-populates them only when the identity still matches — an edit that
+    /// commits between the guard and the copies still clears them after the
+    /// assignment lands, because the edit's clear takes the same gate).
+    /// <paramref name="population"/> follows the client's no-data sentinel:
+    /// when provided, 0 clears the resolved population (the fetch reported
+    /// none), a non-zero value replaces it — "no data" and "keep previous"
+    /// are distinguishable by null vs. provided. Returns whether the
+    /// snapshot was applied.
     /// </summary>
     private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,
-        IReadOnlyList<GeocodeCandidate>? candidates = null, double population = 0, string? resolvedName = null)
+        IReadOnlyList<GeocodeCandidate>? candidates = null, double? population = null, string? resolvedName = null)
     {
         lock (_forecastGate)
         {
@@ -618,7 +638,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _forecastVersion++;
             }
             if (candidates is not null) _resolvedCandidates = candidates;
-            if (population != 0) _resolvedPopulation = population;
+            if (population is double p) _resolvedPopulation = p;
             if (resolvedName is not null) _resolvedCityName = resolvedName;
             return true;
         }

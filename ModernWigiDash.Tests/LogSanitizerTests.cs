@@ -48,4 +48,27 @@ public class LogSanitizerTests
 
         Assert.AreEqual(value, result);
     }
+
+    [TestMethod]
+    public void Sanitize_NullValue_ReadsAsEmptyString()
+    {
+        // The sanitizer runs inside error paths over user-supplied input: a
+        // null value must not replace the original failure with a secondary
+        // NullReferenceException.
+        Assert.AreEqual("", LogSanitizer.Sanitize(null));
+    }
+
+    [TestMethod]
+    public void Sanitize_OverMaxLengthWithBreaks_FlattensAndTruncatesInOneBound()
+    {
+        // The single-pass scan must honor BOTH rules for one value: the breaks
+        // inside the kept window are flattened, and the result never exceeds
+        // the bound (a value that grows by flattening is still cut at the cap).
+        var value = new string('a', LogSanitizer.MaxLogValueLength) + "\r\n" + new string('b', 50);
+
+        string result = LogSanitizer.Sanitize(value);
+
+        Assert.AreEqual(LogSanitizer.MaxLogValueLength, result.Length);
+        Assert.AreEqual(new string('a', LogSanitizer.MaxLogValueLength), result);
+    }
 }

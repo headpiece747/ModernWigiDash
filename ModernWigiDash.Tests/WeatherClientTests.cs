@@ -1342,12 +1342,13 @@ public class WeatherClientTests
             logError: (message, _) => logs.Add(message), http: new HttpClient(new StubHttpHandler(Respond)));
 
         // The writer opens first (FileShare.ReadWrite), so it can grow the
-        // file while the reader's FileShare.Read handle is live. Each attempt
-        // restores the file and runs a tight append loop while the reader is
-        // inside the load: an append that lands before the reader's length
-        // check trips the initial bound, one that lands inside the read trips
-        // the post-loop guard - both reject with the same bound error. A miss
-        // (the load finished before any append) just retries.
+        // file while the reader's handle is live. The handshake removes the
+        // timing flake: the grow task signals BEFORE its first write, so the
+        // reader starts with the file still at exactly the cap (the initial
+        // length check passes) and the first append lands INSIDE the bounded
+        // read — the post-loop total-vs-length guard is the guard that must
+        // catch it. Each attempt restores the file and runs a tight append
+        // loop while the reader is inside the load.
         using var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
         byte[] growth = new byte[4096];
         bool rejected = false;
@@ -1355,15 +1356,22 @@ public class WeatherClientTests
         {
             writer.SetLength(payload.Length);
             writer.Position = payload.Length;
+            using var started = new ManualResetEventSlim(false);
             using var stop = new CancellationTokenSource();
             var grow = Task.Run(() =>
             {
+                // Signal BEFORE the first write: the load below begins with
+                // the file at exactly the cap, so the growth this task is
+                // about to do lands inside the read, not before the initial
+                // length check.
+                started.Set();
                 while (!stop.IsCancellationRequested)
                 {
                     writer.Write(growth);
                     writer.Flush();
                 }
             });
+            started.Wait();
             var loaded = await reader.LoadCacheAsync(CoordinateLocation);
             await stop.CancelAsync();
             await grow;

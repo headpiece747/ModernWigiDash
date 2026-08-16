@@ -249,10 +249,10 @@ internal sealed class WeatherGeocoder
             }
             JsonElement place = places[0];
             // The tolerant getters apply here too: a malformed response with
-            // a missing/null latitude must read as unusable coordinates, not
-            // throw a raw null-ref into the caller's catch.
-            string latStr = place.TryGetProperty("latitude", out var latEl) ? latEl.GetString() ?? "" : "";
-            string lonStr = place.TryGetProperty("longitude", out var lonEl) ? lonEl.GetString() ?? "" : "";
+            // a missing/null/non-string latitude must read as unusable
+            // coordinates, not throw a raw exception into the caller's catch.
+            string latStr = GetString(place, "latitude");
+            string lonStr = GetString(place, "longitude");
             if (!double.TryParse(latStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double lat)
                 || !double.TryParse(lonStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double lon))
             {
