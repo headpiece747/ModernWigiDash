@@ -150,7 +150,7 @@ public class InspectorPanelRendererTests
             {
                 string url = request.RequestUri?.AbsoluteUri ?? "";
                 if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
-                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherForecastWidgetTests.SampleForecast) : StubHttpHandler.NotFound();
+                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
             });
             var widget = new WeatherForecastWidget { Location = "Berlin, New Hampshire, United States" };
             widget.TestHttpClient = new HttpClient(resolver);
@@ -195,7 +195,7 @@ public class InspectorPanelRendererTests
             {
                 string url = request.RequestUri?.AbsoluteUri ?? "";
                 if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
-                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherForecastWidgetTests.SampleForecast) : StubHttpHandler.NotFound();
+                return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
             });
             var widget = new WeatherForecastWidget { Location = "Berlin, New Hampshire, United States" };
             widget.TestHttpClient = new HttpClient(resolver);

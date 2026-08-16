@@ -121,7 +121,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
         float heroTop = bounds.Top + 4f * sy;
         float heroBottom = bounds.Bottom - forecastH - (hasMetrics ? metricsH + 12f * sy : 0f) - 4f * sy;
-        float heroHeight = Math.Max(heroBottom - heroTop, 35f);
+        float heroHeight = Math.Max(heroBottom - heroTop, WeatherLayout.DetailedHeroMinHeight);
         float heroMidY = heroTop + heroHeight / 2f;
 
         // Sizing hero elements proportionally to fit strictly inside heroHeight without overlapping pills below
@@ -176,7 +176,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
         // Auto-scale hero block down if container is narrow
         if (totalBlockW > w)
         {
-            float scaleFactor = Math.Max(0.5f, w / totalBlockW);
+            float scaleFactor = Math.Max(WeatherLayout.HeroBlockNarrowScaleFloor, w / totalBlockW);
             iconSize *= scaleFactor;
             tempSize *= scaleFactor;
             descSize *= scaleFactor;
@@ -242,7 +242,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
         float metricScale = WeatherLayout.MetricPillShrinkScale(totalPillsW, w);
         if (metricScale < 1f)
         {
-            metricFontSize = Math.Max(7f, metricFontSize * metricScale);
+            metricFontSize = Math.Max(WeatherLayout.MetricPillFontFloor, metricFontSize * metricScale);
             // Re-fetch at the final size (see the fit-scale note above) —
             // mutating the shared cached font corrupts its cache entry.
             metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, metricFontSize);

@@ -31,7 +31,10 @@ public class WeatherClientTests
 
     // The legacy response shape (current_weather + relativehumidity_2m +
     // weathercode) must still parse — stale caches and edge responses carry it.
-    private const string SampleForecastLegacy = """
+    // Internal (not private): the widget tests deliberately ride THIS legacy
+    // shape as their forecast fixture (see WeatherForecastWidgetTests), so the
+    // two test classes can never carry a divergent copy.
+    internal const string SampleForecastLegacy = """
     {
       "latitude": 40.7128, "longitude": -74.006,
       "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
@@ -205,6 +208,55 @@ public class WeatherClientTests
                 "https://api.open-meteo.com/v1/forecast?latitude=40.7100&longitude=-74.0000&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,precipitation,cloud_cover&hourly=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto",
                 url,
                 "the forecast URL must be identical under any OS locale (invariant F4)");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_DayNames_StayEnglishUnderNonEnglishLocale()
+    {
+        // The strip's "Today" marker is English by design: the day names
+        // must render in the INVARIANT calendar too, or a de-DE system would
+        // mix "Today" with "Freitag" (DayOfWeek.ToString() follows the
+        // ambient culture). 2026-08-13 is a Thursday (Today), 2026-08-14 a
+        // Friday.
+        const string fixture = """
+        {
+          "latitude": 40.7128, "longitude": -74.006,
+          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 2, "wind_speed_10m": 8.2, "time": "2026-08-13T12:00" },
+          "hourly": {
+            "time": ["2026-08-13T00:00", "2026-08-13T01:00"],
+            "temperature_2m": [12.5, 13.1],
+            "weather_code": [2, 2]
+          },
+          "daily": {
+            "time": ["2026-08-13", "2026-08-14"],
+            "weather_code": [2, 3],
+            "temperature_2m_max": [18.0, 20.0],
+            "temperature_2m_min": [9.0, 11.0]
+          }
+        }
+        """;
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+
+            var stub = new StubHttpHandler(request =>
+                request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(fixture)
+                    : StubHttpHandler.NotFound());
+            var client = CreateClient(stub);
+
+            var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+            Assert.IsNotNull(snapshot);
+            Assert.AreEqual("Today", snapshot.DailyForecasts![0].DayName, "the strip's Today marker is English by design");
+            Assert.AreEqual("Friday", snapshot.DailyForecasts[1].DayName,
+                "day names must render in the invariant calendar: under de-DE a regression would say 'Freitag'");
         }
         finally
         {
@@ -820,7 +872,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_InFlight_ReturnsNull()
+    public async Task FetchCurrentAsync_InFlight_ReportsInFlightOutcome()
     {
         var gate = new TaskCompletionSource();
         var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast), gate);
@@ -900,7 +952,32 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_FetchFailure_ReturnsNullAndRecovers()
+    public async Task FetchCurrentAsync_StaleGeocodeFailure_DoesNotStampNewIdentityThrottle()
+    {
+        // A geocode that FAILS after the resolution identity changed
+        // mid-flight must not stamp the NEW identity's throttle: the widget's
+        // edit-time invalidation cleared the client, so the stale failure is
+        // like a stale success: the new identity's fetch must run
+        // immediately, not cool down for 5 minutes.
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound(), gate);
+        var client = CreateClient(stub);
+
+        var fetching = client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+
+        client.InvalidateLocation(); // the widget's edit-time invalidation while the geocode is in flight
+        gate.SetResult();
+        var result = await fetching;
+
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
+            "a geocode failure after an identity change must report Stale (the re-fetch runs immediately)");
+        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+            "a stale geocode failure must not stamp the new identity's throttle");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_FetchFailure_ReportsFailedAndRecovers()
     {
         bool fail = true;
         var stub = new StubHttpHandler(_ => fail ? StubHttpHandler.NotFound() : StubHttpHandler.Ok(SampleForecast));
@@ -1104,6 +1181,39 @@ public class WeatherClientTests
 
         Assert.IsNull(snapshot, "a response declaring more than the cap must fail the fetch");
         Assert.AreEqual(1, stub.Calls, "the forecast leg must be the only request (coordinate pair skips geocoding)");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_SlowForecastBody_TimesOutAndStampsThrottle()
+    {
+        // The per-leg body deadline converts to a failure like every fetch
+        // failure: the fetch reports Failed (the TimeoutException is not
+        // swallowed as OCE), and the attempt time is stamped so the render
+        // kick cools down instead of retrying at frame rate during an outage.
+        var original = WeatherGeocoder.HttpTimeoutOverride;
+        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromMilliseconds(50);
+        try
+        {
+            var stub = new StubHttpHandler(request =>
+            {
+                string url = request.RequestUri?.AbsoluteUri ?? "";
+                return url.Contains("/v1/forecast", StringComparison.Ordinal)
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }
+                    : StubHttpHandler.NotFound();
+            });
+            var client = CreateClient(stub);
+
+            var result = await client.FetchCurrentAsync(CoordinateLocation);
+
+            Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Failed),
+                "the forecast-leg deadline must report Failed, not surface as OCE");
+            Assert.AreNotEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+                "a timed-out fetch must stamp the throttle like any failure");
+        }
+        finally
+        {
+            WeatherGeocoder.HttpTimeoutOverride = original;
+        }
     }
 
     [TestMethod]

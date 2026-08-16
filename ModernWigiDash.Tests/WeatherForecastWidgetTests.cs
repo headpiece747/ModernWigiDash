@@ -12,25 +12,12 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class WeatherForecastWidgetTests
 {
-    internal const string SampleForecast = """
-    {
-      "latitude": 40.7128, "longitude": -74.006,
-      "current_weather": { "temperature": 12.5, "windspeed": 8.2, "weathercode": 2, "time": "2026-08-07T12:00" },
-      "hourly": {
-        "time": ["2026-08-07T12:00", "2026-08-07T13:00"],
-        "temperature_2m": [12.5, 13.1],
-        "relativehumidity_2m": [60, 58],
-        "weathercode": [2, 2]
-      },
-      "daily": {
-        "time": ["2026-08-07", "2026-08-08"],
-        "weathercode": [2, 3],
-        "temperature_2m_max": [18.0, 20.0],
-        "temperature_2m_min": [9.0, 11.0]
-      }
-    }
-    """;
-
+    // The forecast fixture is shared from WeatherClientTests
+    // (SampleForecastLegacy): the widget tests deliberately ride the LEGACY
+    // response shape (current_weather + relativehumidity_2m + weathercode):
+    // the client tests own the canonical fixture, so the widget tests never
+    // carry a divergent copy. The 19+2 references below spell the owner out
+    // for the same reason.
 
     private const string SampleGeocode = """
     {
@@ -46,7 +33,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(SampleGeocode)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub) };
 
@@ -73,7 +60,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(multi)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
 
@@ -111,7 +98,7 @@ public class WeatherForecastWidgetTests
                     }
                     """);
             }
-            return StubHttpHandler.Ok(SampleForecast);
+            return StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
 
@@ -153,7 +140,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(multi)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
 
@@ -216,7 +203,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok("""{"results":[{"name":"Paris","latitude":48.85,"longitude":2.35,"admin1":"Ile-de-France","country":"France","country_code":"FR"}]}""");
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         });
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Paris, France" };
 
@@ -235,7 +222,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(SampleGeocode)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Clock = clock };
@@ -264,7 +251,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         });
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub), Clock = clock };
@@ -347,7 +334,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(SampleGeocode)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
         using var surface = SKSurface.Create(new SKImageInfo(406, 296));
@@ -378,7 +365,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
-            return fail ? StubHttpHandler.Ok("not json {{{") : StubHttpHandler.Ok(SampleForecast);
+            return fail ? StubHttpHandler.Ok("not json {{{") : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
 
@@ -462,7 +449,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         });
         var widget = new WeatherForecastWidget { Location = "Victoria" };
         widget.TestHttpClient = new HttpClient(stub);
@@ -490,6 +477,33 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task FetchLiveWeatherAsync_CustomLabel_SkipsTheLocationWriteback()
+    {
+        // A CustomLabel supplies the title; the resolved name must never be
+        // written back into Location (writing "Home" into the field would
+        // destroy the query: explicit-coords/pick + CustomLabel would
+        // overwrite "New York" with "Home" in the profile). Explicit
+        // coordinates skip geocoding, so the fetch is one forecast leg.
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy));
+        var widget = new WeatherForecastWidget
+        {
+            Location = "New York",
+            Latitude = "40.7128",
+            Longitude = "-74.006",
+            CustomLabel = "Home",
+            TestHttpClient = new HttpClient(stub),
+        };
+
+        await widget.FetchLiveWeatherAsync(force: true);
+        widget.ApplyPendingLocationWriteback();
+
+        Assert.AreEqual("New York", widget.Location,
+            "the resolved name must never overwrite the query when a CustomLabel supplies the title");
+        Assert.AreEqual("Home", widget.ResolvedCityName,
+            "the applied snapshot's resolved name is the CustomLabel (the client-side resolution honors it)");
+    }
+
+    [TestMethod]
     public async Task FetchLiveWeatherAsync_InFlightLocationEdit_DoesNotClobberTheEdit()
     {
         // A fetch that was in flight while the user edited Location must never
@@ -500,7 +514,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         }, gate);
         var widget = new WeatherForecastWidget { Location = "Victoria" };
         widget.TestHttpClient = new HttpClient(stub);
@@ -530,7 +544,7 @@ public class WeatherForecastWidgetTests
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (!url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleForecast);
+            if (!url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
             return url.Contains("countryCode=DE", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(WeatherClientTests.SampleSanJoses)
                 : StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
@@ -576,7 +590,7 @@ public class WeatherForecastWidgetTests
                     ? """{ "results": [ { "name": "Tokyo", "latitude": 35.6762, "longitude": 139.6503, "admin1": "Tokyo Prefecture", "country": "Japan", "country_code": "JP" } ] }"""
                     : WeatherClientTests.SampleSameNameMultiCountry);
             }
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         }, gate);
         var widget = new WeatherForecastWidget { Location = "Victoria", TestHttpClient = new HttpClient(stub) };
 
@@ -610,7 +624,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         });
         var widget = new WeatherForecastWidget { Location = "Victoria", TestHttpClient = new HttpClient(stub) };
 
@@ -654,12 +668,12 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(SampleGeocode)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
 
         // A stale cache that would clobber the fresh fetch (one daily row and
-        // a garbage temperature; the fetch's SampleForecast carries two rows).
+        // a garbage temperature; the fetch's shared legacy fixture carries two rows).
         var staleCache = new WeatherSnapshot(99.9, 99.9, 99, 99, 99, 99, 99,
             [new DailyForecastItem("Today", 99, 99, 0)], null, "Stale City", 0, 0);
         var gate = new TaskCompletionSource();
@@ -693,6 +707,69 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task LoadCachedWeatherAsync_IdentityChangedMidLoad_RollsBackClientStateAndKeepsPreviousData()
+    {
+        // Rehydration-style boot race: the cache load captures the DEFAULT
+        // location's key, then the profile silently reassigns Location (no
+        // OnPropertyChanged). The default-stamped cache must not apply under
+        // the new identity, and the client's resolution state must roll back
+        // (InvalidateCoordinates) so the new identity starts clean: the
+        // rollback resets the throttle, which is observable: a NON-forced
+        // follow-up fetch runs immediately instead of cooling down.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                return StubHttpHandler.Ok(url.Contains("name=Tokyo", StringComparison.OrdinalIgnoreCase)
+                    ? """{ "results": [ { "name": "Tokyo", "latitude": 35.6762, "longitude": 139.6503, "admin1": "Tokyo Prefecture", "country": "Japan", "country_code": "JP" } ] }"""
+                    : """{ "results": [ { "name": "Miami", "latitude": 25.7743, "longitude": -80.1937, "admin1": "Florida", "country": "United States", "country_code": "US" } ] }""");
+            }
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub) };
+
+        // Prime the client's throttle + data with the default location so the
+        // rollback has a state to reset (and "keeps previous data" is
+        // observable: two rows, not the cache's one).
+        await widget.FetchLiveWeatherAsync(force: true);
+        await TestWait.WaitUntilAsync(() => widget._dailyForecasts.Count >= 2, TimeSpan.FromSeconds(5));
+
+        // The boot cache load: a snapshot whose identity belongs to the
+        // DEFAULT location, released only after the silent reassignment.
+        var cached = new WeatherSnapshot(99.9, 99.9, 99, 99, 99, 99, 99,
+            [new DailyForecastItem("Today", 99, 99, 0)], null, "Cached City", 0, 0);
+        var gate = new TaskCompletionSource();
+        widget.CacheLoadOverride = async (_, _) =>
+        {
+            await gate.Task.ConfigureAwait(false);
+            return cached;
+        };
+
+        var loading = widget.LoadCachedWeatherAsync(CancellationToken.None); // captures the DEFAULT key, parks at the gate
+        widget.Location = "Tokyo"; // the rehydration-style assignment: NO OnPropertyChanged
+        gate.SetResult();
+        await loading;
+
+        Assert.AreEqual(2, widget._dailyForecasts.Count,
+            "a cache stamped for the previous identity must not apply under the silently-reassigned location");
+        Assert.AreEqual("Miami, Florida, United States", widget.ResolvedCityName,
+            "the discarded cache's resolved name must not surface (the widget keeps the previous resolution)");
+
+        // The rollback reset the client's throttle: a NON-forced follow-up
+        // fetch runs immediately (a stamped throttle would return Throttled
+        // with no network hit) and resolves Tokyo fresh from its own
+        // coordinates.
+        int callsAfterRollback = stub.Calls;
+        await widget.FetchLiveWeatherAsync();
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Tokyo, Tokyo Prefecture, Japan", TimeSpan.FromSeconds(5));
+        Assert.IsTrue(stub.Calls > callsAfterRollback,
+            "the rollback must reset the throttle (LastFetchTimeUtc = MinValue) so the new identity fetches immediately");
+        Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("name=Tokyo", StringComparison.OrdinalIgnoreCase)),
+            "the follow-up fetch must resolve Tokyo fresh after the client rollback");
+    }
+
+    [TestMethod]
     public async Task LoadCachedWeatherAsync_NullDailySnapshot_KeepsPreviousForecast()
     {
         var stub = new StubHttpHandler(request =>
@@ -700,7 +777,7 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
                 ? StubHttpHandler.Ok(SampleGeocode)
-                : StubHttpHandler.Ok(SampleForecast);
+                : StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy);
         });
         var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
         await widget.FetchLiveWeatherAsync(force: true);
@@ -728,7 +805,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         }));
         string cachePath = Path.Combine(cacheDir, widget.CacheFileName);
         await File.WriteAllTextAsync(cachePath, """
@@ -745,7 +822,7 @@ public class WeatherForecastWidgetTests
             await widget.InitializeAsync(new TestContext());
 
             // The boot fetch's fresh data must be the final state (daily
-            // WeatherCode 2 from SampleForecast), regardless of whether the
+            // WeatherCode 2 from the shared legacy fixture), regardless of whether the
             // load applied first or was dropped by the version guard.
             await TestWait.WaitUntilAsync(
                 () => widget._dailyForecasts.Count == 2 && widget._dailyForecasts[0].WeatherCode == 2,
@@ -763,7 +840,7 @@ public class WeatherForecastWidgetTests
         // Teardown (dispose cancels the poll CTS) must abort a fetch without
         // logging an error or touching the network — the geocode and forecast
         // legs propagate the cancellation, and the widget swallows it.
-        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(SampleForecast));
+        var stub = new StubHttpHandler(_ => StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy));
         var widget = new WeatherForecastWidget { Location = "Victoria" };
         widget.TestHttpClient = new HttpClient(stub);
         using var cts = new CancellationTokenSource();
@@ -811,7 +888,7 @@ public class WeatherForecastWidgetTests
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherClientTests.SampleForecastLegacy) : StubHttpHandler.NotFound();
         });
         var widget = new WeatherForecastWidget { Location = "Berlin" };
         widget.TestHttpClient = new HttpClient(stub);

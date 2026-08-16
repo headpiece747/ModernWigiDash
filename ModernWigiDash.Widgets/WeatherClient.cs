@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
@@ -66,14 +68,14 @@ internal abstract record WeatherFetchResult
     /// <summary>A fresh snapshot was produced and the fetch completed; the
     /// caller applies it (and may write back the resolved label). Carries the
     /// resolved identity the snapshot was fetched for: the geocode candidates
-    /// (the widget's "Location Match" dropdown), the winner's population, and
-    /// the resolved display name, so the widget can store its own copies
-    /// instead of re-reading the client's resolution state.</summary>
+    /// (the widget's "Location Match" dropdown) and the winner's population,
+    /// so the widget can store its own copies instead of re-reading the
+    /// client's resolution state. The resolved display name rides the
+    /// snapshot itself (one label source).</summary>
     public sealed record Fetched(
         WeatherSnapshot Snapshot,
         IReadOnlyList<GeocodeCandidate> Candidates,
-        double Population,
-        string ResolvedName) : WeatherFetchResult;
+        double Population) : WeatherFetchResult;
 
     /// <summary>The throttle window was open; no request was made and the
     /// caller keeps its previous state.</summary>
@@ -152,6 +154,10 @@ internal sealed class WeatherClient
     /// buffered into memory).</summary>
     internal const long MaxCacheBytes = 1024 * 1024;
 
+    /// <summary>The neutral resolved-name label when no resolution exists
+    /// (one spelling shared by the client and the widget's copy).</summary>
+    internal const string UnknownLocationLabel = "Unknown location";
+
     private readonly string _cacheDirectory;
     private readonly Func<string> _cacheNameProvider;
     private readonly Action<string, Exception?>? _logError;
@@ -168,7 +174,7 @@ internal sealed class WeatherClient
     private double? _lat;
     private double? _lon;
     // Neutral until a resolution sets a real identity (never a hardcoded city).
-    private string _resolvedCityName = "Unknown location";
+    private string _resolvedCityName = UnknownLocationLabel;
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -323,7 +329,22 @@ internal sealed class WeatherClient
             if (!_lat.HasValue || !string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal) || force)
                 await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
 
-            if (!_lat.HasValue || !_lon.HasValue) return new WeatherFetchResult.Failed();
+            if (!_lat.HasValue || !_lon.HasValue)
+            {
+                // No coordinates: the resolution failed or was left
+                // unresolved. If the identity changed while it was in flight,
+                // this is a STALE failure (the stale success path's verdict) —
+                // the widget must re-fetch the new identity immediately, not
+                // treat it as a plain failed attempt.
+                lock (_identityGate)
+                {
+                    if (!string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal))
+                    {
+                        return new WeatherFetchResult.Stale();
+                    }
+                }
+                return new WeatherFetchResult.Failed();
+            }
 
             double lat = _lat.Value;
             double lon = _lon.Value;
@@ -363,7 +384,7 @@ internal sealed class WeatherClient
                 // interleave and leave a stamp or payload for the OLD
                 // identity (the widget copies these into its own state).
                 _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-                fetched = new WeatherFetchResult.Fetched(snapshot, LastCandidates, LastResolvedPopulation, _resolvedCityName);
+                fetched = new WeatherFetchResult.Fetched(snapshot, LastCandidates, LastResolvedPopulation);
             }
 
             await SaveCacheAsync(snapshot, fetchQueryKey, cancellationToken).ConfigureAwait(false);
@@ -378,21 +399,34 @@ internal sealed class WeatherClient
             // EXCEPT when the identity changed mid-flight: a stale failure is
             // like a stale success — it must not block the re-fetch of the
             // new identity, and the status must SAY so.
-            bool identityChanged;
-            lock (_identityGate)
-            {
-                identityChanged = !string.Equals(fetchQueryKey, _lastLocationQuery, StringComparison.Ordinal);
-                if (!identityChanged)
-                {
-                    _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-                }
-            }
-            return identityChanged ? new WeatherFetchResult.Stale() : new WeatherFetchResult.Failed();
+            return TryStampForIdentity(fetchQueryKey)
+                ? new WeatherFetchResult.Failed()
+                : new WeatherFetchResult.Stale();
         }
         finally
         {
             EndFetch();
             FetchCompletedCount++;
+        }
+    }
+
+    /// <summary>
+    /// The single spelling of "the identity still matches the fetch's key":
+    /// compares under the identity gate and, when it matches, stamps the
+    /// throttle (an attempt cools down like a success). Returns whether the
+    /// stamp was written — false means the identity changed mid-flight and
+    /// the NEW identity's fetch must not be cooled down. Used by the fetch's
+    /// failure path and the geocode leg; the success path keeps its inline
+    /// version because the stamp, the compare, and the Fetched payload
+    /// construction must share one lock.
+    /// </summary>
+    private bool TryStampForIdentity(string fetchQueryKey)
+    {
+        lock (_identityGate)
+        {
+            if (!string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal)) return false;
+            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
+            return true;
         }
     }
 
@@ -415,14 +449,12 @@ internal sealed class WeatherClient
             string path = CachePath;
             if (!File.Exists(path)) return null;
             // A cache file larger than the bound is a corrupted/foreign file —
-            // reject it before reading a byte (a multi-megabyte file could not
-            // have been written by this client's capped save).
-            if (new FileInfo(path).Length > MaxCacheBytes)
-            {
-                _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
-                return null;
-            }
-            string json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            // reject it before reading a byte. The read itself is BOUNDED
+            // (streamed with a hard cap): a stat-then-ReadAllText would let a
+            // file that grows between the stat and the read bypass the cap
+            // and buffer unboundedly.
+            string? json = await ReadCacheFileBoundedAsync(path, cancellationToken).ConfigureAwait(false);
+            if (json is null) return null;
             var data = JsonSerializer.Deserialize<WeatherCacheData>(json);
             if (data == null) return null;
             // The identity stamp: a cache saved for a different resolution
@@ -446,7 +478,7 @@ internal sealed class WeatherClient
             }
             else
             {
-                _resolvedCityName = "Unknown location";
+                _resolvedCityName = UnknownLocationLabel;
             }
             _lat = data.Lat;
             _lon = data.Lon;
@@ -467,6 +499,54 @@ internal sealed class WeatherClient
                 _resolvedCityName,
                 data.Lat ?? 0,
                 data.Lon ?? 0);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logError?.Invoke($"Weather cache load failed: {ex.Message}", ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the cache file with a HARD byte cap — the stat-then-read gap is
+    /// closed: a file that grows (or is swapped) after the existence check is
+    /// still truncated at <see cref="MaxCacheBytes"/> instead of buffered
+    /// whole. Returns null (logged) when the file exceeds the cap mid-read.
+    /// </summary>
+    private async Task<string?> ReadCacheFileBoundedAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (fs.Length > MaxCacheBytes)
+            {
+                _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
+                return null;
+            }
+            byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
+            try
+            {
+                using var buffer = new MemoryStream((int)fs.Length);
+                long total = 0;
+                while (total < MaxCacheBytes)
+                {
+                    int remaining = (int)Math.Min(chunk.Length, MaxCacheBytes - total);
+                    int read = await fs.ReadAsync(chunk.AsMemory(0, remaining), cancellationToken).ConfigureAwait(false);
+                    if (read == 0) break;
+                    total += read;
+                    await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                }
+                if (total > MaxCacheBytes)
+                {
+                    _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
+                    return null;
+                }
+                return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(chunk);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -675,16 +755,9 @@ internal sealed class WeatherClient
         // widget renders its "no data" state instead of silently pinning a
         // default location. The throttle stamp is identity-guarded like the
         // fetch's catch block: a geocode that failed AFTER the resolution
-        // identity changed must not cool down the NEW identity's fetch (and
-        // the outcome must say Stale so the widget re-fetches immediately).
-        lock (_identityGate)
-        {
-            if (!string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal))
-            {
-                return;
-            }
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-        }
+        // identity changed must not cool down the NEW identity's fetch (the
+        // caller's no-coordinates path reports Stale for the same condition).
+        TryStampForIdentity(fetchQueryKey);
     }
 
     /// <summary>
@@ -815,8 +888,11 @@ internal sealed class WeatherClient
         for (int i = 0; i < Math.Min(dLen, MaxFetchDays); i++)
         {
             string dateStr = dTimes[i].GetString() ?? "";
+            // Day names render in the INVARIANT calendar (the strip's "Today"
+            // marker is English by design) — DayOfWeek.ToString() would mix
+            // "Today" with the OS locale's weekday on non-English systems.
             string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)
-                ? parsedDate.DayOfWeek.ToString()
+                ? parsedDate.ToString("dddd", CultureInfo.InvariantCulture)
                 : $"Day {i + 1}";
             items.Add(new DailyForecastItem(
                 i == 0 ? "Today" : dayName,

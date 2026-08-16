@@ -53,6 +53,7 @@ public class WeatherWidgetRendererTests
 
     private static bool IsBright(SKColor c) => Math.Max(c.Red, Math.Max(c.Green, c.Blue)) > 90;
     private static bool IsWhite(SKColor c) => c.Red > 90 && c.Green > 90 && c.Blue > 90;
+    private static bool IsDark(SKColor c) => c.Red < 90 && c.Green < 90 && c.Blue < 90;
     private static bool IsAccent(SKColor c) => c.Red > 90 && c.Green < 80 && c.Blue < 80;
 
     private static int CountPixels(SKSurface surface, SKRect region, Func<SKColor, bool> match)
@@ -385,19 +386,26 @@ public class WeatherWidgetRendererTests
     [TestMethod]
     public void RenderCompact_DrawsIconAndTemp_AtTheLeft()
     {
+        // LIGHT background on purpose: the icon is painted BLACK (the
+        // renderer's hero paint), so it is only pixel-detectable against a
+        // light surface: the old black-on-black render made the icon
+        // invisible and the test could only assert the temperature.
         using var surface = SKSurface.Create(new SKImageInfo(406, 296));
-        surface.Canvas.Clear(Background);
+        surface.Canvas.Clear(SKColors.White);
         var model = CreateModel();
 
         using (var renderer = new WeatherWidgetRenderer())
         {
-            renderer.RenderCompact(surface.Canvas, new SKRect(0, 0, 406, 296), SKColors.White, 1f, 1f, model);
+            renderer.RenderCompact(surface.Canvas, new SKRect(0, 0, 406, 296), SKColors.Black, 1f, 1f, model);
         }
 
-        // Compact draws only the (black, invisible-on-black) icon and the
-        // temperature next to it on the left; the right side stays empty.
-        AssertRegionHas(surface, new SKRect(30, 100, 200, 200), IsWhite, "the temperature must be drawn left of the container center");
-        Assert.AreEqual(0, CountPixels(surface, new SKRect(270, 100, 406, 200), IsWhite),
+        // Compact draws only the black weather icon at the left edge and the
+        // temperature next to it; the right side stays empty.
+        AssertRegionHas(surface, new SKRect(0, 100, 60, 220), c => c.Alpha > 0 && !IsWhite(c),
+            "the black icon must be drawn at the left edge");
+        AssertRegionHas(surface, new SKRect(30, 100, 200, 200), IsDark,
+            "the temperature must be drawn left of the container center");
+        Assert.AreEqual(0, CountPixels(surface, new SKRect(270, 100, 406, 200), c => c.Alpha > 0 && !IsWhite(c)),
             "the right side of a Compact render must stay empty");
     }
 }

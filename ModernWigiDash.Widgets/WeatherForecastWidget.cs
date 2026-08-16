@@ -95,7 +95,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private IReadOnlyList<GeocodeCandidate> _resolvedCandidates = [];
     private double _resolvedPopulation;
     // Neutral until a resolution sets a real identity (never a hardcoded city).
-    private string _resolvedCityName = "Unknown location";
+    private string _resolvedCityName = WeatherClient.UnknownLocationLabel;
 
     // -- IWidgetLocationSearch ------------------------------------------------
 
@@ -491,16 +491,26 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             return;
         }
 
-        ApplySnapshot(fetched.Snapshot);
+        // The apply is identity-guarded under the same lock as the version
+        // checks: an edit landing between the post-await re-check above and
+        // this point must win — the snapshot and the resolved-identity copies
+        // must not belong to the OLD identity (the stale write-back is
+        // protected separately below).
+        if (!ApplySnapshot(fetched.Snapshot,
+                identityGuard: () => string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal)))
+        {
+            RequestRefresh(force: true);
+            return;
+        }
 
         // The resolved identity travels on the Fetched outcome; store the
         // widget's own copies (dropdown, population, header) once per applied
         // fetch, so the render path never re-reads the client's resolution
-        // state.
+        // state. The snapshot's own resolved name is the single label source.
+        WeatherSnapshot snapshot = fetched.Snapshot;
         _resolvedCandidates = fetched.Candidates;
         _resolvedPopulation = fetched.Population;
-        _resolvedCityName = fetched.ResolvedName;
-        WeatherSnapshot snapshot = fetched.Snapshot;
+        _resolvedCityName = snapshot.ResolvedCityName;
 
         // The resolved label's write-back is deferred to the UI thread (Render
         // flushes the pending field): Context.PersistProperty stays on the UI

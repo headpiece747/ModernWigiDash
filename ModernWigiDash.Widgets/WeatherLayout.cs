@@ -211,6 +211,18 @@ internal static class WeatherLayout
     /// strips are hidden). One rule shared by both strips' visibility gates.</summary>
     public const float StripsMinHeight = 150f;
 
+    /// <summary>The hero block's minimum height (px): below it the icon/temp
+    /// stack is too small to read, so the hero never shrinks past this.</summary>
+    public const float DetailedHeroMinHeight = 35f;
+
+    /// <summary>The narrow-container auto-scale floor: the hero block scales
+    /// down to at most half its natural width.</summary>
+    public const float HeroBlockNarrowScaleFloor = 0.5f;
+
+    /// <summary>The metric pill font's legibility floor (px): the shrink
+    /// re-measure never goes below it.</summary>
+    public const float MetricPillFontFloor = 7f;
+
     /// <summary>The forecast strip's height at scale <paramref name="sy"/>.</summary>
     public static float ForecastStripHeight(float sy) => Math.Clamp(80f * sy, 45f, 160f);
 

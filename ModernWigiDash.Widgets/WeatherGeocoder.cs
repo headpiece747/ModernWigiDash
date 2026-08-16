@@ -75,6 +75,10 @@ internal sealed class WeatherGeocoder
     /// <summary>The per-leg body-read deadline (the shared client's
     /// <c>Timeout</c> only bounds the header phase under ResponseHeadersRead).</summary>
     internal static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
+    /// <summary>Test seam: overrides the per-leg deadline (see
+    /// <see cref="ReadBoundedAsync"/>) so the timeout path is drivable
+    /// without waiting the real 30 s.</summary>
+    internal static TimeSpan? HttpTimeoutOverride { get; set; }
 
     /// <summary>
     /// The bounded HTTP text read behind every fetch leg, replacing
@@ -97,7 +101,7 @@ internal sealed class WeatherGeocoder
         // failure path (log + throttle stamp) would be skipped, leaving a
         // silent 30s retry loop during an outage. Convert it to a failure.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(HttpTimeout);
+        timeoutCts.CancelAfter(HttpTimeoutOverride ?? HttpTimeout);
         try
         {
             using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
@@ -368,9 +372,13 @@ internal sealed class WeatherGeocoder
             : 0;
 
     /// <summary>
-    /// Flattens user-provided strings before interpolation into log lines so
-    /// embedded newlines cannot inject fake log entries.
+    /// Flattens and BOUNDS user-provided strings before interpolation into
+    /// log lines: embedded newlines cannot inject fake entries, and a
+    /// multi-megabyte Location value cannot write a multi-megabyte line.
     /// </summary>
     private static string SanitizeLog(string value)
-        => value.Replace('\r', ' ').Replace('\n', ' ');
+    {
+        string flat = value.Replace('\r', ' ').Replace('\n', ' ');
+        return flat.Length <= 200 ? flat : flat[..200];
+    }
 }

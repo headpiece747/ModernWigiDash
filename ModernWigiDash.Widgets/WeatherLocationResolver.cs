@@ -11,7 +11,10 @@ namespace ModernWigiDash.Widgets;
 /// and the query/ZIP routing helpers. <see cref="WeatherClient"/> keeps the
 /// HTTP fetch, the JSON parsing, and the resolved-state application; this
 /// module owns the rules so the ranking is assertable without a client
-/// instance.
+/// instance. The module is a LEAF utility: both <see cref="WeatherGeocoder"/>
+/// (decision + URL builders) and <see cref="WeatherClient"/> (the forecast
+/// URL and the ZIP routing pre-check) call it directly — routing either
+/// through the geocoder would be a facade with no policy behind it.
 /// </summary>
 internal static class WeatherLocationResolver
 {
@@ -278,12 +281,29 @@ internal static class WeatherLocationResolver
             // code suffixes still work for non-state abbreviations
             // ("San Jose, CR"). The all-or-nothing rule applies here too: a
             // state-code component that matches no admin1 fails the whole
-            // suffix, exactly like every other tier.
+            // suffix, exactly like every other tier — EXCEPT the weak ISO
+            // fallback below, which keeps country-code readings alive when a
+            // state abbreviation collides with a real ISO code ("Amsterdam,
+            // NL" is the Netherlands, not Newfoundland; "Bratislava, SK" is
+            // Slovakia, not Saskatchewan): a state match (500) still
+            // dominates a code match (125), so "London, CA" keeps resolving
+            // to California.
             if (StateAbbreviations.TryGetValue(component, out string? stateFullName))
             {
-                if (!EqualsInsensitive(candidate.Admin1, stateFullName)) return 0;
-                score += SuffixExactBonus;
-                continue;
+                if (EqualsInsensitive(candidate.Admin1, stateFullName))
+                {
+                    score += SuffixExactBonus;
+                    continue;
+                }
+                // Weak ISO fallback: the component is also a real country
+                // code — a candidate whose CODE matches keeps a weak score
+                // instead of failing the whole suffix.
+                if (EqualsInsensitive(candidate.CountryCode, component))
+                {
+                    score += SuffixWeakBonus;
+                    continue;
+                }
+                return 0;
             }
             if (EqualsAny(candidate.Admin1, candidate.Country, candidate.CountryCode, component)) score += SuffixExactBonus;
             else if (StartsWithAny(candidate.Admin1, candidate.Country, candidate.CountryCode, component)) score += SuffixPrefixBonus;
