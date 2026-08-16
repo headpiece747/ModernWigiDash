@@ -535,12 +535,24 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // the set: an edit landing between the re-check above and this
         // assignment must win (the pending set would otherwise flush the OLD
         // identity's label over the fresh edit on the next render).
+        // The identity check and the pending set are one critical section
+        // under the SAME gate the edit-side clears use: an edit committed
+        // between the check and the set would clear the pending field, and
+        // this set would then resurrect the old identity's label — the same
+        // race class the in-lock copies close. Either the gated set lands
+        // before the edit's gated clear (the clear erases it) or after (the
+        // guard re-reads the new location and the set never happens).
         if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
             && string.IsNullOrWhiteSpace(CustomLabel)
-            && !string.Equals(snapshot.ResolvedCityName, Location, StringComparison.Ordinal)
-            && string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
+            && !string.Equals(snapshot.ResolvedCityName, Location, StringComparison.Ordinal))
         {
-            _pendingLocationWriteback = snapshot.ResolvedCityName;
+            lock (_forecastGate)
+            {
+                if (string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
+                {
+                    _pendingLocationWriteback = snapshot.ResolvedCityName;
+                }
+            }
         }
 
         // The geocode may have produced new Location Match candidates: refresh

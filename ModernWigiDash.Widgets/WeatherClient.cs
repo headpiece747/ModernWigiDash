@@ -553,7 +553,12 @@ internal sealed class WeatherClient
             byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
             try
             {
-                using var buffer = new MemoryStream((int)fs.Length);
+                // The capacity hint must never exceed the read bound: the file
+                // can grow between the length check and this allocation (the
+                // stream tolerates a concurrent writer), so an attacker-
+                // influenced length must not size the buffer — the read loop
+                // caps at MaxCacheBytes anyway.
+                using var buffer = new MemoryStream((int)Math.Min(fs.Length, MaxCacheBytes));
                 long total = 0;
                 while (total < MaxCacheBytes)
                 {

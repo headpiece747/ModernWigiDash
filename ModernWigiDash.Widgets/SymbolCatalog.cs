@@ -150,13 +150,12 @@ internal static class SymbolCatalog
 
     internal static void LogInvalidSymbol(string? symbol)
     {
-        string preview;
-        if (symbol is null) preview = "<null>";
-        else if (symbol.Length > 48) preview = symbol[..48] + "…";
-        else preview = symbol;
         // Config path: a wrongly-typed symbol must be diagnosable in the
-        // field — the shared log, not a Debug-only line.
-        FileLog.Write($"[PRICE-FEED] Skipping invalid feed symbol '{preview.Replace('\r', ' ').Replace('\n', ' ')}'");
+        // field — the shared log, not a Debug-only line. The preview keeps the
+        // null spelling for diagnosis but routes through the ONE sanitization
+        // rule (flatten + bound) so this line can never drift from the rest of
+        // the price-feed logging.
+        FileLog.Write($"[PRICE-FEED] Skipping invalid feed symbol '{LogSanitizer.Sanitize(symbol ?? "<null>")}'");
     }
 
     internal static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);

@@ -265,8 +265,8 @@ internal sealed class WeatherGeocoder
             {
                 throw new InvalidOperationException("zippopotam response carried unusable coordinates");
             }
-            string city = place.TryGetProperty("place name", out var name) ? name.GetString() ?? "" : "";
-            string state = place.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
+            string city = GetString(place, "place name");
+            string state = GetString(place, "state");
             // Compose only the non-empty parts: a zippopotam response that
             // omits the place name must not produce a ", Texas" label.
             string cityTrim = city.Trim();
