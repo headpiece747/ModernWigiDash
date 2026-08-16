@@ -74,6 +74,62 @@ public class WeatherPresentationTests
     }
 
     [TestMethod]
+    public void MapWmoCode_FullSweep_EveryCode0To99MapsToNonEmpty()
+    {
+        // The full WMO range sweep: every code 0..99 must map to a non-empty
+        // icon + description, the known group codes must map to their pinned
+        // group, and every code outside the table must read the fair fallback
+        // (a code accidentally dropped from a group would silently mislabel
+        // the forecast strip).
+        var pinned = new Dictionary<int, (string Icon, string Description)>
+        {
+            [0] = ("☀️", "Clear Sky"),
+            [1] = ("🌤️", "Mainly Clear"),
+            [2] = ("⛅", "Partly Cloudy"),
+            [3] = ("☁️", "Overcast"),
+            [45] = ("🌫️", "Foggy"),
+            [48] = ("🌫️", "Foggy"),
+            [51] = ("🌧️", "Drizzle"),
+            [53] = ("🌧️", "Drizzle"),
+            [55] = ("🌧️", "Drizzle"),
+            [56] = ("🌧️❄️", "Freezing Drizzle"),
+            [57] = ("🌧️❄️", "Freezing Drizzle"),
+            [61] = ("🌧️", "Rainy"),
+            [63] = ("🌧️", "Rainy"),
+            [65] = ("🌧️", "Rainy"),
+            [66] = ("🌧️❄️", "Freezing Rain"),
+            [67] = ("🌧️❄️", "Freezing Rain"),
+            [71] = ("❄️", "Snowy"),
+            [73] = ("❄️", "Snowy"),
+            [75] = ("❄️", "Snowy"),
+            [77] = ("❄️", "Snowy"),
+            [80] = ("🌦️", "Rain Showers"),
+            [81] = ("🌦️", "Rain Showers"),
+            [82] = ("🌦️", "Rain Showers"),
+            [85] = ("🌨️", "Snow Showers"),
+            [86] = ("🌨️", "Snow Showers"),
+            [95] = ("🌩️", "Thunderstorm"),
+            [96] = ("🌩️", "Thunderstorm"),
+            [99] = ("🌩️", "Thunderstorm"),
+        };
+
+        for (int code = 0; code <= 99; code++)
+        {
+            var (icon, desc) = WeatherPresentation.MapWmoCode(code);
+            Assert.IsFalse(string.IsNullOrEmpty(icon), $"code {code} must map to an icon");
+            Assert.IsFalse(string.IsNullOrEmpty(desc), $"code {code} must map to a description");
+            if (pinned.TryGetValue(code, out var want))
+            {
+                Assert.AreEqual(want, (icon, desc), $"code {code} must map to its pinned group");
+            }
+            else
+            {
+                Assert.AreEqual(("☀️", "Fair"), (icon, desc), $"code {code} (outside the WMO table) must read fair");
+            }
+        }
+    }
+
+    [TestMethod]
     public void MetricPills_OnlyEnabledPillsInFixedOrder()
     {
         var input = new WeatherMetricsInput(
@@ -118,5 +174,44 @@ public class WeatherPresentationTests
     {
         Assert.AreEqual("High: 25.0°C  Low: 16.0°C", WeatherPresentation.DailyHighLowText(25, 16, "°C"));
         Assert.AreEqual("High: 77°F  Low: 61°F", WeatherPresentation.DailyHighLowText(25, 16, "°F"));
+    }
+
+    [TestMethod]
+    public void Build_CapsDailyAtFiveAndHourlyAtSix()
+    {
+        var daily = Enumerable.Range(0, 8)
+            .Select(i => new DailyForecastItem($"Day{i}", 20 + i, 10 + i, 1)).ToArray();
+        var hourly = Enumerable.Range(0, 10)
+            .Select(i => new HourlyForecastItem($"{i}:00", 15 + i, 1)).ToArray();
+        var input = new WeatherDisplayInput(22.5, new WeatherMetricsInput(false, 0, false, 0, false, 0, false, 0, 0, "°C", "km/h"), daily, hourly);
+
+        var display = WeatherPresentation.Build(input);
+
+        Assert.AreEqual(5, display.ForecastRanges.Count, "the daily strip caps at five days");
+        Assert.AreEqual(5, display.DailyHighLows.Count, "the high/low rows follow the same cap");
+        Assert.AreEqual(6, display.HourlyTemps.Count, "the hourly strip caps at six hours");
+        Assert.AreEqual("22.5°C", display.MainTemp);
+        // The cap keeps the FIRST entries, never the last: the ranges/high-lows
+        // must carry Day0 (20/10), not Day7 (27/17), and the hourly strip must
+        // carry hour 0 (15°C), not hour 9.
+        Assert.AreEqual("20° / 10°", display.ForecastRanges[0],
+            "the cap must keep the first day's range, not the last");
+        Assert.AreEqual("High: 20.0°C  Low: 10.0°C", display.DailyHighLows[0],
+            "the high/low rows must keep the first day too");
+        Assert.AreEqual("15.0°C", display.HourlyTemps[0],
+            "the hourly strip must keep the first hour, not the last");
+    }
+
+    [TestMethod]
+    public void Build_ShortListsArePassedThroughUncapped()
+    {
+        var daily = new[] { new DailyForecastItem("Day0", 20, 10, 1) };
+        var hourly = new[] { new HourlyForecastItem("0:00", 15, 1) };
+        var input = new WeatherDisplayInput(22.5, new WeatherMetricsInput(false, 0, false, 0, false, 0, false, 0, 0, "°C", "km/h"), daily, hourly);
+
+        var display = WeatherPresentation.Build(input);
+
+        Assert.AreEqual(1, display.ForecastRanges.Count);
+        Assert.AreEqual(1, display.HourlyTemps.Count);
     }
 }

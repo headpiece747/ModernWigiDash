@@ -83,6 +83,29 @@ public class FrameDeliveryTests
     }
 
     [TestMethod]
+    public void Push_WhenEncoderThrows_DropsAndSurvives()
+    {
+        var encoder = new FixedSizeEncoder(4096);
+        encoder.SetThrowOnEncode(true);
+        var logs = new List<string>();
+        using var delivered = new ManualResetEventSlim(false);
+        using var delivery = new FrameDelivery(encoder: encoder, send: _ => { delivered.Set(); return true; }, log: logs.Add);
+        using var bitmap = CreateFrameBitmap();
+
+        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "An encode failure must drop the frame, not escape the tick");
+        Assert.AreEqual(1L, delivery.DroppedEncodeCount);
+        Assert.IsTrue(logs.Any(line => line.Contains("encode failed")), "The encode failure must surface through the log seam");
+
+        // The pipeline must survive: the SAME delivery that dropped the frame
+        // must deliver after the encoder recovers (the production try/catch in
+        // Push guarantees survival — a fresh pipeline would prove nothing).
+        encoder.SetThrowOnEncode(false);
+        delivered.Reset();
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+        Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "The delivery must recover after a failed encode");
+    }
+
+    [TestMethod]
     public void Push_WithEncoderAndSend_DeliversEncodedRgb565Frame()
     {
         using var delivered = new ManualResetEventSlim(false);
@@ -402,13 +425,17 @@ public class FrameDeliveryTests
     private sealed class FixedSizeEncoder : IRgb565Encoder
     {
         private readonly int _outputSize;
+        private bool _throwOnEncode;
 
         public FixedSizeEncoder(int outputSize) => _outputSize = outputSize;
+
+        public void SetThrowOnEncode(bool value) => _throwOnEncode = value;
 
         public int OutputBufferSize => _outputSize;
 
         public void Encode(SKBitmap bitmap, byte[] destination)
         {
+            if (_throwOnEncode) throw new InvalidOperationException("boom");
             destination[0] = 0xAB;
             destination[1] = 0xCD;
         }

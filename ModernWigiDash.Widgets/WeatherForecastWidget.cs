@@ -1,6 +1,7 @@
 using System.Reflection;
 using SkiaSharp;
 using ModernWigiDash.Sdk;
+using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
@@ -71,20 +72,30 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
-        if (propertyName != nameof(LocationMatch)) return [];
+        if (!string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal)) return [];
 
         // Empty candidates: no dropdown yet (the geocode may not have run).
-        if (_client.LastCandidates.Count == 0) return [];
+        if (_resolvedCandidates.Count == 0) return [];
 
         // The empty "Automatic (by ranking)" entry lets a pick be cleared.
         return
         [
             new WidgetPropertyOption("", "Automatic (by ranking)"),
-            .. _client.LastCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
+            .. _resolvedCandidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
         ];
     }
 
     private readonly WeatherClient _client;
+
+    // The widget's own copies of the resolved identity, taken from the
+    // Fetched outcome (or the boot cache load): the client reports the
+    // identity once per fetch, and the widget owns the dropdown, population,
+    // header title, and the render-model cache key from these copies, so it
+    // never re-reads the client's resolution state on the render path.
+    private IReadOnlyList<GeocodeCandidate> _resolvedCandidates = [];
+    private double _resolvedPopulation;
+    // Neutral until a resolution sets a real identity (never a hardcoded city).
+    private string _resolvedCityName = "Unknown location";
 
     // -- IWidgetLocationSearch ------------------------------------------------
 
@@ -94,17 +105,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     public void CommitPick(GeocodeCandidate candidate)
     {
         // The name is the truth: a pick writes only the label. Latitude/Longitude
-        // stay manual-only ° the label resolves deterministically (multi-component
+        // stay manual-only — the label resolves deterministically (multi-component
         // suffix matching).
         SetProperty(nameof(Location), candidate.Label);
     }
 
-    public double? CurrentPopulation => _client.LastResolvedPopulation > 0 ? _client.LastResolvedPopulation : null;
+    public double? CurrentPopulation => _resolvedPopulation > 0 ? _resolvedPopulation : null;
 
     // -- IWidgetEditorProvider ------------------------------------------------
 
     public EditorKind? GetEditorKind(PropertyInfo property)
-        => property.Name == nameof(Location) ? EditorKind.LocationSearch : null;
+        => string.Equals(property.Name, nameof(Location), StringComparison.Ordinal) ? EditorKind.LocationSearch : null;
 
     public WeatherForecastWidget()
     {
@@ -112,8 +123,10 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // baked at construction: RehydrateWidget assigns the placed InstanceId
         // only after the widget is built, so a baked name would key every
         // load/save by a fresh never-reused GUID (the cache would never round
-        // trip across restarts).
-        _client = new WeatherClient(CacheDir, () => $"weather_{InstanceId}.json", logError: (message, exception) => Context?.LogError(message, exception));
+        // trip across restarts). Defense in depth: the profile-import boundary
+        // already regenerates unsafe ids, but the name builder also refuses
+        // one here so a cache file can never escape the cache directory.
+        _client = new WeatherClient(CacheDir, () => $"weather_{SafeCacheToken(InstanceId)}.json", logError: (message, exception) => Context?.LogError(message, exception));
     }
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
@@ -122,13 +135,24 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>Test seam: substitute HTTP transport for fetch tests (forwards to the client).</summary>
     internal HttpClient? TestHttpClient { get => _client.TestHttpClient; set => _client.TestHttpClient = value; }
 
-    /// <summary>The last resolved display name (test/UI seam into the client).</summary>
-    internal string ResolvedCityName => _client.ResolvedCityName;
+    /// <summary>The last resolved display name (test/UI seam: the widget's own
+    /// copy of the identity the Fetched outcome reported).</summary>
+    internal string ResolvedCityName => _resolvedCityName;
 
     /// <summary>The client's cache file name as currently resolved (test seam:
-    /// pins the placed-InstanceId keying ° the name must follow the InstanceId
+    /// pins the placed-InstanceId keying — the name must follow the InstanceId
     /// assigned by rehydration, never the construction-time default GUID).</summary>
     internal string CacheFileName => _client.CacheFileName;
+
+    /// <summary>The InstanceId is a cache-file key; a foreign value with path
+    /// segments must never reach the name builder (defense in depth behind the
+    /// import boundary's regeneration rule). The fallback is a PER-INSTANCE
+    /// token — a shared literal would collide two widgets' cache files if the
+    /// guard were ever reached by more than one widget.</summary>
+    private readonly string _safeCacheFallbackToken = Guid.NewGuid().ToString();
+
+    private string SafeCacheToken(string? instanceId)
+        => ProfileOps.IsSafeInstanceId(instanceId) ? instanceId! : _safeCacheFallbackToken;
 
     /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
     internal int FetchCompletedCount => _client.FetchCompletedCount;
@@ -141,19 +165,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private double _highTempC = 26.6;   // 80°F default
     private double _lowTempC = 20.5;    // 69°F default
 
-    // The card fill/stroke paints behind every pill, row, and column ° one
-    // shared pair, colors swapped via Paint.Color mutation (hoisted out of the
-    // per-card loops).
-    private readonly SKPaint _cardFillPaint = new() { IsAntialias = true };
-    private readonly SKPaint _cardStrokePaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true };
-    private readonly SKPaint _metricPaint = new() { IsAntialias = true };
-    private readonly SKPaint _dayPaint = new() { IsAntialias = true };
-    private readonly SKPaint _iconPaint = new() { IsAntialias = true };
-    private readonly SKPaint _descPaint = new() { IsAntialias = true };
-    private readonly SKPaint _tempPaint = new() { IsAntialias = true };
-    private readonly SKPaint _timePaint = new() { IsAntialias = true };
-    private readonly SKPaint _rangePaint = new() { IsAntialias = true };
-    private readonly SKPaint _dayIconPaint = new() { IsAntialias = true };
+    // The per-mode draw paths live in the renderer (WeatherWidgetRenderer),
+    // which owns the card/pill/row paints — one shared pair behind every
+    // card, colors swapped via Paint.Color mutation (hoisted out of the
+    // per-card loops). The header's two paints (title, unit badge) follow the
+    // same hoisted pattern here — the 30 FPS render path allocates no paints.
+    private readonly WeatherWidgetRenderer _renderer = new();
+    private readonly SKPaint _titlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
 
     internal readonly List<DailyForecastItem> _dailyForecasts = [];
     internal readonly List<HourlyForecastItem> _hourlyForecasts = [];
@@ -165,11 +184,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private SKRect _lastBounds;
 
     // The render-model cache: every formatted string the draw paths need is
-    // rebuilt only when (data version, bounds, property snapshot) changes °
+    // rebuilt only when (data version, bounds, property snapshot) changes —
     // weather data moves at most every 15 minutes, so the static scene
     // allocates nothing on the 30 FPS render path.
     private int _dataVersion;
-    private WeatherRenderModel? _renderModel;
+    /// <summary>The cached render model (internal test seam: the invalidation
+    /// matrix pins which keys force a rebuild).</summary>
+    internal WeatherRenderModel? _renderModel;
 
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
     private PollLoop? _refreshPoll;
@@ -177,15 +198,15 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// tests inject a cancelled token to pin the silent-teardown path).</summary>
     internal CancellationTokenSource? _pollCts;
 
-    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        base.InitializeAsync(context, cancellationToken);
+        await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
         // The poll CTS is created before the boot cache load so the load can
         // take the same teardown token every other fetch leg gets.
         _pollCts = new CancellationTokenSource();
         _ = LoadCachedWeatherAsync(_pollCts.Token);
         // The refresh loop rides the repo's one loop shape at the client's
-        // fetch-window cadence ° the one cadence constant (visible pages are
+        // fetch-window cadence — the one cadence constant (visible pages are
         // driven by the render kick at the same window; the loop is the sole
         // driver for hidden pages, whose reveal-kick then refreshes anyway).
         // The old code used the last raw System.Threading.Timer: fire-and-
@@ -205,7 +226,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         //     never DISPLAY the wrong city — at most it transiently writes
         //     the default's cache, which the hydration kick overwrites
         _ = FetchLiveWeatherAsync();
-        return ValueTask.CompletedTask;
     }
 
     private void WeatherRefreshTick() => RequestRefresh();
@@ -216,7 +236,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// paths all call this. The static-snapshot rule and the client's
     /// throttle-window pre-check are applied here, once, instead of being
     /// re-derived at each call site; the client's atomic in-flight claim
-    /// remains the authority (see <see cref="WeatherClient.TryBeginFetch"/>).
+    /// remains the authority (see <see cref="WeatherClient.FetchCurrentAsync"/>).
     /// </summary>
     private void RequestRefresh(bool force = false)
     {
@@ -229,14 +249,20 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _refreshPoll?.Dispose();
         if (_pollCts != null)
         {
-            await _pollCts.CancelAsync();
+            await _pollCts.CancelAsync().ConfigureAwait(false);
             _pollCts.Dispose();
         }
-        await base.DisposeAsync();
+        // The hoisted SKPaints wrap native Skia handles — release them like
+        // every other widget's DisposeAsync (profile reloads / edits recreate
+        // widgets, and finalizer-driven reclamation would accumulate).
+        _renderer.Dispose();
+        _titlePaint.Dispose();
+        _unitPaint.Dispose();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The resolution inputs that force a re-fetch on change ° the widget-side
+    /// The resolution inputs that force a re-fetch on change — the widget-side
     /// mirror of <see cref="WeatherClient.BuildQueryKey"/> (every key field
     /// except LocationMatch, which has its own branch in OnPropertyChanged).
     /// The drift test pins this set to the WeatherLocation record, so a new
@@ -250,8 +276,20 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // A Location Match pick resolves against the candidates it was offered
         // from, so it keeps them (InvalidateCoordinates); every other location
         // change clears the candidates so a stale pick can never win.
-        if (propertyName == nameof(LocationMatch))
+        // Any resolution-input edit also drops a PENDING resolved-label
+        // write-back: a fetch that completed just before the edit may have set
+        // the pending label, and the next Render tick would otherwise write it
+        // over the newer edit (the client's in-flight stale guard only covers
+        // fetches still in flight at edit time — a completed fetch whose
+        // write-back was not yet flushed is the race the clear closes).
+        if (string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal))
         {
+            _pendingLocationWriteback = null;
+            // Mirror the client's InvalidateCoordinates: the resolved name and
+            // population drop with the old resolution, but the candidates stay
+            // (the pick resolves against the candidates it was offered from).
+            _resolvedCityName = "";
+            _resolvedPopulation = 0;
             _client.InvalidateCoordinates();
             RequestRefresh(force: true);
         }
@@ -261,6 +299,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // label was just resolved by the fetch that wrote it, so fetching
             // again would loop (the write-back converges after one extra
             // resolution at most).
+            _pendingLocationWriteback = null;
+            // Mirror the client's InvalidateLocation: the whole resolved
+            // identity (candidates, population, name) is void until the next
+            // fetch resolves the new input, so the render-model cache key
+            // turns and the header drops the old city immediately.
+            _resolvedCandidates = [];
+            _resolvedCityName = "";
+            _resolvedPopulation = 0;
             _client.InvalidateLocation();
             RequestRefresh(force: true);
         }
@@ -288,7 +334,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _lastBounds = bounds;
 
         // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render ° but only when the source actually changed (the
+        // a list mid-render — but only when the source actually changed (the
         // snapshot copies are skipped on the frames in between).
         lock (_forecastGate)
         {
@@ -310,14 +356,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         // Prominent Location Name Header
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
-        using var titlePaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-        canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, titlePaint);
+        _titlePaint.Color = textPrimary;
+        canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, _titlePaint);
 
         // Styled Unit Toggle Badge [°F] / [°C] (No background card)
-        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(17f * s, 10f, 30f));
-        using var unitPaint = new SKPaint { Color = SKColors.White, IsAntialias = true };
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, WeatherLayout.BadgeFontSize(s));
+        _unitPaint.Color = SKColors.White;
         float uW = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
-        canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, unitPaint);
+        canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, _unitPaint);
 
         // Content Area Bounds
         SKRect contentBounds = new(bounds.Left + header.Pad, bounds.Top + header.HeaderHeight + 6f * sy, bounds.Right - header.Pad, bounds.Bottom - header.Pad);
@@ -325,393 +371,21 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         switch (WeatherLayout.ParseMode(LayoutMode))
         {
             case WeatherLayoutMode.DailyForecast:
-                RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
+                _renderer.RenderDailyForecast(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
                 break;
             case WeatherLayoutMode.HourlyForecast:
-                RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, sx, sy, model);
+                _renderer.RenderHourlyForecast(canvas, contentBounds, accentColor, textSecondary, sx, sy, model);
                 break;
             case WeatherLayoutMode.CurrentOnly:
-                RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, sx, sy, model);
+                _renderer.RenderCurrentOnly(canvas, contentBounds, accentColor, textPrimary, sx, sy, model);
                 break;
             case WeatherLayoutMode.Compact:
-                RenderCompact(canvas, contentBounds, textPrimary, sx, sy, model);
+                _renderer.RenderCompact(canvas, contentBounds, textPrimary, sx, sy, model);
                 break;
             default:
-                RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
+                _renderer.RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
                 break;
         }
-    }
-
-    private void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
-    {
-        var (icon, desc) = WeatherPresentation.MapWmoCode(_weatherCode);
-        float s = Math.Min(sx, sy);
-        float w = bounds.Width;
-        float h = bounds.Height;
-
-        // Show forecast strip only if container height is at least 150px physical units
-        bool hasForecast = ShowForecast && _dailyForecastSnapshot.Count > 0 && h >= 150f;
-        float forecastH = hasForecast ? Math.Clamp(80f * sy, 45f, 160f) : 0f;
-
-        // Show metrics pill strip only if container height is at least 150px physical units
-        bool hasMetrics = model.Metrics.Count > 0 && h >= 150f;
-        float metricsH = hasMetrics ? Math.Clamp(28f * sy, 16f, 50f) : 0f;
-
-        float heroTop = bounds.Top + 4f * sy;
-        float heroBottom = bounds.Bottom - forecastH - (hasMetrics ? metricsH + 12f * sy : 0f) - 4f * sy;
-        float heroHeight = Math.Max(heroBottom - heroTop, 35f);
-        float heroMidY = heroTop + heroHeight / 2f;
-
-        // Sizing hero elements proportionally to fit strictly inside heroHeight without overlapping pills below
-        float iconSize = Math.Clamp(heroHeight * 0.75f, 20f, 220f);
-        float tempSize = Math.Clamp(heroHeight * 0.45f, 14f, 140f);
-        float descSize = Math.Clamp(heroHeight * 0.18f, 9f, 45f);
-
-        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
-        using var iconPaint = new SKPaint { IsAntialias = true };
-        float iconW = iconFont.MeasureText(icon);
-
-        string mainTempStr = model.MainTemp;
-        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
-        using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-
-        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, descSize);
-        using var descPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-
-        // Ensure vertical text stack (Temp + Condition) strictly fits inside heroHeight
-        tempFont.GetFontMetrics(out var tempMetrics);
-        descFont.GetFontMetrics(out var descMetrics);
-        float tempH = tempMetrics.Descent - tempMetrics.Ascent;
-        float descH = descMetrics.Descent - descMetrics.Ascent;
-        float textStackSpacing = 2f * sy;
-        float textStackTotalH = tempH + textStackSpacing + descH;
-
-        float fitScale = WeatherLayout.HeroTextStackShrinkScale(textStackTotalH, heroHeight);
-        if (fitScale < 1f)
-        {
-            tempSize *= fitScale;
-            descSize *= fitScale;
-            tempFont.Size = tempSize;
-            descFont.Size = descSize;
-
-            tempFont.GetFontMetrics(out tempMetrics);
-            descFont.GetFontMetrics(out descMetrics);
-            tempH = tempMetrics.Descent - tempMetrics.Ascent;
-            descH = descMetrics.Descent - descMetrics.Ascent;
-            textStackTotalH = tempH + textStackSpacing + descH;
-        }
-
-        float tempW = tempFont.MeasureText(mainTempStr);
-        float descW = descFont.MeasureText(desc);
-
-        float rightBlockW = Math.Max(tempW, descW);
-        float gap = Math.Clamp(20f * s, 8f, 50f);
-        float totalBlockW = iconW + gap + rightBlockW;
-
-        // Auto-scale hero block down if container is narrow
-        if (totalBlockW > w)
-        {
-            float scaleFactor = Math.Max(0.5f, w / totalBlockW);
-            iconSize *= scaleFactor;
-            tempSize *= scaleFactor;
-            descSize *= scaleFactor;
-            gap *= scaleFactor;
-
-            iconFont.Size = iconSize;
-            tempFont.Size = tempSize;
-            descFont.Size = descSize;
-
-            iconW = iconFont.MeasureText(icon);
-            tempW = tempFont.MeasureText(mainTempStr);
-            descW = descFont.MeasureText(desc);
-            rightBlockW = Math.Max(tempW, descW);
-            totalBlockW = iconW + gap + rightBlockW;
-        }
-
-        float blockLeft = bounds.MidX - totalBlockW / 2f;
-        float rightX = blockLeft + iconW + gap;
-
-        // Draw Icon perfectly centered vertically beside Temp + Condition
-        iconFont.GetFontMetrics(out var iconMetrics);
-        float iconBaseline = heroMidY - (iconMetrics.Ascent + iconMetrics.Descent) / 2f;
-        canvas.DrawTextWithFallback(icon, blockLeft, iconBaseline, iconFont, iconPaint);
-
-        // Stack Temperature & Condition on right of icon with centered vertical alignment
-        float textStackTop = heroMidY - textStackTotalH / 2f;
-        float tempBaseline = textStackTop - tempMetrics.Ascent;
-        float descBaseline = tempBaseline + tempMetrics.Descent + textStackSpacing - descMetrics.Ascent;
-
-        canvas.DrawTextWithFallback(mainTempStr, rightX, tempBaseline, tempFont, tempPaint);
-        canvas.DrawTextWithFallback(desc, rightX, descBaseline, descFont, descPaint);
-
-        RenderMetricPills(canvas, bounds, hasMetrics, metricsH, heroBottom, textSecondary, sx, sy, model);
-        RenderForecastStrip(canvas, bounds, hasForecast, forecastH, accentColor, textPrimary, textSecondary, sx, sy, model);
-    }
-
-    private void RenderMetricPills(SKCanvas canvas, SKRect bounds, bool hasMetrics, float metricsH, float heroBottom, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
-    {
-        if (!hasMetrics) return;
-
-        float s = Math.Min(sx, sy);
-        float w = bounds.Width;
-        float pillY = heroBottom + 4f * sy;
-        float pillHeight = metricsH;
-        float metricFontSize = WeatherLayout.PillFontSize(s);
-        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, metricFontSize);
-
-        float pillPadX = WeatherLayout.PillPadX(s);
-        float pillGap = WeatherLayout.PillGap(s);
-        float totalPillsW = 0f;
-        float[] metricWidths = model.MetricWidths;
-        for (int i = 0; i < metricWidths.Length; i++)
-        {
-            totalPillsW += metricWidths[i];
-        }
-        totalPillsW += (model.Metrics.Count - 1) * pillGap;
-
-        // If pills exceed bounds width, scale down metric font size to fit inside card
-        float metricScale = WeatherLayout.MetricPillShrinkScale(totalPillsW, w);
-        if (metricScale < 1f)
-        {
-            metricFontSize = Math.Max(7f, metricFontSize * metricScale);
-            metricFont.Size = metricFontSize;
-            pillPadX *= metricScale;
-            pillGap *= metricScale;
-
-            totalPillsW = 0f;
-            for (int i = 0; i < model.Metrics.Count; i++)
-            {
-                metricWidths[i] = metricFont.MeasureText(model.Metrics[i]) + pillPadX * 2;
-                totalPillsW += metricWidths[i];
-            }
-            totalPillsW += (model.Metrics.Count - 1) * pillGap;
-        }
-
-        _cardStrokePaint.Color = new SKColor(255, 255, 255, 22);
-        _cardStrokePaint.StrokeWidth = Math.Max(1f * s, 1f);
-        _metricPaint.Color = textSecondary;
-
-        metricFont.GetFontMetrics(out var mMetrics);
-        float mBaseline = pillY + pillHeight / 2f - (mMetrics.Ascent + mMetrics.Descent) / 2f;
-
-        float pillStartX = bounds.MidX - totalPillsW / 2f;
-        for (int i = 0; i < model.Metrics.Count; i++)
-        {
-            SKRect pillRect = new(pillStartX, pillY, pillStartX + metricWidths[i], pillY + pillHeight);
-            canvas.DrawRoundRect(pillRect, 8f * s, 8f * s, _cardStrokePaint);
-            canvas.DrawTextWithFallback(model.Metrics[i], pillRect.MidX, mBaseline, metricFont, _metricPaint, SKTextAlign.Center);
-            pillStartX += metricWidths[i] + pillGap;
-        }
-    }
-
-    private void RenderForecastStrip(SKCanvas canvas, SKRect bounds, bool hasForecast, float forecastH, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
-    {
-        if (!hasForecast) return;
-
-        float s = Math.Min(sx, sy);
-        float w = bounds.Width;
-        int count = Math.Min(_dailyForecastSnapshot.Count, 5);
-        float stripY = bounds.Bottom - forecastH;
-        SKRect stripBounds = new(bounds.Left, stripY, bounds.Right, bounds.Bottom);
-
-        _cardStrokePaint.Color = new SKColor(255, 255, 255, 18);
-        _cardStrokePaint.StrokeWidth = Math.Max(1f * s, 1f);
-        canvas.DrawRoundRect(stripBounds, 12f * s, 12f * s, _cardStrokePaint);
-
-        float colWidth = w / count;
-        float dayFontSize = Math.Clamp(14f * s, 8f, 24f);
-        float dayIconFontSize = Math.Clamp(22f * s, 10f, 48f);
-        float rangeFontSize = Math.Clamp(12f * s, 7f, 22f);
-
-        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, dayFontSize);
-        var rangeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, rangeFontSize);
-        var dayIconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, dayIconFontSize);
-
-        _rangePaint.Color = textSecondary;
-        _dayIconPaint.Color = SKColors.Black;
-
-        for (int i = 0; i < count; i++)
-        {
-            var day = _dailyForecastSnapshot[i];
-            var (dayIcon, _) = WeatherPresentation.MapWmoCode(day.WeatherCode);
-            float colCx = bounds.Left + (i + 0.5f) * colWidth;
-
-            _dayPaint.Color = i == 0 ? accentColor : textPrimary;
-            float dayY = stripY + Math.Clamp(18f * s, 10f, 36f);
-
-            dayFont.MeasureText(day.DayName, out var dayBounds);
-            float dayX = colCx - (dayBounds.Left + dayBounds.Width / 2f);
-            canvas.DrawTextWithFallback(day.DayName, dayX, dayY, dayFont, _dayPaint);
-
-            string rangeStr = model.ForecastRanges[i];
-            float rangeY = stripBounds.Bottom - Math.Clamp(10f * s, 5f, 20f);
-
-            rangeFont.MeasureText(rangeStr, out var rangeBounds);
-            float rangeX = colCx - (rangeBounds.Left + rangeBounds.Width / 2f);
-            canvas.DrawTextWithFallback(rangeStr, rangeX, rangeY, rangeFont, _rangePaint);
-
-            // Calculate exact vertical center between Day Name and Temp Range baselines
-            dayFont.GetFontMetrics(out var dayMetrics);
-            rangeFont.GetFontMetrics(out var rangeMetrics);
-            dayIconFont.GetFontMetrics(out var dayIconMetrics);
-
-            float dayBottomY = dayY + dayMetrics.Descent;
-            float rangeTopY = rangeY + rangeMetrics.Ascent;
-            float midGapY = (dayBottomY + rangeTopY) / 2f;
-            float dayIconBaseline = midGapY - (dayIconMetrics.Ascent + dayIconMetrics.Descent) / 2f;
-
-            // Exact visual bounding box horizontal centering for emoji icon
-            dayIconFont.MeasureText(dayIcon, out var iconRect);
-            float iconVisualCenterX = iconRect.Left + (iconRect.Width / 2f);
-            float iconX = colCx - iconVisualCenterX;
-
-            canvas.DrawTextWithFallback(dayIcon, iconX, dayIconBaseline, dayIconFont, _dayIconPaint);
-        }
-    }
-
-    private void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
-    {
-        int count = Math.Min(_dailyForecastSnapshot.Count, 5);
-        if (count == 0) return;
-
-        float rowHeight = bounds.Height / count;
-        float s = Math.Min(sx, sy);
-
-        _cardFillPaint.Color = new SKColor(22, 26, 40, 180);
-        _cardStrokePaint.Color = new SKColor(255, 255, 255, 15);
-        _cardStrokePaint.StrokeWidth = 1f;
-        _descPaint.Color = textSecondary;
-        _tempPaint.Color = accentColor;
-        _iconPaint.Color = SKColors.Black;
-
-        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(13f * s, 9f, 18f));
-        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(16f * s, 10f, 22f));
-        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Clamp(11f * s, 8f, 15f));
-        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
-
-        for (int i = 0; i < count; i++)
-        {
-            var day = _dailyForecastSnapshot[i];
-            float y = bounds.Top + (i * rowHeight);
-            SKRect rowRect = new(bounds.Left, y + 2, bounds.Right, y + rowHeight - 2);
-
-            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, _cardFillPaint);
-            canvas.DrawRoundRect(rowRect, 8f * s, 8f * s, _cardStrokePaint);
-
-            var (icon, desc) = WeatherPresentation.MapWmoCode(day.WeatherCode);
-
-            _dayPaint.Color = i == 0 ? accentColor : textPrimary;
-            canvas.DrawTextWithFallback(day.DayName, rowRect.Left + 12f * sx, rowRect.MidY + 5f * sy, dayFont, _dayPaint);
-
-            canvas.DrawTextWithFallback(icon, rowRect.Left + 80f * sx, rowRect.MidY + 6f * sy, iconFont, _iconPaint);
-
-            canvas.DrawTextWithFallback(desc, rowRect.Left + 110f * sx, rowRect.MidY + 4f * sy, descFont, _descPaint);
-
-            string highLowStr = model.DailyHighLows[i];
-            canvas.DrawTextWithFallback(highLowStr, rowRect.Right - FontHelper.MeasureTextWithFallback(highLowStr, tempFont) - 12f * sx, rowRect.MidY + 4f * sy, tempFont, _tempPaint);
-        }
-    }
-
-    private void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
-    {
-        int count = Math.Min(_hourlyForecastSnapshot.Count, 6);
-        if (count == 0) return;
-
-        float itemWidth = bounds.Width / count;
-        float s = Math.Min(sx, sy);
-
-        _cardFillPaint.Color = new SKColor(22, 26, 40, 180);
-        _cardStrokePaint.Color = new SKColor(255, 255, 255, 15);
-        _cardStrokePaint.StrokeWidth = 1f;
-        _timePaint.Color = textSecondary;
-        _tempPaint.Color = accentColor;
-        _iconPaint.Color = SKColors.Black;
-
-        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(11f * s, 8f, 15f));
-        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Normal, Math.Clamp(20f * s, 12f, 28f));
-        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(12f * s, 8f, 16f));
-
-        for (int i = 0; i < count; i++)
-        {
-            var item = _hourlyForecastSnapshot[i];
-            float x = bounds.Left + (i * itemWidth);
-            SKRect colRect = new(x + 2, bounds.Top + 4, x + itemWidth - 2, bounds.Bottom - 4);
-
-            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, _cardFillPaint);
-            canvas.DrawRoundRect(colRect, 8f * s, 8f * s, _cardStrokePaint);
-
-            var (icon, _) = WeatherPresentation.MapWmoCode(item.WeatherCode);
-
-            canvas.DrawTextWithFallback(item.TimeLabel, colRect.MidX - (FontHelper.MeasureTextWithFallback(item.TimeLabel, timeFont) / 2f), colRect.Top + 22f * sy, timeFont, _timePaint);
-
-            canvas.DrawTextWithFallback(icon, colRect.MidX - 12f * sx, colRect.MidY + 6f * sy, iconFont, _iconPaint);
-
-            string tempStr = model.HourlyTemps[i];
-            canvas.DrawTextWithFallback(tempStr, colRect.MidX - (FontHelper.MeasureTextWithFallback(tempStr, tempFont) / 2f), colRect.Bottom - 14f * sy, tempFont, _tempPaint);
-        }
-    }
-
-    private void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
-    {
-        var (icon, desc) = WeatherPresentation.MapWmoCode(_weatherCode);
-        float s = Math.Min(sx, sy);
-        float midY = bounds.MidY;
-        float midX = bounds.MidX;
-
-        float iconSize = Math.Clamp(88f * s, 40f, 120f);
-        float tempSize = Math.Clamp(64f * s, 28f, 84f);
-        float descSize = Math.Clamp(24f * s, 12f, 32f);
-
-        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, iconSize);
-        using var iconPaint = new SKPaint { IsAntialias = true };
-        float iconW = iconFont.MeasureText(icon);
-
-        string mainTempStr = model.MainTemp;
-        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, tempSize);
-        using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-        float tempW = tempFont.MeasureText(mainTempStr);
-
-        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, descSize);
-        using var descPaint = new SKPaint { Color = accentColor, IsAntialias = true };
-        float descW = descFont.MeasureText(desc);
-
-        float rightBlockW = Math.Max(tempW, descW);
-        float gap = 24f * sx;
-        float totalBlockW = iconW + gap + rightBlockW;
-        float blockLeft = midX - totalBlockW / 2f;
-        float rightX = blockLeft + iconW + gap;
-
-        iconFont.GetFontMetrics(out var iconMetrics);
-        float iconBaseline = midY - (iconMetrics.Ascent + iconMetrics.Descent) / 2f;
-        canvas.DrawTextWithFallback(icon, blockLeft, iconBaseline, iconFont, iconPaint);
-
-        tempFont.GetFontMetrics(out var tempMetrics);
-        descFont.GetFontMetrics(out var descMetrics);
-        float tempH = tempMetrics.Descent - tempMetrics.Ascent;
-        float descH = descMetrics.Descent - descMetrics.Ascent;
-        float textStackTotalH = tempH + 6f * sy + descH;
-        float textStackTop = midY - textStackTotalH / 2f;
-
-        float tempBaseline = textStackTop - tempMetrics.Ascent;
-        float descBaseline = tempBaseline + tempMetrics.Descent + 6f * sy - descMetrics.Ascent;
-
-        canvas.DrawTextWithFallback(mainTempStr, rightX, tempBaseline, tempFont, tempPaint);
-        canvas.DrawTextWithFallback(desc, rightX, descBaseline, descFont, descPaint);
-    }
-
-    private void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
-    {
-        var (icon, _) = WeatherPresentation.MapWmoCode(_weatherCode);
-        float s = Math.Min(sx, sy);
-
-        var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, Math.Clamp(26f * s, 14f, 32f));
-        using var iconPaint = new SKPaint { IsAntialias = true };
-        canvas.DrawTextWithFallback(icon, bounds.Left, bounds.MidY + 10f * sy, iconFont, iconPaint);
-
-        string mainTempStr = model.MainTemp;
-        var tempFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Clamp(20f * s, 12f, 26f));
-        using var tempPaint = new SKPaint { Color = textPrimary, IsAntialias = true };
-        canvas.DrawTextWithFallback(mainTempStr, bounds.Left + 36f * sx, bounds.MidY + 8f * sy, tempFont, tempPaint);
     }
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
@@ -720,7 +394,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         // Hit-test against the last rendered bounds so touches line up with the
         // drawn controls at any widget size, not just the design size. The zones
-        // come from WeatherLayout ° the same geometry the render path draws.
+        // come from WeatherLayout — the same geometry the render path draws.
         var b = _lastBounds.Width > 0 ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
         var scale = WeatherLayout.Scale(b);
 
@@ -749,7 +423,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>
     /// The candidate labels last pushed to the inspector. Refreshing the
     /// inspector rebuilds the panel, which steals focus from the field the
-    /// user is typing in ° so a refresh fires only when the pickable options
+    /// user is typing in — so a refresh fires only when the pickable options
     /// actually changed (e.g. the first geocode after a Location edit), never
     /// on every fetch.
     /// </summary>
@@ -771,54 +445,88 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     internal async Task FetchLiveWeatherAsync(bool force = false)
     {
-        // The identity this fetch was started for: a fetch that was in flight
-        // while the user edited any resolution input (Location, Latitude,
-        // Longitude, CountryCode, LocationMatch) must never apply the stale
-        // weather or write the stale resolved label over the newer edit. The
-        // key mirrors the client's query identity, so one guard covers every
-        // invalidation source.
+        // The query key at START: the client's Stale verdict is computed
+        // before its own cache-save await, so an identity change landing
+        // after that verdict but before this continuation runs would come
+        // back as Fetched — re-validate at the end of the await.
         string fetchKey = WeatherClient.BuildQueryKey(BuildLocation());
-        WeatherSnapshot? snapshot;
+        WeatherFetchResult result;
         try
         {
-            snapshot = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+            result = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            // Teardown: the widget's poll CTS was cancelled (dispose) ° a
+            // Teardown: the widget's poll CTS was cancelled (dispose) — a
             // cancelled fetch is not a failure, so nothing is logged or applied.
             return;
         }
-        if (snapshot is null) return;
 
-        if (fetchKey != WeatherClient.BuildQueryKey(BuildLocation()))
+        if (result is WeatherFetchResult.Stale)
         {
-            // The identity changed while the fetch was in flight: drop the
-            // stale result (weather and label) and re-fetch the new identity °
-            // the edit-time force refresh was swallowed by the client's
-            // in-flight claim, which this fetch's completion has now released.
+            // The resolution identity changed while the fetch was in flight
+            // (the widget's invalidation cleared the client's query identity):
+            // the client dropped the stale result — weather AND label — without
+            // stamping the throttle. Re-fetch the new identity immediately,
+            // since the edit-time force refresh was swallowed by the in-flight
+            // claim, which this fetch's completion has now released.
             RequestRefresh(force: true);
             return;
         }
 
-        ApplySnapshot(snapshot);
+        // Post-await re-validation: the client's Stale verdict is computed
+        // before its cache-save await; a resolution-input change (including
+        // the post-InitializeAsync profile hydration) landing in that window
+        // returns Fetched. Drop the result — weather AND label — when the
+        // identity no longer matches, exactly as the old in-widget guard did.
+        if (!string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
+        {
+            RequestRefresh(force: true);
+            return;
+        }
+
+        if (result is not WeatherFetchResult.Fetched fetched)
+        {
+            // Throttled / InFlight / Failed: keep the previous state silently.
+            return;
+        }
+
+        ApplySnapshot(fetched.Snapshot);
+
+        // The resolved identity travels on the Fetched outcome; store the
+        // widget's own copies (dropdown, population, header) once per applied
+        // fetch, so the render path never re-reads the client's resolution
+        // state.
+        _resolvedCandidates = fetched.Candidates;
+        _resolvedPopulation = fetched.Population;
+        _resolvedCityName = fetched.ResolvedName;
+        WeatherSnapshot snapshot = fetched.Snapshot;
 
         // The resolved label's write-back is deferred to the UI thread (Render
         // flushes the pending field): Context.PersistProperty stays on the UI
         // thread, and the identity guard above already dropped any fetch whose
-        // resolution inputs changed while it was in flight.
+        // resolution inputs changed while it was in flight. The write-back is
+        // skipped entirely when a CustomLabel supplies the title: the label is
+        // display-only, and writing it into Location would destroy the query
+        // (explicit-coords/pick + CustomLabel would overwrite "New York" with
+        // "Home" in the profile). The identity is re-validated once more at
+        // the set: an edit landing between the re-check above and this
+        // assignment must win (the pending set would otherwise flush the OLD
+        // identity's label over the fresh edit on the next render).
         if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-            && snapshot.ResolvedCityName != Location)
+            && string.IsNullOrWhiteSpace(CustomLabel)
+            && !string.Equals(snapshot.ResolvedCityName, Location, StringComparison.Ordinal)
+            && string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
         {
             _pendingLocationWriteback = snapshot.ResolvedCityName;
         }
 
         // The geocode may have produced new Location Match candidates: refresh
         // the inspector so an already-open panel shows the dropdown (the Twitch
-        // pattern ° the renderer only builds a ComboBox when options exist).
-        // Only when the option set changed ° see _lastInspectorCandidatesStamp.
-        string stamp = string.Join('\n', _client.LastCandidates.Select(c => c.Query));
-        if (stamp != _lastInspectorCandidatesStamp)
+        // pattern — the renderer only builds a ComboBox when options exist).
+        // Only when the option set changed — see _lastInspectorCandidatesStamp.
+        string stamp = string.Join('\n', _resolvedCandidates.Select(c => c.Query));
+        if (!string.Equals(stamp, _lastInspectorCandidatesStamp, StringComparison.Ordinal))
         {
             _lastInspectorCandidatesStamp = stamp;
             Context?.RequestInspectorRefresh();
@@ -838,7 +546,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     {
         if (_pendingLocationWriteback is not { } pending) return;
         _pendingLocationWriteback = null;
-        if (string.IsNullOrWhiteSpace(pending) || pending == Location || _suppressLocationWriteback) return;
+        if (string.IsNullOrWhiteSpace(pending) || string.Equals(pending, Location, StringComparison.Ordinal) || _suppressLocationWriteback) return;
 
         _suppressLocationWriteback = true;
         try
@@ -859,12 +567,22 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the render fields, keeping the
-    /// "response omitted this section ? keep the previous value" semantics.
+    /// "response omitted this section — keep the previous value" semantics.
+    /// When <paramref name="expectedVersion"/> is set, the apply is skipped —
+    /// atomically, under the same lock that bumps <see cref="_dataVersion"/>
+    /// — if the data version moved on (a fetch landed while a cache load was
+    /// in flight must never be overwritten by the stale cache).
+    /// <paramref name="identityGuard"/> is evaluated under the same lock:
+    /// the cache may also be skipped when the resolution identity changed
+    /// (the boot load runs pre-hydration). Returns whether the snapshot was
+    /// applied.
     /// </summary>
-    private void ApplySnapshot(WeatherSnapshot snapshot)
+    private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null)
     {
         lock (_forecastGate)
         {
+            if (expectedVersion is int expected && _dataVersion != expected) return false;
+            if (identityGuard is not null && !identityGuard()) return false;
             _dataVersion++;
             if (snapshot.CurrentTempC is not null) _currentTempC = snapshot.CurrentTempC.Value;
             if (snapshot.FeelsLikeC is not null) _feelsLikeC = snapshot.FeelsLikeC.Value;
@@ -885,19 +603,73 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _hourlyForecasts.AddRange(snapshot.HourlyForecasts);
                 _forecastVersion++;
             }
+            return true;
         }
     }
 
-    private async Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
+    /// <summary>Test seam: replaces the client cache-load leg so the boot-race
+    /// version guard is drivable deterministically (defaults to the client's
+    /// identity-checked load).</summary>
+    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride { get; set; }
+
+    /// <summary>
+    /// The boot cache load. The data version is captured BEFORE the await and
+    /// re-checked after, so a fetch that landed while the load was in flight
+    /// (InitializeAsync fires the load and the boot fetch concurrently) can
+    /// never be overwritten by the stale cache.
+    /// </summary>
+    internal async Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var cached = await _client.LoadCacheAsync(cancellationToken).ConfigureAwait(false);
-            if (cached is not null) ApplySnapshot(cached);
+            int versionBefore;
+            string locationKeyBefore;
+            lock (_forecastGate) { versionBefore = _dataVersion; }
+            locationKeyBefore = WeatherClient.BuildQueryKey(BuildLocation());
+
+            // The cache is identity-checked against the CURRENT location: a
+            // cache saved for a different resolution must not surface as fresh
+            // weather (the client rejects a stamp mismatch).
+            var load = CacheLoadOverride ?? _client.LoadCacheAsync;
+            var cached = await load(BuildLocation(), cancellationToken).ConfigureAwait(false);
+            if (cached is null) return;
+
+            // The version + identity guards run INSIDE ApplySnapshot's lock:
+            // a fetch that landed during the await (version) or a hydration
+            // that changed the location (identity) must both win over the
+            // stale cache, and the check + apply are one atomic step. The
+            // boot load runs pre-hydration with the DEFAULT location, so the
+            // identity guard is what keeps the default-stamped cache from
+            // surfacing under the profile's real location.
+            bool applied = ApplySnapshot(cached, expectedVersion: versionBefore,
+                identityGuard: () => string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal));
+            if (applied)
+            {
+                // The cache load also restores the widget's resolved-name copy
+                // (the cache cannot carry candidates or population; they stay
+                // empty, exactly like the client's own load state).
+                _resolvedCityName = cached.ResolvedCityName;
+            }
+            if (!applied)
+            {
+                // The client's load already mutated its resolution state
+                // (name/lat/lon/throttle) — roll it back when the identity
+                // changed so the next resolution starts clean (a version-only
+                // skip means a fresh fetch already landed; nothing to undo).
+                bool identityChanged;
+                lock (_forecastGate)
+                {
+                    identityChanged = !string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal);
+                }
+                if (identityChanged)
+                {
+                    _client.InvalidateCoordinates();
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            // Teardown: the poll CTS was cancelled (dispose) ° a cancelled
+            // Teardown: the poll CTS was cancelled (dispose) — a cancelled
             // cache load is not a failure, so nothing is logged or applied.
         }
     }
@@ -915,7 +687,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // written by the fetch thread; the model must build from one
         // consistent view (a torn version read would freeze the cache key).
         double currentTempC, feelsLikeC, humidity, windSpeedKmH, highTempC, lowTempC;
-        int dataVersion;
+        int weatherCode, dataVersion;
+        IReadOnlyList<DailyForecastItem> daily;
+        IReadOnlyList<HourlyForecastItem> hourly;
         lock (_forecastGate)
         {
             dataVersion = _dataVersion;
@@ -925,6 +699,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             windSpeedKmH = _windSpeedKmH;
             highTempC = _highTempC;
             lowTempC = _lowTempC;
+            weatherCode = _weatherCode;
+            daily = _dailyForecastSnapshot;
+            hourly = _hourlyForecastSnapshot;
         }
 
         if (_renderModel is { } cached && IsCacheValid(cached, dataVersion, bounds))
@@ -932,8 +709,22 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             return cached;
         }
 
-        var (sx, sy, s) = WeatherLayout.Scale(bounds);
+        var (_, sy, s) = WeatherLayout.Scale(bounds);
         var header = WeatherLayout.ComputeHeader(bounds, s, sy);
+
+        // The display facts (hero temp, pills, daily/hourly strings) compose
+        // in WeatherPresentation; the model caches them alongside the data
+        // slices the draw paths need.
+        var display = WeatherPresentation.Build(new WeatherDisplayInput(
+            currentTempC,
+            new WeatherMetricsInput(
+                ShowFeelsLike, feelsLikeC,
+                ShowHumidity, humidity,
+                ShowWind, windSpeedKmH,
+                ShowHighLow, highTempC, lowTempC,
+                tempUnit, speedUnit),
+            daily,
+            hourly));
 
         var model = new WeatherRenderModel
         {
@@ -942,37 +733,32 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             LayoutMode = LayoutMode,
             UnitSystem = UnitSystem,
             CustomLabel = CustomLabel,
-            ResolvedCity = _client.ResolvedCityName,
+            ResolvedCity = _resolvedCityName,
             ShowFeelsLike = ShowFeelsLike,
             ShowHumidity = ShowHumidity,
             ShowWind = ShowWind,
             ShowHighLow = ShowHighLow,
             ShowForecast = ShowForecast,
-            MainTemp = WeatherPresentation.FormatTemp(currentTempC, tempUnit),
-            Metrics = WeatherPresentation.MetricPills(new WeatherMetricsInput(
-                ShowFeelsLike, feelsLikeC,
-                ShowHumidity, humidity,
-                ShowWind, windSpeedKmH,
-                ShowHighLow, highTempC, lowTempC,
-                tempUnit, speedUnit))
+            WeatherCode = weatherCode,
+            Daily = daily.ToArray(),
+            Hourly = hourly.ToArray(),
+            Display = display,
         };
 
         // Auto-truncated header: the city name uppercased once per model, then
         // truncated to the same max width the draw path uses.
-        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _client.ResolvedCityName : CustomLabel;
+        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _resolvedCityName : CustomLabel;
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
-        float maxTitleW = Math.Max(30f, bounds.Width - header.Pad * 2f - header.BadgeRect.Width);
+        float maxTitleW = WeatherLayout.TitleMaxWidth(bounds.Width, header.Pad, header.BadgeRect.Width);
         model.TruncatedHeader = TextRenderHelper.TruncateText(cityRaw.ToUpperInvariant(), titleFont, maxTitleW);
 
         // Pill widths: measured with the pill font the draw path derives from
-        // the same bounds (the pill shrink re-measures when it triggers).
-        model.MetricWidths = MeasurePillWidths(model.Metrics, Math.Min(sx, sy));
-
-        var (ranges, highLows) = BuildForecastStrings(_dailyForecastSnapshot, Math.Min(_dailyForecastSnapshot.Count, 5), tempUnit);
-        model.ForecastRanges = ranges;
-        model.DailyHighLows = highLows;
-
-        model.HourlyTemps = BuildHourlyStrings(_hourlyForecastSnapshot, tempUnit);
+        // the same bounds — via the renderer's shared helper, so the model's
+        // cached widths and the draw path's shrink re-measure are ONE spelling.
+        model.MetricWidths = WeatherWidgetRenderer.MeasurePillWidths(
+            model.Display.Metrics,
+            WeatherLayout.PillFontSize(s),
+            WeatherLayout.PillPadX(s));
 
         _renderModel = model;
         return model;
@@ -984,83 +770,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private bool IsCacheValid(WeatherRenderModel cached, int dataVersion, SKRect bounds)
         => cached.DataVersion == dataVersion
             && cached.Bounds == bounds
-            && cached.LayoutMode == LayoutMode
-            && cached.UnitSystem == UnitSystem
-            && cached.CustomLabel == CustomLabel
-            && cached.ResolvedCity == _client.ResolvedCityName
+            && string.Equals(cached.LayoutMode, LayoutMode, StringComparison.Ordinal)
+            && string.Equals(cached.UnitSystem, UnitSystem, StringComparison.Ordinal)
+            && string.Equals(cached.CustomLabel, CustomLabel, StringComparison.Ordinal)
+            && string.Equals(cached.ResolvedCity, _resolvedCityName, StringComparison.Ordinal)
             && cached.ShowFeelsLike == ShowFeelsLike
             && cached.ShowHumidity == ShowHumidity
             && cached.ShowWind == ShowWind
             && cached.ShowHighLow == ShowHighLow
             && cached.ShowForecast == ShowForecast;
-
-    /// <summary>Measured pill widths (text + padding) in the pill font the draw
-    /// path derives from the same WeatherLayout formulas — one spelling, so
-    /// the model's cached widths can never drift from the drawn pills.</summary>
-    private static float[] MeasurePillWidths(IReadOnlyList<string> metrics, float scale)
-    {
-        var metricFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, WeatherLayout.PillFontSize(scale));
-        float pillPadX = WeatherLayout.PillPadX(scale);
-        var widths = new float[metrics.Count];
-        for (int i = 0; i < widths.Length; i++)
-        {
-            widths[i] = metricFont.MeasureText(metrics[i]) + pillPadX * 2;
-        }
-        return widths;
-    }
-
-    private static (string[] Ranges, string[] HighLows) BuildForecastStrings(IReadOnlyList<DailyForecastItem> daily, int count, string tempUnit)
-    {
-        var ranges = new string[count];
-        var highLows = new string[count];
-        for (int i = 0; i < count; i++)
-        {
-            var day = daily[i];
-            ranges[i] = WeatherPresentation.ForecastRangeText(day.MaxTempC, day.MinTempC, tempUnit);
-            highLows[i] = WeatherPresentation.DailyHighLowText(day.MaxTempC, day.MinTempC, tempUnit);
-        }
-        return (ranges, highLows);
-    }
-
-    private static string[] BuildHourlyStrings(IReadOnlyList<HourlyForecastItem> hourly, string tempUnit)
-    {
-        int count = Math.Min(hourly.Count, 6);
-        var temps = new string[count];
-        for (int i = 0; i < count; i++)
-        {
-            temps[i] = WeatherPresentation.FormatTemp(hourly[i].TempC, tempUnit);
-        }
-        return temps;
-    }
-
-    /// <summary>
-    /// The cached render model: every formatted string the five layout modes
-    /// draw, recomputed only when its key components change. The key covers
-    /// everything that can change the strings ° the data version, the bounds
-    /// (layout-derived font sizes), and the property snapshot (mode, unit
-    /// system, custom label, visibility toggles).
-    /// </summary>
-    private sealed class WeatherRenderModel
-    {
-        public int DataVersion = int.MinValue;
-        public SKRect Bounds;
-        public string LayoutMode = "";
-        public string UnitSystem = "";
-        public string CustomLabel = "";
-        public string ResolvedCity = "";
-        public bool ShowFeelsLike;
-        public bool ShowHumidity;
-        public bool ShowWind;
-        public bool ShowHighLow;
-        public bool ShowForecast;
-
-        public string TruncatedHeader = "";
-        public string MainTemp = "";
-        public IReadOnlyList<string> Metrics = [];
-        public float[] MetricWidths = [];
-        public string[] ForecastRanges = [];
-        public string[] DailyHighLows = [];
-        public string[] HourlyTemps = [];
-    }
 }
 

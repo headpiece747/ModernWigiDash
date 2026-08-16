@@ -7,7 +7,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// process, expanded to its descendant tree (multi-process apps present from
 /// child GPU/renderer processes), else none. The producer asks one question.
 /// </summary>
-public sealed class TrackedTargetResolver
+internal sealed class TrackedTargetResolver
 {
     private const uint Th32csSnapprocess = 0x00000002;
 

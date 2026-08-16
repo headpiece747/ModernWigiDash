@@ -23,7 +23,7 @@ public sealed class LogCadence
     }
 
     /// <summary>True when this call is on cadence: every Nth call, plus the
-    /// first call when <paramref name="logFirst"/> is set. Thread-safe.</summary>
+    /// first call when the first-log flag is set. Thread-safe.</summary>
     public bool Due()
     {
         int count = Interlocked.Increment(ref _count);

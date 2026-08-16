@@ -32,7 +32,7 @@ public class HotkeyButtonWidgetTests
             ActionCommand = "https://example.com"
         };
         widget.ActionExecutor = executor.Execute;
-        await widget.InitializeAsync(context);
+        await widget.InitializeAsync(context).ConfigureAwait(false);
         return widget;
     }
 

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
@@ -8,13 +7,13 @@ namespace ModernWigiDash.Widgets;
 /// A day-row of the daily forecast strip. Shared data model between
 /// <see cref="WeatherClient"/> (producer) and the rendering widgets (consumer).
 /// </summary>
-public readonly record struct DailyForecastItem(string DayName, double MaxTempC, double MinTempC, int WeatherCode);
+internal readonly record struct DailyForecastItem(string DayName, double MaxTempC, double MinTempC, int WeatherCode);
 
 /// <summary>
 /// One column of the hourly forecast strip. Shared data model between
 /// <see cref="WeatherClient"/> (producer) and the rendering widgets (consumer).
 /// </summary>
-public readonly record struct HourlyForecastItem(string TimeLabel, double TempC, int WeatherCode);
+internal readonly record struct HourlyForecastItem(string TimeLabel, double TempC, int WeatherCode);
 
 /// <summary>
 /// A resolved place the weather is fetched for. Latitude/Longitude are the
@@ -23,7 +22,7 @@ public readonly record struct HourlyForecastItem(string TimeLabel, double TempC,
 /// <see cref="CountryCode"/> is the optional ISO country-code hint ("US",
 /// "DE", ...) that disambiguates same-named cities across countries.
 /// </summary>
-public sealed record WeatherLocation(string LocationType, string Location, string? Latitude, string? Longitude, string? CustomLabel)
+internal sealed record WeatherLocation(string LocationType, string Location, string? Latitude, string? Longitude, string? CustomLabel)
 {
     /// <summary>Optional ISO 3166-1 alpha-2 country-code hint for geocoding.</summary>
     public string? CountryCode { get; init; }
@@ -43,7 +42,7 @@ public sealed record WeatherLocation(string LocationType, string Location, strin
 /// One complete Open-Meteo fetch result. Fields are null when the response
 /// omitted that section — consumers keep their previous value in that case.
 /// </summary>
-public sealed record WeatherSnapshot(
+internal sealed record WeatherSnapshot(
     double? CurrentTempC,
     double? FeelsLikeC,
     double? Humidity,
@@ -56,6 +55,44 @@ public sealed record WeatherSnapshot(
     string ResolvedCityName,
     double Lat,
     double Lon);
+
+/// <summary>
+/// The outcome of one <see cref="WeatherClient.FetchCurrentAsync"/> call. The
+/// union shapes make "a result with no snapshot" unrepresentable: the snapshot
+/// exists only on <see cref="Fetched"/>.
+/// </summary>
+internal abstract record WeatherFetchResult
+{
+    /// <summary>A fresh snapshot was produced and the fetch completed; the
+    /// caller applies it (and may write back the resolved label). Carries the
+    /// resolved identity the snapshot was fetched for: the geocode candidates
+    /// (the widget's "Location Match" dropdown), the winner's population, and
+    /// the resolved display name, so the widget can store its own copies
+    /// instead of re-reading the client's resolution state.</summary>
+    public sealed record Fetched(
+        WeatherSnapshot Snapshot,
+        IReadOnlyList<GeocodeCandidate> Candidates,
+        double Population,
+        string ResolvedName) : WeatherFetchResult;
+
+    /// <summary>The throttle window was open; no request was made and the
+    /// caller keeps its previous state.</summary>
+    public sealed record Throttled : WeatherFetchResult;
+
+    /// <summary>Another fetch was already in flight; no request was made and
+    /// the caller keeps its previous state (the in-flight fetch applies when
+    /// it completes).</summary>
+    public sealed record InFlight : WeatherFetchResult;
+
+    /// <summary>The request failed or the location could not be resolved; no
+    /// snapshot and the caller keeps its previous state.</summary>
+    public sealed record Failed : WeatherFetchResult;
+
+    /// <summary>The resolution identity was invalidated while the fetch was in
+    /// flight; the snapshot is stale and must not be applied, and no throttle
+    /// stamp was written (the caller re-fetches the new identity immediately).</summary>
+    public sealed record Stale : WeatherFetchResult;
+}
 
 /// <summary>
 /// One geocoding candidate the user can pick from the widget's "Location
@@ -71,23 +108,49 @@ public sealed record GeocodeCandidate(string Label, string Query, double Lat, do
 }
 
 /// <summary>
-/// Deep weather data module: geocode → fetch → parse → disk cache, with an
-/// internal 5-minute fetch throttle. The widget layer only renders snapshots
-/// returned by <see cref="FetchCurrentAsync"/>.
+/// Deep weather data module: resolve (geocode) → fetch → parse → disk cache,
+/// with an internal 5-minute fetch throttle. The geocoding HTTP + parse half
+/// lives in <see cref="WeatherGeocoder"/>; this class owns the fetch claim,
+/// cache, forecast parsing, and the resolved-state routing (lat/lon/city
+/// fields). The widget layer only renders snapshots returned by
+/// <see cref="FetchCurrentAsync"/>.
 /// </summary>
-public sealed class WeatherClient
+internal sealed class WeatherClient
 {
     private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(15),
         EnableMultipleHttp2Connections = true
-    });
+    })
+    {
+        // A hung upstream must not stall the fetch claim (and the widget's
+        // render-kick cadence) indefinitely — 30s is the bound for every leg
+        // that rides the shared client.
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+
+    private readonly WeatherGeocoder _geocoder;
 
     /// <summary>The fetch throttle window — the one spelling shared by the
-    /// atomic claim (<see cref="TryBeginFetch"/>), the render-tick pre-check
-    /// (<see cref="IsFetchWindowElapsed"/>), and the widget's hidden-page
-    /// refresh loop; a change edits one constant.</summary>
+    /// atomic claim in <see cref="FetchCurrentAsync"/>, the render-tick
+    /// pre-check (<see cref="IsFetchWindowElapsed"/>), and the widget's
+    /// hidden-page refresh loop; a change edits one constant.</summary>
     internal static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
+
+    /// <summary>The maximum daily forecast rows the client ever keeps — the
+    /// parse cap, the deserialized-cache cap, and the API's own response
+    /// length share this one limit.</summary>
+    internal const int MaxFetchDays = 7;
+
+    /// <summary>The maximum hourly forecast rows the client ever keeps — the
+    /// parse cap, the deserialized-cache cap, and the API's own response
+    /// length share this one limit.</summary>
+    internal const int MaxFetchHours = 12;
+
+    /// <summary>The disk-cache size bound: a cache file larger than this is
+    /// rejected before reading (a corrupted or foreign file must never be
+    /// buffered into memory).</summary>
+    internal const long MaxCacheBytes = 1024 * 1024;
 
     private readonly string _cacheDirectory;
     private readonly Func<string> _cacheNameProvider;
@@ -97,6 +160,11 @@ public sealed class WeatherClient
     private int _fetchClaim; // 1 = a fetch is in flight (see TryBeginFetch)
     private string _lastLocationQuery = "";
 
+    /// <summary>Serializes the identity fields (_lastLocationQuery,
+    /// _lastFetchTime, _lat/_lon) between the fetch continuation (thread pool)
+    /// and the widget's invalidation calls (UI thread).</summary>
+    private readonly Lock _identityGate = new();
+
     private double? _lat;
     private double? _lon;
     // Neutral until a resolution sets a real identity (never a hardcoded city).
@@ -105,8 +173,19 @@ public sealed class WeatherClient
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
-    /// <summary>Test seam: substitute HTTP transport for fetch tests (defaults to <see cref="SharedHttpClient"/>).</summary>
-    internal HttpClient? TestHttpClient { get; set; }
+    private HttpClient? _testHttpClient;
+
+    /// <summary>Test seam: substitute HTTP transport for fetch tests (defaults to <see cref="SharedHttpClient"/>).
+    /// The geocoder follows the same seam, so both fetch legs are drivable from one property.</summary>
+    internal HttpClient? TestHttpClient
+    {
+        get => _testHttpClient;
+        set
+        {
+            _testHttpClient = value;
+            _geocoder.Http = Http;
+        }
+    }
 
     private HttpClient Http => TestHttpClient ?? SharedHttpClient;
 
@@ -154,10 +233,11 @@ public sealed class WeatherClient
     internal WeatherClient(string cacheDirectory, Func<string> cacheFileNameProvider, TimeProvider? timeProvider = null, HttpClient? http = null, Action<string, Exception?>? logError = null)
     {
         _cacheDirectory = cacheDirectory;
-        _cacheNameProvider = cacheFileNameProvider ?? (() => "weather_default.json");
+        _cacheNameProvider = cacheFileNameProvider;
         Clock = timeProvider ?? TimeProvider.System;
-        TestHttpClient = http;
         _logError = logError;
+        _geocoder = new WeatherGeocoder(SharedHttpClient, _logError);
+        TestHttpClient = http;
         Directory.CreateDirectory(cacheDirectory);
     }
 
@@ -166,23 +246,6 @@ public sealed class WeatherClient
 
     /// <summary>The cache file name the provider currently resolves (test seam).</summary>
     internal string CacheFileName => _cacheNameProvider();
-
-    /// <summary>
-    /// Atomically claims a fetch slot: true when a fetch may start (not
-    /// already in flight and, unless forced, not throttled). The in-flight
-    /// guard is Interlocked — the render tick, the refresh timer, and OnTouch
-    /// can race, and a check-then-set would let two of them through.
-    /// </summary>
-    internal bool TryBeginFetch(bool force = false)
-    {
-        if (Interlocked.CompareExchange(ref _fetchClaim, 1, 0) != 0) return false;
-        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime) < FetchWindow)
-        {
-            Interlocked.Exchange(ref _fetchClaim, 0);
-            return false;
-        }
-        return true;
-    }
 
     private void EndFetch() => Interlocked.Exchange(ref _fetchClaim, 0);
 
@@ -205,49 +268,74 @@ public sealed class WeatherClient
     /// </summary>
     internal void InvalidateLocation()
     {
-        _lat = null;
-        _lon = null;
-        _lastFetchTime = DateTime.MinValue;
-        _lastLocationQuery = "";
+        InvalidateCoordinates();
         LastCandidates = [];
     }
 
     /// <summary>
     /// Resets only the resolved coordinates and throttle — the geocode
     /// candidates stay. Used when the Location Match pick itself changes, so
-    /// the pick can resolve against the candidates it was offered from.
+    /// the pick can resolve against the candidates it was offered from. The
+    /// resolved NAME is dropped too: it describes the previous resolution and
+    /// must not render under a changed identity (a discarded cache load that
+    /// applied state here rolls back through this same path).
     /// </summary>
     internal void InvalidateCoordinates()
     {
-        _lat = null;
-        _lon = null;
-        _lastFetchTime = DateTime.MinValue;
-        _lastLocationQuery = "";
+        lock (_identityGate)
+        {
+            _lat = null;
+            _lon = null;
+            _resolvedCityName = "";
+            _lastFetchTime = DateTime.MinValue;
+            _lastLocationQuery = "";
+        }
     }
 
     /// <summary>
     /// Resolves the location (geocode or explicit coordinates), fetches current
     /// + hourly + daily weather from Open-Meteo in one request, parses it into a
-    /// snapshot, and writes the disk cache. Returns null when throttled, already
-    /// in flight, or on failure — consumers keep their previous values.
+    /// snapshot, and writes the disk cache. The outcome reports WHY no snapshot
+    /// came back when the caller cannot apply one — the widget distinguishes
+    /// "try again now" (Stale) from "keep what you have" (Throttled, InFlight,
+    /// Failed).
     /// </summary>
-    public async Task<WeatherSnapshot?> FetchCurrentAsync(WeatherLocation location, bool force = false, CancellationToken cancellationToken = default)
+    public async Task<WeatherFetchResult> FetchCurrentAsync(WeatherLocation location, bool force = false, CancellationToken cancellationToken = default)
     {
-        if (!TryBeginFetch(force)) return null;
+        // The resolution identity this fetch started for — captured once so
+        // the completion check (and the cache stamp) cannot drift from the
+        // location that actually resolved.
+        string fetchQueryKey = BuildQueryKey(location);
+
+        // The in-flight guard is Interlocked — the render tick, the refresh
+        // timer, and OnTouch can race, and a check-then-set would let two of
+        // them through. The claim's failure reason is reported so the caller
+        // can tell "already being fetched" from "cooling down".
+        if (Interlocked.CompareExchange(ref _fetchClaim, 1, 0) != 0)
+        {
+            return new WeatherFetchResult.InFlight();
+        }
+        if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime) < FetchWindow)
+        {
+            Interlocked.Exchange(ref _fetchClaim, 0);
+            return new WeatherFetchResult.Throttled();
+        }
 
         try
         {
-            string currentQuery = BuildQueryKey(location);
-            if (!_lat.HasValue || _lastLocationQuery != currentQuery || force)
-                await ResolveCoordinatesAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
+            if (!_lat.HasValue || !string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal) || force)
+                await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
 
-            if (!_lat.HasValue || !_lon.HasValue) return null;
+            if (!_lat.HasValue || !_lon.HasValue) return new WeatherFetchResult.Failed();
 
             double lat = _lat.Value;
             double lon = _lon.Value;
 
-            string forecastUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat:F4}&longitude={lon:F4}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,precipitation,cloud_cover&hourly=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto";
-            string json = await Http.GetStringAsync(forecastUrl, cancellationToken).ConfigureAwait(false);
+            // The forecast URL is built in WeatherLocationResolver with
+            // invariant F4 formatting — a comma-decimal OS locale must never
+            // interpolate "40,7100" into the query.
+            string forecastUrl = WeatherLocationResolver.BuildForecastUri(lat, lon).ToString();
+            string json = await WeatherGeocoder.ReadBoundedAsync(Http, forecastUrl, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -258,9 +346,31 @@ public sealed class WeatherClient
                 tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
                 dailyForecasts, hourlyForecasts, _resolvedCityName, lat, lon);
 
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            await SaveCacheAsync(snapshot, cancellationToken).ConfigureAwait(false);
-            return snapshot;
+            // The stale check: the widget invalidates the client (clearing
+            // _lastLocationQuery) when ANY resolution input changes. If that
+            // happened while this fetch was in flight, the resolved identity
+            // no longer matches the one this fetch started for — the snapshot
+            // is stale: no throttle stamp (the new identity's fetch must not
+            // cool down) and no cache write. The identity fields are read and
+            // cleared under one gate so a concurrent invalidation cannot tear
+            // the comparison.
+            WeatherFetchResult fetched;
+            lock (_identityGate)
+            {
+                if (!string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal))
+                {
+                    return new WeatherFetchResult.Stale();
+                }
+                // The throttle stamp and the resolved-identity payload ride
+                // the same lock as the confirmation: no invalidation can
+                // interleave and leave a stamp or payload for the OLD
+                // identity (the widget copies these into its own state).
+                _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
+                fetched = new WeatherFetchResult.Fetched(snapshot, LastCandidates, LastResolvedPopulation, _resolvedCityName);
+            }
+
+            await SaveCacheAsync(snapshot, fetchQueryKey, cancellationToken).ConfigureAwait(false);
+            return fetched;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -268,8 +378,19 @@ public sealed class WeatherClient
             // Stamp the attempt time so a failure cools down like a success —
             // otherwise the widget's render tick sees an elapsed window and
             // retries at frame rate during an outage (request + log storm).
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            return null;
+            // EXCEPT when the identity changed mid-flight: a stale failure is
+            // like a stale success — it must not block the re-fetch of the
+            // new identity, and the status must SAY so.
+            bool identityChanged;
+            lock (_identityGate)
+            {
+                identityChanged = !string.Equals(fetchQueryKey, _lastLocationQuery, StringComparison.Ordinal);
+                if (!identityChanged)
+                {
+                    _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
+                }
+            }
+            return identityChanged ? new WeatherFetchResult.Stale() : new WeatherFetchResult.Failed();
         }
         finally
         {
@@ -279,20 +400,42 @@ public sealed class WeatherClient
     }
 
     /// <summary>
-    /// Loads the disk cache and returns the stored snapshot (if any). On success
-    /// the fetch throttle is primed to "now" so a freshly cached widget does not
-    /// immediately re-fetch — matching the widget's boot semantics. The token
-    /// aborts the read on teardown, like every other fetch leg.
+    /// Loads the disk cache and returns the stored snapshot (if any). The
+    /// cache is identity-stamped at save (<see cref="WeatherCacheData.LocationQueryKey"/>);
+    /// a stamp that does not match <paramref name="location"/>'s query key is
+    /// not applied — a cache written for a different resolution (a location
+    /// edited after the last save) must never surface as fresh weather. An
+    /// empty stamp is a legacy cache (predates the identity check) and applies
+    /// as before. On success the fetch throttle is primed to "now" so a
+    /// freshly cached widget does not immediately re-fetch — matching the
+    /// widget's boot semantics. The token aborts the read on teardown, like
+    /// every other fetch leg.
     /// </summary>
-    public async Task<WeatherSnapshot?> LoadCacheAsync(CancellationToken cancellationToken = default)
+    public async Task<WeatherSnapshot?> LoadCacheAsync(WeatherLocation location, CancellationToken cancellationToken = default)
     {
         try
         {
             string path = CachePath;
             if (!File.Exists(path)) return null;
+            // A cache file larger than the bound is a corrupted/foreign file —
+            // reject it before reading a byte (a multi-megabyte file could not
+            // have been written by this client's capped save).
+            if (new FileInfo(path).Length > MaxCacheBytes)
+            {
+                _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
+                return null;
+            }
             string json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
             var data = JsonSerializer.Deserialize<WeatherCacheData>(json);
             if (data == null) return null;
+            // The identity stamp: a cache saved for a different resolution
+            // query must not be applied. An empty stamp (legacy cache) is
+            // trusted — it predates the identity check.
+            if (!string.IsNullOrEmpty(data.LocationQueryKey)
+                && !string.Equals(data.LocationQueryKey, BuildQueryKey(location), StringComparison.Ordinal))
+            {
+                return null;
+            }
             // A cache without a resolved name must not invent one (the old
             // "New York" fallback mislabeled any location) — use the cached
             // coordinates, the only truthful identity the cache carries.
@@ -302,7 +445,7 @@ public sealed class WeatherClient
             }
             else if (data.Lat is double cachedLat && data.Lon is double cachedLon)
             {
-                _resolvedCityName = $"{cachedLat.ToString("F2", CultureInfo.InvariantCulture)}, {cachedLon.ToString("F2", CultureInfo.InvariantCulture)}";
+                _resolvedCityName = WeatherGeocoder.FormatCoordinates(cachedLat, cachedLon);
             }
             else
             {
@@ -319,8 +462,11 @@ public sealed class WeatherClient
                 data.WeatherCode,
                 data.HighTempC,
                 data.LowTempC,
-                data.DailyForecasts.Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
-                data.HourlyForecasts.Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
+                // Deserialized lists are capped at the fetch limits — a
+                // hand-edited or foreign cache cannot smuggle more rows than
+                // the API ever returns.
+                (data.DailyForecasts ?? []).Take(MaxFetchDays).Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
+                (data.HourlyForecasts ?? []).Take(MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
                 _resolvedCityName,
                 data.Lat ?? 0,
                 data.Lon ?? 0);
@@ -346,7 +492,7 @@ public sealed class WeatherClient
         }
     }
 
-    private async Task SaveCacheAsync(WeatherSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task SaveCacheAsync(WeatherSnapshot snapshot, string queryKey, CancellationToken cancellationToken)
     {
         try
         {
@@ -362,11 +508,32 @@ public sealed class WeatherClient
                 ResolvedCityName = snapshot.ResolvedCityName,
                 Lat = snapshot.Lat,
                 Lon = snapshot.Lon,
+                // The identity stamp: the query key this snapshot was fetched
+                // for. LoadCacheAsync applies the cache only when the stamp
+                // matches the loading location's key (or is empty = legacy).
+                LocationQueryKey = queryKey,
                 DailyForecasts = (snapshot.DailyForecasts ?? []).Select(d => new DailyForecastData { DayName = d.DayName, MaxTempC = d.MaxTempC, MinTempC = d.MinTempC, WeatherCode = d.WeatherCode }).ToList(),
                 HourlyForecasts = (snapshot.HourlyForecasts ?? []).Select(h => new HourlyForecastData { TimeLabel = h.TimeLabel, TempC = h.TempC, WeatherCode = h.WeatherCode }).ToList()
             };
             string json = JsonSerializer.Serialize(data);
-            await File.WriteAllTextAsync(CachePath, json, cancellationToken).ConfigureAwait(false);
+            // Atomic write: the temp file is written fully, then moved over the
+            // target. A crash mid-write can never leave a truncated cache that
+            // the next boot reads as a fresh snapshot. The temp name is unique
+            // per save — a fixed "<name>.tmp" would interleave two concurrent
+            // writers (e.g. two app instances) and let a torn file win the move.
+            string path = CachePath;
+            string tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, json, cancellationToken).ConfigureAwait(false);
+                File.Move(tempPath, path, overwrite: true);
+            }
+            finally
+            {
+                // Best-effort: a crash between write and move (or a locked
+                // target) must not accumulate orphan temp files.
+                try { File.Delete(tempPath); } catch { /* best-effort cleanup */ }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -384,28 +551,45 @@ public sealed class WeatherClient
         LastResolvedPopulation = 0;
 
         // Explicit coordinates are authoritative — they must win over a stale
-        // Location Match pick from a previous city query.
+        // Location Match pick from a previous city query. The pair is only
+        // honored when BOTH values are usable coordinates: "NaN"/"Infinity"
+        // parse as doubles, so the range check is what rejects them (and the
+        // resolution falls back to the location query instead of poisoning
+        // the forecast URL).
         if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
-            && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal))
+            && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal)
+            && WeatherGeocoder.IsValidCoordinate(latVal, lonVal))
         {
             _lat = latVal;
             _lon = lonVal;
             _resolvedCityName = string.IsNullOrWhiteSpace(location.CustomLabel)
-                ? $"{latVal.ToString("F2", CultureInfo.InvariantCulture)}, {lonVal.ToString("F2", CultureInfo.InvariantCulture)}"
+                ? WeatherGeocoder.FormatCoordinates(latVal, lonVal)
                 : location.CustomLabel;
         }
-        else if (IsCoordinatePair(location.Location))
+        else if (WeatherGeocoder.TryParseCoordinatePair(location.Location, out double pairLat, out double pairLon))
         {
-            string[] parts = location.Location.Split(',');
-            _lat = double.Parse(parts[0].Trim(), CultureInfo.InvariantCulture);
-            _lon = double.Parse(parts[1].Trim(), CultureInfo.InvariantCulture);
-            _resolvedCityName = $"{_lat.Value.ToString("F2", CultureInfo.InvariantCulture)}, {_lon.Value.ToString("F2", CultureInfo.InvariantCulture)}";
+            _lat = pairLat;
+            _lon = pairLon;
+            _resolvedCityName = WeatherGeocoder.FormatCoordinates(pairLat, pairLon);
         }
-        else if (IsZipCode(location.Location))
+        else if (WeatherLocationResolver.IsZipCode(location.Location))
         {
             // The ZIP path routes by the country hint (zippopotam /de/, /us/,
             // ...); unsupported countries 404 and fall back to the geocoder.
-            await GeocodeZipCodeAsync(location, cancellationToken).ConfigureAwait(false);
+            var zip = await _geocoder.GeocodeZipAsync(location.Location, location.CountryCode, cancellationToken).ConfigureAwait(false);
+            if (zip is not null)
+            {
+                _lat = zip.Lat;
+                _lon = zip.Lon;
+                _resolvedCityName = zip.CityName;
+                return;
+            }
+
+            // The zippopotam path is US-only; fall back to the worldwide
+            // Open-Meteo geocoder WITH the original location (so the
+            // CountryCode hint is carried — e.g. "10115" + "DE" resolves the
+            // Berlin postal district).
+            await ResolveCityAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -428,7 +612,62 @@ public sealed class WeatherClient
                 }
             }
 
-            await GeocodeCityLocationAsync(location, cancellationToken).ConfigureAwait(false);
+            await ResolveCityAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The city-name resolution leg: geocodes via <see cref="WeatherGeocoder"/>
+    /// and applies the resolved state — the winner's coordinates, label, and
+    /// population; an ambiguous tie clears the resolution (the "Location
+    /// Match" dropdown stays populated with the tie's candidates); a failed
+    /// geocode leaves the previous resolution valid. Every non-resolved
+    /// outcome stamps the attempt time so the 5-minute throttle applies even
+    /// without coordinates — otherwise a typo'd city, an ambiguous tie, or an
+    /// outage would retry at render rate forever.
+    /// </summary>
+    private async Task ResolveCityAsync(WeatherLocation location, string fetchQueryKey, CancellationToken cancellationToken)
+    {
+        var result = await _geocoder.GeocodeCityAsync(location.Location, location.CountryCode, location.LocationMatch, cancellationToken).ConfigureAwait(false);
+
+        // A geocode that produced candidates refreshes the dropdown; one that
+        // produced none (failure or an empty response) leaves the last
+        // dropdown untouched.
+        if (result.Candidates.Count > 0) LastCandidates = result.Candidates;
+
+        if (result is WeatherCityGeocodeResult.Resolved r)
+        {
+            _lat = r.Lat;
+            _lon = r.Lon;
+            _resolvedCityName = r.Label;
+            LastResolvedPopulation = r.Population;
+            return;
+        }
+
+        if (result is WeatherCityGeocodeResult.Ambiguous)
+        {
+            _lat = null;
+            _lon = null;
+            // Drop the stale resolved name too: a previous resolution's
+            // name must never trap the next editor with a place the fetch
+            // never reached.
+            _resolvedCityName = "";
+        }
+
+        // A failed or ambiguous geocode leaves the coordinates unresolved:
+        // FetchCurrentAsync returns a Failed outcome (no snapshot) and the
+        // widget renders its "no data" state instead of silently pinning a
+        // default location. The throttle stamp is identity-guarded like the
+        // fetch's catch block: a geocode that failed AFTER the resolution
+        // identity changed must not cool down the NEW identity's fetch (and
+        // the outcome must say Stale so the widget re-fetches immediately).
+        lock (_identityGate)
+        {
+            if (!string.Equals(_lastLocationQuery, fetchQueryKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
         }
     }
 
@@ -517,7 +756,7 @@ public sealed class WeatherClient
 
         int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
         List<HourlyForecastItem> items = [];
-        for (int i = 0; i < Math.Min(hLen, 12); i++)
+        for (int i = 0; i < Math.Min(hLen, MaxFetchHours); i++)
         {
             string timeStr = times[i].GetString() ?? "";
             string label = timeStr.Length >= 16 ? timeStr[11..16] : $"{i}:00";
@@ -557,7 +796,7 @@ public sealed class WeatherClient
     {
         int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
         List<DailyForecastItem> items = [];
-        for (int i = 0; i < Math.Min(dLen, 7); i++)
+        for (int i = 0; i < Math.Min(dLen, MaxFetchDays); i++)
         {
             string dateStr = dTimes[i].GetString() ?? "";
             string dayName = DateTime.TryParse(dateStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate)
@@ -575,447 +814,27 @@ public sealed class WeatherClient
     /// <summary>The resolution identity key — one spelling for the client's
     /// per-query geocode cache and the widget's in-flight staleness guard:
     /// a change in any resolution input (Location, Latitude, Longitude,
-    /// CountryCode, LocationMatch) yields a different key.</summary>
+    /// CountryCode, LocationMatch) yields a different key. Fields are
+    /// backslash-escaped and joined with '|' so a separator character inside
+    /// a field can never forge a colliding key.</summary>
     internal static string BuildQueryKey(WeatherLocation location)
-        => $"{location.LocationType}_{location.Location}_{location.Latitude}_{location.Longitude}_{location.CountryCode}_{location.LocationMatch}";
+        => string.Join('|',
+            EscapeKeyField(location.LocationType), EscapeKeyField(location.Location),
+            EscapeKeyField(location.Latitude), EscapeKeyField(location.Longitude),
+            EscapeKeyField(location.CountryCode), EscapeKeyField(location.LocationMatch));
 
-    /// <summary>The geocoder search URL — the single URL builder shared by the
-    /// resolution flow and the inspector's search-as-you-type (cities and postal
-    /// codes both resolve as a name query).</summary>
-    private static Uri BuildGeocodeSearchUri(string query, string? countryCode)
-    {
-        string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=10&language=en&format=json";
-        if (!string.IsNullOrWhiteSpace(countryCode))
-            url += $"&countryCode={Uri.EscapeDataString(countryCode.Trim())}";
-        return new Uri(url);
-    }
+    private static string EscapeKeyField(string? value)
+        => (value ?? "").Replace("\\", "\\\\").Replace("|", "\\|");
 
     /// <summary>
     /// The inspector's search-as-you-type surface: geocodes <paramref name="query"/>
     /// (a city name or a postal code) into ranked candidates with their exact
     /// coordinates and population. Returns an empty list on any failure — never
     /// throws; cancellation propagates so the editor can discard stale responses.
+    /// The fetch + parse + candidate shaping live in <see cref="WeatherGeocoder"/>.
     /// </summary>
-    public async Task<IReadOnlyList<GeocodeCandidate>> SearchCitiesAsync(string query, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            string json = await Http.GetStringAsync(BuildGeocodeSearchUri(query, null), cancellationToken).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("results", out var results))
-            {
-                return [];
-            }
-
-            var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
-            foreach (var candidate in results.EnumerateArray())
-                candidates.Add(BuildGeocodeCandidate(candidate, query));
-            return candidates;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logError?.Invoke($"Location search failed for '{SanitizeLog(query)}': {ex.Message}", ex);
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// Resolves a city-name query via the Open-Meteo geocoding API. The API
-    /// ranks by population, so a bare name can resolve to the wrong same-named
-    /// city worldwide ("Victoria" -> Vitoria, Brazil). This fetches ten
-    /// candidates and ranks them: exact name match first, then a comma-suffix
-    /// match ("Springfield, MA" / "Victoria, BC" / "San Jose, Costa Rica")
-    /// against admin1/country/country_code, then the <see cref="WeatherLocation.CountryCode"/>
-    /// hint. A tie at the top score is deliberately left unresolved — the
-    /// ambiguity gate blocks the fetch until the user picks from the
-    /// candidates; population never decides the winner (an untrusted
-    /// population-decided tie would show wrong-city weather). The resolved
-    /// name carries "Name, Admin1, Country" so the widget title shows what
-    /// was picked.
-    /// </summary>
-    private async Task GeocodeCityLocationAsync(WeatherLocation location, CancellationToken cancellationToken)
-    {
-        try
-        {
-            string query = location.Location.Trim();
-            string namePart = query;
-            string? suffixPart = null;
-            int comma = query.IndexOf(',');
-            if (comma > 0)
-            {
-                namePart = query[..comma].Trim();
-                suffixPart = query[(comma + 1)..].Trim();
-                if (suffixPart.Length == 0) suffixPart = null;
-            }
-
-            string url = BuildGeocodeSearchUri(namePart, location.CountryCode).ToString();
-
-            string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
-            {
-                // Every candidate becomes a pickable option ("Location Match"
-                // dropdown): label = "Name, Admin1, Country", query = the label
-                // text so a pick re-resolves deterministically to this place.
-                var candidates = new List<GeocodeCandidate>(results.GetArrayLength());
-                foreach (var candidate in results.EnumerateArray())
-                    candidates.Add(BuildGeocodeCandidate(candidate, namePart));
-                LastCandidates = candidates;
-
-                // A persisted Location Match pick must survive restart/import:
-                // candidates are in-memory per instance, so after re-creation
-                // the stored pick cannot resolve from cache. If the pick
-                // matches a freshly geocoded candidate, promote that candidate
-                // to the winner instead of silently reverting to the ranking.
-                // The pick resolves a tie deterministically — it runs before
-                // the ambiguity gate, so a picked place never reads ambiguous.
-                if (!string.IsNullOrWhiteSpace(location.LocationMatch))
-                {
-                    var picked = candidates.FirstOrDefault(c =>
-                        c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
-                    if (picked is not null)
-                    {
-                        _lat = picked.Lat;
-                        _lon = picked.Lon;
-                        _resolvedCityName = picked.Label;
-                        LastResolvedPopulation = picked.Population;
-                        return;
-                    }
-                }
-
-                // Rank: collect (score, population, candidate) and detect a
-                // population-decided tie — when more than one candidate shares
-                // the top score, the winner is untrustworthy without a pick
-                // (the "Berlin" problem). The widget must not display
-                // wrong-city weather, so coordinates stay unresolved and the
-                // fetch returns null (the existing no-coordinates path in
-                // FetchCurrentAsync). A single top scorer is the unambiguous
-                // winner — population no longer decides anything, EXCEPT one
-                // narrow case: a tie where every candidate is in the SAME
-                // country (the geocoder lists the capital plus same-named
-                // towns — "Accra, Ghana" ties across two GH entries). The
-                // suffix already pinned the country, so the tie cannot pick a
-                // wrong country; the highest-population entry is the place.
-                var ranked = results.EnumerateArray()
-                    .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, location.CountryCode)))
-                    .ToList();
-                int bestScore = ranked.Max(r => r.Rank);
-                var topTied = ranked.Where(r => r.Rank == bestScore).ToList();
-                if (topTied.Count > 1)
-                {
-                    // The population tiebreak applies only when the suffix
-                    // actually pinned the place: every tied candidate must
-                    // have matched the suffix (all-or-nothing, so they share
-                    // the intended country) AND share one country_code. A
-                    // bare-name tie ("Berlin" + US hint) or a tie where the
-                    // suffix matched NOBODY ("Washington, District of
-                    // Columbia" — the DC candidate's name differs, so the
-                    // state Washingtons tie at the bare score) stays gated.
-                    string? tieCountry = GetString(topTied[0].Candidate, "country_code");
-                    bool sameCountryTie = !string.IsNullOrWhiteSpace(tieCountry)
-                        && topTied.All(t => GetString(t.Candidate, "country_code").Equals(tieCountry, StringComparison.OrdinalIgnoreCase))
-                        && topTied.All(t => ScoreSuffixMatch(
-                            GetString(t.Candidate, "admin1"),
-                            GetString(t.Candidate, "country"),
-                            GetString(t.Candidate, "country_code"),
-                            suffixPart) > 0);
-                    if (sameCountryTie)
-                    {
-                        var best = topTied
-                            .Select(t => (Candidate: t.Candidate, Population: ReadPopulation(t.Candidate)))
-                            .OrderByDescending(x => x.Population)
-                            .First();
-                        if (best.Population > 0)
-                        {
-                            _lat = best.Candidate.GetProperty("latitude").GetDouble();
-                            _lon = best.Candidate.GetProperty("longitude").GetDouble();
-                            _resolvedCityName = ComposeResolvedName(best.Candidate, namePart);
-                            LastResolvedPopulation = best.Population;
-                            return;
-                        }
-                    }
-                    _lat = null;
-                    _lon = null;
-                    // Drop the stale resolved name too: a previous resolution's
-                    // name must never trap the next editor with a place the
-                    // fetch never reached.
-                    _resolvedCityName = "";
-                }
-                else
-                {
-                    JsonElement best = topTied[0].Candidate;
-                    _lat = best.GetProperty("latitude").GetDouble();
-                    _lon = best.GetProperty("longitude").GetDouble();
-                    _resolvedCityName = ComposeResolvedName(best, namePart);
-                    LastResolvedPopulation = ReadPopulation(best);
-                    return;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logError?.Invoke($"Geocoding failed for '{SanitizeLog(location.Location)}': {ex.Message}", ex);
-        }
-
-        // A failed or ambiguous geocode leaves the coordinates unresolved:
-        // FetchCurrentAsync returns null and the widget renders its "no data"
-        // state instead of silently pinning a default location. Stamp the
-        // attempt time so the 5-minute throttle applies even without
-        // coordinates — otherwise a typo'd city, an ambiguous tie, or an
-        // outage would retry at render rate forever.
-        _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-    }
-
-    /// <summary>
-    /// Pure geocode-candidate ranking: exact name match dominates; the
-    /// comma-suffix (state/country) and the country-code hint add weighted
-    /// matches. Returns the score only — the caller deliberately leaves a tie
-    /// at the top score unresolved (the ambiguity gate), so population never
-    /// decides the winner.
-    /// </summary>
-    private static int RankGeocodeCandidate(JsonElement candidate, string namePart, string? suffixPart, string? countryCode)
-    {
-        string name = GetString(candidate, "name");
-        string admin1 = GetString(candidate, "admin1");
-        string country = GetString(candidate, "country");
-        string code = GetString(candidate, "country_code");
-
-        return ScoreExactName(name, namePart)
-            + ScoreSuffixMatch(admin1, country, code, suffixPart)
-            + ScoreCountryHint(code, country, countryCode);
-    }
-
-    private static string GetString(JsonElement element, string property)
-        => element.TryGetProperty(property, out var value) ? value.GetString() ?? "" : "";
-
-    /// <summary>One geocoder result → a pickable candidate: the resolved
-    /// label doubles as the query so a pick re-resolves deterministically,
-    /// and the population rides along for the search list's disambiguating
-    /// suffix — the single spelling shared by the search and resolution
-    /// paths.</summary>
-    private static GeocodeCandidate BuildGeocodeCandidate(JsonElement candidate, string fallbackName)
-    {
-        string label = ComposeResolvedName(candidate, fallbackName);
-        return new GeocodeCandidate(
-            label, label,
-            candidate.GetProperty("latitude").GetDouble(),
-            candidate.GetProperty("longitude").GetDouble())
-        {
-            Population = ReadPopulation(candidate),
-        };
-    }
-
-    /// <summary>The candidate's reported population (0 when the geocoder
-    /// omitted it) — the search list's disambiguating label data and the
-    /// resolution winner's exposed population.</summary>
-    private static double ReadPopulation(JsonElement candidate)
-        => candidate.TryGetProperty("population", out var p) && p.ValueKind == JsonValueKind.Number
-            ? p.GetDouble()
-            : 0;
-
-    private static int ScoreExactName(string name, string namePart)
-        => EqualsInsensitive(name, namePart) ? 1000 : 0;
-
-    private static int ScoreSuffixMatch(string admin1, string country, string code, string? suffixPart)
-    {
-        if (string.IsNullOrWhiteSpace(suffixPart)) return 0;
-
-        // A full label suffix ("New Hampshire, United States" — what a pick
-        // persists) must match component by component: every component must hit
-        // admin1/country/code, else the place does not match the label at all
-        // (the population tiebreak must never re-pick a wrong city from a
-        // persisted label).
-        string[] components = suffixPart.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        int score = 0;
-        foreach (string component in components)
-        {
-            if (EqualsAny(admin1, country, code, component)) score += 500;
-            else if (StartsWithAny(admin1, country, code, component)) score += 250;
-            // The renamed-country tier: the geocoder reports official names
-            // ("The Netherlands", "Republic of Türkiye") while users type the
-            // common English name ("Netherlands", "Turkey"). Contains is the
-            // lowest tier — it only breaks a tie between a renamed-country
-            // candidate and same-named places elsewhere; the all-or-nothing
-            // rule above still requires every component to match at some tier.
-            // Components shorter than 4 chars skip contains: a 2-letter code
-            // like "PR" must never substring-match "Province".
-            else if (component.Length >= 4 && ContainsAny(admin1, country, code, component)) score += 125;
-            // A renamed-country that even contains-matching cannot reach —
-            // the letters differ ("Türkiye" vs "Turkey", "Cabo Verde" vs
-            // "Cape Verde") — resolves through the alias table.
-            else if (AliasMatches(admin1, country, code, component)) score += 125;
-            else return 0;
-        }
-        return score;
-    }
-
-    private static bool EqualsAny(string admin1, string country, string code, string component)
-        => EqualsInsensitive(admin1, component)
-            || EqualsInsensitive(country, component)
-            || EqualsInsensitive(code, component);
-
-    private static bool StartsWithAny(string admin1, string country, string code, string component)
-        => StartsWithInsensitive(admin1, component)
-            || StartsWithInsensitive(country, component)
-            || StartsWithInsensitive(code, component);
-
-    private static bool ContainsAny(string admin1, string country, string code, string component)
-        => ContainsInsensitive(admin1, component)
-            || ContainsInsensitive(country, component)
-            || ContainsInsensitive(code, component);
-
-    /// <summary>Diacritic-insensitive comparison: the user's ASCII spelling
-    /// ("Asuncion", "Bogota", "Sao Paulo") must match the geocoder's accented
-    /// names ("Asunción", "Bogotá", "São Paulo") — otherwise the exact-name
-    /// bonus goes to a same-named ASCII town elsewhere and the accented
-    /// capital never wins. Normalization strips combining marks (FormD) and
-    /// periods ("St. George's" must match "St George's" — the geocoder
-    /// punctuates the Grenada capital differently than the user types).</summary>
-    private static string NormalizeForMatch(string value)
-    {
-        string normalized = value.Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-        foreach (char c in normalized)
-        {
-            if (c != '.' && CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
-            {
-                builder.Append(c);
-            }
-        }
-        return builder.ToString();
-    }
-
-    private static bool EqualsInsensitive(string a, string b)
-        => NormalizeForMatch(a).Equals(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
-
-    private static bool StartsWithInsensitive(string a, string b)
-        => NormalizeForMatch(a).StartsWith(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
-
-    private static bool ContainsInsensitive(string a, string b)
-        => NormalizeForMatch(a).Contains(NormalizeForMatch(b), StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Common English country/territory names the geocoder reports
-    /// under an official/renamed name whose letters differ (the contains tier
-    /// cannot reach these) — the user's spelling is matched against the
-    /// aliased form of each candidate's country. US-territory entries often
-    /// carry an EMPTY country field with only the code ("San Juan" is PR with
-    /// no country), so the alias resolves to the code as well.</summary>
-    private static readonly Dictionary<string, string> CountryAliases = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Turkey"] = "Türkiye",
-        ["Cape Verde"] = "Cabo Verde",
-        ["Czech Republic"] = "Czechia",
-        ["Republic of the Congo"] = "Congo Republic",
-        ["Puerto Rico"] = "PR",
-        ["Guam"] = "GU",
-        ["US Virgin Islands"] = "VI",
-        ["American Samoa"] = "AS",
-        ["Northern Mariana Islands"] = "MP",
-    };
-
-    private static bool AliasMatches(string admin1, string country, string code, string component)
-    {
-        if (!CountryAliases.TryGetValue(component, out string? official)) return false;
-        if (EqualsInsensitive(admin1, official)
-            || EqualsInsensitive(country, official)
-            || EqualsInsensitive(code, official))
-        {
-            return true;
-        }
-        // Contains only for real names — a short alias value ("PR") must
-        // never substring-match "Province".
-        return official.Length >= 4
-            && (ContainsInsensitive(admin1, official)
-                || ContainsInsensitive(country, official)
-                || ContainsInsensitive(code, official));
-    }
-
-    private static int ScoreCountryHint(string code, string country, string? countryCode)
-    {
-        if (string.IsNullOrWhiteSpace(countryCode)) return 0;
-        string hint = countryCode.Trim();
-        return code.Equals(hint, StringComparison.OrdinalIgnoreCase)
-            || country.Equals(hint, StringComparison.OrdinalIgnoreCase)
-            ? 500
-            : 0;
-    }
-
-    /// <summary>"Name, Admin1, Country" (omitting missing parts) so the widget
-    /// title shows exactly which place was picked.</summary>
-    private static string ComposeResolvedName(JsonElement candidate, string fallbackName)
-    {
-        string name = candidate.TryGetProperty("name", out var n) ? n.GetString() ?? fallbackName : fallbackName;
-        string admin1 = candidate.TryGetProperty("admin1", out var a1) ? a1.GetString() ?? "" : "";
-        string country = candidate.TryGetProperty("country", out var c) ? c.GetString() ?? "" : "";
-
-        if (string.IsNullOrWhiteSpace(admin1)) return string.IsNullOrWhiteSpace(country) ? name : $"{name}, {country}";
-        return string.IsNullOrWhiteSpace(country) ? $"{name}, {admin1}" : $"{name}, {admin1}, {country}";
-    }
-
-    private async Task GeocodeZipCodeAsync(WeatherLocation location, CancellationToken cancellationToken)
-    {
-        string zipCode = location.Location.Trim();
-        try
-        {
-            // zippopotam routes by country code: the hint selects the route
-            // ("/de/" for a German ZIP — "10115" is both Berlin's district
-            // and a Manhattan ZIP, so the US default would resolve the wrong
-            // country). Unsupported countries 404 and fall back below.
-            string country = string.IsNullOrWhiteSpace(location.CountryCode)
-                ? "us"
-                : location.CountryCode.Trim().ToLowerInvariant();
-            string url = $"https://api.zippopotam.us/{country}/{Uri.EscapeDataString(zipCode)}";
-            string json = await Http.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            // The real zippopotam shape nests the place under "places[0]"
-            // with string coordinates — the earlier root-level numeric parse
-            // matched a hand-made fixture, not the API, so every real ZIP
-            // threw, logged, and silently fell back to the postal-code
-            // geocoder (which resolves some US ZIPs to area centroids).
-            if (!root.TryGetProperty("places", out var places) || places.GetArrayLength() == 0)
-            {
-                throw new InvalidOperationException("zippopotam response has no places");
-            }
-            JsonElement place = places[0];
-            _lat = double.Parse(place.GetProperty("latitude").GetString()!, CultureInfo.InvariantCulture);
-            _lon = double.Parse(place.GetProperty("longitude").GetString()!, CultureInfo.InvariantCulture);
-            string city = place.TryGetProperty("place name", out var name) ? name.GetString() ?? "" : "";
-            string state = place.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
-            _resolvedCityName = string.IsNullOrWhiteSpace(state) ? city : $"{city}, {state}";
-            return;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logError?.Invoke($"ZIP geocoding failed for '{SanitizeLog(zipCode)}': {ex.Message}", ex);
-        }
-
-        // The zippopotam path is US-only; fall back to the worldwide Open-Meteo
-        // geocoder WITH the original location (so the CountryCode hint is
-        // carried — e.g. "10115" + "DE" resolves the Berlin postal district).
-        await GeocodeCityLocationAsync(location, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static bool IsZipCode(string query)
-    {
-        string trimmed = query.Trim();
-        return trimmed.Length == 5 && trimmed.All(char.IsDigit);
-    }
-
-    /// <summary>
-    /// Flattens user-provided strings before interpolation into log lines so
-    /// embedded newlines cannot inject fake log entries.
-    /// </summary>
-    private static string SanitizeLog(string value)
-        => value.Replace('\r', ' ').Replace('\n', ' ');
-
-    private static bool IsCoordinatePair(string query)
-    {
-        string[] parts = query.Split(',');
-        if (parts.Length != 2) return false;
-        return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)
-            && double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
-    }
+    public Task<IReadOnlyList<GeocodeCandidate>> SearchCitiesAsync(string query, CancellationToken cancellationToken = default)
+        => _geocoder.SearchCitiesAsync(query, cancellationToken);
 
     private sealed class WeatherCacheData
     {
@@ -1029,6 +848,11 @@ public sealed class WeatherClient
         public string? ResolvedCityName { get; set; }
         public double? Lat { get; set; }
         public double? Lon { get; set; }
+
+        /// <summary>The resolution query key this cache was saved for
+        /// (<see cref="BuildQueryKey"/>); null/empty on legacy caches that
+        /// predate the identity check.</summary>
+        public string? LocationQueryKey { get; set; }
         public List<DailyForecastData> DailyForecasts { get; set; } = [];
         public List<HourlyForecastData> HourlyForecasts { get; set; } = [];
     }

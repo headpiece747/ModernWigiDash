@@ -6,7 +6,7 @@ using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
-public enum UpdateState { Hidden, Available, Downloading, Ready }
+internal enum UpdateState { Hidden, Available, Downloading, Ready }
 
 /// <summary>
 /// The update button's UI states (approved mockup: Griddy icons left of Snap
@@ -53,7 +53,7 @@ public partial class MainWindow
             var info = await _updateService.CheckForUpdateAsync();
             if (info is null) return; // up-to-date/offline/failed — silent
             _pendingUpdate = info;
-            _ = Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available", info.Version));
+            _ = Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available"));
         }
         catch (Exception ex)
         {
@@ -61,7 +61,7 @@ public partial class MainWindow
         }
     }
 
-    internal void ApplyUpdateState(UpdateState state, string tooltip, string? version)
+    internal void ApplyUpdateState(UpdateState state, string tooltip)
     {
         _updateState = state;
         UpdateButton.ToolTip = tooltip;
@@ -86,17 +86,17 @@ public partial class MainWindow
 
     private async Task DownloadUpdateAsync(UpdateInfo info)
     {
-        ApplyUpdateState(UpdateState.Downloading, $"Downloading v{info.Version}… 0%", info.Version);
+        ApplyUpdateState(UpdateState.Downloading, $"Downloading v{info.Version}… 0%");
         var progress = new Progress<double>(p =>
             UpdateButton.ToolTip = $"Downloading v{info.Version}… {p * 100:F0}%");
         bool ok = await _updateService.DownloadAndStageAsync(info, progress);
         if (!ok)
         {
-            ApplyUpdateState(UpdateState.Hidden, "", null); // silent fail
+            ApplyUpdateState(UpdateState.Hidden, ""); // silent fail
             return;
         }
         _pendingUpdate = info;
-        ApplyUpdateState(UpdateState.Ready, "Restart to apply", info.Version);
+        ApplyUpdateState(UpdateState.Ready, "Restart to apply");
     }
 
     private void ShowRestartPrompt()
@@ -113,7 +113,7 @@ public partial class MainWindow
         // again instead of the app dying on the UI thread).
         if (!_updateService.LaunchUpdater(_pendingUpdate, AppContext.BaseDirectory))
         {
-            ApplyUpdateState(UpdateState.Hidden, "", null);
+            ApplyUpdateState(UpdateState.Hidden, "");
             return;
         }
 

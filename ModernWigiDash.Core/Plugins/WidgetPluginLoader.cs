@@ -5,17 +5,12 @@ namespace ModernWigiDash.Core.Plugins;
 
 /// <summary>
 /// One catalog entry. Only the fields the host actually consumes — the catalog
-/// binds PluginId/DisplayName/Category, <see cref="CreateInstance"/> needs
-/// WidgetType. The remaining metadata (description, author, version, grid
-/// size) stays on the [WidgetMetadata] attribute.
+/// binds PluginId/DisplayName/Category, <see cref="WidgetPluginLoader.CreateInstance"/>
+/// needs WidgetType. The remaining metadata (description, author, version, grid
+/// size) stays on the [WidgetMetadata] attribute. Immutable: a catalog entry
+/// never changes after registration.
 /// </summary>
-public class PluginInfo
-{
-    public string PluginId { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string Category { get; set; } = string.Empty;
-    public Type WidgetType { get; set; } = null!;
-}
+public sealed record PluginInfo(string PluginId, string DisplayName, string Category, Type WidgetType);
 
 public class WidgetPluginLoader
 {
@@ -42,18 +37,11 @@ public class WidgetPluginLoader
         if (_registeredPlugins.ContainsKey(id))
         {
             string message = $"WidgetPluginLoader: duplicate plugin id '{id}' from {widgetType.FullName}; keeping the first registration";
-            System.Diagnostics.Debug.WriteLine(message);
             FileLog.Write(message);
             return;
         }
 
-        _registeredPlugins[id] = new PluginInfo
-        {
-            PluginId = id,
-            DisplayName = name,
-            Category = attr?.Category ?? "General",
-            WidgetType = widgetType
-        };
+        _registeredPlugins[id] = new PluginInfo(id, name, attr?.Category ?? "General", widgetType);
     }
 
     /// <summary>
@@ -73,7 +61,6 @@ public class WidgetPluginLoader
         catch (ReflectionTypeLoadException ex)
         {
             string message = $"WidgetPluginLoader: {ex.LoaderExceptions.Length} type(s) failed to load from {assembly.FullName}; registering the loadable subset";
-            System.Diagnostics.Debug.WriteLine(message);
             FileLog.Write(message);
             types = ex.Types.OfType<Type>().ToArray();
         }
@@ -87,25 +74,47 @@ public class WidgetPluginLoader
         }
     }
 
-    public IModernWidget? CreateInstance(string pluginId)
+    /// <summary>
+    /// Instantiates the plugin's widget type, distinguishing a broken widget
+    /// (constructor threw, <see cref="WidgetCreateResult.Broken"/>) from an
+    /// absent one (unknown id, <see cref="WidgetCreateResult.NotFound"/>), so
+    /// hosts can surface the failure reason in their diagnostics.
+    /// </summary>
+    internal WidgetCreateResult CreateInstanceResult(string pluginId)
     {
         if (!_registeredPlugins.TryGetValue(pluginId, out var info))
         {
-            return null;
+            return new WidgetCreateResult.NotFound();
         }
 
         try
         {
-            return (IModernWidget?)Activator.CreateInstance(info.WidgetType);
+            return new WidgetCreateResult.Ok((IModernWidget)Activator.CreateInstance(info.WidgetType)!);
         }
         catch (Exception ex)
         {
             // A widget whose constructor throws must not crash the host; surface
             // the failure so the catalog can show the plugin as broken.
+            // Activator.CreateInstance wraps a throwing constructor in
+            // TargetInvocationException — unwrap it so the reason carries the
+            // widget's actual failure, not the wrapper's boilerplate.
+            if (ex is TargetInvocationException tie && tie.InnerException is not null)
+            {
+                ex = tie.InnerException;
+            }
             string message = $"Widget instantiation failed for {pluginId} ({info.WidgetType.FullName}): {ex.Message}";
-            System.Diagnostics.Debug.WriteLine(message);
             FileLog.Write(message);
-            return null;
+            return new WidgetCreateResult.Broken(message);
         }
     }
+
+    /// <summary>Convenience wrapper over <see cref="CreateInstanceResult"/>: the
+    /// widget instance, or null when the plugin is absent or broken. Call sites
+    /// that cannot act on the distinction keep compiling unchanged.</summary>
+    public IModernWidget? CreateInstance(string pluginId)
+        => CreateInstanceResult(pluginId) switch
+        {
+            WidgetCreateResult.Ok ok => ok.Widget,
+            _ => null
+        };
 }

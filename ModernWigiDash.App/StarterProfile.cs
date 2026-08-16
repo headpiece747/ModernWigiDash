@@ -12,7 +12,7 @@ namespace ModernWigiDash.App;
 /// can read <see cref="Layout"/> without instantiating widgets (no network,
 /// timer, or audio-capture side effects).
 /// </summary>
-public sealed class StarterProfile
+internal sealed class StarterProfile
 {
     /// <summary>One default widget placement on the 1016x592 canvas.</summary>
     /// <param name="PluginId">Widget plugin id from the catalog.</param>
@@ -20,12 +20,12 @@ public sealed class StarterProfile
     /// <param name="Y">Top edge on the 1016x592 canvas.</param>
     /// <param name="Width">Width in pixels (&gt; 0).</param>
     /// <param name="Height">Height in pixels (&gt; 0).</param>
-    public sealed record StarterPlacement(string PluginId, float X, float Y, float Width, float Height);
+    internal sealed record StarterPlacement(string PluginId, float X, float Y, float Width, float Height);
 
     /// <summary>One named starter page holding its widget placements.</summary>
     /// <param name="Name">Page name.</param>
     /// <param name="Placements">Widget placements on the page.</param>
-    public sealed record StarterPage(string Name, IReadOnlyList<StarterPlacement> Placements);
+    internal sealed record StarterPage(string Name, IReadOnlyList<StarterPlacement> Placements);
 
     public static IReadOnlyList<StarterPage> Layout { get; } =
     [

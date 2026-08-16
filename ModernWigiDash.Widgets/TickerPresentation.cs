@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -31,7 +29,7 @@ public static class TickerPresentation
 
     /// <summary>The display price with the currency symbol.</summary>
     public static string FormatPrice(decimal rawPrice, string decimalsChoice, string currencySymbol = "$")
-        => currencySymbol + rawPrice.ToString("N" + DecimalsFor(decimalsChoice, rawPrice), CultureInfo.InvariantCulture);
+        => currencySymbol + DisplayFormat.Number(rawPrice, DecimalsFor(decimalsChoice, rawPrice));
 
     /// <summary>
     /// The widget's label: the user's display name wins, then an FX pair's

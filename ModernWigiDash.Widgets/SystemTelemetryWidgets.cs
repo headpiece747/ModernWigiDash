@@ -49,7 +49,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
     private SensorReadingDto? MatchReading(SensorSnapshotDto snapshot)
     {
-        if (!ReferenceEquals(snapshot, _lastMatchSnapshot) || _lastMatchLabel != SensorLabel)
+        if (!ReferenceEquals(snapshot, _lastMatchSnapshot) || !string.Equals(_lastMatchLabel, SensorLabel, StringComparison.Ordinal))
         {
             _lastMatchSnapshot = snapshot;
             _lastMatchLabel = SensorLabel;

@@ -37,16 +37,16 @@ public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
         => new(_emptyValue, defaultMaxAge: maxAge, timeProvider: timeProvider);
 
     /// <summary>
-    /// Internal test seam: builds a store bound to a fake clock (and optional
+    /// Test seam: builds a store bound to a fake clock (and optional
     /// max age) so the facade freshness tests can drive time. The production
     /// singleton binds <see cref="TimeProvider.System"/> at construction.
     /// </summary>
-    public TelemetryStore<TRecord> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
+    internal TelemetryStore<TRecord> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
         => Create(timeProvider, maxAge ?? DefaultMaxAge);
 
-    /// <summary>Internal test seam: installs the store behind the read/update
+    /// <summary>Test seam: installs the store behind the read/update
     /// surface (see <see cref="CreateStoreForTest"/>).</summary>
-    public TelemetryStore<TRecord> StoreForTest
+    internal TelemetryStore<TRecord> StoreForTest
     {
         get => _store;
         set => _store = value ?? throw new ArgumentNullException(nameof(value));

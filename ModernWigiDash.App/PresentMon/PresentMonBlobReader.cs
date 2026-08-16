@@ -8,7 +8,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// frame's worth of per-element values read at each element's <c>DataOffset</c>.
 /// Numeric poll results are stored as IEEE-754 doubles.
 /// </summary>
-public static class PresentMonBlobReader
+internal static class PresentMonBlobReader
 {
     /// <summary>
     /// Total bytes occupied by one swap chain's worth of dynamic-query results:

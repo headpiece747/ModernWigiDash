@@ -12,7 +12,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// <param name="ForeignStreak">Consecutive polls the live root has been absent.</param>
 /// <param name="CheckingAdopted">True while the frozen-data guard holds.</param>
 /// <param name="Outcome">What this poll decided.</param>
-public sealed record FrameTimePollDiagnostics(
+internal sealed record FrameTimePollDiagnostics(
     string? ForegroundTitle,
     IReadOnlyList<int> Candidates,
     int LiveRootPid,

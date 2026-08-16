@@ -1,6 +1,9 @@
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Core.Theming;
 
 /// <summary>HSV color value. H in [0,360), S and V in [0,1].</summary>
+[StructLayout(LayoutKind.Sequential)]
 public readonly record struct HsvColor(double H, double S, double V);
 
 /// <summary>

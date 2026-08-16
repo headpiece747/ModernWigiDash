@@ -3,10 +3,11 @@ using ModernWigiDash.Widgets.Twitch;
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The Twitch IRC wire-format parser (TwitchIrcMessages) plus the NOTICE →
-/// status rules (TwitchChatPresentation.StatusFromNotice) — the protocol was
+/// The Twitch IRC wire-format parser (TwitchIrcMessages) — the protocol was
 /// extracted from TwitchChatStreamWidget so the framing, tags, escapes, the
-/// 400-char cap, and the name palette are directly testable.
+/// 400-char cap, and the name palette are directly testable. The NOTICE →
+/// status rules moved to <see cref="TwitchChatStatusPolicyTests"/> with the
+/// policy module split.
 /// </summary>
 [TestClass]
 public class TwitchIrcMessagesTests
@@ -117,45 +118,5 @@ public class TwitchIrcMessagesTests
     {
         // hash(17, 'a'=97) = 17*31+97 = 624; 624 % 8 = 0.
         Assert.AreEqual(TwitchIrcMessages.NamePalette[0], TwitchIrcMessages.PaletteColorFor("a"));
-    }
-
-    [TestMethod]
-    public void StatusFromNotice_LoginAuthenticationFailed_Disconnects()
-    {
-        var (status, changed) = TwitchChatPresentation.StatusFromNotice("Login authentication failed", ChatStatus.Connecting);
-        Assert.IsTrue(changed);
-        Assert.AreEqual(ChatStatus.Disconnected, status);
-    }
-
-    [TestMethod]
-    public void StatusFromNotice_InvalidNick_Disconnects()
-    {
-        var (status, changed) = TwitchChatPresentation.StatusFromNotice("Invalid NICK", ChatStatus.Connecting);
-        Assert.IsTrue(changed);
-        Assert.AreEqual(ChatStatus.Disconnected, status);
-    }
-
-    [TestMethod]
-    public void StatusFromNotice_LoginFailureMatchingIsCaseInsensitive()
-    {
-        var (status, changed) = TwitchChatPresentation.StatusFromNotice("LOGIN AUTHENTICATION FAILED", ChatStatus.Connecting);
-        Assert.IsTrue(changed);
-        Assert.AreEqual(ChatStatus.Disconnected, status);
-    }
-
-    [TestMethod]
-    public void StatusFromNotice_NotLoggedIn_Connects()
-    {
-        var (status, changed) = TwitchChatPresentation.StatusFromNotice("you are not logged in", ChatStatus.Disconnected);
-        Assert.IsTrue(changed);
-        Assert.AreEqual(ChatStatus.Connected, status);
-    }
-
-    [TestMethod]
-    public void StatusFromNotice_AnyOtherNotice_KeepsTheCurrentStatus()
-    {
-        var (status, changed) = TwitchChatPresentation.StatusFromNotice("This room is in slow mode", ChatStatus.Connected);
-        Assert.IsFalse(changed);
-        Assert.AreEqual(ChatStatus.Connected, status);
     }
 }

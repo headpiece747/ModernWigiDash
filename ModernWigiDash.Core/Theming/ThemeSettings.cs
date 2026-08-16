@@ -3,12 +3,15 @@ using System.Reflection;
 using System.Text.Json;
 using ModernWigiDash.Sdk;
 
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Core.Theming;
 
 /// <summary>
 /// WPF-free color value produced by <see cref="ThemeSettings.ParseColor"/>.
 /// Kept as a plain record struct so the Core library has no UI framework dependency.
 /// </summary>
+[StructLayout(LayoutKind.Sequential)]
 public readonly record struct RgbaColor(byte A, byte R, byte G, byte B);
 
 /// <summary>

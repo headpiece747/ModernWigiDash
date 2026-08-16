@@ -162,7 +162,7 @@ internal static class SymbolCatalog
     internal static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);
 
     internal static string NormalizeSymbol(string symbol) =>
-        CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper();
+        CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpperInvariant();
 
     /// <summary>
     /// Maps a user-entered symbol to the canonical feed key for an asset kind:
@@ -171,13 +171,13 @@ internal static class SymbolCatalog
     /// </summary>
     internal static string ToFeedKey(string symbol, AssetKind kind) => kind switch
     {
-        AssetKind.Crypto => CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpper(),
+        AssetKind.Crypto => CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpperInvariant(),
         AssetKind.Fx => NormalizeFxKey(symbol),
-        _ => symbol.ToUpper()
+        _ => symbol.ToUpperInvariant()
     };
 
     // Timeout guards the match against catastrophic backtracking on hostile input.
-    private static readonly Regex FxPairRegex = new("^([A-Za-z]{3})/([A-Za-z]{3})$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+    private static readonly Regex FxPairRegex = new("^(?<base>[A-Za-z]{3})/(?<quote>[A-Za-z]{3})$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     internal static bool TryParseFxPair(string symbol, out string baseCurrency, out string quoteCurrency)
     {
@@ -186,8 +186,8 @@ internal static class SymbolCatalog
         if (string.IsNullOrWhiteSpace(symbol)) return false;
         Match match = FxPairRegex.Match(symbol.Trim());
         if (!match.Success) return false;
-        baseCurrency = match.Groups[1].Value.ToUpperInvariant();
-        quoteCurrency = match.Groups[2].Value.ToUpperInvariant();
+        baseCurrency = match.Groups["base"].Value.ToUpperInvariant();
+        quoteCurrency = match.Groups["quote"].Value.ToUpperInvariant();
         return true;
     }
 

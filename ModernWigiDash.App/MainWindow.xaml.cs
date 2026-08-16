@@ -228,7 +228,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // path carries the desktop edit-mode veto.
         _usbDevice.OnTouchEvent += (point, touchType) =>
         {
-            Dispatcher.BeginInvoke(() =>
+            _ = Dispatcher.BeginInvoke(() =>
             {
                 if (touchType == TouchEventType.TouchDown)
                 {
@@ -429,11 +429,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// source is exempted, skip work after the close/teardown sequence began.
     /// </summary>
     private void Hop(Action action, bool guardClose = true)
-        => Dispatcher.BeginInvoke(() =>
+    {
+        _ = Dispatcher.BeginInvoke(() =>
         {
             if (guardClose && App.IsClosing) return;
             action();
         });
+    }
 
     /// <summary>
     /// One refresh funnel for every manipulation outcome: the input controller

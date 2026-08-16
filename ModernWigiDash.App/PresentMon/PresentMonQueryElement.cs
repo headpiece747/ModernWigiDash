@@ -11,7 +11,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// the element's value lives inside each polled blob.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public readonly record struct PresentMonQueryElement(
+internal readonly record struct PresentMonQueryElement(
     uint Metric,
     uint Stat,
     uint DeviceId,

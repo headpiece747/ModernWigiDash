@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.Widgets;
@@ -88,10 +90,11 @@ public class WeatherClientTests
     """;
 
     // The real Open-Meteo candidate set for a bare "Berlin" (captured from the
-    // live API): five places share the exact name, Germany has the population —
-    // so without a suffix or country hint the population tiebreak picks Berlin,
-    // Germany (the reported on-device symptom: a US Berlin user saw Berlin DE's
-    // weather). The suffix and country-hint tests below pin the escape routes.
+    // live API): FOUR places share the exact name (DE, NH, NJ, WI) plus one
+    // Brunswick decoy - the bare-name tie returns null (no fetch) instead of a
+    // population-decided pick, so the reported on-device symptom (a US Berlin
+    // user seeing Berlin DE's weather) cannot recur. The suffix and
+    // country-hint tests below pin the escape routes out of the tie.
     internal const string SampleBerlines = """
     {
       "results": [
@@ -127,6 +130,12 @@ public class WeatherClientTests
 
     private static WeatherLocation CoordinateLocation => new("Fixed Location", "40.71,-74.00", null, null, null);
 
+    /// <summary>The snapshot of a fetch outcome, or null for every non-Fetched
+    /// outcome - the pre-outcome tests' null/values assertions keep their exact
+    /// semantics (the outcome's kind itself is pinned by the outcome tests).</summary>
+    private static async Task<WeatherSnapshot?> SnapshotOf(Task<WeatherFetchResult> fetch)
+        => (await fetch.ConfigureAwait(false)) is WeatherFetchResult.Fetched { Snapshot: var snapshot } ? snapshot : null;
+
     private static WeatherClient CreateClient(HttpMessageHandler stub, FakeTimeProvider? clock = null, string? cacheDirectory = null)
         => new(cacheDirectory ?? NewTempDir(), "weather_test.json", timeProvider: clock, http: new HttpClient(stub));
 
@@ -153,7 +162,7 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(12.5, snapshot.CurrentTempC);
@@ -174,6 +183,36 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_ForecastUrl_IsInvariantUnderCommaDecimalCulture()
+    {
+        // The forecast URL is built with invariant F4 formatting: under a
+        // comma-decimal OS locale (de-DE) the coordinates must still read
+        // "latitude=40.7100", never "latitude=40,7100" — the comma form is
+        // rejected (or mis-read) by the API.
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+
+            var stub = new StubHttpHandler(Respond);
+            var client = CreateClient(stub);
+
+            var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+            Assert.IsNotNull(snapshot);
+            string url = stub.RequestUrls.Single(u => u.Contains("/v1/forecast", StringComparison.Ordinal));
+            Assert.AreEqual(
+                "https://api.open-meteo.com/v1/forecast?latitude=40.7100&longitude=-74.0000&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,precipitation,cloud_cover&hourly=temperature_2m,relative_humidity_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto",
+                url,
+                "the forecast URL must be identical under any OS locale (invariant F4)");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_HumidityAndFeelsLike_ComeFromCurrentBlockNotMidnightBucket()
     {
         // Precision regression: the hourly array starts at local midnight, so
@@ -184,7 +223,7 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(60, snapshot.Humidity, "humidity must come from the current block (60), not the midnight hourly bucket (40)");
@@ -203,7 +242,7 @@ public class WeatherClientTests
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(CoordinateLocation);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(12.5, snapshot.CurrentTempC);
@@ -231,7 +270,7 @@ public class WeatherClientTests
         // A user pick resolves DIRECTLY to that candidate — no re-geocode.
         string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
         int geocodesBefore = stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal));
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(-20.3194, snapshot.Lat);
@@ -255,7 +294,7 @@ public class WeatherClientTests
         // The pick references a candidate that no longer exists (the query
         // changed and re-geocoded, replacing the candidate list) — must fall
         // back to normal geocoding instead of failing.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = "Gone, Nowhere, Atlantis" });
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = "Gone, Nowhere, Atlantis" }));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(48.4284, snapshot.Lat, "Fallback geocoding must resolve the exact-name match (Victoria, Canada)");
@@ -281,13 +320,13 @@ public class WeatherClientTests
         // Pick Vitoria (the last candidate) from the "Victoria" resolution.
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
         string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
-        var pickSnapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        var pickSnapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
         Assert.AreEqual(-20.3194, pickSnapshot!.Lat, "The pick itself must still resolve to Vitoria");
 
         // Changing Location must drop the candidates, so the stale pick cannot
         // win: "Berlin" must geocode to Berlin.
         client.InvalidateLocation();
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null) { LocationMatch = picked }, force: true);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null) { LocationMatch = picked }, force: true));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(52.52, snapshot.Lat, "After InvalidateLocation the stale pick must not override the new Location");
@@ -307,7 +346,7 @@ public class WeatherClientTests
 
         // A pick from a previous city resolution must never override explicit
         // lat/lon overrides (they are documented as authoritative).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", "40.1", "-75.2", null) { LocationMatch = "Victoria, British Columbia, Canada" });
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", "40.1", "-75.2", null) { LocationMatch = "Victoria, British Columbia, Canada" }));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(40.1, snapshot.Lat);
@@ -334,7 +373,7 @@ public class WeatherClientTests
         // "10115" + "DE": the US-only zippopotam path fails, and the worldwide
         // fallback must carry the country-code hint so Berlin's postal district
         // resolves (the spec's named scenario).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE"));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE")));
 
         Assert.IsNotNull(snapshot);
         Assert.IsNotNull(searchUrl);
@@ -360,7 +399,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual("Berlin, Germany", snapshot.ResolvedCityName, "The resolved name must carry the country so a wrong pick is visible");
@@ -384,7 +423,7 @@ public class WeatherClientTests
 
         // "Victoria" must resolve to Victoria, Canada — not Vitoria, Brazil,
         // which the API ranks first by population (the reported bug).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(48.4284, snapshot.Lat);
@@ -405,7 +444,7 @@ public class WeatherClientTests
 
         // Missouri is listed first with more people; the ", MA" suffix must
         // pick Springfield, Massachusetts anyway.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Springfield, MA", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Springfield, MA", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(42.10148, snapshot.Lat);
@@ -432,7 +471,7 @@ public class WeatherClientTests
         var client = CreateClient(stub);
 
         // Identical city names in two countries: the CR hint must pick Costa Rica.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose", null, null, null, "CR"));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose", null, null, null, "CR")));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(9.92807, snapshot.Lat);
@@ -453,7 +492,7 @@ public class WeatherClientTests
         // as a fetch failure (the request may still be dispatched before the
         // pipeline observes the token; the contract is the propagation).
         await Assert.ThrowsAsync<OperationCanceledException>(
-            () => client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), cancellationToken: cts.Token));
+            async () => await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), cancellationToken: cts.Token).ConfigureAwait(false));
     }
 
     [TestMethod]
@@ -468,10 +507,13 @@ public class WeatherClientTests
         var client = CreateClient(stub);
 
         // A bare "Berlin" ties four candidates on the exact name; without a pick
-        // the population choice is untrustworthy — wrong data must never display.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        // the population choice is untrustworthy — wrong data must never display,
+        // and the gate must not even reach the forecast endpoint.
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null)));
 
         Assert.IsNull(snapshot, "an ambiguous bare name must not fetch weather");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "an ambiguous name must not reach the forecast endpoint");
     }
 
     [TestMethod]
@@ -486,31 +528,13 @@ public class WeatherClientTests
         var client = CreateClient(stub);
 
         // A persisted Location Match pick resolves the tie deterministically.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation(
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation(
             "Fixed Location", "Berlin", null, null, null)
-        { LocationMatch = "Berlin, New Hampshire, United States" });
+        { LocationMatch = "Berlin, New Hampshire, United States" }));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(44.46867, snapshot.Lat, 0.0001, "the picked Berlin, NH must win over the population choice");
         Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
-    }
-
-    [TestMethod]
-    public async Task FetchCurrentAsync_UnambiguousName_FetchesTheWinner()
-    {
-        var stub = new StubHttpHandler(request =>
-        {
-            string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
-        });
-        var client = CreateClient(stub);
-
-        // "Victoria" ties no candidate on the exact name — the exact-match winner
-        // is unambiguous and fetches instantly.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-
-        Assert.IsNotNull(snapshot);
     }
 
     [TestMethod]
@@ -525,16 +549,33 @@ public class WeatherClientTests
         var client = CreateClient(stub);
 
         // The full-state suffix "Berlin, New Hampshire" must pick Berlin, NH —
-        // the suffix beats the population tiebreak (note: the two-letter
-        // abbreviation "NH" does NOT match — the abbreviation support only
-        // covers state names that start with their abbreviation, for example "MA"
-        // the working escape routes are the full state name, the CountryCode
-        // hint, or the Location Match dropdown).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire", null, null, null));
+        // the suffix beats the population tiebreak. The two-letter
+        // abbreviation "NH" matches through the StateAbbreviations table too
+        // (see FetchCurrentAsync_TwoLetterStateAbbreviation_SuffixPicksTheState).
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(44.46867, snapshot.Lat);
         Assert.AreEqual(-71.18508, snapshot.Lon);
+        Assert.AreEqual("Berlin, New Hampshire, United States", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_TwoLetterStateAbbreviation_SuffixPicksTheState()
+    {
+        // "Berlin, NH" — the two-letter abbreviation resolves through the
+        // StateAbbreviations table, not a StartsWith rule.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, NH", null, null, null)));
+
+        Assert.IsNotNull(snapshot);
         Assert.AreEqual("Berlin, New Hampshire, United States", snapshot.ResolvedCityName);
     }
 
@@ -555,7 +596,7 @@ public class WeatherClientTests
         // winner the gate exists to block — the pick must come from the
         // "Location Match" dropdown. (The hint still disambiguates when it
         // leaves a single winner, e.g. San Jose + CR.)
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null, "US"));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null, "US")));
 
         Assert.IsNull(snapshot, "a hint that leaves multiple candidates tied must not fetch weather");
     }
@@ -574,28 +615,11 @@ public class WeatherClientTests
         // The full label "Berlin, New Hampshire, United States" (what a pick
         // persists) must resolve deterministically: both suffix components match
         // Berlin NH only — the population tiebreak must not come into play.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
-
-        Assert.IsNotNull(snapshot);
-        Assert.AreEqual(44.46867, snapshot.Lat, 0.0001);
-        Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
-    }
-
-    [TestMethod]
-    public async Task FetchCurrentAsync_TwoPartStateAndCountryLabel_MatchesAdmin1AndCountry()
-    {
-        var stub = new StubHttpHandler(request =>
-        {
-            string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleBerlines);
-            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
-        });
-        var client = CreateClient(stub);
-
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(44.46867, snapshot.Lat, 0.0001, "admin1 'New Hampshire' and country 'United States' must both match");
+        Assert.AreEqual(-71.18508, snapshot.Lon, 0.0001);
     }
 
     [TestMethod]
@@ -612,7 +636,7 @@ public class WeatherClientTests
         // "Berlin, Ontario, United States": no candidate has admin1/country
         // "Ontario" — every component must match, so no suffix score; the bare
         // name tie then flags ambiguity (no fetch).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, Ontario, United States", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, Ontario, United States", null, null, null)));
 
         Assert.IsNull(snapshot, "a non-matching suffix component must not resolve to a population pick");
     }
@@ -623,7 +647,7 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10001", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10001", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(40.7505, snapshot.Lat);
@@ -641,7 +665,7 @@ public class WeatherClientTests
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null)));
 
         Assert.IsNull(snapshot, "A failed geocode must leave coordinates unresolved so the widget shows its no-data state");
     }
@@ -670,6 +694,43 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_NonFiniteExplicitCoordinates_FallBackToLocationResolution()
+    {
+        // "NaN"/"Infinity" explicit overrides must never resolve to non-finite
+        // coordinates (they parse as doubles!) — the override is rejected and
+        // the resolution falls back to the location query.
+        var stub = new StubHttpHandler(Respond);
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "40.71,-74.00", "NaN", "Infinity", null)));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(40.71, snapshot.Lat, "the location pair must resolve once the overrides are rejected");
+        Assert.AreEqual(-74.00, snapshot.Lon);
+        Assert.IsTrue(double.IsFinite(snapshot.Lat) && double.IsFinite(snapshot.Lon),
+            "no coordinate may ever be NaN/Infinity");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_OutOfRangeCoordinatePair_DoesNotFetch()
+    {
+        // A "91, 0" pair is rejected by the coordinate validation, and the
+        // geocode of the literal pair fails — the fetch must yield null
+        // without ever reaching the forecast endpoint.
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleForecast)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "91, 0", null, null, null)));
+
+        Assert.IsNull(snapshot, "an out-of-range pair must not resolve to weather");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "an out-of-range pair must not reach the forecast endpoint");
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_ForecastFailure_ThrottlesRetries()
     {
         // Regression guard: a forecast failure (geocode OK, forecast 500)
@@ -682,7 +743,7 @@ public class WeatherClientTests
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var client = CreateClient(stub, clock: clock);
 
-        var first = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null));
+        var first = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null)));
         Assert.IsNull(first, "The forecast failure must return null");
         int callsAfterFirst = stub.Calls;
 
@@ -711,10 +772,10 @@ public class WeatherClientTests
 
         // Fresh instance, no prior geocode: the persisted pick must win over
         // the exact-name ranking (Victoria, Canada) and resolve to Vitoria.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null)
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null)
         {
             LocationMatch = "Vitória, Espírito Santo, Brazil"
-        });
+        }));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(-20.3194, snapshot.Lat);
@@ -728,7 +789,7 @@ public class WeatherClientTests
         var stub = new StubHttpHandler(Respond);
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "New York", "40.1", "-75.2", null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "New York", "40.1", "-75.2", null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(40.1, snapshot.Lat);
@@ -748,12 +809,12 @@ public class WeatherClientTests
         await client.FetchCurrentAsync(CoordinateLocation, force: true);
         int afterFirst = stub.Calls;
 
-        var throttled = await client.FetchCurrentAsync(CoordinateLocation);
+        var throttled = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNull(throttled, "Within the 5-minute window a non-forced fetch must be throttled away");
         Assert.AreEqual(afterFirst, stub.Calls, "The 5-minute throttle must suppress a second fetch");
 
         clock.Advance(TimeSpan.FromMinutes(6));
-        var resumed = await client.FetchCurrentAsync(CoordinateLocation);
+        var resumed = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNotNull(resumed, "After the throttle window elapses, fetching resumes");
         Assert.IsTrue(stub.Calls > afterFirst, "After the throttle window elapses, the transport must be hit again");
     }
@@ -769,11 +830,73 @@ public class WeatherClientTests
         await TestWait.WaitUntilAsync(() => stub.Calls == 1, TimeSpan.FromSeconds(5));
 
         var second = await client.FetchCurrentAsync(CoordinateLocation);
-        Assert.IsNull(second, "A fetch while one is already in flight must be skipped");
+        Assert.IsInstanceOfType(second, typeof(WeatherFetchResult.InFlight),
+            "a fetch while one is already in flight must report InFlight");
 
         gate.SetResult();
-        var first = await inFlight;
+        var first = await SnapshotOf(inFlight);
         Assert.IsNotNull(first, "The in-flight fetch itself must complete successfully");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_FetchedThrottledAndFailed_ReportTheirOutcome()
+    {
+        // The outcome's kind is the caller's policy input: Fetched when a
+        // snapshot came back, Throttled inside the window, Failed on an error.
+        // (The union shapes make "a result without a snapshot" unrepresentable -
+        // the snapshot exists only on Fetched.)
+        var stub = new StubHttpHandler(Respond);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var client = CreateClient(stub, clock);
+
+        var fetched = await client.FetchCurrentAsync(CoordinateLocation, force: true);
+        Assert.IsInstanceOfType(fetched, typeof(WeatherFetchResult.Fetched));
+        Assert.IsNotNull(((WeatherFetchResult.Fetched)fetched).Snapshot);
+
+        var throttled = await client.FetchCurrentAsync(CoordinateLocation);
+        Assert.IsInstanceOfType(throttled, typeof(WeatherFetchResult.Throttled),
+            "a non-forced fetch inside the window must report Throttled");
+
+        var failClient = CreateClient(new StubHttpHandler(_ => StubHttpHandler.NotFound()));
+        var failed = await failClient.FetchCurrentAsync(CoordinateLocation);
+        Assert.IsInstanceOfType(failed, typeof(WeatherFetchResult.Failed),
+            "a failed fetch must report Failed");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_IdentityInvalidatedMidFlight_ReturnsStaleWithoutThrottleStamp()
+    {
+        // The stale contract: when the resolution identity is invalidated
+        // while a fetch is in flight (the widget's OnPropertyChanged calls
+        // InvalidateLocation/InvalidateCoordinates, clearing the client's
+        // query identity), the completed fetch reports Stale with no snapshot
+        // - and, critically, without stamping the throttle, so the new
+        // identity's fetch does not cool down.
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        }, gate);
+        var client = CreateClient(stub);
+
+        var fetching = client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), force: true);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+
+        client.InvalidateLocation(); // the widget's edit-time invalidation
+        gate.SetResult();
+        var result = await fetching;
+
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
+            "an invalidated identity must report the result stale");
+        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+            "a stale result must not stamp the throttle window");
+
+        // The new identity's fetch must run immediately (the stale path left
+        // the throttle open) and resolve fresh.
+        var fresh = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), force: true);
+        Assert.IsInstanceOfType(fresh, typeof(WeatherFetchResult.Fetched));
     }
 
     [TestMethod]
@@ -784,20 +907,20 @@ public class WeatherClientTests
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
         var client = CreateClient(stub, clock: clock);
 
-        var failed = await client.FetchCurrentAsync(CoordinateLocation);
+        var failed = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNull(failed, "A failed fetch must yield null, not throw");
 
         // A failure cools down like a success (the retry-storm guard) — a
         // non-forced retry within the window must be throttled away.
         int callsAfterFirst = stub.Calls;
         fail = false;
-        var throttled = await client.FetchCurrentAsync(CoordinateLocation);
+        var throttled = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNull(throttled, "A failed fetch must throttle retries within the window");
         Assert.AreEqual(callsAfterFirst, stub.Calls, "No retry may hit the network within the throttle window");
 
         // After the window elapses, the fetch runs and recovers.
         clock.Advance(TimeSpan.FromMinutes(6));
-        var recovered = await client.FetchCurrentAsync(CoordinateLocation);
+        var recovered = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNotNull(recovered, "A subsequent fetch must succeed (the in-flight flag must be cleared)");
         Assert.AreEqual(12.5, recovered.CurrentTempC);
     }
@@ -813,7 +936,7 @@ public class WeatherClientTests
         Assert.AreEqual(1, stub.Calls);
 
         client.InvalidateLocation();
-        var refreshed = await client.FetchCurrentAsync(CoordinateLocation);
+        var refreshed = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNotNull(refreshed, "Invalidation must clear the throttle so a non-forced fetch runs");
         Assert.AreEqual(2, stub.Calls);
     }
@@ -829,7 +952,7 @@ public class WeatherClientTests
         Assert.IsNotNull(fetched);
 
         var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
-        var loaded = await reader.LoadCacheAsync();
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual(12.5, loaded.CurrentTempC);
@@ -839,6 +962,52 @@ public class WeatherClientTests
         Assert.AreEqual(40.71, loaded.Lat);
         Assert.AreEqual("40.71, -74.00", loaded.ResolvedCityName);
         Assert.AreNotEqual(DateTime.MinValue, reader.LastFetchTimeUtc, "A successful cache load must prime the fetch throttle");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_QueryKeyMismatch_DoesNotApply()
+    {
+        // The cache is identity-stamped at save: a cache saved for one
+        // resolution must never surface as fresh weather for another.
+        string dir = NewTempDir();
+        var stub = new StubHttpHandler(Respond);
+        var writer = CreateClient(stub, cacheDirectory: dir);
+
+        var fetched = await writer.FetchCurrentAsync(CoordinateLocation);
+        Assert.IsNotNull(fetched);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var otherLocation = new WeatherLocation("Fixed Location", "Berlin", null, null, null);
+        Assert.IsNull(await reader.LoadCacheAsync(otherLocation),
+            "a cache stamped for a different query key must not apply");
+
+        var matching = await reader.LoadCacheAsync(CoordinateLocation);
+        Assert.IsNotNull(matching, "the same query key must still load the cache");
+        Assert.AreEqual(12.5, matching.CurrentTempC);
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_LegacyCacheWithoutStamp_StillApplies()
+    {
+        // A cache written before the identity check carries no stamp — it must
+        // apply under ANY query key (the old behavior), so a pre-upgrade cache
+        // never becomes dead data.
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        await File.WriteAllTextAsync(path, """
+        {
+          "CurrentTempC": 12.5, "FeelsLikeC": 10.1, "Humidity": 60, "WindSpeedKmH": 8.2,
+          "WeatherCode": 2, "HighTempC": 18, "LowTempC": 9, "ResolvedCityName": "Paris",
+          "Lat": 48.85, "Lon": 2.35, "DailyForecasts": [], "HourlyForecasts": []
+        }
+        """);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync(new WeatherLocation("Fixed Location", "Somewhere Else", null, null, null));
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("Paris", loaded.ResolvedCityName, "a legacy unstamped cache must apply under any key");
     }
 
     [TestMethod]
@@ -859,7 +1028,7 @@ public class WeatherClientTests
         """);
 
         var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
-        var loaded = await reader.LoadCacheAsync();
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual("48.85, 2.35", loaded.ResolvedCityName,
@@ -880,7 +1049,7 @@ public class WeatherClientTests
         Assert.IsNotNull(fetched);
 
         var reader = new WeatherClient(dir, () => "weather_lazy.json", http: new HttpClient(new StubHttpHandler(Respond)));
-        var loaded = await reader.LoadCacheAsync();
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
 
         Assert.IsNotNull(loaded);
         Assert.AreEqual(12.5, loaded.CurrentTempC);
@@ -905,9 +1074,141 @@ public class WeatherClientTests
     {
         var client = new WeatherClient(NewTempDir(), "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
 
-        var loaded = await client.LoadCacheAsync();
+        var loaded = await client.LoadCacheAsync(CoordinateLocation);
 
         Assert.IsNull(loaded);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_OversizedDeclaredContentLength_IsRejectedBeforeReading()
+    {
+        // The bounded read must reject a response that DECLARES more than the
+        // 2 MB cap before buffering any body. The body is VALID JSON padded
+        // past the cap: without the declared-length pre-check the padded
+        // payload would parse and return a snapshot — so a regression in the
+        // guard fails this test instead of slipping through on invalid JSON.
+        string padded = SampleForecast + new string(' ', (int)WeatherGeocoder.MaxResponseBytes);
+        var stub = new StubHttpHandler(request =>
+        {
+            if (request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal))
+            {
+                var content = new StreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(padded)));
+                content.Headers.ContentLength = padded.Length;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+            }
+            return StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+        Assert.IsNull(snapshot, "a response declaring more than the cap must fail the fetch");
+        Assert.AreEqual(1, stub.Calls, "the forecast leg must be the only request (coordinate pair skips geocoding)");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_MalformedForecastBody_ReturnsNull()
+    {
+        var logs = new List<string>();
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok("not json {{{")
+                : StubHttpHandler.NotFound());
+        var client = new WeatherClient(NewTempDir(), "weather_test.json", logError: (message, ex) => logs.Add(message), http: new HttpClient(stub));
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+        Assert.IsNull(snapshot, "a malformed forecast body must yield null, not throw");
+        Assert.IsTrue(logs.Count > 0, "the malformed body must surface through the error sink");
+    }
+
+    [TestMethod]
+    public async Task SaveCacheAsync_WritesAtomically_NoTempFileLeftBehind()
+    {
+        string dir = NewTempDir();
+        var client = CreateClient(new StubHttpHandler(Respond), cacheDirectory: dir);
+
+        await client.FetchCurrentAsync(CoordinateLocation);
+
+        string path = Path.Combine(dir, "weather_test.json");
+        Assert.IsTrue(File.Exists(path), "the cache file must exist after a fetch");
+        Assert.IsFalse(File.Exists(path + ".tmp"),
+            "the atomic write (temp + move) must not leave a temp file behind");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_CacheMoveFailure_StillReturnsFetchedAndLogs()
+    {
+        // The cache-save leg is best-effort: when the atomic move cannot
+        // replace the target (the cache path is a DIRECTORY here, so
+        // File.Move throws), the fetch must still report Fetched with the
+        // snapshot, and the failure must surface through the error sink.
+        string dir = NewTempDir();
+        Directory.CreateDirectory(Path.Combine(dir, "weather_test.json"));
+        var logs = new List<string>();
+        var client = new WeatherClient(dir, "weather_test.json",
+            logError: (message, ex) => logs.Add(message),
+            http: new HttpClient(new StubHttpHandler(Respond)));
+
+        var result = await client.FetchCurrentAsync(CoordinateLocation);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Fetched),
+            "a failed cache save must never fail the fetch");
+        Assert.IsNotNull(((WeatherFetchResult.Fetched)result).Snapshot,
+            "the snapshot must still be delivered");
+        Assert.IsTrue(logs.Any(l => l.StartsWith("Weather cache save failed", StringComparison.Ordinal)),
+            "the save failure must surface through the error sink");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_OversizedFile_IsRejectedBeforeReading()
+    {
+        // A cache file larger than the 1 MB bound is a corrupted or foreign
+        // file — the load must reject it without buffering it into memory.
+        // The payload is VALID cache JSON padded past the cap: without the
+        // FileInfo size guard the parse would succeed and return a snapshot,
+        // so a regression in the guard fails this test instead of slipping
+        // through on invalid JSON.
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        string payload = """{"CurrentTempC":20.0,"ResolvedCityName":"Berlin"}""" + new string(' ', (int)WeatherClient.MaxCacheBytes);
+        await File.WriteAllTextAsync(path, payload);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
+
+        Assert.IsNull(loaded, "an oversized cache file must not be loaded");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_OversizedLists_AreCappedToFetchLimits()
+    {
+        // A hand-edited or foreign cache cannot smuggle more forecast rows
+        // than the API ever returns — the deserialized lists are capped.
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        string daily = string.Join(",", Enumerable.Range(0, 20)
+            .Select(i => $"{{\"DayName\":\"Day{i}\",\"MaxTempC\":20,\"MinTempC\":10,\"WeatherCode\":1}}"));
+        string hourly = string.Join(",", Enumerable.Range(0, 20)
+            .Select(i => $"{{\"TimeLabel\":\"{i}:00\",\"TempC\":15,\"WeatherCode\":1}}"));
+        await File.WriteAllTextAsync(path, $$"""
+        {
+          "CurrentTempC": 12.5, "FeelsLikeC": 10.1, "Humidity": 60, "WindSpeedKmH": 8.2,
+          "WeatherCode": 2, "HighTempC": 18, "LowTempC": 9, "ResolvedCityName": "Cached",
+          "Lat": 48.85, "Lon": 2.35,
+          "DailyForecasts": [{{daily}}],
+          "HourlyForecasts": [{{hourly}}]
+        }
+        """);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(7, loaded.DailyForecasts!.Count, "daily rows must cap at the fetch limit (MaxFetchDays = 7)");
+        Assert.AreEqual(12, loaded.HourlyForecasts!.Count, "hourly rows must cap at the fetch limit (MaxFetchHours = 12)");
     }
 
     [TestMethod]
@@ -925,18 +1226,18 @@ public class WeatherClientTests
             // FetchCurrentAsync returns (async flush / AV scanner), so wait
             // for it before asserting it exists — same retry pattern as the
             // delete loop below.
-            for (int attempt = 0; attempt < 20 && await reader.LoadCacheAsync() is null; attempt++)
+            for (int attempt = 0; attempt < 20 && await reader.LoadCacheAsync(CoordinateLocation) is null; attempt++)
             {
                 await Task.Delay(50);
             }
-            Assert.IsNotNull(await reader.LoadCacheAsync());
+            Assert.IsNotNull(await reader.LoadCacheAsync(CoordinateLocation));
 
             // The freshly written file can be held open by the AV scanner for a
             // moment, so ClearCache's delete may need a retry before it sticks.
             for (int attempt = 0; attempt < 10; attempt++)
             {
                 reader.ClearCache();
-                if (await reader.LoadCacheAsync() is null) return;
+                if (await reader.LoadCacheAsync(CoordinateLocation) is null) return;
                 await Task.Delay(50);
             }
 
@@ -959,7 +1260,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(9367, client.LastResolvedPopulation, 0.0001);
@@ -980,7 +1281,7 @@ public class WeatherClientTests
         // path resolves against them (no re-geocode).
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
         string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil (population 1962476)
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(1962476, client.LastResolvedPopulation, 0.0001,
@@ -1001,7 +1302,7 @@ public class WeatherClientTests
         // "California" matches only the US candidate's admin1; "Germany"
         // matches neither. The all-or-nothing rule scores the whole suffix 0
         // for both — a partial-sum tiebreak must NOT resolve this uniquely.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose, California, Germany", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Jose, California, Germany", null, null, null)));
 
         Assert.IsNull(snapshot, "a partial suffix match must not resolve — the suffix is all-or-nothing");
     }
@@ -1035,7 +1336,7 @@ public class WeatherClientTests
         // "The Netherlands" — the contains tier must still pick it over the
         // US Amsterdams (before the tier, every candidate tied at 1000 and
         // the suffix gated: "Amsterdam, Netherlands" never resolved).
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Amsterdam, Netherlands", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Amsterdam, Netherlands", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(52.37403, snapshot.Lat, 0.0001);
@@ -1070,7 +1371,7 @@ public class WeatherClientTests
         // Both candidates tie at the top score with the same name in the
         // same country — the same-country tiebreak must pick the populated
         // city, or "Accra, Ghana" would never resolve.
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(5.55602, snapshot.Lat, 0.0001);
@@ -1100,7 +1401,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null)));
 
         Assert.IsNull(snapshot, "a same-country tie with no population must not resolve");
     }
@@ -1128,7 +1429,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Ankara, Turkey", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Ankara, Turkey", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(39.93336, snapshot.Lat, 0.0001);
@@ -1161,7 +1462,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Washington, District of Columbia", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Washington, District of Columbia", null, null, null)));
 
         Assert.IsNull(snapshot, "a suffix that matched no tied candidate must not let population pick a wrong city");
     }
@@ -1189,7 +1490,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(-25.26374, snapshot.Lat, 0.0001);
@@ -1220,7 +1521,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE"));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE")));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(52.532, snapshot.Lat, 0.0001, "the DE hint must route the ZIP to the /de/ service");
@@ -1254,7 +1555,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Juan, Puerto Rico", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "San Juan, Puerto Rico", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(18.46554, snapshot.Lat, 0.0001, "the PR alias must resolve over the same-named AR/US cities");
@@ -1285,7 +1586,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Asuncion, Paraguay", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(-25.26374, snapshot.Lat, 0.0001, "the ASCII spelling must resolve the accented capital, not a same-named PH town");
@@ -1316,7 +1617,7 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "St George's, Grenada", null, null, null));
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "St George's, Grenada", null, null, null)));
 
         Assert.IsNotNull(snapshot);
         Assert.AreEqual(12.05610, snapshot.Lat, 0.0001);

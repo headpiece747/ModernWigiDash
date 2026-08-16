@@ -165,7 +165,7 @@ public static class ProfileOps
         var placed = new PlacedWidgetInstance
         {
             PluginId = pluginId,
-            DisplayName = loader.RegisteredPlugins.FirstOrDefault(p => p.PluginId == pluginId)?.DisplayName ?? pluginId,
+            DisplayName = loader.RegisteredPlugins.FirstOrDefault(p => string.Equals(p.PluginId, pluginId, StringComparison.Ordinal))?.DisplayName ?? pluginId,
             X = x,
             Y = y,
             ZIndex = profile.ActivePage.Widgets.Count + 1
@@ -237,8 +237,14 @@ public static class ProfileOps
         IModernWidget? instance = null;
         try
         {
-            instance = loader.CreateInstance(placed.PluginId);
-            if (instance is null) return null;
+            WidgetCreateResult created = loader.CreateInstanceResult(placed.PluginId);
+            if (created is WidgetCreateResult.Broken broken)
+            {
+                context.LogError($"Widget '{placed.PluginId}' is broken and was skipped: {broken.Reason}");
+                return null;
+            }
+            if (created is not WidgetCreateResult.Ok ok) return null;
+            instance = ok.Widget;
 
             // The instance and the placed widget share one identity: the
             // placed's InstanceId survives Export/Import, so rehydration must
@@ -436,8 +442,11 @@ public static class ProfileOps
         }
 
         // Enforce per-page and total widget caps in one pass: later pages are
-        // emptied once the total budget is exhausted.
+        // emptied once the total budget is exhausted. The seen-InstanceId set
+        // spans the whole import — a foreign profile must not be able to give
+        // two widgets the SAME safe id (their cache files would collide).
         int total = 0;
+        var seenInstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var page in profile.Pages)
         {
             page.Widgets ??= [];
@@ -460,7 +469,7 @@ public static class ProfileOps
             int allowed = Math.Min(page.Widgets.Count, Math.Min(MaxWidgetsPerPage, remaining));
             for (int i = 0; i < allowed; i++)
             {
-                SanitizeWidgetValues(page.Widgets[i]);
+                SanitizeWidgetValues(page.Widgets[i], seenInstanceIds);
             }
             if (page.Widgets.Count > allowed)
             {
@@ -470,7 +479,7 @@ public static class ProfileOps
         }
     }
 
-    private static void SanitizeWidgetValues(PlacedWidgetInstance placed)
+    private static void SanitizeWidgetValues(PlacedWidgetInstance placed, HashSet<string> seenInstanceIds)
     {
         // Untrusted JSON may carry "propertyValues": null — repair before use.
         placed.PropertyValues ??= [];
@@ -516,7 +525,44 @@ public static class ProfileOps
         {
             placed.PropertyValues["ChannelName"] = TwitchChannelRule.Sanitize(channel, "");
         }
+
+        // InstanceId is placement identity, not user data — but a foreign
+        // profile can dictate it, and widgets key cache FILE NAMES by it (the
+        // weather widget: "weather_{InstanceId}.json" under the app dir). An
+        // id with .. segments would escape that directory on the next fetch,
+        // and a DUPLICATE safe id would collide two widgets' cache files.
+        // Regenerate unless the id is a safe token that no other widget in
+        // this import already claimed.
+        if (!IsSafeInstanceId(placed.InstanceId) || !seenInstanceIds.Add(placed.InstanceId))
+        {
+            placed.InstanceId = Guid.NewGuid().ToString();
+            seenInstanceIds.Add(placed.InstanceId);
+        }
+
+        // Untrusted string property values feed query keys, URLs, and the
+        // display — a 10 MB import could carry a 10 MB Location. Cap every
+        // string value at a generous bound so the import can never create a
+        // multi-hundred-MB allocation spike at geocode/parse time.
+        foreach (var key in placed.PropertyValues.Keys.ToArray())
+        {
+            if (ConvertPropertyValue(placed.PropertyValues[key], typeof(string)) is string text && text.Length > MaxPropertyStringLength)
+            {
+                placed.PropertyValues[key] = text[..MaxPropertyStringLength];
+            }
+        }
     }
+
+    /// <summary>Cap for string widget-property values at the import boundary
+    /// (query keys, URLs, and labels all derive from them).</summary>
+    private const int MaxPropertyStringLength = 256;
+
+    /// <summary>InstanceId safety rule: a short ASCII token (letters, digits,
+    /// '-', '_') that can never escape a directory or resolve outside it.
+    /// GUIDs and the app's own generated ids always pass; only foreign
+    /// profiles can fail.</summary>
+    public static bool IsSafeInstanceId(string? id)
+        => id is { Length: > 0 and <= 64 }
+           && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
     /// <summary>
     /// Widget property names that carry filesystem paths. Must match the
@@ -537,7 +583,7 @@ public static class ProfileOps
         // drive — reject it so only genuinely relative paths survive.
         if (path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':') return "";
         if (path.StartsWith("\\\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) return "";
-        if (path.Split(['\\', '/'], StringSplitOptions.None).Any(segment => segment == "..")) return "";
+        if (path.Split(['\\', '/'], StringSplitOptions.None).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal))) return "";
         return path;
     }
 }

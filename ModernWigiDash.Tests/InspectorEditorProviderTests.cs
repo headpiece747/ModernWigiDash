@@ -67,7 +67,7 @@ public class InspectorEditorProviderTests
     [TestMethod]
     public void Describe_SkipsIconPickerCompanion_KeepsPickerAndCommand()
     {
-        var descriptions = InspectorModelBuilder.Describe(Place());
+        var descriptions = InspectorModelBuilder.Describe(Place(), []);
 
         Assert.IsFalse(descriptions.Any(d => d.Property.Name == nameof(ProviderWidget.IconFile)),
             "The IconPicker companion property must not get a generic editor row");
@@ -121,7 +121,8 @@ public class InspectorEditorProviderTests
             PluginId = "hotkey",
             DisplayName = "Hotkey",
             ActiveInstance = new HotkeyButtonWidget()
-        });
+        },
+        []);
 
         Assert.IsFalse(descriptions.Any(d => d.Property.Name == nameof(HotkeyButtonWidget.IconFile)));
         Assert.IsTrue(descriptions.Any(d => d.Property.Name == nameof(HotkeyButtonWidget.Icon)));
@@ -143,7 +144,7 @@ public class InspectorEditorProviderTests
             var panel = new StackPanel();
             InspectorPanelRenderer.Render(
                 placed,
-                InspectorModelBuilder.Describe(placed),
+                InspectorModelBuilder.Describe(placed, []),
                 panel.Children,
                 () => false,
                 new InspectorCallbacks
@@ -193,7 +194,7 @@ public class InspectorEditorProviderTests
             var panel = new StackPanel();
             InspectorPanelRenderer.Render(
                 placed,
-                InspectorModelBuilder.Describe(placed),
+                InspectorModelBuilder.Describe(placed, []),
                 panel.Children,
                 () => false,
                 new InspectorCallbacks

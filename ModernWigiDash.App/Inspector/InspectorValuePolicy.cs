@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using System.ComponentModel;
 using System.Reflection;
 using ModernWigiDash.Core.Rendering;
@@ -55,14 +57,14 @@ internal sealed class InspectorValuePolicy
     }
 
     /// <summary>Parses a position field (X/Y).</summary>
-    public bool TryParsePosition(string text, out float value) => float.TryParse(text, out value);
+    public bool TryParsePosition(string text, out float value) => float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
     /// <summary>Parses a size field (Width/Height); values at or below the minimum are rejected.</summary>
     public bool TryParseSize(string text, out float value)
-        => float.TryParse(text, out value) && value > MinWidgetSize;
+        => float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value > MinWidgetSize;
 
     /// <summary>Parses a ZIndex field.</summary>
-    public bool TryParseZIndex(string text, out int value) => int.TryParse(text, out value);
+    public bool TryParseZIndex(string text, out int value) => int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 
     /// <summary>
     /// Parses a rotation field in degrees, normalized to its 360° remainder
@@ -71,7 +73,7 @@ internal sealed class InspectorValuePolicy
     /// </summary>
     public bool TryParseRotation(string text, out float value)
     {
-        if (!float.TryParse(text, out value)) return false;
+        if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return false;
         value %= 360;
         return true;
     }

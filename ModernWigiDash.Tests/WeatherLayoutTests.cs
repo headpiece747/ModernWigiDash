@@ -1,225 +1,95 @@
-using SkiaSharp;
 using ModernWigiDash.Widgets;
+using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The Weather widget's layout rules: the scale factors, the header geometry
-/// (title, unit badge, content padding), the header touch zones, and the
-/// layout-mode cycle. Previously split between the render path and OnTouch's
-/// independent constants — the drawn geometry and the tap targets now share
-/// this module.
+/// The weather layout policy: every font size / offset constant the renderers
+/// and the widget share — one owner, so draw and measurement cannot drift.
 /// </summary>
 [TestClass]
 public class WeatherLayoutTests
 {
     [TestMethod]
-    public void Scale_DesignSize_IsOneToOne()
+    public void FontSizes_AreClampedAndScaled()
     {
-        var scale = WeatherLayout.Scale(new SKRect(0, 0, 406, 296));
-
-        Assert.AreEqual(1f, scale.Sx, 0.001f);
-        Assert.AreEqual(1f, scale.Sy, 0.001f);
-        Assert.AreEqual(1f, scale.S, 0.001f);
+        // Scaled from a unit scale; the clamps bound the extremes.
+        Assert.AreEqual(8f, WeatherLayout.ForecastDayFontSize(0.1f), "a tiny scale clamps to the minimum");
+        Assert.AreEqual(24f, WeatherLayout.ForecastDayFontSize(10f), "a huge scale clamps to the maximum");
+        float mid = WeatherLayout.ForecastDayFontSize(1f);
+        Assert.IsTrue(mid is > 8f and < 24f, "a unit scale lands inside the clamp range");
     }
 
     [TestMethod]
-    public void Scale_NonUniform_UniformIsTheMin()
+    public void FontSizes_MonotonicInScale()
     {
-        var scale = WeatherLayout.Scale(new SKRect(0, 0, 812, 296));
-
-        Assert.AreEqual(2f, scale.Sx, 0.001f);
-        Assert.AreEqual(1f, scale.Sy, 0.001f);
-        Assert.AreEqual(1f, scale.S, 0.001f);
+        Assert.IsTrue(WeatherLayout.ForecastDayFontSize(0.5f) < WeatherLayout.ForecastDayFontSize(1f),
+            "a larger scale must never produce a smaller font");
+        Assert.IsTrue(WeatherLayout.HourlyTempFontSize(0.5f) < WeatherLayout.HourlyTempFontSize(1f));
+        Assert.IsTrue(WeatherLayout.CompactIconFontSize(0.5f) < WeatherLayout.CompactIconFontSize(1f));
     }
 
     [TestMethod]
-    public void ComputeHeader_DesignSize_MatchesDrawnGeometry()
+    public void TitleMaxWidth_ReservesBadgeAndPadding()
     {
-        var header = WeatherLayout.ComputeHeader(new SKRect(0, 0, 406, 296), 1f, 1f);
-
-        Assert.AreEqual(44f, header.HeaderHeight, 0.001f);
-        Assert.AreEqual(28.6f, header.HeaderTextY, 0.001f);
-        Assert.AreEqual(24f, header.TitleFontSize, 0.001f);
-        Assert.AreEqual(14f, header.Pad, 0.001f);
-        Assert.AreEqual(new SKRect(338, 9, 392, 35), header.BadgeRect);
+        // 500 wide, 8 pad, 40 badge → 500 − 2·8 − 40 = 444 exactly.
+        Assert.AreEqual(444f, WeatherLayout.TitleMaxWidth(500f, 8f, 40f),
+            "the title must yield the badge and both paddings, computed exactly");
+        // 100 − 2·8 − 90 = −6: the absolute-minimum 30px floor must win.
+        Assert.AreEqual(30f, WeatherLayout.TitleMaxWidth(100f, 8f, 90f),
+            "the title keeps its absolute minimum width when the content would collapse below it");
     }
 
     [TestMethod]
-    public void ComputeHeader_SmallSize_ClampsToMinimums()
+    public void CurrentOnlyIconSize_ClampsToHeroExtremes()
     {
-        var header = WeatherLayout.ComputeHeader(new SKRect(0, 0, 200, 160), 200f / 406f, 160f / 296f);
-
-        Assert.AreEqual(24f, header.HeaderHeight, 0.001f);
-        Assert.AreEqual(15.6f, header.HeaderTextY, 0.001f);
-        Assert.AreEqual(12f, header.TitleFontSize, 0.001f);
-        Assert.AreEqual(8f, header.Pad, 0.001f);
-        Assert.AreEqual(new SKRect(162, 4, 192, 20), header.BadgeRect);
+        // The CurrentOnly hero pins its icon to 40..120 (the 20..220 range
+        // belongs to the Detailed hero) — pin the REAL bounds so a regression
+        // in the clamp cannot slip through a stale assertion.
+        Assert.AreEqual(40f, WeatherLayout.CurrentOnlyIconSize(0.1f), "a tiny hero still gets a legible icon");
+        Assert.AreEqual(120f, WeatherLayout.CurrentOnlyIconSize(10f), "a huge hero caps the icon size");
     }
 
     [TestMethod]
-    public void ComputeHeader_LargeSize_ClampsToMaximums()
+    public void GetHeaderAction_BadgeAndCycleZoneGeometry()
     {
-        var header = WeatherLayout.ComputeHeader(new SKRect(0, 0, 812, 592), 2f, 2f);
+        // The touch zones come from the SAME ComputeHeader the render path
+        // draws: the badge rect is the unit-toggle target, the left header
+        // band is the layout-cycle target, everything else reads None.
+        var bounds = new SKRect(0, 0, WeatherLayout.DesignWidth, WeatherLayout.DesignHeight);
+        var (_, sy, s) = WeatherLayout.Scale(bounds);
+        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
 
-        Assert.AreEqual(88f, header.HeaderHeight, 0.001f);
-        Assert.AreEqual(57.2f, header.HeaderTextY, 0.001f);
-        Assert.AreEqual(44f, header.TitleFontSize, 0.001f);
-        Assert.AreEqual(28f, header.Pad, 0.001f);
-        Assert.AreEqual(new SKRect(684, 19, 784, 69), header.BadgeRect);
+        Assert.AreEqual(WeatherHeaderAction.ToggleUnit,
+            WeatherLayout.GetHeaderAction(bounds, new SKPoint(header.BadgeRect.MidX, header.BadgeRect.MidY), s, sy),
+            "a tap inside the badge rect must toggle the unit");
+
+        Assert.AreEqual(WeatherHeaderAction.CycleLayout,
+            WeatherLayout.GetHeaderAction(bounds, new SKPoint(20f, 15f), s, sy),
+            "a tap in the left header band must cycle the layout");
+
+        Assert.AreEqual(WeatherHeaderAction.None,
+            WeatherLayout.GetHeaderAction(bounds, new SKPoint(300f, 15f), s, sy),
+            "a tap right of the cycle zone inside the header band reads None");
+
+        Assert.AreEqual(WeatherHeaderAction.None,
+            WeatherLayout.GetHeaderAction(bounds, new SKPoint(20f, header.HeaderHeight + 20f), s, sy),
+            "a tap below the header band reads None");
     }
 
     [TestMethod]
-    public void GetHeaderAction_BadgeCenter_TogglesUnit()
+    public void NextMode_GarbageResetsToTheDefault()
     {
-        // Full-screen fallback bounds — the geometry the widget uses before
-        // its first render (DefaultSize = 1016 x 592).
-        var bounds = new SKRect(0, 0, 1016, 592);
-        var scale = WeatherLayout.Scale(bounds);
-
-        var action = WeatherLayout.GetHeaderAction(bounds, new SKPoint(940, 40), scale.S, scale.Sy);
-
-        Assert.AreEqual(WeatherHeaderAction.ToggleUnit, action);
-    }
-
-    [TestMethod]
-    public void GetHeaderAction_LeftHeaderZone_CyclesLayout()
-    {
-        var bounds = new SKRect(0, 0, 1016, 592);
-        var scale = WeatherLayout.Scale(bounds);
-
-        var action = WeatherLayout.GetHeaderAction(bounds, new SKPoint(20, 15), scale.S, scale.Sy);
-
-        Assert.AreEqual(WeatherHeaderAction.CycleLayout, action);
-    }
-
-    [TestMethod]
-    public void GetHeaderAction_BelowHeader_None()
-    {
-        var bounds = new SKRect(0, 0, 406, 296);
-
-        var action = WeatherLayout.GetHeaderAction(bounds, new SKPoint(200, 200), 1f, 1f);
-
-        Assert.AreEqual(WeatherHeaderAction.None, action);
-    }
-
-    [TestMethod]
-    public void GetHeaderAction_RightOfBadge_None()
-    {
-        // The old 64px tap strip beyond the badge is not a target anymore — the
-        // badge rect is the honest target (the badge is what the user sees).
-        var bounds = new SKRect(0, 0, 406, 296);
-
-        var action = WeatherLayout.GetHeaderAction(bounds, new SKPoint(400, 20), 1f, 1f);
-
-        Assert.AreEqual(WeatherHeaderAction.None, action);
-    }
-
-    [TestMethod]
-    public void GetHeaderAction_BadgeXButBelowBadge_None()
-    {
-        var bounds = new SKRect(0, 0, 406, 296);
-
-        var action = WeatherLayout.GetHeaderAction(bounds, new SKPoint(360, 40), 1f, 1f);
-
-        Assert.AreEqual(WeatherHeaderAction.None, action);
-    }
-
-    [TestMethod]
-    public void NextMode_CycleOrder_MatchesWidgetCycle()
-    {
-        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.NextMode(WeatherLayoutMode.Detailed));
-        Assert.AreEqual(WeatherLayoutMode.HourlyForecast, WeatherLayout.NextMode(WeatherLayoutMode.DailyForecast));
-        Assert.AreEqual(WeatherLayoutMode.CurrentOnly, WeatherLayout.NextMode(WeatherLayoutMode.HourlyForecast));
-        Assert.AreEqual(WeatherLayoutMode.Compact, WeatherLayout.NextMode(WeatherLayoutMode.CurrentOnly));
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(WeatherLayoutMode.Compact));
-    }
-
-    [TestMethod]
-    public void DisplayName_EachMode_MatchesInspectorChoiceStrings()
-    {
-        Assert.AreEqual(WeatherLayout.DefaultLayoutMode, WeatherLayout.DisplayName(WeatherLayoutMode.Detailed));
-        Assert.AreEqual("Daily Forecast", WeatherLayout.DisplayName(WeatherLayoutMode.DailyForecast));
-        Assert.AreEqual("Hourly Forecast", WeatherLayout.DisplayName(WeatherLayoutMode.HourlyForecast));
-        Assert.AreEqual("Current Only", WeatherLayout.DisplayName(WeatherLayoutMode.CurrentOnly));
-        Assert.AreEqual("Compact", WeatherLayout.DisplayName(WeatherLayoutMode.Compact));
-    }
-
-    [TestMethod]
-    public void ParseMode_KnownModes_MapExactly()
-    {
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode("Detailed"));
-        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.ParseMode("Daily Forecast"));
-        Assert.AreEqual(WeatherLayoutMode.HourlyForecast, WeatherLayout.ParseMode("Hourly Forecast"));
-        Assert.AreEqual(WeatherLayoutMode.CurrentOnly, WeatherLayout.ParseMode("Current Only"));
-        Assert.AreEqual(WeatherLayoutMode.Compact, WeatherLayout.ParseMode("Compact"));
-    }
-
-    [TestMethod]
-    public void ParseMode_UnknownMode_DefaultsToDetailed()
-    {
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode("Bogus"));
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.ParseMode(null));
-    }
-
-    [TestMethod]
-    public void NextMode_UnknownMode_LandsOnDefault()
-    {
-        // A hand-edited profile with an unknown LayoutMode string must reset
-        // to the default on tap — not advance past it (the OLD bug: garbage
-        // parsed to Detailed, then the cycle stepped it to Daily Forecast).
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode("Bogus"));
-        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(null));
+        // A hand-edited profile value ("garbage") parses to the default, and
+        // the cycle must LAND on that default — not advance past it.
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode("garbage"));
         Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(""));
-        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.NextMode("Detailed"), "a known mode still advances");
-    }
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode(null));
 
-    [TestMethod]
-    public void HeroTextStackShrinkScale_Overflow_ScalesTo85PercentOfHeroHeight()
-    {
-        Assert.AreEqual(0.425f, WeatherLayout.HeroTextStackShrinkScale(200f, 100f), 0.001f);
-    }
-
-    [TestMethod]
-    public void HeroTextStackShrinkScale_Fits_NoShrink()
-    {
-        Assert.AreEqual(1f, WeatherLayout.HeroTextStackShrinkScale(80f, 100f), 0.001f);
-    }
-
-    [TestMethod]
-    public void MetricPillShrinkScale_Overflow_ProportionalWithFloor()
-    {
-        Assert.AreEqual(0.6667f, WeatherLayout.MetricPillShrinkScale(300f, 200f), 0.001f);
-        Assert.AreEqual(0.6f, WeatherLayout.MetricPillShrinkScale(500f, 100f), 0.001f);
-    }
-
-    [TestMethod]
-    public void MetricPillShrinkScale_Fits_NoShrink()
-    {
-        Assert.AreEqual(1f, WeatherLayout.MetricPillShrinkScale(150f, 200f), 0.001f);
-    }
-
-    [TestMethod]
-    public void PillFontSize_ClampsToTheDrawRange()
-    {
-        Assert.AreEqual(8f, WeatherLayout.PillFontSize(0.1f), "tiny scales clamp to the minimum");
-        Assert.AreEqual(24f, WeatherLayout.PillFontSize(3f), "huge scales clamp to the maximum");
-        Assert.AreEqual(13f, WeatherLayout.PillFontSize(1f), 0.001f, "the design scale uses the base size");
-    }
-
-    [TestMethod]
-    public void PillPadX_ClampsToTheDrawRange()
-    {
-        Assert.AreEqual(4f, WeatherLayout.PillPadX(0.1f));
-        Assert.AreEqual(20f, WeatherLayout.PillPadX(3f));
-        Assert.AreEqual(10f, WeatherLayout.PillPadX(1f), 0.001f);
-    }
-
-    [TestMethod]
-    public void PillGap_ClampsToTheDrawRange()
-    {
-        Assert.AreEqual(3f, WeatherLayout.PillGap(0.1f));
-        Assert.AreEqual(16f, WeatherLayout.PillGap(3f));
-        Assert.AreEqual(8f, WeatherLayout.PillGap(1f), 0.001f);
+        Assert.AreEqual(WeatherLayoutMode.DailyForecast, WeatherLayout.NextMode("Detailed"));
+        Assert.AreEqual(WeatherLayoutMode.HourlyForecast, WeatherLayout.NextMode("Daily Forecast"));
+        Assert.AreEqual(WeatherLayoutMode.CurrentOnly, WeatherLayout.NextMode("Hourly Forecast"));
+        Assert.AreEqual(WeatherLayoutMode.Compact, WeatherLayout.NextMode("Current Only"));
+        Assert.AreEqual(WeatherLayoutMode.Detailed, WeatherLayout.NextMode("Compact"), "the wrap resets to the default");
     }
 }

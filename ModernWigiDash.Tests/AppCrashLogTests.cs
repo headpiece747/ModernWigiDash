@@ -19,6 +19,17 @@ public class AppCrashLogTests
     }
 
     [TestMethod]
+    public void SanitizeMessage_RedactsCredentialShapedParams()
+    {
+        // The redactor covers every credential-shaped query param, not just
+        // `token=` — access/refresh/device tokens are equally sensitive. The
+        // marker is the fixed "token=<redacted>" form for any match.
+        Assert.AreEqual("token=<redacted>", CrashLog.SanitizeMessage("access_token=abc123"));
+        Assert.AreEqual("token=<redacted>", CrashLog.SanitizeMessage("refresh_token=abc123"));
+        Assert.AreEqual("token=<redacted>", CrashLog.SanitizeMessage("device_code=abc123"));
+    }
+
+    [TestMethod]
     public void SanitizeMessage_RedactsTokenCaseInsensitively()
     {
         // The match is case-insensitive; the marker is a fixed lowercase token.

@@ -11,7 +11,7 @@ namespace ModernWigiDash.App.Controls;
 /// strips, a hex field, and Apply/Cancel. Pure preview state inside — nothing
 /// is committed until Apply (or the hosting row's live hex box) raises Applied.
 /// </summary>
-public sealed class ColorPickerPopup : UserControl
+internal sealed class ColorPickerPopup : UserControl
 {
     private HsvColor _hsv;
     private byte _alpha;

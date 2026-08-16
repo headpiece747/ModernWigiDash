@@ -11,7 +11,7 @@ namespace ModernWigiDash.App.Update;
 /// cache rule is the shared Sdk <see cref="SvgPathParseCache{T}"/>; the
 /// WPF-specific part is only the parser and the null fallback.
 /// </summary>
-public static class GriddyIconGeometry
+internal static class GriddyIconGeometry
 {
     /// <summary>Parsed geometry for <paramref name="name"/>, or null when unknown.</summary>
     public static Geometry? FromName(string name)

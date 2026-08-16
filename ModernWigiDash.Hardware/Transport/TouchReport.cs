@@ -1,11 +1,14 @@
 using ModernWigiDash.Sdk;
 
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
 /// Touch report data structure from the WigiDash display.
 /// </summary>
-public readonly record struct TouchReport
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct TouchReport
 {
     public byte Type { get; init; }
     public short X { get; init; }

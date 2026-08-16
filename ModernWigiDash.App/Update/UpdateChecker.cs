@@ -6,7 +6,7 @@ namespace ModernWigiDash.App.Update;
 /// Pure update-decision logic: parse the GitHub releases/latest JSON, compare
 /// SemVer, and pick the slim app-only asset. No I/O — testable via a JSON string.
 /// </summary>
-public static class UpdateChecker
+internal static class UpdateChecker
 {
     /// <summary>Returns the pending slim update when the latest release is newer
     /// than <paramref name="currentVersion"/>, else null. Null current (dev) never updates.</summary>
@@ -65,7 +65,7 @@ public static class UpdateChecker
         foreach (var asset in assets.EnumerateArray())
         {
             string u = asset.TryGetProperty("browser_download_url", out var ue) ? ue.GetString() ?? "" : "";
-            if (u == url && asset.TryGetProperty("digest", out var d))
+            if (string.Equals(u, url, StringComparison.Ordinal) && asset.TryGetProperty("digest", out var d))
             {
                 // GitHub's digest is "sha256:<hex>" — normalize to the raw hex
                 // the SHA-256 comparison uses.

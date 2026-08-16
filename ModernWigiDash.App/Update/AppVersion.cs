@@ -8,7 +8,7 @@ namespace ModernWigiDash.App.Update;
 /// the 0.0.0 csproj default (with the SDK's git-sha suffix), which
 /// <see cref="Parse"/> maps to null — so <see cref="IsDevBuild"/> disables the updater.
 /// </summary>
-public static class AppVersion
+internal static class AppVersion
 {
     /// <summary>Parsed major.minor version, or null for dev/unparseable builds.</summary>
     public static Version? Current { get; } = Parse(ReadInformationalVersion());

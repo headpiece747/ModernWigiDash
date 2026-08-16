@@ -13,7 +13,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// to <c>FrameTimeStore.UpdateFromDto</c>. PresentMon is a direct App↔service
 /// connection — it is independent of any service routing.
 /// </summary>
-public sealed class PresentMonFrameTimeProducer : IDisposable
+internal sealed class PresentMonFrameTimeProducer : IDisposable
 {
     /// <summary>Sparkline sample cap — aliases the single owner on FrameTimeStatistics.</summary>
     internal const int MaxSparklineSamples = FrameTimeStatistics.MaxSparklineSamples;

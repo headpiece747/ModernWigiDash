@@ -39,7 +39,7 @@ public class MainWindowUpdateTests
             var window = new MainWindow(new StubPresentMonNative());
             try
             {
-                window.ApplyUpdateState(UpdateState.Available, "Update v0.5.0 available", "0.5.0");
+                window.ApplyUpdateState(UpdateState.Available, "Update v0.5.0 available");
                 Assert.AreEqual(Visibility.Visible, window.UpdateButton.Visibility);
                 Assert.IsNotNull(window.UpdateIconPath?.Data, "the arrow-circle-down geometry must be set");
                 return null;

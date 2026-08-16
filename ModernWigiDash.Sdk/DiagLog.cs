@@ -15,9 +15,8 @@ public sealed class DiagLog(string category, int cadence, bool logFirst = false,
     /// <summary>
     /// Writes the message when the cadence is due, tagged with the category —
     /// callers pass only the message body, never the "[...]" prefix. The
-    /// optional <paramref name="write"/> seam (tests only) mirrors
-    /// FrameDelivery's injected log callback; production defaults to
-    /// <see cref="FileLog"/>.
+    /// optional write seam (tests only) mirrors FrameDelivery's injected log
+    /// callback; production defaults to <see cref="FileLog"/>.
     /// </summary>
     /// <param name="message">The message, composed lazily — the lambda runs
     /// only when the cadence fires, so hot-path call sites (per-frame bulk

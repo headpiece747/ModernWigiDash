@@ -70,15 +70,14 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
-    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        base.InitializeAsync(context, cancellationToken);
+        await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
         _artworkLoader = new ArtworkLoader(Context.LogError);
         _artworkLoader.ArtworkChanged += OnArtworkChanged;
         _mediaMonitor = (_monitorFactory ?? (() => new MediaSessionMonitor(Context.LogError)))();
         _mediaMonitor.SnapshotChanged += OnMediaSnapshotChanged;
         _ = _mediaMonitor.InitializeAsync();
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -93,7 +92,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _artworkLoader?.NotifySnapshotChanged(update);
     }
 
-    private void OnArtworkChanged(ArtworkLoaded? artwork)
+    private void OnArtworkChanged(ArtworkLoaded? _)
     {
         Context?.RequestRender();
     }
@@ -712,7 +711,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (_mediaMonitor is not null)
         {
             _mediaMonitor.SnapshotChanged -= OnMediaSnapshotChanged;
-            await _mediaMonitor.DisposeAsync();
+            await _mediaMonitor.DisposeAsync().ConfigureAwait(false);
             _mediaMonitor = null;
         }
         if (_artworkLoader is not null)
@@ -722,6 +721,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             _artworkLoader = null;
         }
 
-        await base.DisposeAsync();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

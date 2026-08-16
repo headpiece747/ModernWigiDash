@@ -56,7 +56,7 @@ internal sealed class ClientWebSocketFeed : IWebSocketFeed
         _receiveBytes.Clear();
         while (_ws.State == WebSocketState.Open)
         {
-            var result = await _ws.ReceiveAsync(_buffer, ct);
+            var result = await _ws.ReceiveAsync(_buffer, ct).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close) return null;
             if (result.MessageType != WebSocketMessageType.Text) continue;
             _receiveBytes.AddRange(_buffer.AsSpan(0, result.Count));

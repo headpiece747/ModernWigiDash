@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ModernWigiDash.App.PresentMon;
 
 /// <summary>
@@ -77,7 +79,7 @@ internal sealed class TargetTrustPolicy
         {
             return false;
         }
-        if (SampleKey(sample) == _adoptedKey)
+        if (string.Equals(SampleKey(sample), _adoptedKey, StringComparison.Ordinal))
         {
             return true;
         }
@@ -97,6 +99,11 @@ internal sealed class TargetTrustPolicy
     /// departed target's data comes back byte-stable for every pid, so an
     /// adopted target that still reads the departed target's values is
     /// detected by exact key equality.</summary>
+    /// <summary>Byte-stable key for the frozen-data guard: an adopted target
+    /// whose sample still carries the departed target's values formats
+    /// identically to the departed key. Invariant culture — the key exists to
+    /// detect exact equality, and a mid-session culture change must not flip
+    /// the decimal separator and wedge the guard.</summary>
     private static string SampleKey(PresentMonDynamicSample sample)
-        => $"{sample.Fps:0.0}|{sample.DisplayedFps:0.0}";
+        => $"{sample.Fps.ToString("0.0", CultureInfo.InvariantCulture)}|{sample.DisplayedFps.ToString("0.0", CultureInfo.InvariantCulture)}";
 }

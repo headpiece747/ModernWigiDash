@@ -10,7 +10,7 @@ namespace ModernWigiDash.App.Controls;
 /// clamped fallback. Extracted from the inspector's combo-dropdown clamp so
 /// combo popups and the color picker popup share one placement rule.
 /// </summary>
-public static class PopupClamp
+internal static class PopupClamp
 {
     /// <summary>
     /// Pure placement math: candidate positions relative to the placement

@@ -7,7 +7,7 @@ namespace ModernWigiDash.App.LibreHardwareService;
 /// named sensors map under its writer mutex and performs the bounded copy.
 /// Every failure maps to null + a reason string — never throws.
 /// </summary>
-public sealed class MemoryMappedLhmMapSource : ILhmMapSource
+internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
 {
     // LibreHardwareService (epinter) constants — mirrored from its
     // MemoryMappedSensors source; the mutex name protects the map.

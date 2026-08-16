@@ -7,7 +7,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// RGB565 little-endian pixel payload. Used by both the direct (USB) and the
 /// frame paths so pixel encoding cannot drift between components.
 /// </summary>
-public static class FrameEncoder
+internal static class FrameEncoder
 {
     /// <summary>The RGB565 bit packing — the one definition (fast and
     /// fallback paths share it).</summary>

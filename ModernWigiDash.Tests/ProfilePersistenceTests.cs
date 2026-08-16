@@ -29,7 +29,7 @@ public sealed class ProfilePersistenceTests
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) throw new TimeoutException("Condition not met in time");
-            await Task.Delay(10);
+            await Task.Delay(10).ConfigureAwait(false);
         }
     }
 

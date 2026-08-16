@@ -7,7 +7,7 @@ namespace ModernWigiDash.App.LibreHardwareService;
 /// tests substitute an in-memory fake, so the reader's Poll policy (map
 /// present, map absent, parse outcome) is drivable without named maps.
 /// </summary>
-public interface ILhmMapSource
+internal interface ILhmMapSource
 {
     /// <summary>
     /// Copies the sensors map under the writer's mutex, bounded per the

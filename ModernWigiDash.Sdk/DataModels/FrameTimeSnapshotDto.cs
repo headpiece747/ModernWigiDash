@@ -31,6 +31,8 @@ public sealed record FrameTimeSnapshotDto
     /// </summary>
     public string ErrorMessage { get; set; } = string.Empty;
 
+    /// <summary>The producer's timestamp for this snapshot (the store's
+    /// freshness window compares against it).</summary>
     public DateTime LastUpdate { get; set; }
 
     /// <summary>
@@ -101,5 +103,5 @@ public sealed record FrameTimeSnapshotDto
     /// <summary>
     /// Recent frame times (ms), newest last, downsampled for a sparkline.
     /// </summary>
-    public List<double> RecentFrameTimesMs { get; set; } = [];
+    public IReadOnlyList<double> RecentFrameTimesMs { get; set; } = [];
 }

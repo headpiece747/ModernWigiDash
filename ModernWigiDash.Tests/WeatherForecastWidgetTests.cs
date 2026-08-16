@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using Microsoft.Extensions.Time.Testing;
@@ -123,16 +124,16 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        // Wait for the pick fetch to COMPLETE (FetchCompletedCount advances
-        // only when FetchCurrentAsync finishes and releases its in-flight
-        // claim) — the HTTP call count alone fires mid-fetch and races the
-        // next change.
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
+        // Wait for the APPLIED state, not the client's fetch-completion count:
+        // the count increments inside the client's finally BEFORE the widget's
+        // continuation applies the snapshot, so a count-based wait can race
+        // the apply on a busy scheduler.
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
 
         widget.Location = "Berlin";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Berlin");
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 3, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Berlin, Germany", TimeSpan.FromSeconds(5));
         Assert.AreEqual("Berlin, Germany", widget.ResolvedCityName);
     }
 
@@ -170,13 +171,17 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 2, TimeSpan.FromSeconds(5));
-        // Wait for the APPLIED state, not just the client count: the pending
-        // write-back is set by the widget's continuation, which can lag the
-        // client's finally under parallel load — flushing early would leave
-        // Location unchanged and fail the pick assertion.
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
-        widget.ApplyPendingLocationWriteback();
+        // Wait for the APPLIED state - the pick's label landed in Location via
+        // the write-back - not the client's fetch-completion count: the count
+        // increments inside the client's finally BEFORE the widget's
+        // continuation sets the pending write-back, so a count-based wait can
+        // flush early and leave Location unchanged. The flush inside the
+        // predicate is idempotent and re-checks each poll until it lands.
+        await TestWait.WaitUntilAsync(() =>
+        {
+            widget.ApplyPendingLocationWriteback();
+            return string.Equals(widget.Location, "Vitória, Espírito Santo, Brazil", StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
         Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.Location,
             "the write-back must leave the field showing the picked place");
@@ -184,14 +189,15 @@ public class WeatherForecastWidgetTests
         // Clearing the pick (the empty "Automatic" option) reverts to ranking.
         // The write-back made Location carry the picked label, so the label
         // self-resolves to the same city; returning the field to the bare
-        // query then lets the auto ranking of "Victoria" decide — a stale
-        // pick must never win it.
+        // query then lets the auto ranking of "Victoria" decide - a stale
+        // pick must never win it. (No completion-count wait between the
+        // changes: if the clear-pick fetch is still in flight when Location
+        // changes, its stale result is dropped and the forced re-fetch covers
+        // the new identity.)
         widget.LocationMatch = "";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), "");
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 3, TimeSpan.FromSeconds(5));
         widget.Location = "Victoria";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Victoria");
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 4, TimeSpan.FromSeconds(5));
         await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.ResolvedCityName);
@@ -247,6 +253,147 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task StaticSnapshot_NonForcedRefresh_IsGatedUntilToggledOff()
+    {
+        // The static-snapshot rule: while a snapshot is showing (a primed
+        // fetch time), the render kick's non-forced refresh must not fetch -
+        // the cadence gate is the single RequestRefresh decision point, and
+        // the render tick drives it. Toggling the property off resumes the
+        // cadence.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub), Clock = clock };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        // Prime the fetch time (a snapshot exists) and open the throttle window.
+        await widget.FetchLiveWeatherAsync(force: true);
+        clock.Advance(TimeSpan.FromMinutes(6));
+        int forecastsAfterPrime = stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal));
+
+        widget.StaticSnapshot = true;
+        widget.Render(surface.Canvas, bounds); // the render kick's non-forced RequestRefresh
+        Assert.AreEqual(forecastsAfterPrime, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "a static snapshot must gate the render kick's non-forced refresh");
+
+        widget.StaticSnapshot = false;
+        widget.Render(surface.Canvas, bounds);
+        await TestWait.WaitUntilAsync(
+            () => stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)) > forecastsAfterPrime,
+            TimeSpan.FromSeconds(5));
+        Assert.IsTrue(stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)) > forecastsAfterPrime,
+            "toggling the snapshot off must resume the fetch cadence");
+    }
+
+    [TestMethod]
+    public void RenderModel_UnchangedState_ReusesTheCachedModel()
+    {
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())) };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        widget.Render(surface.Canvas, bounds);
+        var first = widget._renderModel;
+        Assert.IsNotNull(first, "the first render must build a model");
+
+        widget.Render(surface.Canvas, bounds);
+
+        Assert.AreSame(first, widget._renderModel, "unchanged state must reuse the cached render model");
+        Assert.AreSame(first.MetricWidths, widget._renderModel!.MetricWidths,
+            "the cached pill widths must be reused, not re-measured");
+    }
+
+    [TestMethod]
+    public void RenderModel_EachCacheKey_ForcesARebuild()
+    {
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())) };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        // The matrix pins every IsCacheValid key: changing any one of them
+        // must rebuild the model (the static scene would otherwise draw stale
+        // strings). Each mutation persists — every assertion starts from the
+        // previous mutated state and changes ONE key.
+        void AssertRebuilds(string keyName, Action mutate)
+        {
+            widget.Render(surface.Canvas, bounds);
+            var before = widget._renderModel;
+            mutate();
+            widget.Render(surface.Canvas, bounds);
+            Assert.AreNotSame(before, widget._renderModel, $"{keyName} must force a rebuild");
+        }
+
+        AssertRebuilds("LayoutMode", () => widget.LayoutMode = "Compact");
+        AssertRebuilds("UnitSystem", () => widget.UnitSystem = "Celsius (°C, km/h)");
+        AssertRebuilds("CustomLabel", () => widget.CustomLabel = "Home");
+        AssertRebuilds("ShowFeelsLike", () => widget.ShowFeelsLike = false);
+        AssertRebuilds("ShowHumidity", () => widget.ShowHumidity = false);
+        AssertRebuilds("ShowWind", () => widget.ShowWind = false);
+        AssertRebuilds("ShowHighLow", () => widget.ShowHighLow = false);
+        AssertRebuilds("ShowForecast", () => widget.ShowForecast = false);
+        AssertRebuilds("Bounds", () => bounds = new SKRect(0, 0, 300, 200));
+    }
+
+    [TestMethod]
+    public async Task RenderModel_FetchChangesDataVersionAndResolvedCity_ForcesARebuild()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        widget.Render(surface.Canvas, bounds);
+        // The render's own kick may have fired a fetch (the stub completes
+        // synchronously) - wait for it to APPLY (the daily rows land in the
+        // widget's lists) so `before` is stable. The client's completion
+        // count increments before the widget's continuation applies the
+        // snapshot, so a count-based wait can race the apply.
+        await TestWait.WaitUntilAsync(() => widget._dailyForecasts.Count >= 2, TimeSpan.FromSeconds(5));
+        var before = widget._renderModel;
+        Assert.IsNotNull(before);
+
+        await widget.FetchLiveWeatherAsync(force: true);
+        widget.Render(surface.Canvas, bounds);
+
+        Assert.AreNotSame(before, widget._renderModel, "a fetch (data version + resolved city) must force a rebuild");
+        Assert.AreEqual("New York, US", widget._renderModel!.ResolvedCity);
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_MalformedForecastBody_KeepsPreviousForecast()
+    {
+        bool fail = false;
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(SampleGeocode);
+            return fail ? StubHttpHandler.Ok("not json {{{") : StubHttpHandler.Ok(SampleForecast);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+
+        await widget.FetchLiveWeatherAsync(force: true);
+        int dailyCount = widget._dailyForecasts.Count;
+        Assert.IsTrue(dailyCount >= 2, "precondition: the first fetch applies the forecast");
+
+        fail = true;
+        await widget.FetchLiveWeatherAsync(force: true);
+
+        Assert.AreEqual(dailyCount, widget._dailyForecasts.Count,
+            "a malformed body must keep the previous forecast intact");
+    }
+
+    [TestMethod]
     public void Render_WithWiredAccent_ComposesWithoutThrowing()
     {
         using var surface = SKSurface.Create(new SKImageInfo(406, 296));
@@ -297,8 +444,8 @@ public class WeatherForecastWidgetTests
         widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
         var renders = context.Renders;
 
-        // The shipped prompt state is gone: an ambiguous resolution must be
-        // silent — no fetch, no state change, no render request.
+        // An ambiguous resolution must be silent - no fetch, no state change,
+        // no render request.
         // (Drive the fetch directly; the client's ambiguity flag suppresses it.)
         widget._suppressLocationWriteback = true; // isolate this test from the write-back path
         await widget.FetchLiveWeatherAsync();
@@ -324,12 +471,16 @@ public class WeatherForecastWidgetTests
         profile.ActivePage.Widgets.Add(placed);
         var context = new PersistingContext(profile);
         widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
-        // InitializeAsync kicks the startup fetch; wait for it to complete.
-        await TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5));
-        // The write-back lands on the UI thread (the Render flush), never on
-        // the fetch continuation — Context.PersistProperty stays on the UI
-        // thread and a stale fetch cannot clobber a newer edit.
-        widget.ApplyPendingLocationWriteback();
+        // Poll the write-back application until the label lands: the
+        // fetch-completion count increments inside the client's finally BEFORE
+        // the widget's continuation sets the pending write-back, so a
+        // count-based wait can race the apply on a busy scheduler. The apply
+        // is idempotent — a no-op while the pending field is not yet set.
+        await TestWait.WaitUntilAsync(() =>
+        {
+            widget.ApplyPendingLocationWriteback();
+            return string.Equals(widget.Location, "Victoria, British Columbia, Canada", StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location,
             "a successful resolution must write the resolved label back into Location");
@@ -357,6 +508,7 @@ public class WeatherForecastWidgetTests
         var fetching = widget.FetchLiveWeatherAsync(force: true);
         await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
         widget.Location = "Tokyo"; // the user edits while the fetch is in flight
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Tokyo"); // the real edit path — invalidates the client
         gate.SetResult();
         await fetching;
         widget.ApplyPendingLocationWriteback();
@@ -389,6 +541,7 @@ public class WeatherForecastWidgetTests
         var fetching = widget.FetchLiveWeatherAsync(force: true);
         await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
         widget.CountryCode = "DE"; // the user adds a country hint while the fetch is in flight
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.CountryCode), "DE"); // the real edit path — invalidates the client
         gate.SetResult();
         await fetching;
         widget.ApplyPendingLocationWriteback();
@@ -401,6 +554,207 @@ public class WeatherForecastWidgetTests
         // did not), and its unresolvable result applied nothing.
         Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("/v1/search", StringComparison.Ordinal) && u.Contains("countryCode=DE", StringComparison.Ordinal)),
             "the new identity must be fetched with the country hint");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_LocationReassignedWithoutNotification_DropsStaleAndRefetches()
+    {
+        // RehydrateWidget assigns the profile's properties AFTER the widget is
+        // constructed and never calls OnPropertyChanged for them - the silent
+        // assignment bypasses the widget's invalidation, so a fetch that was
+        // in flight during it completes as Fetched (the client's identity
+        // never saw the edit). The widget's post-await re-validation must
+        // drop that stale result AND force a re-fetch of the new identity,
+        // exactly like the OnPropertyChanged path does for live edits.
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                return StubHttpHandler.Ok(url.Contains("name=Tokyo", StringComparison.OrdinalIgnoreCase)
+                    ? """{ "results": [ { "name": "Tokyo", "latitude": 35.6762, "longitude": 139.6503, "admin1": "Tokyo Prefecture", "country": "Japan", "country_code": "JP" } ] }"""
+                    : WeatherClientTests.SampleSameNameMultiCountry);
+            }
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        }, gate);
+        var widget = new WeatherForecastWidget { Location = "Victoria", TestHttpClient = new HttpClient(stub) };
+
+        var fetching = widget.FetchLiveWeatherAsync(force: true);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+        widget.Location = "Tokyo"; // the rehydration-style assignment: NO OnPropertyChanged
+        gate.SetResult();
+        await fetching;
+
+        // The re-validation must have dropped the Victoria result (never
+        // applied) and re-fetched Tokyo: wait for the applied state of the
+        // re-fetch, not the client's completion count (the count increments
+        // before the widget's continuation applies the snapshot).
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Tokyo, Tokyo Prefecture, Japan", TimeSpan.FromSeconds(5));
+        Assert.AreEqual("Tokyo, Tokyo Prefecture, Japan", widget.ResolvedCityName,
+            "a fetch that completed under a silently-reassigned identity must be dropped and re-fetched");
+        Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("name=Tokyo", StringComparison.OrdinalIgnoreCase)),
+            "the re-validation must re-fetch the NEW identity");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_CompletedFetchThenLocationEdit_WritebackDoesNotClobber()
+    {
+        // The edit-time race the pending write-back clear closes: a fetch
+        // COMPLETED (not in flight) while the user edits Location, but its
+        // resolved-label write-back had not been flushed by a Render tick yet.
+        // The edit must drop the pending write-back, so the next flush leaves
+        // the newer edit alone. (The in-flight stale guard only covers fetches
+        // still in flight at edit time.)
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var widget = new WeatherForecastWidget { Location = "Victoria", TestHttpClient = new HttpClient(stub) };
+
+        // Fetch #1 completes and sets the pending write-back (no Render call
+        // flushed it — the write-back waits for the UI thread).
+        await widget.FetchLiveWeatherAsync(force: true);
+        Assert.AreEqual("Victoria", widget.Location, "the write-back must still be pending at this point");
+
+        // The user edits Location through the real property-change path
+        // (SetProperty → OnPropertyChanged → invalidation + forced re-fetch).
+        // The re-fetch for "Tokyo" resolves ambiguously (no such candidate)
+        // and applies nothing, so the flush below is the only writer.
+        widget.Location = "Tokyo";
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Tokyo");
+        // Wait for the APPLIED state - the edit still stands after the flush -
+        // not the client's completion count: the count increments inside the
+        // client's finally BEFORE the widget's continuation runs, so a
+        // count-based wait can flush while the re-fetch is still settling.
+        // The flush is idempotent; the edit already cleared the pending
+        // write-back, so the field can only stay "Tokyo".
+        await TestWait.WaitUntilAsync(() =>
+        {
+            widget.ApplyPendingLocationWriteback();
+            return string.Equals(widget.Location, "Tokyo", StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
+
+        widget.ApplyPendingLocationWriteback();
+        Assert.AreEqual("Tokyo", widget.Location,
+            "an edit made after a completed fetch must survive the pending write-back");
+    }
+
+    [TestMethod]
+    public async Task LoadCachedWeatherAsync_FetchLandedDuringLoad_DoesNotOverwriteWithStaleCache()
+    {
+        // The boot race: InitializeAsync fires the cache load and the boot
+        // fetch concurrently. When the fetch lands while the load is in
+        // flight, the stale cache must not overwrite it — the load captures
+        // the data version before its await and re-checks after.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+
+        // A stale cache that would clobber the fresh fetch (one daily row and
+        // a garbage temperature; the fetch's SampleForecast carries two rows).
+        var staleCache = new WeatherSnapshot(99.9, 99.9, 99, 99, 99, 99, 99,
+            [new DailyForecastItem("Today", 99, 99, 0)], null, "Stale City", 0, 0);
+        var gate = new TaskCompletionSource();
+        widget.CacheLoadOverride = async (_, _) =>
+        {
+            await gate.Task.ConfigureAwait(false);
+            return staleCache;
+        };
+
+        var loading = widget.LoadCachedWeatherAsync(CancellationToken.None); // captures version 0, parks at the gate
+        await widget.FetchLiveWeatherAsync(force: true);                      // applies fresh data (version 1)
+        gate.SetResult();                                                     // the load completes AFTER the fetch
+        await loading;
+
+        Assert.AreEqual(2, widget._dailyForecasts.Count,
+            "the stale cache must not overwrite the fetch that landed during the load");
+    }
+
+    [TestMethod]
+    public async Task LoadCachedWeatherAsync_NoConcurrentChange_AppliesTheCache()
+    {
+        var widget = new WeatherForecastWidget();
+        var cached = new WeatherSnapshot(99.9, 99.9, 99, 99, 99, 99, 99,
+            [new DailyForecastItem("Today", 99, 99, 0)], null, "Cached City", 0, 0);
+        widget.CacheLoadOverride = (_, _) => Task.FromResult<WeatherSnapshot?>(cached);
+
+        await widget.LoadCachedWeatherAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, widget._dailyForecasts.Count,
+            "an unchanged data version must apply the cache (the guard only drops concurrent writes)");
+    }
+
+    [TestMethod]
+    public async Task LoadCachedWeatherAsync_NullDailySnapshot_KeepsPreviousForecast()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(SampleGeocode)
+                : StubHttpHandler.Ok(SampleForecast);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+        await widget.FetchLiveWeatherAsync(force: true);
+        Assert.AreEqual(2, widget._dailyForecasts.Count, "precondition: the fetch applies two daily rows");
+
+        widget.CacheLoadOverride = (_, _) => Task.FromResult<WeatherSnapshot?>(
+            new WeatherSnapshot(12.5, null, null, null, null, null, null, null, null, "Cached", 0, 0));
+
+        await widget.LoadCachedWeatherAsync(CancellationToken.None);
+
+        Assert.AreEqual(2, widget._dailyForecasts.Count,
+            "a snapshot that omits the daily section must keep the previous forecast (null-Daily merge)");
+    }
+
+    [TestMethod]
+    public async Task InitializeAsync_BootLoadAppliesLegacyCache_ThenBootFetchWins()
+    {
+        // End-to-end boot: a legacy (unstamped) cache file is applied by the
+        // boot load through the widget's identity-threaded load, and the
+        // concurrent boot fetch's fresh data wins afterwards.
+        string cacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
+        Directory.CreateDirectory(cacheDir);
+        var widget = new WeatherForecastWidget { InstanceId = "bootrace-id", Location = "Victoria" };
+        widget.TestHttpClient = new HttpClient(new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherClientTests.SampleSameNameMultiCountry);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleForecast) : StubHttpHandler.NotFound();
+        }));
+        string cachePath = Path.Combine(cacheDir, widget.CacheFileName);
+        await File.WriteAllTextAsync(cachePath, """
+        {
+          "CurrentTempC": 99.9, "FeelsLikeC": 99, "Humidity": 99, "WindSpeedKmH": 99,
+          "WeatherCode": 3, "HighTempC": 99, "LowTempC": 99, "ResolvedCityName": "Cached City",
+          "Lat": 48.85, "Lon": 2.35,
+          "DailyForecasts": [ { "DayName": "Today", "MaxTempC": 99, "MinTempC": 99, "WeatherCode": 0 } ],
+          "HourlyForecasts": []
+        }
+        """);
+        try
+        {
+            await widget.InitializeAsync(new TestContext());
+
+            // The boot fetch's fresh data must be the final state (daily
+            // WeatherCode 2 from SampleForecast), regardless of whether the
+            // load applied first or was dropped by the version guard.
+            await TestWait.WaitUntilAsync(
+                () => widget._dailyForecasts.Count == 2 && widget._dailyForecasts[0].WeatherCode == 2,
+                TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            try { File.Delete(cachePath); } catch { /* best-effort cleanup */ }
+        }
     }
 
     [TestMethod]
@@ -425,24 +779,29 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
-    public void OnPropertyChanged_InvalidationSet_MatchesWeatherLocationKeyFields()
+    public void OnPropertyChanged_InvalidationSet_CoversEveryResolutionInput()
     {
-        // BuildQueryKey interpolates every WeatherLocation property except
-        // CustomLabel; the widget's invalidation guard (plus LocationMatch's
-        // own branch) must cover exactly those fields — otherwise a new
-        // resolution input would change the identity without forcing a
-        // re-fetch, and the "one guard covers every source" claim rots.
-        var keyFields = typeof(WeatherLocation)
-            .GetProperties()
+        // The client's stale detection rides the widget's invalidation calls:
+        // a resolution input that fails to invalidate would let an in-flight
+        // fetch apply stale weather after an edit. The expected set is
+        // DERIVED from the WeatherLocation record (every member except
+        // CustomLabel — a label change must not re-fetch): a new resolution
+        // field added to the record fails this test until it is wired into
+        // the invalidation set. LocationMatch has its own branch in
+        // OnPropertyChanged (which clears the same client identity via
+        // InvalidateCoordinates), so it is appended to the guarded side.
+        var expected = typeof(WeatherLocation).GetProperties()
             .Select(p => p.Name)
-            .Where(name => name != nameof(WeatherLocation.CustomLabel))
-            .ToHashSet();
+            .Where(n => !string.Equals(n, nameof(WeatherLocation.CustomLabel), StringComparison.Ordinal))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
         var guarded = WeatherForecastWidget.ResolutionInvalidationProperties
-            .Append(nameof(WeatherLocation.LocationMatch))
-            .ToHashSet();
+            .Append(nameof(WeatherForecastWidget.LocationMatch))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
 
-        CollectionAssert.AreEquivalent(keyFields.ToList(), guarded.ToList(),
-            "every WeatherLocation key field must be covered by the invalidation guard or LocationMatch's branch");
+        CollectionAssert.AreEquivalent(expected, guarded,
+            "every resolution input must invalidate the client identity (or route through LocationMatch's branch)");
     }
 
     [TestMethod]
@@ -488,7 +847,8 @@ public class WeatherForecastWidgetTests
         Assert.IsTrue(widget.ShowHighLow);
         Assert.IsFalse(widget.StaticSnapshot);
 
-        // Property Change resets geocode cache flag
+        // The defaulted property snapshot survives a change (the render-model
+        // cache invalidation covers the property set — see IsCacheValid).
         widget.Location = "Tokyo";
         Assert.AreEqual("Tokyo", widget.Location);
     }
@@ -575,7 +935,7 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
-    public void WeatherForecastWidget_Rendering_ExecutesWithoutExceptions()
+    public void Render_AllLayoutModes_ExecutesWithoutExceptions()
     {
         var widget = new WeatherForecastWidget();
         using var surface = SKSurface.Create(new SKImageInfo(400, 300));
@@ -585,15 +945,15 @@ public class WeatherForecastWidgetTests
         string[] modes = ["Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact"];
         foreach (var mode in modes)
         {
+            canvas.Clear(SKColors.Black);
             widget.LayoutMode = mode;
             widget.Render(canvas, bounds);
+            AssertWidgetDrewContent(surface, $"{mode} must paint content");
         }
-
-        Assert.IsNotNull(surface);
     }
 
     [TestMethod]
-    public void WeatherForecastWidget_SmallGridSizeScaling_ExecutesWithoutExceptions()
+    public void Render_SmallGridSizes_ExecutesWithoutExceptions()
     {
         var widget = new WeatherForecastWidget();
         using var surface = SKSurface.Create(new SKImageInfo(200, 160));
@@ -602,9 +962,18 @@ public class WeatherForecastWidgetTests
         SKSize[] smallSizes = [new(200, 160), new(150, 120), new(120, 90)];
         foreach (var size in smallSizes)
         {
+            canvas.Clear(SKColors.Black);
             widget.Render(canvas, new SKRect(0, 0, size.Width, size.Height));
         }
 
-        Assert.IsNotNull(surface);
+        AssertWidgetDrewContent(surface, "a small grid must still paint content");
+    }
+
+    private static void AssertWidgetDrewContent(SKSurface surface, string message)
+    {
+        using var image = surface.Snapshot();
+        using var readback = SKBitmap.FromImage(image);
+        Assert.IsTrue(readback.Pixels.Any(p => p.Alpha > 0 && (p.Red > 0 || p.Green > 0 || p.Blue > 0)),
+            message);
     }
 }

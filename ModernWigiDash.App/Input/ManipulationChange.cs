@@ -10,4 +10,4 @@ namespace ModernWigiDash.App.Input;
 /// applied snap-to-grid (profile dirty + inspector transform refresh + repaint).</param>
 /// <param name="IconMoved">True when an icon grab changed the widget's icon
 /// offsets (full inspector refresh).</param>
-public readonly record struct ManipulationChange(bool Changed, bool IconMoved);
+internal readonly record struct ManipulationChange(bool Changed, bool IconMoved);

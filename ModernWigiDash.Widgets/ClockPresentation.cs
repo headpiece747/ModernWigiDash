@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -9,15 +11,15 @@ public static class ClockPresentation
 {
     /// <summary>The AM/PM suffix for the 12H mode; empty for 24H.</summary>
     public static string AmPm(DateTime now, string timeFormat)
-        => timeFormat == "24H" ? "" : now.ToString("tt");
+        => string.Equals(timeFormat, "24H", StringComparison.Ordinal) ? "" : now.ToString("tt", CultureInfo.InvariantCulture);
 
     /// <summary>The long date line under the time.</summary>
     public static string Date(DateTime now)
-        => now.ToString("dddd, MMMM dd, yyyy");
+        => now.ToString("dddd, MMMM dd, yyyy", CultureInfo.InvariantCulture);
 
     /// <summary>Formats the digital clock time for the 12H/24H choice.</summary>
     public static string FormatClockTime(DateTime now, string timeFormat)
-        => timeFormat == "24H" ? now.ToString("HH:mm") : now.ToString("hh:mm");
+        => string.Equals(timeFormat, "24H", StringComparison.Ordinal) ? now.ToString("HH:mm", CultureInfo.InvariantCulture) : now.ToString("hh:mm", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The analog hands' angles in radians (straight up = 0, clockwise). The

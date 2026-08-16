@@ -46,7 +46,7 @@ public class InspectorModelBuilderTests
     [TestMethod]
     public void Describe_ReturnsEntryPerWidgetProperty()
     {
-        var descriptions = InspectorModelBuilder.Describe(Place());
+        var descriptions = InspectorModelBuilder.Describe(Place(), []);
 
         Assert.AreEqual(6, descriptions.Count);
         CollectionAssert.AreEqual(
@@ -57,7 +57,7 @@ public class InspectorModelBuilderTests
     [TestMethod]
     public void Describe_ActionProperty_IsMarkedAsAction()
     {
-        var descriptions = InspectorModelBuilder.Describe(Place());
+        var descriptions = InspectorModelBuilder.Describe(Place(), []);
 
         var action = descriptions.Single(d => d.Property.Name == "DoThing");
         Assert.IsTrue(action.IsAction);
@@ -69,7 +69,7 @@ public class InspectorModelBuilderTests
     public void Describe_CurrentValue_DefaultsToAttributeDefault()
     {
         var widget = new FakeWidget { Title = "Changed" };
-        var descriptions = InspectorModelBuilder.Describe(Place(widget));
+        var descriptions = InspectorModelBuilder.Describe(Place(widget), []);
 
         Assert.AreEqual("Changed", descriptions.Single(d => d.Property.Name == "Title").CurrentValue);
     }
@@ -77,7 +77,7 @@ public class InspectorModelBuilderTests
     [TestMethod]
     public void Describe_Choice_UsesOptionsProviderOverAttributeOptions()
     {
-        var descriptions = InspectorModelBuilder.Describe(Place());
+        var descriptions = InspectorModelBuilder.Describe(Place(), []);
 
         var mode = descriptions.Single(d => d.Property.Name == "Mode");
         CollectionAssert.AreEqual(
@@ -90,7 +90,7 @@ public class InspectorModelBuilderTests
     {
         var placed = new PlacedWidgetInstance { PluginId = "x", DisplayName = "X", ActiveInstance = null };
 
-        Assert.AreEqual(0, InspectorModelBuilder.Describe(placed).Count);
+        Assert.AreEqual(0, InspectorModelBuilder.Describe(placed, []).Count);
     }
 
     [TestMethod]
@@ -104,7 +104,7 @@ public class InspectorModelBuilderTests
             ActiveInstance = hotkey
         };
 
-        var descriptions = InspectorModelBuilder.Describe(placed);
+        var descriptions = InspectorModelBuilder.Describe(placed, []);
 
         Assert.IsFalse(descriptions.Any(d => d.Property.Name == nameof(HotkeyButtonWidget.IconFile)),
             "IconFile is a hidden companion of the Icon editor");
@@ -113,10 +113,9 @@ public class InspectorModelBuilderTests
     }
 
     [TestMethod]
-    public void Describe_SensorSelector_OptionsComeFromLiveStore()
+    public void Describe_SensorSelector_UsesCallerSuppliedOptions()
     {
-        LhmSensorStore.Reset();
-        LhmSensorStore.UpdateFromDto(new SensorSnapshotDto
+        var snapshot = new SensorSnapshotDto
         {
             IsConnected = true,
             LastUpdate = DateTime.UtcNow,
@@ -125,15 +124,17 @@ public class InspectorModelBuilderTests
                 new SensorReadingDto { SensorId = "cpu", SensorName = "CPU Temp", HardwareName = "Mainboard", Unit = "°C", Value = 50, Min = 40, Max = 90 },
                 new SensorReadingDto { SensorId = "gpu", SensorName = "GPU Temp", HardwareName = "GPU", Unit = "°C", Value = 60, Min = 40, Max = 90 },
             ],
-        });
+        };
 
         var sensorWidget = new SensorSelectorWidgetStub();
-        var descriptions = InspectorModelBuilder.Describe(new PlacedWidgetInstance
-        {
-            PluginId = "sensor",
-            DisplayName = "Sensor",
-            ActiveInstance = sensorWidget
-        });
+        var descriptions = InspectorModelBuilder.Describe(
+            new PlacedWidgetInstance
+            {
+                PluginId = "sensor",
+                DisplayName = "Sensor",
+                ActiveInstance = sensorWidget
+            },
+            InspectorModelBuilder.SensorOptions(snapshot));
 
         var selector = descriptions.Single(d => d.PropertyType == WidgetPropertyType.SensorSelector);
         CollectionAssert.AreEqual(

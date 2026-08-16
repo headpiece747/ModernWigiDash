@@ -4,7 +4,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// PresentMon status codes (PresentMonAPI.h — success is zero, first in
 /// enum; the rest are positional, NOT named-assigned).
 /// </summary>
-public enum PmStatus
+internal enum PmStatus
 {
     Success = 0,
     Failure = 1,

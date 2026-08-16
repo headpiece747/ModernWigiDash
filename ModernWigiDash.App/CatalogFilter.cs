@@ -6,7 +6,7 @@ namespace ModernWigiDash.App;
 /// The widget-catalog filter and sort used by the window's catalog list —
 /// pure so the match rules are assertable without WPF.
 /// </summary>
-public static class CatalogFilter
+internal static class CatalogFilter
 {
     public static IReadOnlyList<PluginInfo> Apply(IEnumerable<PluginInfo> plugins, string query)
     {

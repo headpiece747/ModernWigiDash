@@ -9,7 +9,7 @@ namespace ModernWigiDash.App;
 /// assertable: every ordered step runs in order, and the last resort runs
 /// no matter what.
 /// </summary>
-public sealed class ShutdownOrchestrator(Action[] orderedSteps, Action lastResort)
+internal sealed class ShutdownOrchestrator(Action[] orderedSteps, Action lastResort)
 {
     public void Run()
     {

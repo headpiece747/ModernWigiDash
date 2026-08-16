@@ -8,7 +8,7 @@ namespace ModernWigiDash.App;
 /// while the engine is still trying); Simulated keeps AccentRed, which reads
 /// as "amber" on this theme.
 /// </summary>
-public static class UsbBadgeModel
+internal static class UsbBadgeModel
 {
     public static (string Label, string BrushKey) From(ConnectionState state) => state switch
     {

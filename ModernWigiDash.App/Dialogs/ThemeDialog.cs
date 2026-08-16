@@ -13,7 +13,7 @@ namespace ModernWigiDash.App.Dialogs;
 /// widget canvas) grouped by category, with hex validation and apply/reset.
 /// Extracted from MainWindow so the dialog owns its entire UI lifetime.
 /// </summary>
-public sealed class ThemeDialog : Window
+internal sealed class ThemeDialog : Window
 {
     private readonly ThemeApplicator _themeApplicator;
     private readonly List<(string Key, ColorPickerEditor Editor)> _entries = [];
@@ -68,7 +68,7 @@ public sealed class ThemeDialog : Window
         foreach (var prop in props)
         {
             string group = ThemeSettings.Groups.TryGetValue(prop.Name, out var grp) ? grp : "Other";
-            if (group != currentGroup)
+            if (!string.Equals(group, currentGroup, StringComparison.Ordinal))
             {
                 currentGroup = group;
                 fields.Children.Add(new TextBlock

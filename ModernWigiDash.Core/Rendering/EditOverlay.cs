@@ -9,7 +9,7 @@ namespace ModernWigiDash.Core.Rendering;
 /// and resize handle. Rendering logic that used to live inside the compositor —
 /// one module for the authoring overlay, one place to test it.
 /// </summary>
-public sealed class EditOverlay
+internal sealed class EditOverlay
 {
     /// <summary>
     /// Size of the edit-mode resize handle, in canvas pixels. Single source of

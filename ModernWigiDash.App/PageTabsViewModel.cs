@@ -6,14 +6,14 @@ namespace ModernWigiDash.App;
 /// <see cref="PageTabsView.Rebuild"/> applies, testable without WPF: which tab
 /// is active, whether deletion is allowed (never on the last page), and the
 /// tab label.</summary>
-public sealed record PageTabItem(string PageName, int Index, bool IsActive, bool CanDelete);
+internal sealed record PageTabItem(string PageName, int Index, bool IsActive, bool CanDelete);
 
 /// <summary>
 /// Builds the per-tab rule set for the page-tabs strip. The window renders
 /// these items; the rules (active index, delete-only-when-more-than-one-page)
 /// live here so they can be tested directly.
 /// </summary>
-public static class PageTabsViewModel
+internal static class PageTabsViewModel
 {
     /// <summary>The single delete-page rule: the last page can never be
     /// deleted. The rule lives in ProfileOps beside DeletePage; this delegates

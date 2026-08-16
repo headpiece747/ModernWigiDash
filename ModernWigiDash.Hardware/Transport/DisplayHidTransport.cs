@@ -28,7 +28,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// fake providers — including a fake WinUSB leg — through the list, so the
 /// connect policy — open, init, fallback — is drivable without hardware.
 /// </summary>
-public sealed class DisplayHidTransport : IDisplayTransport
+internal sealed class DisplayHidTransport : IDisplayTransport
 {
     private readonly ILogger<DisplayHidTransport> _logger;
 

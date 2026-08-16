@@ -120,10 +120,10 @@ internal sealed class FeedLoop : IDisposable
                 Current = feed;
                 try
                 {
-                    await feed.ConnectAsync(_uri, ct);
-                    await _onConnected(feed, ct);
+                    await feed.ConnectAsync(_uri, ct).ConfigureAwait(false);
+                    await _onConnected(feed, ct).ConfigureAwait(false);
                     string? message;
-                    while ((message = await feed.ReceiveTextAsync(ct)) is not null)
+                    while ((message = await feed.ReceiveTextAsync(ct).ConfigureAwait(false)) is not null)
                     {
                         _onMessage(message);
                     }
@@ -145,7 +145,7 @@ internal sealed class FeedLoop : IDisposable
 
                 _onCycleEnded?.Invoke(faulted);
                 if (ct.IsCancellationRequested || !(_continueAfterCycle?.Invoke() ?? true)) break;
-                await _delay(_reconnect.NextDelay(faulted), ct);
+                await _delay(_reconnect.NextDelay(faulted), ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

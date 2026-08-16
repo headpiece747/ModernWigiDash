@@ -14,8 +14,13 @@ namespace ModernWigiDash.App;
 /// inspector's icon picker. Owns the authorization window's lifetime tracking;
 /// the window just forwards calls.
 /// </summary>
-public sealed class DialogHost
+internal sealed class DialogHost
 {
+    private const int PromptWidth = 380;
+    private const int EditorWidth = 520;
+    private const int EditorHeight = 620;
+    private const int DeviceAuthWidth = 430;
+
     private readonly Window _owner;
     private readonly ThemeApplicator _themeApplicator;
     private readonly Func<string, object?> _tryFindResource;
@@ -35,7 +40,7 @@ public sealed class DialogHost
     /// </summary>
     public string? PromptForText(string title, string label, string initialValue)
     {
-        var dialog = CreateChrome(title, 380);
+        var dialog = CreateChrome(title, PromptWidth);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -121,7 +126,7 @@ public sealed class DialogHost
     /// </summary>
     private (Window Dialog, Button OkButton) CreateMessageDialog(string title, string message, bool isConfirm)
     {
-        var dialog = CreateChrome(title, 380);
+        var dialog = CreateChrome(title, PromptWidth);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -193,8 +198,8 @@ public sealed class DialogHost
         var dialog = new Window
         {
             Title = title,
-            Width = 520,
-            Height = 620,
+            Width = EditorWidth,
+            Height = EditorHeight,
             Owner = _owner,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Background = _tryFindResource("BgPanel") as Brush ?? _tryFindResource("PanelBackground") as Brush ?? Brushes.Black,
@@ -380,7 +385,7 @@ public sealed class DialogHost
             var window = new Window
             {
                 Title = $"ModernWigiDash - {serviceName} Login",
-                Width = 430,
+                Width = DeviceAuthWidth,
                 SizeToContent = SizeToContent.Height,
                 Owner = _owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,

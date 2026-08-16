@@ -66,6 +66,17 @@ public class InspectorValuePolicyTests
     }
 
     [TestMethod]
+    public void TryParsePosition_InvariantDecimal_NotCommaDecimal()
+    {
+        // The policy parses with InvariantCulture (the profile JSON round-trip
+        // is invariant): "1.5" parses, "1,5" does not — regardless of the
+        // machine's current culture.
+        Assert.IsTrue(Policy.TryParsePosition("1.5", out float x));
+        Assert.AreEqual(1.5f, x);
+        Assert.IsFalse(Policy.TryParsePosition("1,5", out _), "a comma decimal must not parse");
+    }
+
+    [TestMethod]
     public void TryParsePosition_Garbage_ReturnsFalse() =>
         Assert.IsFalse(Policy.TryParsePosition("abc", out _));
 

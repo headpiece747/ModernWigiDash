@@ -1,4 +1,3 @@
-using System.Globalization;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 
@@ -37,45 +36,39 @@ public static class FrameTimePresentation
 {
     public static FrameTimeDisplay Build(FrameTimeSnapshotDto snapshot, SKSize bounds)
     {
-        string Fps0(double v) => v > 0 ? $"{v:F0} FPS" : "0 FPS";
-        string Ms0(double v) => double.IsFinite(v) && v > 0 ? $"{v:F1} ms" : "0.0 ms";
-        string Pct0(double v) => v > 0 ? $"{v:F0}%" : "0%";
-        string Count0(int v) => v.ToString(CultureInfo.InvariantCulture);
-        string FpsHero(double v) => v > 0 ? $"{v:F0}" : "0";
-
         // The overlay's frame-time rows derive from the percentile FPS values,
         // matching PresentMon's 99th/1st %tile stat naming (the producer keeps
         // the percentile data in PresentMon's own units).
-        string PercentileFrameTime(double percentileFps) => Ms0(1000.0 / percentileFps);
+        string PercentileFrameTime(double percentileFps) => DisplayFormat.Ms(1000.0 / percentileFps);
 
         var dashboard = new List<FrameTimeMetric>(8)
         {
-            new("1% LOW", Fps0(snapshot.Low1PercentFps)),
-            new("0.1% LOW", Fps0(snapshot.Low01PercentFps)),
-            new("CPU FRAME", Ms0(snapshot.CpuFrameTimeMs)),
-            new("GPU BUSY", Pct0(snapshot.GpuBusyPercent)),
-            new("DISPLAYED", Fps0(snapshot.DisplayedFps)),
-            new("DROPPED", Count0(snapshot.DroppedFrames)),
-            new("GPU TIME", Ms0(snapshot.GpuTimeMs)),
+            new("1% LOW", DisplayFormat.Fps(snapshot.Low1PercentFps)),
+            new("0.1% LOW", DisplayFormat.Fps(snapshot.Low01PercentFps)),
+            new("CPU FRAME", DisplayFormat.Ms(snapshot.CpuFrameTimeMs)),
+            new("GPU BUSY", DisplayFormat.Pct(snapshot.GpuBusyPercent)),
+            new("DISPLAYED", DisplayFormat.Fps(snapshot.DisplayedFps)),
+            new("DROPPED", DisplayFormat.Count(snapshot.DroppedFrames)),
+            new("GPU TIME", DisplayFormat.Ms(snapshot.GpuTimeMs)),
             new("PRESENT MODE", PresentMonPresentMode.ShortName(snapshot.PresentModeId)),
         };
 
         var overlay = new List<FrameTimeMetric>(9)
         {
-            new("Presented FPS", FpsHero(snapshot.Fps)),
-            new("Displayed FPS", FpsHero(snapshot.DisplayedFps)),
+            new("Presented FPS", DisplayFormat.FpsValue(snapshot.Fps)),
+            new("Displayed FPS", DisplayFormat.FpsValue(snapshot.DisplayedFps)),
             new("99th %tile Frame Time", PercentileFrameTime(snapshot.Low1PercentFps)),
             new("1st %tile Frame Time", PercentileFrameTime(snapshot.Low01PercentFps)),
-            new("GPU Busy %", Pct0(snapshot.GpuBusyPercent)),
-            new("GPU Time", Ms0(snapshot.GpuTimeMs)),
-            new("CPU Frame Time", Ms0(snapshot.CpuFrameTimeMs)),
-            new("Dropped Frames", Count0(snapshot.DroppedFrames)),
+            new("GPU Busy %", DisplayFormat.Pct(snapshot.GpuBusyPercent)),
+            new("GPU Time", DisplayFormat.Ms(snapshot.GpuTimeMs)),
+            new("CPU Frame Time", DisplayFormat.Ms(snapshot.CpuFrameTimeMs)),
+            new("Dropped Frames", DisplayFormat.Count(snapshot.DroppedFrames)),
             new("Present Mode", PresentMonPresentMode.FullName(snapshot.PresentModeId)),
         };
 
         return new FrameTimeDisplay(
-            HeroFps: FpsHero(snapshot.Fps),
-            HeroFrameTimeMs: Ms0(snapshot.FrameTimeMs),
+            HeroFps: DisplayFormat.FpsValue(snapshot.Fps),
+            HeroFrameTimeMs: DisplayFormat.Ms(snapshot.FrameTimeMs),
             Dashboard: dashboard,
             Overlay: overlay,
             ProcessName: snapshot.ProcessName,

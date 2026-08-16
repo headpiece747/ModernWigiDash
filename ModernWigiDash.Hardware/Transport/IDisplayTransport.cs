@@ -17,7 +17,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// wrappers over blocking I/O would be fake async and force sync-over-async
 /// bridges at the callers.
 /// </summary>
-public interface IDisplayTransport : IAsyncDisposable, IDisposable
+internal interface IDisplayTransport : IAsyncDisposable, IDisposable
 {
     /// <summary>
     /// Gets a value indicating whether the hardware transport connection is currently active.

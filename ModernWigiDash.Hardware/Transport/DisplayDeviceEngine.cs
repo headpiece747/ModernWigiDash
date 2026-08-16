@@ -63,15 +63,22 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// Creates the engine. The constructor is deliberately inert: no connect
     /// attempt, no background loops — construction must never reach for
     /// hardware (window field initializers, test hosts). Call <see cref="Start"/>
-    /// to begin connection and touch polling.
+    /// to begin connection and touch polling. The transport is constructed
+    /// lazily per connect attempt by the default factory (the real hardware
+    /// transport), so the connect state machine stays drivable by the internal
+    /// factory ctor's fake-transport seam in tests.
     /// </summary>
+    public DisplayDeviceEngine() : this((Func<IDisplayTransport>?)null)
+    {
+    }
+
     /// <summary>
     /// Creates the engine. The transport is constructed lazily per connect
     /// attempt via <paramref name="transportFactory"/> (defaults to the real
     /// hardware transport), so the connect state machine is drivable with a
     /// fake transport end-to-end.
     /// </summary>
-    public DisplayDeviceEngine(Func<IDisplayTransport>? transportFactory = null)
+    internal DisplayDeviceEngine(Func<IDisplayTransport>? transportFactory)
     {
         _transportFactory = transportFactory ?? (() => new DisplayHidTransport());
         Log("=== Display Hardware Engine Initializing ===");
@@ -156,7 +163,7 @@ public sealed class DisplayDeviceEngine : IDisposable
             {
                 Log($"{faultPrefix}: {t.Exception?.GetBaseException().Message}");
             }
-            else if (failureLog is not null && !t.Result)
+            else if (failureLog is not null && !t.GetAwaiter().GetResult())
             {
                 Log(failureLog);
             }

@@ -1,9 +1,7 @@
-using System.Globalization;
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>The metric-pill visibility flags and values the Detailed mode needs.</summary>
-public sealed record WeatherMetricsInput(
+internal sealed record WeatherMetricsInput(
     bool ShowFeelsLike,
     double FeelsLikeC,
     bool ShowHumidity,
@@ -17,12 +15,38 @@ public sealed record WeatherMetricsInput(
     string SpeedUnit);
 
 /// <summary>
+/// The data-side inputs for <see cref="WeatherPresentation.Build"/>: the
+/// current conditions, the unit/visibility choices, and the forecast lists
+/// the Daily/Hourly strings derive from.
+/// </summary>
+internal sealed record WeatherDisplayInput(
+    double CurrentTempC,
+    WeatherMetricsInput Metrics,
+    IReadOnlyList<DailyForecastItem> DailyForecasts,
+    IReadOnlyList<HourlyForecastItem> HourlyForecasts);
+
+/// <summary>
+/// Everything the widget draws that is a *fact* of the weather data and
+/// units: the hero temperature, the metric pills, the daily strip strings,
+/// and the hourly temps — composed by <see cref="WeatherPresentation.Build"/>
+/// and rendered by <see cref="WeatherWidgetRenderer"/>. The render methods
+/// are thin adapters that lay these out; the display rules are assertable
+/// without pixels.
+/// </summary>
+internal sealed record WeatherDisplay(
+    string MainTemp,
+    IReadOnlyList<string> Metrics,
+    IReadOnlyList<string> ForecastRanges,
+    IReadOnlyList<string> DailyHighLows,
+    IReadOnlyList<string> HourlyTemps);
+
+/// <summary>
 /// Pure display rules for the Weather widget: the unit conversions, the WMO
 /// condition table, and the composed row/pill strings the five layout modes
 /// draw. Moved out of the widget's render paths and out of the data module
 /// (WeatherClient), so every display string is assertable without pixels.
 /// </summary>
-public static class WeatherPresentation
+internal static class WeatherPresentation
 {
     /// <summary>WMO weather-code → (emoji icon, short description).</summary>
     public static (string Icon, string Description) MapWmoCode(int code)
@@ -49,6 +73,16 @@ public static class WeatherPresentation
     /// <summary>The default unit-system choice — the single source for the
     /// widget's property default and the tap-toggle.</summary>
     public const string DefaultUnitSystem = "Fahrenheit (°F, mph)";
+
+    /// <summary>The daily-strip draw cap — the number of day columns the
+    /// renderer can draw. The display model caps at this; the renderer's
+    /// re-caps share the same constant, so a change edits one spelling.</summary>
+    public const int MaxStripDays = 5;
+
+    /// <summary>The hourly-strip draw cap — the number of hour columns the
+    /// renderer can draw. The display model caps at this; the renderer's
+    /// re-caps share the same constant, so a change edits one spelling.</summary>
+    public const int MaxStripHours = 6;
 
     /// <summary>The tap-toggle rule: Fahrenheit ⇄ Celsius (km/h) — the
     /// widget's badge cycles between the two primary systems.</summary>
@@ -78,9 +112,9 @@ public static class WeatherPresentation
     {
         return tempUnit switch
         {
-            "°F" => shortFormat ? $"{Invariant(tempC * 9.0 / 5.0 + 32.0, "F0")}°" : $"{Invariant(tempC * 9.0 / 5.0 + 32.0, "F0")}°F",
-            "K" => $"{Invariant(tempC + 273.15, "F0")} K",
-            _ => shortFormat ? $"{Invariant(tempC, "F0")}°" : $"{Invariant(tempC, "F1")}°C",
+            "°F" => shortFormat ? $"{DisplayFormat.Value(tempC * 9.0 / 5.0 + 32.0, "F0")}°" : $"{DisplayFormat.Value(tempC * 9.0 / 5.0 + 32.0, "F0")}°F",
+            "K" => $"{DisplayFormat.Value(tempC + 273.15, "F0")} K",
+            _ => shortFormat ? $"{DisplayFormat.Value(tempC, "F0")}°" : $"{DisplayFormat.Value(tempC, "F1")}°C",
         };
     }
 
@@ -90,15 +124,11 @@ public static class WeatherPresentation
     {
         return speedUnit switch
         {
-            "mph" => $"{Invariant(kmh * 0.621371, "F0")} mph",
-            "m/s" => $"{Invariant(kmh / 3.6, "F0")} m/s",
-            _ => $"{Invariant(kmh, "F0")} km/h",
+            "mph" => $"{DisplayFormat.Value(kmh * 0.621371, "F0")} mph",
+            "m/s" => $"{DisplayFormat.Value(kmh / 3.6, "F0")} m/s",
+            _ => $"{DisplayFormat.Value(kmh, "F0")} km/h",
         };
     }
-
-    /// <summary>Invariant-culture number formatting for display strings.</summary>
-    private static string Invariant(double value, string format)
-        => value.ToString(format, CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The Detailed-mode metric pills, in the widget's fixed order. Only the
@@ -113,7 +143,7 @@ public static class WeatherPresentation
         }
         if (input.ShowHumidity)
         {
-            metrics.Add($"Humidity: {input.Humidity:F0}%");
+            metrics.Add($"Humidity: {DisplayFormat.Pct(input.Humidity)}");
         }
         if (input.ShowWind)
         {
@@ -133,4 +163,37 @@ public static class WeatherPresentation
     /// <summary>The "High: ...  Low: ..." row in the Daily forecast mode.</summary>
     public static string DailyHighLowText(double maxTempC, double minTempC, string tempUnit)
         => $"High: {FormatTemp(maxTempC, tempUnit)}  Low: {FormatTemp(minTempC, tempUnit)}";
+
+    /// <summary>
+    /// Composes the display facts for one weather data state: the hero
+    /// temperature, the metric pills, the daily strip strings (capped at
+    /// <see cref="MaxStripDays"/> days, the strip's draw limit), and the hourly
+    /// temps (capped at <see cref="MaxStripHours"/> columns, the row's draw
+    /// limit). The widget measures and truncates the font-dependent pieces
+    /// (header, pill widths) around this record; the draw paths never re-derive
+    /// a display string from raw data.
+    /// </summary>
+    public static WeatherDisplay Build(WeatherDisplayInput input)
+    {
+        string mainTemp = FormatTemp(input.CurrentTempC, input.Metrics.TempUnit);
+        IReadOnlyList<string> metrics = MetricPills(input.Metrics);
+
+        int dayCount = Math.Min(input.DailyForecasts.Count, MaxStripDays);
+        var ranges = new string[dayCount];
+        var highLows = new string[dayCount];
+        for (int i = 0; i < dayCount; i++)
+        {
+            ranges[i] = ForecastRangeText(input.DailyForecasts[i].MaxTempC, input.DailyForecasts[i].MinTempC, input.Metrics.TempUnit);
+            highLows[i] = DailyHighLowText(input.DailyForecasts[i].MaxTempC, input.DailyForecasts[i].MinTempC, input.Metrics.TempUnit);
+        }
+
+        int hourCount = Math.Min(input.HourlyForecasts.Count, MaxStripHours);
+        var temps = new string[hourCount];
+        for (int i = 0; i < hourCount; i++)
+        {
+            temps[i] = FormatTemp(input.HourlyForecasts[i].TempC, input.Metrics.TempUnit);
+        }
+
+        return new WeatherDisplay(mainTemp, metrics, ranges, highLows, temps);
+    }
 }

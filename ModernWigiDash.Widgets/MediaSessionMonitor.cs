@@ -61,7 +61,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     {
         try
         {
-            var manager = await _source.GetManagerAsync();
+            var manager = await _source.GetManagerAsync().ConfigureAwait(false);
             if (_disposed || manager is null) return;
 
             _manager = manager;
@@ -184,7 +184,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
         try
         {
-            var props = await session.TryGetMediaPropertiesAsync();
+            var props = await session.TryGetMediaPropertiesAsync().ConfigureAwait(false);
             var info = session.GetPlaybackInfo();
             var timeline = session.GetTimelineProperties();
             if (_disposed || refreshVersion != _refreshVersion) return;

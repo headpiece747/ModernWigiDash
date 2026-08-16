@@ -46,7 +46,7 @@ internal static class WinUsbNative
         IntPtr Overlapped);
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct WinUsbSetupPacket
+    internal struct WinUsbSetupPacket
     {
         public byte RequestType;
         public byte Request;
@@ -92,7 +92,7 @@ internal static class SetupApiNative
     /// Layout is identical to SYSTEM_GUID: 16 bytes, no padding.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct NativeGuid
+    internal struct NativeGuid
     {
         public uint Data1;
         public ushort Data2;
@@ -115,7 +115,7 @@ internal static class SetupApiNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct SpDeviceInterfaceData
+    internal struct SpDeviceInterfaceData
     {
         public uint CbSize;
         public NativeGuid InterfaceClassGuid;
@@ -131,7 +131,7 @@ internal static class SetupApiNative
     /// fail with ERROR_INVALID_USER_BUFFER (1784).
     /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct SpDeviceInterfaceDetailData
+    internal struct SpDeviceInterfaceDetailData
     {
         public uint CbSize;
         public char DevicePath;

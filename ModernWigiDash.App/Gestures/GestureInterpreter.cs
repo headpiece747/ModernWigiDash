@@ -5,7 +5,7 @@ namespace ModernWigiDash.App.Gestures;
 /// <summary>
 /// Page-navigation action produced by <see cref="GestureInterpreter"/>.
 /// </summary>
-public enum GesturePageAction
+internal enum GesturePageAction
 {
     None,
     NextPage,
@@ -21,7 +21,7 @@ public enum GesturePageAction
 /// <param name="PageAction">Swipe/edge-tap navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
 /// <param name="RouteToWidgets">True when the sample should be forwarded to the widget compositor.</param>
 /// <param name="WidgetTouchType">Touch type to route to widgets (Down/Move/Up mapping).</param>
-public readonly record struct GestureOutcome(
+internal readonly record struct GestureOutcome(
     GesturePageAction PageAction,
     bool RouteToWidgets,
     TouchEventType WidgetTouchType);
@@ -37,7 +37,7 @@ public readonly record struct GestureOutcome(
 /// therefore yields one Down followed by repeated Up samples. The mouse feeds
 /// the same normalized Down/Move/Up sequence.
 /// </summary>
-public sealed class GestureInterpreter
+internal sealed class GestureInterpreter
 {
     public const float SwipeThresholdX = 70f;
     public const float SwipeToleranceY = 80f;

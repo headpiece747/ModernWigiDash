@@ -57,11 +57,10 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     /// <summary>Test seam for the fallback-fetch throttle.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
-    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        base.InitializeAsync(context, cancellationToken);
+        await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
         UpdateSubscription();
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -83,11 +82,11 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         _subscription.Track(Symbol, AssetKindValue, Feed);
     }
 
-    public override async ValueTask DisposeAsync()
+    public override ValueTask DisposeAsync()
     {
         // Stop polling this widget's symbol once it is removed from the canvas.
         _subscription.Untrack();
-        await base.DisposeAsync();
+        return base.DisposeAsync();
     }
 
     private AssetKind AssetKindValue => SymbolCatalog.DetectAssetKind(Symbol, AssetType);
@@ -107,7 +106,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     {
         get
         {
-            if (Symbol != _labelKeySymbol || AssetType != _labelKeyType || DisplayName != _labelKeyName)
+            if (!string.Equals(Symbol, _labelKeySymbol, StringComparison.Ordinal) || !string.Equals(AssetType, _labelKeyType, StringComparison.Ordinal) || !string.Equals(DisplayName, _labelKeyName, StringComparison.Ordinal))
             {
                 _labelKeySymbol = Symbol;
                 _labelKeyType = AssetType;
@@ -206,7 +205,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         try
         {
             if (IsFxAsset) return;
-            await Feed.FetchFallbackAsync(Symbol, AssetKindValue);
+            await Feed.FetchFallbackAsync(Symbol, AssetKindValue).ConfigureAwait(false);
 
             var info = Feed.GetPrice(Symbol, AssetKindValue);
             if (info != null)

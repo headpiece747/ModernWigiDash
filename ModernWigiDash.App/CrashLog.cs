@@ -25,11 +25,11 @@ internal static class CrashLog
     /// lowercase marker) in a crash message — an exception message may echo a
     /// failing request URL that carries a token.</summary>
     private static readonly Regex TokenParamRedactor =
-        new(@"token=[^&\s""'<>]+", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        new(@"(?:access_token|refresh_token|device_code|token)=[^&\s""'<>]+", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     /// <summary>Strips the query string from embedded URLs in a crash message.</summary>
     private static readonly Regex UrlQueryStripper =
-        new(@"(https?://[^\s""'<>]+)\?[^\s""'<>]*", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        new(@"(?<url>https?://[^\s""'<>]+)\?[^\s""'<>]*", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     public static void Append(Exception? ex, bool handled = false)
     {
@@ -64,7 +64,7 @@ internal static class CrashLog
         if (string.IsNullOrEmpty(message)) return string.Empty;
         // Query-strip first: the redaction marker must not sit inside a URL
         // (its angle brackets would break the URL pattern).
-        return TokenParamRedactor.Replace(UrlQueryStripper.Replace(message, "$1"), "token=<redacted>");
+        return TokenParamRedactor.Replace(UrlQueryStripper.Replace(message, "${url}"), "token=<redacted>");
     }
 
     /// <summary>

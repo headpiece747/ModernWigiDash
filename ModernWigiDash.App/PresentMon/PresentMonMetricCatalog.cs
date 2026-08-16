@@ -7,7 +7,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// consults this instead of hand-maintained mirrors, so an installed service
 /// that differs from the header never silently mis-registers.
 /// </summary>
-public sealed record PresentMonMetricInfo(
+internal sealed record PresentMonMetricInfo(
     int Id,
     int MetricType,
     int Unit,
@@ -19,7 +19,7 @@ public sealed record PresentMonMetricInfo(
 /// (<see cref="PresentMonIntrospection"/>); consumed by
 /// <see cref="PresentMonQueryBuilder"/> to build the dynamic query.
 /// </summary>
-public sealed class PresentMonMetricCatalog
+internal sealed class PresentMonMetricCatalog
 {
     private readonly IReadOnlyDictionary<int, PresentMonMetricInfo> _metrics;
 

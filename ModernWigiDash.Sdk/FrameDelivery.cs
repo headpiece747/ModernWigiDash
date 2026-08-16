@@ -44,8 +44,13 @@ public sealed class FrameDelivery : IDisposable
     private long _dropped;
     private long _droppedPool;
     private long _droppedCoalesced;
+    private long _droppedEncode;
     private long _sendFailed;
     private int _disposed;
+
+    private readonly DiagLog _sentLog;
+    private readonly DiagLog _sendFailLog;
+    private readonly DiagLog _encodeFailLog;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
     /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
@@ -95,6 +100,7 @@ public sealed class FrameDelivery : IDisposable
         // a delivery without a log sink stays silent.
         _sentLog = new DiagLog("FrameDelivery", 60, write: log ?? (static _ => { }));
         _sendFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
+        _encodeFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _channel = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(capacity)
         {
             SingleWriter = true,
@@ -163,6 +169,11 @@ public sealed class FrameDelivery : IDisposable
     /// backlog (drain-to-latest replays only the newest frame).</summary>
     public long DroppedCoalescedCount => Interlocked.Read(ref _droppedCoalesced);
 
+    /// <summary>Frames dropped because the encoder threw while encoding — the
+    /// third in-pipeline drop source (a transient encode failure must drop the
+    /// frame, never the 30 FPS tick that feeds it).</summary>
+    public long DroppedEncodeCount => Interlocked.Read(ref _droppedEncode);
+
     /// <summary>Frames handed to the transport seam that failed to send (the
     /// seam returned false or threw). A broken pipe accumulates here, not in
     /// <see cref="FramesSent"/> and not in the drop counters.</summary>
@@ -188,10 +199,13 @@ public sealed class FrameDelivery : IDisposable
         {
             _encoder.Encode(frame, buffer);
         }
-        catch
+        catch (Exception ex)
         {
             _pool.Release(buffer);
-            throw;
+            Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _droppedEncode);
+            _encodeFailLog.Write(() => $"encode failed, frame dropped: {ex.Message}");
+            return FrameDeliveryResult.Dropped;
         }
 
         return Queue(new FrameSlot(buffer));
@@ -205,7 +219,7 @@ public sealed class FrameDelivery : IDisposable
     {
         try
         {
-            while (await _channel.Reader.WaitToReadAsync(ct))
+            while (await _channel.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
             {
                 FrameSlot latest = ChannelFrameCoalescer.DrainToLatest(
                     _channel.Reader,
@@ -221,7 +235,7 @@ public sealed class FrameDelivery : IDisposable
                 {
                     try
                     {
-                        await Task.Delay(_minInterval - sinceLastStart, ct);
+                        await Task.Delay(_minInterval - sinceLastStart, ct).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -274,16 +288,6 @@ public sealed class FrameDelivery : IDisposable
         }
     }
 
-    /// <summary>
-    /// Log cadences composed as <see cref="DiagLog"/>s: success logs every 60th
-    /// frame; failure logs the first occurrence and then every 60th — a dead
-    /// bus cannot spam the log at ~30 lines/s. The write seam is the injected
-    /// log callback (null = write nothing), so the tag and cadence rules are
-    /// declared once instead of hand-baked at each call site.
-    /// </summary>
-    private readonly DiagLog _sentLog;
-    private readonly DiagLog _sendFailLog;
-
     private void ReleaseSlot(FrameSlot slot, bool dropped)
     {
         if (dropped)
@@ -310,6 +314,10 @@ public sealed class FrameDelivery : IDisposable
         return FrameDeliveryResult.Dropped;
     }
 
+    /// <summary>
+    /// Stops the sender loop, returns queued buffers to the pool, and releases
+    /// the channel. Idempotent; the standby path on app close calls this once.
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;

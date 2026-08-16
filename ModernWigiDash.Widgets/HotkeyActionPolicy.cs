@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -45,7 +47,7 @@ internal static class HotkeyActionPolicy
     /// anything else (e.g. "up") = +120.</summary>
     public static int WheelAmount(string direction)
     {
-        if (int.TryParse(direction, out int value)) return value;
+        if (int.TryParse(direction, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)) return value;
         return direction.Trim().Equals("down", StringComparison.OrdinalIgnoreCase) ? -120 : 120;
     }
 

@@ -48,14 +48,14 @@ public static class PriceFeedMessages
                 return false;
             }
 
-            if (!s.EndsWith("USDT")
+            if (!s.EndsWith("USDT", StringComparison.Ordinal)
                 || !decimal.TryParse(c, NumberStyles.Any, CultureInfo.InvariantCulture, out price)
                 || !decimal.TryParse(P, NumberStyles.Any, CultureInfo.InvariantCulture, out changePercent))
             {
                 return false;
             }
 
-            coin = s[..^4].ToUpper();
+            coin = s[..^4].ToUpperInvariant();
             return true;
         }
         catch
@@ -75,7 +75,7 @@ public static class PriceFeedMessages
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.GetProperty("type").GetString() != "trade" || !root.TryGetProperty("data", out var data))
+            if (!string.Equals(root.GetProperty("type").GetString(), "trade", StringComparison.Ordinal) || !root.TryGetProperty("data", out var data))
             {
                 return true; // a well-formed non-trade message is not an error
             }

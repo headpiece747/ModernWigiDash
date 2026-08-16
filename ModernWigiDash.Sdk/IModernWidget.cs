@@ -4,26 +4,91 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Sdk;
 
+/// <summary>
+/// The widget contract every display widget implements. The host discovers
+/// widget types by reflection (parameterless constructor, <c>[WidgetMetadata]</c>),
+/// instantiates them per placement, and drives the lifecycle:
+/// <see cref="InitializeAsync"/> once at placement, <see cref="Render"/> on the
+/// 30 FPS presentation tick, <see cref="OnTouch"/> for compositor-routed touch,
+/// <see cref="OnPropertyChanged"/> on external property writes, and
+/// <see cref="IAsyncDisposable.DisposeAsync"/> at teardown. Because widgets are
+/// reflectively instantiated they cannot take constructor dependencies — the
+/// <see cref="IModernWigiDashContext"/> handed to
+/// <see cref="InitializeAsync"/> is the widget's only host-service seam.
+/// </summary>
 public interface IModernWidget : IAsyncDisposable
 {
+    /// <summary>Identity of this widget instance, assigned by the host when the
+    /// widget is placed. The host resolves the owning placed instance by this
+    /// identity (property persistence, touch routing); widgets should treat it
+    /// as host-managed and never assume a value before initialization.</summary>
     string InstanceId { get; set; }
+
+    /// <summary>The size the widget takes when placed without an explicit size
+    /// (placement centering and catalog previews use it).</summary>
     SKSize DefaultSize { get; }
 
+    /// <summary>
+    /// Host call, once per placement: hands the widget its
+    /// <see cref="IModernWigiDashContext"/> and starts its lifetime. The host
+    /// invokes it SYNCHRONOUSLY on the UI thread during placement and BEFORE
+    /// the profile's stored properties are applied to the instance — a widget
+    /// must not marshal to a SynchronizationContext and await it (a deadlock
+    /// would wedge startup), and it cannot assume its persisted property
+    /// values exist yet. Long-lived work (poll loops, subscriptions,
+    /// background fetches) should be started here with the supplied token so
+    /// teardown can cancel it; the base stores the context, so overrides must
+    /// call <c>base.InitializeAsync</c> first.
+    /// </summary>
     ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>Host call on every 30 FPS presentation tick: draws the widget
+    /// into <paramref name="canvas"/> within <paramref name="bounds"/> (the
+    /// placement rect). Rendering must stay allocation-light — per-frame
+    /// allocations are a measured cost in the hot pipeline.</summary>
     void Render(SKCanvas canvas, SKRect bounds);
+
+    /// <summary>Host call for compositor-routed touch input. The point is
+    /// already in the widget's local coordinate space (the compositor
+    /// transformed it through the placement transform, including rotation), so
+    /// widgets hit-test against their own layout. Tap actions conventionally
+    /// fire on <see cref="TouchEventType.TouchUp"/>.</summary>
     void OnTouch(SKPoint localPoint, TouchEventType eventType);
+
+    /// <summary>Host call when a property's value changed outside the widget
+    /// (inspector write-back); <see cref="ModernWidgetBase.SetProperty"/> also
+    /// raises it on internal mutation. The default implementation requests a
+    /// repaint; overrides react to specific properties (restart loops, clamp
+    /// values) and must call the base to keep the repaint.</summary>
     void OnPropertyChanged(string propertyName, object? newValue);
 }
 
+/// <summary>
+/// The default widget implementation: stores the context handed to
+/// <see cref="InitializeAsync"/>, owns the cached color parsing and the single
+/// property-write path (<see cref="SetProperty"/>), and gives every lifecycle
+/// hook a benign default. Widgets derive from this (public, parameterless
+/// constructor for the reflection loader) and override only what they do.
+/// </summary>
 public abstract class ModernWidgetBase : IModernWidget
 {
+    /// <summary>A fresh GUID identity per instance — the host may replace it
+    /// with the placed instance's persisted identity.</summary>
     public string InstanceId { get; set; } = Guid.NewGuid().ToString();
 
     // 2x2 grid cell default (406x296), matching GridSizePreset.Size2x2.
+    /// <summary>The default placement size: the 2×2 grid cell (406×296).</summary>
     public virtual SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
 
+    /// <summary>The host-services seam, set by the base
+    /// <see cref="InitializeAsync"/>. Null before initialization — guard
+    /// (<c>Context?.X</c>) when teardown work may run after the context is
+    /// gone.</summary>
     protected IModernWigiDashContext Context { get; private set; } = null!;
 
+    /// <summary>Stores the host context. Overrides must call this first
+    /// (<c>await base.InitializeAsync(context, cancellationToken)</c>) before
+    /// using <see cref="Context"/>.</summary>
     public virtual ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -31,13 +96,19 @@ public abstract class ModernWidgetBase : IModernWidget
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>Draws the widget into the placement rect (see
+    /// <see cref="IModernWidget.Render"/>).</summary>
     public abstract void Render(SKCanvas canvas, SKRect bounds);
 
+    /// <summary>Default: no-op. Override for interactive touch buttons; see
+    /// <see cref="IModernWidget.OnTouch"/> for the coordinate contract.</summary>
     public virtual void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         // Default: no-op, override for interactive touch buttons
     }
 
+    /// <summary>Default: request a repaint. Override to react to specific
+    /// property changes, then call the base.</summary>
     public virtual void OnPropertyChanged(string propertyName, object? newValue)
     {
         // Default: request render when property changes
@@ -94,18 +165,23 @@ public abstract class ModernWidgetBase : IModernWidget
         if (property is null)
         {
             string message = $"SetProperty: property '{propertyName}' not found on {GetType().FullName}";
-            System.Diagnostics.Debug.WriteLine(message);
             FileLog.Write(message);
+            // Nothing was set — do NOT raise the change or persist an unknown
+            // key into PropertyValues (a typo'd property must not silently
+            // write garbage into the export format).
+            return;
         }
-        else
-        {
-            property.SetValue(this, value);
-        }
+
+        property.SetValue(this, value);
 
         OnPropertyChanged(propertyName, value);
         Context?.PersistProperty(this, propertyName, value);
     }
 
+    /// <summary>Host call at teardown (widget removed, profile closed):
+    /// release owned resources — poll loops, feed subscriptions, tokens. The
+    /// default does nothing. Widgets that cancel long-lived work should use
+    /// the token they captured in <see cref="InitializeAsync"/>.</summary>
     public virtual ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
@@ -118,5 +194,8 @@ public abstract class ModernWidgetBase : IModernWidget
 /// </summary>
 public interface IWidgetActionInvoker
 {
+    /// <summary>Host call when the inspector button for
+    /// <paramref name="propertyName"/> is clicked; the widget runs its action
+    /// (e.g. Twitch login) and refreshes the inspector/render via the context.</summary>
     void InvokeWidgetAction(string propertyName);
 }

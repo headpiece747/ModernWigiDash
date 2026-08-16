@@ -124,7 +124,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     {
         get
         {
-            if (Icon != _lastGriddyIcon)
+            if (!string.Equals(Icon, _lastGriddyIcon, StringComparison.Ordinal))
             {
                 _lastGriddyIcon = Icon;
                 _lastGriddyIconResult = !string.IsNullOrWhiteSpace(Icon) && GriddyIcons.Contains(Icon);
@@ -171,7 +171,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
         if (!ComputeIconGeometry(bounds.Width, bounds.Height, out var iconCenter, out float half))
         {
-            if (useCustomFile && _lastIconErrorPath != IconFile)
+            if (useCustomFile && !string.Equals(_lastIconErrorPath, IconFile, StringComparison.Ordinal))
             {
                 _lastIconErrorPath = IconFile;
                 Context?.LogError($"Hotkey custom icon file not found or unsupported: {IconFile}");
@@ -312,13 +312,13 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
 
     public EditorKind? GetEditorKind(PropertyInfo property)
     {
-        if (property.Name == nameof(IconFile)) return EditorKind.IconPicker;
-        if (property.Name == nameof(ActionCommand)) return EditorKind.ActionCommand;
+        if (string.Equals(property.Name, nameof(IconFile), StringComparison.Ordinal)) return EditorKind.IconPicker;
+        if (string.Equals(property.Name, nameof(ActionCommand), StringComparison.Ordinal)) return EditorKind.ActionCommand;
         return null;
     }
 
     public PropertyInfo? GetIconFileCompanion(PropertyInfo iconProperty)
-        => iconProperty.Name == nameof(Icon)
+        => string.Equals(iconProperty.Name, nameof(Icon), StringComparison.Ordinal)
             ? typeof(HotkeyButtonWidget).GetProperty(nameof(IconFile))
             : null;
 
@@ -335,10 +335,10 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         _descriptionPaint.Dispose();
         if (_actionCts is { } cts)
         {
-            await cts.CancelAsync();
+            await cts.CancelAsync().ConfigureAwait(false);
             cts.Dispose();
         }
         _actionGate.Dispose();
-        await base.DisposeAsync();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

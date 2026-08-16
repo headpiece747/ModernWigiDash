@@ -14,7 +14,7 @@ namespace ModernWigiDash.App.Controls;
 /// background) all wire one event. Programmatic <see cref="Hex"/> sets never
 /// raise events (panel rebuilds must not commit).
 /// </summary>
-public sealed class ColorPickerEditor : UserControl
+internal sealed class ColorPickerEditor : UserControl
 {
     private readonly Border _swatch;
     private string _hex = "";

@@ -8,6 +8,10 @@ namespace ModernWigiDash.Sdk;
 /// </summary>
 public enum FrameDeliveryResult
 {
+    /// <summary>The frame entered the pipeline (encoded and queued for delivery).</summary>
     Queued,
+
+    /// <summary>The frame did not enter the pipeline — delivery not ready,
+    /// pool exhausted, or the encode failed (counted in the drop counters).</summary>
     Dropped
 }

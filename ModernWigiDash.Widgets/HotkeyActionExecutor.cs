@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -112,7 +114,7 @@ internal static class HotkeyActionExecutor
     {
         var keys = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(ParseVirtualKey).ToArray();
-        ArgumentOutOfRangeException.ThrowIfZero(keys.Length);
+        if (keys.Length == 0) throw new ArgumentOutOfRangeException(nameof(text), "A key chord must contain at least one key.");
 
         try
         {
@@ -145,7 +147,7 @@ internal static class HotkeyActionExecutor
 
     private static void SendUnicodeText(string text)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(text.Length, HotkeyActionPolicy.MaxTextLength);
+        if (text.Length > HotkeyActionPolicy.MaxTextLength) throw new ArgumentOutOfRangeException(nameof(text), $"Text exceeds the {HotkeyActionPolicy.MaxTextLength}-character limit.");
         var inputs = new List<Input>(text.Length * 2);
         foreach (char character in text)
         {
@@ -198,7 +200,7 @@ internal static class HotkeyActionExecutor
         }
         if (key.Length == 1 && ((key[0] is >= 'A' and <= 'Z') || (key[0] is >= '0' and <= '9')))
             return key[0];
-        if (key.StartsWith('F') && int.TryParse(key[1..], out int function) && function is >= 1 and <= 24)
+        if (key.StartsWith('F') && int.TryParse(key[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int function) && function is >= 1 and <= 24)
             return (ushort)(0x70 + function - 1);
 
         return key switch

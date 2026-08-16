@@ -8,6 +8,8 @@ namespace ModernWigiDash.Sdk;
 /// </summary>
 public static class PresentMonPresentMode
 {
+    /// <summary>The full PM_PRESENT_MODE label for a polled id ("—" for no
+    /// data/unknown).</summary>
     public static string FullName(int id) => id switch
     {
         0 => "Unknown",
@@ -21,6 +23,8 @@ public static class PresentMonPresentMode
         _ => "—",
     };
 
+    /// <summary>The compact PM_PRESENT_MODE label for a polled id ("—" for no
+    /// data/unknown).</summary>
     public static string ShortName(int id) => id switch
     {
         0 => "Unknown",

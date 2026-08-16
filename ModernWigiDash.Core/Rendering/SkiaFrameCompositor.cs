@@ -60,7 +60,7 @@ public class SkiaFrameCompositor : IDisposable
 
         // 1. Clear background with charcoal slate / page background color
         // (the string parse is hoisted: reparse only when the hex changes).
-        if (page.BackgroundHexColor != _lastBgHex)
+        if (!string.Equals(page.BackgroundHexColor, _lastBgHex, StringComparison.Ordinal))
         {
             _lastBgHex = page.BackgroundHexColor;
             _lastBgColor = SKColor.TryParse(page.BackgroundHexColor, out var parsed)
@@ -162,32 +162,6 @@ public class SkiaFrameCompositor : IDisposable
                 j--;
             }
             order[j + 1] = current;
-        }
-    }
-
-    public static PlacedWidgetInstance? HitTest(PageLayout page, float pointX, float pointY)
-    {
-        // Top-most widget (highest ZIndex) that contains the point — single
-        // pass, zero allocation (replaces OrderByDescending+FirstOrDefault).
-        PlacedWidgetInstance? best = null;
-        foreach (PlacedWidgetInstance widget in page.Widgets)
-        {
-            if (!widget.ContainsPoint(pointX, pointY)) continue;
-            if (best == null || widget.ZIndex > best.ZIndex)
-            {
-                best = widget;
-            }
-        }
-        return best;
-    }
-
-    public static void RouteTouch(PageLayout page, float pointX, float pointY, TouchEventType eventType)
-    {
-        var target = HitTest(page, pointX, pointY);
-        if (target?.ActiveInstance != null)
-        {
-            var localPoint = target.ToLocalPoint(pointX, pointY);
-            target.ActiveInstance.OnTouch(localPoint, eventType);
         }
     }
 

@@ -1,6 +1,8 @@
 using ModernWigiDash.Core.Plugins;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
+using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
@@ -56,5 +58,52 @@ public class WidgetPluginLoaderTests
         var loader = new WidgetPluginLoader();
 
         Assert.IsNull(loader.CreateInstance("no_such_plugin"));
+    }
+
+    [TestMethod]
+    public void WidgetPluginLoader_CreateInstanceResult_UnknownIdReturnsNotFound()
+    {
+        var loader = new WidgetPluginLoader();
+
+        var result = loader.CreateInstanceResult("no_such_plugin");
+
+        Assert.IsInstanceOfType<WidgetCreateResult.NotFound>(result);
+    }
+
+    [TestMethod]
+    public void WidgetPluginLoader_CreateInstanceResult_ThrowingConstructorReturnsBrokenWithReason()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(ThrowingCtorWidget));
+
+        var result = loader.CreateInstanceResult(nameof(ThrowingCtorWidget));
+
+        Assert.IsInstanceOfType<WidgetCreateResult.Broken>(result);
+        StringAssert.Contains(((WidgetCreateResult.Broken)result).Reason, "boom");
+    }
+
+    [TestMethod]
+    public void WidgetPluginLoader_CreateInstanceResult_RegisteredWidgetReturnsOk()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(DigitalAnalogClockWidget));
+
+        var result = loader.CreateInstanceResult("clock_modern");
+
+        Assert.IsInstanceOfType<WidgetCreateResult.Ok>(result);
+        Assert.IsInstanceOfType<DigitalAnalogClockWidget>(((WidgetCreateResult.Ok)result).Widget);
+    }
+
+    /// <summary>A widget whose constructor throws — the Broken-result pin for
+    /// <see cref="WidgetPluginLoader.CreateInstanceResult"/>. Internal (not
+    /// private) because the constructor is only reached through reflection;
+    /// the unused-member analyzer would flag a private one.</summary>
+    internal sealed class ThrowingCtorWidget : ModernWidgetBase
+    {
+        public ThrowingCtorWidget() => throw new InvalidOperationException("boom");
+
+        public override void Render(SKCanvas canvas, SKRect bounds)
+        {
+        }
     }
 }

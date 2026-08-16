@@ -8,7 +8,7 @@ namespace ModernWigiDash.App.Power;
 /// (StatusChange and unknown modes are never raised — the lifecycle policy
 /// reacts only to sleep/wake).
 /// </summary>
-public sealed class SystemPowerModeSource : IPowerModeSource
+internal sealed class SystemPowerModeSource : IPowerModeSource
 {
     public event Action<PowerModes>? ModeChanged;
 

@@ -14,7 +14,7 @@ internal static class TestWait
         bool met = condition();
         while (!met && DateTime.UtcNow < deadline)
         {
-            await Task.Delay(5);
+            await Task.Delay(5).ConfigureAwait(false);
             met = condition();
         }
 

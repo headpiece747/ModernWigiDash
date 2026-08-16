@@ -6,7 +6,7 @@ namespace ModernWigiDash.App;
 /// Mirrors the UsbBadgeModel pattern — the window keeps only the element
 /// writes, so the table is assertable without WPF.
 /// </summary>
-public sealed record UpdateBadgeModel(string IconName, byte Red, byte Green, byte Blue, bool IsVisible)
+internal sealed record UpdateBadgeModel(string IconName, byte Red, byte Green, byte Blue, bool IsVisible)
 {
     public static UpdateBadgeModel From(UpdateState state) => state switch
     {

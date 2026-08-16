@@ -12,7 +12,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// <see cref="PresentMonQueryRegistry"/>; this class owns the session and the
 /// tracking surface.
 /// </summary>
-public sealed class PresentMonNative : IPresentMonNative
+internal sealed class PresentMonNative : IPresentMonNative
 {
     private readonly IntPtr? _library;
     private readonly PmOpenSession? _openSessionFn;

@@ -11,7 +11,7 @@ namespace ModernWigiDash.App;
 /// reassigned under their <c>{propertyName}</c> keys so every DynamicResource consumer
 /// repaints immediately — no reliance on a Color-to-brush freezable chain.
 /// </summary>
-public static class ThemeManager
+internal static class ThemeManager
 {
     /// <summary>Converts a theme color to a WPF Color — the single conversion
     /// site (the resource application and the window's shadow re-application

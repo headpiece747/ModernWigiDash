@@ -5,7 +5,8 @@ namespace ModernWigiDash.Widgets.Twitch;
 /// <summary>
 /// Pure display rules for the Twitch chat widget: the header status line and
 /// the empty-state hint, previously composed inline in the render path and
-/// never asserted.
+/// never asserted. The connection-state policy lives in
+/// <see cref="TwitchChatStatusPolicy"/>.
 /// </summary>
 public static class TwitchChatPresentation
 {
@@ -18,29 +19,6 @@ public static class TwitchChatPresentation
             ChatStatus.Disconnected => "○ " + (detail.Length > 0 ? detail : "Disconnected"),
             _ => "○ Disconnected" // unreachable — guards undefined enum values
         };
-
-    /// <summary>
-    /// The NOTICE → connection-state rule: a login-failure notice (or an
-    /// invalid nick) disconnects the chat, the "you are not logged in" notice
-    /// means the anonymous session is live, and any other notice leaves the
-    /// state untouched. The widget derives its detail text and log channel
-    /// from the result.
-    /// </summary>
-    public static (ChatStatus Status, bool Changed) StatusFromNotice(string noticeText, ChatStatus current)
-    {
-        if (noticeText.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase)
-            || noticeText.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
-        {
-            return (ChatStatus.Disconnected, true);
-        }
-
-        if (noticeText.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
-        {
-            return (ChatStatus.Connected, true);
-        }
-
-        return (current, false);
-    }
 
     /// <summary>The empty-chat hint shown when no messages have arrived yet.</summary>
     public static string EmptyHint(ChatStatus status, bool autoConnect)
@@ -56,10 +34,4 @@ public static class TwitchChatPresentation
     /// <summary>The header status color: green when the chat is live, white otherwise.</summary>
     public static SKColor StatusColor(ChatStatus status)
         => status == ChatStatus.Connected ? new SKColor(0x10, 0xB9, 0x81) : SKColors.White;
-
-    /// <summary>The message-buffer trim rule: the chat holds at most the
-    /// clamped MaxMessages (5..100) — one spelling shared by the receive path
-    /// and the property-change trim, so the bound can never drift between
-    /// them.</summary>
-    public static int ClampMaxMessages(int value) => Math.Clamp(value, 5, 100);
 }

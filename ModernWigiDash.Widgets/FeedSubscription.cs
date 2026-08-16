@@ -32,7 +32,7 @@ internal sealed class FeedSubscription
     /// </summary>
     public void Track(string? symbol, AssetKind kind, PriceFeedManager feed)
     {
-        if (_trackedSymbol == symbol && _trackedKind == kind) return;
+        if (string.Equals(_trackedSymbol, symbol, StringComparison.Ordinal) && _trackedKind == kind) return;
 
         if (_trackedSymbol != null)
         {

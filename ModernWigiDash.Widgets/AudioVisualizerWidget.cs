@@ -49,9 +49,9 @@ public class AudioVisualizerWidget : ModernWidgetBase
     private volatile bool _stopQueued;
     private long _lastRenderTimestamp = TimeProvider.System.GetTimestamp();
 
-    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        await base.InitializeAsync(context, cancellationToken);
+        return base.InitializeAsync(context, cancellationToken);
         // Capture starts lazily on the first Render, not here.
     }
 

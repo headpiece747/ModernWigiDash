@@ -170,7 +170,7 @@ internal sealed class StubHttpHandler : HttpMessageHandler
         RequestUrls.Add(request.RequestUri?.ToString() ?? "");
         if (_gate is not null)
         {
-            await _gate.Task;
+            await _gate.Task.ConfigureAwait(false);
         }
         if (_responses is not null)
         {

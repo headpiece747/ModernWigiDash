@@ -11,7 +11,7 @@ namespace ModernWigiDash.App;
 /// MarkDirty/Flush policy. The 30 FPS render loop never touches this module —
 /// only user mutations arm the debounce.
 /// </summary>
-public sealed class ProfilePersistence : IDisposable
+internal sealed class ProfilePersistence : IDisposable
 {
     public const string DirectoryName = "ModernWigiDash";
     public const string FileName = "profile.json";
@@ -143,7 +143,7 @@ public sealed class ProfilePersistence : IDisposable
     {
         try
         {
-            await Task.Delay(_debounceDelay, _timeProvider, token);
+            await Task.Delay(_debounceDelay, _timeProvider, token).ConfigureAwait(false);
             if (version != Volatile.Read(ref _dirtyVersion)) return;
             Save();
         }

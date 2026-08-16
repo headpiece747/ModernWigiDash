@@ -6,7 +6,8 @@ namespace ModernWigiDash.Tests;
 /// <summary>
 /// The Twitch chat widget's display rules — the status line and the
 /// empty-state hint, previously composed inline in the render path with no
-/// tests at all.
+/// tests at all. The connection-state policy is pinned by
+/// <see cref="TwitchChatStatusPolicyTests"/>.
 /// </summary>
 [TestClass]
 public class TwitchChatPresentationTests
@@ -45,25 +46,5 @@ public class TwitchChatPresentationTests
             "a live chat reads green");
         Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Connecting));
         Assert.AreEqual(SKColors.White, TwitchChatPresentation.StatusColor(ChatStatus.Disconnected));
-    }
-
-    [TestMethod]
-    public void ClampMaxMessages_WithinRange_PassesThrough()
-    {
-        Assert.AreEqual(30, TwitchChatPresentation.ClampMaxMessages(30));
-    }
-
-    [TestMethod]
-    public void ClampMaxMessages_BelowMinimum_ClampsToFive()
-    {
-        Assert.AreEqual(5, TwitchChatPresentation.ClampMaxMessages(0));
-        Assert.AreEqual(5, TwitchChatPresentation.ClampMaxMessages(5));
-    }
-
-    [TestMethod]
-    public void ClampMaxMessages_AboveMaximum_ClampsToOneHundred()
-    {
-        Assert.AreEqual(100, TwitchChatPresentation.ClampMaxMessages(500));
-        Assert.AreEqual(100, TwitchChatPresentation.ClampMaxMessages(100));
     }
 }

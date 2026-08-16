@@ -10,7 +10,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// display semantics are testable directly instead of through a 100-line poll
 /// method.
 /// </summary>
-public static class FrameTimeSnapshotFactory
+internal static class FrameTimeSnapshotFactory
 {
     /// <summary>Service absent or unreachable: the widget renders the unavailable state.</summary>
     public static FrameTimeSnapshotDto Unavailable(string? reason, DateTime now) => new()

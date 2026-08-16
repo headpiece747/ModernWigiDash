@@ -13,7 +13,7 @@ namespace ModernWigiDash.App.LibreHardwareService;
 /// snapshot, and <see cref="LastError"/> carries the reason for the poll
 /// tick to log once per change.
 /// </summary>
-public sealed class LhmSharedMemoryReader
+internal sealed class LhmSharedMemoryReader
 {
     // LibreHardwareService (epinter) header layout — mirrored from its
     // MemoryMappedSensors source. The metadata block is 4 + MetadataSize

@@ -242,7 +242,7 @@ public static class FontHelper
     /// The split is memoized per (text, style, preferred typeface) — it is independent of
     /// font size and target width — and the returned list is shared: callers must not mutate it.
     /// </summary>
-    public static List<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
+    public static IReadOnlyList<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
     {
         if (string.IsNullOrEmpty(text))
         {
@@ -275,7 +275,7 @@ public static class FontHelper
                 currentTf = tf;
                 currentRun.Append(rune);
             }
-            else if (currentTf.Handle == tf.Handle || currentTf.FamilyName == tf.FamilyName)
+            else if (currentTf.Handle == tf.Handle || string.Equals(currentTf.FamilyName, tf.FamilyName, StringComparison.Ordinal))
             {
                 currentRun.Append(rune);
             }

@@ -35,17 +35,17 @@ public static class NowPlayingPresentation
         }
         string lower = appId.ToLowerInvariant();
 
-        if (lower.Contains("spotify")) return "Spotify";
-        if (lower.Contains("chrome")) return "Chrome";
-        if (lower.Contains("msedge")) return "Edge";
-        if (lower.Contains("firefox")) return "Firefox";
-        if (lower.Contains("vlc")) return "VLC";
-        if (lower.Contains("itunes")) return "iTunes";
-        if (lower.Contains("apple") || lower.Contains("music")) return "Apple Music";
-        if (lower.Contains("mediaplayer") || lower.Contains("wmplayer")) return "Windows Media Player";
-        if (lower.Contains("discord")) return "Discord";
-        if (lower.Contains("foobar")) return "foobar2000";
-        if (lower.Contains("steam")) return "Steam";
+        if (lower.Contains("spotify", StringComparison.Ordinal)) return "Spotify";
+        if (lower.Contains("chrome", StringComparison.Ordinal)) return "Chrome";
+        if (lower.Contains("msedge", StringComparison.Ordinal)) return "Edge";
+        if (lower.Contains("firefox", StringComparison.Ordinal)) return "Firefox";
+        if (lower.Contains("vlc", StringComparison.Ordinal)) return "VLC";
+        if (lower.Contains("itunes", StringComparison.Ordinal)) return "iTunes";
+        if (lower.Contains("apple", StringComparison.Ordinal) || lower.Contains("music", StringComparison.Ordinal)) return "Apple Music";
+        if (lower.Contains("mediaplayer", StringComparison.Ordinal) || lower.Contains("wmplayer", StringComparison.Ordinal)) return "Windows Media Player";
+        if (lower.Contains("discord", StringComparison.Ordinal)) return "Discord";
+        if (lower.Contains("foobar", StringComparison.Ordinal)) return "foobar2000";
+        if (lower.Contains("steam", StringComparison.Ordinal)) return "Steam";
 
         int slash = appId.LastIndexOf('!');
         string name = slash >= 0 ? appId[(slash + 1)..] : appId;
@@ -85,5 +85,5 @@ public static class NowPlayingPresentation
 
     /// <summary>"1.5×" when the playback rate deviates from 1.0, else null (nothing to show).</summary>
     public static string? PlaybackRateText(double rate)
-        => Math.Abs(rate - 1.0) > 0.001 ? $"{rate:0.0}×" : null;
+        => Math.Abs(rate - 1.0) > 0.001 ? $"{DisplayFormat.Value(rate, "0.0")}×" : null;
 }

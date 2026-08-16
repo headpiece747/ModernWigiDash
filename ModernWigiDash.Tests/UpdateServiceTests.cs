@@ -102,16 +102,46 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
+    public void ExtractSlimZip_EscapingEntry_ThrowsAndWritesNothingOutside()
+    {
+        string dir = NewDir();
+        Directory.CreateDirectory(dir);
+        string zipPath = Path.Combine(dir, "evil.zip");
+        using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = zip.CreateEntry("../escape.txt");
+            using (var w = new StreamWriter(entry.Open()))
+            {
+                w.Write("escape");
+            }
+        }
+
+        string target = Path.Combine(dir, "extracted");
+        Assert.ThrowsExactly<InvalidDataException>(() => UpdateService.ExtractSlimZip(zipPath, target),
+            "A zip entry escaping the stage directory must be rejected");
+        Assert.IsFalse(File.Exists(Path.Combine(dir, "escape.txt")), "Nothing may be written outside the stage");
+    }
+
+    [TestMethod]
+    public void EnforceDownloadCap_OverCap_Throws()
+    {
+        // The boundary itself must pass (no throw); one byte over must throw.
+        UpdateService.EnforceDownloadCap(UpdateService.MaxUpdateBytes);
+        var ex = Assert.ThrowsExactly<InvalidDataException>(() => UpdateService.EnforceDownloadCap(UpdateService.MaxUpdateBytes + 1));
+        StringAssert.Contains(ex.Message, "size cap", "The failure must name the cap so the log line is diagnostic");
+    }
+
+    [TestMethod]
     public async Task DownloadAndStage_ShaMismatch_ReturnsFalseAndCleansUp()
     {
         string dir = NewDir();
         var service = new UpdateService(
-            downloadFile: async (_, dest, _, _) => await File.WriteAllTextAsync(dest, "corrupt"),
+            downloadFile: async (_, dest, _, _) => await File.WriteAllTextAsync(dest, "corrupt").ConfigureAwait(false),
             sha256Matches: (_, _) => false,
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", "expected-digest");
 
-        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>());
+        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
 
         Assert.IsFalse(ok);
         Assert.IsFalse(Directory.Exists(Path.Combine(dir, "downloads")),
@@ -126,10 +156,10 @@ public class UpdateServiceTests
         Directory.CreateDirectory(dir);
         // S6966 suppressed: ZipArchive has no OpenAsync/Entry.OpenAsync variants.
 #pragma warning disable S6966
-        using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+        using (var zip = await ZipFile.OpenAsync(zipPath, ZipArchiveMode.Create))
         {
             var entry = zip.CreateEntry("ModernWigiDash-win-x64/ModernWigiDash.App.exe");
-            using var w = new StreamWriter(entry.Open());
+            using var w = new StreamWriter(await entry.OpenAsync());
             await w.WriteAsync("exe");
         }
 #pragma warning restore S6966
@@ -137,12 +167,12 @@ public class UpdateServiceTests
         string digest = Convert.ToHexString(SHA256.HashData(zipBytes)).ToLowerInvariant();
 
         var service = new UpdateService(
-            downloadFile: async (_, dest, _, _) => await File.WriteAllBytesAsync(dest, zipBytes),
+            downloadFile: async (_, dest, _, _) => await File.WriteAllBytesAsync(dest, zipBytes).ConfigureAwait(false),
             sha256Matches: (actual, expected) => actual == expected,
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", digest);
 
-        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>());
+        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
 
         Assert.IsTrue(ok);
         string stagedExe = Path.Combine(dir, "staged", "0.5.0", "ModernWigiDash-win-x64", "ModernWigiDash.App.exe");

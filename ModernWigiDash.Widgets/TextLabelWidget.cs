@@ -29,7 +29,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
-        if (propertyName != nameof(FontFamily)) return [];
+        if (!string.Equals(propertyName, nameof(FontFamily), StringComparison.Ordinal)) return [];
         return FontHelper.GetAllFamilies()
             .Select(family => new WidgetPropertyOption(family, family))
             .ToArray();

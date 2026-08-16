@@ -8,7 +8,7 @@ namespace ModernWigiDash.App.Power;
 /// engine reconnect); this module owns only the mode→action mapping and the
 /// subscription lifecycle — testable without windowing or SystemEvents.
 /// </summary>
-public sealed class PowerLifecycle : IDisposable
+internal sealed class PowerLifecycle : IDisposable
 {
     private readonly IPowerModeSource _source;
     private readonly Action _onSuspend;

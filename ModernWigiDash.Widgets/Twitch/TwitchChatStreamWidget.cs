@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using SkiaSharp;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Rendering;
@@ -94,12 +96,11 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// widget's shared <see cref="WrapCache"/>.</summary>
     private sealed record ChatMessage(string Username, string Text, SKColor Color);
 
-    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        base.InitializeAsync(context, cancellationToken);
+        await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
         if (AutoConnect) StartConnection();
         _ = RestoreTwitchSessionAsync(cancellationToken);
-        return ValueTask.CompletedTask;
     }
 
     public void InvokeWidgetAction(string propertyName)
@@ -109,16 +110,16 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     }
 
     public string? GetWidgetActionLabel(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && Session.IsAuthenticated
+        => string.Equals(propertyName, nameof(LoginWithTwitch), StringComparison.Ordinal) && Session.IsAuthenticated
             ? "Twitch logged in"
             : null;
 
     public bool IsWidgetActionActive(string propertyName)
-        => propertyName == nameof(LoginWithTwitch) && Session.IsAuthenticated;
+        => string.Equals(propertyName, nameof(LoginWithTwitch), StringComparison.Ordinal) && Session.IsAuthenticated;
 
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
-        if (propertyName != nameof(ChannelName)) return [];
+        if (!string.Equals(propertyName, nameof(ChannelName), StringComparison.Ordinal)) return [];
 
         return Session.FollowedChannels
             .Select(channel => new WidgetPropertyOption(channel.Login, channel.DisplayLabel))
@@ -139,7 +140,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             case nameof(MaxMessages):
                 lock (_messagesLock)
                 {
-                    while (_messages.Count > TwitchChatPresentation.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
+                    while (_messages.Count > TwitchChatStatusPolicy.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
                     _renderSnapshot = [.. _messages];
                 }
                 break;
@@ -257,13 +258,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private async Task ConnectIrcAsync(IWebSocketFeed feed, CancellationToken ct)
     {
         var channel = NormalizeChannel(ChannelName);
-        string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString();
+        string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString(CultureInfo.InvariantCulture);
         string pass = AnonymousPass;
 
-        await SendIrcLineAsync(feed, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct);
-        await SendIrcLineAsync(feed, "PASS " + pass, ct);
-        await SendIrcLineAsync(feed, "NICK " + nick, ct);
-        await SendIrcLineAsync(feed, "JOIN #" + channel, ct);
+        await SendIrcLineAsync(feed, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct).ConfigureAwait(false);
+        await SendIrcLineAsync(feed, "PASS " + pass, ct).ConfigureAwait(false);
+        await SendIrcLineAsync(feed, "NICK " + nick, ct).ConfigureAwait(false);
+        await SendIrcLineAsync(feed, "JOIN #" + channel, ct).ConfigureAwait(false);
 
         _chatState = new(ChatStatus.Connecting, "Joining #" + channel + "…");
         Context.RequestRender();
@@ -300,7 +301,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                         CancellationToken token = _cts?.Token ?? CancellationToken.None;
                         _ = Task.Run(async () =>
                         {
-                            try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token); }
+                            try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token).ConfigureAwait(false); }
                             catch
                             {
                                 System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
@@ -318,7 +319,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                 break;
             case IrcMessageKind.Notice:
                 {
-                    var (newStatus, changed) = TwitchChatPresentation.StatusFromNotice(message.Text, _chatState.Status);
+                    var (newStatus, changed) = TwitchChatStatusPolicy.StatusFromNotice(message.Text, _chatState.Status);
                     if (changed)
                     {
                         _chatState = new(newStatus, newStatus == ChatStatus.Connected ? "LIVE" : "Login failed — check token & username");
@@ -339,14 +340,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private void HandlePrivmsg(IrcMessage message)
     {
         var colorHex = message.ColorHex;
-        var color = SKColors.White;
-        if (colorHex.StartsWith('#')) SKColor.TryParse(colorHex, out color);
+        var color = colorHex.StartsWith('#') && SKColor.TryParse(colorHex, out var parsed) ? parsed : SKColors.White;
         if (color == SKColors.White) color = TwitchIrcMessages.PaletteColorFor(message.Login.Length > 0 ? message.Login : message.Username);
 
         lock (_messagesLock)
         {
             _messages.Add(new ChatMessage(message.Username, message.Text, color));
-            while (_messages.Count > TwitchChatPresentation.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
+            while (_messages.Count > TwitchChatStatusPolicy.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
             _renderSnapshot = [.. _messages];
         }
         Context?.RequestRender();
@@ -496,8 +496,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _msgPaint.Dispose();
         _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
         _feedLoop = null;
-        if (_cts is { } cts) await cts.CancelAsync();
+        if (_cts is { } cts) await cts.CancelAsync().ConfigureAwait(false);
         _cts?.Dispose();
-        await base.DisposeAsync();
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

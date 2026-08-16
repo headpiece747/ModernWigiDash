@@ -18,7 +18,7 @@ public sealed class LogOnChange
     /// arrives).</summary>
     public bool Changed(string? message)
     {
-        if (message == _last) return false;
+        if (string.Equals(message, _last, StringComparison.Ordinal)) return false;
         _last = message;
         return true;
     }

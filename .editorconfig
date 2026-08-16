@@ -27,6 +27,71 @@ dotnet_diagnostic.S2292.severity = none
 # S1075: Structurally-literal URIs that cannot be configurable: the fixed Binance WS endpoint (PriceFeedManager.CreateBinanceLoop) and the pack URI to the embedded logo resource (WindowChrome.ApplyDarkTitleBar)
 dotnet_diagnostic.S1075.severity = none
 
+# Meziantou.Analyzer — rules that conflict with this codebase's deliberate
+# conventions (each with the reason), versus the high-value ones kept below.
+# MA0048: file-name-must-match-type — the Sdk bundles related attribute
+# types in Attributes.cs by design, and generated/partial files (MainWindow
+# partials, GriddyIconPaths.g.cs) cannot match a single type name.
+dotnet_diagnostic.MA0048.severity = none
+# MA0051: method-too-long — style only; the codebase's complexity hotspots
+# are deliberate and already reviewed.
+dotnet_diagnostic.MA0051.severity = none
+# MA0046: prefer named arguments — style; positional calls are fine here.
+dotnet_diagnostic.MA0046.severity = none
+# MA0016: prefer collection abstraction — the mutable model lists
+# (PageLayout.Widgets, ProfileLayout.Pages, PlacedWidgetInstance.
+# PropertyValues) are mutated by design (ProfileOps, inspector); the DTO and
+# FontHelper sites were fixed to IReadOnlyList.
+dotnet_diagnostic.MA0016.severity = none
+# MA0002: string-overload-with-comparer family (Contains/EndsWith/Replace…)
+# — the most numerous and the most redundant with MA0006; kept as
+# suggestions so the eyes remain without a 900-site gate.
+dotnet_diagnostic.MA0002.severity = suggestion
+# RCS1138/RCS1139 (doc-comment summary completeness) — the repo's convention
+# is substantive summaries where they earn their place; param-only blocks are
+# deliberate for parameter-focused docs. Style, not a gate.
+dotnet_diagnostic.RCS1138.severity = none
+dotnet_diagnostic.RCS1139.severity = none
+
+# Tests: the culture/async rules stay suggestions in test code (not shipped);
+# production keeps them at warning. MA0025 (unimplemented test helpers),
+# MA0009 (regex DoS) and RCS1075 (empty catch) also fire only in test code —
+# they are scoped HERE so production keeps the default warning severity.
+# NOTE: '/*.cs' (not '**/*.cs') — all test files are top-level today; if test
+# code ever moves into subfolders, this section must follow.
+[ModernWigiDash.Tests/*.cs]
+dotnet_diagnostic.MA0006.severity = suggestion
+dotnet_diagnostic.MA0011.severity = suggestion
+dotnet_diagnostic.MA0134.severity = suggestion
+dotnet_diagnostic.MA0074.severity = suggestion
+dotnet_diagnostic.MA0025.severity = suggestion
+dotnet_diagnostic.MA0009.severity = suggestion
+dotnet_diagnostic.RCS1075.severity = suggestion
+
+# Re-open the project-wide scope: the style rules below must NOT be captured
+# by the test-only section above.
+[*.cs]
+
+# MA0004: ConfigureAwait(false) is the correct default for LIBRARY code
+# (Sdk/Core/Hardware/Widgets background loops) — an await that omits it can
+# capture the caller's SynchronizationContext and deadlock a blocked UI
+# caller, so the warning stays on there. Only the WPF chrome genuinely
+# resumes on the dispatcher: scoped to the App assembly (both glob forms —
+# '**/*.cs' does not match files directly in the App root).
+[ModernWigiDash.App/*.cs]
+[ModernWigiDash.App/**/*.cs]
+dotnet_diagnostic.MA0004.severity = none
+
+[*.cs]
+
+# MA0049: type name matching namespace — fires at ERROR on the WPF template's
+# `App` class in the `ModernWigiDash.App` namespace (App.xaml.cs codegen).
+# Scoped to that one file so genuine mismatches elsewhere still surface.
+[ModernWigiDash.App/App.xaml.cs]
+dotnet_diagnostic.MA0049.severity = none
+
+[*.cs]
+
 # Style rules the codebase actually follows
 csharp_style_namespace_declarations = file_scoped:suggestion
 csharp_style_var_when_type_is_apparent = true:suggestion

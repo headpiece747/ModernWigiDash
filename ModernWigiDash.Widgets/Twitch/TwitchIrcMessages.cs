@@ -123,7 +123,9 @@ internal static class TwitchIrcMessages
         {
             var eq = t.IndexOf('=');
             var k = eq < 0 ? t : t[..eq];
-            if (k == key) return eq < 0 ? "" : t[(eq + 1)..];
+            // IRCv3 tag keys are case-insensitive: servers emit lowercase, yet
+            // a client echoing mixed case must still match.
+            if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase)) return eq < 0 ? "" : t[(eq + 1)..];
         }
         return "";
     }

@@ -14,7 +14,7 @@ namespace ModernWigiDash.App.Update;
 /// <see cref="UpdatesRoot"/> so a non-writable install dir never blocks the
 /// download. I/O seams are injectable for tests.
 /// </summary>
-public sealed class UpdateService
+internal sealed class UpdateService
 {
     public const string GitHubLatestUrl = "https://api.github.com/repos/headpiece747/ModernWigiDash/releases/latest";
     private const string RepoUserAgent = "ModernWigiDash-Updater/1.0";
@@ -205,9 +205,20 @@ public sealed class UpdateService
         return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
-    /// <summary>Extracts the slim zip (root folder included) and returns the exe path.</summary>
+    /// <summary>Extracts the slim zip (root folder included) and returns the exe path.
+    /// Every entry must stay under <paramref name="targetDir"/> — a crafted zip
+    /// with ..-escaping entries writes outside the stage (the digest gate makes
+    /// this defense-in-depth, not the primary control).</summary>
     internal static string ExtractSlimZip(string zipPath, string targetDir)
     {
+        using var archive = ZipFile.OpenRead(zipPath);
+        string root = Path.GetFullPath(targetDir) + Path.DirectorySeparatorChar;
+        foreach (string fullName in archive.Entries.Select(entry => entry.FullName))
+        {
+            string dest = Path.GetFullPath(Path.Combine(targetDir, fullName));
+            if (!dest.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Zip entry escapes the stage directory: {fullName}");
+        }
         ZipFile.ExtractToDirectory(zipPath, targetDir);
         string exe = Path.Combine(targetDir, "ModernWigiDash-win-x64", "ModernWigiDash.App.exe");
         if (!File.Exists(exe)) throw new InvalidDataException("Slim zip has no ModernWigiDash.App.exe");
@@ -234,6 +245,19 @@ public sealed class UpdateService
         return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync().ConfigureAwait(false) : null;
     }
 
+    /// <summary>Upper bound for a downloaded update package — the slim zip is
+    /// ~10–40 MB; a larger stream is a poisoned/misbehaving release, and a
+    /// bounded-time-but-unbounded-size download could fill the disk.</summary>
+    internal const long MaxUpdateBytes = 500 * 1024 * 1024;
+
+    /// <summary>The download size-cap gate (extracted so the security control
+    /// is directly testable — the streaming loop calls it before every write).</summary>
+    internal static void EnforceDownloadCap(long bytesRead)
+    {
+        if (bytesRead > MaxUpdateBytes)
+            throw new InvalidDataException($"Update package exceeds the {MaxUpdateBytes / (1024 * 1024)} MB size cap");
+    }
+
     private static async Task DownloadFileAsync(string url, string dest, IProgress<double> progress, CancellationToken ct)
     {
         using var resp = await SharedHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
@@ -246,8 +270,9 @@ public sealed class UpdateService
         int n;
         while ((n = await input.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
         {
-            await output.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
             read += n;
+            EnforceDownloadCap(read);
+            await output.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
             if (total > 0) progress.Report((double)read / total);
         }
     }

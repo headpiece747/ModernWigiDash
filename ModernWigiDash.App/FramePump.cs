@@ -11,7 +11,7 @@ namespace ModernWigiDash.App;
 /// compose/send step is injected so tests can drive the cadence with recording
 /// delegates instead of a compositor and USB engine.
 /// </summary>
-public sealed class FramePump : IDisposable
+internal sealed class FramePump : IDisposable
 {
     private readonly DispatcherTimer _timer;
     private readonly Action _composeAndSend;

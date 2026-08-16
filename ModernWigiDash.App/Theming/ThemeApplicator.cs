@@ -14,7 +14,7 @@ namespace ModernWigiDash.App.Theming;
 /// and own none of that themselves. One implementation, no interface: a
 /// seam with a single adapter is hypothetical (the repo's own rule).
 /// </summary>
-public sealed class ThemeApplicator
+internal sealed class ThemeApplicator
 {
     /// <summary>The named preview surface whose shadow must be re-applied on
     /// theme change — DropShadowEffect does not track DynamicResource.</summary>
@@ -33,7 +33,7 @@ public sealed class ThemeApplicator
     public void Apply(Window window)
     {
         string fingerprint = Fingerprint(ThemeSettings.Theme);
-        bool themeChanged = fingerprint != _appliedFingerprint;
+        bool themeChanged = !string.Equals(fingerprint, _appliedFingerprint, StringComparison.Ordinal);
         if (themeChanged)
         {
             ThemeManager.ApplyToApplication();

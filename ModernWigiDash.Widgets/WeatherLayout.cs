@@ -1,9 +1,11 @@
 using SkiaSharp;
 
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>The header tap zones of the Weather widget, in precedence order.</summary>
-public enum WeatherHeaderAction
+internal enum WeatherHeaderAction
 {
     /// <summary>The point is not on any header control.</summary>
     None,
@@ -20,7 +22,11 @@ public enum WeatherHeaderAction
 /// placement bounds and the same scale factors the render path uses, so the
 /// drawn badge and the touch targets can never drift apart.
 /// </summary>
-public readonly record struct WeatherHeaderLayout(
+// The sequential layout is pinned by MA0008: every field (four floats + the
+// blittable SKRect) is blittable, and a deterministic layout is what makes
+// the per-frame header record cheap to copy and layout-stable.
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct WeatherHeaderLayout(
     float HeaderHeight,
     SKRect BadgeRect,
     float HeaderTextY,
@@ -48,12 +54,12 @@ internal enum WeatherLayoutMode
 /// widget's render and touch paths so the drawn geometry and the tap targets
 /// share one source of truth.
 /// </summary>
-public static class WeatherLayout
+internal static class WeatherLayout
 {
     /// <summary>The widget's design-space dimensions — the scale base for both render and touch.</summary>
     public const float DesignWidth = 406f;
 
-    /// <summary>The widget's design-space dimensions — the scale base for both render and touch.</summary>
+    /// <summary>The widget's design-space HEIGHT: the scale base for render and touch.</summary>
     public const float DesignHeight = 296f;
 
     /// <summary>The default layout mode — the single source for the property default and the cycle rule.</summary>
@@ -138,7 +144,7 @@ public static class WeatherLayout
     internal static WeatherLayoutMode NextMode(string? mode)
     {
         WeatherLayoutMode parsed = ParseMode(mode);
-        return mode == DisplayName(parsed) ? NextMode(parsed) : parsed;
+        return string.Equals(mode, DisplayName(parsed), StringComparison.Ordinal) ? NextMode(parsed) : parsed;
     }
 
     /// <summary>
@@ -179,4 +185,105 @@ public static class WeatherLayout
 
     /// <summary>The gap between metric pills at scale <paramref name="s"/>.</summary>
     public static float PillGap(float s) => Math.Clamp(8f * s, 3f, 16f);
+
+    // -- Forecast strip ---------------------------------------------------------
+    // One named rule per draw constant, so the render paths cannot drift from
+    // the strip's pinned font/offset clamps (each mirrors the original
+    // inline literal exactly).
+
+    /// <summary>The forecast-strip day-name font size at scale <paramref name="s"/>.</summary>
+    public static float ForecastDayFontSize(float s) => Math.Clamp(14f * s, 8f, 24f);
+
+    /// <summary>The forecast-strip day-icon font size at scale <paramref name="s"/>.</summary>
+    public static float ForecastDayIconFontSize(float s) => Math.Clamp(22f * s, 10f, 48f);
+
+    /// <summary>The forecast-strip range font size at scale <paramref name="s"/>.</summary>
+    public static float ForecastRangeFontSize(float s) => Math.Clamp(12f * s, 7f, 22f);
+
+    /// <summary>The forecast-strip day-name top offset at scale <paramref name="s"/>.</summary>
+    public static float ForecastDayTopOffset(float s) => Math.Clamp(18f * s, 10f, 36f);
+
+    /// <summary>The forecast-strip range bottom inset at scale <paramref name="s"/>.</summary>
+    public static float ForecastRangeBottomInset(float s) => Math.Clamp(10f * s, 5f, 20f);
+
+    /// <summary>The minimum content height for the Detailed-mode strips: below
+    /// it, the hero owns the whole content area (the forecast and metrics
+    /// strips are hidden). One rule shared by both strips' visibility gates.</summary>
+    public const float StripsMinHeight = 150f;
+
+    /// <summary>The forecast strip's height at scale <paramref name="sy"/>.</summary>
+    public static float ForecastStripHeight(float sy) => Math.Clamp(80f * sy, 45f, 160f);
+
+    /// <summary>The metrics pill strip's height at scale <paramref name="sy"/>.</summary>
+    public static float MetricsStripHeight(float sy) => Math.Clamp(28f * sy, 16f, 50f);
+
+    // -- Daily rows ---------------------------------------------------------------
+
+    /// <summary>The Daily-forecast row's day-name font size at scale <paramref name="s"/>.</summary>
+    public static float DailyDayFontSize(float s) => Math.Clamp(13f * s, 9f, 18f);
+
+    /// <summary>The Daily-forecast row's icon font size at scale <paramref name="s"/>.</summary>
+    public static float DailyIconFontSize(float s) => Math.Clamp(16f * s, 10f, 22f);
+
+    /// <summary>The Daily-forecast row's description font size at scale <paramref name="s"/>.</summary>
+    public static float DailyDescFontSize(float s) => Math.Clamp(11f * s, 8f, 15f);
+
+    /// <summary>The Daily-forecast row's temp font size at scale <paramref name="s"/>.</summary>
+    public static float DailyTempFontSize(float s) => Math.Clamp(12f * s, 8f, 16f);
+
+    // -- Hourly columns ------------------------------------------------------------
+
+    /// <summary>The Hourly-forecast column's time font size at scale <paramref name="s"/>.</summary>
+    public static float HourlyTimeFontSize(float s) => Math.Clamp(11f * s, 8f, 15f);
+
+    /// <summary>The Hourly-forecast column's icon font size at scale <paramref name="s"/>.</summary>
+    public static float HourlyIconFontSize(float s) => Math.Clamp(20f * s, 12f, 28f);
+
+    /// <summary>The Hourly-forecast column's temp font size at scale <paramref name="s"/>.</summary>
+    public static float HourlyTempFontSize(float s) => Math.Clamp(12f * s, 8f, 16f);
+
+    // -- Detailed hero -------------------------------------------------------------
+
+    /// <summary>The Detailed hero icon size for a hero height: 75% of the hero
+    /// height, clamped to the 20..220 range.</summary>
+    public static float DetailedHeroIconSize(float heroHeight) => Math.Clamp(heroHeight * 0.75f, 20f, 220f);
+
+    /// <summary>The Detailed hero temp size for a hero height: 45% of the hero
+    /// height, clamped to the 14..140 range.</summary>
+    public static float DetailedHeroTempSize(float heroHeight) => Math.Clamp(heroHeight * 0.45f, 14f, 140f);
+
+    /// <summary>The Detailed hero description size for a hero height: 18% of
+    /// the hero height, clamped to the 9..45 range.</summary>
+    public static float DetailedHeroDescSize(float heroHeight) => Math.Clamp(heroHeight * 0.18f, 9f, 45f);
+
+    /// <summary>The gap between the Detailed hero icon and the temp/condition
+    /// stack at scale <paramref name="s"/>.</summary>
+    public static float DetailedHeroGap(float s) => Math.Clamp(20f * s, 8f, 50f);
+
+    // -- CurrentOnly / Compact heroes ----------------------------------------------
+
+    /// <summary>The CurrentOnly hero icon size at scale <paramref name="s"/>.</summary>
+    public static float CurrentOnlyIconSize(float s) => Math.Clamp(88f * s, 40f, 120f);
+
+    /// <summary>The CurrentOnly hero temp size at scale <paramref name="s"/>.</summary>
+    public static float CurrentOnlyTempSize(float s) => Math.Clamp(64f * s, 28f, 84f);
+
+    /// <summary>The CurrentOnly hero description size at scale <paramref name="s"/>.</summary>
+    public static float CurrentOnlyDescSize(float s) => Math.Clamp(24f * s, 12f, 32f);
+
+    /// <summary>The Compact hero icon font size at scale <paramref name="s"/>.</summary>
+    public static float CompactIconFontSize(float s) => Math.Clamp(26f * s, 14f, 32f);
+
+    /// <summary>The Compact hero temp font size at scale <paramref name="s"/>.</summary>
+    public static float CompactTempFontSize(float s) => Math.Clamp(20f * s, 12f, 26f);
+
+    // -- Header badge / title --------------------------------------------------------
+
+    /// <summary>The unit-toggle badge font size at scale <paramref name="s"/>.</summary>
+    public static float BadgeFontSize(float s) => Math.Clamp(17f * s, 10f, 30f);
+
+    /// <summary>The title's max draw width: the content width minus the badge,
+    /// never below 30px (the header truncation rule).</summary>
+    public static float TitleMaxWidth(float width, float pad, float badgeWidth)
+        => Math.Max(30f, width - pad * 2f - badgeWidth);
 }

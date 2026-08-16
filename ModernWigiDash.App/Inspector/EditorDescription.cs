@@ -16,7 +16,7 @@ namespace ModernWigiDash.App.Inspector;
 /// for <see cref="WidgetPropertyType.SensorSelector"/>.</param>
 /// <param name="IsAction">True for <see cref="WidgetPropertyType.Button"/> —
 /// an executable action, not a value editor.</param>
-public sealed record EditorDescription(
+internal sealed record EditorDescription(
     PropertyInfo Property,
     string DisplayName,
     WidgetPropertyType PropertyType,

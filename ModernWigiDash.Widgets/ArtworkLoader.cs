@@ -69,9 +69,9 @@ public sealed class ArtworkLoader
             return;
         }
 
-        bool trackChanged = update.ArtKey != _currentArtKey;
+        bool trackChanged = !string.Equals(update.ArtKey, _currentArtKey, StringComparison.Ordinal);
         bool artworkBecameAvailable = update.Thumbnail is not null &&
-            _loadedArtworkKey != update.ArtKey && _loadingArtworkKey != update.ArtKey;
+            !string.Equals(_loadedArtworkKey, update.ArtKey, StringComparison.Ordinal) && !string.Equals(_loadingArtworkKey, update.ArtKey, StringComparison.Ordinal);
         if (trackChanged || artworkBecameAvailable)
         {
             _currentArtKey = update.ArtKey;
@@ -118,7 +118,7 @@ public sealed class ArtworkLoader
             ArtworkDecodeResult result;
             try
             {
-                result = await _decoder.DecodeAsync(thumbnail);
+                result = await _decoder.DecodeAsync(thumbnail).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -134,7 +134,7 @@ public sealed class ArtworkLoader
                 _bgColor = DefaultBackground;
             }
 
-            if (_disposed || version != _artLoadVersion || artKey != _currentArtKey)
+            if (_disposed || version != _artLoadVersion || !string.Equals(artKey, _currentArtKey, StringComparison.Ordinal))
             {
                 result.Bitmap?.Dispose();
             }
@@ -147,7 +147,7 @@ public sealed class ArtworkLoader
         }
         finally
         {
-            if (_loadingArtworkKey == artKey)
+            if (string.Equals(_loadingArtworkKey, artKey, StringComparison.Ordinal))
                 _loadingArtworkKey = "";
         }
 
@@ -235,7 +235,7 @@ internal sealed class WinRtArtworkDecoder : IArtworkDecoder
             reader.ReadBytes(data);
         }
 
-        var decoded = await Task.Run(() => SKBitmap.Decode(data));
+        var decoded = await Task.Run(() => SKBitmap.Decode(data)).ConfigureAwait(false);
         return new ArtworkDecodeResult(decoded, false);
     }
 }

@@ -2,44 +2,92 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Sdk;
 
+/// <summary>
+/// The normalized touch phases delivered to <see cref="IModernWidget.OnTouch"/>.
+/// The App's touch pipeline normalizes the hardware protocol bytes exactly once
+/// (TouchReport.ToEventType), so widgets never see vendor-specific data. Tap
+/// actions conventionally fire on <see cref="TouchUp"/>.
+/// </summary>
 public enum TouchEventType
 {
+    /// <summary>Finger pressed the display.</summary>
     TouchDown,
+    /// <summary>Finger lifted — the tap completion event.</summary>
     TouchUp,
+    /// <summary>Finger moved while pressed (drag tracking).</summary>
     TouchMove
 }
 
+/// <summary>
+/// The nominal placement size table for the display's 5×4 grid: columns × rows,
+/// where one cell is 203×148 px (the table's nominal integers). Used for
+/// widget default sizes and the size picker; snap-to-grid uses the exact
+/// fractional cell (<see cref="GridSizeExtensions.CellWidth"/> = 1016/5 =
+/// 203.2) so tiles never drift across the 1016 px width.
+/// </summary>
 public enum GridSizePreset
 {
-    Size1x1, // 203 x 148 px
-    Size2x1, // 406 x 148 px
-    Size3x1, // 609 x 148 px
-    Size4x1, // 813 x 148 px
-    Size5x1, // 1016 x 148 px
-    Size1x2, // 203 x 296 px
-    Size2x2, // 406 x 296 px
-    Size3x2, // 609 x 296 px
-    Size4x2, // 813 x 296 px
-    Size5x2, // 1016 x 296 px
-    Size1x3, // 203 x 444 px
-    Size2x3, // 406 x 444 px
-    Size3x3, // 609 x 444 px
-    Size4x3, // 813 x 444 px
-    Size5x3, // 1016 x 444 px
-    Size1x4, // 203 x 592 px
-    Size2x4, // 406 x 592 px
-    Size3x4, // 609 x 592 px
-    Size4x4, // 813 x 592 px
-    Size5x4 // 1016 x 592 px (Full Screen)
+    /// <summary>1×1 cell: 203 × 148 px.</summary>
+    Size1x1,
+    /// <summary>2×1 cells: 406 × 148 px.</summary>
+    Size2x1,
+    /// <summary>3×1 cells: 609 × 148 px.</summary>
+    Size3x1,
+    /// <summary>4×1 cells: 813 × 148 px.</summary>
+    Size4x1,
+    /// <summary>5×1 cells: 1016 × 148 px.</summary>
+    Size5x1,
+    /// <summary>1×2 cells: 203 × 296 px.</summary>
+    Size1x2,
+    /// <summary>2×2 cells: 406 × 296 px (the default widget size).</summary>
+    Size2x2,
+    /// <summary>3×2 cells: 609 × 296 px.</summary>
+    Size3x2,
+    /// <summary>4×2 cells: 813 × 296 px.</summary>
+    Size4x2,
+    /// <summary>5×2 cells: 1016 × 296 px.</summary>
+    Size5x2,
+    /// <summary>1×3 cells: 203 × 444 px.</summary>
+    Size1x3,
+    /// <summary>2×3 cells: 406 × 444 px.</summary>
+    Size2x3,
+    /// <summary>3×3 cells: 609 × 444 px.</summary>
+    Size3x3,
+    /// <summary>4×3 cells: 813 × 444 px.</summary>
+    Size4x3,
+    /// <summary>5×3 cells: 1016 × 444 px.</summary>
+    Size5x3,
+    /// <summary>1×4 cells: 203 × 592 px.</summary>
+    Size1x4,
+    /// <summary>2×4 cells: 406 × 592 px.</summary>
+    Size2x4,
+    /// <summary>3×4 cells: 609 × 592 px.</summary>
+    Size3x4,
+    /// <summary>4×4 cells: 813 × 592 px.</summary>
+    Size4x4,
+    /// <summary>5×4 cells: 1016 × 592 px — the full framebuffer.</summary>
+    Size5x4
 }
 
+/// <summary>
+/// The grid-geometry rules derived from the single framebuffer source
+/// (<see cref="DisplayGeometry"/>): the exact cell size the 5×4 grid tiles
+/// into, and the one snap-to-grid rule placement centering and drag/resize
+/// snapping share, so the rounding can never drift between Core and App.
+/// </summary>
 public static class GridSizeExtensions
 {
     // Cell size derived from the single framebuffer geometry source:
     // 5 columns x 4 rows. Note the GridSizePreset table uses nominal integer
     // cells (203) for widget default sizes; the exact 203.2 is what
     // snap-to-grid needs to tile the 1016 px width without drift.
+    /// <summary>The exact cell width: framebuffer width (1016 px) ÷ 5 columns
+    /// = 203.2 px — the value snap-to-grid must use (the preset table's 203 is
+    /// nominal).</summary>
     public const float CellWidth = DisplayGeometry.FramebufferWidth / 5f;
+
+    /// <summary>The exact cell height: framebuffer height (592 px) ÷ 4 rows
+    /// = 148 px (integer, identical to the preset table).</summary>
     public const float CellHeight = DisplayGeometry.FramebufferHeight / 4f;
 
     /// <summary>Rounds a coordinate to the nearest whole cell — the single
@@ -54,6 +102,9 @@ public static class GridSizeExtensions
     /// <summary>Rounds a Y coordinate to the vertical grid.</summary>
     public static float SnapY(float value) => SnapToCell(value, CellHeight);
 
+    /// <summary>The preset's nominal pixel size from the table (203×148 per
+    /// cell); throws <see cref="ArgumentOutOfRangeException"/> for values
+    /// outside the defined presets.</summary>
     public static SKSize ToSize(this GridSizePreset preset)
     {
         return preset switch

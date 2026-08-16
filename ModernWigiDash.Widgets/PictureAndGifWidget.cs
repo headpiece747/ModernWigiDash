@@ -64,7 +64,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     private bool ProbeFileExists(string path)
     {
-        if (path != _lastProbePath)
+        if (!string.Equals(path, _lastProbePath, StringComparison.Ordinal))
         {
             _lastProbePath = path;
             _lastProbeExists = File.Exists(path);
@@ -99,7 +99,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         if (!string.IsNullOrEmpty(currentFile) && ProbeFileExists(currentFile))
         {
-            if (currentFile != _loadedPath)
+            if (!string.Equals(currentFile, _loadedPath, StringComparison.Ordinal))
             {
                 _loadedPath = currentFile;
                 StartMediaLoad(currentFile);
@@ -157,7 +157,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             // Snapshot the file bytes so no file handle outlives this task:
             // decodes read from memory, the source file can be replaced or the
             // tests can delete it without racing an open handle.
-            byte[] data = await File.ReadAllBytesAsync(path);
+            byte[] data = await File.ReadAllBytesAsync(path).ConfigureAwait(false);
             if (data.Length > MaxFileBytes)
             {
                 Context?.LogError($"PictureAndGifWidget: refusing {data.Length} byte media (cap {MaxFileBytes} bytes)");
@@ -188,7 +188,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             staticBitmap = null;
         }
 
-        if (version != _loadVersion || path != _loadedPath)
+        if (version != _loadVersion || !string.Equals(path, _loadedPath, StringComparison.Ordinal))
         {
             DisposeAll(frames);
             staticBitmap?.Dispose();
@@ -369,12 +369,12 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     private SKRect GetDrawRect(SKRect bounds, int imgW, int imgH)
     {
-        if (FitMode == "Stretch")
+        if (string.Equals(FitMode, "Stretch", StringComparison.Ordinal))
         {
             return bounds;
         }
 
-        float scale = FitMode == "Contain"
+        float scale = string.Equals(FitMode, "Contain", StringComparison.Ordinal)
             ? Math.Min(bounds.Width / imgW, bounds.Height / imgH)
             : Math.Max(bounds.Width / imgW, bounds.Height / imgH);
 
@@ -394,15 +394,15 @@ public class PictureAndGifWidget : ModernWidgetBase
         using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
         // The cycle hint only applies when the source mode actually cycles —
         // a single-image widget must not promise a tap-to-cycle behavior.
-        bool cycles = SourceMode == "Folder (Cycle)" || (SourceMode == "Auto" && Directory.Exists(ImagePath));
+        bool cycles = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal) || (string.Equals(SourceMode, "Auto", StringComparison.Ordinal) && Directory.Exists(ImagePath));
         string hint = cycles ? "Click/Tap to Cycle Pictures" : "Tap to set an Image Path";
         TextRenderHelper.DrawCenteredText(canvas, hint, bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
     }
 
     private string? GetActiveImageFile()
     {
-        bool singleMode = SourceMode == "Single Image";
-        bool folderMode = SourceMode == "Folder (Cycle)";
+        bool singleMode = string.Equals(SourceMode, "Single Image", StringComparison.Ordinal);
+        bool folderMode = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal);
 
         if (!folderMode && ProbeFileExists(ImagePath))
         {
@@ -439,8 +439,8 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
-        bool folderMode = SourceMode == "Folder (Cycle)";
-        bool autoFolder = SourceMode == "Auto" && Directory.Exists(ImagePath);
+        bool folderMode = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal);
+        bool autoFolder = string.Equals(SourceMode, "Auto", StringComparison.Ordinal) && Directory.Exists(ImagePath);
 
         if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 && (folderMode || autoFolder))
         {

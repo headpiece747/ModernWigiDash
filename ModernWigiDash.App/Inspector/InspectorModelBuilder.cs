@@ -8,19 +8,26 @@ namespace ModernWigiDash.App.Inspector;
 /// <summary>
 /// Pure reflection→model mapping: turns a widget's <c>[WidgetProperty]</c>
 /// attributes into <see cref="EditorDescription"/>s. No WPF, no dialogs, no
-/// window state — the interface is the test surface. A thin WPF renderer
-/// (<see cref="InspectorPanelRenderer"/>) consumes the descriptions, and every
-/// write-back funnels through the host's single
+/// window state, no static stores — the interface is the test surface. A thin
+/// WPF renderer (<see cref="InspectorPanelRenderer"/>) consumes the
+/// descriptions, and every write-back funnels through the host's single
 /// <c>ApplyInspectorPropertyValue</c> seam.
 /// </summary>
-public static class InspectorModelBuilder
+internal static class InspectorModelBuilder
 {
     /// <summary>
     /// Describes every editable property on the widget's active instance, in
     /// declaration order. Skips properties that never get their own row
     /// (e.g. the Hotkey <c>IconFile</c> companion, written by the icon picker).
     /// </summary>
-    public static IReadOnlyList<EditorDescription> Describe(PlacedWidgetInstance widget)
+    /// <param name="widget">The placed widget being inspected.</param>
+    /// <param name="sensorOptions">The live sensor list backing
+    /// <see cref="WidgetPropertyType.SensorSelector"/> rows. The caller
+    /// resolves it once per refresh (see <see cref="SensorOptions"/>) — this
+    /// module never touches the store.</param>
+    public static IReadOnlyList<EditorDescription> Describe(
+        PlacedWidgetInstance widget,
+        IReadOnlyList<WidgetPropertyOption> sensorOptions)
     {
         var instance = widget.ActiveInstance;
         if (instance == null) return [];
@@ -46,15 +53,31 @@ public static class InspectorModelBuilder
                 attr.DisplayName,
                 attr.PropertyType,
                 prop.GetValue(instance) ?? attr.DefaultValue,
-                ResolveOptions(instance, prop, attr),
+                ResolveOptions(instance, prop, attr, sensorOptions),
                 attr.PropertyType == WidgetPropertyType.Button));
         }
 
         return result;
     }
 
+    /// <summary>
+    /// Builds the sensor picker's option list from a snapshot — the readings →
+    /// labels mapping (distinct, case-insensitively sorted). Pure data shaping:
+    /// the caller resolves the snapshot from the store once per refresh; this
+    /// module only maps it.
+    /// </summary>
+    public static IReadOnlyList<WidgetPropertyOption> SensorOptions(SensorSnapshotDto snapshot)
+        => snapshot.Readings
+            .Select(r => new WidgetPropertyOption(r.Label, r.Label))
+            .Distinct()
+            .OrderBy(o => o.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
     private static IReadOnlyList<WidgetPropertyOption> ResolveOptions(
-        IModernWidget instance, PropertyInfo prop, WidgetPropertyAttribute attr)
+        IModernWidget instance,
+        PropertyInfo prop,
+        WidgetPropertyAttribute attr,
+        IReadOnlyList<WidgetPropertyOption> sensorOptions)
     {
         if (instance is IWidgetPropertyOptionsProvider provider)
         {
@@ -64,13 +87,9 @@ public static class InspectorModelBuilder
 
         if (attr.PropertyType == WidgetPropertyType.SensorSelector)
         {
-            // Live sensor labels from the store — pure data, no UI dependency.
-            return LhmSensorStore.ReadSnapshot()
-                .Readings
-                .Select(r => new WidgetPropertyOption(r.Label, r.Label))
-                .Distinct()
-                .OrderBy(o => o.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            // Live sensor labels supplied by the caller — pure data, no store
+            // access from the mapping module.
+            return sensorOptions;
         }
 
         return attr.Options

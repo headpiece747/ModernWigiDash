@@ -17,7 +17,7 @@ namespace ModernWigiDash.App.Inspector;
 /// the window owns, plus the few callbacks the controller needs to reach back
 /// into the window (resource lookup, selection, canvas repaint).
 /// </summary>
-public sealed class InspectorControllerHost(
+internal sealed class InspectorControllerHost(
     UIElement emptyPanel,
     UIElement activePanel,
     TextBlock nameText,
@@ -60,7 +60,7 @@ public sealed class InspectorControllerHost(
 /// the icon picker dialog lives in <see cref="DialogHost"/>. The window keeps
 /// selection and wiring only.
 /// </summary>
-public sealed class InspectorController
+internal sealed class InspectorController
 {
     private readonly InspectorControllerHost _host;
     private readonly InspectorValuePolicy _policy = new();
@@ -135,9 +135,14 @@ public sealed class InspectorController
             _host.CustomProperties.Children.Clear();
             if (selected.ActiveInstance is not null)
             {
+                // The sensor picker's live labels come from the store — read
+                // once per refresh at the composition site, then passed into
+                // the pure mapping module (never per Describe call).
+                var sensorOptions = InspectorModelBuilder.SensorOptions(LhmSensorStore.ReadSnapshot());
+
                 InspectorPanelRenderer.Render(
                     selected,
-                    InspectorModelBuilder.Describe(selected),
+                    InspectorModelBuilder.Describe(selected, sensorOptions),
                     _host.CustomProperties.Children,
                     () => _isUpdatingInspector,
                     new InspectorCallbacks

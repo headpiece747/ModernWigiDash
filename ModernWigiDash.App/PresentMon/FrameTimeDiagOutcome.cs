@@ -6,7 +6,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// shapes the log would otherwise conflate: no candidates, the settling
 /// window, and the frozen-data hold.
 /// </summary>
-public enum FrameTimeDiagOutcome
+internal enum FrameTimeDiagOutcome
 {
     /// <summary>Library missing or the session could not be opened.</summary>
     Unavailable,

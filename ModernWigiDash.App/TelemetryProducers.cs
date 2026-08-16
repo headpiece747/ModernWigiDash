@@ -13,7 +13,7 @@ namespace ModernWigiDash.App;
 /// cluster is testable without WPF (previously, exercising this wiring meant
 /// constructing the entire window).
 /// </summary>
-public sealed class TelemetryProducers : IDisposable
+internal sealed class TelemetryProducers : IDisposable
 {
     private readonly LhmSharedMemoryReader _lhsReader;
     private readonly PresentMonFrameTimeProducer _presentMonProducer;

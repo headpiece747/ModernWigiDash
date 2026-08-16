@@ -7,7 +7,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// frame (PM_METRIC_GPU_BUSY, "Ms GPU Busy"); the producer converts it to the
 /// overlay-style busy-per-frame percentage.
 /// </summary>
-public sealed record PresentMonDynamicSample(
+internal sealed record PresentMonDynamicSample(
     double Fps,
     double Low1PercentFps,
     double GpuBusyMs,
@@ -24,7 +24,7 @@ public sealed record PresentMonDynamicSample(
 /// (<see cref="PmStatus.SessionNotOpen"/>, <see cref="PmStatus.PipeError"/>,
 /// <see cref="PmStatus.ServiceError"/>).
 /// </summary>
-public sealed record PresentMonPollResult(PresentMonDynamicSample? Sample, PmStatus Status);
+internal sealed record PresentMonPollResult(PresentMonDynamicSample? Sample, PmStatus Status);
 
 /// <summary>
 /// The seam between the PresentMon producer and the runtime-loaded
@@ -33,7 +33,7 @@ public sealed record PresentMonPollResult(PresentMonDynamicSample? Sample, PmSta
 /// implementation loads the DLL at runtime from the PresentMon SDK install
 /// directory. Tests inject a fake.
 /// </summary>
-public interface IPresentMonNative : IDisposable
+internal interface IPresentMonNative : IDisposable
 {
     /// <summary>True when the native API library can be loaded.</summary>
     bool IsAvailable { get; }

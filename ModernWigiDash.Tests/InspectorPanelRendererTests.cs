@@ -22,7 +22,7 @@ public class InspectorPanelRendererTests
         {
             var widget = new WeatherForecastWidget();
             var placed = new PlacedWidgetInstance { PluginId = "weather", DisplayName = "Weather", ActiveInstance = widget };
-            var descriptions = InspectorModelBuilder.Describe(placed);
+            var descriptions = InspectorModelBuilder.Describe(placed, []);
             var target = new StackPanel();
             GeocodeCandidate? committed = null;
             var callbacks = new InspectorCallbacks
@@ -73,7 +73,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
 
             var popup = FindVisualChildren<Popup>(target).First();
             var results = FindVisualChildren<ListBox>((DependencyObject)popup.Child!).First();
@@ -115,7 +115,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
 
             var popup = FindVisualChildren<Popup>(target).First();
             var box = FindVisualChildren<TextBox>(target).First();
@@ -178,7 +178,7 @@ public class InspectorPanelRendererTests
                 CommitLocationPick = _ => { },
             };
 
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
 
             var box = FindVisualChildren<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains("Berlin, New Hampshire, United States"), "the box must seed from the Location label");
@@ -221,7 +221,7 @@ public class InspectorPanelRendererTests
                 BrowseFolder = _ => null,
             };
 
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
 
             var box = FindVisualChildren<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains(" · 9.4k"), "precondition: the box must seed with the population suffix");
@@ -273,7 +273,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
 
             // The Location row's editor: its TextBox is the row's only TextBox
             // (the results ListBox lives in the closed popup's Child).

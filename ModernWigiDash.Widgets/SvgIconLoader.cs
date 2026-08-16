@@ -70,7 +70,7 @@ public static class SvgIconLoader
     {
         pathData = null;
         var doc = XDocument.Load(filePath);
-        var paths = doc.Descendants().Where(e => e.Name.LocalName == "path").ToList();
+        var paths = doc.Descendants().Where(e => string.Equals(e.Name.LocalName, "path", StringComparison.Ordinal)).ToList();
         if (paths.Count != 1) return false;
         pathData = paths[0].Attribute("d")?.Value;
         return !string.IsNullOrWhiteSpace(pathData);

@@ -11,7 +11,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// Hardware protocol specifications and constants for the USB display device.
 /// Derived from USB protocol analysis and direct WinUSB hardware specifications.
 /// </summary>
-public static class DisplayProtocolConstants
+internal static class DisplayProtocolConstants
 {
     /// <summary>
     /// USB Vendor ID for the display device.

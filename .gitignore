@@ -372,7 +372,6 @@ FodyWeavers.xsd
 /opencode.json
 /skills-lock.json
 /repomix-output.xml
-/scorecard.png
 
 # Runtime diagnostics artifacts (glider-trace / dotnet tools)
 .glider-trace/
@@ -394,3 +393,8 @@ FodyWeavers.xsd
 ModernWigiDash-v*.zip
 ModernWigiDash-win-x64.zip
 ModernWigiDash-app-only-win-x64.zip
+
+# Scan artifacts
+.pytest_cache/
+/.slopwatch/
+/scorecard.png

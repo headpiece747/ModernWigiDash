@@ -22,7 +22,7 @@ namespace ModernWigiDash.App.Inspector;
 /// (the renderer is dialog-free); <c>isUpdatingInspector</c> is a live guard
 /// that suppresses change events while the panel is rebuilt.
 /// </summary>
-public sealed class InspectorCallbacks
+internal sealed class InspectorCallbacks
 {
     /// <summary>Resolves a named resource from the window/application (may return null).</summary>
     public required Func<string, object?> TryFindResource { get; init; }
@@ -55,7 +55,7 @@ public sealed class InspectorCallbacks
 /// Widgets that need special editors implement <see cref="IWidgetEditorProvider"/>
 /// (icon pickers, action-command paths); the renderer never branches on widget types.
 /// </summary>
-public static class InspectorPanelRenderer
+internal static class InspectorPanelRenderer
 {
     /// <summary>
     /// Renders editors for every <see cref="EditorDescription"/> into
@@ -95,7 +95,7 @@ public static class InspectorPanelRenderer
             {
                 case WidgetPropertyType.Choice when desc.Options.Count > 0:
                     var combo = BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
-                    if (provider?.ActionCommandVisibilityChoicePropertyName == desc.Property.Name) actionTypeCombo = combo;
+                    if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) actionTypeCombo = combo;
                     propPanel.Children.Add(combo);
                     break;
                 case WidgetPropertyType.Font:
@@ -425,7 +425,7 @@ public static class InspectorPanelRenderer
             // The seed's population suffix searches nothing ("label · 9.4k"
             // matches no geocoder result) — search the base label while the
             // box still holds the seeded text (no real user edit yet).
-            string query = box.Text == seed ? baseLabel : box.Text.Trim();
+            string query = string.Equals(box.Text, seed, StringComparison.Ordinal) ? baseLabel : box.Text.Trim();
             var (outcome, candidates) = await RunSearchTickAsync(search, query, version);
             ApplySearchResults(results, popup, outcome, candidates);
         };
@@ -457,7 +457,7 @@ public static class InspectorPanelRenderer
             // label degrades to a bare-name tie on every restart). Commit the
             // base label while the box still holds the seeded text; a real
             // user edit takes over verbatim.
-            string committed = box.Text == seed ? baseLabel : box.Text;
+            string committed = string.Equals(box.Text, seed, StringComparison.Ordinal) ? baseLabel : box.Text;
             callbacks.ApplyInspectorPropertyValue(desc.Property, committed);
             popup.IsOpen = false;
             results.Visibility = Visibility.Collapsed;

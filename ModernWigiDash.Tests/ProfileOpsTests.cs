@@ -262,6 +262,54 @@ public class ProfileOpsTests
         Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["ChannelName"]);
     }
 
+    // ── InstanceId safety (the weather cache-file key) ─────
+
+    [TestMethod]
+    public void ImportJson_UnsafeInstanceId_IsRegenerated()
+    {
+        // The placed InstanceId flows into the weather widget's cache file
+        // name ("weather_{InstanceId}.json") — a foreign profile with path
+        // segments would escape the cache directory on the next fetch.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","InstanceId":"..\\..\\evil","PropertyValues":{}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.IsTrue(ProfileOps.IsSafeInstanceId(loaded.Pages[0].Widgets[0].InstanceId),
+            "an escaping InstanceId must be regenerated to a safe token");
+        Assert.AreNotEqual(@"..\..\evil", loaded.Pages[0].Widgets[0].InstanceId);
+    }
+
+    [TestMethod]
+    public void ImportJson_SafeInstanceId_IsPreserved()
+    {
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","InstanceId":"ab-12_CD","PropertyValues":{}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("ab-12_CD", loaded.Pages[0].Widgets[0].InstanceId,
+            "a safe token (letters, digits, '-', '_') must survive import unchanged");
+    }
+
+    [TestMethod]
+    public void IsSafeInstanceId_RejectsEveryUnsafeShape()
+    {
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId(null), "null is not a safe token");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId(""), "empty is not a safe token");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId(new string('a', 65)), "65 chars exceed the 64-char cap");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId("a/b"), "path separators are rejected");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId("a\\b"), "backslash separators are rejected");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId(".."), "dot segments are rejected");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId("id.with.dots"), "dots are rejected");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId("C:evil"), "colon is rejected");
+        Assert.IsFalse(ProfileOps.IsSafeInstanceId("über"), "non-ASCII is rejected");
+    }
+
+    [TestMethod]
+    public void IsSafeInstanceId_AcceptsGuidAndTokenShapes()
+    {
+        Assert.IsTrue(ProfileOps.IsSafeInstanceId("ab-12_CD"), "letters/digits/-/_ are safe");
+        Assert.IsTrue(ProfileOps.IsSafeInstanceId(Guid.NewGuid().ToString()), "a GUID is safe (the regenerated form)");
+        Assert.IsTrue(ProfileOps.IsSafeInstanceId("x"), "a single char is safe");
+    }
+
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
 
     [TestMethod]

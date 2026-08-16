@@ -46,7 +46,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         SKColor accentColor = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
 
-        if (ClockMode == "Analog")
+        if (string.Equals(ClockMode, "Analog", StringComparison.Ordinal))
         {
             RenderAnalog(canvas, bounds, now, accentColor, textColor);
         }

@@ -138,7 +138,7 @@ public sealed class PriceFeedManager : IDisposable
                     _cryptoRestTask ??= RunCryptoRestPollerAsync();
                     // Push an incremental subscribe so symbols added after the
                     // socket connected still receive real-time ticks.
-                    _ = SendWsSubscribeAsync(FeedKind.Binance, $"{baseCoin.ToLower()}usdt@ticker");
+                    _ = SendWsSubscribeAsync(FeedKind.Binance, $"{baseCoin.ToLowerInvariant()}usdt@ticker");
                 }
                 break;
             case AssetKind.Fx:
@@ -158,7 +158,7 @@ public sealed class PriceFeedManager : IDisposable
                     SymbolCatalog.LogInvalidSymbol(symbol);
                     return;
                 }
-                string stockSym = symbol.ToUpper();
+                string stockSym = symbol.ToUpperInvariant();
                 // Without a Finnhub key the WS/REST stock feeds cannot work; the
                 // Yahoo Finance fallback in FetchFallbackAsync still does.
                 if (_subscribedStocks.AddOrUpdate(stockSym, 1, (_, count) => count + 1) == 1
@@ -186,7 +186,7 @@ public sealed class PriceFeedManager : IDisposable
             object message = feed == FeedKind.Finnhub
                 ? new { type = "subscribe", symbol = payload }
                 : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
-            await ws.SendTextAsync(JsonSerializer.Serialize(message), _cts.Token);
+            await ws.SendTextAsync(JsonSerializer.Serialize(message), _cts.Token).ConfigureAwait(false);
         }
         catch
         {
@@ -288,7 +288,7 @@ public sealed class PriceFeedManager : IDisposable
             string baseCoin = SymbolCatalog.ToFeedKey(symbol, kind);
             if (SymbolCatalog.CoinGeckoIdFor(baseCoin) is not string geckoId) return;
             string url = $"https://api.coingecko.com/api/v3/simple/price?ids={geckoId}&vs_currencies=usd&include_24hr_change=true";
-            string json = await _http.GetStringAsync(url, _cts.Token);
+            string json = await _http.GetStringAsync(url, _cts.Token).ConfigureAwait(false);
             if (PriceFeedMessages.TryParseCoinGeckoSimplePrice(json, geckoId, out var price, out var change))
             {
                 _prices[baseCoin] = NewPrice(price, change, "CoinGecko");
@@ -296,10 +296,10 @@ public sealed class PriceFeedManager : IDisposable
         }
         else if (kind == AssetKind.Stock)
         {
-            string stockSym = symbol.ToUpper();
+            string stockSym = symbol.ToUpperInvariant();
             if (!SymbolCatalog.IsValidSymbol(stockSym)) return;
             string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{stockSym}?interval=1d&range=1d";
-            string json = await _http.GetStringAsync(url, _cts.Token);
+            string json = await _http.GetStringAsync(url, _cts.Token).ConfigureAwait(false);
             if (PriceFeedMessages.TryParseYahooChart(json, out var price, out var changePct))
             {
                 _prices[stockSym] = NewPrice(price, changePct, "Yahoo");
@@ -326,7 +326,7 @@ public sealed class PriceFeedManager : IDisposable
     /// not overwrite live feed data. Pure over the existing record and the
     /// clock so the freshness window is directly testable.</summary>
     internal static bool ShouldKeepFreshBinanceUs(PriceInfo existing, DateTime now)
-        => existing.Source == SourceBinanceUs && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
+        => string.Equals(existing.Source, SourceBinanceUs, StringComparison.Ordinal) && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
 
     /// <summary>Diagnostic log with cadence dedup for the per-tick feed
     /// failures — the module's runtime surface (configuration paths use
@@ -341,7 +341,7 @@ public sealed class PriceFeedManager : IDisposable
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),
         () => _feedFactory(FeedKind.Binance),
-        (feed, ct) => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLower()}usdt@ticker").ToArray(), id = 1 }), ct),
+        (feed, ct) => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLowerInvariant()}usdt@ticker").ToArray(), id = 1 }), ct),
         ParseBinanceTicker,
         new FixedReconnectPolicy(_reconnectDelay));
 
@@ -351,26 +351,26 @@ public sealed class PriceFeedManager : IDisposable
         async (feed, ct) =>
         {
             foreach (var sym in _subscribedStocks.Keys)
-                await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), ct);
+                await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), ct).ConfigureAwait(false);
         },
         ParseFinnhubMessage,
         new FixedReconnectPolicy(_reconnectDelay));
 
-    private async Task RunStockRestPollerAsync()
-        => await RunRestPollLoopAsync(_stockRestInterval, _subscribedStocks.Keys, PollStockSymbolAsync);
+    private Task RunStockRestPollerAsync()
+        => RunRestPollLoopAsync(_stockRestInterval, _subscribedStocks.Keys, PollStockSymbolAsync);
 
     internal async Task PollStockSymbolAsync(string sym)
     {
         if (!SymbolCatalog.IsValidSymbol(sym)) return;
-        var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token);
+        var json = await _http.GetStringAsync($"https://finnhub.io/api/v1/quote?symbol={sym}&token={_finnhubKey}", _cts.Token).ConfigureAwait(false);
         if (PriceFeedMessages.TryParseFinnhubQuote(json, out var price, out var change))
         {
             _prices[sym] = NewPrice(price, change, "Finnhub");
         }
     }
 
-    private async Task RunFxRestPollerAsync()
-        => await RunRestPollLoopAsync(_fxRestInterval, _subscribedFx.Keys, PollFxPairAsync);
+    private Task RunFxRestPollerAsync()
+        => RunRestPollLoopAsync(_fxRestInterval, _subscribedFx.Keys, PollFxPairAsync);
 
     internal async Task PollFxPairAsync(string key)
     {
@@ -383,7 +383,7 @@ public sealed class PriceFeedManager : IDisposable
         string quoteCurrency = key[3..];
         string start = Clock.GetUtcNow().UtcDateTime.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string end = Clock.GetUtcNow().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token);
+        var json = await _http.GetStringAsync($"https://api.frankfurter.app/{start}..{end}?from={baseCurrency}&to={quoteCurrency}", _cts.Token).ConfigureAwait(false);
         if (PriceFeedMessages.TryParseFrankfurterSeries(json, quoteCurrency, out var price, out var change))
         {
             _prices[key] = NewPrice(price, change, "Frankfurter", "");
@@ -405,7 +405,7 @@ public sealed class PriceFeedManager : IDisposable
         {
             try
             {
-                await _delay(interval, _cts.Token);
+                await _delay(interval, _cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -417,7 +417,7 @@ public sealed class PriceFeedManager : IDisposable
             {
                 try
                 {
-                    await pollSymbol(symbol);
+                    await pollSymbol(symbol).ConfigureAwait(false);
                 }
                 catch
                 {
@@ -427,13 +427,13 @@ public sealed class PriceFeedManager : IDisposable
             }
             if (afterBatch is not null)
             {
-                await afterBatch();
+                await afterBatch().ConfigureAwait(false);
             }
         }
     }
 
-    private async Task RunCryptoRestPollerAsync()
-        => await RunRestPollLoopAsync(_cryptoRestInterval, _subscribedCrypto.Keys, PollCryptoSymbolAsync, FallbackCoinGeckoAsync);
+    private Task RunCryptoRestPollerAsync()
+        => RunRestPollLoopAsync(_cryptoRestInterval, _subscribedCrypto.Keys, PollCryptoSymbolAsync, FallbackCoinGeckoAsync);
 
     /// <summary>
     /// One crypto REST poll hop: the BinanceUS 24hr ticker for one subscribed
@@ -442,7 +442,7 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     internal async Task PollCryptoSymbolAsync(string sym)
     {
-        var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token);
+        var json = await _http.GetStringAsync($"https://api.binance.us/api/v3/ticker/24hr?symbol={sym}USDT", _cts.Token).ConfigureAwait(false);
         if (PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change))
         {
             _prices[sym] = NewPrice(price, change, SourceBinanceUs);
@@ -455,7 +455,7 @@ public sealed class PriceFeedManager : IDisposable
         {
             var ids = string.Join(",", _subscribedCrypto.Keys.Select(SymbolCatalog.CoinGeckoIdFor).OfType<string>());
             if (string.IsNullOrEmpty(ids)) return;
-            var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token);
+            var json = await _http.GetStringAsync($"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd&include_24hr_change=true", _cts.Token).ConfigureAwait(false);
             // Parse the batch once, index by id — the per-alias spelling would
             // re-parse the same JSON document for every subscribed alias.
             var parsed = PriceFeedMessages.ParseCoinGeckoSimplePriceBatch(json);

@@ -14,7 +14,7 @@ namespace ModernWigiDash.App;
 /// live in <see cref="PageTabVisual"/>. The wheel handler subscribes here, so
 /// the window owns no tab-strip event code at all.
 /// </summary>
-public sealed class PageTabsView
+internal sealed class PageTabsView
 {
     private readonly Panel _panel;
     private readonly ScrollViewer _scrollViewer;

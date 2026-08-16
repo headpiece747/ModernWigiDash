@@ -13,7 +13,7 @@ namespace ModernWigiDash.App;
 /// applied to the main window and every owned dialog. Theme resources are the
 /// ThemeManager's job; this module owns only the per-window chrome.
 /// </summary>
-public static class WindowChrome
+internal static class WindowChrome
 {
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);

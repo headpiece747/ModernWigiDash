@@ -9,7 +9,7 @@ namespace ModernWigiDash.App;
 /// engine, with the encode→pool→coalesce→pace policy and the readiness gate.
 /// MainWindow sends the freshly composed frame; the presenter decides delivery.
 /// </summary>
-public sealed class DisplayPresenter : IDisposable
+internal sealed class DisplayPresenter : IDisposable
 {
     private readonly FrameDelivery _delivery;
 

@@ -104,7 +104,7 @@ public sealed class PollLoop : IDisposable
             {
                 if (!_ready())
                 {
-                    try { await Task.Delay(500, ct); }
+                    try { await Task.Delay(500, ct).ConfigureAwait(false); }
                     catch (OperationCanceledException) { break; }
                     continue;
                 }
@@ -125,7 +125,7 @@ public sealed class PollLoop : IDisposable
                 _onTickFailure();
             }
 
-            try { await timer.WaitForNextTickAsync(ct); }
+            try { await timer.WaitForNextTickAsync(ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }

@@ -10,7 +10,7 @@ namespace ModernWigiDash.App.Input;
 /// <summary>
 /// What kind of edit-mode manipulation a mouse press started.
 /// </summary>
-public enum ManipulationKind
+internal enum ManipulationKind
 {
     None,
     Drag,
@@ -25,7 +25,7 @@ public enum ManipulationKind
 /// physical display always routes (hotkeys fire on the device even while the
 /// desktop is in edit mode).
 /// </summary>
-public enum InputSource
+internal enum InputSource
 {
     DesktopEdit,
     Device
@@ -36,7 +36,7 @@ public enum InputSource
 /// touch routing. One accessor behind the controller instead of three
 /// re-extractions per call at every feed site.
 /// </summary>
-public readonly record struct InputState(PageLayout ActivePage, int PageCount, int ActivePageIndex);
+internal readonly record struct InputState(PageLayout ActivePage, int PageCount, int ActivePageIndex);
 
 /// <summary>
 /// The single input module. Behind one small interface it owns:
@@ -57,7 +57,7 @@ public readonly record struct InputState(PageLayout ActivePage, int PageCount, i
 /// stays in MainWindow behind the <paramref name="navigateTo"/> and
 /// <paramref name="select"/> seams.
 /// </summary>
-public sealed class InputController
+internal sealed class InputController
 {
     private readonly GestureInterpreter _machine = new();
     private readonly Func<InputState> _state;
@@ -80,10 +80,10 @@ public sealed class InputController
     /// index when a swipe/arrow-tap navigates; MainWindow performs the UI work.</param>
     /// <param name="requestRender">Canvas refresh seam, invoked when a touch
     /// sample was routed to a widget.</param>
-    /// <param name="routeTouch">Widget-touch routing; defaults to the
-    /// compositor's hit-test routing. Tests inject a spy.</param>
-    /// <param name="hitTest">Widget hit-testing; defaults to the compositor's.
-    /// Tests inject a fake page.</param>
+    /// <param name="routeTouch">Widget-touch routing; defaults to
+    /// <see cref="WidgetRouting"/>'s hit-test routing. Tests inject a spy.</param>
+    /// <param name="hitTest">Widget hit-testing; defaults to
+    /// <see cref="WidgetRouting"/>'s. Tests inject a fake page.</param>
     /// <param name="select">Selection seam; MainWindow selects the hit widget
     /// and refreshes the inspector/canvas. Tests inject a spy.</param>
     /// <param name="onManipulation">One refresh funnel: invoked whenever an
@@ -104,8 +104,8 @@ public sealed class InputController
         _state = stateProvider;
         _navigateTo = navigateTo;
         _requestRender = requestRender;
-        _routeTouch = routeTouch ?? SkiaFrameCompositor.RouteTouch;
-        _hitTest = hitTest ?? SkiaFrameCompositor.HitTest;
+        _routeTouch = routeTouch ?? WidgetRouting.RouteTouch;
+        _hitTest = hitTest ?? WidgetRouting.HitTest;
         _select = select;
         _onManipulation = onManipulation;
     }

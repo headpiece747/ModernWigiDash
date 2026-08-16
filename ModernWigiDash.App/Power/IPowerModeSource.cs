@@ -9,7 +9,7 @@ namespace ModernWigiDash.App.Power;
 /// <see cref="Microsoft.Win32.SystemEvents.PowerModeChanged"/>; other power
 /// modes (e.g. StatusChange) are filtered out at the adapter.
 /// </summary>
-public interface IPowerModeSource : IDisposable
+internal interface IPowerModeSource : IDisposable
 {
     /// <summary>Raised on the system's power event thread: Suspend when Windows
     /// enters sleep, Resume when it wakes. Subscribe before use; raise from
