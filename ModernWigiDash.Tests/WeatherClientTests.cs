@@ -131,6 +131,16 @@ public class WeatherClientTests
 
     private static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "wmd-weather-client-tests");
 
+    /// <summary>A pre-stamp cache JSON fixture: parses as an unstamped legacy
+    /// cache that applies under any query key.</summary>
+    private const string LegacyCacheJson = """
+        {
+          "CurrentTempC": 12.5, "FeelsLikeC": 10.1, "Humidity": 60, "WindSpeedKmH": 8.2,
+          "WeatherCode": 2, "HighTempC": 18, "LowTempC": 9, "ResolvedCityName": "Paris",
+          "Lat": 48.85, "Lon": 2.35, "DailyForecasts": [], "HourlyForecasts": []
+        }
+        """;
+
     private static WeatherLocation CoordinateLocation => new("Fixed Location", "40.71,-74.00", null, null, null);
 
     /// <summary>The snapshot of a fetch outcome, or null for every non-Fetched
@@ -1289,6 +1299,80 @@ public class WeatherClientTests
         var loaded = await reader.LoadCacheAsync(CoordinateLocation);
 
         Assert.IsNull(loaded, "an oversized cache file must not be loaded");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_FileExactlyAtCap_Loads()
+    {
+        // The size-bound boundary: a cache file exactly at MaxCacheBytes is
+        // not oversized - it must load (the initial check is strict >, and the
+        // bounded read reaches the full length, so the post-loop guard holds).
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        string payload = LegacyCacheJson + new string(' ', (int)WeatherClient.MaxCacheBytes - LegacyCacheJson.Length);
+        await File.WriteAllTextAsync(path, payload);
+
+        var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
+        var loaded = await reader.LoadCacheAsync(CoordinateLocation);
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("Paris", loaded.ResolvedCityName, "a cache file exactly at the cap must parse normally");
+    }
+
+    [TestMethod]
+    public async Task LoadCacheAsync_FileGrowsMidRead_IsRejected()
+    {
+        // The stat-then-read gap guard: a cache file that grows after the
+        // reader opened (a writer that held the file BEFORE the reader is
+        // grandfathered past the reader's FileShare.Read, so it can append
+        // under the live read) must not load - the bounded loop stops at
+        // MaxCacheBytes and the post-loop total-vs-length check rejects the
+        // truncated read. The payload is VALID cache JSON padded to exactly
+        // the cap, so a load that slips through the guard would parse and
+        // return a snapshot (the initial length check alone cannot catch a
+        // growth that lands after it).
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "weather_test.json");
+        string payload = LegacyCacheJson + new string(' ', (int)WeatherClient.MaxCacheBytes - LegacyCacheJson.Length);
+        await File.WriteAllTextAsync(path, payload);
+        var logs = new List<string>();
+        var reader = new WeatherClient(dir, "weather_test.json",
+            logError: (message, _) => logs.Add(message), http: new HttpClient(new StubHttpHandler(Respond)));
+
+        // The writer opens first (FileShare.ReadWrite), so it can grow the
+        // file while the reader's FileShare.Read handle is live. Each attempt
+        // restores the file and runs a tight append loop while the reader is
+        // inside the load: an append that lands before the reader's length
+        // check trips the initial bound, one that lands inside the read trips
+        // the post-loop guard - both reject with the same bound error. A miss
+        // (the load finished before any append) just retries.
+        using var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        byte[] growth = new byte[4096];
+        bool rejected = false;
+        for (int attempt = 0; attempt < 50 && !rejected; attempt++)
+        {
+            writer.SetLength(payload.Length);
+            writer.Position = payload.Length;
+            using var stop = new CancellationTokenSource();
+            var grow = Task.Run(() =>
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    writer.Write(growth);
+                    writer.Flush();
+                }
+            });
+            var loaded = await reader.LoadCacheAsync(CoordinateLocation);
+            await stop.CancelAsync();
+            await grow;
+            rejected = loaded is null;
+        }
+
+        Assert.IsTrue(rejected, "the mid-read growth must be rejected (the post-loop guard reads short at the cap)");
+        Assert.IsTrue(logs.Any(l => l.Contains($"exceeds the {WeatherClient.MaxCacheBytes} byte bound", StringComparison.Ordinal)),
+            "the rejection must surface through the error sink");
     }
 
     [TestMethod]

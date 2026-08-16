@@ -151,6 +151,60 @@ public class WeatherLocationResolverTests
     }
 
     [TestMethod]
+    public void Resolve_LondonCA_StatePresentInResponse_StateWinsAndCodeReadingSuppressed()
+    {
+        // The weak ISO fallback is response-aware: with California present in
+        // the response, Ontario's 'CA' code match must NOT earn the weak
+        // bonus - the state reading dominates and the code reading is
+        // suppressed entirely (Ontario scores 0, California 500). Observable
+        // through a persisted pick: "London, Ontario, Canada" is NOT promoted
+        // (its suffix score is 0), so the ranking decides and California
+        // wins - the pre-fix code granted Ontario the weak 125 and would have
+        // promoted the pick to the wrong country.
+        var result = WeatherLocationResolver.Resolve(
+            [C("Ontario", "Canada", "CA", 366151, "London"), C("California", "United States", "US", 500000, "London")],
+            "London", "CA", null, "London, Ontario, Canada");
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("London, California, United States", resolved.Label);
+    }
+
+    [TestMethod]
+    public void Resolve_LondonCA_StateAbsentFromResponse_WeakCodeFallbackWins()
+    {
+        // The weak ISO fallback: with NO California candidate in the response
+        // (the geocoder's top-10 omitted it), Ontario's 'CA' code match keeps
+        // the weak bonus (125) and wins over same-named candidates that fail
+        // the suffix - the code reading is the only reading left.
+        var result = WeatherLocationResolver.Resolve(
+            [C("Ontario", "Canada", "CA", 366151, "London"), C("Ohio", "United States", "US", 1000, "London")],
+            "London", "CA", null, null);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("London, Ontario, Canada", resolved.Label);
+    }
+
+    [TestMethod]
+    public void Resolve_AmsterdamNL_StateAbsentFromResponse_WeakCodeFallbackApplies()
+    {
+        // "Amsterdam, NL": NL is Newfoundland's abbreviation AND the
+        // Netherlands' ISO code. With no Newfoundland candidate in the
+        // response, the Netherlands' code match earns the weak bonus and
+        // beats the same-named US towns.
+        var result = WeatherLocationResolver.Resolve(
+            [C("North Holland", "The Netherlands", "NL", 741636, "Amsterdam"),
+             C("New York", "United States", "US", 18620, "Amsterdam"),
+             C("Ohio", "United States", "US", 510, "Amsterdam")],
+            "Amsterdam", "NL", null, null);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("Amsterdam, North Holland, The Netherlands", resolved.Label);
+    }
+
+    [TestMethod]
     public void Resolve_NonStateCountryCode_StillMatchesByCode()
     {
         // "San Jose, CR" — 'CR' is not a US state abbreviation, so the
@@ -262,6 +316,38 @@ public class WeatherLocationResolverTests
         Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
         var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
         Assert.AreEqual("Springfield, Massachusetts, United States", resolved.Label);
+    }
+
+    [TestMethod]
+    public void Resolve_LocationMatchPick_CountryCodeHintDisagrees_IsStaleAndNotPromoted()
+    {
+        // A persisted pick from a different country than the current
+        // CountryCode hint is stale: the user narrowed the query with a
+        // country hint, so the ranking (with its country-hint bonus) must win
+        // - the stale pick must not silently override the explicit hint.
+        var result = WeatherLocationResolver.Resolve(
+            [C("California", "United States", "US", 999999, "Springfield"), C("Ontario", "Canada", "CA", 100, "Springfield")],
+            "Springfield", null, "US", "Springfield, Ontario, Canada");
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("Springfield, California, United States", resolved.Label);
+    }
+
+    [TestMethod]
+    public void Resolve_LocationMatchPick_CountryCodeHintMatches_IsPromoted()
+    {
+        // A pick consistent with the current CountryCode hint is the user's
+        // last explicit choice and must survive restart/import: it is
+        // promoted over the ranking, which would pick the higher-population
+        // same-named town.
+        var result = WeatherLocationResolver.Resolve(
+            [C("California", "United States", "US", 999999, "Springfield"), C("Ontario", "Canada", "CA", 100, "Springfield")],
+            "Springfield", null, "CA", "Springfield, Ontario, Canada");
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("Springfield, Ontario, Canada", resolved.Label);
     }
 
     [TestMethod]

@@ -495,22 +495,20 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // checks: an edit landing between the post-await re-check above and
         // this point must win — the snapshot and the resolved-identity copies
         // must not belong to the OLD identity (the stale write-back is
-        // protected separately below).
+        // protected separately below). The resolved-identity copies are
+        // assigned under the same lock — an edit cannot resurrect the old
+        // dropdown/name/population over the fresh edit.
         if (!ApplySnapshot(fetched.Snapshot,
-                identityGuard: () => string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal)))
+                identityGuard: () => string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal),
+                candidates: fetched.Candidates,
+                population: fetched.Population,
+                resolvedName: fetched.Snapshot.ResolvedCityName))
         {
             RequestRefresh(force: true);
             return;
         }
 
-        // The resolved identity travels on the Fetched outcome; store the
-        // widget's own copies (dropdown, population, header) once per applied
-        // fetch, so the render path never re-reads the client's resolution
-        // state. The snapshot's own resolved name is the single label source.
         WeatherSnapshot snapshot = fetched.Snapshot;
-        _resolvedCandidates = fetched.Candidates;
-        _resolvedPopulation = fetched.Population;
-        _resolvedCityName = snapshot.ResolvedCityName;
 
         // The resolved label's write-back is deferred to the UI thread (Render
         // flushes the pending field): Context.PersistProperty stays on the UI
@@ -584,10 +582,16 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// in flight must never be overwritten by the stale cache).
     /// <paramref name="identityGuard"/> is evaluated under the same lock:
     /// the cache may also be skipped when the resolution identity changed
-    /// (the boot load runs pre-hydration). Returns whether the snapshot was
+    /// (the boot load runs pre-hydration). The resolved-identity copies
+    /// (dropdown, population, header name) are assigned under the SAME lock
+    /// when provided — an edit landing between the guard and the copies can
+    /// no longer be resurrected over by the old identity's state (the edit
+    /// cleared the copies; the guarded assignment re-populates them only
+    /// when the identity still matches). Returns whether the snapshot was
     /// applied.
     /// </summary>
-    private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null)
+    private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,
+        IReadOnlyList<GeocodeCandidate>? candidates = null, double population = 0, string? resolvedName = null)
     {
         lock (_forecastGate)
         {
@@ -613,6 +617,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _hourlyForecasts.AddRange(snapshot.HourlyForecasts);
                 _forecastVersion++;
             }
+            if (candidates is not null) _resolvedCandidates = candidates;
+            if (population != 0) _resolvedPopulation = population;
+            if (resolvedName is not null) _resolvedCityName = resolvedName;
             return true;
         }
     }
@@ -650,16 +657,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // stale cache, and the check + apply are one atomic step. The
             // boot load runs pre-hydration with the DEFAULT location, so the
             // identity guard is what keeps the default-stamped cache from
-            // surfacing under the profile's real location.
+            // surfacing under the profile's real location. The widget's
+            // resolved-name copy restores under the same lock (the cache
+            // cannot carry candidates or population; they stay empty,
+            // exactly like the client's own load state).
             bool applied = ApplySnapshot(cached, expectedVersion: versionBefore,
-                identityGuard: () => string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal));
-            if (applied)
-            {
-                // The cache load also restores the widget's resolved-name copy
-                // (the cache cannot carry candidates or population; they stay
-                // empty, exactly like the client's own load state).
-                _resolvedCityName = cached.ResolvedCityName;
-            }
+                identityGuard: () => string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal),
+                resolvedName: cached.ResolvedCityName);
             if (!applied)
             {
                 // The client's load already mutated its resolution state

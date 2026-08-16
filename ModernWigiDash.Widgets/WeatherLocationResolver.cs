@@ -156,6 +156,17 @@ internal static class WeatherLocationResolver
     {
         if (candidates.Count == 0) return new ResolveResult.NoMatch();
 
+        // The state-abbreviation tier's weak ISO fallback is response-aware:
+        // a code match gets the weak bonus only when NO candidate carries the
+        // state's full admin1 name (the geocoder's top-10 omitted it). When
+        // the state reading IS present, it dominates and the code reading is
+        // suppressed entirely ("London, CA" with California in the response
+        // must never resolve Ontario). Computed before the pick promotion and
+        // the ranking so both use the same view.
+        var presentStateNames = candidates
+            .Select(c => NormalizeForMatch(c.Admin1))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         // A persisted Location Match pick must survive restart/import:
         // candidates are in-memory per instance, so after re-creation the
         // stored pick cannot resolve from cache. If the pick matches a freshly
@@ -172,11 +183,14 @@ internal static class WeatherLocationResolver
             // ("Springfield, IL" + a persisted "Springfield, Massachusetts"
             // pick) means the user narrowed the query — the ranking (with the
             // IL bonus) must win, or the stale pick silently overrides the
-            // explicit suffix and shows wrong-city weather. A query WITHOUT a
-            // suffix keeps the restart/import promotion (the pick IS the
-            // user's last explicit choice).
+            // explicit suffix and shows wrong-city weather. The country hint
+            // is checked the same way: a pick from a different country than
+            // the current CountryCode hint is stale. A query WITHOUT a suffix
+            // keeps the restart/import promotion (the pick IS the user's last
+            // explicit choice).
             if (picked is not null
-                && (string.IsNullOrWhiteSpace(suffixPart) || ScoreSuffixMatch(picked, suffixPart) > 0))
+                && (string.IsNullOrWhiteSpace(suffixPart) || ScoreSuffixMatch(picked, suffixPart, presentStateNames) > 0)
+                && (string.IsNullOrWhiteSpace(countryCode) || EqualsInsensitive(picked.CountryCode, countryCode)))
             {
                 return new ResolveResult.Resolved(picked.Lat, picked.Lon, ComposeLabel(picked, namePart), picked.Population);
             }
@@ -195,7 +209,7 @@ internal static class WeatherLocationResolver
         // the tie cannot pick a wrong country; the highest-population entry
         // is the place.
         var ranked = candidates
-            .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, countryCode)))
+            .Select(c => (Candidate: c, Rank: RankGeocodeCandidate(c, namePart, suffixPart, countryCode, presentStateNames)))
             .ToList();
         int bestScore = ranked.Max(r => r.Rank);
         var topTied = ranked.Where(r => r.Rank == bestScore).ToList();
@@ -211,7 +225,7 @@ internal static class WeatherLocationResolver
             string tieCountry = topTied[0].Candidate.CountryCode;
             bool sameCountryTie = !string.IsNullOrWhiteSpace(tieCountry)
                 && topTied.All(t => t.Candidate.CountryCode.Equals(tieCountry, StringComparison.OrdinalIgnoreCase))
-                && topTied.All(t => ScoreSuffixMatch(t.Candidate, suffixPart) > 0);
+                && topTied.All(t => ScoreSuffixMatch(t.Candidate, suffixPart, presentStateNames) > 0);
             if (sameCountryTie)
             {
                 var best = topTied
@@ -248,19 +262,19 @@ internal static class WeatherLocationResolver
     /// decides the winner outside the same-country carve-out in
     /// <see cref="Resolve"/>.
     /// </summary>
-    private static int RankGeocodeCandidate(Candidate candidate, string namePart, string? suffixPart, string? countryCode)
+    private static int RankGeocodeCandidate(Candidate candidate, string namePart, string? suffixPart, string? countryCode, IReadOnlySet<string> presentStateNames)
     {
         string name = candidate.Name ?? "";
 
         return ScoreExactName(name, namePart)
-            + ScoreSuffixMatch(candidate, suffixPart)
+            + ScoreSuffixMatch(candidate, suffixPart, presentStateNames)
             + ScoreCountryHint(candidate.CountryCode, candidate.Country, countryCode);
     }
 
     private static int ScoreExactName(string name, string namePart)
         => EqualsInsensitive(name, namePart) ? NameExactBonus : 0;
 
-    private static int ScoreSuffixMatch(Candidate candidate, string? suffixPart)
+    private static int ScoreSuffixMatch(Candidate candidate, string? suffixPart, IReadOnlySet<string> presentStateNames)
     {
         if (string.IsNullOrWhiteSpace(suffixPart)) return 0;
 
@@ -297,8 +311,14 @@ internal static class WeatherLocationResolver
                 }
                 // Weak ISO fallback: the component is also a real country
                 // code — a candidate whose CODE matches keeps a weak score
-                // instead of failing the whole suffix.
-                if (EqualsInsensitive(candidate.CountryCode, component))
+                // instead of failing the whole suffix — but ONLY when the
+                // state's own candidate is absent from the response (the
+                // geocoder's top-10 omitted it): "Amsterdam, NL" resolves the
+                // Netherlands because no Newfoundland candidate is listed,
+                // while "London, CA" with California present still suppresses
+                // Ontario's code reading entirely.
+                if (EqualsInsensitive(candidate.CountryCode, component)
+                    && !presentStateNames.Contains(NormalizeForMatch(stateFullName)))
                 {
                     score += SuffixWeakBonus;
                     continue;

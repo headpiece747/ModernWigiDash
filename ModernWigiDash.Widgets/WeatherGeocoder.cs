@@ -138,8 +138,11 @@ internal sealed class WeatherGeocoder
             // Either the internal deadline OR the shared client's own Timeout
             // fired (the request CTS cancels independently of the linked one)
             // — the caller's token did not. Report the hang as a failure so
-            // the callers log it and stamp the throttle.
-            throw new TimeoutException($"HTTP leg exceeded the {HttpTimeout.TotalSeconds}s deadline");
+            // the callers log it and stamp the throttle. The message states
+            // the EFFECTIVE deadline (the override, when the test seam set
+            // one), not the default.
+            double effectiveSeconds = (HttpTimeoutOverride ?? HttpTimeout).TotalSeconds;
+            throw new TimeoutException($"HTTP leg exceeded the {effectiveSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s deadline");
         }
     }
 
@@ -170,7 +173,7 @@ internal sealed class WeatherGeocoder
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logError?.Invoke($"Location search failed for '{SanitizeLog(query)}': {ex.Message}", ex);
+            _logError?.Invoke($"Location search failed for '{LogSanitizer.Sanitize(query)}': {ex.Message}", ex);
             return [];
         }
     }
@@ -216,7 +219,7 @@ internal sealed class WeatherGeocoder
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logError?.Invoke($"Geocoding failed for '{SanitizeLog(query)}': {ex.Message}", ex);
+            _logError?.Invoke($"Geocoding failed for '{LogSanitizer.Sanitize(query)}': {ex.Message}", ex);
             return new WeatherCityGeocodeResult.Unresolved([]);
         }
     }
@@ -245,8 +248,16 @@ internal sealed class WeatherGeocoder
                 throw new InvalidOperationException("zippopotam response has no places");
             }
             JsonElement place = places[0];
-            double lat = double.Parse(place.GetProperty("latitude").GetString()!, CultureInfo.InvariantCulture);
-            double lon = double.Parse(place.GetProperty("longitude").GetString()!, CultureInfo.InvariantCulture);
+            // The tolerant getters apply here too: a malformed response with
+            // a missing/null latitude must read as unusable coordinates, not
+            // throw a raw null-ref into the caller's catch.
+            string latStr = place.TryGetProperty("latitude", out var latEl) ? latEl.GetString() ?? "" : "";
+            string lonStr = place.TryGetProperty("longitude", out var lonEl) ? lonEl.GetString() ?? "" : "";
+            if (!double.TryParse(latStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double lat)
+                || !double.TryParse(lonStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double lon))
+            {
+                throw new InvalidOperationException("zippopotam response carried unusable coordinates");
+            }
             // The remote response is the cluster's third coordinate entry
             // point — NaN/out-of-range strings must not flow into the forecast
             // URL (reject the row like the city-leg validation).
@@ -268,7 +279,7 @@ internal sealed class WeatherGeocoder
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logError?.Invoke($"ZIP geocoding failed for '{SanitizeLog(trimmed)}': {ex.Message}", ex);
+            _logError?.Invoke($"ZIP geocoding failed for '{LogSanitizer.Sanitize(trimmed)}': {ex.Message}", ex);
             return null;
         }
     }
@@ -370,15 +381,4 @@ internal sealed class WeatherGeocoder
            && p.TryGetDouble(out double population)
             ? population
             : 0;
-
-    /// <summary>
-    /// Flattens and BOUNDS user-provided strings before interpolation into
-    /// log lines: embedded newlines cannot inject fake entries, and a
-    /// multi-megabyte Location value cannot write a multi-megabyte line.
-    /// </summary>
-    private static string SanitizeLog(string value)
-    {
-        string flat = value.Replace('\r', ' ').Replace('\n', ' ');
-        return flat.Length <= 200 ? flat : flat[..200];
-    }
 }

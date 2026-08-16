@@ -334,10 +334,6 @@ public sealed class PriceFeedManager : IDisposable
     /// diagnosable in the field without a per-tick log storm.</summary>
     private readonly DiagLog _failLog = new("PRICE-FEED", 20, logFirst: true);
 
-    /// <summary>Flattens user-provided strings before interpolation into log
-    /// lines so embedded newlines cannot inject fake log entries.</summary>
-    private static string SanitizeLog(string value) => value.Replace('\r', ' ').Replace('\n', ' ');
-
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),
         () => _feedFactory(FeedKind.Binance),
@@ -422,7 +418,7 @@ public sealed class PriceFeedManager : IDisposable
                 catch
                 {
                     // Individual symbol failure is non-fatal.
-                    _failLog.Write(() => $"REST poll failed for '{SanitizeLog(symbol)}'; continuing");
+                    _failLog.Write(() => $"REST poll failed for '{LogSanitizer.Sanitize(symbol)}'; continuing");
                 }
             }
             if (afterBatch is not null)

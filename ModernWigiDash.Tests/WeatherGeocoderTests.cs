@@ -32,6 +32,31 @@ internal sealed class PendingStream : Stream
 }
 
 /// <summary>
+/// A stream whose body read faults with an immediate OperationCanceledException
+/// (no token involved): the timeout-conversion catch branch runs instantly, so
+/// the message is assertable without waiting the effective deadline. The branch
+/// is the same one the internal deadline reaches - the production catch
+/// converts any non-caller OCE ("the internal deadline OR the shared client's
+/// own Timeout").
+/// </summary>
+internal sealed class ImmediateOceStream : Stream
+{
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        => Task.FromException<int>(new OperationCanceledException());
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() { }
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+}
+
+/// <summary>
 /// The geocoding adapter behind <see cref="WeatherClient"/>: the three
 /// endpoint legs (city search, city geocode, ZIP lookup), the tolerant
 /// candidate parsing, and the coordinate helpers. The resolver's DECISION
@@ -114,6 +139,26 @@ public class WeatherGeocoderTests
 
         Assert.IsNull(result, "a failed ZIP leg must fall back to the city geocoder");
         Assert.IsTrue(logs.Count > 0, "the failure must surface through the error sink");
+    }
+
+    [TestMethod]
+    public async Task GeocodeZipAsync_NullOrMissingLatitude_ReturnsNullForCityFallback()
+    {
+        // The tolerant getters apply to the ZIP leg: a response with a missing
+        // or null latitude reads as unusable coordinates (the
+        // "unusable coordinates" failure path) - not a raw null-reference into
+        // the caller's catch - so the ZIP falls back to the city geocoder like
+        // any other failure.
+        var logs = new List<string>();
+        var missing = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("""{"places":[{"longitude":"-97.7431","state":"Texas"}]}""")), logs);
+        var nullLat = Geocoder(new StubHttpHandler(_ => StubHttpHandler.Ok("""{"places":[{"latitude":null,"longitude":"-97.7431","state":"Texas"}]}""")));
+
+        Assert.IsNull(await missing.GeocodeZipAsync("78701", "us", CancellationToken.None),
+            "a missing-latitude ZIP leg must fall back to the city geocoder");
+        Assert.IsNull(await nullLat.GeocodeZipAsync("78701", "us", CancellationToken.None),
+            "a null-latitude ZIP leg must fall back to the city geocoder");
+        Assert.IsTrue(logs.Any(l => l.Contains("unusable coordinates", StringComparison.Ordinal)),
+            "the malformed-coordinate failure must surface through the error sink");
     }
 
     [TestMethod]
@@ -218,6 +263,58 @@ public class WeatherGeocoderTests
 
             await Assert.ThrowsAsync<TaskCanceledException>(
                 () => geocoder.GeocodeCityAsync("Berlin", null, null, cts.Token));
+        }
+        finally
+        {
+            WeatherGeocoder.HttpTimeoutOverride = original;
+        }
+    }
+
+    [TestMethod]
+    public async Task ReadBoundedAsync_Timeout_MessageStatesOverrideDeadline()
+    {
+        // The timeout-conversion message states the EFFECTIVE deadline: with
+        // the test-seam override set, the message reflects it (1s), never the
+        // 30 s default - a stale default in the message would mislead the log
+        // reader about how long the leg actually waited.
+        var original = WeatherGeocoder.HttpTimeoutOverride;
+        WeatherGeocoder.HttpTimeoutOverride = TimeSpan.FromSeconds(1);
+        try
+        {
+            var http = new HttpClient(new StubHttpHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new PendingStream()) }));
+
+            var ex = await Assert.ThrowsAsync<TimeoutException>(
+                () => WeatherGeocoder.ReadBoundedAsync(http, "https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
+
+            Assert.AreEqual("HTTP leg exceeded the 1s deadline", ex.Message);
+        }
+        finally
+        {
+            WeatherGeocoder.HttpTimeoutOverride = original;
+        }
+    }
+
+    [TestMethod]
+    public async Task ReadBoundedAsync_Timeout_MessageStatesDefaultDeadline()
+    {
+        // Without an override, the message states the 30 s DEFAULT deadline.
+        // The stream faults with an immediate OCE of its own (no token
+        // involved), so the converter's catch branch - the same one the
+        // internal deadline and the shared client's own timeout reach - runs
+        // without waiting the real deadline; the message is built from the
+        // same (HttpTimeoutOverride ?? HttpTimeout) expression.
+        var original = WeatherGeocoder.HttpTimeoutOverride;
+        WeatherGeocoder.HttpTimeoutOverride = null;
+        try
+        {
+            var http = new HttpClient(new StubHttpHandler(_ =>
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new ImmediateOceStream()) }));
+
+            var ex = await Assert.ThrowsAsync<TimeoutException>(
+                () => WeatherGeocoder.ReadBoundedAsync(http, "https://api.open-meteo.com/v1/search?name=Berlin", CancellationToken.None));
+
+            Assert.AreEqual("HTTP leg exceeded the 30s deadline", ex.Message);
         }
         finally
         {

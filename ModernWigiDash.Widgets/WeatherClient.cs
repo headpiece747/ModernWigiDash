@@ -446,6 +446,7 @@ internal sealed class WeatherClient
     {
         try
         {
+            string resolvedName = UnknownLocationLabel;
             string path = CachePath;
             if (!File.Exists(path)) return null;
             // A cache file larger than the bound is a corrupted/foreign file —
@@ -467,22 +468,41 @@ internal sealed class WeatherClient
             }
             // A cache without a resolved name must not invent one (the old
             // "New York" fallback mislabeled any location) — use the cached
-            // coordinates, the only truthful identity the cache carries.
-            if (!string.IsNullOrWhiteSpace(data.ResolvedCityName))
+            // coordinates, the only truthful identity the cache carries. The
+            // identity fields are mutated UNDER the gate, and only when no
+            // resolution for a DIFFERENT identity has started: the boot load
+            // runs concurrently with the boot fetch, and a slow load must not
+            // overwrite the coordinates/name a newer resolution is producing
+            // (the fetch's guards validate the KEY — they cannot see a state
+            // swap underneath it). Empty _lastLocationQuery = boot, no
+            // resolution started yet — the legitimate load case.
+            lock (_identityGate)
             {
-                _resolvedCityName = data.ResolvedCityName;
+                if (!string.IsNullOrEmpty(_lastLocationQuery)
+                    && !string.Equals(_lastLocationQuery, BuildQueryKey(location), StringComparison.Ordinal))
+                {
+                    return null;
+                }
+                if (!string.IsNullOrWhiteSpace(data.ResolvedCityName))
+                {
+                    _resolvedCityName = data.ResolvedCityName;
+                }
+                else if (data.Lat is double cachedLat && data.Lon is double cachedLon)
+                {
+                    _resolvedCityName = WeatherGeocoder.FormatCoordinates(cachedLat, cachedLon);
+                }
+                else
+                {
+                    _resolvedCityName = UnknownLocationLabel;
+                }
+                _lat = data.Lat;
+                _lon = data.Lon;
+                _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
+                // Captured under the gate: the snapshot below must carry the
+                // name consistent with the state just applied, not whatever a
+                // concurrent resolution produced after the lock released.
+                resolvedName = _resolvedCityName;
             }
-            else if (data.Lat is double cachedLat && data.Lon is double cachedLon)
-            {
-                _resolvedCityName = WeatherGeocoder.FormatCoordinates(cachedLat, cachedLon);
-            }
-            else
-            {
-                _resolvedCityName = UnknownLocationLabel;
-            }
-            _lat = data.Lat;
-            _lon = data.Lon;
-            _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             return new WeatherSnapshot(
                 data.CurrentTempC,
                 data.FeelsLikeC,
@@ -496,7 +516,7 @@ internal sealed class WeatherClient
                 // the API ever returns.
                 (data.DailyForecasts ?? []).Take(MaxFetchDays).Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
                 (data.HourlyForecasts ?? []).Take(MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
-                _resolvedCityName,
+                resolvedName,
                 data.Lat ?? 0,
                 data.Lon ?? 0);
         }
@@ -511,13 +531,20 @@ internal sealed class WeatherClient
     /// Reads the cache file with a HARD byte cap — the stat-then-read gap is
     /// closed: a file that grows (or is swapped) after the existence check is
     /// still truncated at <see cref="MaxCacheBytes"/> instead of buffered
-    /// whole. Returns null (logged) when the file exceeds the cap mid-read.
+    /// whole. Returns null (logged) when the file exceeds the cap mid-read
+    /// (the loop stops at the cap, so a file larger than the cap is detected
+    /// by the total read falling short of the file's length).
     /// </summary>
     private async Task<string?> ReadCacheFileBoundedAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            // The stream tolerates a concurrent writer (ReadWrite share): the
+            // bounded read + the length guards below make mid-read growth
+            // safe-by-rejection — a FileShare.Read open would instead fail at
+            // open with a sharing violation the moment another process writes
+            // the cache, never reaching the guards that own the decision.
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             if (fs.Length > MaxCacheBytes)
             {
                 _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
@@ -536,7 +563,7 @@ internal sealed class WeatherClient
                     total += read;
                     await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 }
-                if (total > MaxCacheBytes)
+                if (total < fs.Length)
                 {
                     _logError?.Invoke($"Weather cache load failed: cache file exceeds the {MaxCacheBytes} byte bound", null);
                     return null;
