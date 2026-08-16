@@ -189,9 +189,6 @@ internal sealed class WeatherClient
 
     private HttpClient Http => TestHttpClient ?? SharedHttpClient;
 
-    /// <summary>The last resolved display name for the location (API name, override label, or fallback).</summary>
-    internal string ResolvedCityName => _resolvedCityName;
-
     /// <summary>
     /// Number of completed fetches (success or failure) — a test seam for
     /// waiting on fetch completion, since the in-flight claim releases only
