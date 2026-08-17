@@ -30,9 +30,6 @@ internal sealed class PriceRestLeg(
     /// cross rates carry none).</summary>
     internal string CurrencySymbol { get; } = currencySymbol;
 
-    /// <summary>The leg's URL for a symbol (test seam: pins the wire format).</summary>
-    internal string UrlFor(string key) => buildUrl(key);
-
     /// <summary>
     /// One fetch → parse hop for a symbol. Returns null when the symbol fails
     /// the validation guard or the response does not parse as a quote — in
