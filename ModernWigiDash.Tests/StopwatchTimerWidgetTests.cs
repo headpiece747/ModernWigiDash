@@ -68,4 +68,13 @@ public class StopwatchTimerWidgetTests
         Assert.IsTrue(widget.ElapsedForTest >= TimeSpan.FromSeconds(1), "A running stopwatch must have accrued the elapsed time");
     }
 
+    [TestMethod]
+    public void Render_CustomColors_ExecutesWithoutExceptions()
+    {
+        var widget = new StopwatchTimerWidget { TextColorHex = "#C6E0FF" };
+
+        widget.Render(CreateCanvas(), new SKRect(0, 0, 203, 148));
+
+        Assert.AreEqual(TimeSpan.Zero, widget.ElapsedForTest, "A never-started stopwatch renders its idle zero state");
+    }
 }

@@ -41,6 +41,18 @@ public class PictureAndGifWidgetTests
     }
 
     [TestMethod]
+    public void PictureAndGifWidget_CustomPlaceholderColors_RenderWithoutExceptions()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var canvas = surface.Canvas;
+        var bounds = new SKRect(0, 0, 406, 296);
+        var widget = new PictureAndGifWidget { TextColorHex = "#98B4C8" };
+        widget.Render(canvas, bounds);
+
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
     public void PictureAndGifWidget_FolderCycle_AdvancesOnTouchWithoutCyclingInSingleMode()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));

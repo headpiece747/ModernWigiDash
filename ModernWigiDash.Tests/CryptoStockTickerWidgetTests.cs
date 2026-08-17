@@ -96,6 +96,22 @@ public class CryptoStockTickerWidgetTests
         Assert.IsNotNull(surface);
     }
 
+    [TestMethod]
+    public void CryptoStockTickerWidget_CustomColors_RendersWithoutExceptions()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(200, 150));
+        var canvas = surface.Canvas;
+        var widget = new CryptoStockTickerWidget
+        {
+            TextColorHex = "#C6E0FF",
+            PositiveColorHex = "#22C55E",
+            NegativeColorHex = "#EF4444"
+        };
+        widget.Render(canvas, new SKRect(0, 0, 200, 150));
+
+        Assert.IsNotNull(surface);
+    }
+
     // ── TickerStalenessPresentation: the stale-price display rules ─────────
 
     [TestMethod]

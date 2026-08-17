@@ -74,4 +74,16 @@ public class DigitalAnalogClockWidgetTests
         var pixel = surface.PeekPixels().GetPixelColor(101, 74);
         Assert.AreNotEqual(SKColors.Transparent, pixel, "The clock must paint output without the date badge");
     }
+
+    [TestMethod]
+    public void Render_CustomColors_ExecutesWithoutExceptions()
+    {
+        var widget = CreateWidget(Afternoon);
+        widget.TextColorHex = "#FFCD85";
+        widget.AccentColorHex = "#22C55E";
+
+        using var surface = CreateSurface();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 203, 148));
+        Assert.IsNotNull(surface);
+    }
 }
