@@ -44,6 +44,17 @@ public static class ProfileOps
     public static bool CanDeletePage(ProfileLayout profile) => profile.Pages.Count > 1;
 
     /// <summary>
+    /// The single bounds-safe page read: the page at <paramref name="index"/>
+    /// or null when the index is stale. Callers that need a page's facts
+    /// before an operation (the delete confirm's name/count) read through
+    /// this instead of indexing <see cref="ProfileLayout.Pages"/> themselves,
+    /// so a stale index degrades to a no-op rather than throwing in the
+    /// window ahead of the module's own validation.
+    /// </summary>
+    public static PageLayout? TryGetPage(ProfileLayout profile, int index)
+        => index >= 0 && index < profile.Pages.Count ? profile.Pages[index] : null;
+
+    /// <summary>
     /// Deletes the page at <paramref name="index"/>. Refuses when it is the
     /// last page. Returns true when deleted.
     /// </summary>

@@ -149,6 +149,33 @@ public class ProfileMutationContractTests
         }
     }
 
+    [TestMethod]
+    public void DeletePage_StaleIndex_IsANoOpNotAThrow()
+    {
+        // The window's delete seam must degrade a stale page index to a silent
+        // no-op: the confirm's page facts read through the module's bounds-safe
+        // accessor, never by the window indexing the page list first (the old
+        // shape threw here, ahead of DeletePage's own validation).
+        var (_, error) = Host.Invoke(() =>
+        {
+            var window = NewWindow();
+            try
+            {
+                int tabsBefore = window.PanelPageTabs.Children.Count;
+                window.DeletePage(99); // stale: beyond any real profile
+                window.DeletePage(-1); // stale: below the list
+                Assert.AreEqual(tabsBefore, window.PanelPageTabs.Children.Count,
+                    "a stale index must leave the page set untouched");
+            }
+            finally
+            {
+                window.Close();
+            }
+            return null;
+        });
+        Assert.IsNull(error, error?.ToString());
+    }
+
     private static MainWindow NewWindow()
         => new(new StubPresentMonNative(),
             Path.Combine(Path.GetTempPath(), "wmd-mutant-" + Guid.NewGuid().ToString("N"), "profile.json"));

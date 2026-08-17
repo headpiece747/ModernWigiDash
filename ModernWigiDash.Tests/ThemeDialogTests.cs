@@ -78,7 +78,7 @@ public class ThemeDialogTests
             Assert.IsTrue(dialog.ApplyIsEnabledForTest);
             var defaults = new ThemeSettings();
             var props = ThemeSettings.StringProperties
-                .OrderBy(p => ThemeSettings.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
+                .OrderBy(p => ThemePresentation.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
                 .ThenBy(p => p.Name)
                 .ToList();
             var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();

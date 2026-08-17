@@ -1,3 +1,4 @@
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.Tests;
@@ -151,8 +152,8 @@ public class ThemeSettingsTests
     [TestMethod]
     public void FriendlyName_ReturnsKnownLabelAndFallsBackToRawName()
     {
-        Assert.AreEqual("Card / Input Background", ThemeSettings.FriendlyName("BgCard"));
-        Assert.AreEqual("UnknownProp", ThemeSettings.FriendlyName("UnknownProp"));
+        Assert.AreEqual("Card / Input Background", ThemePresentation.FriendlyName("BgCard"));
+        Assert.AreEqual("UnknownProp", ThemePresentation.FriendlyName("UnknownProp"));
     }
 
     [TestMethod]
@@ -174,9 +175,9 @@ public class ThemeSettingsTests
 
         foreach (string name in propertyNames)
         {
-            Assert.IsTrue(ThemeSettings.DisplayNames.ContainsKey(name), $"DisplayNames missing {name}");
-            Assert.IsTrue(ThemeSettings.Descriptions.ContainsKey(name), $"Descriptions missing {name}");
-            Assert.IsTrue(ThemeSettings.Groups.ContainsKey(name), $"Groups missing {name}");
+            Assert.IsTrue(ThemePresentation.DisplayNames.ContainsKey(name), $"DisplayNames missing {name}");
+            Assert.IsTrue(ThemePresentation.Descriptions.ContainsKey(name), $"Descriptions missing {name}");
+            Assert.IsTrue(ThemePresentation.Groups.ContainsKey(name), $"Groups missing {name}");
         }
     }
 
@@ -207,11 +208,11 @@ public class ThemeSettingsTests
 
         foreach (string name in props.Select(p => p.Name))
         {
-            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.DisplayNames.ContainsKey(name),
+            Assert.IsTrue(ThemePresentation.DisplayNames.ContainsKey(name),
                 $"Missing friendly display name for '{name}'");
-            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.Descriptions.ContainsKey(name),
+            Assert.IsTrue(ThemePresentation.Descriptions.ContainsKey(name),
                 $"Missing description for '{name}'");
-            Assert.IsTrue(ModernWigiDash.Core.Theming.ThemeSettings.Groups.ContainsKey(name),
+            Assert.IsTrue(ThemePresentation.Groups.ContainsKey(name),
                 $"Missing group for '{name}'");
         }
     }

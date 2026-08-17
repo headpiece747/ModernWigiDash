@@ -418,6 +418,27 @@ public class ProfileOpsTests
 
 
     [TestMethod]
+    public void TryGetPage_InRange_ReturnsThePage()
+    {
+        var profile = new ProfileLayout();
+        PageLayout added = ProfileOps.AddPage(profile, "Second");
+
+        Assert.AreSame(added, ProfileOps.TryGetPage(profile, 1),
+            "a valid index hands back the page the caller can read facts from");
+    }
+
+    [TestMethod]
+    public void TryGetPage_OutOfRange_ReturnsNull()
+    {
+        var profile = new ProfileLayout();
+
+        Assert.IsNull(ProfileOps.TryGetPage(profile, -1));
+        Assert.IsNull(ProfileOps.TryGetPage(profile, profile.Pages.Count));
+        Assert.IsNull(ProfileOps.TryGetPage(profile, profile.Pages.Count + 42),
+            "a stale window index degrades to null instead of throwing");
+    }
+
+    [TestMethod]
     public void RenamePage_BlankName_IsIgnored()
     {
         var profile = new ProfileLayout();

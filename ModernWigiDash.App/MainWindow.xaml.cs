@@ -600,10 +600,22 @@ public partial class MainWindow : Window, IModernWigiDashContext
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
-    private void DeletePage(int index)
+    /// <summary>
+    /// The window's page-delete seam: the single UI gate (the module's
+    /// last-page rule), a bounds-safe read of the confirm facts, and the
+    /// delete + structural refresh. Internal so tests can pin that a stale
+    /// index degrades to a no-op instead of throwing in the window.
+    /// </summary>
+    internal void DeletePage(int index)
     {
-        if (!PageTabsViewModel.CanDelete(_profile)) return;
-        var targetPage = _profile.Pages[index];
+        // One delete gate: the module's rule, the same predicate the tab
+        // strip's button-enablement consults. The page's facts for the
+        // confirm read through the module's bounds-safe accessor, so a stale
+        // index is a silent no-op here, not a throw ahead of DeletePage's
+        // own validation.
+        if (!ProfileOps.CanDeletePage(_profile)) return;
+
+        if (ProfileOps.TryGetPage(_profile, index) is not { } targetPage) return;
         if (targetPage.Widgets.Count > 0 && !_dialogHost.Confirm("Delete Page", $"Are you sure you want to delete '{targetPage.PageName}' containing {targetPage.Widgets.Count} widget(s)?"))
             return;
 

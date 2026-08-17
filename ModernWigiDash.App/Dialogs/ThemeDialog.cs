@@ -61,13 +61,13 @@ internal sealed class ThemeDialog : Window
         var fields = new StackPanel();
 
         var props = ThemeSettings.StringProperties
-            .OrderBy(p => ThemeSettings.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
+            .OrderBy(p => ThemePresentation.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
             .ThenBy(p => p.Name);
 
         string currentGroup = "";
         foreach (var prop in props)
         {
-            string group = ThemeSettings.Groups.TryGetValue(prop.Name, out var grp) ? grp : "Other";
+            string group = ThemePresentation.Groups.TryGetValue(prop.Name, out var grp) ? grp : "Other";
             if (!string.Equals(group, currentGroup, StringComparison.Ordinal))
             {
                 currentGroup = group;
@@ -82,8 +82,8 @@ internal sealed class ThemeDialog : Window
             }
 
             string current = (string?)prop.GetValue(ThemeSettings.Theme) ?? "#000000";
-            string friendly = ThemeSettings.FriendlyName(prop.Name);
-            string desc = ThemeSettings.Descriptions.TryGetValue(prop.Name, out var d) ? d : "";
+            string friendly = ThemePresentation.FriendlyName(prop.Name);
+            string desc = ThemePresentation.Descriptions.TryGetValue(prop.Name, out var d) ? d : "";
 
             var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
             var label = new TextBlock
