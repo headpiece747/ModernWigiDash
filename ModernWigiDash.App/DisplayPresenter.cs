@@ -13,7 +13,7 @@ internal sealed class DisplayPresenter : IDisposable
 {
     private readonly FrameDelivery _delivery;
 
-    public DisplayPresenter(Func<byte[], bool> send, Func<bool> isReady, Action<string>? log = null)
+    public DisplayPresenter(Func<byte[], FrameSendResult> send, Func<bool> isReady, Action<string>? log = null)
     {
         _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),

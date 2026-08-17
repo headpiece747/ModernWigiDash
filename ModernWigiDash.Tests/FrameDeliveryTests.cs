@@ -29,7 +29,7 @@ public class FrameDeliveryTests
     [TestMethod]
     public void IsReady_WhenSendProvidedInCtor_IsTrue()
     {
-        using var delivery = new FrameDelivery(send: _ => true);
+        using var delivery = new FrameDelivery(send: _ => FrameSendResult.Sent);
 
         Assert.IsTrue(delivery.IsReady);
     }
@@ -37,7 +37,7 @@ public class FrameDeliveryTests
     [TestMethod]
     public void IsReady_ReadinessPredicateOverridesDefault()
     {
-        using var delivery = new FrameDelivery(send: _ => true, isReady: () => false);
+        using var delivery = new FrameDelivery(send: _ => FrameSendResult.Sent, isReady: () => false);
 
         Assert.IsFalse(delivery.IsReady);
     }
@@ -56,7 +56,7 @@ public class FrameDeliveryTests
             {
                 observed.Add(delivery!.IsSendInFlight);
                 release.Set();
-                return true;
+                return FrameSendResult.Sent;
             });
         using var owned = delivery;
         using var bitmap = CreateFrameBitmap();
@@ -76,7 +76,7 @@ public class FrameDeliveryTests
     [TestMethod]
     public void Push_WithoutEncoder_ReturnsDropped()
     {
-        using var delivery = new FrameDelivery(send: _ => true);
+        using var delivery = new FrameDelivery(send: _ => FrameSendResult.Sent);
         using var bitmap = CreateFrameBitmap();
 
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
@@ -89,7 +89,7 @@ public class FrameDeliveryTests
         encoder.SetThrowOnEncode(true);
         var logs = new List<string>();
         using var delivered = new ManualResetEventSlim(false);
-        using var delivery = new FrameDelivery(encoder: encoder, send: _ => { delivered.Set(); return true; }, log: logs.Add);
+        using var delivery = new FrameDelivery(encoder: encoder, send: _ => { delivered.Set(); return FrameSendResult.Sent; }, log: logs.Add);
         using var bitmap = CreateFrameBitmap();
 
         Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "An encode failure must drop the frame, not escape the tick");
@@ -116,7 +116,7 @@ public class FrameDeliveryTests
             {
                 received = bytes;
                 delivered.Set();
-                return true;
+                return FrameSendResult.Sent;
             });
         using var bitmap = CreateFrameBitmap();
 
@@ -137,7 +137,7 @@ public class FrameDeliveryTests
             send: _ =>
             {
                 delivered.Set();
-                return true;
+                return FrameSendResult.Sent;
             },
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -158,7 +158,7 @@ public class FrameDeliveryTests
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            send: _ => false,
+            send: _ => FrameSendResult.Failed,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
@@ -179,7 +179,7 @@ public class FrameDeliveryTests
             {
                 blocker.Set();
                 release.Wait();
-                return true;
+                return FrameSendResult.Sent;
             },
             capacity: 1);
         delivery2.Push(bitmap);
@@ -210,7 +210,7 @@ public class FrameDeliveryTests
                 if (Interlocked.Increment(ref callCount) == 1)
                     firstEntered.Set();
                 release.Wait();
-                return true;
+                return FrameSendResult.Sent;
             },
             capacity: 4);
 
@@ -254,7 +254,7 @@ public class FrameDeliveryTests
             send: _ =>
             {
                 lock (timestamps) { timestamps.Add(DateTime.UtcNow); }
-                return true;
+                return FrameSendResult.Sent;
             },
             minInterval: TimeSpan.FromMilliseconds(120));
         using var frame = CreateFrame(SKColors.White);
@@ -293,7 +293,7 @@ public class FrameDeliveryTests
                 sent++;
                 entered.Set();
                 release.Wait();
-                return true;
+                return FrameSendResult.Sent;
             },
             isReady: () => ready,
             capacity: 1);
@@ -317,7 +317,7 @@ public class FrameDeliveryTests
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            send: _ => false,
+            send: _ => FrameSendResult.Failed,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
 
@@ -326,7 +326,29 @@ public class FrameDeliveryTests
 
         Assert.AreEqual(1, delivery.SendFailedCount);
         Assert.AreEqual(0, delivery.FramesSent, "A failed send is not a successful send");
+        Assert.AreEqual(0, delivery.SendRefusedCount, "A broken pipe is not a device refusal");
         Assert.AreEqual(0, delivery.DroppedCount, "A send failure reached the transport seam — it is not a drop");
+    }
+
+    [TestMethod]
+    public async Task SendRefusal_CountsRefusedNotFailedOrDropped()
+    {
+        // The tri-state seam: a device that declines the frame (not connected)
+        // is provably distinct from a broken pipe (Failed) and from a drop —
+        // the old bool seam folded all three into false.
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            send: _ => FrameSendResult.Refused,
+            capacity: 1);
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        await TestWait.WaitUntilAsync(() => delivery.SendRefusedCount > 0, TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(1, delivery.SendRefusedCount);
+        Assert.AreEqual(0, delivery.SendFailedCount, "a refusal is not a failed transfer");
+        Assert.AreEqual(0, delivery.FramesSent);
+        Assert.AreEqual(0, delivery.DroppedCount, "a refusal reached the transport seam — it is not a drop");
     }
 
     [TestMethod]
@@ -351,7 +373,7 @@ public class FrameDeliveryTests
         List<string> logs = [];
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
-            send: _ => false,
+            send: _ => FrameSendResult.Failed,
             log: logs.Add,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -374,7 +396,7 @@ public class FrameDeliveryTests
             {
                 blocker.Set();
                 release.Wait();
-                return true;
+                return FrameSendResult.Sent;
             },
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -408,7 +430,7 @@ public class FrameDeliveryTests
             {
                 received = bytes;
                 delivered.Set();
-                return true;
+                return FrameSendResult.Sent;
             });
         using var bitmap = CreateFrameBitmap();
 

@@ -336,11 +336,13 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// policy (pooling, coalescing, pacing) lives in <see cref="FrameDelivery"/>;
     /// this is the engine's plain transport seam.
     /// </summary>
-    /// <returns>True when the frame was written to the transport.</returns>
-    public bool SendFrameBytes(byte[] rgb565)
+    /// <returns>The transport's truthful send result — <see cref="Sdk.FrameSendResult.Refused"/>
+    /// when the engine cannot carry the frame (disposed, no live connection, or an empty
+    /// buffer), otherwise whatever the transport reported.</returns>
+    public FrameSendResult SendFrameBytes(byte[] rgb565)
     {
         if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || rgb565 == null || rgb565.Length == 0)
-            return false;
+            return FrameSendResult.Refused;
 
         IDisplayTransport? transport;
         lock (_lock)
@@ -349,7 +351,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
 
         if (transport == null)
-            return false;
+            return FrameSendResult.Refused;
 
 #pragma warning disable S6966 // Transport SendFrame is synchronous by design (ADR-0001)
         return transport.SendFrame(rgb565);

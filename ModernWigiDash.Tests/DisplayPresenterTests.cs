@@ -1,4 +1,5 @@
 using ModernWigiDash.App;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Hardware.Transport;
 using SkiaSharp;
 
@@ -23,7 +24,7 @@ public class DisplayPresenterTests
             {
                 sent++;
                 delivered.Set();
-                return true;
+                return FrameSendResult.Sent;
             },
             isReady: () => true);
         using var frame = CreateFrame();
@@ -42,7 +43,7 @@ public class DisplayPresenterTests
             send: bytes =>
             {
                 sent++;
-                return true;
+                return FrameSendResult.Sent;
             },
             isReady: () => false);
         using var frame = CreateFrame();
@@ -60,7 +61,7 @@ public class DisplayPresenterTests
             send: bytes =>
             {
                 sent++;
-                return true;
+                return FrameSendResult.Sent;
             },
             isReady: () => true);
         using var frame = CreateFrame();
@@ -79,7 +80,7 @@ public class DisplayPresenterTests
             send: bytes =>
             {
                 sent++;
-                return true;
+                return FrameSendResult.Sent;
             },
             isReady: () => true);
 

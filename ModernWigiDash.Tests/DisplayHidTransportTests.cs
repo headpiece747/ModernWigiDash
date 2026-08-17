@@ -254,9 +254,9 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         using var transport = new DisplayHidTransport(backend);
         byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
 
-        bool ok = transport.SendFrame(frame);
+        FrameSendResult result = transport.SendFrame(frame);
 
-        Assert.IsTrue(ok);
+        Assert.AreEqual(FrameSendResult.Sent, result);
         var header = backend.ControlCalls.Single(c => c.Request == DisplayProtocolConstants.CmdFrameHeader);
         Assert.AreEqual("out", header.Direction);
         Assert.AreEqual(0, header.WValue); // page 0, widget 0
@@ -265,21 +265,20 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
     }
 
     [TestMethod]
-    public void SendFrame_WhenBulkFails_SendsFrameAbortAndCountsFailure()
+    public void SendFrame_WhenBulkFails_SendsFrameAbortAndReportsFailed()
     {
         var backend = new RecordingBackend { BulkWriteResult = false };
         using var transport = new DisplayHidTransport(backend);
         byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
 
-        bool ok = transport.SendFrame(frame);
+        FrameSendResult result = transport.SendFrame(frame);
 
-        Assert.IsFalse(ok);
-        Assert.AreEqual(1, transport.FramesFailed);
+        Assert.AreEqual(FrameSendResult.Failed, result, "a bulk transfer failure is a broken pipe, not a device refusal");
         Assert.IsTrue(backend.ControlCalls.Any(c => c.Request == DisplayProtocolConstants.CmdFrameAbort));
     }
 
     [TestMethod]
-    public void SendFrame_ShortBulkWrite_SendsFrameAbortAndCountsFailure()
+    public void SendFrame_ShortBulkWrite_SendsFrameAbortAndReportsFailed()
     {
         // A backend reporting transferred < length fails the write — the same
         // full-transfer contract as the real backends — so the transport must
@@ -288,20 +287,20 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         using var transport = new DisplayHidTransport(backend);
         byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
 
-        bool ok = transport.SendFrame(frame);
+        FrameSendResult result = transport.SendFrame(frame);
 
-        Assert.IsFalse(ok);
-        Assert.AreEqual(1, transport.FramesFailed);
+        Assert.AreEqual(FrameSendResult.Failed, result);
         Assert.IsTrue(backend.ControlCalls.Any(c => c.Request == DisplayProtocolConstants.CmdFrameAbort));
     }
 
     [TestMethod]
-    public void SendFrame_TooSmallBuffer_ReturnsFalse()
+    public void SendFrame_TooSmallBuffer_RefusesWithoutTouchingTheWire()
     {
         var backend = new RecordingBackend();
         using var transport = new DisplayHidTransport(backend);
 
-        Assert.IsFalse(transport.SendFrame(new byte[8]));
+        Assert.AreEqual(FrameSendResult.Refused, transport.SendFrame(new byte[8]),
+            "a malformed frame is a contract refusal, not a transport failure");
         Assert.AreEqual(0, backend.ControlCalls.Count);
     }
 

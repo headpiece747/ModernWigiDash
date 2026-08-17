@@ -4,6 +4,8 @@
 // </copyright>
 
 
+using ModernWigiDash.Sdk;
+
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
@@ -35,8 +37,12 @@ internal interface IDisplayTransport : IAsyncDisposable, IDisposable
     /// Streams a raw frame buffer payload to the hardware display.
     /// </summary>
     /// <param name="frameBuffer">Raw RGB565 Little Endian pixel payload.</param>
-    /// <returns>True if frame framing and bulk transfer succeeded; otherwise, false.</returns>
-    bool SendFrame(ReadOnlyMemory<byte> frameBuffer);
+    /// <returns>The truthful send outcome — <see cref="Sdk.FrameSendResult.Sent"/> when the
+    /// framing and bulk transfer succeeded, <see cref="Sdk.FrameSendResult.Refused"/> when the
+    /// transport declined the frame without touching the wire (no connection, or the frame
+    /// fails the size contract), or <see cref="Sdk.FrameSendResult.Failed"/> when the transfer
+    /// was attempted and failed.</returns>
+    Sdk.FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer);
 
     /// <summary>
     /// Reads the latest touch report from the display, or null when none is pending.

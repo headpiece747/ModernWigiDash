@@ -37,7 +37,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     private volatile bool _isConnected;
     private int _isDisposed;
-    private long _framesFailed;
     private readonly Lock _usbLock = new();
 
     // 3-page initialization (Base screens 0x20..0x22 — ScreenBase0..2 in
@@ -47,7 +46,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     private const byte Base0 = DisplayProtocolConstants.ScreenBase0;
 
     public bool IsConnected => _isConnected;
-    public long FramesFailed => Volatile.Read(ref _framesFailed);
 
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {
@@ -624,20 +622,20 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // Context is a shared singleton - don't dispose
     }
 
-    public bool SendFrame(ReadOnlyMemory<byte> frameBuffer)
+    public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer)
     {
         if (!_isConnected)
         {
             if (_sendFrameSkippedLog.Due())
                 _logger.LogWarning("SendFrame SKIPPED: not connected");
-            return false;
+            return FrameSendResult.Refused;
         }
 
         if (frameBuffer.Length < DisplayProtocolConstants.FrameBufferSize)
         {
             _logger.LogWarning("Frame buffer too small: {Len} < {Req}",
                 frameBuffer.Length, DisplayProtocolConstants.FrameBufferSize);
-            return false;
+            return FrameSendResult.Refused;
         }
 
         try
@@ -675,25 +673,22 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
                 if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue: 0, _frameHeader))
                 {
-                    Interlocked.Increment(ref _framesFailed);
-                    return false;
+                    return FrameSendResult.Failed;
                 }
 
                 if (!WriteBulkData(frameArray))
                 {
                     ControlOut(DisplayProtocolConstants.CmdFrameAbort, 0, null);
-                    Interlocked.Increment(ref _framesFailed);
-                    return false;
+                    return FrameSendResult.Failed;
                 }
             }
 
-            return true;
+            return FrameSendResult.Sent;
         }
         catch (Exception ex)
         {
-            Interlocked.Increment(ref _framesFailed);
-            _logger.LogError(ex, "SendFrame FAILED (total failed: {Failed})", FramesFailed);
-            return false;
+            _logger.LogError(ex, "SendFrame FAILED");
+            return FrameSendResult.Failed;
         }
     }
 

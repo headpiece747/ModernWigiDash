@@ -37,7 +37,7 @@ public sealed class FrameDelivery : IDisposable
     private readonly CancellationTokenSource _cts;
     private readonly Task _senderTask;
 
-    private readonly Func<byte[], bool>? _send;
+    private readonly Func<byte[], FrameSendResult>? _send;
     private DateTimeOffset _lastSendStart;
     private int _sendInFlight;
     private long _sent;
@@ -46,17 +46,20 @@ public sealed class FrameDelivery : IDisposable
     private long _droppedCoalesced;
     private long _droppedEncode;
     private long _sendFailed;
+    private long _sendRefused;
     private int _disposed;
 
     private readonly DiagLog _sentLog;
     private readonly DiagLog _sendFailLog;
+    private readonly DiagLog _sendRefuseLog;
     private readonly DiagLog _encodeFailLog;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
     /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
     /// is built from its <see cref="IRgb565Encoder.OutputBufferSize"/>.</param>
     /// <param name="send">Send seam to the transport, bound once at
-    /// construction.</param>
+    /// construction. Returns the truthful <see cref="FrameSendResult"/> — the
+    /// accounting splits a device refusal (Refused) from a broken pipe (Failed).</param>
     /// <param name="isReady">Optional readiness predicate. Defaults to "a send
     /// seam is attached".</param>
     /// <param name="minInterval">Minimum interval between transport sends
@@ -69,7 +72,7 @@ public sealed class FrameDelivery : IDisposable
     /// <param name="log">Optional log sink for send/drop lines.</param>
     internal FrameDelivery(
         IRgb565Encoder? encoder = null,
-        Func<byte[], bool>? send = null,
+        Func<byte[], FrameSendResult>? send = null,
         Func<bool>? isReady = null,
         TimeSpan? minInterval = null,
         TimeProvider? timeProvider = null,
@@ -100,6 +103,7 @@ public sealed class FrameDelivery : IDisposable
         // a delivery without a log sink stays silent.
         _sentLog = new DiagLog("FrameDelivery", 60, write: log ?? (static _ => { }));
         _sendFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
+        _sendRefuseLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _encodeFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _channel = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(capacity)
         {
@@ -121,7 +125,7 @@ public sealed class FrameDelivery : IDisposable
     /// </summary>
     public static FrameDelivery Create(
         IRgb565Encoder encoder,
-        Func<byte[], bool> send,
+        Func<byte[], FrameSendResult> send,
         Func<bool>? isReady = null,
         Action<string>? log = null)
     {
@@ -175,9 +179,17 @@ public sealed class FrameDelivery : IDisposable
     public long DroppedEncodeCount => Interlocked.Read(ref _droppedEncode);
 
     /// <summary>Frames handed to the transport seam that failed to send (the
-    /// seam returned false or threw). A broken pipe accumulates here, not in
-    /// <see cref="FramesSent"/> and not in the drop counters.</summary>
+    /// seam reported <see cref="FrameSendResult.Failed"/> or threw). A broken
+    /// pipe accumulates here, not in <see cref="FramesSent"/> and not in the
+    /// drop counters — device refusals are a separate metric
+    /// (<see cref="SendRefusedCount"/>).</summary>
     public long SendFailedCount => Interlocked.Read(ref _sendFailed);
+
+    /// <summary>Frames handed to the transport seam that were refused — the device is
+    /// not connected, or the frame fails the transport's size contract. A dead pipe
+    /// is provably distinguished from a broken one, and from a send that reached the
+    /// device; it is not a drop either (the frame was drained from the channel).</summary>
+    public long SendRefusedCount => Interlocked.Read(ref _sendRefused);
 
     /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
@@ -253,21 +265,30 @@ public sealed class FrameDelivery : IDisposable
                     // writing — the bulk write (~55ms) outruns the 33ms tick,
                     // so composing during it is dead CPU.
                     Volatile.Write(ref _sendInFlight, 1);
-                    bool ok = _send?.Invoke(latest.Buffer) == true;
-                    if (ok)
-                    {
-                        long sent = Interlocked.Increment(ref _sent);
+                    FrameSendResult result = _send is not null
+                        ? _send(latest.Buffer)
+                        : FrameSendResult.Refused;
 #pragma warning disable S125 // log-cadence documentation, not commented-out code
-                        // Per-frame success log would grow unbounded at ~30/s;
-                        // every-60th cadence keeps it bounded.
-                        // (Drops are counted in DroppedCount, not logged.)
+                    // Per-frame success log would grow unbounded at ~30/s;
+                    // every-60th cadence keeps it bounded.
+                    // (Drops are counted in DroppedCount, not logged.)
 #pragma warning restore S125
-                        _sentLog.Write(() => $"Frame #{sent} sent ({latest.Buffer.Length} bytes)");
-                    }
-                    else
+                    switch (result)
                     {
-                        Interlocked.Increment(ref _sendFailed);
-                        _sendFailLog.Write($"Send failed (buffer={latest.Buffer.Length} bytes)");
+                        case FrameSendResult.Sent:
+                            {
+                                long sent = Interlocked.Increment(ref _sent);
+                                _sentLog.Write(() => $"Frame #{sent} sent ({latest.Buffer.Length} bytes)");
+                                break;
+                            }
+                        case FrameSendResult.Refused:
+                            Interlocked.Increment(ref _sendRefused);
+                            _sendRefuseLog.Write($"Send refused (buffer={latest.Buffer.Length} bytes)");
+                            break;
+                        default:
+                            Interlocked.Increment(ref _sendFailed);
+                            _sendFailLog.Write($"Send failed (buffer={latest.Buffer.Length} bytes)");
+                            break;
                     }
                 }
                 catch (Exception ex)

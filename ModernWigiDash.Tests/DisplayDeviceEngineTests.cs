@@ -128,8 +128,8 @@ public class DisplayDeviceEngineTests
         var engine = new DisplayDeviceEngine();
         engine.Dispose();
 
-        // After dispose the engine must be inert: sends report failure, not throw.
-        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
+        // After dispose the engine must be inert: sends are refused, not throw.
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(new byte[8]));
     }
 
     [TestMethod]
@@ -169,10 +169,10 @@ public class DisplayDeviceEngineTests
     {
         using var engine = new DisplayDeviceEngine();
 
-        // Must not throw and must report failure when the engine has no live connection.
-        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
-        Assert.IsFalse(engine.SendFrameBytes([]));
-        Assert.IsFalse(engine.SendFrameBytes(null!));
+        // Must not throw and must report refusal when the engine has no live connection.
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(new byte[8]));
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes([]));
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(null!));
     }
 
     [TestMethod]
@@ -184,7 +184,7 @@ public class DisplayDeviceEngineTests
         engine.Dispose();
 
         // The engine must stay inert after a second dispose — no throw, no send.
-        Assert.IsFalse(engine.SendFrameBytes(new byte[8]));
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(new byte[8]));
     }
 
     /// <summary>
@@ -207,7 +207,7 @@ public class DisplayDeviceEngineTests
             OnConnect?.Invoke();
             return ConnectResult;
         }
-        public bool SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected;
+        public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected ? FrameSendResult.Sent : FrameSendResult.Refused;
         public TouchReport? ReadTouch() => NextReport;
         public bool GoToStandby() => false;
         /// <summary>Simulates a device whose Dispose hangs behind an in-flight
@@ -237,7 +237,7 @@ public class DisplayDeviceEngineTests
 
         Assert.IsTrue(ok);
         Assert.AreEqual(ConnectionState.Connected, engine.State);
-        Assert.IsTrue(engine.SendFrameBytes(new byte[8]), "the adopted transport must carry frames");
+        Assert.AreEqual(FrameSendResult.Sent, engine.SendFrameBytes(new byte[8]), "the adopted transport must carry frames");
     }
 
     [TestMethod]
