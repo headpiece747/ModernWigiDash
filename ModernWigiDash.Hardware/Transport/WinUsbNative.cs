@@ -201,7 +201,12 @@ internal class WinUsbBulkDevice : ITransferBackend
 
     private const string LogCategory = "USB-WINUSB";
 
-    private static void Log(string msg) => FileLog.Write($"[{LogCategory}] {msg}");
+    // This leg's file-log vocabulary: the tag binds once here (the DiagLog
+    // module), never hand-baked at the call site — line is always
+    // "[USB-WINUSB] {message}".
+    private static readonly DiagLog _diagnosticLog = new(LogCategory, 1);
+
+    private static void Log(string msg) => _diagnosticLog.Write(msg);
 
     private readonly DiagLog _bulkDiagLog = new(LogCategory, BackendDiag.BulkWriteCadence);
 

@@ -77,17 +77,14 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         "USB-WINUSB",
         TryCreateWinUsbBackend,
         "WinUSB",
-        "[USB-WINUSB] Using WinUSB for all transfers (control + bulk)",
-        "[USB-WINUSB] Init commands failed — falling back to LibUsbDotNet");
+        "Using WinUSB for all transfers (control + bulk)");
 
     /// <summary>The real LibUsbDotNet leg. Internal so tests can keep it in a
     /// fake provider list.</summary>
     internal ConnectProvider LibUsbProvider => new(
         "USB-LIBUSB",
         TryCreateLibUsbBackend,
-        "LibUsbDotNet 3.0",
-        null,
-        "[USB-LIBUSB] Init commands failed — treating connection as failed");
+        "LibUsbDotNet 3.0");
 
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
@@ -116,6 +113,11 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // handle must not be freed while a transfer could be in flight).
         foreach (var provider in ProviderFactories)
         {
+            // This attempt's file-log vocabulary: the loop binds the provider's
+            // tag into a DiagLog once, and every line it emits for this leg —
+            // exception, success, init failure — rides that tag (the DiagLog
+            // module; no hand-baked "[TAG] " prefixes at call sites).
+            var legLog = new DiagLog(provider.Tag, 1);
             ITransferBackend? backend;
             try
             {
@@ -126,7 +128,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 // The real providers catch their own failures; this only fires
                 // for a provider that let an exception escape, and is treated
                 // as terminal like the LibUsb leg's connect exception.
-                LogToFile($"[{provider.Tag}] Connect exception: {ex.GetType().FullName}: {ex.Message}");
+                legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
                 _logger.LogError(ex, "Failed to connect to WigiDash");
                 Cleanup();
                 return false;
@@ -146,15 +148,21 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 // frame flow until Connect() returns; this keeps the transport's
                 // own flag truthful too).
                 _isConnected = true;
-                if (provider.SuccessFileLog is not null)
-                    LogToFile(provider.SuccessFileLog);
-                _logger.LogInformation("Connected to WigiDash via {Via}", provider.ConnectedVia);
+                if (provider.SuccessLine is not null)
+                {
+                    legLog.Write(provider.SuccessLine);
+                }
+                _logger.LogInformation("Connected to WigiDash via {Via}", provider.DisplayName);
                 return true;
             }
 
             // Init failed through this stack — the same control sequence may
-            // complete through the next provider's driver stack, so try it.
-            LogToFile(provider.InitFailureLog);
+            // complete through the next provider's driver stack, so try it. The
+            // loop owns this line (position-aware), spelled once from the tag.
+            bool hasNextAttempt = Array.IndexOf(ProviderFactories, provider) < ProviderFactories.Length - 1;
+            legLog.Write(hasNextAttempt
+                ? "Init commands failed — trying the next provider"
+                : "Init commands failed — connection failed");
             lock (_usbLock)
             {
                 _backend?.Dispose();
@@ -178,22 +186,26 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// </summary>
     private ITransferBackend? TryCreateWinUsbBackend()
     {
+        // The leg's own file-log lines bind its tag once here; the device's
+        // Open diagnostics (WinUsbBulkDevice) emit the same tag through its
+        // own bound DiagLog — one vocabulary across the seam.
+        DiagLog legLog = new("USB-WINUSB", 1);
         var winUsb = new WinUsbBulkDevice();
         try
         {
             if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
             {
-                LogToFile("[USB-WINUSB] Direct WinUSB connection opened");
+                legLog.Write("Direct WinUSB connection opened");
                 return winUsb;
             }
 
-            LogToFile("[USB-WINUSB] Failed to open WinUSB, falling back to LibUsbDotNet");
+            legLog.Write("Failed to open the WinUSB device interface");
             TearDownWinUsb(winUsb);
             return null;
         }
         catch (Exception ex)
         {
-            LogToFile($"[USB-WINUSB] Exception: {ex.Message}, falling back to LibUsbDotNet");
+            legLog.Write($"Open exception: {ex.Message}");
             lock (_usbLock)
             {
                 winUsb.Dispose();
@@ -215,6 +227,15 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     {
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
 
+        // One bound log per connect step (Cadence 1 — each fires when it
+        // happens); the step tags bind once here, at the leg's top.
+        DiagLog findLog = new("USB-FIND", 1);
+        DiagLog openLog = new("USB-OPEN", 1);
+        DiagLog configLog = new("USB-CONFIG", 1);
+        DiagLog claimLog = new("USB-CLAIM", 1);
+        DiagLog endpointLog = new("USB-ENDPOINT", 1);
+        DiagLog legLog = new("USB-LIBUSB", 1);
+
         IUsbDevice? device = null;
         try
         {
@@ -227,29 +248,29 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 return null;
             }
 
-            LogToFile($"[USB-FIND] Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
+            findLog.Write($"Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
 
             try
             {
                 var openSw = System.Diagnostics.Stopwatch.StartNew();
                 device.Open();
                 openSw.Stop();
-                LogToFile($"[USB-OPEN] device.Open() succeeded ({openSw.ElapsedMilliseconds} ms)");
+                openLog.Write($"device.Open() succeeded ({openSw.ElapsedMilliseconds} ms)");
             }
             catch (Exception ex)
             {
-                LogToFile($"[USB-OPEN] device.Open() THREW: {ex.GetType().FullName}: {ex.Message}");
+                openLog.Write($"device.Open() THREW: {ex.GetType().FullName}: {ex.Message}");
                 throw;
             }
 
             try
             {
                 device.SetConfiguration(1);
-                LogToFile("[USB-CONFIG] SetConfiguration(1) succeeded");
+                configLog.Write("SetConfiguration(1) succeeded");
             }
             catch (Exception ex)
             {
-                LogToFile($"[USB-CONFIG] SetConfiguration(1) failed: {ex.Message} (continuing)");
+                configLog.Write($"SetConfiguration(1) failed: {ex.Message} (continuing)");
             }
 
             bool claimed = device.ClaimInterface(0);
@@ -260,18 +281,18 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 return null;
             }
 
-            LogToFile("[USB-CLAIM] ClaimInterface(0) succeeded");
+            claimLog.Write("ClaimInterface(0) succeeded");
 
             WriteEndpointID endpointId = DiscoverBulkOutEndpoint(device);
-            LogToFile($"[USB-ENDPOINT] Using bulk OUT endpoint: {endpointId}");
+            endpointLog.Write($"Using bulk OUT endpoint: {endpointId}");
 
             var backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
-            LogToFile($"[USB-LIBUSB] Connected: endpoint={endpointId}");
+            legLog.Write($"Connected: endpoint={endpointId}");
             return backend;
         }
         catch (Exception ex)
         {
-            LogToFile($"[USB-LIBUSB] Connect exception: {ex.GetType().FullName}: {ex.Message}");
+            legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
             _logger.LogError(ex, "Failed to connect to WigiDash");
             // Terminal teardown of the LOCAL device: an opened (and possibly
             // configured + claimed) device must be released — under _usbLock,
@@ -308,6 +329,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// </summary>
     private static WriteEndpointID DiscoverBulkOutEndpoint(IUsbDevice device)
     {
+        DiagLog descLog = new("USB-DESC", 1);
         try
         {
             var info = device.Info;
@@ -323,7 +345,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                         if ((addr & 0x80) == 0)
                         {
                             byte epNum = (byte)(addr & 0x0F);
-                            LogToFile($"[USB-DESC] Found OUT endpoint: 0x{addr:X2} (ep{epNum})");
+                            descLog.Write($"Found OUT endpoint: 0x{addr:X2} (ep{epNum})");
                             return (WriteEndpointID)epNum;
                         }
                     }
@@ -332,11 +354,11 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         }
         catch (Exception ex)
         {
-            LogToFile($"[USB-DESC] Descriptor scan failed: {ex.Message}");
+            descLog.Write($"Descriptor scan failed: {ex.Message}");
         }
 
         // Fallback to known endpoint from protocol constants
-        LogToFile($"[USB-DESC] Using fallback endpoint: {DisplayProtocolConstants.BulkOutPipeId}");
+        descLog.Write($"Using fallback endpoint: {DisplayProtocolConstants.BulkOutPipeId}");
         return (WriteEndpointID)DisplayProtocolConstants.BulkOutPipeId;
     }
 
@@ -348,11 +370,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     internal bool SendInitCommands()
     {
         _logger.LogInformation("Sending device initialization commands...");
+        DiagLog initLog = new("USB-INIT", 1);
 
         // PING command (CMD_PING = 0x00, Control IN)
         byte[] pingBuf = new byte[4];
         bool pingOk = ControlIn(0x00, 0, 0, pingBuf, out _);
-        LogToFile($"[USB-INIT] PING: ok={pingOk}");
+        initLog.Write($"PING: ok={pingOk}");
 
         // Set brightness to 100%
         ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [100]);
@@ -372,7 +395,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 width: DisplayProtocolConstants.FramebufferWidth,
                 height: DisplayProtocolConstants.FramebufferHeight);
             bool widgetOk = ControlOut(DisplayProtocolConstants.CmdAddWidget, (ushort)((page << 8) | 0), widgetConfig);
-            LogToFile($"[USB-INIT] Page {page}: ClearPage + AddWidget(0,0) sent ({widgetConfig.Length} bytes), ok={clearOk && widgetOk}");
+            initLog.Write($"Page {page}: ClearPage + AddWidget(0,0) sent ({widgetConfig.Length} bytes), ok={clearOk && widgetOk}");
             initOk &= clearOk && widgetOk;
         }
 
@@ -381,7 +404,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
         // GoToScreen(Base0): CMD_SEND_UI_CMD (0x70) wValue=0x20
         bool gotoOk = ControlOut(DisplayProtocolConstants.CmdGoToScreen, Base0, null);
-        LogToFile($"[USB-INIT] GoToScreen(Base0) sent — all 3 pages initialized, ok={gotoOk}");
+        initLog.Write($"GoToScreen(Base0) sent — all 3 pages initialized, ok={gotoOk}");
 
         initOk &= gotoOk;
         _logger.LogInformation("Device initialization complete (3 pages), ok={InitOk}", initOk);
@@ -413,12 +436,13 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     private void WriteBlankFramebuffer(byte page, byte widgetId)
     {
+        DiagLog hwInitLog = new("HW-INIT", 1);
         if (_backend is not { IsOpen: true }) return;
 
         try
         {
             byte[] blankFrame = new byte[DisplayProtocolConstants.FrameBufferSize];
-            LogToFile($"[HW-INIT] Writing blank framebuffer ({blankFrame.Length} bytes) to page={page} widget={widgetId}");
+            hwInitLog.Write($"Writing blank framebuffer ({blankFrame.Length} bytes) to page={page} widget={widgetId}");
 
             // Control transfer header: offset=0, length=FrameBufferSize (the
             // single wire-format owner, shared with the 30 FPS send path).
@@ -427,17 +451,17 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
             ushort wValue = (ushort)((page << 8) | widgetId);
             bool headerOk = ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header);
-            LogToFile($"[HW-INIT] FrameHeader control write: ok={headerOk}");
+            hwInitLog.Write($"FrameHeader control write: ok={headerOk}");
 
             if (headerOk)
             {
                 bool bulkOk = WriteBulkData(blankFrame);
-                LogToFile($"[HW-INIT] Blank framebuffer bulk write: ok={bulkOk}");
+                hwInitLog.Write($"Blank framebuffer bulk write: ok={bulkOk}");
             }
         }
         catch (Exception ex)
         {
-            LogToFile($"[HW-INIT] Blank framebuffer write exception: {ex.Message}");
+            hwInitLog.Write($"Blank framebuffer write exception: {ex.Message}");
         }
     }
 
@@ -492,6 +516,8 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     private const string TouchDiagCategory = "TOUCH-DIAG";
     private readonly DiagLog _touchDiagLog = new(TouchDiagCategory, 20, logFirst: true);
     private readonly DiagLog _touchDiagRawLog = new(TouchDiagCategory, 200);
+    // Standby is the one-shot line of the shutdown path — always fires.
+    private readonly DiagLog _standbyLog = new("STANDBY", 1);
     // The send-skipped log rides the ILogger, not FileLog, so it keeps a bare
     // LogCadence instead of a DiagLog.
     private readonly LogCadence _sendFrameSkippedLog = new(60);
@@ -556,7 +582,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             }
             catch (Exception ex)
             {
-                LogToFile($"[TOUCH-DIAG] Exception: {ex.Message}");
+                // Same vocabulary as the other touch-diag lines above — the
+                // hand-baked "[TOUCH-DIAG] " prefix was the drift the DiagLog
+                // binding exists to prevent.
+                _touchDiagLog.Write($"Exception: {ex.Message}");
                 return null;
             }
         }
@@ -700,7 +729,8 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome);
             if (ok)
             {
-                LogToFile("[STANDBY] Display set to standby (welcome screen)");
+                // One-shot per shutdown (the standby guarantee) — Cadence 1.
+                _standbyLog.Write("Display set to standby (welcome screen)");
             }
             return ok;
         }
@@ -719,6 +749,4 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         Cleanup();
         return ValueTask.CompletedTask;
     }
-
-    private static void LogToFile(string msg) => FileLog.Write(msg);
 }

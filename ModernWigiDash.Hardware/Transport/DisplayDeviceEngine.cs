@@ -33,6 +33,14 @@ public sealed class DisplayDeviceEngine : IDisposable
     private int _isDisposed;
     private readonly Timer _reconnectTimer;
 
+    // The engine's file-log vocabulary: one DiagLog per connect area, each
+    // binding its tag once at construction (the DiagLog module) so a category
+    // can never drift between the engine's call sites.
+    private readonly DiagLog _tryConnectLog = new("TryConnect", 1);
+    private readonly DiagLog _connectLog = new("Connect", 1);
+    private readonly DiagLog _reconnectLog = new("Reconnect", 1);
+    private readonly DiagLog _disposeLog = new("Dispose", 1);
+
     /// <summary>
     /// Test seam: the reconnect timer period (see <see cref="Start"/>).
     /// Defaults to 5s — the reconnect cadence on a missing/vanished device.
@@ -126,7 +134,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // connect (WinUSB probe + init, ~100-150ms) must run off the calling
         // thread — Start() is invoked from the window ctor on the UI thread.
         // ReconnectTick below already runs on the Timer thread.
-        RunConnectAttempt("Initial connection faulted", "Initial connection failed, will retry via reconnect timer");
+        RunConnectAttempt(_connectLog, "Initial connection failed, will retry via reconnect timer");
 
         _reconnectTimer.Change(ReconnectPeriod, ReconnectPeriod);
     }
@@ -149,23 +157,27 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         if (!shouldReconnect) return;
 
-        RunConnectAttempt("[Reconnect] Connection attempt faulted");
+        RunConnectAttempt(_reconnectLog);
     }
 #pragma warning restore S1172
 
     /// <summary>One fire-and-forget connect attempt with fault logging — the
     /// Start and reconnect-timer scaffolding share this shape (the connect
-    /// itself is synchronous per ADR-0001, so it runs off the caller's thread).</summary>
-    private void RunConnectAttempt(string faultPrefix, string? failureLog = null)
+    /// itself is synchronous per ADR-0001, so it runs off the caller's
+    /// thread). The caller passes the area's bound <paramref name="faultLog"/>
+    /// (Connect for the initial attempt, Reconnect for the timer), so the
+    /// fault and failure lines carry the area's tag instead of a hand-baked
+    /// prefix.</summary>
+    private void RunConnectAttempt(DiagLog faultLog, string? failureMessage = null)
         => _ = Task.Run(() => TryConnect()).ContinueWith(t =>
         {
             if (t.IsFaulted)
             {
-                Log($"{faultPrefix}: {t.Exception?.GetBaseException().Message}");
+                faultLog.Write($"attempt faulted: {t.Exception?.GetBaseException().Message}");
             }
-            else if (failureLog is not null && !t.GetAwaiter().GetResult())
+            else if (failureMessage is not null && !t.GetAwaiter().GetResult())
             {
-                Log(failureLog);
+                faultLog.Write(failureMessage);
             }
         }, TaskContinuationOptions.ExecuteSynchronously);
 
@@ -209,7 +221,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // Fast-path: already connected
         if (State == ConnectionState.Connected)
         {
-            Log("[TryConnect] Already connected, skipping");
+            _tryConnectLog.Write("Already connected, skipping");
             return true;
         }
 
@@ -218,7 +230,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         {
             if (_connecting || Volatile.Read(ref _isDisposed) != 0)
             {
-                Log($"[TryConnect] Connection in progress or disposed, skipping (state={State})");
+                _tryConnectLog.Write($"Connection in progress or disposed, skipping (state={State})");
                 return State == ConnectionState.Connected;
             }
             _connecting = true;
@@ -242,7 +254,7 @@ public sealed class DisplayDeviceEngine : IDisposable
             }
             catch (Exception ex)
             {
-                Log($"[Connect] Connection exception: {ex.Message}");
+                _connectLog.Write($"Connection exception: {ex.Message}");
                 connected = false;
             }
 
@@ -380,7 +392,7 @@ public sealed class DisplayDeviceEngine : IDisposable
             }
             catch (Exception ex)
             {
-                Log($"[Dispose] Transport disposal failed or timed out: {ex.Message}");
+                _disposeLog.Write($"Transport disposal failed or timed out: {ex.Message}");
             }
         }
     }

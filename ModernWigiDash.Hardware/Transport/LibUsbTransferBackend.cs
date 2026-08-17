@@ -18,7 +18,16 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
     private readonly IUsbDevice _device;
     private readonly UsbEndpointWriter _writer;
     private const string BulkDiagCategory = "USB-BULK-LIBUSB";
+    private const string CtrlDiagCategory = "USB-CTRL";
+    private const string BulkErrorDiagCategory = "USB-BULK-ERR";
+    private const string DisposeDiagCategory = "USB-DISPOSE";
     private readonly DiagLog _bulkDiagLog = new(BulkDiagCategory, BackendDiag.BulkWriteCadence);
+    // The other vocabulary categories bind once at construction (Cadence 1 —
+    // each is a failure path whose lines must always fire), so a tag can't
+    // drift between this backend's call sites.
+    private readonly DiagLog _ctrlDiagLog = new(CtrlDiagCategory, 1);
+    private readonly DiagLog _bulkErrorDiagLog = new(BulkErrorDiagCategory, 1);
+    private readonly DiagLog _disposeDiagLog = new(DisposeDiagCategory, 1);
 
     public LibUsbTransferBackend(IUsbDevice device, UsbEndpointWriter writer)
     {
@@ -48,7 +57,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[USB-CTRL] ControlOut 0x{request:X2} failed: {ex.Message}");
+            _ctrlDiagLog.Write($"ControlOut 0x{request:X2} failed: {ex.Message}");
             return false;
         }
     }
@@ -70,7 +79,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[USB-CTRL] ControlIn 0x{request:X2} failed: {ex.Message}");
+            _ctrlDiagLog.Write($"ControlIn 0x{request:X2} failed: {ex.Message}");
             return false;
         }
     }
@@ -94,12 +103,12 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
                         : (false, transferLength, error.ToString());
                 },
                 out transferred,
-                msg => FileLog.Write($"[USB-BULK-ERR] {msg}"));
+                msg => _bulkErrorDiagLog.Write(msg));
             return ok;
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[USB-BULK-ERR] Chunked write exception: {ex.Message}");
+            _bulkErrorDiagLog.Write($"Chunked write exception: {ex.Message}");
             return false;
         }
     }
@@ -128,7 +137,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         catch (Exception ex)
         {
             // USB device may already be disconnected
-            FileLog.Write($"[USB-DISPOSE] LibUsb backend dispose failed: {ex.Message}");
+            _disposeDiagLog.Write($"LibUsb backend dispose failed: {ex.Message}");
         }
     }
 }

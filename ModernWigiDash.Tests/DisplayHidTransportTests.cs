@@ -87,9 +87,7 @@ public class DisplayHidTransportTests
             }
             return fake;
         },
-        "WinUSB",
-        null,
-        "init failed");
+        "WinUSB");
 
     [TestMethod]
     public void Connect_WinUsbOpenAndPingSucceed_ConnectsAndRunsInit()
@@ -120,7 +118,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(fake),
-            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0", null, "init failed"),
+            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0"),
         ];
 
         // The WinUSB path must be abandoned after the failed PING (inside
@@ -152,7 +150,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect();
@@ -176,7 +174,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0", null, "init failed"),
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect();
@@ -197,7 +195,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0", null, "init failed"),
+            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect();
@@ -215,8 +213,8 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-            new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "WinUSB", null, "init failed"),
-            new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return libUsb; }, "LibUsbDotNet 3.0", null, "init failed"),
+new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "WinUSB"),
+             new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return libUsb; }, "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect();
