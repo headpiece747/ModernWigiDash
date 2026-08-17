@@ -4,11 +4,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities")]
+[WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class CryptoStockTickerWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
-
     [WidgetProperty("Symbol", WidgetPropertyType.Text, "Crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT)")]
     public string Symbol { get; set; } = "";
 

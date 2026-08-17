@@ -7,8 +7,6 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("hardware_monitor", "Hardware Monitor", Category = "System Monitoring")]
 public class HardwareMonitorWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
-
     [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from LibreHardwareService", "")]
     public string SensorLabel { get; set; } = "";
 

@@ -3,8 +3,9 @@ namespace ModernWigiDash.Sdk;
 /// <summary>
 /// The registration metadata every widget class carries: the plugin identity
 /// the catalog (<c>WidgetPluginLoader</c>) exposes, the display name and
-/// category shown in the widget picker, and the persisted widget-type key used
-/// in profiles. One attribute per widget class, on the class itself.
+/// category shown in the widget picker, the nominal default grid size
+/// placement and the catalog use, and the persisted widget-type key used in
+/// profiles. One attribute per widget class, on the class itself.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
 public sealed class WidgetMetadataAttribute : Attribute
@@ -20,6 +21,18 @@ public sealed class WidgetMetadataAttribute : Attribute
     /// <summary>The catalog grouping the widget appears under; defaults to
     /// "General".</summary>
     public string Category { get; set; } = "General";
+
+    /// <summary>
+    /// The nominal size the widget takes when placed without an explicit
+    /// size (placement centering and the catalog's placement facts). The
+    /// instance's <see cref="IModernWidget.DefaultSize"/> derives from this,
+    /// and the catalog resolves it once at registration — so a widget that
+    /// declares its preset here needs no override and placement never
+    /// constructs a probe instance to learn the value. Defaults to the 2×2
+    /// house size. A non-preset default can still override
+    /// <see cref="IModernWidget.DefaultSize"/>.
+    /// </summary>
+    public GridSizePreset DefaultGridSize { get; set; } = GridSizePreset.Size2x2;
 
     /// <summary>
     /// Only the required identity fields are positional; optional metadata is

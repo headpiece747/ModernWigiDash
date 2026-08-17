@@ -4,11 +4,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("text_label", "Text", Category = "Utilities")]
+[WidgetMetadata("text_label", "Text", Category = "Utilities", DefaultGridSize = GridSizePreset.Size2x1)]
 public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 {
-    public override SKSize DefaultSize => GridSizePreset.Size2x1.ToSize();
-
     [WidgetProperty("Text", WidgetPropertyType.Text, "Text to display (supports multiple lines)", "Your text here")]
     public string Text { get; set; } = "Your text here";
 

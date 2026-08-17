@@ -70,12 +70,15 @@ internal sealed class PersistingContext(ProfileLayout profile) : TestContext
 /// layout), the loader metadata profile tests register, and the one
 /// protected-member accessor the color tests need.
 /// </summary>
-[WidgetMetadata("profile_test_widget", "Profile Test")]
+[WidgetMetadata("profile_test_widget", "Profile Test", DefaultGridSize = GridSizePreset.Size2x1)]
 internal sealed class TestWidget : ModernWidgetBase
 {
     [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "seed")]
     public string Label { get; set; } = "seed";
 
+    // The raw override (equal to the attribute's 2x1 preset) pins the
+    // instance-escape-hatch: a widget may still override DefaultSize, and
+    // placement reads the catalog while PlaceWidget sizes from the instance.
     public override SKSize DefaultSize => new(406, 148);
 
     public override void Render(SKCanvas canvas, SKRect bounds) { }

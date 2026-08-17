@@ -12,11 +12,9 @@ namespace ModernWigiDash.Widgets;
 /// Covers Spotify, browsers (YouTube/Netflix), VLC, iTunes, Windows Media Player, games —
 /// zero polling, zero network, zero login, works for free-tier accounts.
 /// </summary>
-[WidgetMetadata("now_playing", "Now Playing", Category = "Media & Audio")]
+[WidgetMetadata("now_playing", "Now Playing", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class NowPlayingWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
-
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Progress fill, active toggles, and placeholder accent", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 

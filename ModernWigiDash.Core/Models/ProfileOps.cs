@@ -182,11 +182,15 @@ public static class ProfileOps
     }
 
     /// <summary>
-    /// Places a widget at its natural position: full-screen widgets at the
-    /// origin, smaller ones centered on the grid. The center is rounded to the
+    /// Places a widget at its natural position: full-screen widgets (the
+    /// catalog's nominal default nearly fills the framebuffer) at the origin,
+    /// smaller ones centered on the grid. The center is rounded to the
     /// snap-to-grid cells; the widget itself is not re-snapped (a 2-cell
     /// widget cannot be both centered and cell-aligned — centering wins, as it
-    /// did when the window owned this math).
+    /// did when the window owned this math). The size comes from the catalog
+    /// entry's [WidgetMetadata] fact, so no probe instance is constructed —
+    /// the only instance this method creates is the real one, inside
+    /// <see cref="PlaceWidget"/>.
     /// </summary>
     public static PlacedWidgetInstance? PlaceCentered(
         ProfileLayout profile,
@@ -194,32 +198,16 @@ public static class ProfileOps
         IModernWigiDashContext context,
         string pluginId)
     {
-        var instance = loader.CreateInstance(pluginId);
-        if (instance is null) return null;
+        if (loader.FindPlugin(pluginId) is not { } info) return null;
 
-        var size = instance.DefaultSize;
-
-        // The probe instance exists only to report its default size — the
-        // placed widget's instance is created fresh inside PlaceWidget. It is
-        // IAsyncDisposable, so tear it down here instead of leaking one
-        // widget (timers, sockets) per catalog click.
-        try
-        {
-            instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-        catch
-        {
-            // Probe teardown must never break placement.
-        }
-
-        if (size.Width >= DisplayGeometry.FramebufferWidth - 10 || size.Height >= DisplayGeometry.FramebufferHeight - 10)
+        if (info.DefaultSize.Width >= DisplayGeometry.FramebufferWidth - 10 || info.DefaultSize.Height >= DisplayGeometry.FramebufferHeight - 10)
         {
             return PlaceWidget(profile, loader, context, pluginId, 0, 0);
         }
 
         float cx = GridSizeExtensions.SnapX(DisplayGeometry.FramebufferWidth / 2.0f);
         float cy = GridSizeExtensions.SnapY(DisplayGeometry.FramebufferHeight / 2.0f);
-        return PlaceWidget(profile, loader, context, pluginId, cx - size.Width / 2, cy - size.Height / 2);
+        return PlaceWidget(profile, loader, context, pluginId, cx - info.DefaultSize.Width / 2, cy - info.DefaultSize.Height / 2);
     }
 
     /// <summary>

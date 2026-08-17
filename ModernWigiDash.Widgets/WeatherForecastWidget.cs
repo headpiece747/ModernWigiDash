@@ -6,11 +6,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual")]
+[WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
 public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider
 {
-    public override SKSize DefaultSize => GridSizePreset.Size5x4.ToSize();
-
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
 

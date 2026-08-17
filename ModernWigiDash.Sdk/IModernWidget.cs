@@ -76,9 +76,30 @@ public abstract class ModernWidgetBase : IModernWidget
     /// with the placed instance's persisted identity.</summary>
     public string InstanceId { get; set; } = Guid.NewGuid().ToString();
 
-    // 2x2 grid cell default (406x296), matching GridSizePreset.Size2x2.
-    /// <summary>The default placement size: the 2×2 grid cell (406×296).</summary>
-    public virtual SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
+    // The nominal default size is declared on the [WidgetMetadata] attribute
+    // (the catalog reads the same fact at registration), so a widget that
+    // declares its preset there needs no override for its instance to agree
+    // with the catalog. A non-preset default can still override.
+    private SKSize? _defaultSize;
+
+    /// <summary>The default placement size: this type's
+    /// <see cref="WidgetMetadataAttribute.DefaultGridSize"/> preset (the 2×2
+    /// house size when the attribute is absent), resolved once per instance.</summary>
+    public virtual SKSize DefaultSize
+    {
+        get
+        {
+            if (_defaultSize is null)
+            {
+                // this.GetType() (not typeof(this)): the generic call after
+                // the typeof-paren trips the parser's qualified-type
+                // ambiguity in expression positions.
+                _defaultSize = this.GetType().GetCustomAttribute<WidgetMetadataAttribute>()?.DefaultGridSize.ToSize()
+                    ?? GridSizePreset.Size2x2.ToSize();
+            }
+            return _defaultSize.Value;
+        }
+    }
 
     /// <summary>The host-services seam, set by the base
     /// <see cref="InitializeAsync"/>. Null before initialization — guard

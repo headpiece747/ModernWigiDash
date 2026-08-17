@@ -17,8 +17,6 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
 public class FrameTimeWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
-
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 

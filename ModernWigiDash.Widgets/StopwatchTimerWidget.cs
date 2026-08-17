@@ -4,11 +4,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Category = "Utilities")]
+[WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class StopwatchTimerWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
-
     private bool _isRunning = false;
     private DateTime _startTime;
     private TimeSpan _elapsed = TimeSpan.Zero;

@@ -20,7 +20,42 @@ public class WidgetPluginLoaderTests
 
         Assert.IsNotNull(instance);
         Assert.IsInstanceOfType<DigitalAnalogClockWidget>(instance);
-        Assert.AreEqual(406f, instance.DefaultSize.Width, "The clock's 2x1 default size must come from its GridSizePreset");
+        Assert.AreEqual(406f, instance.DefaultSize.Width, "the clock's 2x1 default size must come from its [WidgetMetadata] DefaultGridSize preset");
+    }
+
+    [TestMethod]
+    public void WidgetPluginLoader_CatalogDefaultSize_AgreesWithInstances()
+    {
+        // Placement reads the catalog entry's nominal size (resolved from the
+        // [WidgetMetadata] preset at registration) while PlaceWidget sizes
+        // from the instance's DefaultSize (derived from the same attribute):
+        // for widgets that only declare the preset, the two facts agree.
+        // Pin the agreement so a future attribute/instance drift cannot make
+        // centered placement disagree with the placed size.
+        var loader = new WidgetPluginLoader();
+        Type[] declaredWidgets =
+        [
+            typeof(DigitalAnalogClockWidget), // 2x1
+            typeof(TwitchChatStreamWidget),   // 2x4
+            typeof(AudioVisualizerWidget),    // 5x2
+            typeof(WeatherForecastWidget),    // 5x4
+            typeof(NowPlayingWidget),         // 5x4
+            typeof(FrameTimeWidget)           // 2x2 (attribute default)
+        ];
+        foreach (var widgetType in declaredWidgets)
+        {
+            loader.RegisterBuiltInPlugin(widgetType);
+        }
+
+        foreach (var info in loader.RegisteredPlugins)
+        {
+            var widget = loader.CreateInstance(info.PluginId);
+            Assert.IsNotNull(widget, $"{info.PluginId} must instantiate for the agreement check");
+            Assert.AreEqual(info.DefaultSize.Width, widget.DefaultSize.Width,
+                $"{info.PluginId}: the catalog's nominal size must equal the instance's DefaultSize");
+            Assert.AreEqual(info.DefaultSize.Height, widget.DefaultSize.Height,
+                $"{info.PluginId}: the catalog's nominal size must equal the instance's DefaultSize");
+        }
     }
 
     [TestMethod]

@@ -6,14 +6,12 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets.Twitch;
 
-[WidgetMetadata("twitch_chat", "Twitch", Category = "Social & Visual")]
+[WidgetMetadata("twitch_chat", "Twitch", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size2x4)]
 public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IWidgetPropertyOptionsProvider, IWidgetActionPresentationProvider
 {
     private const string AnonymousNickPrefix = "justinfan";
     private const string AnonymousPass = "SCHMOOPIIE";
     private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
-
-    public override SKSize DefaultSize => GridSizePreset.Size2x4.ToSize();
 
     [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
     public string ChannelName { get; set; } = "twitch";

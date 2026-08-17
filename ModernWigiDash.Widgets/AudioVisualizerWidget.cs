@@ -3,10 +3,9 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio")]
+[WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x2)]
 public class AudioVisualizerWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size5x2.ToSize();
 
     [WidgetProperty("Visualizer Style", WidgetPropertyType.Choice, "Bar spectrum or radial wave", "Neon Bars", "Neon Bars", "Oscilloscope Wave", "Radial Pulse")]
     public string VisualizerStyle { get; set; } = "Neon Bars";

@@ -7,8 +7,6 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("picture_viewer", "Picture & GIF Viewer", Category = "Social & Visual")]
 public class PictureAndGifWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size2x2.ToSize();
-
     [WidgetProperty("Image Folder/File Path", WidgetPropertyType.Path, "Path to image or folder of images", "C:\\Pictures")]
     public string ImagePath { get; set; } = "C:\\Pictures";
 

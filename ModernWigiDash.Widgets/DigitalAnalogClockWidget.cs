@@ -4,11 +4,9 @@ using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("clock_modern", "Clock", Category = "Clock & Time")]
+[WidgetMetadata("clock_modern", "Clock", Category = "Clock & Time", DefaultGridSize = GridSizePreset.Size2x1)]
 public class DigitalAnalogClockWidget : ModernWidgetBase
 {
-    public override SKSize DefaultSize => GridSizePreset.Size2x1.ToSize();
-
     [WidgetProperty("Clock Mode", WidgetPropertyType.Choice, "Display mode for the clock", "Digital", "Digital", "Analog")]
     public string ClockMode { get; set; } = "Digital";
 

@@ -6,11 +6,9 @@ using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 
-[WidgetMetadata("hotkey_button", "Hotkey", Category = "Utilities")]
+[WidgetMetadata("hotkey_button", "Hotkey", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab
 {
-    public override SKSize DefaultSize => GridSizePreset.Size1x1.ToSize();
-
     [WidgetProperty("Button Label", WidgetPropertyType.Text, "Text displayed on button", "Hotkey")]
     public string ButtonLabel { get; set; } = "Hotkey";
 

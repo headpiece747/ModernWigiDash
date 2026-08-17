@@ -27,10 +27,9 @@ public class ProfileOpsTests
             => SetProperty(nameof(Mode), Mode == "A" ? "B" : "A");
     }
 
-    [WidgetMetadata("fullscreen_test_widget", "Fullscreen Test")]
+    [WidgetMetadata("fullscreen_test_widget", "Fullscreen Test", DefaultGridSize = GridSizePreset.Size5x4)]
     private sealed class FullScreenTestWidget : ModernWidgetBase
     {
-        public override SKSize DefaultSize => new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
@@ -382,6 +381,9 @@ public class ProfileOpsTests
     [TestMethod]
     public void PlaceCentered_FullScreenWidget_GoesToOrigin()
     {
+        // The widget declares Size5x4 in its [WidgetMetadata]: the catalog
+        // entry reports the full-framebuffer size, so placement takes the
+        // origin branch — no probe instance is constructed.
         var profile = new ProfileLayout();
         var loader = new WidgetPluginLoader();
         loader.RegisterBuiltInPlugin(typeof(FullScreenTestWidget));
@@ -400,7 +402,7 @@ public class ProfileOpsTests
     {
         var profile = new ProfileLayout();
         var loader = new WidgetPluginLoader();
-        loader.RegisterBuiltInPlugin(typeof(TestWidget)); // 406 x 148
+        loader.RegisterBuiltInPlugin(typeof(TestWidget)); // 406 x 148 (the fixture declares the 2x1 preset in its metadata; placement reads the catalog entry)
 
         var placed = ProfileOps.PlaceCentered(profile, loader, new TestContext(), "profile_test_widget");
 

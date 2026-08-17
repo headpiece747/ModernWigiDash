@@ -1,22 +1,30 @@
 using System.Reflection;
 using ModernWigiDash.Sdk;
+using SkiaSharp;
 
 namespace ModernWigiDash.Core.Plugins;
 
 /// <summary>
 /// One catalog entry. Only the fields the host actually consumes — the catalog
 /// binds PluginId/DisplayName/Category, <see cref="WidgetPluginLoader.CreateInstance"/>
-/// needs WidgetType. The remaining metadata (description, author, version, grid
-/// size) stays on the [WidgetMetadata] attribute. Immutable: a catalog entry
-/// never changes after registration.
+/// needs WidgetType, and placement centering reads DefaultSize (the widget's
+/// [WidgetMetadata] nominal preset, resolved once at registration). Immutable: a
+/// catalog entry never changes after registration.
 /// </summary>
-public sealed record PluginInfo(string PluginId, string DisplayName, string Category, Type WidgetType);
+public sealed record PluginInfo(string PluginId, string DisplayName, string Category, SKSize DefaultSize, Type WidgetType);
 
 public class WidgetPluginLoader
 {
     private readonly Dictionary<string, PluginInfo> _registeredPlugins = [];
 
     public IReadOnlyCollection<PluginInfo> RegisteredPlugins => _registeredPlugins.Values;
+
+    /// <summary>The catalog entry for <paramref name="pluginId"/>, or null
+    /// when the id is unregistered. Placement reads the entry's nominal
+    /// default size from here (the [WidgetMetadata] fact) instead of
+    /// constructing a probe instance.</summary>
+    public PluginInfo? FindPlugin(string pluginId)
+        => _registeredPlugins.TryGetValue(pluginId, out var info) ? info : null;
 
     /// <summary>
     /// Registers one widget type under its <see cref="WidgetMetadataAttribute"/>
@@ -41,7 +49,17 @@ public class WidgetPluginLoader
             return;
         }
 
-        _registeredPlugins[id] = new PluginInfo(id, name, attr?.Category ?? "General", widgetType);
+        _registeredPlugins[id] = new PluginInfo(
+            id,
+            name,
+            attr?.Category ?? "General",
+            // The nominal placement size lives on the [WidgetMetadata]
+            // attribute: resolving it here (at registration) is what lets
+            // placement centering read the catalog instead of constructing a
+            // probe instance. No attribute (hand-rolled test types) falls
+            // back to the 2x2 house size.
+            attr?.DefaultGridSize.ToSize() ?? GridSizePreset.Size2x2.ToSize(),
+            widgetType);
     }
 
     /// <summary>

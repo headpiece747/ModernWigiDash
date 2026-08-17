@@ -1,6 +1,7 @@
 using ModernWigiDash.App;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Hardware.Transport;
+using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
@@ -21,9 +22,9 @@ public class MainWindowDisplayModelTests
         Assert.AreEqual(("Disconnected", "DangerBorder"), UsbBadgeModel.From(ConnectionState.Disconnected));
     }
 
-    private static readonly PluginInfo FpsPlugin = new("frame_time", "FPS / Frame Time", "System Monitoring", typeof(FrameTimeWidget));
-    private static readonly PluginInfo WeatherPlugin = new("weather", "Weather Forecast", "Social & Visual", typeof(WeatherForecastWidget));
-    private static readonly PluginInfo ClockPlugin = new("clock", "Clock", "Utilities", typeof(DigitalAnalogClockWidget));
+    private static readonly PluginInfo FpsPlugin = new("frame_time", "FPS / Frame Time", "System Monitoring", GridSizePreset.Size2x2.ToSize(), typeof(FrameTimeWidget));
+    private static readonly PluginInfo WeatherPlugin = new("weather", "Weather Forecast", "Social & Visual", GridSizePreset.Size2x2.ToSize(), typeof(WeatherForecastWidget));
+    private static readonly PluginInfo ClockPlugin = new("clock", "Clock", "Utilities", GridSizePreset.Size2x1.ToSize(), typeof(DigitalAnalogClockWidget));
 
     [TestMethod]
     public void CatalogFilter_EmptyQuery_SortsAllByName()
