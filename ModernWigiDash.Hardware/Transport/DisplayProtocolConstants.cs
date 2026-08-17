@@ -150,6 +150,20 @@ internal static class DisplayProtocolConstants
     public const int TouchReportSize = 8;
 
     /// <summary>
+    /// Pipe transfer timeouts, ms — the single source the WinUSB backend binds
+    /// into the pipe policies and the transport's <c>CloseBound</c> derives
+    /// from, so the engine's close invariant ("abandon a close that would
+    /// stall behind a hung device") and the timeout that bounds the stall can
+    /// never drift apart.
+    /// </summary>
+    public const int ControlPipeTimeoutMs = 1000;
+
+    /// <summary>Bulk OUT pipe timeout, ms — the dominant contributor to
+    /// <c>CloseBound</c>: an in-flight frame write holds the transport lock
+    /// for up to this long on a hung device.</summary>
+    public const int BulkPipeTimeoutMs = 30000;
+
+    /// <summary>
     /// Touch report: no touch active (Type == 0).
     /// </summary>
     public const byte TouchTypeNone = 0;

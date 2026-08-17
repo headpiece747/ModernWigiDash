@@ -340,13 +340,14 @@ internal class WinUsbBulkDevice : ITransferBackend
                     IntPtr timeoutPtr = Marshal.AllocHGlobal(sizeof(int));
                     try
                     {
-                        // Control pipe timeout: 1000ms
-                        Marshal.WriteInt32(timeoutPtr, 1000);
+                        // Control pipe timeout (the protocol constants own the budget the
+                        // transport's CloseBound derives from).
+                        Marshal.WriteInt32(timeoutPtr, DisplayProtocolConstants.ControlPipeTimeoutMs);
                         _api.SetPipePolicy(
                             _interfaceHandle, 0x00, WinUsbNative.PipeTransferTimeout, sizeof(int), timeoutPtr);
 
-                        // Bulk OUT pipe timeout: 30000ms (30s for large transfers)
-                        Marshal.WriteInt32(timeoutPtr, 30000);
+                        // Bulk OUT pipe timeout (large-transfer budget, 30s).
+                        Marshal.WriteInt32(timeoutPtr, DisplayProtocolConstants.BulkPipeTimeoutMs);
                         _api.SetPipePolicy(
                             _interfaceHandle, 0x01, WinUsbNative.PipeTransferTimeout, sizeof(int), timeoutPtr);
                     }
@@ -355,7 +356,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                         Marshal.FreeHGlobal(timeoutPtr);
                     }
 
-                    Log("Pipe timeouts configured (control=1000ms, bulk=30000ms)");
+                    Log($"Pipe timeouts configured (control={DisplayProtocolConstants.ControlPipeTimeoutMs}ms, bulk={DisplayProtocolConstants.BulkPipeTimeoutMs}ms)");
                     return true;
                 }
                 finally

@@ -45,7 +45,28 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     private const int NumPages = 3;
     private const byte Base0 = DisplayProtocolConstants.ScreenBase0;
 
-    public bool IsConnected => _isConnected;
+    /// <summary>
+    /// The transport's connection truth — kept for test observability only.
+    /// It is NOT on the <see cref="IDisplayTransport"/> seam: production
+    /// callers (the engine) gate on their own ConnectionState, and the
+    /// transport's methods read the private field directly.
+    /// </summary>
+    internal bool IsConnected => _isConnected;
+
+    /// <summary>
+    /// The worst-case duration a hung device can hold the transport's teardown
+    /// — the named budget behind the engine's never-stall-on-close invariant.
+    /// The max of the two backend stall bounds: the WinUSB bulk pipe timeout
+    /// (an in-flight frame write holds the transport lock for up to that long)
+    /// and the LibUsb leg's chunk-timeout product over a full frame (every
+    /// chunk exhausting its timeout). The engine's close waits are deliberately
+    /// shorter than this — it abandons a slow close rather than follow it — but
+    /// the rationale no longer re-spells the backend numbers: both sides read
+    /// this one value.
+    /// </summary>
+    internal static TimeSpan CloseBound => TimeSpan.FromMilliseconds(Math.Max(
+        DisplayProtocolConstants.BulkPipeTimeoutMs,
+        (long)ChunkedBulkWrite.WorstCaseWrite(DisplayGeometry.FrameBufferSize).TotalMilliseconds));
 
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {

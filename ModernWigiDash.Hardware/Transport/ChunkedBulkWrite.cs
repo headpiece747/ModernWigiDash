@@ -16,6 +16,15 @@ internal static class ChunkedBulkWrite
     public const int ChunkTimeoutMs = 10000;
 
     /// <summary>
+    /// The worst-case duration of a blocked write of <paramref name="payloadBytes"/>:
+    /// every chunk exhausts its timeout. One budget the transport's
+    /// <c>CloseBound</c> takes the max over — the LibUsb leg's contribution to
+    /// "how long a hung device can hold the teardown lock."
+    /// </summary>
+    public static TimeSpan WorstCaseWrite(int payloadBytes)
+        => TimeSpan.FromMilliseconds(((payloadBytes + ChunkSize - 1) / ChunkSize) * (long)ChunkTimeoutMs);
+
+    /// <summary>
     /// Writes <paramref name="data"/> in bounded chunks. Each chunk starts at
     /// the accumulated transferred length — not a nominal stride — so a short
     /// write continues from where the device actually accepted data. Returns

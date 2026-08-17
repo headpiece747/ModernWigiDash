@@ -47,6 +47,15 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// </summary>
     internal TimeSpan ReconnectPeriod { get; set; } = TimeSpan.FromSeconds(5);
 
+    // The never-stall-on-close budgets: each is deliberately shorter than the
+    // transport's DisplayHidTransport.CloseBound (the worst-case time a hung
+    // device can hold the teardown) — close abandons a slow teardown rather
+    // than follow it, because a leaked handle at exit beats a frozen window.
+    // A healthy close completes in well under a second, so these bounds only
+    // ever bite for a hung device.
+    internal static readonly TimeSpan StandbyCloseBudget = TimeSpan.FromSeconds(2);
+    internal static readonly TimeSpan DisposeAbandonBudget = TimeSpan.FromSeconds(3);
+
     // Direct-USB touch polling: the engine owns the transport, reads the touch
     // report at a 16ms cadence, and normalizes it once via
     // TouchReport.ToEventType. Idle while not connected (simulation mode) —
@@ -103,16 +112,19 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// Test seam: an engine bound to an injected transport, without auto-connect
     /// or background loops. The touch poll loop is created but not started —
     /// tests drive <see cref="TouchPollTick"/> directly (or call
-    /// <see cref="Start"/> to exercise the loop wiring). The state derives
-    /// from the injected transport's actual connection truth — never asserted.
-    /// The transport factory returns this same transport, so a Start() that
-    /// reaches TryConnect reconnects through it instead of NRE-ing.
+    /// <see cref="Start"/> to exercise the loop wiring). The initial state is
+    /// seeded by the caller through <paramref name="initialState"/> — the seam
+    /// no longer asks the transport for its connection truth (the engine's
+    /// ConnectionState is the one truth; the transport's own connection state
+    /// is only meaningful after a Connect the engine observed). The transport
+    /// factory returns this same transport, so a Start() that reaches
+    /// TryConnect reconnects through it instead of NRE-ing.
     /// </summary>
-    internal DisplayDeviceEngine(IDisplayTransport transport)
+    internal DisplayDeviceEngine(IDisplayTransport transport, ConnectionState initialState = ConnectionState.Disconnected)
     {
         _transport = transport;
         _transportFactory = () => transport;
-        State = transport.IsConnected ? ConnectionState.Connected : ConnectionState.Simulated;
+        State = initialState;
         _touchPoll = CreateTouchPollLoop();
         _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
     }
@@ -380,17 +392,20 @@ public sealed class DisplayDeviceEngine : IDisposable
             _transport = null;
         }
 
-        // Dispose outside the lock to avoid holding it during I/O — and
-        // bounded off-thread: an in-flight frame write holds the transport's
-        // lock up to the bulk-write timeout (30s on a hung device), and close
+        // Dispose outside the lock to avoid holding it during I/O — and bounded
+        // off-thread: an in-flight frame write holds the transport's lock for
+        // up to the transport's CloseBound (DisplayHidTransport.CloseBound —
+        // the backend's worst-case stall budget) on a hung device, and close
         // must never stall on that (the standby pattern — a leaked handle at
-        // exit beats a frozen window). The timer thread may also reach this
-        // via the reconnect path, where an abandoned dispose is equally fine.
+        // exit beats a frozen window); DisposeAbandonBudget is the abandon
+        // point, deliberately shorter than CloseBound. The timer thread may
+        // also reach this via the reconnect path, where an abandoned dispose
+        // is equally fine.
         if (oldTransport != null)
         {
             try
             {
-                Task.Run(() => oldTransport.Dispose()).Wait(TimeSpan.FromSeconds(3));
+                Task.Run(() => oldTransport.Dispose()).Wait(DisposeAbandonBudget);
             }
             catch (Exception ex)
             {
@@ -422,16 +437,19 @@ public sealed class DisplayDeviceEngine : IDisposable
         {
             // Off-thread with a bounded wait: close must not hang behind an
             // in-flight frame write holding the transport lock (the LibUsb
-            // chunked write can block on chunk timeouts). Standby itself is a
-            // fast control transfer once the lock frees; 2s bounds the worst
-            // case, so close can never stall on the write. The transport is
-            // snapshotted under the lock (the touch-poll pattern).
+            // chunked write can block on its chunk timeouts — worst case the
+            // transport's CloseBound). Standby itself is a fast control
+            // transfer (bounded by the control pipe timeout) once the lock
+            // frees; StandbyCloseBudget is the abandon point, deliberately
+            // shorter than CloseBound, so close can never stall on the write.
+            // The transport is snapshotted under the lock (the touch-poll
+            // pattern).
             IDisplayTransport? transport;
             lock (_lock)
             {
                 transport = _transport;
             }
-            Task.Run(() => transport?.GoToStandby()).Wait(TimeSpan.FromSeconds(2));
+            Task.Run(() => transport?.GoToStandby()).Wait(StandbyCloseBudget);
         }
         catch (Exception ex)
         {

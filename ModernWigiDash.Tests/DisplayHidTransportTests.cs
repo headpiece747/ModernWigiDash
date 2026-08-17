@@ -471,4 +471,17 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         Assert.IsFalse(ok);
         Assert.AreEqual(1, device.CloseCalls, "an endpoint-writer failure must release the open+claimed device");
     }
+
+    [TestMethod]
+    public void CloseBound_CoversBothBackendStallBounds()
+    {
+        // The teardown budget is a worst case: at least the WinUSB bulk pipe
+        // timeout (an in-flight frame write holds the transport lock that
+        // long) and at least the LibUsb chunked-write worst case for a full
+        // frame (every chunk exhausting its timeout).
+        Assert.IsTrue(DisplayHidTransport.CloseBound >= TimeSpan.FromMilliseconds(DisplayProtocolConstants.BulkPipeTimeoutMs),
+            "the close bound must cover the WinUSB bulk pipe timeout");
+        Assert.IsTrue(DisplayHidTransport.CloseBound >= ChunkedBulkWrite.WorstCaseWrite(DisplayGeometry.FrameBufferSize),
+            "the close bound must cover the LibUsb chunked-write worst case");
+    }
 }

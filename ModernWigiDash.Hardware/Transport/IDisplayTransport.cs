@@ -22,11 +22,6 @@ namespace ModernWigiDash.Hardware.Transport;
 internal interface IDisplayTransport : IAsyncDisposable, IDisposable
 {
     /// <summary>
-    /// Gets a value indicating whether the hardware transport connection is currently active.
-    /// </summary>
-    bool IsConnected { get; }
-
-    /// <summary>
     /// Connects to the USB display hardware (WinUSB first, LibUsbDotNet
     /// fallback) and runs the initialization sequence.
     /// </summary>

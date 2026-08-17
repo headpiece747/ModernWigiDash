@@ -111,7 +111,7 @@ public class DisplayDeviceEngineTests
                 Y = 34
             }
         };
-        using var engine = new DisplayDeviceEngine(fake);
+        using var engine = new DisplayDeviceEngine(fake, ConnectionState.Connected);
         using var received = new ManualResetEventSlim(false);
         engine.OnTouchEvent += (_, _) => received.Set();
 
@@ -282,13 +282,16 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
-    public void InternalCtor_StateDerivesFromTransportConnectionTruth()
+    public void InternalCtor_SeedsStateFromTheExplicitParameter()
     {
-        var connected = new DisplayDeviceEngine(new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true });
-        Assert.AreEqual(ConnectionState.Connected, connected.State, "an open transport reports Connected");
+        // The test seam no longer asks the transport for its connection truth —
+        // the engine's ConnectionState is the one truth, and a bound engine
+        // starts in whatever state the caller says it is in.
+        var connected = new DisplayDeviceEngine(new FakeTransport { ConnectResult = true }, ConnectionState.Connected);
+        Assert.AreEqual(ConnectionState.Connected, connected.State, "a bound engine starts in the caller-seeded state");
 
-        var simulated = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false });
-        Assert.AreEqual(ConnectionState.Simulated, simulated.State, "a closed transport must not report Connected");
+        var simulated = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false }, ConnectionState.Simulated);
+        Assert.AreEqual(ConnectionState.Simulated, simulated.State);
     }
 
     // ── the reconnect tick gate ──────────────────────────────────────
@@ -361,5 +364,21 @@ public class DisplayDeviceEngineTests
         Assert.IsTrue(sw.Elapsed < TimeSpan.FromSeconds(8),
             $"engine Dispose must not stall behind a hung transport (took {sw.Elapsed.TotalSeconds:F1}s)");
         Assert.IsFalse(fake.Disposed, "the abandoned dispose may still be running off-thread");
+    }
+
+    [TestMethod]
+    public void CloseBudgets_AbandonBeforeWorstCaseTeardown()
+    {
+        // The engine's close waits are abandon points: each is deliberately
+        // shorter than the transport's CloseBound (the worst-case time a hung
+        // device can hold the teardown lock) — a leaked handle at exit beats a
+        // frozen window. If a budget ever reached CloseBound, close would
+        // follow a hung device to the very end and stall on it. The invariant
+        // is pinned on both sides of the seam (CloseBound itself is pinned in
+        // DisplayHidTransportTests) so it can never drift silently.
+        Assert.IsTrue(DisplayDeviceEngine.StandbyCloseBudget < DisplayHidTransport.CloseBound,
+            "the standby close must abandon before a worst-case teardown");
+        Assert.IsTrue(DisplayDeviceEngine.DisposeAbandonBudget < DisplayHidTransport.CloseBound,
+            "the transport dispose must abandon before a worst-case teardown");
     }
 }
