@@ -169,22 +169,24 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // never show the device-authorization window it owns).
         _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
 
-        _inspector = new Inspector.InspectorController(new Inspector.InspectorControllerHost(
-            emptyPanel: PanelEmptyInspector,
-            activePanel: PanelActiveInspector,
-            nameText: TxtInspName,
-            posX: TxtPosX,
-            posY: TxtPosY,
-            widthText: TxtWidth,
-            heightText: TxtHeight,
-            zIndexText: TxtZIndex,
-            rotationText: TxtRotation,
-            opacitySlider: SliderOpacity,
-            opacityValueText: TxtOpacityVal,
-            customProperties: PanelCustomProperties,
-            tryFindResource: TryFindResource,
-            getSelectedWidget: () => _selectedWidget,
-            requestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
+        _inspector = new Inspector.InspectorController(
+            new Inspector.TransformFieldBindings(
+                PosX: TxtPosX,
+                PosY: TxtPosY,
+                WidthText: TxtWidth,
+                HeightText: TxtHeight,
+                ZIndexText: TxtZIndex,
+                RotationText: TxtRotation,
+                OpacitySlider: SliderOpacity,
+                OpacityValueText: TxtOpacityVal,
+                RequestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
+            new Inspector.CustomPropertyPanel(
+                emptyPanel: PanelEmptyInspector,
+                activePanel: PanelActiveInspector,
+                nameText: TxtInspName,
+                customProperties: PanelCustomProperties,
+                tryFindResource: TryFindResource),
+            () => _selectedWidget,
             _dialogHost,
             onProfileChanged: () => _profilePersistence.MarkDirty(),
             commitLocationPick: candidate =>
@@ -206,7 +208,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             DeletePage);
 
         // Page-background picker: the swatch commits the active page's color.
-        // Its Hex is kept in sync by RefreshAfterMutation (the mutation funnel).
+        // Its Hex is kept in sync by ApplyProfileMutation (the mutation funnel).
         PageBgPicker.Applied += OnPageBackgroundApplied;
 
         // 4. Load the persisted profile, or build the starter profile on first
@@ -220,6 +222,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
         }
         _pageTabs.Rebuild(_profile);
         PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
+        // Resync the page-level toggle from the loaded profile the same way the
+        // mutation funnel does after an import (the XAML default is true; a
+        // persisted page may differ). _wired is still off, so the checkbox
+        // event this resync fires is guarded: a startup state resync is not a
+        // mutation and must not arm a save.
+        ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
 
         // 5. Route device touch input through the single input module. Display
         // touches are runtime input: Press/Move/Release cross the controller's
@@ -319,6 +327,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     private void SelectWidget(PlacedWidgetInstance? widget)
     {
+        // The same-reference early-out keeps the mutation contract's
+        // selection re-application free when nothing changed (the in-page
+        // shapes pass the current selection straight through), and protects
+        // the re-entrant import path: the funnel's control resyncs can fire a
+        // handler that re-enters the contract while the old — now disposed —
+        // selected instance is still referenced, and re-applying it must not
+        // rebuild the inspector over a dead widget.
+        if (ReferenceEquals(widget, _selectedWidget)) return;
         _selectedWidget = widget;
         _compositor.SelectedWidget = widget;
         _inspector.Refresh();
@@ -331,33 +347,61 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>
-    /// One refresh sequence after a mutation: re-selects (null clears),
-    /// refreshes the active count, and repaints the canvas. Structural
-    /// mutations (add/delete/rename/switch/import) also rebuild the tab strip
-    /// and re-sync the page-background picker — a single funnel, so a later
-    /// step can never drift between the two shapes.
+    /// The ONE post-mutation contract: whatever shape a mutation takes, its
+    /// post-conditions run exactly once here, so a call site never re-derives
+    /// "what happens after a mutation" (refresh shape, dirty mark, structural
+    /// flag) per site — the doubled and missing marks the per-site variants
+    /// used to produce are unrepresentable. The shape selects the refresh bundle:
+    /// <see cref="ProfileMutationShape.Structural"/> re-syncs the tab strip and
+    /// the page-background picker (the page set changed);
+    /// <see cref="ProfileMutationShape.RawWrite"/> (an import) additionally
+    /// re-syncs the snap-to-grid toggle from the imported page — the import's
+    /// old direct control write is absorbed as this ordinary control resync,
+    /// whose handler routes through this same contract;
+    /// <see cref="ProfileMutationShape.Transform"/> re-syncs nothing structural
+    /// (in-page state only). Every shape then re-applies the selection (the
+    /// caller always passes the post-mutation selection; in-page shapes pass the
+    /// unchanged one), refreshes the active count, repaints the canvas, and
+    /// marks the profile dirty exactly once. Inspector-driven write-backs
+    /// (transform text, opacity, property values) are the one path that marks
+    /// through the inspector's onProfileChanged callback instead — exactly one
+    /// invocation per landed write-back, and the window's forwarding handlers
+    /// add none.
     /// </summary>
-    private void RefreshAfterMutation(PlacedWidgetInstance? selection, bool structural)
+    internal void ApplyProfileMutation(ProfileMutationShape shape, PlacedWidgetInstance? selection)
     {
-        if (structural)
+        if (shape is ProfileMutationShape.Structural or ProfileMutationShape.RawWrite)
         {
             _pageTabs.Rebuild(_profile);
             PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
         }
+
+        if (shape is ProfileMutationShape.RawWrite)
+        {
+            // A raw write replaces the whole profile state, so the imported page's
+            // snap-to-grid may differ from the checkbox's old page's: the resync
+            // routes through the checkbox's own handler, which re-derives the
+            // profile value from the control and thus keeps one source of truth
+            // (no bypass of the write-back loop). On import the handler is wired
+            // and idempotently re-enters this same contract with the unchanged
+            // value; on the startup resync it is still guarded off by _wired.
+            ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
+        }
+
         SelectWidget(selection);
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
+        _profilePersistence.MarkDirty();
     }
 
     /// <summary>Page-background picker commit: writes the active page's
     /// BackgroundHexColor (the compositor diffs it per frame, so the change
-    /// flows to the physical display on the next tick) and marks the profile
-    /// dirty. The swatch itself is kept in sync by <see cref="RefreshAfterMutation"/>.</summary>
+    /// flows to the physical display on the next tick). The post-conditions ride
+    /// the mutation funnel; the swatch itself is kept in sync by the commit.</summary>
     private void OnPageBackgroundApplied(string hex)
     {
         _profile.ActivePage.BackgroundHexColor = hex;
-        _profilePersistence.MarkDirty();
-        SkiaCanvas.InvalidateVisual();
+        ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
     }
 
     #region Skia Canvas Rendering & Mouse Interaction
@@ -462,18 +506,22 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     #region Inspector event forwarding (logic lives in Inspector.InspectorController)
 
+    /// <summary>
+    /// One forward only: the inspector's write-back seam fires onProfileChanged
+    /// (exactly once per landed write-back), and that callback IS the dirty mark
+    /// on the inspector-driven path — a mark here would double it (the old
+    /// doubled/spurious marks the per-site handlers used to produce).
+    /// </summary>
     private void Transform_Changed(object sender, TextChangedEventArgs e)
     {
         if (!_wired) return;
         _inspector.TransformChanged(sender, e);
-        _profilePersistence.MarkDirty();
     }
 
     private void SliderOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!_wired) return;
         _inspector.OpacityChanged(sender, e);
-        _profilePersistence.MarkDirty();
     }
 
     #endregion
@@ -491,8 +539,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_selectedWidget != null)
         {
             ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
-            RefreshAfterMutation(null, structural: false);
-            _profilePersistence.MarkDirty();
+            ApplyProfileMutation(ProfileMutationShape.Transform, null);
         }
     }
 
@@ -531,8 +578,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             var placed = ProfileOps.PlaceCentered(_profile, _loader, this, pluginId);
             if (placed == null) return;
 
-            RefreshAfterMutation(placed, structural: false);
-            _profilePersistence.MarkDirty();
+            ApplyProfileMutation(ProfileMutationShape.Transform, placed);
         }
     }
 
@@ -545,14 +591,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (string.IsNullOrWhiteSpace(newName)) return;
 
         ProfileOps.RenamePage(page, newName);
-        RefreshAfterMutation(_selectedWidget, structural: true);
-        _profilePersistence.MarkDirty();
+        ApplyProfileMutation(ProfileMutationShape.Structural, _selectedWidget);
     }
 
     private void SwitchToPage(int index)
     {
         if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
-        RefreshAfterMutation(null, structural: true);
+        ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
     private void DeletePage(int index)
@@ -563,23 +608,20 @@ public partial class MainWindow : Window, IModernWigiDashContext
             return;
 
         if (!ProfileOps.DeletePage(_profile, index)) return;
-        RefreshAfterMutation(null, structural: true);
-        _profilePersistence.MarkDirty();
+        ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
     private void BtnAddPage_Click(object sender, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
-        RefreshAfterMutation(null, structural: true);
-        _profilePersistence.MarkDirty();
+        ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
     private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
     {
         if (!_wired) return;
         _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
-        _profilePersistence.MarkDirty();
-        SkiaCanvas.InvalidateVisual();
+        ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
     }
 
     private void ChkEditMode_Changed(object sender, RoutedEventArgs e)
@@ -631,13 +673,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     // widget instances and returns the imported profile active.
                     _profile = ProfileOps.ReplaceProfile(_profile, loaded);
 
-                    // Resync the toggle: the imported page's snap-to-grid may
-                    // differ from the checkbox's current state. Applied
-                    // directly from the import result — no reliance on the
-                    // change-handler write-back loop.
-                    ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-                    RefreshAfterMutation(null, structural: true);
-                    _profilePersistence.MarkDirty();
+                    // The funnel owns everything after the swap — tab strip,
+                    // picker, and the snap-to-grid resync (a RawWrite): the
+                    // old force-write of the checkbox is gone.
+                    ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
                 }
             }
             catch (Exception ex)
@@ -652,8 +691,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
             ProfileOps.ClearPage(_profile.ActivePage);
-            RefreshAfterMutation(null, structural: false);
-            _profilePersistence.MarkDirty();
+            ApplyProfileMutation(ProfileMutationShape.Transform, null);
         }
     }
 

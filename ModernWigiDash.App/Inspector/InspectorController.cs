@@ -2,7 +2,6 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
 using ModernWigiDash.App.Controls;
@@ -11,45 +10,6 @@ using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Inspector;
-
-/// <summary>
-/// Host wiring for the inspector controller: the concrete WPF panel controls
-/// the window owns, plus the few callbacks the controller needs to reach back
-/// into the window (resource lookup, selection, canvas repaint).
-/// </summary>
-internal sealed class InspectorControllerHost(
-    UIElement emptyPanel,
-    UIElement activePanel,
-    TextBlock nameText,
-    TextBox posX,
-    TextBox posY,
-    TextBox widthText,
-    TextBox heightText,
-    TextBox zIndexText,
-    TextBox rotationText,
-    Slider opacitySlider,
-    TextBlock opacityValueText,
-    StackPanel customProperties,
-    Func<string, object?> tryFindResource,
-    Func<PlacedWidgetInstance?> getSelectedWidget,
-    Action requestCanvasRender)
-{
-    public UIElement EmptyPanel { get; } = emptyPanel;
-    public UIElement ActivePanel { get; } = activePanel;
-    public TextBlock NameText { get; } = nameText;
-    public TextBox PosX { get; } = posX;
-    public TextBox PosY { get; } = posY;
-    public TextBox WidthText { get; } = widthText;
-    public TextBox HeightText { get; } = heightText;
-    public TextBox ZIndexText { get; } = zIndexText;
-    public TextBox RotationText { get; } = rotationText;
-    public Slider OpacitySlider { get; } = opacitySlider;
-    public TextBlock OpacityValueText { get; } = opacityValueText;
-    public StackPanel CustomProperties { get; } = customProperties;
-    public Func<string, object?> TryFindResource { get; } = tryFindResource;
-    public Func<PlacedWidgetInstance?> GetSelectedWidget { get; } = getSelectedWidget;
-    public Action RequestCanvasRender { get; } = requestCanvasRender;
-}
 
 /// <summary>
 /// The right-side property inspector: panel refresh, transform write-backs,
@@ -62,31 +22,44 @@ internal sealed class InspectorControllerHost(
 /// </summary>
 internal sealed class InspectorController
 {
-    private readonly InspectorControllerHost _host;
+    private readonly TransformFieldBindings _transform;
+    private readonly CustomPropertyPanel _panel;
+    private readonly Func<PlacedWidgetInstance?> _getSelectedWidget;
     private readonly InspectorValuePolicy _policy = new();
     private readonly DialogHost _dialogHost;
     private readonly Action? _onProfileChanged;
     private readonly Action<GeocodeCandidate>? _commitLocationPick;
     private bool _isUpdatingInspector = false;
 
-    /// <param name="host">The window's wiring holder.</param>
+    /// <param name="transform">The window's transform-face bindings (the six
+    /// transform boxes, the opacity slider, the canvas-repaint request).</param>
+    /// <param name="panel">The window's panel-face bindings (empty/active
+    /// shells, name label, custom-properties host + focus bookkeeping).</param>
+    /// <param name="getSelectedWidget">The window's selection probe — shared
+    /// by both faces, so it stays a plain callback between them.</param>
     /// <param name="dialogHost">The window's single DialogHost instance. The
     /// inspector must not build its own — DialogHost is stateful (it owns the
     /// device-authorization window), and two instances for one owner would
     /// silently never show that window.</param>
     /// <param name="onProfileChanged">Invoked after a write-back lands in the
     /// profile model (transform/opacity/property values) so the owner can arm
-    /// profile persistence.</param>
+    /// profile persistence. This callback IS the dirty mark on the
+    /// inspector-driven path — exactly one invocation per landed write-back,
+    /// the window's forwarding handlers add none.</param>
     /// <param name="commitLocationPick">Invoked when the user picks a location
     /// search result; the owner resolves the selected widget's
     /// <see cref="IWidgetLocationSearch"/> and commits the candidate.</param>
     public InspectorController(
-        InspectorControllerHost host,
+        TransformFieldBindings transform,
+        CustomPropertyPanel panel,
+        Func<PlacedWidgetInstance?> getSelectedWidget,
         DialogHost dialogHost,
         Action? onProfileChanged = null,
         Action<GeocodeCandidate>? commitLocationPick = null)
     {
-        _host = host;
+        _transform = transform;
+        _panel = panel;
+        _getSelectedWidget = getSelectedWidget;
         _dialogHost = dialogHost;
         _onProfileChanged = onProfileChanged;
         _commitLocationPick = commitLocationPick;
@@ -99,40 +72,36 @@ internal sealed class InspectorController
     /// <summary>Rebuilds the panel for the currently selected widget (or the empty state).</summary>
     public void Refresh()
     {
-        var selected = _host.GetSelectedWidget();
+        var selected = _getSelectedWidget();
         if (selected is null)
         {
-            _host.EmptyPanel.Visibility = Visibility.Visible;
-            _host.ActivePanel.Visibility = Visibility.Collapsed;
+            _panel.ShowEmptyState();
             return;
         }
 
         _isUpdatingInspector = true;
         try
         {
-            _host.EmptyPanel.Visibility = Visibility.Collapsed;
-            _host.ActivePanel.Visibility = Visibility.Visible;
+            _panel.ShowWidget(selected.DisplayName);
 
-            _host.NameText.Text = selected.DisplayName;
-
-            _host.PosX.Text = _policy.FormatTransformValue(selected.X);
-            _host.PosY.Text = _policy.FormatTransformValue(selected.Y);
-            _host.WidthText.Text = _policy.FormatTransformValue(selected.Width);
-            _host.HeightText.Text = _policy.FormatTransformValue(selected.Height);
-            _host.ZIndexText.Text = _policy.FormatValue(selected.ZIndex);
-            _host.RotationText.Text = _policy.FormatTransformValue(selected.Rotation);
-            _host.OpacitySlider.Value = selected.Opacity;
-            _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
+            _transform.PosX.Text = _policy.FormatTransformValue(selected.X);
+            _transform.PosY.Text = _policy.FormatTransformValue(selected.Y);
+            _transform.WidthText.Text = _policy.FormatTransformValue(selected.Width);
+            _transform.HeightText.Text = _policy.FormatTransformValue(selected.Height);
+            _transform.ZIndexText.Text = _policy.FormatValue(selected.ZIndex);
+            _transform.RotationText.Text = _policy.FormatTransformValue(selected.Rotation);
+            _transform.OpacitySlider.Value = selected.Opacity;
+            _transform.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
 
             // Remember which custom-property row owned focus (and where the
             // caret was) before the rebuild: the panel is cleared and
             // re-rendered below, which would otherwise eject the user from the
             // field they are typing in (the weather widget's inspector refresh
             // fires while Location is being edited).
-            var (focusedRow, focusedCaret) = CaptureFocusState();
+            var (focusedRow, focusedCaret) = _panel.CaptureFocusState();
 
             // Build dynamic custom property editors for the widget
-            _host.CustomProperties.Children.Clear();
+            _panel.CustomProperties.Children.Clear();
             if (selected.ActiveInstance is not null)
             {
                 // The sensor picker's live labels come from the store — read
@@ -143,11 +112,11 @@ internal sealed class InspectorController
                 InspectorPanelRenderer.Render(
                     selected,
                     InspectorModelBuilder.Describe(selected, sensorOptions),
-                    _host.CustomProperties.Children,
+                    _panel.CustomProperties.Children,
                     () => _isUpdatingInspector,
                     new InspectorCallbacks
                     {
-                        TryFindResource = name => _host.TryFindResource(name),
+                        TryFindResource = name => _panel.TryFindResource(name),
                         ApplyInspectorPropertyValue = ApplyPropertyValue,
                         ShowIconSelectorPopup = ShowIconSelectorPopup,
                         AttachDropdownWithinWindow = AttachDropdownWithinWindow,
@@ -167,7 +136,7 @@ internal sealed class InspectorController
                 // Restore focus to the same property's editor so typing and
                 // caret placement survive the refresh. The rebuilt row sits at
                 // the same index as the old one (one row per property).
-                RestoreFocusToRow(focusedRow, focusedCaret);
+                _panel.RestoreFocusToRow(focusedRow, focusedCaret);
             }
         }
         finally
@@ -176,71 +145,18 @@ internal sealed class InspectorController
         }
     }
 
-    /// <summary>
-    /// Index of the custom-properties row containing the focused element (or
-    /// -1 when focus is elsewhere — transforms, catalog, outside the panel),
-    /// plus the focused TextBox's caret offset so it can be restored.
-    /// </summary>
-    private (int RowIndex, int CaretIndex) CaptureFocusState()
-    {
-        if (Keyboard.FocusedElement is not DependencyObject focused) return (-1, 0);
-        var current = focused;
-        while (current is not null)
-        {
-            if (current is UIElement element)
-            {
-                int idx = _host.CustomProperties.Children.IndexOf(element);
-                if (idx >= 0)
-                {
-                    int caret = focused is TextBox box ? box.CaretIndex : 0;
-                    return (idx, caret);
-                }
-            }
-            current = VisualTreeHelper.GetParent(current);
-        }
-        return (-1, 0);
-    }
-
-    /// <summary>
-    /// Refocuses the editor in the given rebuilt row (the one the user was
-    /// typing in before the refresh), restoring the caret to where it was.
-    /// A row's editor is its first focusable child (TextBox or ComboBox).
-    /// </summary>
-    private void RestoreFocusToRow(int rowIndex, int caretIndex)
-    {
-        if (rowIndex < 0 || rowIndex >= _host.CustomProperties.Children.Count) return;
-        if (_host.CustomProperties.Children[rowIndex] is not DependencyObject row) return;
-        var editor = FindFirstFocusable(row);
-        if (editor is not TextBox box) { editor?.Focus(); return; }
-        box.Focus();
-        // Focus lands the caret at 0 on a freshly built TextBox; restore it to
-        // where the user was typing (clamped to the current text length).
-        box.CaretIndex = Math.Clamp(caretIndex, 0, box.Text.Length);
-    }
-
-    private static IInputElement? FindFirstFocusable(DependencyObject root)
-    {
-        if (root is TextBox or ComboBox) return root as IInputElement;
-        int count = VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            if (FindFirstFocusable(VisualTreeHelper.GetChild(root, i)) is { } found) return found;
-        }
-        return null;
-    }
-
     /// <summary>Refreshes only the transform text boxes (used during drag/resize).</summary>
     public void RefreshTransforms()
     {
-        var selected = _host.GetSelectedWidget();
+        var selected = _getSelectedWidget();
         if (selected is null) return;
         _isUpdatingInspector = true;
         try
         {
-            _host.PosX.Text = _policy.FormatTransformValue(selected.X);
-            _host.PosY.Text = _policy.FormatTransformValue(selected.Y);
-            _host.WidthText.Text = _policy.FormatTransformValue(selected.Width);
-            _host.HeightText.Text = _policy.FormatTransformValue(selected.Height);
+            _transform.PosX.Text = _policy.FormatTransformValue(selected.X);
+            _transform.PosY.Text = _policy.FormatTransformValue(selected.Y);
+            _transform.WidthText.Text = _policy.FormatTransformValue(selected.Width);
+            _transform.HeightText.Text = _policy.FormatTransformValue(selected.Height);
         }
         finally
         {
@@ -255,7 +171,7 @@ internal sealed class InspectorController
     /// </summary>
     public void ApplyPropertyValue(PropertyInfo? prop, object value)
     {
-        var selected = _host.GetSelectedWidget();
+        var selected = _getSelectedWidget();
         if (selected?.ActiveInstance is null || prop is null) return;
 
         object? converted = value;
@@ -277,30 +193,30 @@ internal sealed class InspectorController
     /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation/opacity write-backs.</summary>
     public void TransformChanged(object sender, TextChangedEventArgs e)
     {
-        var selected = _host.GetSelectedWidget();
+        var selected = _getSelectedWidget();
         if (_isUpdatingInspector || selected is null) return;
 
-        if (_policy.TryParsePosition(_host.PosX.Text, out float x)) selected.X = x;
-        if (_policy.TryParsePosition(_host.PosY.Text, out float y)) selected.Y = y;
-        if (_policy.TryParseSize(_host.WidthText.Text, out float w)) selected.Width = w;
-        if (_policy.TryParseSize(_host.HeightText.Text, out float h)) selected.Height = h;
-        if (_policy.TryParseZIndex(_host.ZIndexText.Text, out int z)) selected.ZIndex = z;
-        if (_policy.TryParseRotation(_host.RotationText.Text, out float r)) selected.Rotation = r;
+        if (_policy.TryParsePosition(_transform.PosX.Text, out float x)) selected.X = x;
+        if (_policy.TryParsePosition(_transform.PosY.Text, out float y)) selected.Y = y;
+        if (_policy.TryParseSize(_transform.WidthText.Text, out float w)) selected.Width = w;
+        if (_policy.TryParseSize(_transform.HeightText.Text, out float h)) selected.Height = h;
+        if (_policy.TryParseZIndex(_transform.ZIndexText.Text, out int z)) selected.ZIndex = z;
+        if (_policy.TryParseRotation(_transform.RotationText.Text, out float r)) selected.Rotation = r;
 
         _onProfileChanged?.Invoke();
-        _host.RequestCanvasRender();
+        _transform.RequestCanvasRender();
     }
 
     /// <summary>XAML <c>SliderOpacity_ValueChanged</c> handler.</summary>
     public void OpacityChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        var selected = _host.GetSelectedWidget();
+        var selected = _getSelectedWidget();
         if (_isUpdatingInspector || selected is null) return;
 
-        selected.Opacity = _policy.ClampOpacity((float)_host.OpacitySlider.Value);
-        _host.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
+        selected.Opacity = _policy.ClampOpacity((float)_transform.OpacitySlider.Value);
+        _transform.OpacityValueText.Text = _policy.FormatOpacityPercent(selected.Opacity);
         _onProfileChanged?.Invoke();
-        _host.RequestCanvasRender();
+        _transform.RequestCanvasRender();
     }
 
     /// <summary>
@@ -384,9 +300,9 @@ internal sealed class InspectorController
         int count = VisualTreeHelper.GetChildrenCount(parent);
         for (int i = 0; i < count; i++)
         {
-            var child = VisualTreeHelper.GetChild(parent, i);
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
             if (child is T match) return match;
-            if (FindVisualChild<T>(child) is T inner) return inner;
+            if (FindVisualChild<T>(child) is { } inner) return inner;
         }
         return null;
     }
