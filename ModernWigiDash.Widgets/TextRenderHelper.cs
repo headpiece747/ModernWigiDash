@@ -1,4 +1,3 @@
-using System.Text;
 using ModernWigiDash.Core.Rendering;
 using SkiaSharp;
 

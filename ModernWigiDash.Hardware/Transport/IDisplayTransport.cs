@@ -37,7 +37,7 @@ internal interface IDisplayTransport : IAsyncDisposable, IDisposable
     /// transport declined the frame without touching the wire (no connection, or the frame
     /// fails the size contract), or <see cref="Sdk.FrameSendResult.Failed"/> when the transfer
     /// was attempted and failed.</returns>
-    Sdk.FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer);
+    FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer);
 
     /// <summary>
     /// Reads the latest touch report from the display, or null when none is pending.
