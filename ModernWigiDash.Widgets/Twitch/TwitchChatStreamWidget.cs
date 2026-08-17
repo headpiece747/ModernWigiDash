@@ -60,9 +60,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
     // Status + detail as ONE volatile reference: the render thread composes
     // them into the status line, and two independent volatiles could tear
-    // (new status with the previous detail for one frame).
-    private sealed record ChatState(ChatStatus Status, string Detail);
-    private volatile ChatState _chatState = new(ChatStatus.Disconnected, "");
+    // (new status with the previous detail for one frame). The payload type
+    // and its one-spelling factories live in TwitchChatPresentation.
+    private volatile TwitchChatPresentation.ChatState _chatState = TwitchChatPresentation.ChatState.Disconnected();
     private volatile bool _disposed;
 
     // Hoisted paints: every color is computed per render (theme/status-driven),
@@ -216,7 +216,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             _messages.Clear();
             _renderSnapshot = [];
         }
-        _chatState = new(ChatStatus.Connecting, "Connecting…");
+        _chatState = TwitchChatPresentation.ChatState.Connecting();
         Context.RequestRender();
 
         // The IRC loop is a FeedLoop: connect → handshake → read messages →
@@ -231,7 +231,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             onCycleEnded: _ => SetReconnectingStatus(),
             onStopped: () =>
             {
-                _chatState = new(ChatStatus.Disconnected, "");
+                _chatState = TwitchChatPresentation.ChatState.Disconnected();
                 Context.RequestRender();
             },
             continueAfterCycle: () => AutoConnect && !_disposed,
@@ -249,7 +249,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         // the object; StartConnection creates a fresh one.
         _cts?.Cancel();
         _cts = null;
-        _chatState = new(ChatStatus.Disconnected, "");
+        _chatState = TwitchChatPresentation.ChatState.Disconnected();
         Context.RequestRender();
     }
 
@@ -266,13 +266,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         await SendIrcLineAsync(feed, "NICK " + nick, ct).ConfigureAwait(false);
         await SendIrcLineAsync(feed, "JOIN #" + channel, ct).ConfigureAwait(false);
 
-        _chatState = new(ChatStatus.Connecting, "Joining #" + channel + "…");
+        _chatState = TwitchChatPresentation.ChatState.JoiningChannel(channel);
         Context.RequestRender();
     }
 
     private void SetReconnectingStatus()
     {
-        _chatState = new(ChatStatus.Disconnected, "Reconnecting…");
+        _chatState = TwitchChatPresentation.ChatState.Reconnecting();
         Context.RequestRender();
     }
 
@@ -311,7 +311,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                     break;
                 }
             case IrcMessageKind.RoomState:
-                _chatState = new(ChatStatus.Connected, "LIVE");
+                _chatState = TwitchChatPresentation.ChatState.Live();
                 Context.RequestRender();
                 break;
             case IrcMessageKind.Privmsg:
@@ -322,7 +322,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                     var (newStatus, changed) = TwitchChatStatusPolicy.StatusFromNotice(message.Text, _chatState.Status);
                     if (changed)
                     {
-                        _chatState = new(newStatus, newStatus == ChatStatus.Connected ? "LIVE" : "Login failed — check token & username");
+                        _chatState = newStatus == ChatStatus.Connected ? TwitchChatPresentation.ChatState.Live() : TwitchChatPresentation.ChatState.LoginFailed();
                         if (newStatus == ChatStatus.Connected) Context.RequestRender();
                         else Context.LogError("Twitch login failed: " + message.Text);
                     }
@@ -391,10 +391,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private string StatusLine()
     {
-        ChatState state = _chatState;
+        TwitchChatPresentation.ChatState state = _chatState;
         return _statusMemo.GetOrCompute(
             (state.Status, state.Detail),
-            () => TwitchChatPresentation.StatusText(state.Status, state.Detail));
+            () => TwitchChatPresentation.StatusText(state));
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
