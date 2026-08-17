@@ -237,7 +237,7 @@ public class FrameTimeWidget : ModernWidgetBase
                     lo -= 1;
                     hi += 1;
                 }
-                TextRenderHelper.BuildSparklinePaths(area, samples, lo, hi, out _sparkLine, out _sparkFill);
+                SparklineRenderer.BuildSparklinePaths(area, samples, lo, hi, out _sparkLine, out _sparkFill);
             }
         }
 

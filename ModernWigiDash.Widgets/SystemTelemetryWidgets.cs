@@ -304,7 +304,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
                 hi = value + 1f;
             }
 
-            TextRenderHelper.DrawSparkline(canvas, area, samples, lo, hi, accent);
+            SparklineRenderer.DrawSparkline(canvas, area, samples, lo, hi, accent);
         }
 
         const float valFontSize = 22f;

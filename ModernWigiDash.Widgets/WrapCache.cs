@@ -1,3 +1,5 @@
+using System.Text;
+using ModernWigiDash.Core.Rendering;
 using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
@@ -51,7 +53,7 @@ internal sealed class WrapCache
             List<string> wrapped = [];
             foreach (string rawLine in source.Split('\n'))
             {
-                wrapped.AddRange(TextRenderHelper.WrapText(rawLine, font, width));
+                wrapped.AddRange(WrapLine(rawLine, font, width));
             }
 
             var entry = new Entry(Normalize(text), fontSize, width, wrapped);
@@ -74,4 +76,50 @@ internal sealed class WrapCache
     }
 
     private static string Normalize(string? text) => text ?? "";
+
+    /// <summary>
+    /// Greedy word wrap: splits <paramref name="text"/> into lines that fit
+    /// within <paramref name="maxWidth"/> measured with <paramref name="font"/>.
+    /// Words are never split — a word wider than the available width gets its
+    /// own line. An empty/null text yields a single empty line, and a
+    /// <paramref name="maxWidth"/> ≤ 0 yields one word per line (matching the
+    /// edge semantics of the two former per-widget copies). Private to this
+    /// cache — the word-wrap rule is the wrap result's only consumer's job, so
+    /// it lives behind the cache instead of the shared text helper.
+    /// </summary>
+    private static List<string> WrapLine(string text, SKFont font, float maxWidth)
+    {
+        List<string> result = [];
+        if (string.IsNullOrEmpty(text))
+        {
+            result.Add("");
+            return result;
+        }
+
+        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
+        {
+            result.Add(text);
+            return result;
+        }
+
+        var current = new StringBuilder();
+        foreach (string word in text.Split(' '))
+        {
+            string candidate = current.Length == 0 ? word : current + " " + word;
+            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
+            {
+                current.Clear();
+                current.Append(candidate);
+            }
+            else
+            {
+                if (current.Length > 0) result.Add(current.ToString());
+                current.Clear();
+                current.Append(word);
+            }
+        }
+
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
+    }
 }

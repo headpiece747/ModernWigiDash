@@ -13,7 +13,7 @@ public class SparklineRendererTests
     {
         double[] samples = [1.0, 2.0, 3.0, 4.0, 5.0];
 
-        TextRenderHelper.BuildSparklinePaths(Area, samples, 0.0, 6.0, out SKPath? line, out SKPath? fill);
+        SparklineRenderer.BuildSparklinePaths(Area, samples, 0.0, 6.0, out SKPath? line, out SKPath? fill);
 
         Assert.IsNotNull(line);
         Assert.IsNotNull(fill);
@@ -31,17 +31,17 @@ public class SparklineRendererTests
     public void BuildSparklinePaths_FewerThanTwoSamples_ReturnsNullPaths()
     {
         double[] empty = [];
-        TextRenderHelper.BuildSparklinePaths(Area, empty, 0.0, 1.0, out SKPath? emptyLine, out SKPath? emptyFill);
+        SparklineRenderer.BuildSparklinePaths(Area, empty, 0.0, 1.0, out SKPath? emptyLine, out SKPath? emptyFill);
         Assert.IsNull(emptyLine);
         Assert.IsNull(emptyFill);
 
         double[] single = [3.5];
-        TextRenderHelper.BuildSparklinePaths(Area, single, 0.0, 1.0, out SKPath? singleLine, out SKPath? singleFill);
+        SparklineRenderer.BuildSparklinePaths(Area, single, 0.0, 1.0, out SKPath? singleLine, out SKPath? singleFill);
         Assert.IsNull(singleLine);
         Assert.IsNull(singleFill);
 
         Span<float> emptySpan = [];
-        TextRenderHelper.BuildSparklinePaths(Area, emptySpan, 0f, 1f, out SKPath? emptySpanLine, out SKPath? emptySpanFill);
+        SparklineRenderer.BuildSparklinePaths(Area, emptySpan, 0f, 1f, out SKPath? emptySpanLine, out SKPath? emptySpanFill);
         Assert.IsNull(emptySpanLine);
         Assert.IsNull(emptySpanFill);
     }
@@ -51,7 +51,7 @@ public class SparklineRendererTests
     {
         float[] samples = [42f, 42f, 42f, 42f];
 
-        TextRenderHelper.BuildSparklinePaths(Area, samples, 42f, 42f, out SKPath? line, out SKPath? fill);
+        SparklineRenderer.BuildSparklinePaths(Area, samples, 42f, 42f, out SKPath? line, out SKPath? fill);
 
         Assert.IsNotNull(line);
         Assert.IsNotNull(fill);
@@ -72,8 +72,8 @@ public class SparklineRendererTests
         double[] list = [10.5, 12.25, 9.75, 11.5, 10.0, 8.9, 13.1];
         Span<float> span = [10.5f, 12.25f, 9.75f, 11.5f, 10.0f, 8.9f, 13.1f];
 
-        TextRenderHelper.BuildSparklinePaths(Area, list, 9.0, 13.0, out SKPath? listLine, out SKPath? listFill);
-        TextRenderHelper.BuildSparklinePaths(Area, span, 9f, 13f, out SKPath? spanLine, out SKPath? spanFill);
+        SparklineRenderer.BuildSparklinePaths(Area, list, 9.0, 13.0, out SKPath? listLine, out SKPath? listFill);
+        SparklineRenderer.BuildSparklinePaths(Area, span, 9f, 13f, out SKPath? spanLine, out SKPath? spanFill);
 
         Assert.IsNotNull(listLine);
         Assert.IsNotNull(listFill);
@@ -103,7 +103,7 @@ public class SparklineRendererTests
         using var canvas = new SKCanvas(bitmap);
         double[] samples = [1.0, 2.0];
 
-        TextRenderHelper.DrawSparkline(canvas, Area, samples, 0.0, 3.0, SKColors.Orange);
+        SparklineRenderer.DrawSparkline(canvas, Area, samples, 0.0, 3.0, SKColors.Orange);
 
         Assert.IsNotNull(bitmap);
     }
