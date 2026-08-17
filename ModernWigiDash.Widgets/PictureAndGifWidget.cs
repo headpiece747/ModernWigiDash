@@ -392,57 +392,57 @@ public class PictureAndGifWidget : ModernWidgetBase
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
         using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        // The cycle hint only applies when the source mode actually cycles —
-        // a single-image widget must not promise a tap-to-cycle behavior.
-        bool cycles = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal) || (string.Equals(SourceMode, "Auto", StringComparison.Ordinal) && Directory.Exists(ImagePath));
-        string hint = cycles ? "Click/Tap to Cycle Pictures" : "Tap to set an Image Path";
+        // The cycle hint only applies when the source actually cycles (the
+        // policy verdict) — a single-image widget or a missing folder must not
+        // promise a tap-to-cycle behavior it cannot keep.
+        string hint = PictureSourcePolicy.PlaceholderHint(
+            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)));
         TextRenderHelper.DrawCenteredText(canvas, hint, bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
     }
 
     private string? GetActiveImageFile()
     {
-        bool singleMode = string.Equals(SourceMode, "Single Image", StringComparison.Ordinal);
-        bool folderMode = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal);
-
-        if (!folderMode && ProbeFileExists(ImagePath))
+        switch (PictureSourcePolicy.Resolve(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)))
         {
-            return ImagePath;
+            case PictureSourcePolicy.PictureSourceKind.File:
+                return ImagePath;
+
+            case PictureSourcePolicy.PictureSourceKind.Folder:
+                // Rescan on first use and then on a throttled cadence: files
+                // added to a cycling folder while the app runs appear within
+                // one period, without a per-frame disk scan (the old one-shot
+                // latch froze the list until a property change or restart).
+                if (!_folderScanned || Clock.GetUtcNow() - _folderLastScan >= FolderRescanPeriod)
+                {
+                    _folderImages = Directory.GetFiles(ImagePath, "*.*")
+                        .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                                    f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                                    f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+                                    f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+                    _folderScanned = true;
+                    _folderLastScan = Clock.GetUtcNow();
+                }
+
+                if (_folderImages.Length > 0)
+                {
+                    _imageIndex %= _folderImages.Length;
+                    return _folderImages[_imageIndex];
+                }
+                return null;
+
+            default:
+                return null;
         }
-
-        if (!singleMode && Directory.Exists(ImagePath))
-        {
-            // Rescan on first use and then on a throttled cadence: files added
-            // to a cycling folder while the app runs appear within one period,
-            // without a per-frame disk scan (the old one-shot latch froze the
-            // list until a property change or restart).
-            if (!_folderScanned || Clock.GetUtcNow() - _folderLastScan >= FolderRescanPeriod)
-            {
-                _folderImages = Directory.GetFiles(ImagePath, "*.*")
-                    .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                _folderScanned = true;
-                _folderLastScan = Clock.GetUtcNow();
-            }
-
-            if (_folderImages.Length > 0)
-            {
-                _imageIndex %= _folderImages.Length;
-                return _folderImages[_imageIndex];
-            }
-        }
-
-        return null;
     }
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
-        bool folderMode = string.Equals(SourceMode, "Folder (Cycle)", StringComparison.Ordinal);
-        bool autoFolder = string.Equals(SourceMode, "Auto", StringComparison.Ordinal) && Directory.Exists(ImagePath);
-
-        if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 && (folderMode || autoFolder))
+        // The touch gate is the policy's cycle verdict: only an actually
+        // cycling folder advances on tap (the scanned-list guard stays — a
+        // folder with no images yet has nothing to cycle).
+        if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 &&
+            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)))
         {
             _imageIndex = (_imageIndex + 1) % _folderImages.Length;
             _loadedPath = "";
