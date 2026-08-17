@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -8,11 +7,11 @@ using ModernWigiDash.Widgets;
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The REST poll bodies of <see cref="PriceFeedManager"/>: one fetch → parse →
-/// store hop per symbol, driven through the injectable HttpClient (the 30s
-/// delay-first loop cadence is not practically testable, so the bodies are the
-/// seam — the wire parsers they call are pinned separately in the messages
-/// tests).
+/// The REST quote legs behind <see cref="PriceFeedManager"/>: one fetch →
+/// parse → store hop per symbol, driven through the injectable HttpClient.
+/// The cycle cadence itself is the RestPollLoop module (pinned by
+/// RestPollLoopTests through its injected delay delegate), and the wire
+/// parsers the legs call are pinned separately in the messages tests.
 /// </summary>
 [TestClass]
 public class PriceFeedManagerRestPollTests
@@ -20,28 +19,13 @@ public class PriceFeedManagerRestPollTests
     private static HttpResponseMessage Ok(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body) };
 
-    /// <summary>The loop-delay seam (the FeedLoop pattern): a delay driven by
-    /// the fake clock's timers, so <see cref="FakeTimeProvider.Advance"/>
-    /// controls the REST loop's cadence deterministically. The cancellation
-    /// registration is deliberately kept alive (no <c>using</c>): a pending
-    /// delay must be cancellable so <c>Dispose</c> lets <c>await loop</c>
-    /// return instead of hanging on an un-fired timer.</summary>
-    private static Func<TimeSpan, CancellationToken, Task> FakeClockDelay(FakeTimeProvider clock)
-        => (delay, ct) =>
-        {
-            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            ct.Register(() => tcs.TrySetCanceled(ct));
-            clock.CreateTimer(_ => tcs.TrySetResult(), null, delay, Timeout.InfiniteTimeSpan);
-            return tcs.Task;
-        };
-
     [TestMethod]
-    public async Task PollStockSymbolAsync_FinnhubQuote_StoresPrice()
+    public async Task PollStockAsync_FinnhubQuote_StoresPrice()
     {
         var stub = new StubHttpHandler(_ => Ok("""{"c":150.5,"d":2.1,"dp":1.4,"h":152,"l":148,"o":148.5,"pc":148.5}"""));
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
-        await feed.PollStockSymbolAsync("AAPL");
+        await feed.PollStockAsync("AAPL");
 
         var info = feed.GetPrice("AAPL", AssetKind.Stock);
         Assert.IsNotNull(info);
@@ -52,23 +36,23 @@ public class PriceFeedManagerRestPollTests
     }
 
     [TestMethod]
-    public async Task PollStockSymbolAsync_InvalidSymbol_MakesNoRequest()
+    public async Task PollStockAsync_InvalidSymbol_MakesNoRequest()
     {
         var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
-        await feed.PollStockSymbolAsync("AAPL&x=1");
+        await feed.PollStockAsync("AAPL&x=1");
 
         Assert.AreEqual(0, stub.Calls);
     }
 
     [TestMethod]
-    public async Task PollFxPairAsync_FrankfurterSeries_StoresPriceAndChange()
+    public async Task PollFxAsync_FrankfurterSeries_StoresPriceAndChange()
     {
         var stub = new StubHttpHandler(_ => Ok("""{"rates":{"2025-08-01":{"EUR":0.95},"2025-08-02":{"EUR":0.93}}}"""));
         using var feed = new PriceFeedManager(new HttpClient(stub));
 
-        await feed.PollFxPairAsync("USDEUR");
+        await feed.PollFxAsync("USDEUR");
 
         var info = feed.GetPrice("USDEUR", AssetKind.Fx);
         Assert.IsNotNull(info);
@@ -80,12 +64,12 @@ public class PriceFeedManagerRestPollTests
     }
 
     [TestMethod]
-    public async Task PollFxPairAsync_InvalidKey_MakesNoRequest()
+    public async Task PollFxAsync_InvalidKey_MakesNoRequest()
     {
         var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub));
 
-        await feed.PollFxPairAsync("USDEURX");
+        await feed.PollFxAsync("USDEURX");
 
         Assert.AreEqual(0, stub.Calls);
     }
@@ -108,12 +92,12 @@ public class PriceFeedManagerRestPollTests
     }
 
     [TestMethod]
-    public async Task PollCryptoSymbolAsync_BinanceUs24HrTicker_StoresPrice()
+    public async Task PollCryptoAsync_BinanceUs24HrTicker_StoresPrice()
     {
         var stub = new StubHttpHandler(_ => Ok("""{"symbol":"BTCUSDT","lastPrice":"65000.0","priceChangePercent":"2.5"}"""));
         using var feed = new PriceFeedManager(new HttpClient(stub));
 
-        await feed.PollCryptoSymbolAsync("BTC");
+        await feed.PollCryptoAsync("BTC");
 
         var info = feed.GetPrice("BTC", AssetKind.Crypto);
         Assert.IsNotNull(info);
@@ -124,17 +108,17 @@ public class PriceFeedManagerRestPollTests
     }
 
     [TestMethod]
-    public async Task PollCryptoSymbolAsync_UnparseableBody_StoresNothing()
+    public async Task PollCryptoAsync_UnparseableBody_StoresNothing()
     {
         var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub));
 
-        await feed.PollCryptoSymbolAsync("BTC");
+        await feed.PollCryptoAsync("BTC");
 
         Assert.IsNull(feed.GetPrice("BTC", AssetKind.Crypto));
     }
 
-    // ── freshness policy: the 60s window, one spelling ─────────────
+    // ── freshness policy: the 60s window, one spelling ─────────────────
 
     [TestMethod]
     public void PriceInfo_IsStale_WithinWindow_False()
@@ -198,7 +182,7 @@ public class PriceFeedManagerRestPollTests
         using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: _ => new FakeFeed()) { Clock = clock };
         feed.Subscribe("bitcoin", AssetKind.Crypto);
 
-        await feed.PollCryptoSymbolAsync("BTC");
+        await feed.PollCryptoAsync("BTC");
         clock.Advance(TimeSpan.FromSeconds(30));
         await feed.FallbackCoinGeckoAsync();
 
@@ -222,7 +206,7 @@ public class PriceFeedManagerRestPollTests
         using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: _ => new FakeFeed()) { Clock = clock };
         feed.Subscribe("bitcoin", AssetKind.Crypto);
 
-        await feed.PollCryptoSymbolAsync("BTC");
+        await feed.PollCryptoAsync("BTC");
         clock.Advance(TimeSpan.FromSeconds(61));
         await feed.FallbackCoinGeckoAsync();
 
@@ -230,84 +214,5 @@ public class PriceFeedManagerRestPollTests
         Assert.IsNotNull(info);
         Assert.AreEqual(60000m, info.Price, "a stale BinanceUS price may be replaced by the fallback");
         Assert.AreEqual("CoinGecko", info.Source);
-    }
-
-    // ── the REST loop orchestration: cadence, isolation, ordering ────
-    // Driven through the Clock (TimeProvider) delay seam — the same seam
-    // FeedLoop and PollLoop expose — so no 30 real seconds are needed.
-
-    [TestMethod]
-    public async Task RunRestPollLoopAsync_BadSymbol_DoesNotKillTheLoop()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), feedFactory: _ => new FakeFeed(), delay: FakeClockDelay(clock)) { Clock = clock };
-        var polled = new ConcurrentQueue<string>();
-        // Batch-completion signals make the advance sequencing deterministic:
-        // the loop creates its next delay timer synchronously after afterBatch
-        // completes, so advancing only after the signal can never miss it.
-        var firstBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int batches = 0;
-
-        var loop = feed.RunRestPollLoopAsync(TimeSpan.FromSeconds(30), ["AAPL", "BAD"],
-            sym =>
-            {
-                polled.Enqueue(sym);
-                return sym == "BAD" ? Task.FromException(new InvalidOperationException("boom")) : Task.CompletedTask;
-            },
-            afterBatch: () =>
-            {
-                batches++;
-                if (batches == 1) firstBatch.TrySetResult();
-                if (batches == 2) secondBatch.TrySetResult();
-                return Task.CompletedTask;
-            });
-
-        Assert.AreEqual(0, polled.Count, "delay-first: no polls before the window elapses");
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await firstBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await secondBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.AreEqual(2, polled.Count(p => p == "AAPL"), "the good symbol survives the bad one's failures");
-        Assert.AreEqual(2, polled.Count(p => p == "BAD"), "the bad symbol is still attempted every cycle");
-        feed.Dispose();
-        await loop;
-    }
-
-    [TestMethod]
-    public async Task RunRestPollLoopAsync_AfterBatch_RunsOncePerCycleAfterAllSymbols()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        using var feed = new PriceFeedManager(new HttpClient(new StubHttpHandler("{}")), feedFactory: _ => new FakeFeed(), delay: FakeClockDelay(clock)) { Clock = clock };
-        var sequence = new ConcurrentQueue<string>();
-        var firstBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int batches = 0;
-
-        var loop = feed.RunRestPollLoopAsync(TimeSpan.FromSeconds(30), ["A", "B"],
-            sym =>
-            {
-                sequence.Enqueue(sym);
-                return Task.CompletedTask;
-            },
-            () =>
-            {
-                sequence.Enqueue("batch");
-                batches++;
-                if (batches == 1) firstBatch.TrySetResult();
-                if (batches == 2) secondBatch.TrySetResult();
-                return Task.CompletedTask;
-            });
-
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await firstBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await secondBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        CollectionAssert.AreEqual(new[] { "A", "B", "batch", "A", "B", "batch" }, sequence.ToArray(),
-            "each cycle must poll every symbol, then run afterBatch");
-        feed.Dispose();
-        await loop;
     }
 }
