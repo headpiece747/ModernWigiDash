@@ -139,33 +139,53 @@ public class PriceFeedManagerRestPollTests
     }
 
     [TestMethod]
-    public void ShouldKeepFreshBinanceUs_FreshBinanceUs_True()
+    public void ShouldKeepExisting_FreshOtherSource_True()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
         var existing = new PriceInfo { Price = 100m, Source = PriceFeedManager.SourceBinanceUs, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
 
-        Assert.IsTrue(PriceFeedManager.ShouldKeepFreshBinanceUs(existing, clock.GetUtcNow().UtcDateTime),
+        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
             "a fresh BinanceUS price must not be downgraded by the CoinGecko fallback");
     }
 
     [TestMethod]
-    public void ShouldKeepFreshBinanceUs_StaleBinanceUs_False()
+    public void ShouldKeepExisting_StaleOtherSource_False()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
         var existing = new PriceInfo { Price = 100m, Source = PriceFeedManager.SourceBinanceUs, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61) };
 
-        Assert.IsFalse(PriceFeedManager.ShouldKeepFreshBinanceUs(existing, clock.GetUtcNow().UtcDateTime),
+        Assert.IsFalse(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
             "a stale BinanceUS price may be replaced by the fallback");
     }
 
     [TestMethod]
-    public void ShouldKeepFreshBinanceUs_OtherSource_False()
+    public void ShouldKeepExisting_SameSourceRefresh_False()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
         var existing = new PriceInfo { Price = 100m, Source = "CoinGecko", Timestamp = clock.GetUtcNow().UtcDateTime };
 
-        Assert.IsFalse(PriceFeedManager.ShouldKeepFreshBinanceUs(existing, clock.GetUtcNow().UtcDateTime),
-            "only BinanceUS prices are protected by the downgrade guard");
+        Assert.IsFalse(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
+            "a same-source refresh must replace the previous fallback sample");
+    }
+
+    [TestMethod]
+    public void ShouldKeepExisting_FreshWebSocketBinance_True()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var existing = new PriceInfo { Price = 100m, Source = "Binance", Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
+
+        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
+            "the live Binance WebSocket price is protected from the CoinGecko fallback too");
+    }
+
+    [TestMethod]
+    public void ShouldKeepExisting_FreshFinnhubAgainstYahoo_True()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        var existing = new PriceInfo { Price = 150.5m, Source = "Finnhub", Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
+
+        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "Yahoo", clock.GetUtcNow().UtcDateTime),
+            "a fresh Finnhub stock price must not be downgraded by the Yahoo one-shot seed");
     }
 
     [TestMethod]
@@ -214,5 +234,78 @@ public class PriceFeedManagerRestPollTests
         Assert.IsNotNull(info);
         Assert.AreEqual(60000m, info.Price, "a stale BinanceUS price may be replaced by the fallback");
         Assert.AreEqual("CoinGecko", info.Source);
+    }
+
+    // ── one-shot seed: the manager-owned operation behind the ticker ──
+
+    [TestMethod]
+    public async Task SeedFallbackAsync_Crypto_FreshLivePrice_IsNotDowngraded()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("binance.us", StringComparison.Ordinal)
+                ? Ok("""{"symbol":"BTCUSDT","lastPrice":"65000.0","priceChangePercent":"2.5"}""")
+                : Ok("""{"bitcoin":{"usd":60000.0,"usd_24h_change":1.5}}""");
+        });
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        using var feed = new PriceFeedManager(new HttpClient(stub)) { Clock = clock };
+
+        await feed.PollCryptoAsync("BTC"); // the live cycle stores a fresh BinanceUS record
+        await feed.SeedFallbackAsync("BTC", AssetKind.Crypto);
+
+        var info = feed.GetPrice("BTC", AssetKind.Crypto);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(65000m, info.Price, "a fresh BinanceUS price must survive the one-shot seed");
+        Assert.AreEqual(PriceFeedManager.SourceBinanceUs, info.Source);
+
+        clock.Advance(TimeSpan.FromSeconds(90)); // the live record is now stale
+        await feed.SeedFallbackAsync("BTC", AssetKind.Crypto);
+
+        info = feed.GetPrice("BTC", AssetKind.Crypto);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(60000m, info.Price, "a stale live price may be replaced by the seed");
+        Assert.AreEqual("CoinGecko", info.Source);
+    }
+
+    [TestMethod]
+    public async Task SeedFallbackAsync_Stock_FreshFinnhubPrice_IsNotDowngraded()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("finnhub.io", StringComparison.Ordinal)
+                ? Ok("""{"c":150.5,"d":2.1,"dp":1.4,"h":152,"l":148,"o":148.5,"pc":148.5}""")
+                : Ok("""{"chart":{"result":[{"meta":{"regularMarketPrice":140.0,"chartPreviousClose":138.0}}]}}""");
+        });
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
+        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key") { Clock = clock };
+
+        await feed.PollStockAsync("AAPL");
+        await feed.SeedFallbackAsync("AAPL", AssetKind.Stock);
+
+        var info = feed.GetPrice("AAPL", AssetKind.Stock);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(150.5m, info.Price, "a fresh Finnhub price must survive the Yahoo one-shot seed");
+        Assert.AreEqual("Finnhub", info.Source);
+
+        clock.Advance(TimeSpan.FromSeconds(90));
+        await feed.SeedFallbackAsync("AAPL", AssetKind.Stock);
+
+        info = feed.GetPrice("AAPL", AssetKind.Stock);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(140.0m, info.Price, "a stale Finnhub price may be replaced by the seed");
+        Assert.AreEqual("Yahoo", info.Source);
+    }
+
+    [TestMethod]
+    public async Task SeedFallbackAsync_Fx_MakesNoRequest()
+    {
+        var stub = new StubHttpHandler("{}");
+        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
+
+        await feed.SeedFallbackAsync("EUR/USD", AssetKind.Fx);
+
+        Assert.AreEqual(0, stub.Calls, "FX is served by the Frankfurter cycle — the one-shot seed must make no request");
     }
 }

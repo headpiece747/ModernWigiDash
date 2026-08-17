@@ -200,25 +200,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         TextRenderHelper.DrawCenteredText(canvas, "e.g. BTC, ETH, AAPL, MSFT", bounds.MidX, bounds.MidY + 16f, hintFont, hintPaint);
     }
 
-    private async Task FallbackFetchAsync()
-    {
-        try
-        {
-            if (IsFxAsset) return;
-            await Feed.FetchFallbackAsync(Symbol, AssetKindValue).ConfigureAwait(false);
-
-            var info = Feed.GetPrice(Symbol, AssetKindValue);
-            if (info != null)
-            {
-                Price = FormatPrice(info.Price, info.CurrencySymbol);
-                ChangeBadge = info.FormattedChange;
-                _lastChangePositive = info.IsPositive;
-                Context?.RequestRender();
-            }
-        }
-        catch
-        {
-            FileLog.Write($"[PRICE-FEED] Market price fetch failed for '{LogSanitizer.Sanitize(Symbol)}'; keeping last known price");
-        }
-    }
+    /// <summary>
+    /// One fallback seed through the manager's seam: the source routing, the FX
+    /// no-op, the guarded price-map write, and the failure log all live in the
+    /// manager (it owns the one-shot legs and never throws — this call is
+    /// fire-and-forget from the render tick). Render pulls the seeded price from
+    /// the shared map on the next tick; no write-back is needed.
+    /// </summary>
+    private Task FallbackFetchAsync() => Feed.SeedFallbackAsync(Symbol, AssetKindValue);
 }

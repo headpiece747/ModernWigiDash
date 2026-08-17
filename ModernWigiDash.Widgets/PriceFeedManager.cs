@@ -222,7 +222,7 @@ public sealed class PriceFeedManager : IDisposable
                 }
                 string stockSym = symbol.ToUpperInvariant();
                 // Without a Finnhub key the WS/REST stock feeds cannot work; the
-                // Yahoo Finance fallback in FetchFallbackAsync still does.
+                // Yahoo Finance seed in SeedFallbackAsync still does.
                 if (_subscribedStocks.AddOrUpdate(stockSym, 1, (_, count) => count + 1) == 1
                     && !string.IsNullOrEmpty(_finnhubKey))
                 {
@@ -343,29 +343,43 @@ public sealed class PriceFeedManager : IDisposable
     }
 
     /// <summary>
-    /// One-shot fallback price fetch for a single symbol (crypto via CoinGecko
-    /// using the CoinGeckoIds mapping, stocks via Yahoo). Used by widgets when
-    /// no live feed price is available yet; stores into the shared price map.
+    /// The one-shot fallback seed — the manager's single seeding operation, which
+    /// the ticker's render tick and the subscription seed ride. It owns the source
+    /// routing (crypto → CoinGecko leg, stock → Yahoo leg, FX is a no-op — the
+    /// Frankfurter cycle already serves FX), the price-map write under the fallback
+    /// downgrade guard (a fresh live price is never downgraded — the same rule the
+    /// crypto-cycle batch tail applies), and the failure log with cadence dedup. It
+    /// never throws, so a fire-and-forget caller is safe.
     /// </summary>
-    public async Task FetchFallbackAsync(string symbol, AssetKind kind)
+    public async Task SeedFallbackAsync(string symbol, AssetKind kind)
     {
-        if (kind == AssetKind.Crypto)
+        // FX is a no-op: the Frankfurter REST cycle already serves FX symbols —
+        // a one-shot seed would duplicate it, and its series response has no
+        // single best quote to seed from.
+        if (kind == AssetKind.Fx) return;
+
+        (string key, string source) = kind == AssetKind.Crypto
+            ? (SymbolCatalog.ToFeedKey(symbol, AssetKind.Crypto), CoinGeckoRestLeg.SourceLabel)
+            : (symbol.ToUpperInvariant(), YahooRestLeg.SourceLabel);
+        try
         {
-            string baseCoin = SymbolCatalog.ToFeedKey(symbol, kind);
-            QuoteSample? sample = await CoinGeckoLeg.FetchAsync(baseCoin, _cts.Token).ConfigureAwait(false);
-            if (sample is QuoteSample quote)
-            {
-                _prices[baseCoin] = NewPrice(quote.Price, quote.ChangePercent, CoinGeckoRestLeg.SourceLabel);
-            }
+            QuoteSample? sample = kind == AssetKind.Crypto
+                ? await CoinGeckoLeg.FetchAsync(key, _cts.Token).ConfigureAwait(false)
+                : await YahooRestLeg.FetchAsync(key, _cts.Token).ConfigureAwait(false);
+            if (sample is not QuoteSample quote) return;
+            _prices.AddOrUpdate(
+                key,
+                _ => NewPrice(quote.Price, quote.ChangePercent, source),
+                (_, existing) => ShouldKeepExisting(existing, source, Clock.GetUtcNow().UtcDateTime)
+                    ? existing
+                    : NewPrice(quote.Price, quote.ChangePercent, source));
         }
-        else if (kind == AssetKind.Stock)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            string stockSym = symbol.ToUpperInvariant();
-            QuoteSample? sample = await YahooRestLeg.FetchAsync(stockSym, _cts.Token).ConfigureAwait(false);
-            if (sample is QuoteSample quote)
-            {
-                _prices[stockSym] = NewPrice(quote.Price, quote.ChangePercent, YahooRestLeg.SourceLabel);
-            }
+            // Transport failure: the leg propagates it (the REST cycle isolates
+            // per-symbol; the one-shot path has no cycle) — the seed's owner is
+            // the cadence-deduped log, so a dead source stays diagnosable.
+            _failLog.Write($"One-shot fallback seed failed for {LogSanitizer.Sanitize(symbol)}: {ex.Message}");
         }
     }
 
@@ -383,12 +397,16 @@ public sealed class PriceFeedManager : IDisposable
             CurrencySymbol = currencySymbol
         };
 
-    /// <summary>The CoinGecko downgrade rule: a fresh BinanceUS price is never
-    /// replaced by a CoinGecko fallback — the fallback's slower cadence must
-    /// not overwrite live feed data. Pure over the existing record and the
-    /// clock so the freshness window is directly testable.</summary>
-    internal static bool ShouldKeepFreshBinanceUs(PriceInfo existing, DateTime now)
-        => string.Equals(existing.Source, SourceBinanceUs, StringComparison.Ordinal) && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
+    /// <summary>The fallback downgrade guard — the one spelling every fallback
+    /// store site (the one-shot seed, the crypto-cycle batch tail) applies
+    /// before writing a fallback sample: a fresh record from any OTHER source
+    /// is kept — live feed data is never downgraded by the fallback's slower
+    /// cadence and coarser data. A same-source refresh and a stale record are
+    /// replaced. Pure over the existing record, the incoming source, and the
+    /// clock so the rule is directly testable without the price map.</summary>
+    internal static bool ShouldKeepExisting(PriceInfo existing, string incomingSource, DateTime now)
+        => !string.Equals(existing.Source, incomingSource, StringComparison.Ordinal)
+            && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
 
     /// <summary>Diagnostic log with cadence dedup for the per-tick feed
     /// failures — the module's runtime surface (configuration paths use
@@ -438,8 +456,8 @@ public sealed class PriceFeedManager : IDisposable
 
     /// <summary>
     /// The crypto cycle's batch tail: one CoinGecko request for every
-    /// subscribed base coin. A fresh BinanceUS price is never downgraded by
-    /// the fallback (see <see cref="ShouldKeepFreshBinanceUs"/>).
+    /// subscribed base coin. A fresh live price is never downgraded by the
+    /// fallback (see <see cref="ShouldKeepExisting"/>).
     /// </summary>
     internal async Task FallbackCoinGeckoAsync()
     {
@@ -454,7 +472,7 @@ public sealed class PriceFeedManager : IDisposable
                     _ => NewPrice(sample.Price, sample.ChangePercent, CoinGeckoRestLeg.SourceLabel),
                     (_, existing) =>
                     {
-                        if (ShouldKeepFreshBinanceUs(existing, Clock.GetUtcNow().UtcDateTime))
+                        if (ShouldKeepExisting(existing, CoinGeckoRestLeg.SourceLabel, Clock.GetUtcNow().UtcDateTime))
                         {
                             return existing;
                         }

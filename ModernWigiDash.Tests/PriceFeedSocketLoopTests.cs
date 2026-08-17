@@ -52,7 +52,7 @@ public class PriceFeedSocketLoopTests
     }
 
     [TestMethod]
-    public async Task FetchFallbackAsync_CryptoWithKnownAlias_UsesCoinGeckoIdFromSingleTable()
+    public async Task SeedFallbackAsync_CryptoWithKnownAlias_UsesCoinGeckoIdFromSingleTable()
     {
         var stub = new StubHttpHandler("""{"arbitrum":{"usd":1.05,"usd_24h_change":2.5}}""");
         using var manager = new PriceFeedManager(new HttpClient(stub), "test-key");
@@ -60,7 +60,7 @@ public class PriceFeedSocketLoopTests
         // "arbitrum" is not the canonical symbol — the fallback must still
         // resolve its CoinGecko id through the single table (old two-table
         // layout silently dropped coins whose canonical symbol was not a key).
-        await manager.FetchFallbackAsync("ARB", AssetKind.Crypto);
+        await manager.SeedFallbackAsync("ARB", AssetKind.Crypto);
 
         Assert.AreEqual(1, stub.Calls);
         Assert.IsTrue(stub.RequestUrls[0].Contains("arbitrum", StringComparison.Ordinal), "Fallback URL must use the CoinGecko id");

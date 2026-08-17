@@ -77,35 +77,35 @@ public class PriceFeedManagerLifecycleTests
     }
 
     [TestMethod]
-    public async Task FetchFallbackAsync_InvalidStockSymbol_DoesNotCallHttp()
+    public async Task SeedFallbackAsync_InvalidStockSymbol_DoesNotCallHttp()
     {
         var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
-        await feed.FetchFallbackAsync("AAPL&x=1", AssetKind.Stock);
+        await feed.SeedFallbackAsync("AAPL&x=1", AssetKind.Stock);
 
         Assert.AreEqual(0, stub.Calls, "A polluted symbol must never reach the Yahoo feed");
     }
 
     [TestMethod]
-    public async Task FetchFallbackAsync_OverlongOrEmptySymbol_DoesNotCallHttp()
+    public async Task SeedFallbackAsync_OverlongOrEmptySymbol_DoesNotCallHttp()
     {
         var stub = new StubHttpHandler("{}");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
-        await feed.FetchFallbackAsync(new string('A', 100), AssetKind.Stock);
-        await feed.FetchFallbackAsync("", AssetKind.Stock);
+        await feed.SeedFallbackAsync(new string('A', 100), AssetKind.Stock);
+        await feed.SeedFallbackAsync("", AssetKind.Stock);
 
         Assert.AreEqual(0, stub.Calls, "Overlong and empty symbols must never reach the Yahoo feed");
     }
 
     [TestMethod]
-    public async Task FetchFallbackAsync_ValidStockSymbol_StillCallsHttp()
+    public async Task SeedFallbackAsync_ValidStockSymbol_StillCallsHttp()
     {
         var stub = new StubHttpHandler("""{"chart":{"result":[{"meta":{"regularMarketPrice":150.5,"chartPreviousClose":148.0}}]}}""");
         using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
 
-        await feed.FetchFallbackAsync("AAPL", AssetKind.Stock);
+        await feed.SeedFallbackAsync("AAPL", AssetKind.Stock);
 
         Assert.AreEqual(1, stub.Calls, "A valid symbol must still reach the Yahoo feed");
         Assert.IsTrue(stub.RequestUrls[0].Contains("AAPL", StringComparison.OrdinalIgnoreCase), "The Yahoo URL must contain the requested symbol");
