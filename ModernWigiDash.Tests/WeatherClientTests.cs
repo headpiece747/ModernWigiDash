@@ -782,6 +782,24 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_Success_FetchedCarriesTheQueryKey()
+    {
+        // The Fetched outcome carries the key the client actually resolved
+        // for, so the caller can compare it against its own pre-await capture
+        // (a resolution-input change in the capture window resolves a
+        // different identity than the caller thinks it fetched).
+        var stub = new StubHttpHandler(Respond);
+        var client = CreateClient(stub);
+
+        var result = await client.FetchCurrentAsync(CoordinateLocation);
+        var fetched = result as WeatherFetchResult.Fetched;
+
+        Assert.IsNotNull(fetched);
+        Assert.AreEqual(WeatherClient.BuildQueryKey(CoordinateLocation), fetched.QueryKey,
+            "a Fetched outcome must carry the query key it was resolved for");
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_FetchedThrottledAndFailed_ReportTheirOutcome()
     {
         // The outcome's kind is the caller's policy input: Fetched when a
@@ -835,6 +853,9 @@ public class WeatherClientTests
             "an invalidated identity must report the result stale");
         Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
             "a stale result must not stamp the throttle window");
+        var stale = (WeatherFetchResult.Stale)result;
+        Assert.AreEqual(WeatherClient.BuildQueryKey(new WeatherLocation("Fixed Location", "Victoria", null, null, null)), stale.QueryKey,
+            "a Stale outcome must carry the query key the in-flight fetch was started for");
 
         // The new identity's fetch must run immediately (the stale path left
         // the throttle open) and resolve fresh.
@@ -865,6 +886,9 @@ public class WeatherClientTests
             "a geocode failure after an identity change must report Stale (the re-fetch runs immediately)");
         Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
             "a stale geocode failure must not stamp the new identity's throttle");
+        var stale = (WeatherFetchResult.Stale)result;
+        Assert.AreEqual(WeatherClient.BuildQueryKey(new WeatherLocation("Fixed Location", "Atlantis", null, null, null)), stale.QueryKey,
+            "a Stale outcome must carry the query key the in-flight fetch was started for");
     }
 
     [TestMethod]
@@ -1165,7 +1189,7 @@ public class WeatherClientTests
         string dir = NewTempDir();
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "weather_test.json");
-        string payload = """{"CurrentTempC":20.0,"ResolvedCityName":"Berlin"}""" + new string(' ', (int)WeatherClient.MaxCacheBytes);
+        string payload = """{"CurrentTempC":20.0,"ResolvedCityName":"Berlin"}""" + new string(' ', (int)WeatherCacheStore.MaxCacheBytes);
         await File.WriteAllTextAsync(path, payload);
 
         var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
@@ -1183,7 +1207,7 @@ public class WeatherClientTests
         string dir = NewTempDir();
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "weather_test.json");
-        string payload = LegacyCacheJson + new string(' ', (int)WeatherClient.MaxCacheBytes - LegacyCacheJson.Length);
+        string payload = LegacyCacheJson + new string(' ', (int)WeatherCacheStore.MaxCacheBytes - LegacyCacheJson.Length);
         await File.WriteAllTextAsync(path, payload);
 
         var reader = new WeatherClient(dir, "weather_test.json", http: new HttpClient(new StubHttpHandler(Respond)));
@@ -1208,7 +1232,7 @@ public class WeatherClientTests
         string dir = NewTempDir();
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "weather_test.json");
-        string payload = LegacyCacheJson + new string(' ', (int)WeatherClient.MaxCacheBytes - LegacyCacheJson.Length);
+        string payload = LegacyCacheJson + new string(' ', (int)WeatherCacheStore.MaxCacheBytes - LegacyCacheJson.Length);
         await File.WriteAllTextAsync(path, payload);
         var logs = new List<string>();
         var reader = new WeatherClient(dir, "weather_test.json",
@@ -1252,7 +1276,7 @@ public class WeatherClientTests
         }
 
         Assert.IsTrue(rejected, "the mid-read growth must be rejected (the post-loop guard reads short at the cap)");
-        Assert.IsTrue(logs.Any(l => l.Contains($"exceeds the {WeatherClient.MaxCacheBytes} byte bound", StringComparison.Ordinal)),
+        Assert.IsTrue(logs.Any(l => l.Contains($"exceeds the {WeatherCacheStore.MaxCacheBytes} byte bound", StringComparison.Ordinal)),
             "the rejection must surface through the error sink");
     }
 

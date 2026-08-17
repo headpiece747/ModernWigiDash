@@ -657,6 +657,67 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task FetchLiveWeatherAsync_Success_ReturnsApplied()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleGeocode) : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+
+        var outcome = await widget.FetchLiveWeatherAsync(force: true);
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.Applied, outcome);
+        Assert.AreEqual("New York, US", widget.ResolvedCityName, "the applied fetch must have taken effect");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_InFlightEdit_ReturnsDroppedStale()
+    {
+        var gate = new TaskCompletionSource();
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry)
+                : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
+        }, gate);
+        var widget = new WeatherForecastWidget { Location = "Victoria", TestHttpClient = new HttpClient(stub) };
+
+        var fetching = widget.FetchLiveWeatherAsync(force: true);
+        await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
+        widget.Location = "Tokyo"; // the user edits while the fetch is in flight
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Tokyo"); // invalidates the client
+        gate.SetResult();
+
+        var outcome = await fetching;
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome,
+            "a fetch that completed under an identity change must report DroppedStale");
+        Assert.AreEqual("Tokyo", widget.Location, "the edit must survive");
+    }
+
+    [TestMethod]
+    public async Task FetchLiveWeatherAsync_Throttled_ReturnsSkipped()
+    {
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal) ? StubHttpHandler.Ok(SampleGeocode) : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
+        });
+        var widget = new WeatherForecastWidget { Location = "New York", TestHttpClient = new HttpClient(stub) };
+
+        var first = await widget.FetchLiveWeatherAsync(force: true);
+        Assert.AreEqual(WeatherFetchFlowOutcome.Applied, first);
+        var second = await widget.FetchLiveWeatherAsync(); // no force: inside the 5-minute throttle window
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.Skipped, second,
+            "a throttled fetch must keep the previous state and report Skipped");
+        Assert.AreEqual("New York, US", widget.ResolvedCityName, "the previous snapshot must still be shown");
+    }
+
+    [TestMethod]
     public async Task LoadCachedWeatherAsync_FetchLandedDuringLoad_DoesNotOverwriteWithStaleCache()
     {
         // The boot race: InitializeAsync fires the cache load and the boot
@@ -847,12 +908,13 @@ public class WeatherForecastWidgetTests
         await cts.CancelAsync();
         widget._pollCts = cts;
 
-        await widget.FetchLiveWeatherAsync(force: true);
+        var outcome = await widget.FetchLiveWeatherAsync(force: true);
 
         // The cancellation is swallowed by the widget (teardown is not a
         // failure): awaiting the fetch completes without throwing.
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Victoria", widget.Location, "a cancelled fetch must not apply or write back anything");
+        Assert.AreEqual(WeatherFetchFlowOutcome.Cancelled, outcome, "a cancelled fetch must report the Cancelled verdict");
     }
 
     [TestMethod]

@@ -95,7 +95,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // the state transitions (Apply / Invalidate* / pending write-back); the
     // widget keeps only the gate discipline (every mutation runs under
     // _forecastGate) and the UI-thread flush.
-    private readonly WeatherResolvedIdentity _identity = new(WeatherClient.UnknownLocationLabel);
+    private readonly WeatherResolvedIdentity _identity = new(WeatherFetchControl.UnknownLocationLabel);
 
     // -- IWidgetLocationSearch ------------------------------------------------
 
@@ -208,7 +208,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // The old code used the last raw System.Threading.Timer: fire-and-
         // forget async callback, no readiness guard, no failure logging.
         _refreshPoll = new PollLoop(
-            "WEATHER", WeatherClient.FetchWindow, () => true,
+            "WEATHER", WeatherFetchControl.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
         // The boot fetch: InitializeAsync runs BEFORE the profile applies
@@ -424,7 +424,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// re-fire a fetch).</summary>
     internal bool _suppressLocationWriteback;
 
-    internal async Task FetchLiveWeatherAsync(bool force = false)
+    internal async Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
     {
         // The query key at START: the client's Stale verdict is computed
         // before its own cache-save await, so an identity change landing
@@ -440,7 +440,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         {
             // Teardown: the widget's poll CTS was cancelled (dispose) — a
             // cancelled fetch is not a failure, so nothing is logged or applied.
-            return;
+            return WeatherFetchFlowOutcome.Cancelled;
         }
 
         if (result is WeatherFetchResult.Stale)
@@ -452,7 +452,21 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // since the edit-time force refresh was swallowed by the in-flight
             // claim, which this fetch's completion has now released.
             RequestRefresh(force: true);
-            return;
+            return WeatherFetchFlowOutcome.DroppedStale;
+        }
+
+        // The outcome carries the key the client actually resolved for. It
+        // must match the key captured here: a resolution-input change landing
+        // between this capture and the client's own capture resolves a
+        // DIFFERENT identity, and if that identity was then changed back
+        // before this continuation runs, the live check below cannot see it —
+        // the outcome key can. Drop the result — weather AND label — when
+        // either comparison fails.
+        if (result is WeatherFetchResult.Fetched fetchedKeyCheck
+            && !string.Equals(fetchedKeyCheck.QueryKey, fetchKey, StringComparison.Ordinal))
+        {
+            RequestRefresh(force: true);
+            return WeatherFetchFlowOutcome.DroppedStale;
         }
 
         // Post-await re-validation: the client's Stale verdict is computed
@@ -460,16 +474,16 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // the post-InitializeAsync profile hydration) landing in that window
         // returns Fetched. Drop the result — weather AND label — when the
         // identity no longer matches, exactly as the old in-widget guard did.
-        if (!string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
+        if (!StillCurrent(fetchKey))
         {
             RequestRefresh(force: true);
-            return;
+            return WeatherFetchFlowOutcome.DroppedStale;
         }
 
         if (result is not WeatherFetchResult.Fetched fetched)
         {
             // Throttled / InFlight / Failed: keep the previous state silently.
-            return;
+            return WeatherFetchFlowOutcome.Skipped;
         }
 
         // The apply is identity-guarded under the same lock as the version
@@ -480,13 +494,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // assigned under the same lock — an edit cannot resurrect the old
         // dropdown/name/population over the fresh edit.
         if (!ApplySnapshot(fetched.Snapshot,
-                identityGuard: () => string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal),
+                identityGuard: () => StillCurrent(fetchKey),
                 candidates: fetched.Candidates,
                 population: fetched.Population,
                 resolvedName: fetched.Snapshot.ResolvedCityName))
         {
             RequestRefresh(force: true);
-            return;
+            return WeatherFetchFlowOutcome.DroppedStale;
         }
 
         WeatherSnapshot snapshot = fetched.Snapshot;
@@ -515,7 +529,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         {
             lock (_forecastGate)
             {
-                if (string.Equals(fetchKey, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal))
+                if (StillCurrent(fetchKey))
                 {
                     _identity.SetPendingWriteback(snapshot.ResolvedCityName);
                 }
@@ -534,6 +548,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
 
         Context?.RequestRender();
+        return WeatherFetchFlowOutcome.Applied;
     }
 
     /// <summary>
@@ -564,6 +579,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         {
             LocationMatch = string.IsNullOrWhiteSpace(LocationMatch) ? null : LocationMatch.Trim()
         };
+
+    /// <summary>
+    /// The single spelling of "the resolution identity still matches the key
+    /// captured at fetch start": re-derives the LIVE key from the current
+    /// location and compares. The client's Stale verdict is computed before
+    /// its own awaits, so every widget await boundary re-validates through
+    /// this — one comparison shape instead of the former inline
+    /// re-derivations at each guard site.
+    /// </summary>
+    private bool StillCurrent(string key)
+        => string.Equals(key, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal);
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the display state, keeping the
@@ -634,7 +660,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             // cannot carry candidates or population; they stay empty,
             // exactly like the client's own load state).
             bool applied = ApplySnapshot(cached, expectedVersion: versionBefore,
-                identityGuard: () => string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal),
+                identityGuard: () => StillCurrent(locationKeyBefore),
                 resolvedName: cached.ResolvedCityName);
             if (!applied)
             {
@@ -645,7 +671,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 bool identityChanged;
                 lock (_forecastGate)
                 {
-                    identityChanged = !string.Equals(locationKeyBefore, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal);
+                    identityChanged = !StillCurrent(locationKeyBefore);
                 }
                 if (identityChanged)
                 {
