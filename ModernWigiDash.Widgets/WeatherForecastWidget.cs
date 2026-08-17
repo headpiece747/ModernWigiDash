@@ -426,10 +426,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     internal async Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
     {
-        // The query key at START: the client's Stale verdict is computed
-        // before its own cache-save await, so an identity change landing
-        // after that verdict but before this continuation runs would come
-        // back as Fetched — re-validate at the end of the await.
+        // The query key at START: the client's Stale verdict covers its whole
+        // capture window (through the cache-save await), but this key still
+        // guards the outcome-key comparison below (a resolution-input change
+        // landing between this capture and the client's own capture resolves
+        // a DIFFERENT identity) and the post-await gap re-check.
         string fetchKey = WeatherClient.BuildQueryKey(BuildLocation());
         WeatherFetchResult result;
         try
@@ -469,11 +470,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             return WeatherFetchFlowOutcome.DroppedStale;
         }
 
-        // Post-await re-validation: the client's Stale verdict is computed
-        // before its cache-save await; a resolution-input change (including
-        // the post-InitializeAsync profile hydration) landing in that window
-        // returns Fetched. Drop the result — weather AND label — when the
-        // identity no longer matches, exactly as the old in-widget guard did.
+        // Post-await re-validation: the client's Stale verdict closes its own
+        // capture window (through the cache-save await); an identity change
+        // landing in the return→apply gap the client's window cannot see
+        // (including the post-InitializeAsync profile hydration) still comes
+        // back as Fetched here. Drop the result — weather AND label.
         if (!StillCurrent(fetchKey))
         {
             RequestRefresh(force: true);

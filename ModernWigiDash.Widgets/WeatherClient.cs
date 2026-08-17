@@ -113,6 +113,14 @@ internal sealed class WeatherClient
     internal string CacheFileName => _cache.CacheFileName;
 
     /// <summary>
+    /// Test seam: an await that runs inside <see cref="FetchCurrentAsync"/>'s
+    /// capture window, after the cache save completes and before the post-save
+    /// re-validation. A test parks a fetch on it and lands an invalidation
+    /// there, driving the stale-during-save-window race deterministically.
+    /// </summary>
+    internal Func<CancellationToken, Task>? SaveAwaitSeam { get; set; }
+
+    /// <summary>
     /// Sync throttle pre-check for the render tick: true when the throttle
     /// window has elapsed since the last attempt. The first attempt
     /// (never-fetched) reads as elapsed; a failed attempt stamps the time,
@@ -220,6 +228,22 @@ internal sealed class WeatherClient
             var fetched = new WeatherFetchResult.Fetched(snapshot, candidates, population, fetchQueryKey);
 
             await _cache.SaveAsync(snapshot, fetchQueryKey, cancellationToken).ConfigureAwait(false);
+            // The cache write is part of the capture window: an invalidation
+            // landing while the save is in flight makes the snapshot stale AT
+            // COMPLETION — the Stale verdict must cover the whole window, not
+            // stop at the identity confirmation above. The file that was
+            // written stays on disk stamped with the OLD identity: the cache
+            // load's stamp check rejects it, and the invalidation that caused
+            // the staleness already reset the throttle, so the new identity
+            // re-fetches immediately.
+            if (SaveAwaitSeam is { } saveSeam)
+            {
+                await saveSeam(cancellationToken).ConfigureAwait(false);
+            }
+            if (!_fetchControl.MatchesCurrent(fetchQueryKey))
+            {
+                return new WeatherFetchResult.Stale(fetchQueryKey);
+            }
             return fetched;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

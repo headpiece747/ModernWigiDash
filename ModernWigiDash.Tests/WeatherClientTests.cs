@@ -864,6 +864,47 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_IdentityInvalidatedDuringSaveWindow_ReturnsStale()
+    {
+        // The stale contract covers the WHOLE capture window, not just the
+        // network legs: an invalidation landing in the cache-save window
+        // (after the identity confirmation, before the result returns) must
+        // convert the outcome to Stale — never Fetched — so a snapshot saved
+        // for a place the widget no longer shows is never applied under the
+        // old identity's result, and the throttle the confirmation stamped is
+        // reset by the invalidation, so the new identity re-fetches
+        // immediately.
+        var gate = new TaskCompletionSource();
+        var client = CreateClient(new StubHttpHandler(Respond));
+        client.SaveAwaitSeam = _ => gate.Task;
+
+        var location = new WeatherLocation("Fixed Location", "Victoria", null, null, null);
+        var fetching = client.FetchCurrentAsync(location, force: true);
+        // Wait until the fetch has confirmed its identity (the throttle is
+        // stamped): everything from here to the post-save re-validation is
+        // the save window under test.
+        await TestWait.WaitUntilAsync(() => client.LastFetchTimeUtc != DateTime.MinValue, TimeSpan.FromSeconds(5));
+
+        client.InvalidateLocation(); // the widget's edit-time invalidation lands in the save window
+        gate.SetResult();
+        var result = await fetching;
+
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
+            "an invalidation inside the cache-save window must report the result stale, never fetched");
+        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+            "the invalidation reset the throttle stamp the confirmation wrote — the new identity must not cool down");
+        var stale = (WeatherFetchResult.Stale)result;
+        Assert.AreEqual(WeatherClient.BuildQueryKey(location), stale.QueryKey,
+            "a Stale outcome must carry the query key the in-flight fetch was started for");
+
+        // The new identity's fetch must run immediately (the stale path left
+        // the throttle open) and resolve fresh.
+        var fresh = await client.FetchCurrentAsync(location, force: true);
+        Assert.IsInstanceOfType(fresh, typeof(WeatherFetchResult.Fetched),
+            "the new identity's fetch must not be cooled down by the stale one");
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_StaleGeocodeFailure_DoesNotStampNewIdentityThrottle()
     {
         // A geocode that FAILS after the resolution identity changed

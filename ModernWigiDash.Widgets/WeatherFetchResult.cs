@@ -8,12 +8,15 @@ namespace ModernWigiDash.Widgets;
 internal abstract record WeatherFetchResult
 {
     /// <summary>A fresh snapshot was produced and the fetch completed; the
-    /// caller applies it (and may write back the resolved label). Carries the
-    /// resolved identity the snapshot was fetched for: the geocode candidates
-    /// (the widget's "Location Match" dropdown), the winner's population, and
-    /// the resolution query key the fetch started for — so the widget can
-    /// verify a result belongs to the identity it requested instead of
-    /// re-deriving the key itself. The resolved display name rides the
+    /// caller applies it (and may write back the resolved label). Fresh means
+    /// the resolution identity still matched at the completion of the WHOLE
+    /// capture window — through the cache write — so an invalidation landing
+    /// in that window converts the outcome to <see cref="Stale"/> instead.
+    /// Carries the resolved identity the snapshot was fetched for: the geocode
+    /// candidates (the widget's "Location Match" dropdown), the winner's
+    /// population, and the resolution query key the fetch started for — so the
+    /// widget can verify a result belongs to the identity it requested instead
+    /// of re-deriving the key itself. The resolved display name rides the
     /// snapshot itself (one label source).</summary>
     public sealed record Fetched(
         WeatherSnapshot Snapshot,
