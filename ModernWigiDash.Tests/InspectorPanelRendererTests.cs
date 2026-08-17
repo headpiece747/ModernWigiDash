@@ -81,14 +81,14 @@ public class InspectorPanelRendererTests
 
             // Drive the tick decision through the extracted seam, then apply it
             // to the real controls exactly as the tick would.
-            var version = new InspectorPanelRenderer.SearchVersionToken();
+            var version = new SearchVersionToken();
             var fake = new ScriptableLocationSearch();
-            var search = InspectorPanelRenderer.RunSearchTickAsync(fake, "Berlin", version);
+            var search = LocationSearchModel.RunSearchTickAsync(fake, "Berlin", version);
             fake.Complete("Berlin", new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508) { Population = 10000 });
             var (outcome, candidates) = search.GetAwaiter().GetResult();
             InspectorPanelRenderer.ApplySearchResults(results, popup, outcome, candidates);
 
-            Assert.AreEqual(InspectorPanelRenderer.LocationSearchTick.Success, outcome);
+            Assert.AreEqual(LocationSearchTick.Success, outcome);
             Assert.AreEqual(Visibility.Visible, results.Visibility,
                 "the results list must be visible when candidates arrive — a Collapsed list inside the popup renders nothing");
             Assert.IsNotNull(results.ItemTemplate, "candidates must render label + population, not the record's ToString");
@@ -292,47 +292,12 @@ public class InspectorPanelRendererTests
         });
     }
 
-    [TestMethod]
-    public async Task RunSearchTickAsync_CompletedSearch_ReturnsCandidates()
-    {
-        var fake = new ScriptableLocationSearch();
-        var version = new InspectorPanelRenderer.SearchVersionToken();
-
-        var search = InspectorPanelRenderer.RunSearchTickAsync(fake, "Berlin", version);
-        fake.Complete("Berlin", new GeocodeCandidate("Berlin, Germany", "Berlin, Germany", 52.52, 13.405));
-        var (outcome, candidates) = await search;
-
-        Assert.AreEqual(InspectorPanelRenderer.LocationSearchTick.Success, outcome);
-        Assert.AreEqual(1, candidates!.Count);
-        Assert.AreEqual("Berlin, Germany", candidates[0].Label);
-    }
-
-    [TestMethod]
-    public async Task RunSearchTickAsync_ShortQueryTick_InvalidatesInFlightResponse()
-    {
-        var fake = new ScriptableLocationSearch();
-        var version = new InspectorPanelRenderer.SearchVersionToken();
-
-        var inFlight = InspectorPanelRenderer.RunSearchTickAsync(fake, "be", version);
-        var (shortOutcome, _) = await InspectorPanelRenderer.RunSearchTickAsync(fake, "x", version);
-
-        Assert.AreEqual(InspectorPanelRenderer.LocationSearchTick.NoSearch, shortOutcome,
-            "a query shorter than two characters must not search");
-
-        fake.Complete("be", new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508));
-        var (staleOutcome, staleCandidates) = await inFlight;
-
-        Assert.AreEqual(InspectorPanelRenderer.LocationSearchTick.Stale, staleOutcome,
-            "a short-query tick must invalidate the response still in flight from the longer query");
-        Assert.IsNull(staleCandidates);
-    }
-
     /// <summary>
     /// Scriptable <see cref="IWidgetLocationSearch"/>: each SearchAsync call
     /// parks until <see cref="Complete"/> supplies the candidates, so tests can
     /// interleave ticks the way the debounced editor does.
     /// </summary>
-    private sealed class ScriptableLocationSearch : IWidgetLocationSearch
+    internal sealed class ScriptableLocationSearch : IWidgetLocationSearch
     {
         private readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<GeocodeCandidate>>> _pending = new();
 

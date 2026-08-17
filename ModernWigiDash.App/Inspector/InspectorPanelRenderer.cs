@@ -380,11 +380,7 @@ internal static class InspectorPanelRenderer
         // label, and the base label is what commits and searches while the box
         // still holds the seeded text (a real user edit takes over verbatim).
         string baseLabel = desc.CurrentValue?.ToString() ?? "";
-        string seed = baseLabel;
-        if (baseLabel.Length > 0 && search.CurrentPopulation is > 0)
-        {
-            seed = $"{baseLabel} · {FormatPopulation(search.CurrentPopulation.Value)}";
-        }
+        string seed = LocationSearchModel.SeedText(baseLabel, search.CurrentPopulation);
         var box = new TextBox { Text = seed };
         var results = new ListBox
         {
@@ -422,11 +418,11 @@ internal static class InspectorPanelRenderer
         debounce.Tick += async (_, _) =>
         {
             debounce.Stop();
-            // The seed's population suffix searches nothing ("label · 9.4k"
-            // matches no geocoder result) — search the base label while the
-            // box still holds the seeded text (no real user edit yet).
-            string query = string.Equals(box.Text, seed, StringComparison.Ordinal) ? baseLabel : box.Text.Trim();
-            var (outcome, candidates) = await RunSearchTickAsync(search, query, version);
+            // The tick's query is the model's rule: the seed's population
+            // suffix searches the base label while the box still holds the
+            // seeded text (no real user edit yet).
+            string query = LocationSearchModel.QueryFor(box.Text, seed, baseLabel);
+            var (outcome, candidates) = await LocationSearchModel.RunSearchTickAsync(search, query, version);
             ApplySearchResults(results, popup, outcome, candidates);
         };
         box.TextChanged += (_, _) =>
@@ -451,13 +447,10 @@ internal static class InspectorPanelRenderer
         };
         void CommitTypedText()
         {
-            // The seed's population suffix is display-only: committing the
-            // seeded text verbatim would persist "label · 9.4k", and the next
-            // resolution's suffix component would match no candidate (the
-            // label degrades to a bare-name tie on every restart). Commit the
-            // base label while the box still holds the seeded text; a real
-            // user edit takes over verbatim.
-            string committed = string.Equals(box.Text, seed, StringComparison.Ordinal) ? baseLabel : box.Text;
+            // The commit rule is the model's: the seeded suffix is
+            // display-only — committing it verbatim would persist "label ·
+            // 9.4k" and degrade the next resolution to a bare-name tie.
+            string committed = LocationSearchModel.CommitText(box.Text, seed, baseLabel);
             callbacks.ApplyInspectorPropertyValue(desc.Property, committed);
             popup.IsOpen = false;
             results.Visibility = Visibility.Collapsed;
@@ -471,11 +464,10 @@ internal static class InspectorPanelRenderer
         // gate would never evaluate the typed name.
         box.LostFocus += (_, _) =>
         {
-            // A click inside the popup is a pick in progress: do not commit and
-            // do not close — the ListBox must finish the selection. (The
-            // IsMouseOver check covers focus steals that arrive without a
-            // mouse press, e.g. keyboard navigation.)
-            if (popupPressed || (popup.IsOpen && popup.IsMouseOver)) return;
+            // A click inside the popup is a pick in progress (an IsMouseOver
+            // focus steal arrives without one, e.g. keyboard navigation): the
+            // model vetoes the commit so the ListBox can finish the selection.
+            if (!LocationSearchModel.ShouldCommitOnLostFocus(popupPressed, popup.IsOpen && popup.IsMouseOver)) return;
             CommitTypedText();
         };
 
@@ -525,64 +517,6 @@ internal static class InspectorPanelRenderer
     }
 
     /// <summary>
-    /// Outcome of one debounced search tick, decided by
-    /// <see cref="RunSearchTickAsync"/>: <see cref="NoSearch"/> when the query
-    /// is too short to search, <see cref="Stale"/> when a newer tick superseded
-    /// this response (the caller must not touch the UI), and
-    /// <see cref="Success"/> with the candidates.
-    /// </summary>
-    internal enum LocationSearchTick
-    {
-        NoSearch,
-        Stale,
-        Success
-    }
-
-    /// <summary>
-    /// One debounced search tick's decision (pure — no UI). The version token
-    /// is bumped BEFORE the length check, so a tick that skips the search
-    /// still invalidates any response in flight from an earlier query — the
-    /// popup must never reopen with results for a query the box no longer
-    /// contains. Stale responses (a newer tick bumped the version while the
-    /// search was in flight) are discarded.
-    /// </summary>
-    internal static async Task<(LocationSearchTick Outcome, IReadOnlyList<GeocodeCandidate>? Candidates)> RunSearchTickAsync(
-        IWidgetLocationSearch search, string query, SearchVersionToken version)
-    {
-        int current = version.Next();
-        string trimmed = query.Trim();
-        if (trimmed.Length < 2) return (LocationSearchTick.NoSearch, null);
-        var candidates = await search.SearchAsync(trimmed, CancellationToken.None);
-        if (current != version.Value) return (LocationSearchTick.Stale, null);
-        return (LocationSearchTick.Success, candidates);
-    }
-
-    /// <summary>
-    /// Monotonic version token for one search editor: bumped before every tick
-    /// decides whether to search, so any response still in flight from an
-    /// earlier tick — including one whose query was too short — is discarded.
-    /// </summary>
-    internal sealed class SearchVersionToken
-    {
-        public int Value { get; private set; }
-
-        public int Next() => ++Value;
-    }
-
-    /// <summary>
-    /// The one compact population format shared by the search list's candidate
-    /// lines and the Location box's seed suffix: "9.4k" / "8.4M", bare number
-    /// below 1000, invariant culture — one spelling, drift impossible.
-    /// </summary>
-    internal static string FormatPopulation(double population)
-        => population switch
-        {
-            >= 1_000_000 => $"{(population / 1_000_000).ToString("0.#", CultureInfo.InvariantCulture)}M",
-            >= 1_000 => $"{(population / 1_000).ToString("0.#", CultureInfo.InvariantCulture)}k",
-            _ => population.ToString("0", CultureInfo.InvariantCulture)
-        };
-
-    /// <summary>
     /// Formats one search result line: the candidate label plus a compact
     /// population suffix when the geocoder reported one ("Berlin, New
     /// Hampshire, United States · 9.4k"); the bare label when population is 0.
@@ -593,7 +527,7 @@ internal static class InspectorPanelRenderer
         {
             string label = values[0] as string ?? "";
             double population = values[1] is double p ? p : 0;
-            return population > 0 ? $"{label} · {FormatPopulation(population)}" : label;
+            return population > 0 ? $"{label} · {LocationSearchModel.FormatPopulation(population)}" : label;
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture)
