@@ -1,4 +1,3 @@
-using System.Globalization;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
 using ModernWigiDash.Core.Rendering;
@@ -71,63 +70,55 @@ public class HardwareMonitorWidget : ModernWidgetBase
         SensorSnapshotDto? snapshot = LhmSensorStore.TryReadFresh();
         if (snapshot is null || !snapshot.IsConnected)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "No sensor data", "Start LibreHardwareService to read hardware sensors", text);
+            DrawPlaceholder(canvas, bounds, SystemTelemetryPresentation.NoSensorData(), text);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(SensorLabel))
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Select a sensor", "Open Settings and pick a sensor reading", text);
+            DrawPlaceholder(canvas, bounds, SystemTelemetryPresentation.NoSensorSelected(), text);
             return;
         }
 
         SensorReadingDto? reading = MatchReading(snapshot);
         if (reading is null)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Sensor not found", $"{SensorLabel} is not currently available", text);
+            DrawPlaceholder(canvas, bounds, SystemTelemetryPresentation.SensorNotPresent(SensorLabel), text);
             return;
         }
 
-        float value = (float)reading.Value;
-        float max = ResolveMax(reading, value);
-        int decimals = Math.Clamp((int)MathF.Round(Decimals), 0, 3);
+        // The display rules (label/unit resolution, mode fallback, value
+        // format, progress) live in the presentation module; the render
+        // methods below are thin adapters that lay the display out.
+        var display = SystemTelemetryPresentation.Build(
+            reading,
+            value: (float)reading.Value,
+            displayLabelOverride: DisplayLabel,
+            unitOverride: Unit,
+            displayMode: DisplayMode,
+            autoScale: AutoScale,
+            maxValue: MaxValue,
+            decimals: Decimals);
 
-        string label = string.IsNullOrWhiteSpace(DisplayLabel) ? reading.Label : DisplayLabel;
-        string unit = string.IsNullOrWhiteSpace(Unit) ? reading.Unit : Unit;
-
-        switch (SystemTelemetryDisplayModeParser.Parse(DisplayMode))
+        switch (display.Mode)
         {
             case SystemTelemetryDisplayMode.Bar:
-                RenderBar(canvas, bounds, label, value, max, unit, decimals, accent, text);
+                RenderBar(canvas, bounds, display, accent, text);
                 break;
             case SystemTelemetryDisplayMode.Value:
-                RenderValue(canvas, bounds, label, value, unit, decimals, text);
+                RenderValue(canvas, bounds, display, text);
                 break;
             case SystemTelemetryDisplayMode.Graph:
-                RenderGraph(canvas, bounds, label, value, unit, decimals, accent, text, reading);
+                RenderGraph(canvas, bounds, display, (float)reading.Value, accent, text, reading);
                 break;
             default:
-                RenderGauge(canvas, bounds, label, value, max, unit, decimals, accent, text);
+                RenderGauge(canvas, bounds, display, accent, text);
                 break;
         }
     }
 
-    /// <summary>
-    /// The gauge/bar maximum: the sensor's recorded peak when Auto Scale is on,
-    /// else the manual <see cref="MaxValue"/>. Falls back to a value-derived
-    /// floor so a zero/negative max can never produce a division-by-zero gauge.
-    /// </summary>
-    internal float ResolveMax(SensorReadingDto reading, float value)
-    {
-        if (AutoScale)
-        {
-            double reference = reading.Max;
-            reference = Math.Max(reference, value);
-            return reference > 0 ? (float)reference : Math.Max(1f, value * 1.2f);
-        }
-
-        return MaxValue > 0 ? MaxValue : Math.Max(1f, value * 1.2f);
-    }
+    private static void DrawPlaceholder(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
+        => TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, display.PlaceholderTitle, display.PlaceholderSubtitle, text);
 
     private static void DrawHeader(SKCanvas canvas, SKRect bounds, string label, float pad, SKColor text)
     {
@@ -135,13 +126,6 @@ public class HardwareMonitorWidget : ModernWidgetBase
         using var headerPaint = new SKPaint { Color = text, IsAntialias = true };
         canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, headerFont, headerPaint);
     }
-
-    /// <summary>
-    /// The value progress fraction clamped into 0..1 (shared by the gauge and
-    /// bar tracks). A non-positive max can never divide by zero.
-    /// </summary>
-    internal static float GaugeFraction(float value, float max)
-        => Math.Clamp(value / Math.Max(1f, max), 0f, 1f);
 
     /// <summary>
     /// Draws the big hero value with its trailing unit — the "value + unit"
@@ -159,30 +143,18 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// added to <paramref name="baselineAnchor"/> for the baseline.</param>
     private void DrawHeroValue(
         SKCanvas canvas,
-        float value,
-        int decimals,
+        SystemTelemetryDisplay display,
         float anchorX,
         float baselineAnchor,
         float baselineFromValue,
         float valFontSize,
         SKColor valueColor,
         SKColor unitColor,
-        string unit,
         float unitFontSize,
         float unitOffset,
         bool rightAligned = false)
     {
-        // The formatted value is memoized per (value bits, decimals): the
-        // reading updates ~1×/s, so identical inputs render the cached string
-        // (bit-exact keying keeps -0.0 distinct from 0.0).
-        int valueBits = BitConverter.SingleToInt32Bits(value);
-        if (valueBits != _lastValueBits || decimals != _lastValueDecimals)
-        {
-            _lastValueBits = valueBits;
-            _lastValueDecimals = decimals;
-            _lastValueText = value.ToString(ValueFormats[decimals], CultureInfo.InvariantCulture);
-        }
-        string valStr = _lastValueText;
+        string valStr = display.ValueText;
 
         var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
         using var valPaint = new SKPaint { Color = valueColor, IsAntialias = true };
@@ -192,26 +164,18 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float baselineY = baselineAnchor + valBounds.Height * baselineFromValue;
         canvas.DrawTextWithFallback(valStr, valueX, baselineY, valFont, valPaint);
 
-        if (!string.IsNullOrWhiteSpace(unit))
+        if (!string.IsNullOrWhiteSpace(display.Unit))
         {
             var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, unitFontSize);
             using var unitPaint = new SKPaint { Color = unitColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, unitPaint);
+            canvas.DrawTextWithFallback(display.Unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, unitPaint);
         }
     }
 
-    // The hero-value format cache: one slot per widget, keyed bit-exactly on
-    // the value and the decimal count. ValueFormats precomputes the "F{n}"
-    // format strings (decimals is clamped to 0..3 before this is called).
-    private int _lastValueBits = int.MinValue;
-    private int _lastValueDecimals = -1;
-    private string _lastValueText = "";
-    private static readonly string[] ValueFormats = ["F0", "F1", "F2", "F3"];
-
-    private void RenderGauge(SKCanvas canvas, SKRect bounds, string label, float value, float max, string unit, int decimals, SKColor accent, SKColor text)
+    private void RenderGauge(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor accent, SKColor text)
     {
         float pad = 16f;
-        DrawHeader(canvas, bounds, label, pad, text);
+        DrawHeader(canvas, bounds, display.Label, pad, text);
 
         float gaugeSize = Math.Min(bounds.Width * 0.42f, bounds.Height - 48f);
         float cx = bounds.MidX;
@@ -222,20 +186,20 @@ public class HardwareMonitorWidget : ModernWidgetBase
         using var trackPaint = new SKPaint { Color = text.WithAlpha(20), Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
         canvas.DrawArc(arcBounds, 135f, 270f, false, trackPaint);
 
-        float progress = GaugeFraction(value, max);
+        float progress = display.Progress;
         using var progressPaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
         canvas.DrawArc(arcBounds, 135f, 270f * progress, false, progressPaint);
 
-        DrawHeroValue(canvas, value, decimals, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), unit, 11f, 4f);
+        DrawHeroValue(canvas, display, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), 11f, 4f);
     }
 
-    private void RenderBar(SKCanvas canvas, SKRect bounds, string label, float value, float max, string unit, int decimals, SKColor accent, SKColor text)
+    private void RenderBar(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor accent, SKColor text)
     {
         float pad = 16f;
-        DrawHeader(canvas, bounds, label, pad, text);
+        DrawHeader(canvas, bounds, display.Label, pad, text);
 
-        DrawHeroValue(canvas, value, decimals, bounds.MidX, bounds.MidY + 4f, 0f,
-            Math.Clamp(bounds.Height * 0.22f, 22f, 48f), text, text.WithAlpha(180), unit, 12f, 5f);
+        DrawHeroValue(canvas, display, bounds.MidX, bounds.MidY + 4f, 0f,
+            Math.Clamp(bounds.Height * 0.22f, 22f, 48f), text, text.WithAlpha(180), 12f, 5f);
 
         var barRect = new SKRect(bounds.Left + pad, bounds.MidY + 20f, bounds.Right - pad, bounds.MidY + 32f);
         float trackRadius = barRect.Height / 2f;
@@ -243,7 +207,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
         using var trackPaint = new SKPaint { Color = text.WithAlpha(20), IsAntialias = true };
         canvas.DrawRoundRect(barRect, trackRadius, trackRadius, trackPaint);
 
-        float progress = GaugeFraction(value, max);
+        float progress = display.Progress;
         float progressWidth = Math.Max(barRect.Height, barRect.Width * progress);
         var progressRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + progressWidth, barRect.Bottom);
         float progressRadius = Math.Min(trackRadius, progressWidth / 2f);
@@ -251,19 +215,19 @@ public class HardwareMonitorWidget : ModernWidgetBase
         canvas.DrawRoundRect(progressRect, progressRadius, progressRadius, progressPaint);
     }
 
-    private void RenderValue(SKCanvas canvas, SKRect bounds, string label, float value, string unit, int decimals, SKColor text)
+    private void RenderValue(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
     {
         float pad = 16f;
-        DrawHeader(canvas, bounds, label, pad, text);
+        DrawHeader(canvas, bounds, display.Label, pad, text);
 
-        DrawHeroValue(canvas, value, decimals, bounds.MidX, bounds.MidY + 4f, 0f,
-            Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f), text, text.WithAlpha(180), unit, 14f, 6f);
+        DrawHeroValue(canvas, display, bounds.MidX, bounds.MidY + 4f, 0f,
+            Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f), text, text.WithAlpha(180), 14f, 6f);
     }
 
-    private void RenderGraph(SKCanvas canvas, SKRect bounds, string label, float value, string unit, int decimals, SKColor accent, SKColor text, SensorReadingDto reading)
+    private void RenderGraph(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, float value, SKColor accent, SKColor text, SensorReadingDto reading)
     {
         float pad = 16f;
-        DrawHeader(canvas, bounds, label, pad, text);
+        DrawHeader(canvas, bounds, display.Label, pad, text);
 
         // The sparkline is the only consumer of the history buffer, so the
         // sample is appended here — Gauge/Bar/Value frames skip the queue work.
@@ -308,8 +272,8 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
 
         const float valFontSize = 22f;
-        DrawHeroValue(canvas, value, decimals, area.Right, area.Top + valFontSize, 0f,
-            valFontSize, accent, text.WithAlpha(180), unit, 11f, 4f, rightAligned: true);
+        DrawHeroValue(canvas, display, area.Right, area.Top + valFontSize, 0f,
+            valFontSize, accent, text.WithAlpha(180), 11f, 4f, rightAligned: true);
     }
 }
 

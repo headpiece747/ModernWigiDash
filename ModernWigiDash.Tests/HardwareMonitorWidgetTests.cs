@@ -132,53 +132,6 @@ public class HardwareMonitorWidgetTests
     }
 
     [TestMethod]
-    public void ResolveMax_AutoScale_UsesSensorPeak_OrValue()
-    {
-        var widget = new HardwareMonitorWidget { AutoScale = true, MaxValue = 100f };
-
-        Assert.AreEqual(90f, widget.ResolveMax(CpuTemp, 55.5f), "Auto scale must use the sensor's recorded max");
-        Assert.AreEqual(95f, widget.ResolveMax(CpuTemp, 95f), "A value above the sensor max must win");
-    }
-
-    [TestMethod]
-    public void ResolveMax_AutoScale_ZeroPeak_FallsBackToValueDerivedFloor()
-    {
-        var widget = new HardwareMonitorWidget { AutoScale = true };
-        var zeroPeak = CpuTemp with { Max = 0 };
-
-        float max = widget.ResolveMax(zeroPeak, 5f);
-
-        Assert.IsTrue(max > 0, "A zero/negative peak must fall back to a value-derived floor");
-    }
-
-    [TestMethod]
-    public void ResolveMax_Manual_UsesMaxValue()
-    {
-        var widget = new HardwareMonitorWidget { AutoScale = false, MaxValue = 120f };
-
-        Assert.AreEqual(120f, widget.ResolveMax(CpuTemp, 55.5f), "Manual mode must use MaxValue");
-    }
-
-    [TestMethod]
-    public void ResolveMax_Manual_InvalidMax_FallsBackToValueDerivedFloor()
-    {
-        var widget = new HardwareMonitorWidget { AutoScale = false, MaxValue = 0f };
-
-        float max = widget.ResolveMax(CpuTemp, 55.5f);
-
-        Assert.IsTrue(max > 0, "A non-positive MaxValue must fall back to a value-derived floor");
-    }
-
-    [TestMethod]
-    public void GaugeFraction_ClampsIntoUnitRange()
-    {
-        Assert.AreEqual(0.5f, HardwareMonitorWidget.GaugeFraction(50f, 100f), 1e-6f);
-        Assert.AreEqual(0f, HardwareMonitorWidget.GaugeFraction(-5f, 100f), "negative values clamp to zero");
-        Assert.AreEqual(1f, HardwareMonitorWidget.GaugeFraction(150f, 100f), "over-max values clamp to one");
-        Assert.AreEqual(1f, HardwareMonitorWidget.GaugeFraction(50f, 0f), "a non-positive max must not divide by zero");
-    }
-
-    [TestMethod]
     public void History_CappedAtCapacity_AfterManyRenders()
     {
         SeedFreshSnapshot();
