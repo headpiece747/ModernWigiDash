@@ -198,7 +198,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 | Static stores with LastUpdate freshness | Widgets are instantiated via reflection (parameterless ctor) and can't receive injected dependencies; static stores with staleness tracking are the pragmatic solution |
 | Telemetry DTOs in Sdk | `SensorSnapshotDto`/`SensorReadingDto`/`FrameTimeSnapshotDto` live in the lowest common layer so every project shares one mailbox format (the Service.Contracts assembly was removed with the service, ADR-0005) |
 | FileLog in Sdk | Shared file logging utility placed in the lowest common layer so all projects can log to `display_device.log` without circular dependencies |
-| Widget-per-file convention | Each widget class lives in its own `.cs` file with its `[WidgetMetadata]` attribute; the catalog is discovered by scanning the assembly |
+| Widget-per-file convention | Each widget class lives in its own `.cs` file with its `[WidgetMetadata]` attribute; the catalog is discovered by scanning the assembly. One type per file also holds for the Sdk contract — `IModernWidget`, `ModernWidgetBase`, and `IWidgetActionInvoker` each own one file (split out of the former single `IModernWidget.cs`) |
 
 ### Testing
 
