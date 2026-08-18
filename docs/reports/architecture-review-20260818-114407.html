@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ModernWigiDash · architecture review — 2026-08-18</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  .node{fill:#1e293b;stroke:#475569;stroke-width:1.2;}
+  .seam{stroke:#2563eb;stroke-width:1.8;stroke-dasharray:6 4;fill:none;}
+  .leak{stroke:#dc2626;stroke-width:2;fill:none;}
+  .node-label{font:600 13px ui-sans-serif,system-ui,sans-serif;fill:#f8fafc;}
+  .node-sub{font:400 10px ui-sans-serif,system-ui,sans-serif;fill:#cbd5e1;}
+  .edge-label{font:400 10px ui-sans-serif,system-ui,sans-serif;fill:#475569;}
+  .leak-label{font:600 10px ui-sans-serif,system-ui,sans-serif;fill:#b91c1c;}
+  .deep{fill:url(#deepg);}
+  .chip{display:inline-flex;align-items:center;gap:.4rem;font-size:.72rem;color:#475569;border:1px solid #e2e8f0;border-radius:999px;padding:.15rem .65rem;background:#fff;white-space:nowrap;}
+  .chip::before{content:"";width:.65rem;height:.65rem;border-radius:.18rem;flex:none;}
+  .lg-mod::before{background:#1e293b;}
+  .lg-seam::before{background:repeating-linear-gradient(90deg,#2563eb 0 3px,transparent 3px 5px);}
+  .lg-leak::before{background:#dc2626;}
+  .lg-deep::before{background:linear-gradient(135deg,#0f172a 0%,#334155 100%);}
+  .deep-block{background:linear-gradient(135deg,#0f172a 0%,#334155 100%);border-radius:1rem;padding:1.5rem 1.75rem;color:#e2e8f0;}
+  .map-caption{margin-top:.75rem;font-size:.8rem;color:#64748b;}
+  .section-title{font-size:1.25rem;font-weight:600;color:#0f172a;display:flex;align-items:center;gap:.6rem;}
+  .section-title::before{content:"";width:.55rem;height:.55rem;border-radius:2px;background:#2563eb;flex:none;}
+  .badge{font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:.2rem .6rem;border-radius:999px;}
+  .badge-blue{background:#dbeafe;color:#1d4ed8;}
+  .badge-amber{background:#fef3c7;color:#b45309;}
+  .file-list .f{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem;color:#334155;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:.4rem;padding:.1rem .45rem;display:inline-block;}
+  .beforeafter{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;}
+  @media (max-width:700px){.beforeafter{grid-template-columns:1fr;}}
+  .ba-label{font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#dc2626;}
+  .ba-after{color:#047857;}
+  pre.mermaid{background:transparent;text-align:center;}
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+<main class="max-w-5xl mx-auto px-6 py-10 pb-20">
+
+  <header>
+    <h1 class="text-3xl font-semibold tracking-tight text-slate-900">ModernWigiDash · architecture review</h1>
+    <p class="text-sm text-slate-500 mt-1">Tue 2026-08-18 · Weather forecast widget cluster</p>
+    <div class="flex flex-wrap gap-2 mt-5">
+      <span class="chip lg-mod">module</span>
+      <span class="chip lg-seam">seam</span>
+      <span class="chip lg-leak">leak</span>
+      <span class="chip lg-deep">deep module</span>
+    </div>
+  </header>
+
+  <section id="map" class="mt-10">
+    <h2 class="section-title">Where the weather cluster is deep, and where it leaks</h2>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 mt-4">
+      <svg viewBox="0 0 1080 640" style="min-width:880px" class="w-full h-auto" role="img" aria-label="Module map of the weather forecast widget cluster">
+        <defs>
+          <linearGradient id="deepg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#0f172a"/>
+            <stop offset="1" stop-color="#334155"/>
+          </linearGradient>
+          <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+          </marker>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+          </marker>
+        </defs>
+        <path class="seam" d="M270,84 C330,74 370,52 430,46" marker-end="url(#ab)"/>
+        <path class="seam" d="M545,76 L545,108" marker-end="url(#ab)"/>
+        <path class="seam" d="M660,124 C700,104 720,70 760,50" marker-end="url(#ab)"/>
+        <path class="seam" d="M210,132 C280,180 340,204 424,238" marker-end="url(#ab)"/>
+        <path class="seam" d="M640,284 L760,282" marker-end="url(#ab)"/>
+        <path class="seam" d="M470,324 L470,448" marker-end="url(#ab)"/>
+        <path class="seam" d="M560,324 C650,380 790,404 880,446" marker-end="url(#ab)"/>
+        <path class="seam" d="M885,516 L885,590 L180,590 L180,522" marker-end="url(#ab)"/>
+        <path class="leak" d="M640,262 L760,260" marker-end="url(#ar)"/>
+        <path class="leak" d="M100,132 C70,178 160,178 140,132"/>
+        <path class="leak" d="M390,324 C330,382 240,404 186,460" marker-end="url(#ar)"/>
+        <rect class="node" x="30" y="60" width="240" height="72" rx="10"/>
+        <rect class="node" x="430" y="24" width="230" height="52" rx="10"/>
+        <rect class="node" x="430" y="108" width="230" height="52" rx="10"/>
+        <rect class="node" x="760" y="24" width="230" height="52" rx="10"/>
+        <rect class="node" x="360" y="240" width="280" height="84" rx="10"/>
+        <rect class="node" x="760" y="248" width="250" height="68" rx="10"/>
+        <rect class="node deep" x="360" y="448" width="280" height="84" rx="10" style="stroke:#94a3b8;stroke-width:1.4;"/>
+        <rect class="node" x="760" y="448" width="250" height="68" rx="10"/>
+        <rect class="node" x="60" y="462" width="240" height="60" rx="10"/>
+        <text class="node-label" x="150" y="92" text-anchor="middle">The widget</text>
+        <text class="node-sub" x="150" y="112" text-anchor="middle">fetch flow · layout modes · touch</text>
+        <text class="node-label" x="545" y="54" text-anchor="middle">Render model</text>
+        <text class="node-label" x="545" y="138" text-anchor="middle">Renderer</text>
+        <text class="node-label" x="875" y="54" text-anchor="middle">Presentation</text>
+        <text class="node-label" x="500" y="268" text-anchor="middle">Client</text>
+        <text class="node-sub" x="500" y="292" text-anchor="middle">fetch · cache · resolve</text>
+        <text class="node-sub" x="500" y="310" text-anchor="middle">owns the capture window</text>
+        <text class="node-label" x="885" y="278" text-anchor="middle">Cache store</text>
+        <text class="node-sub" x="885" y="298" text-anchor="middle">file mechanics · identity stamp</text>
+        <text class="node-label" x="500" y="474" text-anchor="middle">Fetch control</text>
+        <text class="node-sub" x="500" y="498" text-anchor="middle">throttle · single-flight</text>
+        <text class="node-sub" x="500" y="516" text-anchor="middle">holds the stamp</text>
+        <text class="node-label" x="885" y="478" text-anchor="middle">Geocoder</text>
+        <text class="node-sub" x="885" y="498" text-anchor="middle">geocoding transport</text>
+        <text class="node-label" x="180" y="488" text-anchor="middle">Location resolver</text>
+        <text class="node-sub" x="180" y="508" text-anchor="middle">rank · match · route</text>
+        <text class="edge-label" x="346" y="56" text-anchor="middle">compose, cache</text>
+        <text class="edge-label" x="553" y="96" text-anchor="start">draw model</text>
+        <text class="edge-label" x="706" y="78" text-anchor="middle">display strings</text>
+        <text class="edge-label" x="352" y="150" text-anchor="middle">feed, fetch / apply</text>
+        <text class="edge-label" x="712" y="278" text-anchor="middle">read / write</text>
+        <text class="edge-label" x="478" y="390" text-anchor="start">single-flight, throttle</text>
+        <text class="edge-label" x="720" y="380" text-anchor="middle">geocode entry, city 7 / zip 4</text>
+        <text class="edge-label" x="532" y="584" text-anchor="middle">rank, match, route</text>
+        <text class="leak-label" x="712" y="248" text-anchor="middle">stamp compare +</text>
+        <text class="leak-label" x="712" y="260" text-anchor="middle">post-save re-validate</text>
+        <text class="leak-label" x="120" y="190" text-anchor="middle">own return-to-apply re-check</text>
+        <text class="leak-label" x="258" y="404" text-anchor="middle">3 direct leaf calls (door 2)</text>
+      </svg>
+    </div>
+    <p class="map-caption">Blue dashed: the seams the cluster already runs through — one door each. Red solid: the places the same rule is spelled a second time. Dark node: the deep module doing the load-bearing work.</p>
+  </section>
+
+  <section id="candidates" class="mt-12 space-y-6">
+    <h2 class="section-title">Three candidates</h2>
+
+    <article id="card-1" class="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between gap-4 px-5 pt-4">
+        <h3 class="text-lg font-semibold text-slate-900">One owner of the stale-identity invariant</h3>
+        <span class="badge badge-blue">Worth exploring</span>
+      </div>
+      <div class="px-5 py-4 space-y-4">
+        <div>
+          <p class="field-label mb-1.5">Files</p>
+          <p class="file-list flex flex-wrap gap-1.5">
+            <span class="f">WeatherClient</span>
+            <span class="f">WeatherForecastWidget</span>
+            <span class="f">WeatherFetchControl</span>
+            <span class="f">WeatherCacheStore</span>
+            <span class="f">docs/adr · new ADR-0006</span>
+            <span class="f">CONTEXT.md</span>
+          </p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Problem</p>
+          <p class="text-sm text-slate-700 leading-6">The stale-identity rule is spelled out in 4-plus ways — the client's capture window, the widget's return-to-apply recheck, the cache-load comparison — and is held together by comments, with no test surface.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Solution</p>
+          <p class="text-sm text-slate-700 leading-6">A single predicate over a single identity record, owned by one module and named in an ADR, so the guard is assertable in one place.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Benefit</p>
+          <p class="text-sm text-slate-700 leading-6">Locality: one module carries the whole stale-identity rule. The interface is the test surface: tests pin the predicate directly over the identity record, no pixels, no fetch mocks. Leverage: every call site that re-derives the guard today routes through the one owner. The ADR names the invariant, so the next person reading the cluster knows the rule exists and where it lives.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Before — After</p>
+          <div class="beforeafter">
+            <div>
+              <p class="ba-label mb-1">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  classDef bad fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  W["The widget"]:::bad --> S["stale-identity rule<br/>4+ spellings · comments only<br/>no tests"]:::bad
+  C["Client"]:::bad --> S
+  CS["Cache store"]:::bad --> S
+              </pre>
+            </div>
+            <div>
+              <p class="ba-label ba-after mb-1">After</p>
+              <pre class="mermaid">
+flowchart LR
+  classDef deep fill:#0f172a,stroke:#334155,color:#f8fafc
+  classDef ok fill:#ecfdf5,stroke:#059669,color:#065f46
+  W["The widget"] --> P["one predicate<br/>one identity record<br/>ADR-0006"]:::deep
+  C["Client"] --> P
+  CS["Cache store"] --> P
+  P --> T["identity-guard tests"]:::ok
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article id="card-2" class="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between gap-4 px-5 pt-4">
+        <h3 class="text-lg font-semibold text-slate-900">The geocoder's two doors</h3>
+        <span class="badge badge-amber">Speculative</span>
+      </div>
+      <div class="px-5 py-4 space-y-4">
+        <div>
+          <p class="field-label mb-1.5">Files</p>
+          <p class="file-list flex flex-wrap gap-1.5">
+            <span class="f">WeatherClient</span>
+            <span class="f">WeatherGeocoder</span>
+            <span class="f">WeatherLocationResolver</span>
+          </p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Problem</p>
+          <p class="text-sm text-slate-700 leading-6">The client reaches the location resolver through two doors — the geocoder's geocode entry point and three direct leaf calls (is-ZIP, zip-lookup URI, forecast URI) — so one decision is enforced in two places.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Solution</p>
+          <p class="text-sm text-slate-700 leading-6">A single geocode-entry seam through the geocoder, with the resolver's leaf calls absorbed behind it.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Benefit</p>
+          <p class="text-sm text-slate-700 leading-6">One seam, one door: the client stops building geocoding URLs and asks the geocoder the question once. The decision stays in the resolver where its rules already live. The geocoder's interface is the test surface: its entry points are the assertions, no HTTP.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Before — After</p>
+          <div class="beforeafter">
+            <div>
+              <p class="ba-label mb-1">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  Client -->|"door 1: city (7) / zip (4)"| Geocoder
+  Geocoder -->|"rank, match, route"| R["Location resolver"]
+  Client -.->|"door 2: is-ZIP, zip URI, forecast URI"| R
+  linkStyle 2 stroke:#dc2626,stroke-width:2px
+              </pre>
+            </div>
+            <div>
+              <p class="ba-label ba-after mb-1">After</p>
+              <pre class="mermaid">
+flowchart LR
+  classDef deep fill:#0f172a,stroke:#334155,color:#f8fafc
+  Client -->|"one seam: geocode entry"| Geocoder:::deep
+  Geocoder -->|"decisions"| R["Location resolver"]
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article id="card-3" class="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between gap-4 px-5 pt-4">
+        <h3 class="text-lg font-semibold text-slate-900">Pin the identity rules of the render model</h3>
+        <span class="badge badge-blue">Worth exploring</span>
+      </div>
+      <div class="px-5 py-4 space-y-4">
+        <div>
+          <p class="field-label mb-1.5">Files</p>
+          <p class="file-list flex flex-wrap gap-1.5">
+            <span class="f">WeatherRenderModel.cs</span>
+            <span class="f">new WeatherRenderModelTests.cs</span>
+            <span class="f">WeatherWidgetRendererTests.cs (extend)</span>
+          </p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Problem</p>
+          <p class="text-sm text-slate-700 leading-6">The identity key of the render model — the rule that decides when the cached model rebuilds — has no covering test, so a silent drift would quietly change the rebuild with nothing to catch it.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Solution</p>
+          <p class="text-sm text-slate-700 leading-6">A test suite keyed on the identity record, pinning property drift, bounds drift, and the no-drift cache hit.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Benefit</p>
+          <p class="text-sm text-slate-700 leading-6">The interface is the test surface: the identity record is the assertion target, no pixels involved. The cache-hit rule becomes pinned rather than presumed. Locality: the identity rule's tests live beside the key they pin.</p>
+        </div>
+        <div>
+          <p class="field-label mb-1.5">Before — After</p>
+          <div class="beforeafter">
+            <div>
+              <p class="ba-label mb-1">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  classDef bad fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  K["WeatherRenderModelKey<br/>data version + bounds + property snapshot"]:::bad --> T["no covering tests"]:::bad
+              </pre>
+            </div>
+            <div>
+              <p class="ba-label ba-after mb-1">After</p>
+              <pre class="mermaid">
+flowchart LR
+  classDef ok fill:#ecfdf5,stroke:#059669,color:#065f46
+  K["WeatherRenderModelKey"] --> A["property drift: rebuild"]:::ok
+  K --> B["bounds drift: rebuild"]:::ok
+  K --> C2["no drift, re-read: cache hit"]:::ok
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section id="kept" class="mt-12">
+    <h2 class="section-title">Kept as-is — the deletion test passed</h2>
+    <ul class="mt-4 space-y-2">
+      <li class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"><span class="font-semibold text-slate-900">Renderer</span> — kept: a pure pixels-out adapter over the render model; deleting it would not make the module interface shallower.</li>
+      <li class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"><span class="font-semibold text-slate-900">Presentation</span> — kept: the display-string rules are pure and have one consumer, so the seam is hypothetical, not real.</li>
+      <li class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"><span class="font-semibold text-slate-900">Fetch control</span> — kept: deep and load-bearing; card 1 touches its stamp, not the module.</li>
+      <li class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"><span class="font-semibold text-slate-900">Forecast limits</span> — kept: pure constants with the two-layer cap invariant stated once.</li>
+    </ul>
+  </section>
+
+  <section id="top-recommendation" class="mt-12">
+    <h2 class="section-title">Where to start</h2>
+    <div class="deep-block mt-4">
+      <p class="text-base font-semibold text-slate-100">Card 1 — one owner of the stale-identity invariant</p>
+      <p class="text-sm text-slate-300 mt-2 leading-6">The stale-identity guard is the load-bearing rule the whole cluster leans on, and today it is spelled in 4-plus ways, held by comments, with no test surface and no weather ADR. Card 1 creates the single owner and the single predicate — which also shrinks the client's surface, the very surface card 2 then targets — and card 3 lands as a same-session quick win on top of it.</p>
+    </div>
+    <p class="text-xs text-slate-400 mt-3">Cards 2 and 3 are reachable after card 1; none of them is blocked by the kept modules.</p>
+  </section>
+
+</main>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", flowchart: { curve: "basis", htmlLabels: true, useMaxWidth: true } });
+</script>
+</body>
+</html>
