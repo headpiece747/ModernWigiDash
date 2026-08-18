@@ -198,7 +198,7 @@ public class WeatherGeocoderResolveTests
         Assert.AreEqual(52.52437, resolved.Lat);
         Assert.AreEqual(3426354.0, resolved.Population, "the winner's population rides the outcome");
         Assert.IsNotNull(resolved.RefreshedCandidates, "the city leg must refresh the dropdown");
-        Assert.AreEqual(1, resolved.RefreshedCandidates!.Count);
+        Assert.AreEqual(1, resolved.RefreshedCandidates.Count);
         Assert.AreEqual(1, handler.Calls);
     }
 

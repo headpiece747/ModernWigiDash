@@ -84,6 +84,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     }
 
     private readonly WeatherClient _client;
+    private readonly WeatherFetchFlow _flow;
 
     // The widget's own copy of the resolved identity, taken from the Fetched
     // outcome (or the boot cache load): the client reports the identity once
@@ -125,6 +126,37 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // already regenerates unsafe ids, but the name builder also refuses
         // one here so a cache file can never escape the cache directory.
         _client = new WeatherClient(CacheDir, () => $"weather_{SafeCacheToken(InstanceId)}.json", logError: (message, exception) => Context?.LogError(message, exception));
+        // The fetch flow is the deep module behind the host seams: the client
+        // (fetch/load legs, throttle truth, the discarded-load rollback) and
+        // the identity module are the cluster's real modules; these seams
+        // carry the host concerns across its interface — the property
+        // coercion, the gate around the display state (the apply and the
+        // version read run under _forecastGate), the UI-thread write-back
+        // flush's gate, and the context requests.
+        _flow = new WeatherFetchFlow(
+            _client,
+            _identity,
+            currentLocation: BuildLocation,
+            applySnapshot: (snapshot, expectedVersion, identityGuard, candidates, population, resolvedName) =>
+                ApplySnapshot(snapshot, expectedVersion, identityGuard, candidates, population, resolvedName),
+            dataVersion: () =>
+            {
+                lock (_forecastGate) { return _snapshotState.DataVersion; }
+            },
+            isStaticSnapshot: () => StaticSnapshot,
+            runToken: () => _pollCts?.Token ?? CancellationToken.None,
+            setPendingWritebackIfCurrent: (identityGuard, value) =>
+            {
+                lock (_forecastGate)
+                {
+                    if (identityGuard())
+                    {
+                        _identity.SetPendingWriteback(value);
+                    }
+                }
+            },
+            requestRender: () => Context?.RequestRender(),
+            requestInspectorRefresh: () => Context?.RequestInspectorRefresh());
     }
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
@@ -225,17 +257,18 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private void WeatherRefreshTick() => RequestRefresh();
 
     /// <summary>
-    /// The single "fetch if due" gate for every cadence source: the refresh
-    /// PollLoop, the per-frame render kick, and the property-change force
-    /// paths all call this. The static-snapshot rule and the client's
-    /// throttle-window pre-check are applied here, once, instead of being
-    /// re-derived at each call site; the client's atomic in-flight claim
-    /// remains the authority (see <see cref="WeatherClient.FetchCurrentAsync"/>).
+    /// The single "fetch if due" entry for every cadence source: the refresh
+    /// PollLoop, the per-frame render kick, the touch refresh, and the
+    /// edit-time force paths all call this. The gate (static-snapshot rule +
+    /// the client's throttle window) is applied ONCE inside the flow module —
+    /// this host method neither re-derives the policy nor reads the client's
+    /// throttle state; the client's atomic in-flight claim remains the
+    /// authority (see <see cref="WeatherClient.FetchCurrentAsync"/>).
     /// </summary>
     private void RequestRefresh(bool force = false)
     {
-        if (!force && (IsStaticSnapshotBlocking || !_client.IsFetchWindowElapsed())) return;
-        _ = FetchLiveWeatherAsync(force);
+        if (!_flow.CanFetch(force)) return;
+        _ = _flow.RunFetchAsync(force);
     }
 
     public override async ValueTask DisposeAsync()
@@ -404,154 +437,25 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
-    /// <summary>
-    /// Whether the fetch cadence gate blocks a non-forced fetch: while a
-    /// static snapshot is showing (after a boot load), the render tick's
-    /// request is skipped until the snapshot is dismissed.
-    /// </summary>
-    private bool IsStaticSnapshotBlocking => StaticSnapshot && _client.LastFetchTimeUtc != DateTime.MinValue;
-
-    /// <summary>
-    /// The candidate labels last pushed to the inspector. Refreshing the
-    /// inspector rebuilds the panel, which steals focus from the field the
-    /// user is typing in — so a refresh fires only when the pickable options
-    /// actually changed (e.g. the first geocode after a Location edit), never
-    /// on every fetch.
-    /// </summary>
-    private string _lastInspectorCandidatesStamp = "";
+    // The inspector-candidates stamp (refresh only when the pickable options
+    // changed, never on every fetch) moved with the sequence into the flow
+    // module — the host keeps only the refresh request itself.
 
     /// <summary>Suppresses the OnPropertyChanged fetch while the resolved label
     /// is written back after a successful resolution (the write-back must not
     /// re-fire a fetch).</summary>
     internal bool _suppressLocationWriteback;
 
-    internal async Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
-    {
-        // The query key at START: the client's Stale verdict covers its whole
-        // capture window (through the cache-save await), but this key still
-        // guards the outcome-key comparison below (a resolution-input change
-        // landing between this capture and the client's own capture resolves
-        // a DIFFERENT identity) and the post-await gap re-check.
-        string fetchKey = WeatherQueryKey.Build(BuildLocation());
-        WeatherFetchResult result;
-        try
-        {
-            result = await _client.FetchCurrentAsync(BuildLocation(), force, _pollCts?.Token ?? CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Teardown: the widget's poll CTS was cancelled (dispose) — a
-            // cancelled fetch is not a failure, so nothing is logged or applied.
-            return WeatherFetchFlowOutcome.Cancelled;
-        }
-
-        if (result is WeatherFetchResult.Stale)
-        {
-            // The resolution identity changed while the fetch was in flight
-            // (the widget's invalidation cleared the client's query identity):
-            // the client dropped the stale result — weather AND label — without
-            // stamping the throttle. Re-fetch the new identity immediately,
-            // since the edit-time force refresh was swallowed by the in-flight
-            // claim, which this fetch's completion has now released.
-            RequestRefresh(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        // The outcome carries the key the client actually resolved for. It
-        // must match the key captured here: a resolution-input change landing
-        // between this capture and the client's own capture resolves a
-        // DIFFERENT identity, and if that identity was then changed back
-        // before this continuation runs, the live check below cannot see it —
-        // the outcome key can. Drop the result — weather AND label — when
-        // either comparison fails.
-        if (result is WeatherFetchResult.Fetched fetchedKeyCheck
-            && !string.Equals(fetchedKeyCheck.QueryKey, fetchKey, StringComparison.Ordinal))
-        {
-            RequestRefresh(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        // Post-await re-validation: the client's Stale verdict closes its own
-        // capture window (through the cache-save await); an identity change
-        // landing in the return→apply gap the client's window cannot see
-        // (including the post-InitializeAsync profile hydration) still comes
-        // back as Fetched here. Drop the result — weather AND label.
-        if (!StillCurrent(fetchKey))
-        {
-            RequestRefresh(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        if (result is not WeatherFetchResult.Fetched fetched)
-        {
-            // Throttled / InFlight / Failed: keep the previous state silently.
-            return WeatherFetchFlowOutcome.Skipped;
-        }
-
-        // The apply is identity-guarded under the same lock as the version
-        // checks: an edit landing between the post-await re-check above and
-        // this point must win — the snapshot and the resolved-identity copies
-        // must not belong to the OLD identity (the stale write-back is
-        // protected separately below). The resolved-identity copies are
-        // assigned under the same lock — an edit cannot resurrect the old
-        // dropdown/name/population over the fresh edit.
-        if (!ApplySnapshot(fetched.Snapshot,
-                identityGuard: () => StillCurrent(fetchKey),
-                candidates: fetched.Candidates,
-                population: fetched.Population,
-                resolvedName: fetched.Snapshot.ResolvedCityName))
-        {
-            RequestRefresh(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        WeatherSnapshot snapshot = fetched.Snapshot;
-
-        // The resolved label's write-back is deferred to the UI thread (Render
-        // flushes the pending field): Context.PersistProperty stays on the UI
-        // thread, and the identity guard above already dropped any fetch whose
-        // resolution inputs changed while it was in flight. The write-back is
-        // skipped entirely when a CustomLabel supplies the title: the label is
-        // display-only, and writing it into Location would destroy the query
-        // (explicit-coords/pick + CustomLabel would overwrite "New York" with
-        // "Home" in the profile). The identity is re-validated once more at
-        // the set: an edit landing between the re-check above and this
-        // assignment must win (the pending set would otherwise flush the OLD
-        // identity's label over the fresh edit on the next render).
-        // The identity check and the pending set are one critical section
-        // under the SAME gate the edit-side clears use: an edit committed
-        // between the check and the set would clear the pending field, and
-        // this set would then resurrect the old identity's label — the same
-        // race class the in-lock copies close. Either the gated set lands
-        // before the edit's gated clear (the clear erases it) or after (the
-        // guard re-reads the new location and the set never happens).
-        if (!string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-            && string.IsNullOrWhiteSpace(CustomLabel)
-            && !string.Equals(snapshot.ResolvedCityName, Location, StringComparison.Ordinal))
-        {
-            lock (_forecastGate)
-            {
-                if (StillCurrent(fetchKey))
-                {
-                    _identity.SetPendingWriteback(snapshot.ResolvedCityName);
-                }
-            }
-        }
-
-        // The geocode may have produced new Location Match candidates: refresh
-        // the inspector so an already-open panel shows the dropdown (the Twitch
-        // pattern — the renderer only builds a ComboBox when options exist).
-        // Only when the option set changed — see _lastInspectorCandidatesStamp.
-        string stamp = string.Join('\n', _identity.Candidates.Select(c => c.Query));
-        if (!string.Equals(stamp, _lastInspectorCandidatesStamp, StringComparison.Ordinal))
-        {
-            _lastInspectorCandidatesStamp = stamp;
-            Context?.RequestInspectorRefresh();
-        }
-
-        Context?.RequestRender();
-        return WeatherFetchFlowOutcome.Applied;
-    }
+    /// <summary>
+    /// The widget's fetch entry (the direct-drive seam the tests and the edit
+    /// paths use). The whole sequence — key capture, outcome verification,
+    /// the post-await re-validation, drop-and-refetch routing, the guarded
+    /// apply, and the write-back gating — lives in
+    /// <see cref="WeatherFetchFlow"/>, so the host carries no part of the
+    /// flow policy: this method is a forward.
+    /// </summary>
+    internal Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
+        => _flow.RunFetchAsync(force);
 
     /// <summary>
     /// Performs the deferred resolved-label write-back on the UI thread (called
@@ -576,22 +480,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
+    /// <summary>
+    /// The property → identity-input coercion (blank → null, trim of the
+    /// optional fields): the host owns its properties, so this shaping lives
+    /// here and is passed to the flow as the <c>currentLocation</c> seam. One
+    /// call site per fetch step — the flow never re-derives the shape.
+    /// </summary>
     private WeatherLocation BuildLocation()
         => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim())
         {
             LocationMatch = string.IsNullOrWhiteSpace(LocationMatch) ? null : LocationMatch.Trim()
         };
-
-    /// <summary>
-    /// The single spelling of "the resolution identity still matches the key
-    /// captured at fetch start": re-derives the LIVE key from the current
-    /// location and compares. The client's Stale verdict is computed before
-    /// its own awaits, so every widget await boundary re-validates through
-    /// this — one comparison shape instead of the former inline
-    /// re-derivations at each guard site.
-    /// </summary>
-    private bool StillCurrent(string key)
-        => WeatherQueryKey.SameKey(key, WeatherQueryKey.Build(BuildLocation()));
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the display state, keeping the
@@ -625,68 +524,24 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     }
 
     /// <summary>Test seam: replaces the client cache-load leg so the boot-race
-    /// version guard is drivable deterministically (defaults to the client's
-    /// identity-checked load).</summary>
-    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride { get; set; }
+    /// version guard is drivable deterministically (forwards to the flow's
+    /// seam; defaults to the client's identity-checked load).</summary>
+    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride
+    {
+        get => _flow.CacheLoadOverride;
+        set => _flow.CacheLoadOverride = value;
+    }
 
     /// <summary>
-    /// The boot cache load. The data version is captured BEFORE the await and
-    /// re-checked after, so a fetch that landed while the load was in flight
-    /// (InitializeAsync fires the load and the boot fetch concurrently) can
-    /// never be overwritten by the stale cache.
+    /// The boot cache load (InitializeAsync fires it before the boot fetch).
+    /// The guarded sequence — version + identity re-checks, the atomic
+    /// check-and-apply, and the discarded-load rollback of the client's
+    /// committed identity state — lives in
+    /// <see cref="WeatherFetchFlow"/>, so the host carries no part of it:
+    /// this method is a forward.
     /// </summary>
-    internal async Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            int versionBefore;
-            string locationKeyBefore;
-            lock (_forecastGate) { versionBefore = _snapshotState.DataVersion; }
-            locationKeyBefore = WeatherQueryKey.Build(BuildLocation());
-
-            // The cache is identity-checked against the CURRENT location: a
-            // cache saved for a different resolution must not surface as fresh
-            // weather (the client rejects a stamp mismatch).
-            var load = CacheLoadOverride ?? _client.LoadCacheAsync;
-            var cached = await load(BuildLocation(), cancellationToken).ConfigureAwait(false);
-            if (cached is null) return;
-
-            // The version + identity guards run INSIDE ApplySnapshot's lock:
-            // a fetch that landed during the await (version) or a hydration
-            // that changed the location (identity) must both win over the
-            // stale cache, and the check + apply are one atomic step. The
-            // boot load runs pre-hydration with the DEFAULT location, so the
-            // identity guard is what keeps the default-stamped cache from
-            // surfacing under the profile's real location. The widget's
-            // resolved-name copy restores under the same lock (the cache
-            // cannot carry candidates or population; they stay empty,
-            // exactly like the client's own load state).
-            bool applied = ApplySnapshot(cached, expectedVersion: versionBefore,
-                identityGuard: () => StillCurrent(locationKeyBefore),
-                resolvedName: cached.ResolvedCityName);
-            if (!applied)
-            {
-                // The client's load already mutated its resolution state
-                // (name/lat/lon/throttle) — roll it back when the identity
-                // changed so the next resolution starts clean (a version-only
-                // skip means a fresh fetch already landed; nothing to undo).
-                bool identityChanged;
-                lock (_forecastGate)
-                {
-                    identityChanged = !StillCurrent(locationKeyBefore);
-                }
-                if (identityChanged)
-                {
-                    _client.InvalidateCoordinates();
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Teardown: the poll CTS was cancelled (dispose) — a cancelled
-            // cache load is not a failure, so nothing is logged or applied.
-        }
-    }
+    internal Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
+        => _flow.RunBootLoadAsync(cancellationToken);
 
     /// <summary>
     /// Returns the cached render model for the current frame, rebuilding it

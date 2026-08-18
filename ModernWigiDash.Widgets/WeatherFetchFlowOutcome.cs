@@ -1,10 +1,12 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// The verdict of one <see cref="WeatherForecastWidget.FetchLiveWeatherAsync"/>
-/// run: what happened to the fetch's outcome on its way through the widget's
-/// identity/apply gates. Lets tests assert the flow deterministically instead
-/// of polling side effects — and documents the outcome vocabulary the fetch
+/// The verdict of one run of the fetch flow (<see
+/// cref="WeatherFetchFlow.RunFetchAsync"/> — the widget's
+/// <c>FetchLiveWeatherAsync</c> forwards to it): what happened to the fetch's
+/// outcome on its way through the flow's identity/apply gates. Lets tests
+/// assert the flow deterministically at the module interface instead of
+/// polling side effects — and documents the outcome vocabulary the fetch
 /// path actually produces.
 /// </summary>
 internal enum WeatherFetchFlowOutcome
