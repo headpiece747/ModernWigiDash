@@ -6,22 +6,23 @@ using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 
-internal enum UpdateState { Hidden, Available, Downloading, Ready }
-
 /// <summary>
-/// The update button's UI states (approved mockup: Griddy icons left of Snap
-/// to Grid, hover tooltips per state) and the restart-prompt flow. The startup
-/// check runs from SourceInitialized so window construction in tests stays
-/// network-free; the swap spawns apply-update.cmd and closes the window.
+/// The update button's WPF wiring and the restart-prompt flow. The state
+/// machine (the check/download/failure transitions, the one spelling of
+/// every tooltip) is the app-side <see cref="UpdateFlow"/>; the window
+/// applies the flow's <see cref="UpdateUiState"/> render units to the
+/// x:Name'd elements and owns the restart-prompt dialog and the close (the
+/// launch decision routes through <c>UpdateFlow.OnClick</c>; the launch
+/// protocol — staged-cmd read, {{RELAUNCH}} substitution, ShellExecute
+/// detach — stays with <see cref="UpdateService"/>).
+///
+/// The startup check runs from SourceInitialized so window construction in
+/// tests stays network-free.
 /// </summary>
 public partial class MainWindow
 {
-    // UpdateButton / UpdateIconPath: the x:Name'd elements are the window's
-    // generated internal fields — tests reach them directly.
-
     private readonly UpdateService _updateService = new();
-    private UpdateState _updateState = UpdateState.Hidden;
-    private UpdateInfo? _pendingUpdate;
+    private readonly UpdateFlow _updateFlow = new();
 
     private async void OnUpdateCheckAtStartup(object? sender, EventArgs e)
     {
@@ -51,9 +52,11 @@ public partial class MainWindow
         try
         {
             var info = await _updateService.CheckForUpdateAsync();
-            if (info is null) return; // up-to-date/offline/failed — silent
-            _pendingUpdate = info;
-            _ = Dispatcher.InvokeAsync(() => ApplyUpdateState(UpdateState.Available, $"Update v{info.Version} available"));
+            // The flow owns the transition + tooltip spelling; a null result
+            // (up-to-date/offline/failed) is silent — no render.
+            var render = _updateFlow.CheckResult(info);
+            if (render is null) return;
+            _ = Dispatcher.InvokeAsync(() => ApplyUpdateState(render));
         }
         catch (Exception ex)
         {
@@ -61,11 +64,10 @@ public partial class MainWindow
         }
     }
 
-    internal void ApplyUpdateState(UpdateState state, string tooltip)
+    internal void ApplyUpdateState(UpdateUiState render)
     {
-        _updateState = state;
-        UpdateButton.ToolTip = tooltip;
-        UpdateBadgeModel badge = UpdateBadgeModel.From(state);
+        UpdateButton.ToolTip = render.Tooltip;
+        UpdateBadgeModel badge = UpdateBadgeModel.From(render.State);
         UpdateIconPath.Data = GriddyIconGeometry.FromName(badge.IconName);
         UpdateButton.Visibility = badge.IsVisible ? Visibility.Visible : Visibility.Collapsed;
         UpdateIconPath.Fill = new SolidColorBrush(Color.FromRgb(badge.Red, badge.Green, badge.Blue));
@@ -73,12 +75,12 @@ public partial class MainWindow
 
     private void UpdateButton_Click(object sender, RoutedEventArgs e)
     {
-        switch (_updateState)
+        switch (_updateFlow.OnClick())
         {
-            case UpdateState.Available when _pendingUpdate is not null:
-                _ = DownloadUpdateAsync(_pendingUpdate);
+            case UpdateClickAction.Download:
+                _ = DownloadUpdateAsync(_updateFlow.PendingUpdate!);
                 break;
-            case UpdateState.Ready:
+            case UpdateClickAction.Restart:
                 ShowRestartPrompt();
                 break;
         }
@@ -86,34 +88,30 @@ public partial class MainWindow
 
     private async Task DownloadUpdateAsync(UpdateInfo info)
     {
-        ApplyUpdateState(UpdateState.Downloading, $"Downloading v{info.Version}… 0%");
+        ApplyUpdateState(_updateFlow.BeginDownload(info));
         var progress = new Progress<double>(p =>
-            UpdateButton.ToolTip = $"Downloading v{info.Version}… {p * 100:F0}%");
+            UpdateButton.ToolTip = UpdateFlow.DownloadingTooltip(info, p));
         bool ok = await _updateService.DownloadAndStageAsync(info, progress);
-        if (!ok)
-        {
-            ApplyUpdateState(UpdateState.Hidden, ""); // silent fail
-            return;
-        }
-        _pendingUpdate = info;
-        ApplyUpdateState(UpdateState.Ready, "Restart to apply");
+        ApplyUpdateState(_updateFlow.DownloadComplete(info, ok));
     }
 
     private void ShowRestartPrompt()
     {
-        if (_pendingUpdate is null) return;
+        var info = _updateFlow.PendingUpdate;
+        if (info is null) return;
         bool restart = _dialogHost.Confirm("Update ready — restart to apply",
-            $"v{_pendingUpdate.Version} is downloaded and staged. It will be installed in place when the app closes. Your profile and theme are preserved.");
+            $"v{info.Version} is downloaded and staged. It will be installed in place when the app closes. Your profile and theme are preserved.");
         if (!restart) return;
 
         // Spawn the updater hidden, then close normally (standby teardown).
         // The launch protocol — staged-cmd read, {{RELAUNCH}} substitution,
         // live-cmd write outside the stage, ShellExecute detach — is owned by
-        // the service, and a failure keeps the window open (the button hides
-        // again instead of the app dying on the UI thread).
-        if (!_updateService.LaunchUpdater(_pendingUpdate, AppContext.BaseDirectory))
+        // the service, and a failure routes through the flow's failure
+        // transition (the window stays open, the button hides instead of the
+        // app dying on the UI thread).
+        if (!_updateService.LaunchUpdater(info, AppContext.BaseDirectory))
         {
-            ApplyUpdateState(UpdateState.Hidden, "");
+            ApplyUpdateState(_updateFlow.Fail());
             return;
         }
 

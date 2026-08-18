@@ -1,10 +1,12 @@
+using ModernWigiDash.App.Update;
+
 namespace ModernWigiDash.App;
 
 /// <summary>
 /// The update button's state → presentation mapping: which Griddy icon, which
-/// RGB brush, and whether the button is visible per <see cref="UpdateState"/>.
-/// Mirrors the UsbBadgeModel pattern — the window keeps only the element
-/// writes, so the table is assertable without WPF.
+/// RGB brush, and whether the button is visible per <see cref="UpdateState"/>
+/// (App.Update). Mirrors the UsbBadgeModel pattern — the window keeps only
+/// the element writes, so the table is assertable without WPF.
 /// </summary>
 internal sealed record UpdateBadgeModel(string IconName, byte Red, byte Green, byte Blue, bool IsVisible)
 {
