@@ -26,7 +26,7 @@ public static class FontHelper
     /// Memoized glyph presence per (typeface handle, codepoint). All typefaces here are
     /// process-lifetime cached (Geist lazy, system fonts via the fallback cache), so a
     /// typeface handle is never reused for a different font while its entries are live.
-    /// Bounded by a simple clear-on-overflow reset.
+    /// Bounded by the shared clear-on-overflow rule (<see cref="FontCacheEviction"/>).
     /// </summary>
     private static readonly ConcurrentDictionary<(long TypefaceHandle, int Codepoint), bool> _glyphPresenceCache = new();
 
@@ -38,11 +38,10 @@ public static class FontHelper
     /// keyed by reference identity; every typeface that flows through
     /// <see cref="GetTextRuns"/> is a process-lifetime cached singleton, so
     /// identity is stable. The cached lists are shared — callers must treat
-    /// them as read-only. Bounded by a simple clear-on-overflow reset.
+    /// them as read-only. Bounded by the shared clear-on-overflow rule
+    /// (<see cref="FontCacheEviction"/>).
     /// </summary>
     private static readonly ConcurrentDictionary<(string Text, SKFontStyle Style, SKTypeface? Preferred), List<(string Text, SKTypeface Typeface)>> _textRunsCache = new();
-
-    private const int TextRunsCacheLimit = 2048;
 
     private static readonly Lazy<SKTypeface?> _geistTypeface = new(() =>
     {
@@ -124,10 +123,7 @@ public static class FontHelper
         }
 
         bool result = ComputeGlyphPresence(typeface, codepoint);
-        if (_glyphPresenceCache.Count > 4096)
-        {
-            _glyphPresenceCache.Clear();
-        }
+        FontCacheEviction.EvictIfFull(_glyphPresenceCache, FontCacheEviction.GlyphPresenceLimit);
         _glyphPresenceCache[key] = result;
         return result;
     }
@@ -164,10 +160,7 @@ public static class FontHelper
         }
 
         var key = (codepoint, style);
-        if (_fallbackCache.Count > 2048)
-        {
-            _fallbackCache.Clear();
-        }
+        FontCacheEviction.EvictIfFull(_fallbackCache, FontCacheEviction.FallbackTypefaceLimit);
         return _fallbackCache.GetOrAdd(key, k => new Lazy<SKTypeface>(() => ResolveFallback(k))).Value;
     }
 
@@ -249,10 +242,7 @@ public static class FontHelper
             return [];
         }
 
-        if (_textRunsCache.Count > TextRunsCacheLimit)
-        {
-            _textRunsCache.Clear();
-        }
+        FontCacheEviction.EvictIfFull(_textRunsCache, FontCacheEviction.TextRunsLimit);
 
         return _textRunsCache.GetOrAdd((text, style, preferred), static key => ComputeTextRuns(key.Text, key.Style, key.Preferred));
     }
@@ -415,13 +405,10 @@ public static class FontHelper
         int sizeKey = (int)Math.Round(size * 2); // half-point resolution
         // Key by the typeface HANDLE (stable — typefaces are cached for the
         // process lifetime): the family name alone cannot distinguish
-        // Regular from Bold. Bounded by the same clear-on-overflow reset the
-        // text-runs cache applies, so a long session with many distinct sizes
-        // cannot grow the native-font cache without bound.
-        if (CachedFonts.Count > TextRunsCacheLimit)
-        {
-            CachedFonts.Clear();
-        }
+        // Regular from Bold. Bounded by the shared clear-on-overflow rule
+        // (<see cref="FontCacheEviction"/>), so a long session with many
+        // distinct sizes cannot grow the native-font cache without bound.
+        FontCacheEviction.EvictIfFull(CachedFonts, FontCacheEviction.CachedFontLimit);
         return CachedFonts.GetOrAdd(
             (typeface.Handle.ToInt64(), sizeKey),
             _ => CreateFont(typeface, size));
