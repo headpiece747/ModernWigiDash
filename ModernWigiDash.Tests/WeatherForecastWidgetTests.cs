@@ -1062,6 +1062,45 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public void LayoutModeAttribute_Options_MatchTheModeCatalog()
+    {
+        // The inspector's choice list is the compile-time LITERAL copy of the
+        // mode catalog (attributes cannot bind a runtime value): a renamed or
+        // hand-edited mode name must fail HERE, not surface at runtime as the
+        // render's default-mode fallback. Mirrors the UnitSystem lockstep pin.
+        var attribute = typeof(WeatherForecastWidget)
+            .GetProperty(nameof(WeatherForecastWidget.LayoutMode))!
+            .GetCustomAttribute<WidgetPropertyAttribute>()!;
+
+        Assert.AreEqual(WeatherLayout.DefaultLayoutMode, attribute.DefaultValue,
+            "the attribute default must match the catalog's default name");
+        Assert.AreEqual(WeatherLayout.Modes.Count, attribute.Options.Length,
+            "every catalog mode must be an option, and every option a catalog mode");
+        for (int i = 0; i < attribute.Options.Length; i++)
+        {
+            string option = attribute.Options[i];
+            Assert.AreEqual(WeatherLayout.Modes[i].Name, option,
+                "choice order must match the catalog's cycle order");
+            Assert.AreEqual(WeatherLayout.Modes[i].Mode, WeatherLayout.ParseMode(option),
+                "every option must parse back to its catalog mode");
+        }
+
+        // The tap-cycle walks the catalog in order and wraps to the home.
+        WeatherLayoutMode current = WeatherLayout.DefaultMode;
+        for (int i = 1; i <= WeatherLayout.Modes.Count; i++)
+        {
+            current = WeatherLayout.NextMode(current);
+            Assert.AreEqual(WeatherLayout.Modes[i % WeatherLayout.Modes.Count].Mode, current,
+                $"cycle stop {i} must walk the catalog order");
+        }
+
+        // Garbage (a hand-edited profile) lands on the default and the cycle
+        // must STAY there — not advance past it.
+        Assert.AreEqual(WeatherLayout.DefaultMode, WeatherLayout.NextMode("Nonsense"),
+            "an unknown string must land on the default and not advance past it");
+    }
+
+    [TestMethod]
     public void WeatherForecastWidget_TouchInteractivity_CyclesLayoutAndUnits()
     {
         var widget = new WeatherForecastWidget();

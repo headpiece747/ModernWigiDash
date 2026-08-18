@@ -50,9 +50,9 @@ internal enum WeatherLayoutMode
 /// <summary>
 /// Pure layout rules for the Weather widget: the scale factors, the header
 /// geometry (title, unit badge, content padding), the header touch zones, the
-/// layout-mode cycle, and the hero/pill shrink rules. Moved out of the
-/// widget's render and touch paths so the drawn geometry and the tap targets
-/// share one source of truth.
+/// layout-mode cycle (over the mode catalog), and the hero/pill shrink rules.
+/// Moved out of the widget's render and touch paths so the drawn geometry and
+/// the tap targets share one source of truth.
 /// </summary>
 internal static class WeatherLayout
 {
@@ -64,6 +64,30 @@ internal static class WeatherLayout
 
     /// <summary>The default layout mode — the single source for the property default and the cycle rule.</summary>
     public const string DefaultLayoutMode = "Detailed";
+
+    /// <summary>The default mode (the <see cref="DefaultLayoutMode"/> entry of
+    /// the catalog): the render's fallback and the cycle's home.</summary>
+    public static WeatherLayoutMode DefaultMode => WeatherLayoutMode.Detailed;
+
+    /// <summary>One entry of the mode catalog: the mode and its persisted/display name.</summary>
+    public sealed record ModeEntry(WeatherLayoutMode Mode, string Name);
+
+    /// <summary>
+    /// The widget's ONE layout-mode catalog: cycle order and display names.
+    /// The inspector property's <c>[WidgetProperty]</c> choice array is a
+    /// compile-time LITERAL copy of this list (attributes cannot bind a
+    /// runtime value) — the attribute's lockstep test keeps the two in
+    /// agreement, so a renamed or hand-edited mode name fails a pin instead
+    /// of surfacing at runtime as the default-mode fallback. Static readonly:
+    /// the 30 FPS render path must not allocate the table per frame.
+    /// </summary>
+    public static IReadOnlyList<ModeEntry> Modes { get; } = [
+        new(WeatherLayoutMode.Detailed, DefaultLayoutMode),
+        new(WeatherLayoutMode.DailyForecast, "Daily Forecast"),
+        new(WeatherLayoutMode.HourlyForecast, "Hourly Forecast"),
+        new(WeatherLayoutMode.CurrentOnly, "Current Only"),
+        new(WeatherLayoutMode.Compact, "Compact"),
+    ];
 
     /// <summary>The placement → scale factors: X scale, Y scale, and the uniform min.</summary>
     public static (float Sx, float Sy, float S) Scale(SKRect bounds)
@@ -108,32 +132,30 @@ internal static class WeatherLayout
 
     /// <summary>
     /// The single string→mode mapping site (the inspector property stays a
-    /// string); unknown values fall back to <see cref="WeatherLayoutMode.Detailed"/>
-    /// — the property default.
+    /// string): every catalog name maps to its mode; unknown values fall back
+    /// to <see cref="DefaultMode"/> — the property default.
     /// </summary>
-    internal static WeatherLayoutMode ParseMode(string? mode) => mode switch
-    {
-        "Daily Forecast" => WeatherLayoutMode.DailyForecast,
-        "Hourly Forecast" => WeatherLayoutMode.HourlyForecast,
-        "Current Only" => WeatherLayoutMode.CurrentOnly,
-        "Compact" => WeatherLayoutMode.Compact,
-        _ => WeatherLayoutMode.Detailed,
-    };
+    internal static WeatherLayoutMode ParseMode(string? mode)
+        => Modes.FirstOrDefault(entry => string.Equals(entry.Name, mode, StringComparison.Ordinal))?.Mode ?? DefaultMode;
 
     /// <summary>
-    /// The tap-cycle rule: Detailed → Daily Forecast → Hourly Forecast →
-    /// Current Only → Compact → Detailed. The wrap (and any out-of-range
-    /// value) resets to the default — the same default <see cref="ParseMode"/>
-    /// falls back to for unknown strings.
+    /// The tap-cycle rule: walk the catalog in order and wrap to the home.
+    /// The wrap (and any out-of-range value) resets to the default — the same
+    /// default <see cref="ParseMode"/> falls back to for unknown strings.
     /// </summary>
-    internal static WeatherLayoutMode NextMode(WeatherLayoutMode mode) => mode switch
+    internal static WeatherLayoutMode NextMode(WeatherLayoutMode mode)
     {
-        WeatherLayoutMode.Detailed => WeatherLayoutMode.DailyForecast,
-        WeatherLayoutMode.DailyForecast => WeatherLayoutMode.HourlyForecast,
-        WeatherLayoutMode.HourlyForecast => WeatherLayoutMode.CurrentOnly,
-        WeatherLayoutMode.CurrentOnly => WeatherLayoutMode.Compact,
-        _ => WeatherLayoutMode.Detailed,
-    };
+        IReadOnlyList<ModeEntry> entries = Modes;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Mode == mode)
+            {
+                return entries[(i + 1) % entries.Count].Mode;
+            }
+        }
+
+        return DefaultMode;
+    }
 
     /// <summary>
     /// The tap-cycle rule for the persisted string value: a known mode string
@@ -148,18 +170,13 @@ internal static class WeatherLayout
     }
 
     /// <summary>
-    /// The single enum→display-name table — the other copy of the mode names
-    /// lives in the widget's <c>[WidgetProperty]</c> choice array, which must
-    /// stay a compile-time string literal.
+    /// The single enum→display-name table — now a lookup over the mode catalog.
+    /// The other copy of the mode names lives in the widget's
+    /// <c>[WidgetProperty]</c> choice array (a compile-time string literal),
+    /// pinned to the catalog by the attribute lockstep test.
     /// </summary>
-    internal static string DisplayName(WeatherLayoutMode mode) => mode switch
-    {
-        WeatherLayoutMode.DailyForecast => "Daily Forecast",
-        WeatherLayoutMode.HourlyForecast => "Hourly Forecast",
-        WeatherLayoutMode.CurrentOnly => "Current Only",
-        WeatherLayoutMode.Compact => "Compact",
-        _ => DefaultLayoutMode,
-    };
+    internal static string DisplayName(WeatherLayoutMode mode)
+        => Modes.FirstOrDefault(entry => entry.Mode == mode)?.Name ?? DefaultLayoutMode;
 
     /// <summary>
     /// The shrink factor for the hero text stack (temp + condition): scales
