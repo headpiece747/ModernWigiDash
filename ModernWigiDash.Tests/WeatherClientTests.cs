@@ -206,12 +206,15 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // First resolution populates the candidates (exact match wins by ranking).
+        // First resolution caches the same-name candidates (the pick pin below is
+        // the behavior that matters: a pick must resolve from that cache,
+        // never by re-geocoding).
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-        Assert.IsTrue(client.LastCandidates.Count >= 2, "Candidates must be exposed for the Location Match dropdown");
 
-        // A user pick resolves DIRECTLY to that candidate — no re-geocode.
-        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
+        // A user pick resolves DIRECTLY to that candidate — no re-geocode. The
+        // pick's label is what the inspector's search offers (the same data
+        // the fetch path cached on resolution).
+        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil
         int geocodesBefore = stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal));
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
 
@@ -262,7 +265,7 @@ public class WeatherClientTests
 
         // Pick Vitoria (the last candidate) from the "Victoria" resolution.
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil
+        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil
         var pickSnapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
         Assert.AreEqual(-20.3194, pickSnapshot!.Lat, "The pick itself must still resolve to Vitoria");
 
@@ -1400,10 +1403,14 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null)));
+        var result = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin, New Hampshire, United States", null, null, null));
+        var snapshot = result is WeatherFetchResult.Fetched { Snapshot: var resolvedSnapshot } ? resolvedSnapshot : null;
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(9367, client.LastResolvedPopulation, 0.0001);
+        // The population rides on the Fetched outcome — the resolution
+        // payload's one channel (no state forward).
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Fetched), "a resolved winner must fetch");
+        Assert.AreEqual(9367, ((WeatherFetchResult.Fetched)result).Population, 0.0001);
     }
 
     [TestMethod]
@@ -1417,15 +1424,19 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // First resolution populates the candidates; the warm in-memory pick
-        // path resolves against them (no re-geocode).
+        // First resolution caches the candidates; the warm in-memory pick path
+        // resolves against them (no re-geocode).
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-        string picked = client.LastCandidates[^1].Label; // Vitoria, Brazil (population 1962476)
-        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
+        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil (population 1962476)
+        var result = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        var snapshot = result is WeatherFetchResult.Fetched { Snapshot: var resolvedSnapshot } ? resolvedSnapshot : null;
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(1962476, client.LastResolvedPopulation, 0.0001,
-            "the warm in-memory pick path must expose the picked candidate's population");
+        // The warm in-memory pick path must expose the picked candidate's
+        // population — on the Fetched outcome, the resolution payload's one
+        // channel.
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Fetched), "a pick fetch must fetch");
+        Assert.AreEqual(1962476, ((WeatherFetchResult.Fetched)result).Population, 0.0001);
     }
 
     [TestMethod]

@@ -66,18 +66,6 @@ internal sealed class WeatherClient
     /// </summary>
     internal int FetchCompletedCount { get; private set; }
 
-    /// <summary>
-    /// The geocode candidates from the last city-name resolution, in API order
-    /// — the widget's "Location Match" dropdown options. Empty when the last
-    /// resolution was coordinates, a ZIP, or a failed geocode. The state lives
-    /// in the fetch-control module; the client forwards.
-    /// </summary>
-    internal IReadOnlyList<GeocodeCandidate> LastCandidates => _fetchControl.Candidates;
-
-    /// <summary>The last resolved winner's population (0 when the resolution had
-    /// no population, e.g. ZIP/coordinate paths or an ambiguous tie).</summary>
-    internal double LastResolvedPopulation => _fetchControl.ResolvedPopulation;
-
     /// <summary>UTC timestamp of the last successful fetch or cache load (drives throttling).</summary>
     internal DateTime LastFetchTimeUtc => _fetchControl.LastFetchTimeUtc;
 
@@ -271,10 +259,19 @@ internal sealed class WeatherClient
     /// not applied — a cache written for a different resolution (a location
     /// edited after the last save) must never surface as fresh weather. An
     /// empty stamp is a legacy cache (predates the identity check) and applies
-    /// as before. On success the fetch throttle is primed to "now" so a
-    /// freshly cached widget does not immediately re-fetch — matching the
-    /// widget's boot semantics. The token aborts the read on teardown, like
-    /// every other fetch leg.
+    /// as before.
+    /// <para>
+    /// STATE COMMITMENT: on success the load commits the cache's resolved
+    /// identity (coordinates + name) into the fetch-control state and stamps
+    /// the throttle to "now" — a freshly cached widget does not immediately
+    /// re-fetch, matching the widget's boot semantics. The commit happens
+    /// BEFORE the caller can decide what to do with the snapshot, so a caller
+    /// that DISCARDS the result (a location change landing while the load was
+    /// in flight) must roll the commitment back with
+    /// <see cref="InvalidateCoordinates"/> — the interface says what the load
+    /// did, so the rejection is the caller's job, never a silent side effect.
+    /// </para>
+    /// The token aborts the read on teardown, like every other fetch leg.
     /// </summary>
     public async Task<WeatherSnapshot?> LoadCacheAsync(WeatherLocation location, CancellationToken cancellationToken = default)
     {
