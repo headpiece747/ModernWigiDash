@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace ModernWigiDash.Core.Rendering;
+namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Owns the cross-thread bitmap retirement policy: bitmaps replaced from
@@ -10,7 +10,7 @@ namespace ModernWigiDash.Core.Rendering;
 /// 0xc0000005). Retire calls are thread-safe; the dispose passes run on the
 /// caller's thread, so the render thread controls the moment of free.
 /// </summary>
-public sealed class RetiredBitmapSet
+internal sealed class RetiredBitmapSet
 {
     private static readonly List<SKBitmap> Empty = [];
 
