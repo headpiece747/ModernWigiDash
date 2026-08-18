@@ -150,7 +150,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private readonly string _safeCacheFallbackToken = Guid.NewGuid().ToString();
 
     private string SafeCacheToken(string? instanceId)
-        => ProfileOps.IsSafeInstanceId(instanceId) ? instanceId! : _safeCacheFallbackToken;
+        => ProfileImportSanitizer.IsSafeInstanceId(instanceId) ? instanceId! : _safeCacheFallbackToken;
 
     /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
     internal int FetchCompletedCount => _client.FetchCompletedCount;

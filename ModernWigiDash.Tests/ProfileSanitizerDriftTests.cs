@@ -11,8 +11,8 @@ namespace ModernWigiDash.Tests;
 /// renamed path-typed widget property would silently disarm the only guard
 /// between an imported profile JSON and Process.Start / SendInput execution.
 /// Core cannot reference the Widgets assembly, so the key set stays a constant
-/// in ProfileOps and this test reflects over the widget catalog to prove the
-/// two still match.
+/// in ProfileImportSanitizer and this test reflects over the widget catalog to
+/// prove the two still match.
 /// </summary>
 [TestClass]
 public class ProfileSanitizerDriftTests
@@ -29,19 +29,19 @@ public class ProfileSanitizerDriftTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
-        string[] declared = ProfileOps.PathPropertyKeys
+        string[] declared = ProfileImportSanitizer.PathPropertyKeys
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
 
         CollectionAssert.AreEqual(reflected, declared,
-            "ProfileOps.PathPropertyKeys drifted from the widgets' [WidgetProperty(WidgetPropertyType.Path)] declarations. " +
+            "ProfileImportSanitizer.PathPropertyKeys drifted from the widgets' [WidgetProperty(WidgetPropertyType.Path)] declarations. " +
             $"Expected: {string.Join(", ", reflected)}; declared: {string.Join(", ", declared)}. A renamed path property would silently disarm the import sanitizer.");
     }
 
     [TestMethod]
     public void PathPropertyKeys_IncludeHotkeyCommandProperty()
     {
-        Assert.IsTrue(ProfileOps.PathPropertyKeys.Contains("ActionCommand"),
+        Assert.IsTrue(ProfileImportSanitizer.PathPropertyKeys.Contains("ActionCommand"),
             "ActionCommand drives Process.Start / SendInput and must always be covered by the sanitizer keys");
 
         var attr = typeof(HotkeyButtonWidget)

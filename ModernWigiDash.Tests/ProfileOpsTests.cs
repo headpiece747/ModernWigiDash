@@ -272,7 +272,7 @@ public class ProfileOpsTests
         var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","InstanceId":"..\\..\\evil","PropertyValues":{}}]}]}""", CreateLoader(), new TestContext());
 
         Assert.IsNotNull(loaded);
-        Assert.IsTrue(ProfileOps.IsSafeInstanceId(loaded.Pages[0].Widgets[0].InstanceId),
+        Assert.IsTrue(ProfileImportSanitizer.IsSafeInstanceId(loaded.Pages[0].Widgets[0].InstanceId),
             "an escaping InstanceId must be regenerated to a safe token");
         Assert.AreNotEqual(@"..\..\evil", loaded.Pages[0].Widgets[0].InstanceId);
     }
@@ -285,28 +285,6 @@ public class ProfileOpsTests
         Assert.IsNotNull(loaded);
         Assert.AreEqual("ab-12_CD", loaded.Pages[0].Widgets[0].InstanceId,
             "a safe token (letters, digits, '-', '_') must survive import unchanged");
-    }
-
-    [TestMethod]
-    public void IsSafeInstanceId_RejectsEveryUnsafeShape()
-    {
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId(null), "null is not a safe token");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId(""), "empty is not a safe token");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId(new string('a', 65)), "65 chars exceed the 64-char cap");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId("a/b"), "path separators are rejected");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId("a\\b"), "backslash separators are rejected");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId(".."), "dot segments are rejected");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId("id.with.dots"), "dots are rejected");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId("C:evil"), "colon is rejected");
-        Assert.IsFalse(ProfileOps.IsSafeInstanceId("über"), "non-ASCII is rejected");
-    }
-
-    [TestMethod]
-    public void IsSafeInstanceId_AcceptsGuidAndTokenShapes()
-    {
-        Assert.IsTrue(ProfileOps.IsSafeInstanceId("ab-12_CD"), "letters/digits/-/_ are safe");
-        Assert.IsTrue(ProfileOps.IsSafeInstanceId(Guid.NewGuid().ToString()), "a GUID is safe (the regenerated form)");
-        Assert.IsTrue(ProfileOps.IsSafeInstanceId("x"), "a single char is safe");
     }
 
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
@@ -793,29 +771,6 @@ public class ProfileOpsTests
 
         Assert.AreEqual(42, ProfileOps.ConvertPropertyValue(element, typeof(int)));
         Assert.IsNull(ProfileOps.ConvertPropertyValue(element, typeof(DateTime)), "Incompatible conversion must return null");
-    }
-
-    // ── import size guard ─────────────────────────────────────
-
-    [TestMethod]
-    public void IsImportFileTooLarge_ExactCap_IsAllowed()
-    {
-        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(ProfileOps.MaxImportFileBytes),
-            "a file of exactly the cap bytes is the largest allowed import");
-    }
-
-    [TestMethod]
-    public void IsImportFileTooLarge_OneByteOverCap_IsRejected()
-    {
-        Assert.IsTrue(ProfileOps.IsImportFileTooLarge(ProfileOps.MaxImportFileBytes + 1),
-            "anything past the cap is untrusted junk and must be rejected before parsing");
-    }
-
-    [TestMethod]
-    public void IsImportFileTooLarge_EmptyFile_IsAllowed()
-    {
-        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(0));
-        Assert.IsFalse(ProfileOps.IsImportFileTooLarge(-1));
     }
 
     [TestMethod]

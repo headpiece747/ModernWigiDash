@@ -670,8 +670,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             {
                 // Untrusted input: cap the file read before any parsing — the
                 // same reject-oversized-input spirit as the import sanitizer
-                // caps in ProfileOps.
-                if (ProfileOps.IsImportFileTooLarge(new FileInfo(dlg.FileName).Length))
+                // caps in ProfileImportSanitizer.
+                if (ProfileImportSanitizer.IsImportFileTooLarge(new FileInfo(dlg.FileName).Length))
                 {
                     _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
                     return;

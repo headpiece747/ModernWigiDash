@@ -62,7 +62,7 @@ internal sealed class ProfilePersistence : IDisposable
         {
             if (!File.Exists(_profilePath)) return null;
             var info = new FileInfo(_profilePath);
-            if (ProfileOps.IsImportFileTooLarge(info.Length))
+            if (ProfileImportSanitizer.IsImportFileTooLarge(info.Length))
             {
                 _log?.Invoke($"Profile file too large ({info.Length} bytes); ignoring");
                 return null;
