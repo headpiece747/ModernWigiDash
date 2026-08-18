@@ -3,9 +3,12 @@ using System.Threading.Channels;
 namespace ModernWigiDash.Sdk;
 
 /// <summary>
-/// Single definition of the frame-coalescing policy used at every hop of the
-/// frame pipeline: drain a DropOldest channel and keep only the most recent
-/// frame, so stale frames are never replayed after a backlog.
+/// The frame-coalescing policy: drain a DropOldest channel and keep only the
+/// most recent element, so stale elements are never replayed after a
+/// backlog. FrameDelivery's bounded slot channel is the production consumer
+/// (drained by its sender loop, every dropped slot's pooled buffer returned);
+/// the rule is unconstrained so any channel element shape reuses the one
+/// definition.
 /// </summary>
 public static class ChannelFrameCoalescer
 {
@@ -13,10 +16,10 @@ public static class ChannelFrameCoalescer
     /// Drains <paramref name="reader"/>, returning the latest element or the
     /// type's default when the channel was empty. Every dropped element is
     /// passed to <paramref name="onDropped"/> so pooled buffers can be
-    /// returned. Unconstrained so both class (string) and struct (FrameSlot)
-    /// element types can flow through the one coalescing definition; callers
-    /// detect "empty" with a default check. An empty channel never invokes
-    /// <paramref name="onDropped"/>.
+    /// returned. Unconstrained: any element shape can reuse the rule
+    /// (FrameDelivery's <c>FrameSlot</c> in production; the string usage is
+    /// the behavior-pinning test only); callers detect "empty" with a default
+    /// check. An empty channel never invokes <paramref name="onDropped"/>.
     /// </summary>
     public static T DrainToLatest<T>(ChannelReader<T> reader, Action<T> onDropped)
     {
