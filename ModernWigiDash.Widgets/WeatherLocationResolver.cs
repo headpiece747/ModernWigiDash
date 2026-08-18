@@ -8,13 +8,16 @@ namespace ModernWigiDash.Widgets;
 /// candidate scoring (exact name, comma-suffix, country-code hint), the
 /// country alias table, diacritic-insensitive matching, the ambiguity gate,
 /// the same-country population tiebreak, the Location Match pick promotion,
-/// and the query/ZIP routing helpers. <see cref="WeatherClient"/> keeps the
-/// HTTP fetch, the JSON parsing, and the resolved-state application; this
-/// module owns the rules so the ranking is assertable without a client
-/// instance. The module is a LEAF utility: both <see cref="WeatherGeocoder"/>
-/// (decision + URL builders) and <see cref="WeatherClient"/> (the forecast
-/// URL and the ZIP routing pre-check) call it directly — routing either
-/// through the geocoder would be a facade with no policy behind it.
+/// the query/ZIP routing helpers, the coordinate validity rules, and the
+/// place-label compositions (city, ZIP, coordinate) — the ONE home of the
+/// "compose a display name from place parts" rule family. <see
+/// cref="WeatherClient"/> keeps the HTTP fetch, the JSON parsing, and the
+/// resolved-state application; this module owns the rules so the ranking is
+/// assertable without a client instance. The module is a LEAF utility: both
+/// <see cref="WeatherGeocoder"/> (decisions + URL builders) and <see
+/// cref="WeatherClient"/> (the forecast URL and the ZIP routing pre-check)
+/// call it directly — routing either through the geocoder would be a facade
+/// with no policy behind it.
 /// </summary>
 internal static class WeatherLocationResolver
 {
@@ -135,6 +138,51 @@ internal static class WeatherLocationResolver
 
         if (string.IsNullOrWhiteSpace(candidate.Admin1)) return string.IsNullOrWhiteSpace(candidate.Country) ? name : $"{name}, {candidate.Country}";
         return string.IsNullOrWhiteSpace(candidate.Country) ? $"{name}, {candidate.Admin1}" : $"{name}, {candidate.Admin1}, {candidate.Country}";
+    }
+
+    /// <summary>The ZIP leg's display label: "City, State" from zippopotam's
+    /// place-name and state parts, composing only the non-empty parts — a
+    /// response that omits the place name must not produce a ", Texas"
+    /// label. The sibling of <see cref="ComposeLabel"/> in the label family.</summary>
+    public static string ComposeZipLabel(string city, string state)
+    {
+        string cityTrim = city.Trim();
+        string stateTrim = state.Trim();
+        if (cityTrim.Length == 0) return stateTrim;
+        if (stateTrim.Length == 0) return cityTrim;
+        return $"{cityTrim}, {stateTrim}";
+    }
+
+    /// <summary>The display compose for a resolved coordinate identity:
+    /// "lat, lon" with two invariant decimals. The one spelling shared by
+    /// the resolution legs, the cache-load naming, and the tests.</summary>
+    public static string FormatCoordinates(double lat, double lon)
+        => $"{lat.ToString("F2", CultureInfo.InvariantCulture)}, {lon.ToString("F2", CultureInfo.InvariantCulture)}";
+
+    /// <summary>A coordinate pair is usable only when both values are finite
+    /// and inside the lat/lon ranges (|lat| ≤ 90, |lon| ≤ 180). The range
+    /// check exists because "NaN"/"Infinity" PARSE as valid doubles — a
+    /// non-finite coordinate would silently poison every downstream URL.</summary>
+    public static bool IsValidCoordinate(double lat, double lon)
+        => !double.IsNaN(lat) && !double.IsNaN(lon)
+            && !double.IsInfinity(lat) && !double.IsInfinity(lon)
+            && Math.Abs(lat) <= 90
+            && Math.Abs(lon) <= 180;
+
+    /// <summary>
+    /// Parses a "lat,lon" location query into its two components;
+    /// false when the query is not a two-part coordinate pair OR the values
+    /// are not usable coordinates (see <see cref="IsValidCoordinate"/>).
+    /// </summary>
+    public static bool TryParseCoordinatePair(string query, out double lat, out double lon)
+    {
+        lat = 0;
+        lon = 0;
+        string[] parts = query.Split(',');
+        if (parts.Length != 2) return false;
+        return double.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lat)
+            && double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lon)
+            && IsValidCoordinate(lat, lon);
     }
 
     /// <summary>

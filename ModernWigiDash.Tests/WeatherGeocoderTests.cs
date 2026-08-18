@@ -199,44 +199,6 @@ public class WeatherGeocoderTests
     }
 
     [TestMethod]
-    public void TryParseCoordinatePair_ValidPair_Parses()
-    {
-        Assert.IsTrue(WeatherGeocoder.TryParseCoordinatePair("52.52, 13.405", out double lat, out double lon));
-        Assert.AreEqual(52.52, lat, 0.0001);
-        Assert.AreEqual(13.405, lon, 0.0001);
-    }
-
-    [TestMethod]
-    public void TryParseCoordinatePair_NotAPair_ReturnsFalse()
-    {
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("52.52", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("Berlin", out _, out _));
-    }
-
-    [TestMethod]
-    public void TryParseCoordinatePair_NonFiniteOrOutOfRange_ReturnsFalse()
-    {
-        // "NaN" and "Infinity" PARSE as valid doubles — the coordinate
-        // validation is what rejects them, along with the range bounds.
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("NaN, 5", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("5, NaN", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("Infinity, 5", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("-Infinity, 5", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("91, 0", out _, out _), "|lat| > 90 is out of range");
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("-91, 0", out _, out _));
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("45, 181", out _, out _), "|lon| > 180 is out of range");
-        Assert.IsFalse(WeatherGeocoder.TryParseCoordinatePair("45, -181", out _, out _));
-        // Boundary values are still valid.
-        Assert.IsTrue(WeatherGeocoder.TryParseCoordinatePair("90, 180", out _, out _));
-    }
-
-    [TestMethod]
-    public void FormatCoordinates_InvariantTwoDecimals()
-    {
-        Assert.AreEqual("52.52, 13.41", WeatherGeocoder.FormatCoordinates(52.52, 13.406));
-    }
-
-    [TestMethod]
     public async Task GeocodeCityAsync_Timeout_IsConvertedToUnresolvedAndLogged()
     {
         // The internal body-read deadline must NOT surface as a plain

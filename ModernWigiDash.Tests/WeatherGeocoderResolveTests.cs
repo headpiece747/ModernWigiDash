@@ -47,7 +47,7 @@ public class WeatherGeocoderResolveTests
         var resolved = (WeatherResolutionOutcome.Resolved)result;
         Assert.AreEqual(40.71, resolved.Lat);
         Assert.AreEqual(-74.0, resolved.Lon);
-        Assert.AreEqual(WeatherGeocoder.FormatCoordinates(40.71, -74.0), resolved.Label);
+        Assert.AreEqual(WeatherLocationResolver.FormatCoordinates(40.71, -74.0), resolved.Label);
         Assert.AreEqual(0.0, resolved.Population);
         Assert.IsNull(resolved.RefreshedCandidates, "a non-city leg must leave the dropdown untouched");
         Assert.AreEqual(0, handler.Calls);
@@ -93,7 +93,7 @@ public class WeatherGeocoderResolveTests
         var resolved = (WeatherResolutionOutcome.Resolved)result;
         Assert.AreEqual(52.52, resolved.Lat);
         Assert.AreEqual(13.41, resolved.Lon);
-        Assert.AreEqual(WeatherGeocoder.FormatCoordinates(52.52, 13.41), resolved.Label, "the pair label is the default coordinate format");
+        Assert.AreEqual(WeatherLocationResolver.FormatCoordinates(52.52, 13.41), resolved.Label, "the pair label is the default coordinate format");
         Assert.AreEqual(0, handler.Calls);
     }
 

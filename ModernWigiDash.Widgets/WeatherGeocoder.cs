@@ -67,10 +67,12 @@ internal abstract record WeatherResolutionOutcome
 /// The geocoding HTTP + parse adapter behind <see cref="WeatherClient"/>: the
 /// Open-Meteo city search (inspector + resolution) and the zippopotam ZIP
 /// lookup, shaped into resolver candidates and dropdown options. Pure policy
-/// (ranking, ambiguity gate, alias tables) stays in
-/// <see cref="WeatherLocationResolver"/>; resolved-state application stays in
-/// the client. Never throws for HTTP failures — it logs and returns the
-/// empty/fallback shape, so the widget's no-data state renders instead.
+/// AND decision rules (ranking, ambiguity gate, alias tables, coordinate
+/// validity, place-label composition) stay in
+/// <see cref="WeatherLocationResolver"/> — the adapter is transport + JSON
+/// shape only; resolved-state application stays in the client. Never throws
+/// for HTTP failures — it logs and returns the empty/fallback shape, so the
+/// widget's no-data state renders instead.
 /// Cancellation propagates (the teardown contract), like every other fetch leg.
 /// </summary>
 internal sealed class WeatherGeocoder
@@ -201,18 +203,18 @@ internal sealed class WeatherGeocoder
         // the forecast URL).
         if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out double explicitLat)
             && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out double explicitLon)
-            && IsValidCoordinate(explicitLat, explicitLon))
+            && WeatherLocationResolver.IsValidCoordinate(explicitLat, explicitLon))
         {
             return new WeatherResolutionOutcome.Resolved(explicitLat, explicitLon,
                 string.IsNullOrWhiteSpace(location.CustomLabel)
-                    ? FormatCoordinates(explicitLat, explicitLon)
+                    ? WeatherLocationResolver.FormatCoordinates(explicitLat, explicitLon)
                     : location.CustomLabel,
                 0);
         }
 
-        if (TryParseCoordinatePair(location.Location, out double pairLat, out double pairLon))
+        if (WeatherLocationResolver.TryParseCoordinatePair(location.Location, out double pairLat, out double pairLon))
         {
-            return new WeatherResolutionOutcome.Resolved(pairLat, pairLon, FormatCoordinates(pairLat, pairLon), 0);
+            return new WeatherResolutionOutcome.Resolved(pairLat, pairLon, WeatherLocationResolver.FormatCoordinates(pairLat, pairLon), 0);
         }
 
         if (WeatherLocationResolver.IsZipCode(location.Location))
@@ -383,20 +385,16 @@ internal sealed class WeatherGeocoder
             // The remote response is the cluster's third coordinate entry
             // point — NaN/out-of-range strings must not flow into the forecast
             // URL (reject the row like the city-leg validation).
-            if (!IsValidCoordinate(lat, lon))
+            if (!WeatherLocationResolver.IsValidCoordinate(lat, lon))
             {
                 throw new InvalidOperationException("zippopotam response carried unusable coordinates");
             }
             string city = GetString(place, "place name");
             string state = GetString(place, "state");
-            // Compose only the non-empty parts: a zippopotam response that
-            // omits the place name must not produce a ", Texas" label.
-            string cityTrim = city.Trim();
-            string stateTrim = state.Trim();
-            string label;
-            if (cityTrim.Length == 0) label = stateTrim;
-            else if (stateTrim.Length == 0) label = cityTrim;
-            else label = $"{cityTrim}, {stateTrim}";
+            // The label composition is the resolver's rule (the ZIP sibling
+            // of ComposeLabel): only the non-empty parts are composed, so a
+            // response that omits the place name cannot produce a ", Texas".
+            string label = WeatherLocationResolver.ComposeZipLabel(city, state);
             return new WeatherZipGeocodeResult(lat, lon, label);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -405,38 +403,6 @@ internal sealed class WeatherGeocoder
             return null;
         }
     }
-
-    /// <summary>
-    /// Parses a "lat,lon" location query into its two components;
-    /// false when the query is not a two-part coordinate pair OR the values
-    /// are not usable coordinates (NaN/Infinity — "NaN" and "Infinity" parse
-    /// as valid doubles — or out of the lat/lon ranges).
-    /// </summary>
-    public static bool TryParseCoordinatePair(string query, out double lat, out double lon)
-    {
-        lat = 0;
-        lon = 0;
-        string[] parts = query.Split(',');
-        if (parts.Length != 2) return false;
-        return double.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lat)
-            && double.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lon)
-            && IsValidCoordinate(lat, lon);
-    }
-
-    /// <summary>A coordinate pair is usable only when both values are finite
-    /// and inside the lat/lon ranges (|lat| ≤ 90, |lon| ≤ 180). The range
-    /// check exists because "NaN"/"Infinity" PARSE as valid doubles — a
-    /// non-finite coordinate would silently poison every downstream URL.</summary>
-    public static bool IsValidCoordinate(double lat, double lon)
-        => !double.IsNaN(lat) && !double.IsNaN(lon)
-            && !double.IsInfinity(lat) && !double.IsInfinity(lon)
-            && Math.Abs(lat) <= 90
-            && Math.Abs(lon) <= 180;
-
-    /// <summary>The display compose for a resolved coordinate identity:
-    /// "lat, lon" with two invariant decimals.</summary>
-    public static string FormatCoordinates(double lat, double lon)
-        => $"{lat.ToString("F2", CultureInfo.InvariantCulture)}, {lon.ToString("F2", CultureInfo.InvariantCulture)}";
 
     /// <summary>Parses one geocoder result into the resolver's raw candidate
     /// model. A candidate that lacks lat/lon (or carries a non-numeric value)
@@ -451,7 +417,7 @@ internal sealed class WeatherGeocoder
             // The same boundary rule as the explicit-coords and ZIP legs: a
             // candidate with non-finite/out-of-range coordinates must not
             // flow into the forecast URL — degrade the row, not the parse.
-            || !IsValidCoordinate(lat, lon))
+            || !WeatherLocationResolver.IsValidCoordinate(lat, lon))
         {
             return null;
         }

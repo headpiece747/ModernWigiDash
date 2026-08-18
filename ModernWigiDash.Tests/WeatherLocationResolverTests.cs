@@ -413,4 +413,54 @@ public class WeatherLocationResolverTests
             + "&timezone=auto",
             uri.AbsoluteUri);
     }
+
+    // The coordinate validity rules moved here from the geocoder adapter
+    // (the adapter is transport + JSON shape only); the pins follow the rules.
+
+    [TestMethod]
+    public void TryParseCoordinatePair_ValidPair_Parses()
+    {
+        Assert.IsTrue(WeatherLocationResolver.TryParseCoordinatePair("52.52, 13.405", out double lat, out double lon));
+        Assert.AreEqual(52.52, lat, 0.0001);
+        Assert.AreEqual(13.405, lon, 0.0001);
+    }
+
+    [TestMethod]
+    public void TryParseCoordinatePair_NotAPair_ReturnsFalse()
+    {
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("52.52", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("Berlin", out _, out _));
+    }
+
+    [TestMethod]
+    public void TryParseCoordinatePair_NonFiniteOrOutOfRange_ReturnsFalse()
+    {
+        // "NaN" and "Infinity" PARSE as valid doubles — the coordinate
+        // validation is what rejects them, along with the range bounds.
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("NaN, 5", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("5, NaN", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("Infinity, 5", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("-Infinity, 5", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("91, 0", out _, out _), "|lat| > 90 is out of range");
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("-91, 0", out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("45, 181", out _, out _), "|lon| > 180 is out of range");
+        Assert.IsFalse(WeatherLocationResolver.TryParseCoordinatePair("45, -181", out _, out _));
+        // Boundary values are still valid.
+        Assert.IsTrue(WeatherLocationResolver.TryParseCoordinatePair("90, 180", out _, out _));
+    }
+
+    [TestMethod]
+    public void FormatCoordinates_InvariantTwoDecimals()
+    {
+        Assert.AreEqual("52.52, 13.41", WeatherLocationResolver.FormatCoordinates(52.52, 13.406));
+    }
+
+    [TestMethod]
+    public void ComposeZipLabel_ComposesOnlyNonEmptyParts()
+    {
+        Assert.AreEqual("Austin, Texas", WeatherLocationResolver.ComposeZipLabel("Austin", "Texas"));
+        Assert.AreEqual("Texas", WeatherLocationResolver.ComposeZipLabel("", "Texas"), "an omitted place name must not produce a ', Texas' label");
+        Assert.AreEqual("Austin", WeatherLocationResolver.ComposeZipLabel("Austin", ""));
+        Assert.AreEqual("Austin, Texas", WeatherLocationResolver.ComposeZipLabel("  Austin  ", "  Texas  "), "parts are trimmed before composing");
+    }
 }

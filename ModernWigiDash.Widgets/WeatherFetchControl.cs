@@ -218,7 +218,7 @@ internal sealed class WeatherFetchControl
             }
             else if (lat is double cachedLat && lon is double cachedLon)
             {
-                _resolvedCityName = WeatherGeocoder.FormatCoordinates(cachedLat, cachedLon);
+                _resolvedCityName = WeatherLocationResolver.FormatCoordinates(cachedLat, cachedLon);
             }
             else
             {
