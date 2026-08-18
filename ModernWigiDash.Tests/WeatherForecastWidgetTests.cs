@@ -302,7 +302,8 @@ public class WeatherForecastWidgetTests
         using var surface = SKSurface.Create(new SKImageInfo(406, 296));
         var bounds = new SKRect(0, 0, 406, 296);
 
-        // The matrix pins every IsCacheValid key: changing any one of them
+        // The matrix pins every WeatherRenderModelKey component: changing any
+        // one of them
         // must rebuild the model (the static scene would otherwise draw stale
         // strings). Each mutation persists — every assertion starts from the
         // previous mutated state and changes ONE key.
@@ -324,6 +325,28 @@ public class WeatherForecastWidgetTests
         AssertRebuilds("ShowHighLow", () => widget.ShowHighLow = false);
         AssertRebuilds("ShowForecast", () => widget.ShowForecast = false);
         AssertRebuilds("Bounds", () => bounds = new SKRect(0, 0, 300, 200));
+    }
+
+    [TestMethod]
+    public void RenderModel_Key_IsAValueSnapshot_NotLivePropertyReferences()
+    {
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())) };
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        var bounds = new SKRect(0, 0, 406, 296);
+
+        widget.Render(surface.Canvas, bounds);
+        var keyBefore = widget._renderModel!.Key;
+
+        // No re-render: mutating a property must not rewrite the cached
+        // model's key (value snapshot) — and the next render must pick the
+        // change up (the rebuild matrix pins the forced rebuild itself).
+        widget.LayoutMode = "Compact";
+        Assert.AreSame(keyBefore, widget._renderModel.Key,
+            "an un-rendered property change cannot rewrite a cached model's key");
+
+        widget.Render(surface.Canvas, bounds);
+        Assert.AreEqual("Compact", widget._renderModel.Key!.LayoutMode,
+            "the rebuilt model's key must carry the new property value");
     }
 
     [TestMethod]
@@ -987,7 +1010,8 @@ public class WeatherForecastWidgetTests
         Assert.IsFalse(widget.StaticSnapshot);
 
         // The defaulted property snapshot survives a change (the render-model
-        // cache invalidation covers the property set — see IsCacheValid).
+        // cache invalidation covers the property set — see
+        // WeatherRenderModelKey).
         widget.Location = "Tokyo";
         Assert.AreEqual("Tokyo", widget.Location);
     }

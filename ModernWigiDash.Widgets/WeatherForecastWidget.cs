@@ -715,7 +715,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             hourly = _hourlyForecastSnapshot;
         }
 
-        if (_renderModel is { } cached && IsCacheValid(cached, dataVersion, bounds))
+        // One cache identity per build: the key record holds everything that
+        // can change the formatted strings (data version, bounds, property
+        // snapshot), so the hit test is a single record comparison — and the
+        // key is a value snapshot (an un-rendered property change cannot
+        // rewrite a cached model's key).
+        var key = new WeatherRenderModelKey(
+            dataVersion, bounds,
+            LayoutMode, UnitSystem, CustomLabel, _identity.CityName,
+            ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast);
+
+        if (_renderModel is { } cached && cached.Key == key)
         {
             return cached;
         }
@@ -739,6 +749,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         var model = new WeatherRenderModel
         {
+            Key = key,
             DataVersion = dataVersion,
             Bounds = bounds,
             LayoutMode = LayoutMode,
@@ -774,21 +785,5 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _renderModel = model;
         return model;
     }
-
-    /// <summary>The render-model cache key: the data version, the bounds
-    /// (layout-derived font sizes), and the property snapshot that changes any
-    /// formatted string.</summary>
-    private bool IsCacheValid(WeatherRenderModel cached, int dataVersion, SKRect bounds)
-        => cached.DataVersion == dataVersion
-            && cached.Bounds == bounds
-            && string.Equals(cached.LayoutMode, LayoutMode, StringComparison.Ordinal)
-            && string.Equals(cached.UnitSystem, UnitSystem, StringComparison.Ordinal)
-            && string.Equals(cached.CustomLabel, CustomLabel, StringComparison.Ordinal)
-            && string.Equals(cached.ResolvedCity, _identity.CityName, StringComparison.Ordinal)
-            && cached.ShowFeelsLike == ShowFeelsLike
-            && cached.ShowHumidity == ShowHumidity
-            && cached.ShowWind == ShowWind
-            && cached.ShowHighLow == ShowHighLow
-            && cached.ShowForecast == ShowForecast;
 }
 
