@@ -233,12 +233,18 @@ internal sealed class WeatherFetchControl
     }
 
     /// <summary>
-    /// Resets the resolved coordinates, name, query, and throttle so the next
-    /// fetch re-resolves and runs immediately (a location property change, or
-    /// a discarded cache load's rollback). The geocode candidates and
-    /// population survive — the "Location Match" pick can still resolve
-    /// against the candidates it was offered from; <see cref="ClearCandidates"/>
-    /// drops them for the full invalidation.
+    /// Resets the resolved coordinates, name, population, query, and throttle
+    /// so the next fetch re-resolves and runs immediately (an edit-flow
+    /// location change, or a discarded cache load's rollback). The resolved
+    /// population drops with the resolution result (this drop voids the old
+    /// winner — the widget twin's <c>InvalidateCoordinates</c> makes the same
+    /// clear); it rides back only with the new winner via <see
+    /// cref="SetResolved"/>. Contrast <see cref="ClearCoordinates"/>, which
+    /// SERVES an ambiguous tie where the old resolution stays the current
+    /// best and keeps its population. The geocode candidates survive — the
+    /// "Location Match" pick can still resolve against the candidates it was
+    /// offered from; <see cref="ClearCandidates"/> drops them for the full
+    /// invalidation.
     /// </summary>
     internal void Invalidate()
     {
@@ -247,6 +253,7 @@ internal sealed class WeatherFetchControl
             _lat = null;
             _lon = null;
             _resolvedCityName = "";
+            _resolvedPopulation = 0;
             _lastFetchTime = DateTime.MinValue;
             _lastLocationQuery = "";
         }

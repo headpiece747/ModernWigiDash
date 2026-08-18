@@ -257,47 +257,50 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
-        // A Location Match pick resolves against the candidates it was offered
-        // from, so it keeps them (InvalidateCoordinates); every other location
-        // change clears the candidates so a stale pick can never win.
-        // The identity transitions run in the identity module under the SAME
-        // gate ApplySnapshot's guarded apply takes — an in-flight fetch that
-        // passed the identity guard before the edit can still be overwriting
-        // the copies when the edit commits, so the clear must be atomic
-        // against that assignment (either the assignment lands before the
-        // clear and is erased, or the guard re-reads the new location and the
-        // assignment never happens; the edit can never be resurrected over).
-        // Each Invalidate* also drops a PENDING resolved-label write-back: a
-        // fetch that completed just before the edit may have set the pending
-        // label, and the next Render tick would otherwise write it over the
-        // newer edit (the client's in-flight stale guard only covers fetches
-        // still in flight at edit time — a completed fetch whose write-back
-        // was not yet flushed is the race the clear closes). The pending drop
-        // moved inside the gate with the rest — strictly stronger than the
-        // old out-of-lock clear, and safe because the identity re-check is
-        // also under the gate.
-        if (string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal))
-        {
-            lock (_forecastGate)
-            {
-                _identity.InvalidateCoordinates();
-            }
-            _client.InvalidateCoordinates();
-            RequestRefresh(force: true);
-        }
-        else if (!_suppressLocationWriteback && WeatherResolvedIdentity.ResolutionInvalidationProperties.Contains(propertyName))
+        // The drop granularity is the rule's decision (WeatherInvalidation):
+        // a Location Match pick keeps the candidates it was offered from,
+        // every other resolution input voids the whole identity (a stale pick
+        // can never win). The two twins (the client's fetch control and the
+        // widget's resolved identity) are paired PER KIND — the identity
+        // transitions run under the SAME gate ApplySnapshot's guarded apply
+        // takes, so the clear is atomic against an in-flight fetch's
+        // assignment (either the assignment lands before the clear and is
+        // erased, or the guard re-reads the new location and the assignment
+        // never happens; the edit can never be resurrected over). Each
+        // Invalidate* also drops a PENDING resolved-label write-back (the
+        // race a completed-but-unflushed fetch leaves) — strictly stronger
+        // under the gate, safe because the identity re-check is also under
+        // the gate.
+        WeatherInvalidationKind kind = WeatherInvalidation.KindForProperty(propertyName);
+        if (kind == WeatherInvalidationKind.Location && _suppressLocationWriteback)
         {
             // The resolved-label write-back skips the forced re-fetch: the
             // label was just resolved by the fetch that wrote it, so fetching
             // again would loop (the write-back converges after one extra
             // resolution at most).
-            lock (_forecastGate)
-            {
-                _identity.InvalidateLocation();
-            }
-            _client.InvalidateLocation();
-            RequestRefresh(force: true);
+            kind = WeatherInvalidationKind.None;
         }
+
+        switch (kind)
+        {
+            case WeatherInvalidationKind.Coordinates:
+                lock (_forecastGate)
+                {
+                    _identity.InvalidateCoordinates();
+                }
+                _client.InvalidateCoordinates();
+                RequestRefresh(force: true);
+                break;
+            case WeatherInvalidationKind.Location:
+                lock (_forecastGate)
+                {
+                    _identity.InvalidateLocation();
+                }
+                _client.InvalidateLocation();
+                RequestRefresh(force: true);
+                break;
+        }
+
         base.OnPropertyChanged(propertyName, newValue);
     }
 
