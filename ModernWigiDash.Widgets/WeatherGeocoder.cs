@@ -33,6 +33,37 @@ internal abstract record WeatherCityGeocodeResult(IReadOnlyList<GeocodeCandidate
 internal sealed record WeatherZipGeocodeResult(double Lat, double Lon, string CityName);
 
 /// <summary>
+/// The outcome of the cluster's single resolution door (<see
+/// cref="WeatherGeocoder.ResolveAsync"/>): one verdict for every input
+/// spelling the ladder sees — explicit coordinates, a "lat,lon" pair, a
+/// postal code, a "Location Match" pick, or a city name. A resolved outcome
+/// carries the exact coordinates, the composed display label (the explicit
+/// and pick legs honor the custom label; the coordinate-pair and ZIP legs
+/// never do — the per-leg composition is the verbatim rule), and the
+/// winner's population (0 for every non-name resolution);
+/// <c>RefreshedCandidates</c> is non-null only when the city leg ran and
+/// shaped the "Location Match" dropdown. Ambiguous carries the tie's
+/// candidates (coordinates are never guessed); Unresolved means the geocode
+/// produced nothing (the previous resolution stays valid). Applying the
+/// state and stamping the throttle stay with the client.
+/// </summary>
+internal abstract record WeatherResolutionOutcome
+{
+    /// <summary>A unique winner — or a zero-HTTP fast path (explicit
+    /// coordinates, a pair, a ZIP, a pick): its coordinates and label.</summary>
+    public sealed record Resolved(double Lat, double Lon, string Label, double Population, IReadOnlyList<GeocodeCandidate>? RefreshedCandidates = null)
+        : WeatherResolutionOutcome;
+
+    /// <summary>The candidates tie — coordinates must not be guessed.</summary>
+    public sealed record Ambiguous(IReadOnlyList<GeocodeCandidate> Candidates)
+        : WeatherResolutionOutcome;
+
+    /// <summary>The geocode produced no candidates — the previous resolution
+    /// stays valid.</summary>
+    public sealed record Unresolved : WeatherResolutionOutcome;
+}
+
+/// <summary>
 /// The geocoding HTTP + parse adapter behind <see cref="WeatherClient"/>: the
 /// Open-Meteo city search (inspector + resolution) and the zippopotam ZIP
 /// lookup, shaped into resolver candidates and dropdown options. Pure policy
@@ -132,6 +163,110 @@ internal sealed class WeatherGeocoder
             double effectiveSeconds = (HttpTimeoutOverride ?? HttpTimeout).TotalSeconds;
             throw new TimeoutException($"HTTP leg exceeded the {effectiveSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s deadline");
         }
+    }
+
+    /// <summary>
+    /// The forecast leg: builds the forecast query URL (the resolver's
+    /// invariant F4 formatting — a comma-decimal OS locale must never
+    /// interpolate "40,7100" into the query at a call site) and performs the
+    /// bounded read. Every weather fetch in the cluster rides this door; HTTP
+    /// failures propagate to the caller's catch (the client's Failed/Stale
+    /// verdict), like the raw leg.
+    /// </summary>
+    public Task<string> ReadForecastAsync(double lat, double lon, CancellationToken cancellationToken)
+        => ReadBoundedAsync(WeatherLocationResolver.BuildForecastUri(lat, lon).ToString(), cancellationToken);
+
+    /// <summary>
+    /// The cluster's single resolution door: walks the ladder — explicit
+    /// coordinates (authoritative, honoring the custom label), a "lat,lon"
+    /// pair (never honoring it), a postal code (zippopotam with the country
+    /// hint; a failed lookup falls back to the city leg WITH the original
+    /// location, so the hint is carried), a "Location Match" pick (honored
+    /// ONLY on the non-ZIP path — a ZIP input never sees the pick — honoring
+    /// the custom label), and finally the city-name geocode — and returns the
+    /// verdict. Applies no resolved state (the client owns lat/lon/name
+    /// application and the throttle stamp) and never throws for HTTP
+    /// failures — the unresolved verdict is the failure shape.
+    /// </summary>
+    public async Task<WeatherResolutionOutcome> ResolveAsync(
+        WeatherLocation location,
+        IReadOnlyList<GeocodeCandidate>? candidates,
+        CancellationToken cancellationToken)
+    {
+        // Explicit coordinates are authoritative — they must win over a stale
+        // Location Match pick from a previous city query. The pair is only
+        // honored when BOTH values are usable coordinates: "NaN"/"Infinity"
+        // parse as doubles, so the range check is what rejects them (and the
+        // resolution falls back to the location query instead of poisoning
+        // the forecast URL).
+        if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out double explicitLat)
+            && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out double explicitLon)
+            && IsValidCoordinate(explicitLat, explicitLon))
+        {
+            return new WeatherResolutionOutcome.Resolved(explicitLat, explicitLon,
+                string.IsNullOrWhiteSpace(location.CustomLabel)
+                    ? FormatCoordinates(explicitLat, explicitLon)
+                    : location.CustomLabel,
+                0);
+        }
+
+        if (TryParseCoordinatePair(location.Location, out double pairLat, out double pairLon))
+        {
+            return new WeatherResolutionOutcome.Resolved(pairLat, pairLon, FormatCoordinates(pairLat, pairLon), 0);
+        }
+
+        if (WeatherLocationResolver.IsZipCode(location.Location))
+        {
+            // The ZIP path routes by the country hint (zippopotam /de/, /us/,
+            // ...); unsupported countries 404 and fall back to the geocoder.
+            WeatherZipGeocodeResult? zip = await GeocodeZipAsync(location.Location, location.CountryCode, cancellationToken).ConfigureAwait(false);
+            if (zip is not null)
+            {
+                return new WeatherResolutionOutcome.Resolved(zip.Lat, zip.Lon, zip.CityName, 0);
+            }
+
+            // The zippopotam path is US-only; fall back to the worldwide
+            // Open-Meteo geocoder WITH the original location (so the
+            // CountryCode hint is carried — e.g. "10115" + "DE" resolves the
+            // Berlin postal district).
+            return await ResolveCityLegAsync(location, cancellationToken).ConfigureAwait(false);
+        }
+
+        // A user pick from the "Location Match" dropdown resolves directly to
+        // that candidate's exact coordinates — no re-geocode. The pick is only
+        // honored on this non-ZIP path (after the override and ZIP paths); the
+        // caller passes the CURRENT dropdown (cleared by the client's
+        // InvalidateLocation on any location/coords change), so a stale pick
+        // cannot win.
+        if (candidates is { Count: > 0 } && !string.IsNullOrWhiteSpace(location.LocationMatch))
+        {
+            var match = candidates.FirstOrDefault(c =>
+                c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return new WeatherResolutionOutcome.Resolved(match.Lat, match.Lon,
+                    string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel,
+                    match.Population);
+            }
+        }
+
+        return await ResolveCityLegAsync(location, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The city-name leg of the resolution door: the geocode plus the
+    /// dropdown shaping, mapped onto the door's outcome union — a resolved
+    /// winner carries its candidates so the client can refresh the dropdown,
+    /// a tie carries the tie's candidates, and an empty geocode resolves
+    /// nothing (the previous resolution stays valid).</summary>
+    private async Task<WeatherResolutionOutcome> ResolveCityLegAsync(WeatherLocation location, CancellationToken cancellationToken)
+    {
+        WeatherCityGeocodeResult result = await GeocodeCityAsync(location.Location, location.CountryCode, location.LocationMatch, cancellationToken).ConfigureAwait(false);
+        return result switch
+        {
+            WeatherCityGeocodeResult.Resolved r => new WeatherResolutionOutcome.Resolved(r.Lat, r.Lon, r.Label, r.Population, r.Candidates),
+            WeatherCityGeocodeResult.Ambiguous a => new WeatherResolutionOutcome.Ambiguous(a.Candidates),
+            _ => new WeatherResolutionOutcome.Unresolved(),
+        };
     }
 
     /// <summary>

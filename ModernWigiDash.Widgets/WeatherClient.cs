@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
@@ -198,11 +197,10 @@ internal sealed class WeatherClient
             double lat = _fetchControl.Lat.Value;
             double lon = _fetchControl.Lon.Value;
 
-            // The forecast URL is built in WeatherLocationResolver with
-            // invariant F4 formatting — a comma-decimal OS locale must never
-            // interpolate "40,7100" into the query.
-            string forecastUrl = WeatherLocationResolver.BuildForecastUri(lat, lon).ToString();
-            string json = await _geocoder.ReadBoundedAsync(forecastUrl, cancellationToken).ConfigureAwait(false);
+            // The forecast leg: the URL's invariant F4 formatting lives in the
+            // resolver behind the geocoder's door — a comma-decimal OS locale
+            // must never interpolate "40,7100" into the query at a call site.
+            string json = await _geocoder.ReadForecastAsync(lat, lon, cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
@@ -343,111 +341,57 @@ internal sealed class WeatherClient
         // and the completion check (which compares against THIS new key)
         // would pass — fetching and caching the wrong city under the new
         // identity. Only a name resolution carries a population: the advance
-        // resets it, and the city-resolution winner and pick paths below set
-        // the real value.
+        // resets it, and the resolution winner (the city leg or a "Location
+        // Match" pick — the geocoder's door) sets the real value.
 
-        // Explicit coordinates are authoritative — they must win over a stale
-        // Location Match pick from a previous city query. The pair is only
-        // honored when BOTH values are usable coordinates: "NaN"/"Infinity"
-        // parse as doubles, so the range check is what rejects them (and the
-        // resolution falls back to the location query instead of poisoning
-        // the forecast URL).
+        // The ladder (explicit coordinates, a "lat,lon" pair, a postal code,
+        // a "Location Match" pick, the city name) is the geocoder's single
+        // resolution door; this method applies the verdict to module state,
+        // never re-deriving the per-leg rules (the custom label's honor
+        // rules, the dropdown refresh, never guessing a tie's coordinates).
         _fetchControl.AdvanceResolution(currentQuery);
-        if (double.TryParse(location.Latitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var latVal)
-            && double.TryParse(location.Longitude, NumberStyles.Float, CultureInfo.InvariantCulture, out var lonVal)
-            && WeatherGeocoder.IsValidCoordinate(latVal, lonVal))
-        {
-            _fetchControl.SetResolved(latVal, lonVal,
-                string.IsNullOrWhiteSpace(location.CustomLabel)
-                    ? WeatherGeocoder.FormatCoordinates(latVal, lonVal)
-                    : location.CustomLabel, 0);
-        }
-        else if (WeatherGeocoder.TryParseCoordinatePair(location.Location, out double pairLat, out double pairLon))
-        {
-            _fetchControl.SetResolved(pairLat, pairLon, WeatherGeocoder.FormatCoordinates(pairLat, pairLon), 0);
-        }
-        else if (WeatherLocationResolver.IsZipCode(location.Location))
-        {
-            // The ZIP path routes by the country hint (zippopotam /de/, /us/,
-            // ...); unsupported countries 404 and fall back to the geocoder.
-            var zip = await _geocoder.GeocodeZipAsync(location.Location, location.CountryCode, cancellationToken).ConfigureAwait(false);
-            if (zip is not null)
-            {
-                _fetchControl.SetResolved(zip.Lat, zip.Lon, zip.CityName, 0);
-                return;
-            }
 
-            // The zippopotam path is US-only; fall back to the worldwide
-            // Open-Meteo geocoder WITH the original location (so the
-            // CountryCode hint is carried — e.g. "10115" + "DE" resolves the
-            // Berlin postal district).
-            await ResolveCityAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
-        }
-        else
+        var outcome = await _geocoder.ResolveAsync(location, _fetchControl.Candidates, cancellationToken).ConfigureAwait(false);
+        switch (outcome)
         {
-            // A user pick from the "Location Match" dropdown resolves directly
-            // to that candidate's exact coordinates — no re-geocode. The pick
-            // is only honored inside the city branch (after the override and
-            // ZIP paths), and candidates were cleared by InvalidateLocation on
-            // any location/coords change, so a stale pick cannot win.
-            if (!string.IsNullOrWhiteSpace(location.LocationMatch))
-            {
-                var match = _fetchControl.Candidates.FirstOrDefault(c =>
-                    c.Query.Equals(location.LocationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
-                if (match is not null)
+            case WeatherResolutionOutcome.Resolved r:
+                _fetchControl.SetResolved(r.Lat, r.Lon, r.Label, r.Population);
+                // A geocode that produced candidates refreshes the dropdown; a
+                // fast path (explicit/pair/ZIP/pick) leaves the last dropdown
+                // untouched.
+                if (r.RefreshedCandidates is { Count: > 0 })
                 {
-                    _fetchControl.SetResolved(match.Lat, match.Lon,
-                        string.IsNullOrWhiteSpace(location.CustomLabel) ? match.Label : location.CustomLabel,
-                        match.Population);
-                    return;
+                    _fetchControl.SetCandidates(r.RefreshedCandidates);
                 }
-            }
-
-            await ResolveCityAsync(location, currentQuery, cancellationToken).ConfigureAwait(false);
+                break;
+            case WeatherResolutionOutcome.Ambiguous a:
+                // Coordinates are never guessed for a tie; drop the stale
+                // resolved name too — a previous resolution's name must never
+                // trap the next editor with a place the fetch never reached.
+                if (a.Candidates.Count > 0)
+                {
+                    _fetchControl.SetCandidates(a.Candidates);
+                }
+                _fetchControl.ClearCoordinates();
+                break;
+            case WeatherResolutionOutcome.Unresolved:
+                // A failed geocode leaves the previous resolution valid.
+                break;
         }
-    }
 
-    /// <summary>
-    /// The city-name resolution leg: geocodes via <see cref="WeatherGeocoder"/>
-    /// and applies the resolved state — the winner's coordinates, label, and
-    /// population; an ambiguous tie clears the resolution (the "Location
-    /// Match" dropdown stays populated with the tie's candidates); a failed
-    /// geocode leaves the previous resolution valid. Every non-resolved
-    /// outcome stamps the attempt time so the 5-minute throttle applies even
-    /// without coordinates — otherwise a typo'd city, an ambiguous tie, or an
-    /// outage would retry at render rate forever.
-    /// </summary>
-    private async Task ResolveCityAsync(WeatherLocation location, string fetchQueryKey, CancellationToken cancellationToken)
-    {
-        var result = await _geocoder.GeocodeCityAsync(location.Location, location.CountryCode, location.LocationMatch, cancellationToken).ConfigureAwait(false);
-
-        // A geocode that produced candidates refreshes the dropdown; one that
-        // produced none (failure or an empty response) leaves the last
-        // dropdown untouched.
-        if (result.Candidates.Count > 0) _fetchControl.SetCandidates(result.Candidates);
-
-        if (result is WeatherCityGeocodeResult.Resolved r)
+        // A geocode that resolves nothing stamps the attempt time so the
+        // 5-minute throttle applies even without coordinates — a fetch will
+        // never run for it, so it cannot stamp itself at completion
+        // (ConfirmAndStamp). Without the stamp a typo'd city, an ambiguous tie,
+        // or an outage would retry at render rate forever. The stamp is
+        // identity-guarded like the fetch's catch block: a geocode that failed
+        // AFTER the resolution identity changed must not cool down the NEW
+        // identity's fetch (the caller's no-coordinates path reports Stale for
+        // the same condition).
+        if (outcome is WeatherResolutionOutcome.Ambiguous or WeatherResolutionOutcome.Unresolved)
         {
-            _fetchControl.SetResolved(r.Lat, r.Lon, r.Label, r.Population);
-            return;
+            _fetchControl.Stamp(currentQuery);
         }
-
-        if (result is WeatherCityGeocodeResult.Ambiguous)
-        {
-            // Coordinates are never guessed for a tie; drop the stale resolved
-            // name too — a previous resolution's name must never trap the next
-            // editor with a place the fetch never reached.
-            _fetchControl.ClearCoordinates();
-        }
-
-        // A failed or ambiguous geocode leaves the coordinates unresolved:
-        // FetchCurrentAsync returns a Failed outcome (no snapshot) and the
-        // widget renders its "no data" state instead of silently pinning a
-        // default location. The throttle stamp is identity-guarded like the
-        // fetch's catch block: a geocode that failed AFTER the resolution
-        // identity changed must not cool down the NEW identity's fetch (the
-        // caller's no-coordinates path reports Stale for the same condition).
-        _fetchControl.Stamp(fetchQueryKey);
     }
 
     /// <summary>
