@@ -165,7 +165,7 @@ internal sealed class WeatherClient
         // The resolution identity this fetch started for — captured once so
         // the completion check (and the cache stamp) cannot drift from the
         // location that actually resolved.
-        string fetchQueryKey = BuildQueryKey(location);
+        string fetchQueryKey = WeatherQueryKey.Build(location);
 
         // The claim + throttle rules live in the fetch-control module: the
         // in-flight guard is Interlocked — the render tick, the refresh
@@ -291,7 +291,7 @@ internal sealed class WeatherClient
             // query must not be applied. An empty stamp (legacy cache) is
             // trusted — it predates the identity check.
             if (!string.IsNullOrEmpty(payload.LocationQueryKey)
-                && !string.Equals(payload.LocationQueryKey, BuildQueryKey(location), StringComparison.Ordinal))
+                && !WeatherQueryKey.SameKey(payload.LocationQueryKey, WeatherQueryKey.Build(location)))
             {
                 return null;
             }
@@ -306,7 +306,7 @@ internal sealed class WeatherClient
             // see a state swap underneath it). Empty identity query = boot,
             // no resolution started yet — the legitimate load case.
             if (!_fetchControl.TryApplyCacheIdentity(
-                    BuildQueryKey(location), payload.Lat, payload.Lon, payload.ResolvedCityName, out string resolvedName))
+                    WeatherQueryKey.Build(location), payload.Lat, payload.Lon, payload.ResolvedCityName, out string resolvedName))
             {
                 return null;
             }
@@ -449,21 +449,6 @@ internal sealed class WeatherClient
         // caller's no-coordinates path reports Stale for the same condition).
         _fetchControl.Stamp(fetchQueryKey);
     }
-
-    /// <summary>The resolution identity key — one spelling for the client's
-    /// per-query geocode cache and the widget's in-flight staleness guard:
-    /// a change in any resolution input (Location, Latitude, Longitude,
-    /// CountryCode, LocationMatch) yields a different key. Fields are
-    /// backslash-escaped and joined with '|' so a separator character inside
-    /// a field can never forge a colliding key.</summary>
-    internal static string BuildQueryKey(WeatherLocation location)
-        => string.Join('|',
-            EscapeKeyField(location.LocationType), EscapeKeyField(location.Location),
-            EscapeKeyField(location.Latitude), EscapeKeyField(location.Longitude),
-            EscapeKeyField(location.CountryCode), EscapeKeyField(location.LocationMatch));
-
-    private static string EscapeKeyField(string? value)
-        => (value ?? "").Replace("\\", "\\\\").Replace("|", "\\|");
 
     /// <summary>
     /// The inspector's search-as-you-type surface: geocodes <paramref name="query"/>

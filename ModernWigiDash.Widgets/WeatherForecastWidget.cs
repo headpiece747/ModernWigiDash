@@ -429,7 +429,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // guards the outcome-key comparison below (a resolution-input change
         // landing between this capture and the client's own capture resolves
         // a DIFFERENT identity) and the post-await gap re-check.
-        string fetchKey = WeatherClient.BuildQueryKey(BuildLocation());
+        string fetchKey = WeatherQueryKey.Build(BuildLocation());
         WeatherFetchResult result;
         try
         {
@@ -588,7 +588,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// re-derivations at each guard site.
     /// </summary>
     private bool StillCurrent(string key)
-        => string.Equals(key, WeatherClient.BuildQueryKey(BuildLocation()), StringComparison.Ordinal);
+        => WeatherQueryKey.SameKey(key, WeatherQueryKey.Build(BuildLocation()));
 
     /// <summary>
     /// Applies a fetched/cached snapshot to the display state, keeping the
@@ -639,7 +639,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             int versionBefore;
             string locationKeyBefore;
             lock (_forecastGate) { versionBefore = _snapshotState.DataVersion; }
-            locationKeyBefore = WeatherClient.BuildQueryKey(BuildLocation());
+            locationKeyBefore = WeatherQueryKey.Build(BuildLocation());
 
             // The cache is identity-checked against the CURRENT location: a
             // cache saved for a different resolution must not surface as fresh

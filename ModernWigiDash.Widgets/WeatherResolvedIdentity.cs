@@ -85,12 +85,12 @@ internal sealed class WeatherResolvedIdentity
     }
 
     /// <summary>
-    /// The resolution inputs that force a re-fetch on change — the widget-side
-    /// mirror of <see cref="WeatherClient.BuildQueryKey"/> (every key field
-    /// except LocationMatch, which has its own branch in OnPropertyChanged).
-    /// The drift test pins this set to the WeatherLocation record, so a new
-    /// resolution input can never change the identity without a re-fetch.
+    /// The resolution inputs that force a re-fetch on change — an alias of
+    /// <see cref="WeatherQueryKey.InvalidationProperties"/> (the owner of the
+    /// set, ADR-0006: every key field except LocationMatch, which has its own
+    /// branch in OnPropertyChanged). The drift test pins this set to the
+    /// WeatherLocation record, so a new resolution input can never change
+    /// the identity without a re-fetch.
     /// </summary>
-    internal static readonly string[] ResolutionInvalidationProperties =
-        [nameof(WeatherForecastWidget.Location), nameof(WeatherForecastWidget.Latitude), nameof(WeatherForecastWidget.Longitude), nameof(WeatherForecastWidget.CountryCode), nameof(WeatherForecastWidget.LocationType)];
+    internal static readonly string[] ResolutionInvalidationProperties = WeatherQueryKey.InvalidationProperties;
 }

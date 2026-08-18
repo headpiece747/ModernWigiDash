@@ -795,7 +795,7 @@ public class WeatherClientTests
         var fetched = result as WeatherFetchResult.Fetched;
 
         Assert.IsNotNull(fetched);
-        Assert.AreEqual(WeatherClient.BuildQueryKey(CoordinateLocation), fetched.QueryKey,
+        Assert.AreEqual(WeatherQueryKey.Build(CoordinateLocation), fetched.QueryKey,
             "a Fetched outcome must carry the query key it was resolved for");
     }
 
@@ -854,7 +854,7 @@ public class WeatherClientTests
         Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
             "a stale result must not stamp the throttle window");
         var stale = (WeatherFetchResult.Stale)result;
-        Assert.AreEqual(WeatherClient.BuildQueryKey(new WeatherLocation("Fixed Location", "Victoria", null, null, null)), stale.QueryKey,
+        Assert.AreEqual(WeatherQueryKey.Build(new WeatherLocation("Fixed Location", "Victoria", null, null, null)), stale.QueryKey,
             "a Stale outcome must carry the query key the in-flight fetch was started for");
 
         // The new identity's fetch must run immediately (the stale path left
@@ -894,7 +894,7 @@ public class WeatherClientTests
         Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
             "the invalidation reset the throttle stamp the confirmation wrote — the new identity must not cool down");
         var stale = (WeatherFetchResult.Stale)result;
-        Assert.AreEqual(WeatherClient.BuildQueryKey(location), stale.QueryKey,
+        Assert.AreEqual(WeatherQueryKey.Build(location), stale.QueryKey,
             "a Stale outcome must carry the query key the in-flight fetch was started for");
 
         // The new identity's fetch must run immediately (the stale path left
@@ -928,7 +928,7 @@ public class WeatherClientTests
         Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
             "a stale geocode failure must not stamp the new identity's throttle");
         var stale = (WeatherFetchResult.Stale)result;
-        Assert.AreEqual(WeatherClient.BuildQueryKey(new WeatherLocation("Fixed Location", "Atlantis", null, null, null)), stale.QueryKey,
+        Assert.AreEqual(WeatherQueryKey.Build(new WeatherLocation("Fixed Location", "Atlantis", null, null, null)), stale.QueryKey,
             "a Stale outcome must carry the query key the in-flight fetch was started for");
     }
 
