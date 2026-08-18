@@ -61,11 +61,6 @@ public sealed class PriceFeedManager : IDisposable
     internal readonly ConcurrentDictionary<string, int> _subscribedStocks = new();
     internal readonly ConcurrentDictionary<string, int> _subscribedFx = new();
 
-    /// <summary>The freshness guard's source discriminator — the one spelling
-    /// shared by the store site and the downgrade rule (a rename must touch
-    /// both or the guard silently disarms).</summary>
-    internal const string SourceBinanceUs = "BinanceUS";
-
     private readonly Func<FeedKind, IWebSocketFeed> _feedFactory;
     private readonly TimeSpan _reconnectDelay;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -145,27 +140,13 @@ public sealed class PriceFeedManager : IDisposable
         // Idempotent across instances that share a client (the static default).
         httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd("ModernWigiDash/2.0");
 
-        // One leg per REST source: URL shape and response parse live with the
-        // source, so a wire-format change touches exactly one leg.
-        CryptoRestLeg = new PriceRestLeg(httpClient, SourceBinanceUs, "$",
-            k => $"https://api.binance.us/api/v3/ticker/24hr?symbol={k}USDT",
-            (json, _) => PriceFeedMessages.TryParseBinanceRestTicker(json, out var price, out var change)
-                ? new QuoteSample(price, change) : null);
-        StockRestLeg = new PriceRestLeg(httpClient, "Finnhub", "$",
-            k => $"https://finnhub.io/api/v1/quote?symbol={k}&token={_finnhubKey}",
-            (json, _) => PriceFeedMessages.TryParseFinnhubQuote(json, out var price, out var change)
-                ? new QuoteSample(price, change) : null,
-            SymbolCatalog.IsValidSymbol);
-        FxRestLeg = new PriceRestLeg(httpClient, "Frankfurter", "",
-            BuildFrankfurterUrl,
-            (json, key) => PriceFeedMessages.TryParseFrankfurterSeries(json, key[3..], out var price, out var change)
-                ? new QuoteSample(price, change) : null,
-            SymbolCatalog.IsValidFxKey);
-        YahooRestLeg = new PriceRestLeg(httpClient, "Yahoo", "$",
-            k => $"https://query1.finance.yahoo.com/v8/finance/chart/{k}?interval=1d&range=1d",
-            (json, _) => PriceFeedMessages.TryParseYahooChart(json, out var price, out var change)
-                ? new QuoteSample(price, change) : null,
-            SymbolCatalog.IsValidSymbol);
+        // One leg per REST source: the URL shape, the wire parse and the
+        // source label live with the source (one leg module per source), so a
+        // wire-format change touches exactly one leg.
+        CryptoRestLeg = BinanceUsRestLeg.Create(httpClient);
+        StockRestLeg = FinnhubRestLeg.Create(httpClient, _finnhubKey);
+        FxRestLeg = FrankfurterRestLeg.Create(httpClient, () => Clock.GetUtcNow());
+        YahooRestLeg = YahooChartRestLeg.Create(httpClient);
         CoinGeckoLeg = new CoinGeckoRestLeg(httpClient);
     }
 
@@ -484,17 +465,6 @@ public sealed class PriceFeedManager : IDisposable
         {
             _failLog.Write("CoinGecko fallback price fetch failed; continuing");
         }
-    }
-
-    /// <summary>The Frankfurter date-window URL — built at poll time from the
-    /// live <see cref="Clock"/> (the leg calls it per fetch, so a test that
-    /// swaps the manager's clock after construction is honored).</summary>
-    private string BuildFrankfurterUrl(string key)
-    {
-        DateTime now = Clock.GetUtcNow().UtcDateTime;
-        string start = now.AddDays(-10).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string end = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        return $"https://api.frankfurter.app/{start}..{end}?from={key[..3]}&to={key[3..]}";
     }
 
     private void ParseBinanceTicker(string json)

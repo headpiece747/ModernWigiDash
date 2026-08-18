@@ -142,7 +142,7 @@ public class PriceFeedManagerRestPollTests
     public void ShouldKeepExisting_FreshOtherSource_True()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = PriceFeedManager.SourceBinanceUs, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
+        var existing = new PriceInfo { Price = 100m, Source = BinanceUsRestLeg.SourceLabel, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
 
         Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
             "a fresh BinanceUS price must not be downgraded by the CoinGecko fallback");
@@ -152,7 +152,7 @@ public class PriceFeedManagerRestPollTests
     public void ShouldKeepExisting_StaleOtherSource_False()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = PriceFeedManager.SourceBinanceUs, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61) };
+        var existing = new PriceInfo { Price = 100m, Source = BinanceUsRestLeg.SourceLabel, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61) };
 
         Assert.IsFalse(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
             "a stale BinanceUS price may be replaced by the fallback");
@@ -209,7 +209,7 @@ public class PriceFeedManagerRestPollTests
         var info = feed.GetPrice("BTC", AssetKind.Crypto);
         Assert.IsNotNull(info);
         Assert.AreEqual(65000m, info.Price, "a fresh BinanceUS price must survive the CoinGecko fallback");
-        Assert.AreEqual(PriceFeedManager.SourceBinanceUs, info.Source);
+        Assert.AreEqual(BinanceUsRestLeg.SourceLabel, info.Source);
     }
 
     [TestMethod]
@@ -257,7 +257,7 @@ public class PriceFeedManagerRestPollTests
         var info = feed.GetPrice("BTC", AssetKind.Crypto);
         Assert.IsNotNull(info);
         Assert.AreEqual(65000m, info.Price, "a fresh BinanceUS price must survive the one-shot seed");
-        Assert.AreEqual(PriceFeedManager.SourceBinanceUs, info.Source);
+        Assert.AreEqual(BinanceUsRestLeg.SourceLabel, info.Source);
 
         clock.Advance(TimeSpan.FromSeconds(90)); // the live record is now stale
         await feed.SeedFallbackAsync("BTC", AssetKind.Crypto);

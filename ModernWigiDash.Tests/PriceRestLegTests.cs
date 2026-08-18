@@ -7,9 +7,9 @@ namespace ModernWigiDash.Tests;
 /// <summary>
 /// The REST quote legs: one fetch → parse hop per symbol through the
 /// injectable HttpClient seam (the URL shape and the wire parse live in the
-/// leg; the price-map store policy stays with the manager), plus the
-/// CoinGecko leg's id resolution against the <see cref="SymbolCatalog"/>
-/// crypto table.
+/// leg; the price-map store policy stays with the manager), the named
+/// source legs' URL shapes and label pins, and the CoinGecko leg's id
+/// resolution against the <see cref="SymbolCatalog"/> crypto table.
 /// </summary>
 [TestClass]
 public class PriceRestLegTests
@@ -113,5 +113,83 @@ public class PriceRestLegTests
 
         Assert.IsNull(samples);
         Assert.AreEqual(0, stub.Calls);
+    }
+
+    // ── named source legs: the URL shape and the label, per source ─────
+
+    [TestMethod]
+    public async Task BinanceUsLeg_KnownKey_TickerUrlAndSample()
+    {
+        var stub = new StubHttpHandler(_ => Ok("""{"symbol":"BTCUSDT","lastPrice":"65000.0","priceChangePercent":"2.5"}"""));
+        var leg = BinanceUsRestLeg.Create(new HttpClient(stub));
+
+        var sample = await leg.FetchAsync("BTC", CancellationToken.None);
+
+        Assert.IsTrue(sample.HasValue, "a BinanceUS 24hr ticker parses to a sample");
+        Assert.AreEqual(65000m, sample.Value.Price);
+        Assert.AreEqual(2.5m, sample.Value.ChangePercent);
+        StringAssert.Contains(stub.RequestUrls[0], "https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT",
+            "the URL is the leg's to build");
+        Assert.AreEqual("BinanceUS", leg.SourceLabel, "the source label is the freshness guard's discriminator");
+    }
+
+    [TestMethod]
+    public async Task FinnhubLeg_KnownSymbol_KeyRidesUrlAndQuoteParses()
+    {
+        var stub = new StubHttpHandler(_ => Ok("""{"c":150.5,"dp":1.4}"""));
+        var leg = FinnhubRestLeg.Create(new HttpClient(stub), "test-key");
+
+        var sample = await leg.FetchAsync("AAPL", CancellationToken.None);
+
+        Assert.IsTrue(sample.HasValue, "a Finnhub quote parses to a sample");
+        Assert.AreEqual(150.5m, sample.Value.Price);
+        Assert.AreEqual(1.4m, sample.Value.ChangePercent);
+        StringAssert.Contains(stub.RequestUrls[0], "https://finnhub.io/api/v1/quote?symbol=AAPL&token=test-key",
+            "the API key rides the URL");
+    }
+
+    [TestMethod]
+    public async Task FinnhubLeg_InvalidSymbol_MakesNoRequest()
+    {
+        var stub = new StubHttpHandler("{}");
+        var leg = FinnhubRestLeg.Create(new HttpClient(stub), "test-key");
+
+        var sample = await leg.FetchAsync("AAPL&x=1", CancellationToken.None);
+
+        Assert.IsNull(sample, "a symbol that fails the guard is skipped before any request");
+        Assert.AreEqual(0, stub.Calls);
+    }
+
+    [TestMethod]
+    public async Task FrankfurterLeg_LiveClock_DateWindowUrlAndSeriesParses()
+    {
+        var stub = new StubHttpHandler(_ => Ok("""{"rates":{"2026-07-31":{"EUR":1.00},"2026-08-10":{"EUR":1.005}}}"""));
+        var leg = FrankfurterRestLeg.Create(
+            new HttpClient(stub),
+            () => new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
+
+        var sample = await leg.FetchAsync("USDEUR", CancellationToken.None);
+
+        Assert.IsTrue(sample.HasValue, "a Frankfurter series parses to a sample");
+        Assert.AreEqual(1.005m, sample.Value.Price, "the last date is the current rate");
+        Assert.AreEqual(0.5m, sample.Value.ChangePercent, "day-over-day from the last two dates");
+        Assert.AreEqual("https://api.frankfurter.app/2026-07-31..2026-08-10?from=USD&to=EUR", stub.RequestUrls[0],
+            "the date window is the clock's today-10d through today, read at fetch time");
+        Assert.AreEqual("", leg.CurrencySymbol, "cross rates carry no currency");
+    }
+
+    [TestMethod]
+    public async Task YahooChartLeg_KnownSymbol_ChartUrlAndMetaParses()
+    {
+        var stub = new StubHttpHandler(_ => Ok("""{"chart":{"result":[{"meta":{"regularMarketPrice":165.0,"chartPreviousClose":150.0}}]}}"""));
+        var leg = YahooChartRestLeg.Create(new HttpClient(stub));
+
+        var sample = await leg.FetchAsync("AAPL", CancellationToken.None);
+
+        Assert.IsTrue(sample.HasValue, "a Yahoo chart meta block parses to a sample");
+        Assert.AreEqual(165m, sample.Value.Price);
+        Assert.AreEqual(10m, sample.Value.ChangePercent, "derived from the regular price and the previous close");
+        StringAssert.Contains(stub.RequestUrls[0], "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d",
+            "the URL is the leg's to build");
     }
 }
