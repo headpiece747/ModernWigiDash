@@ -385,6 +385,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// Sends the device initialization sequence (PING + 3-page setup + blank
     /// framebuffer + GoToScreen). Called by <see cref="Connect"/>; internal so
     /// tests can drive the sequence through an injected backend.
+    /// The verdict covers the wire steps that can fail: a failed page-setup
+    /// or GoToScreen control write, or a failed blank-frame header/bulk
+    /// write, fails the init — on-device, a reconnect observed exactly that
+    /// split (every control write fine, the 1.2 MB init write timing out at
+    /// the 30 s pipe bound), and a connected verdict for such a pipe would be
+    /// a falsehood the engine would have to inherit.
     /// </summary>
     internal bool SendInitCommands()
     {
@@ -418,8 +424,11 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             initOk &= clearOk && widgetOk;
         }
 
-        // Write blank framebuffer to page 0 only (first visible page)
-        WriteBlankFramebuffer(page: 0, widgetId: 0);
+        // Write blank framebuffer to page 0 only (first visible page). The
+        // verdict folds this in like the control writes: a blank frame that
+        // never arrives means the init sequence did not survive, and the
+        // connect result must say so.
+        initOk &= WriteBlankFramebuffer(page: 0, widgetId: 0);
 
         // GoToScreen(Base0): CMD_SEND_UI_CMD (0x70) wValue=0x20
         bool gotoOk = ControlOut(DisplayProtocolConstants.CmdGoToScreen, Base0, null);
@@ -453,10 +462,17 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         return config;
     }
 
-    private void WriteBlankFramebuffer(byte page, byte widgetId)
+    /// <returns>True when the blank frame fully arrived (the header control
+    /// write plus the full bulk write) — <see cref="SendInitCommands"/> folds
+    /// this into the init verdict like the control writes.</returns>
+    private bool WriteBlankFramebuffer(byte page, byte widgetId)
     {
         DiagLog hwInitLog = new("HW-INIT", 1);
-        if (_backend is not { IsOpen: true }) return;
+        if (_backend is not { IsOpen: true })
+        {
+            hwInitLog.Write("Blank framebuffer skipped: backend not open");
+            return false;
+        }
 
         try
         {
@@ -471,16 +487,19 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             ushort wValue = (ushort)((page << 8) | widgetId);
             bool headerOk = ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header);
             hwInitLog.Write($"FrameHeader control write: ok={headerOk}");
-
-            if (headerOk)
+            if (!headerOk)
             {
-                bool bulkOk = WriteBulkData(blankFrame);
-                hwInitLog.Write($"Blank framebuffer bulk write: ok={bulkOk}");
+                return false;
             }
+
+            bool bulkOk = WriteBulkData(blankFrame);
+            hwInitLog.Write($"Blank framebuffer bulk write: ok={bulkOk}");
+            return bulkOk;
         }
         catch (Exception ex)
         {
             hwInitLog.Write($"Blank framebuffer write exception: {ex.Message}");
+            return false;
         }
     }
 

@@ -25,6 +25,7 @@ public class DisplayHidTransportTests
     {
         public bool OpenResult { get; init; } = true;
         public bool ControlResult { get; init; } = true;
+        public bool BulkWriteResult { get; init; } = true;
         public int OpenCalls { get; private set; }
         public int ControlInCalls { get; private set; }
         public int ControlOutCalls { get; private set; }
@@ -59,7 +60,7 @@ public class DisplayHidTransportTests
         {
             BulkWriteCalls++;
             transferred = data.Length;
-            return ControlResult;
+            return BulkWriteResult;
         }
 
         protected override void Dispose(bool disposing)
@@ -203,6 +204,80 @@ public class DisplayHidTransportTests
         Assert.IsFalse(ok);
         Assert.IsFalse(transport.IsConnected);
         Assert.IsTrue(winUsb.Disposed, "Every provider's partial state must be torn down");
+    }
+
+    // ── the init verdict: the blank-frame bulk write folds into the connect result ──
+
+    [TestMethod]
+    public void SendInitCommands_BlankFrameBulkWriteShortFails_InitFails()
+    {
+        // The on-device reconnect observation (error 121 at the 30 s pipe
+        // timeout, 1022976/1202944 transferred): every control write still
+        // succeeded while the blank-frame bulk write timed out mid-transfer.
+        // The init verdict must come from the bulk write itself — the old
+        // void WriteBlankFramebuffer swallowed the result and the engine
+        // reported a successful connection on a pipe that cannot carry a
+        // full frame.
+        var backend = new RecordingBackend { BulkWriteTransferred = 1022976 };
+        using var transport = new DisplayHidTransport(backend);
+
+        bool ok = transport.SendInitCommands();
+
+        Assert.IsFalse(ok, "a short init bulk write is a broken pipe — the init sequence did not survive");
+    }
+
+    [TestMethod]
+    public void SendInitCommands_BlankFrameBulkWriteFails_InitFails()
+    {
+        var backend = new RecordingBackend { BulkWriteResult = false };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsFalse(transport.SendInitCommands(), "a failed init bulk write fails init like any other init step");
+    }
+
+    [TestMethod]
+    public void Connect_WinUsbInitBulkWriteFails_FallsBackToLibUsb()
+    {
+        // The on-device F1 shape at the policy level: every control write
+        // fine, only the blank-frame write fails. The leg must fail so the
+        // loop tries the next driver stack instead of adopting the backend
+        // with a connected verdict for a pipe that cannot carry a full frame.
+        var winUsb = new FakeWinUsbBulkDevice { BulkWriteResult = false };
+        var libUsb = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            WinUsbLeg(winUsb),
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok, "the fallback leg completes the init sequence through a healthy pipe");
+        Assert.IsTrue(transport.IsConnected);
+        Assert.IsTrue(winUsb.Disposed, "the WinUSB leg whose init bulk write failed must be abandoned before the fallback");
+        Assert.AreEqual(1, winUsb.BulkWriteCalls, "the init blank frame was attempted on the WinUSB leg");
+        Assert.AreEqual(1, libUsb.BulkWrites.Count, "the fallback leg wrote its own blank frame");
+    }
+
+    [TestMethod]
+    public void Connect_InitBulkWriteFailsOnAllLegs_NotConnected()
+    {
+        var winUsb = new FakeWinUsbBulkDevice { BulkWriteResult = false };
+        var libUsb = new RecordingBackend { BulkWriteResult = false };
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            WinUsbLeg(winUsb),
+            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok, "a connected verdict requires a leg that survived the whole init sequence");
+        Assert.IsFalse(transport.IsConnected);
+        Assert.IsTrue(winUsb.Disposed);
+        Assert.IsFalse(libUsb.IsOpen, "the failed fallback backend must be abandoned too");
     }
 
     [TestMethod]
