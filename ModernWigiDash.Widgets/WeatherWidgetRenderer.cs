@@ -108,10 +108,9 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
-        // The current-condition icon is day/night-aware (the moon flip); the
-        // description stays the day-neutral WMO text.
-        string icon = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
-        string desc = WeatherPresentation.MapWmoCode(model.WeatherCode).Description;
+        // The current-condition display fact is day/night-aware (the moon
+        // flip); the description stays the day-neutral WMO text.
+        var (icon, desc) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
         float w = bounds.Width;
         float h = bounds.Height;
@@ -430,10 +429,9 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
-        // The current-condition icon is day/night-aware (the moon flip); the
-        // description stays the day-neutral WMO text.
-        string icon = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
-        string desc = WeatherPresentation.MapWmoCode(model.WeatherCode).Description;
+        // The current-condition display fact is day/night-aware (the moon
+        // flip); the description stays the day-neutral WMO text.
+        var (icon, desc) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
         float midY = bounds.MidY;
         float midX = bounds.MidX;
@@ -470,7 +468,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
-        string icon = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
+        var (icon, _) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, WeatherLayout.CompactIconFontSize(s));

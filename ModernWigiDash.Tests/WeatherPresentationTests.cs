@@ -130,26 +130,35 @@ public class WeatherPresentationTests
     }
 
     [TestMethod]
-    public void MapWmoIcon_Day_MatchesTheDayIconSet()
+    public void MapWmoIcon_Day_MatchesTheDayRow()
     {
-        Assert.AreEqual(WeatherPresentation.MapWmoCode(0).Icon, WeatherPresentation.MapWmoIcon(0, true));
-        Assert.AreEqual(WeatherPresentation.MapWmoCode(61).Icon, WeatherPresentation.MapWmoIcon(61, true));
-        Assert.AreEqual(WeatherPresentation.MapWmoCode(95).Icon, WeatherPresentation.MapWmoIcon(95, true));
+        // Day: the whole display fact is exactly the WMO row (icon + text) —
+        // the night flip must never leak into the day path.
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(0), WeatherPresentation.MapWmoIcon(0, true));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(61), WeatherPresentation.MapWmoIcon(61, true));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(95), WeatherPresentation.MapWmoIcon(95, true));
     }
 
     [TestMethod]
     public void MapWmoIcon_Night_ClearSkiesReadAsAMoon()
     {
-        Assert.AreEqual("🌙", WeatherPresentation.MapWmoIcon(0, false), "clear at night shows the moon");
-        Assert.AreEqual("🌙", WeatherPresentation.MapWmoIcon(1, false), "mainly clear at night shows the moon");
-        Assert.AreEqual("🌃", WeatherPresentation.MapWmoIcon(2, false), "partly cloudy at night shows the night city");
+        // The moon/night-city icon rides the DAY-NEUTRAL description: "Clear
+        // Sky" stays the text at night — only the icon flips.
+        Assert.AreEqual(("🌙", "Clear Sky"), WeatherPresentation.MapWmoIcon(0, false),
+            "clear at night shows the moon with the day-neutral text");
+        Assert.AreEqual(("🌙", "Mainly Clear"), WeatherPresentation.MapWmoIcon(1, false),
+            "mainly clear at night shows the moon with the day-neutral text");
+        Assert.AreEqual(("🌃", "Partly Cloudy"), WeatherPresentation.MapWmoIcon(2, false),
+            "partly cloudy at night shows the night city with the day-neutral text");
     }
 
     [TestMethod]
-    public void MapWmoIcon_Night_PrecipitationKeepsItsDayIcon()
+    public void MapWmoIcon_Night_PrecipitationKeepsItsDayRow()
     {
-        Assert.AreEqual(WeatherPresentation.MapWmoCode(61).Icon, WeatherPresentation.MapWmoIcon(61, false));
-        Assert.AreEqual(WeatherPresentation.MapWmoCode(77).Icon, WeatherPresentation.MapWmoIcon(77, false));
+        // Every code without a night override keeps its FULL day row (icon and
+        // text) — precipitation renders the same all day.
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(61), WeatherPresentation.MapWmoIcon(61, false));
+        Assert.AreEqual(WeatherPresentation.MapWmoCode(77), WeatherPresentation.MapWmoIcon(77, false));
     }
 
     [TestMethod]
@@ -158,11 +167,14 @@ public class WeatherPresentationTests
         // The night table's fall-through is the load-bearing arm: every code
         // without a night override must still map to a non-empty icon (its
         // day icon) — a table edit that blanked a night icon would silently
-        // draw nothing on the display.
+        // draw nothing on the display. The description must pass through the
+        // WMO row's text unchanged (day-neutral) for every code.
         for (int code = 0; code <= 99; code++)
         {
-            string icon = WeatherPresentation.MapWmoIcon(code, isDay: false);
+            var (icon, desc) = WeatherPresentation.MapWmoIcon(code, isDay: false);
             Assert.IsFalse(string.IsNullOrEmpty(icon), $"night code {code} must map to a non-empty icon");
+            Assert.AreEqual(WeatherPresentation.MapWmoCode(code).Description, desc,
+                $"night code {code} must keep the day-neutral description");
         }
     }
 

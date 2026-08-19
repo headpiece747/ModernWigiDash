@@ -88,7 +88,7 @@ public class WeatherCacheStoreTests
     }
 
     [TestMethod]
-    public async Task SaveThenLoad_NightIsDay_RoundTrips()
+    public async Task SaveThenLoad_NightSnapshot_RoundTrips()
     {
         string dir = NewTempDir();
         Directory.CreateDirectory(dir);

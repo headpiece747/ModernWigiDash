@@ -77,47 +77,30 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task FetchCurrentAsync_NightForecast_ReadsIsDayFalse()
+    [DataRow(0, false, "is_day 0 must read as night so the icon can flip")]
+    [DataRow(1, true, "is_day 1 reads as day")]
+    public async Task FetchCurrentAsync_CurrentBlockIsDay_ReadsTheDayNightFact(int isDayValue, bool? expectedIsDay, string why)
     {
         // The day/night fact rides the current block: a clear night must read
-        // as night so the current-condition icon flips to a moon.
-        const string night = """
+        // as night so the current-condition icon flips to a moon — the
+        // polarity is pinned per raw is_day value through the client's parse
+        // path (the absent-flag arm stays its own test, a different behavior).
+        string forecast = $$"""
         {
           "latitude": 40.7128, "longitude": -74.006,
-          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 0, "wind_speed_10m": 8.2, "is_day": 0 }
+          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 0, "wind_speed_10m": 8.2, "is_day": {{isDayValue}} }
         }
         """;
         var stub = new StubHttpHandler(request =>
             request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
-                ? StubHttpHandler.Ok(night)
+                ? StubHttpHandler.Ok(forecast)
                 : StubHttpHandler.NotFound());
         var client = CreateClient(stub);
 
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
 
         Assert.IsNotNull(snapshot);
-        Assert.IsFalse(snapshot.IsDay, "is_day 0 must read as night so the icon can flip");
-    }
-
-    [TestMethod]
-    public async Task FetchCurrentAsync_DayForecast_ReadsIsDayTrue()
-    {
-        const string day = """
-        {
-          "latitude": 40.7128, "longitude": -74.006,
-          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 2, "wind_speed_10m": 8.2, "is_day": 1 }
-        }
-        """;
-        var stub = new StubHttpHandler(request =>
-            request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
-                ? StubHttpHandler.Ok(day)
-                : StubHttpHandler.NotFound());
-        var client = CreateClient(stub);
-
-        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
-
-        Assert.IsNotNull(snapshot);
-        Assert.IsTrue(snapshot.IsDay, "is_day 1 reads as day");
+        Assert.AreEqual(expectedIsDay, snapshot.IsDay, why);
     }
 
     [TestMethod]

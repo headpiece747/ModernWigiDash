@@ -85,6 +85,16 @@ public class WeatherForecastParserTests
     }
 
     [TestMethod]
+    public void ParseCurrentWeather_LegacyBlock_IsDayOne_ReadsDay()
+    {
+        string json = """{ "current_weather": { "weathercode": 0, "is_day": 1 } }""";
+
+        var (_, _, _, _, isDay) = WeatherForecastParser.ParseCurrentWeather(RootOf(json));
+
+        Assert.IsTrue(isDay, "the legacy current_weather block reads is_day 1 as day");
+    }
+
+    [TestMethod]
     public void ParseHourlyForecast_ModernHumidity_ComesFromCurrentBlock()
     {
         var (humidity, hourly) = WeatherForecastParser.ParseHourlyForecast(ModernRoot);

@@ -70,19 +70,25 @@ internal static class WeatherPresentation
         };
     }
 
-    /// <summary>The current-condition icon for a code at a given day/night:
-    /// clear skies read as a moon after dark (the description stays the
-    /// day-neutral text). Every code without a night override keeps its day
-    /// icon — precipitation renders the same all day.</summary>
-    public static string MapWmoIcon(int code, bool isDay)
+    /// <summary>The current-condition display fact for a code at a given
+    /// day/night: the icon (clear skies read as a moon after dark, partly
+    /// cloudy as the night city — every code without a night override keeps
+    /// its day icon, so precipitation renders the same all day) and the
+    /// DAY-NEUTRAL WMO description (the night flip never rewrites it). The
+    /// hero paths read both from this ONE call, so the WMO table is walked
+    /// once per draw, not twice.</summary>
+    public static (string Icon, string Description) MapWmoIcon(int code, bool isDay)
     {
-        if (isDay) return MapWmoCode(code).Icon;
-        return code switch
-        {
-            0 or 1 => "🌙",
-            2 => "🌃",
-            _ => MapWmoCode(code).Icon,
-        };
+        var (dayIcon, description) = MapWmoCode(code);
+        string icon = isDay
+            ? dayIcon
+            : code switch
+            {
+                0 or 1 => "🌙",
+                2 => "🌃",
+                _ => dayIcon,
+            };
+        return (icon, description);
     }
 
     /// <summary>The default unit-system choice — the single source for the
