@@ -65,7 +65,8 @@ internal sealed class WeatherCacheStore
                 data.CurrentTempC, data.FeelsLikeC, data.Humidity, data.WindSpeedKmH, data.WeatherCode,
                 data.HighTempC, data.LowTempC, data.ResolvedCityName, data.Lat, data.Lon, data.LocationQueryKey,
                 (data.DailyForecasts ?? []).Take(WeatherForecastLimits.MaxFetchDays).Select(d => new DailyForecastItem(d.DayName, d.MaxTempC, d.MinTempC, d.WeatherCode)).ToArray(),
-                (data.HourlyForecasts ?? []).Take(WeatherForecastLimits.MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray());
+                (data.HourlyForecasts ?? []).Take(WeatherForecastLimits.MaxFetchHours).Select(h => new HourlyForecastItem(h.TimeLabel, h.TempC, h.WeatherCode)).ToArray(),
+                data.IsDay);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -139,6 +140,9 @@ internal sealed class WeatherCacheStore
                 ResolvedCityName = snapshot.ResolvedCityName,
                 Lat = snapshot.Lat,
                 Lon = snapshot.Lon,
+                // The day/night fact rides the cache (null on a snapshot that
+                // never carried is_day — a legacy cache reads as day).
+                IsDay = snapshot.IsDay,
                 // The identity stamp: the query key this snapshot was fetched
                 // for. LoadAsync returns it with the payload; the caller
                 // applies the cache only when the stamp matches the loading
@@ -195,6 +199,11 @@ internal sealed class WeatherCacheStore
         public double? Lat { get; set; }
         public double? Lon { get; set; }
 
+        /// <summary>The day/night fact the snapshot carried (null on legacy
+        /// caches saved before the field existed — they read as unknown, and
+        /// the display's default is day).</summary>
+        public bool? IsDay { get; set; }
+
         /// <summary>The resolution query key this cache was saved for
         /// (null/empty on legacy caches that predate the identity check).</summary>
         public string? LocationQueryKey { get; set; }
@@ -238,4 +247,5 @@ internal sealed record WeatherCachePayload(
     double? Lon,
     string? LocationQueryKey,
     IReadOnlyList<DailyForecastItem> DailyForecasts,
-    IReadOnlyList<HourlyForecastItem> HourlyForecasts);
+    IReadOnlyList<HourlyForecastItem> HourlyForecasts,
+    bool? IsDay);

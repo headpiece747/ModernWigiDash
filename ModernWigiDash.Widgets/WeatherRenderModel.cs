@@ -51,6 +51,7 @@ internal sealed class WeatherRenderModel
     public int CandidateCount;
 
     public int WeatherCode;
+    public bool IsDay = true;
     public DailyForecastItem[] Daily = [];
     public HourlyForecastItem[] Hourly = [];
     public WeatherDisplay Display = new("", [], [], [], []);

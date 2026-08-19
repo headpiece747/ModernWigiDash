@@ -18,34 +18,70 @@ public class WeatherForecastParserTests
     [TestMethod]
     public void ParseCurrentWeather_ModernBlock_ParsesCurrentConditions()
     {
-        var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = WeatherForecastParser.ParseCurrentWeather(ModernRoot);
+        var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(ModernRoot);
 
         Assert.AreEqual(12.5, tempC);
         Assert.AreEqual(10.1, feelsLikeC);
         Assert.AreEqual(8.2, windSpeedKmH);
         Assert.AreEqual(2, weatherCode);
+        Assert.IsNull(isDay, "the shared fixture carries no is_day — an absent flag reads as unknown");
     }
 
     [TestMethod]
     public void ParseCurrentWeather_LegacyBlock_FallsBackWithNoFeelsLike()
     {
-        var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = WeatherForecastParser.ParseCurrentWeather(LegacyRoot);
+        var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(LegacyRoot);
 
         Assert.AreEqual(12.5, tempC);
         Assert.IsNull(feelsLikeC, "the legacy block has no apparent_temperature — feels-like stays null");
         Assert.AreEqual(8.2, windSpeedKmH);
         Assert.AreEqual(2, weatherCode);
+        Assert.IsNull(isDay, "the legacy fixture carries no is_day — an absent flag reads as unknown");
     }
 
     [TestMethod]
     public void ParseCurrentWeather_NoBlocks_ReturnsNulls()
     {
-        var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = WeatherForecastParser.ParseCurrentWeather(RootOf("{}"));
+        var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(RootOf("{}"));
 
         Assert.IsNull(tempC);
         Assert.IsNull(feelsLikeC);
         Assert.IsNull(windSpeedKmH);
         Assert.IsNull(weatherCode);
+        Assert.IsNull(isDay);
+    }
+
+    [TestMethod]
+    public void ParseCurrentWeather_ModernBlock_IsDayZero_ReadsNight()
+    {
+        string json = """{ "current": { "weather_code": 0, "is_day": 0 } }""";
+
+        var (tempC, _, _, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(RootOf(json));
+
+        Assert.IsNull(tempC);
+        Assert.AreEqual(0, weatherCode);
+        Assert.IsFalse(isDay, "is_day 0 is night — the current-condition icon flips to a moon");
+    }
+
+    [TestMethod]
+    public void ParseCurrentWeather_ModernBlock_IsDayOne_ReadsDay()
+    {
+        string json = """{ "current": { "weather_code": 0, "is_day": 1 } }""";
+
+        var (_, _, _, _, isDay) = WeatherForecastParser.ParseCurrentWeather(RootOf(json));
+
+        Assert.IsTrue(isDay, "is_day 1 is day");
+    }
+
+    [TestMethod]
+    public void ParseCurrentWeather_LegacyBlock_IsDayZero_ReadsNight()
+    {
+        string json = """{ "current_weather": { "weathercode": 2, "is_day": 0 } }""";
+
+        var (_, _, _, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(RootOf(json));
+
+        Assert.AreEqual(2, weatherCode);
+        Assert.IsFalse(isDay, "the legacy current_weather block carries is_day too");
     }
 
     [TestMethod]

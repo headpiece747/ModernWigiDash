@@ -1,8 +1,9 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// The widget's snapshot display state: the seven weather scalars, the two
-/// forecast lists, and the two versions as one immutable record. The apply
+/// The widget's snapshot display state: the eight weather scalars (the
+/// day/night flag included), the two forecast lists, and the two versions as
+/// one immutable record. The apply
 /// policy merges a snapshot into it and returns a new value; the widget swaps
 /// the result in under its gate, so a torn write can never be observed.
 /// </summary>
@@ -23,6 +24,10 @@ internal sealed record WeatherSnapshotState
     public double LowTempC { get; init; } = 20.5;
 
     public int WeatherCode { get; init; } = 51;
+
+    /// <summary>The displayed day/night flag (the snapshot's fact, null-kept
+    /// on apply; unknown — including every cached snapshot — reads as day).</summary>
+    public bool IsDay { get; init; } = true;
 
     public int ForecastVersion { get; init; }
 

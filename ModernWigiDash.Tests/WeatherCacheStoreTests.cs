@@ -64,6 +64,7 @@ public class WeatherCacheStoreTests
         Assert.AreEqual(48.85, payload.Lat);
         Assert.AreEqual(2.35, payload.Lon);
         Assert.IsNull(payload.LocationQueryKey, "a legacy cache has no identity stamp");
+        Assert.IsNull(payload.IsDay, "a cache saved before the day/night field carries no is_day fact");
     }
 
     [TestMethod]
@@ -83,6 +84,27 @@ public class WeatherCacheStoreTests
         Assert.AreEqual(12.5, payload.CurrentTempC);
         Assert.AreEqual(1, payload.DailyForecasts.Count);
         Assert.AreEqual(1, payload.HourlyForecasts.Count);
+        Assert.IsNull(payload.IsDay, "the SnapshotOf fixture carries no day/night fact — an absent flag round-trips as unknown");
+    }
+
+    [TestMethod]
+    public async Task SaveThenLoad_NightIsDay_RoundTrips()
+    {
+        string dir = NewTempDir();
+        Directory.CreateDirectory(dir);
+        var store = CreateStore(dir);
+        var snapshot = new WeatherSnapshot(
+            12.5, 10.1, 60, 8.2, 0, 18, 9,
+            [new DailyForecastItem("Today", 18, 9, 0)],
+            [new HourlyForecastItem("23:00", 12.5, 0)],
+            "Cached", 48.85, 2.35,
+            IsDay: false);
+
+        await store.SaveAsync(snapshot, "key", CancellationToken.None);
+        var payload = await store.LoadAsync(CancellationToken.None);
+
+        Assert.IsFalse(payload!.IsDay,
+            "the day/night fact must round-trip through the disk cache (a saved night renders a moon at boot)");
     }
 
     [TestMethod]

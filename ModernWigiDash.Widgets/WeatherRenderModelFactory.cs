@@ -6,14 +6,16 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The render-model inputs: the cache key (the value snapshot of everything
 /// that can change the formatted strings), the consistent snapshot display
-/// view (read under the host's gate — the data scalars, the weather code, and
-/// the two copied forecast lists), and the per-frame geometry (the header
+/// view (read under the host's gate — the data scalars, the weather code and
+/// its day/night flag, and the two copied forecast lists), and the per-frame
+/// geometry (the header
 /// layout and the scale, computed ONCE in the render tick and shared with the
 /// draw path — the build never re-derives the geometry it is handed).
 /// </summary>
 internal sealed record WeatherRenderModelInputs(
     WeatherRenderModelKey Key,
     int WeatherCode,
+    bool IsDay,
     double CurrentTempC,
     double FeelsLikeC,
     double Humidity,
@@ -83,6 +85,7 @@ internal static class WeatherRenderModelFactory
             ShowForecast = inputs.Key.ShowForecast,
             CandidateCount = inputs.Key.CandidateCount,
             WeatherCode = inputs.WeatherCode,
+            IsDay = inputs.IsDay,
             Daily = inputs.Daily.ToArray(),
             Hourly = inputs.Hourly.ToArray(),
             Display = display,

@@ -175,4 +175,39 @@ public class WeatherSnapshotApplyPolicyTests
         Assert.AreEqual(0.0, next.CurrentTempC,
             "a provided 0 must replace — 'no data' and 'keep previous' differ by null vs provided");
     }
+
+    [TestMethod]
+    public void Merge_ProvidedIsDay_ReplacesThePreviousValue()
+    {
+        var snapshot = new WeatherSnapshot(
+            CurrentTempC: null, FeelsLikeC: null, Humidity: null, WindSpeedKmH: null,
+            WeatherCode: null, HighTempC: null, LowTempC: null,
+            DailyForecasts: null, HourlyForecasts: null,
+            ResolvedCityName: "City", Lat: 0, Lon: 0, IsDay: false);
+
+        var next = WeatherSnapshotApplyPolicy.Merge(snapshot, FullState());
+
+        Assert.IsFalse(next.IsDay, "a provided night fact flips the day/night flag (the state's default is day)");
+    }
+
+    [TestMethod]
+    public void Merge_AbsentIsDay_KeepsThePreviousValue()
+    {
+        var state = new WeatherSnapshotState
+        {
+            DataVersion = 4,
+            WeatherCode = 61,
+            IsDay = false,
+        };
+        var snapshot = new WeatherSnapshot(
+            CurrentTempC: null, FeelsLikeC: null, Humidity: null, WindSpeedKmH: null,
+            WeatherCode: null, HighTempC: null, LowTempC: null,
+            DailyForecasts: null, HourlyForecasts: null,
+            ResolvedCityName: "City", Lat: 0, Lon: 0);
+
+        var next = WeatherSnapshotApplyPolicy.Merge(snapshot, state);
+
+        Assert.IsFalse(next.IsDay,
+            "an absent day/night fact null-keeps — a response that omitted is_day must not reset the flag");
+    }
 }

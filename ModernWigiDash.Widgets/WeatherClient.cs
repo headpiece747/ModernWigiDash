@@ -207,12 +207,12 @@ internal sealed class WeatherClient
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var (tempC, feelsLikeC, windSpeedKmH, weatherCode) = WeatherForecastParser.ParseCurrentWeather(root);
+            var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(root);
             var (humidity, hourlyForecasts) = WeatherForecastParser.ParseHourlyForecast(root);
             var (highTempC, lowTempC, dailyForecasts) = WeatherForecastParser.ParseDailyForecast(root);
             var snapshot = new WeatherSnapshot(
                 tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
-                dailyForecasts, hourlyForecasts, _fetchControl.ResolvedCityName, lat, lon);
+                dailyForecasts, hourlyForecasts, _fetchControl.ResolvedCityName, lat, lon, isDay);
 
             // The stale check: the widget invalidates the client (clearing
             // the identity query) when ANY resolution input changes. If that
@@ -329,7 +329,8 @@ internal sealed class WeatherClient
                 payload.DailyForecasts, payload.HourlyForecasts,
                 resolvedName,
                 payload.Lat ?? 0,
-                payload.Lon ?? 0);
+                payload.Lon ?? 0,
+                payload.IsDay);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

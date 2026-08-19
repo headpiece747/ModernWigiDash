@@ -39,6 +39,7 @@ internal static class WeatherSnapshotApplyPolicy
         if (snapshot.Humidity is not null) next = next with { Humidity = snapshot.Humidity.Value };
         if (snapshot.WindSpeedKmH is not null) next = next with { WindSpeedKmH = snapshot.WindSpeedKmH.Value };
         if (snapshot.WeatherCode is not null) next = next with { WeatherCode = snapshot.WeatherCode.Value };
+        if (snapshot.IsDay is bool isDay) next = next with { IsDay = isDay };
         if (snapshot.HighTempC is not null) next = next with { HighTempC = snapshot.HighTempC.Value };
         if (snapshot.LowTempC is not null) next = next with { LowTempC = snapshot.LowTempC.Value };
         if (snapshot.DailyForecasts is not null)

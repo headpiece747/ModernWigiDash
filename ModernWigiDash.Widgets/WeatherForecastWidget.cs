@@ -430,7 +430,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                     LayoutMode, UnitSystem, CustomLabel, _identity.CityName,
                     ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast,
                     _identity.Candidates.Count),
-                state.WeatherCode, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
+                state.WeatherCode, state.IsDay, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
                 state.WindSpeedKmH, state.HighTempC, state.LowTempC,
                 _dailyForecastSnapshot, _hourlyForecastSnapshot,
                 header, s,

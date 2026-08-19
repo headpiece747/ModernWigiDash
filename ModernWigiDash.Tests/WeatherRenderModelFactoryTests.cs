@@ -33,6 +33,7 @@ public class WeatherRenderModelFactoryTests
     private static WeatherRenderModelInputs Inputs(
         WeatherRenderModelKey key,
         int weatherCode = 61,
+        bool isDay = true,
         double currentTempC = 21.5,
         double feelsLikeC = 19.0,
         double humidity = 60.0,
@@ -48,6 +49,7 @@ public class WeatherRenderModelFactoryTests
         return new WeatherRenderModelInputs(
             key,
             weatherCode,
+            isDay,
             currentTempC, feelsLikeC, humidity, windSpeedKmH, highTempC, lowTempC,
             daily ?? [new DailyForecastItem("Mon", 25.0, 15.0, 61)],
             hourly ?? [new HourlyForecastItem("13:00", 21.5, 61)],
@@ -85,6 +87,21 @@ public class WeatherRenderModelFactoryTests
     }
 
     [TestMethod]
+    public void Resolve_IsDayDriftWithoutDataVersion_IsACacheHit()
+    {
+        // The day/night flag arrives with the weather code in the same apply
+        // (the merge bumps the data version for both), so the flag — like the
+        // code — rides the data version and is no key component.
+        WeatherRenderModelInputs inputs = Inputs(Key(), isDay: false);
+        var cached = WeatherRenderModelFactory.Resolve(null, inputs);
+
+        var result = WeatherRenderModelFactory.Resolve(cached, Inputs(cached.Key!, isDay: true));
+
+        Assert.AreSame(cached, result,
+            "The flag rides the data version: an is_day-only drift is a hit, and the rebuild is driven by the version.");
+    }
+
+    [TestMethod]
     public void Resolve_EveryKeyFieldDrift_RebuildsTheModel()
     {
         WeatherRenderModelInputs inputs = Inputs(Key());
@@ -119,7 +136,7 @@ public class WeatherRenderModelFactoryTests
     public void Resolve_Miss_MapsTheKeyAndDataViewIntoTheModel()
     {
         WeatherRenderModelKey key = Key();
-        var inputs = Inputs(key, weatherCode: 80);
+        var inputs = Inputs(key, weatherCode: 80, isDay: false);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
@@ -136,6 +153,7 @@ public class WeatherRenderModelFactoryTests
         Assert.AreEqual(key.ShowHighLow, model.ShowHighLow);
         Assert.AreEqual(key.ShowForecast, model.ShowForecast);
         Assert.AreEqual(80, model.WeatherCode);
+        Assert.IsFalse(model.IsDay, "the day/night flag rides the data view into the model");
         Assert.AreEqual(1, model.Daily.Length);
         Assert.AreEqual(1, model.Hourly.Length);
         Assert.AreEqual(25.0, model.Daily[0].MaxTempC);

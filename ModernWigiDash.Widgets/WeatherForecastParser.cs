@@ -21,12 +21,13 @@ internal static class WeatherForecastParser
     /// still parse. The legacy block never carried apparent_temperature or
     /// humidity, which is why this reads them from <c>current</c>.
     /// </summary>
-    internal static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode) ParseCurrentWeather(JsonElement root)
+    internal static (double? TempC, double? FeelsLikeC, double? WindSpeedKmH, int? WeatherCode, bool? IsDay) ParseCurrentWeather(JsonElement root)
     {
         double? tempC = null;
         double? feelsLikeC = null;
         double? windSpeedKmH = null;
         int? weatherCode = null;
+        bool? isDay = null;
 
         if (root.TryGetProperty("current", out var current))
         {
@@ -38,10 +39,15 @@ internal static class WeatherForecastParser
                 windSpeedKmH = windEl.GetDouble();
             if (current.TryGetProperty("weather_code", out var codeEl))
                 weatherCode = codeEl.GetInt32();
-            return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
+            // is_day is the API's day/night fact at the location: the
+            // current-condition icon flips to a moon at night. Absent is
+            // unknown (null) — the display keeps its previous value.
+            if (current.TryGetProperty("is_day", out var dayEl))
+                isDay = dayEl.GetInt32() == 1;
+            return (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay);
         }
 
-        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null);
+        if (!root.TryGetProperty("current_weather", out var currentWeather)) return (null, null, null, null, null);
 
         if (currentWeather.TryGetProperty("temperature", out var legacyTemp))
             tempC = legacyTemp.GetDouble();
@@ -54,8 +60,10 @@ internal static class WeatherForecastParser
             windSpeedKmH = legacyWind.GetDouble();
         if (currentWeather.TryGetProperty("weathercode", out var legacyCode))
             weatherCode = legacyCode.GetInt32();
+        if (currentWeather.TryGetProperty("is_day", out var legacyDay))
+            isDay = legacyDay.GetInt32() == 1;
 
-        return (tempC, feelsLikeC, windSpeedKmH, weatherCode);
+        return (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay);
     }
 
     /// <summary>

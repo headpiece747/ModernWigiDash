@@ -16,4 +16,8 @@ internal sealed record WeatherSnapshot(
     IReadOnlyList<HourlyForecastItem>? HourlyForecasts,
     string ResolvedCityName,
     double Lat,
-    double Lon);
+    double Lon,
+    /// <summary>The day/night fact from the API's is_day (null when the
+    /// response omitted it — consumers keep their previous value, and the
+    /// display's default is day).</summary>
+    bool? IsDay = null);

@@ -77,6 +77,65 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_NightForecast_ReadsIsDayFalse()
+    {
+        // The day/night fact rides the current block: a clear night must read
+        // as night so the current-condition icon flips to a moon.
+        const string night = """
+        {
+          "latitude": 40.7128, "longitude": -74.006,
+          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 0, "wind_speed_10m": 8.2, "is_day": 0 }
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
+                ? StubHttpHandler.Ok(night)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsFalse(snapshot.IsDay, "is_day 0 must read as night so the icon can flip");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_DayForecast_ReadsIsDayTrue()
+    {
+        const string day = """
+        {
+          "latitude": 40.7128, "longitude": -74.006,
+          "current": { "temperature_2m": 12.5, "relative_humidity_2m": 60, "apparent_temperature": 10.1, "weather_code": 2, "wind_speed_10m": 8.2, "is_day": 1 }
+        }
+        """;
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri?.AbsoluteUri.Contains("/v1/forecast", StringComparison.Ordinal) == true
+                ? StubHttpHandler.Ok(day)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsTrue(snapshot.IsDay, "is_day 1 reads as day");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_MissingIsDay_ReadsAsUnknown()
+    {
+        // A response without is_day (the shared fixture) carries no day/night
+        // fact: the snapshot reads it as unknown, and the display null-keeps
+        // its previous value (default day).
+        var stub = new StubHttpHandler(Respond);
+        var client = CreateClient(stub);
+
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
+
+        Assert.IsNotNull(snapshot);
+        Assert.IsNull(snapshot.IsDay, "an absent is_day is unknown, not a defaulted day");
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_ForecastUrl_IsInvariantUnderCommaDecimalCulture()
     {
         // The forecast URL is built with invariant F4 formatting: under a
