@@ -367,6 +367,7 @@ FodyWeavers.xsd
 /.codegraph/
 /.desloppify/
 /.opencode/
+/.opencodeignore
 /.superpowers/
 /data/
 /opencode.json
