@@ -97,16 +97,23 @@ internal sealed class WeatherFetchFlow(WeatherClient client, WeatherResolvedIden
             return WeatherFetchFlowOutcome.DroppedStale;
         }
 
-        // The outcome carries the key the client actually resolved for. It
-        // must match the key captured here: a resolution-input change landing
-        // between this capture and the client's own capture resolves a
-        // DIFFERENT identity, and if that identity was then changed back
-        // before this continuation runs the live check below cannot see it —
-        // the outcome key can. Dropped through the ADR-0006 predicate (the ONE
-        // spelling — never an inline ordinal compare). Drop the result —
-        // weather AND label — when either comparison fails.
-        if (result is WeatherFetchResult.Fetched fetchedKeyCheck
-            && !WeatherQueryKey.SameKey(fetchedKeyCheck.QueryKey, fetchKey))
+        // The outcome carries the key the client actually resolved for (both
+        // Fetched and Tie — a tie's candidates belong to the identity that
+        // produced them, exactly like a snapshot). It must match the key
+        // captured here: a resolution-input change landing between this
+        // capture and the client's own capture resolves a DIFFERENT identity,
+        // and if that identity was then changed back before this continuation
+        // runs the live check below cannot see it — the outcome key can.
+        // Dropped through the ADR-0006 predicate (the ONE spelling — never an
+        // inline ordinal compare). Drop the result — weather, label, AND
+        // candidates — when the comparison fails.
+        string? carriedKey = result switch
+        {
+            WeatherFetchResult.Fetched fetchedKeyCheck => fetchedKeyCheck.QueryKey,
+            WeatherFetchResult.Tie tiedKeyCheck => tiedKeyCheck.QueryKey,
+            _ => null,
+        };
+        if (carriedKey is not null && !WeatherQueryKey.SameKey(carriedKey, fetchKey))
         {
             _ = RunFetchAsync(force: true);
             return WeatherFetchFlowOutcome.DroppedStale;
@@ -123,45 +130,63 @@ internal sealed class WeatherFetchFlow(WeatherClient client, WeatherResolvedIden
             return WeatherFetchFlowOutcome.DroppedStale;
         }
 
-        if (result is not WeatherFetchResult.Fetched fetched)
+        // The apply is identity-guarded under the same lock as the version
+        // checks: an edit landing between the post-await re-check above and
+        // this point must win — the applied state (a snapshot, or a tie's
+        // candidates + header) must not belong to the OLD identity (the stale
+        // write-back is protected separately below).
+        bool appliedTie = false;
+        if (result is WeatherFetchResult.Tie tie)
+        {
+            // A tie has no snapshot to apply — the host's tie seam resets the
+            // data state to its placeholder and applies the tied candidates
+            // (the dropdown) plus the queried header. No label write-back:
+            // there is no resolved city to persist, and writing the raw query
+            // back into Location would be a no-op at best.
+            if (!host.TryApplyTie(tie.Candidates, () => StillCurrent(fetchKey)))
+            {
+                _ = RunFetchAsync(force: true);
+                return WeatherFetchFlowOutcome.DroppedStale;
+            }
+            appliedTie = true;
+        }
+        else if (result is WeatherFetchResult.Fetched fetched)
+        {
+            if (!host.TryApply(new WeatherApplyRequest(fetched.Snapshot, null, () => StillCurrent(fetchKey),
+                    fetched.Candidates, fetched.Population, fetched.Snapshot.ResolvedCityName)))
+            {
+                _ = RunFetchAsync(force: true);
+                return WeatherFetchFlowOutcome.DroppedStale;
+            }
+
+            WeatherSnapshot snapshot = fetched.Snapshot;
+
+            // The resolved label's write-back is deferred to the UI thread (the
+            // host's render flushes the pending field, so the host's persistence
+            // stays on the UI thread). It is skipped entirely when a CustomLabel
+            // supplies the title: the label is display-only, and writing it into
+            // Location would destroy the query (explicit-coords/pick + CustomLabel
+            // would overwrite "New York" with "Home" in the profile). The identity
+            // is re-validated at the set, under the same gate the edit-side clears
+            // use: either the gated set lands before the edit's gated clear (the
+            // clear erases it) or after (the guard re-reads the new location and
+            // the set never happens).
+            bool writebackEligible = !string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
+                && string.IsNullOrWhiteSpace(host.CurrentLocation.CustomLabel)
+                && !string.Equals(snapshot.ResolvedCityName, host.CurrentLocation.Location, StringComparison.Ordinal);
+            if (writebackEligible)
+            {
+                host.QueueLabelWriteback(() => StillCurrent(fetchKey), snapshot.ResolvedCityName);
+            }
+        }
+        else
         {
             // Throttled / InFlight / Failed: keep the previous state silently.
             return WeatherFetchFlowOutcome.Skipped;
         }
 
-        // The apply is identity-guarded under the same lock as the version
-        // checks: an edit landing between the post-await re-check above and
-        // this point must win — the snapshot and the resolved-identity copies
-        // must not belong to the OLD identity (the stale write-back is
-        // protected separately below).
-        if (!host.TryApply(new WeatherApplyRequest(fetched.Snapshot, null, () => StillCurrent(fetchKey),
-                fetched.Candidates, fetched.Population, fetched.Snapshot.ResolvedCityName)))
-        {
-            _ = RunFetchAsync(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        WeatherSnapshot snapshot = fetched.Snapshot;
-
-        // The resolved label's write-back is deferred to the UI thread (the
-        // host's render flushes the pending field, so the host's persistence
-        // stays on the UI thread). It is skipped entirely when a CustomLabel
-        // supplies the title: the label is display-only, and writing it into
-        // Location would destroy the query (explicit-coords/pick + CustomLabel
-        // would overwrite "New York" with "Home" in the profile). The identity
-        // is re-validated at the set, under the same gate the edit-side clears
-        // use: either the gated set lands before the edit's gated clear (the
-        // clear erases it) or after (the guard re-reads the new location and
-        // the set never happens).
-        bool writebackEligible = !string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-            && string.IsNullOrWhiteSpace(host.CurrentLocation.CustomLabel)
-            && !string.Equals(snapshot.ResolvedCityName, host.CurrentLocation.Location, StringComparison.Ordinal);
-        if (writebackEligible)
-        {
-            host.QueueLabelWriteback(() => StillCurrent(fetchKey), snapshot.ResolvedCityName);
-        }
-
-        // The geocode may have produced new Location Match candidates: refresh
+        // The geocode may have produced new Location Match candidates — either
+        // a fresh resolution's candidate list or a tie's tied options: refresh
         // the inspector so an already-open panel shows the dropdown (the
         // Twitch pattern — the inspector only builds the editor when options
         // exist). Only when the option set changed — see the stamp below.
@@ -173,7 +198,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, WeatherResolvedIden
         }
 
         host.RequestRender();
-        return WeatherFetchFlowOutcome.Applied;
+        return appliedTie ? WeatherFetchFlowOutcome.AppliedTie : WeatherFetchFlowOutcome.Applied;
     }
 
     /// <summary>

@@ -217,6 +217,172 @@ public class WeatherFetchFlowTests
         Assert.AreEqual(0, host.RenderRequests);
     }
 
+    // -- RunFetchAsync: the tie path ------------------------------------------
+
+    private static HttpResponseMessage TieRespond(HttpRequestMessage request)
+    {
+        string url = request.RequestUri?.AbsoluteUri ?? "";
+        if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+        if (url.Contains("latitude=40.7100", StringComparison.Ordinal)) return StubHttpHandler.Ok(NycForecastJson);
+        if (url.Contains("latitude=51.5100", StringComparison.Ordinal)) return StubHttpHandler.Ok(LondonForecastJson);
+        return StubHttpHandler.NotFound();
+    }
+
+    private static readonly WeatherLocation BerlinTie = new("City", "Berlin", null, null, null);
+
+    [TestMethod]
+    public async Task RunFetchAsync_TieOutcome_AppliesTiedCandidatesAndPlaceholder()
+    {
+        // A tie carries no snapshot — the flow applies the tied candidates
+        // (the dropdown) through the host's tie seam, the queried name as the
+        // honest header, and resets the data state to its placeholder.
+        var stub = new StubHttpHandler(TieRespond);
+        var host = NewHost(stub);
+        host.Location = BerlinTie;
+
+        var outcome = await host.Flow.RunFetchAsync();
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, outcome);
+        Assert.AreEqual(4, host.Identity.Candidates.Count, "the four exact-name candidates must reach the widget's identity");
+        Assert.AreEqual("Berlin", host.Identity.CityName, "the header is the queried name — there is no winner to name");
+        Assert.AreEqual(0, host.Identity.Population);
+        Assert.IsNull(host.Identity.PendingWriteback, "a tie has no resolved label to write back");
+        Assert.AreEqual(1, host.State.DataVersion, "the placeholder reset must bump the version so the render model rebuilds");
+        Assert.AreEqual(25.0, host.State.CurrentTempC, "the placeholder scalars — never a previous city's data");
+        Assert.AreEqual(1, host.RenderRequests);
+        Assert.AreEqual(1, host.InspectorRefreshes, "the tied options are a candidate-set change");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "a tie has no coordinates — no forecast leg may run");
+    }
+
+    [TestMethod]
+    public async Task RunFetchAsync_TieOutcome_ResetsPreviousCityScalars()
+    {
+        // A widget that already shows a resolved city must not keep showing it
+        // under a tie's header: the tie apply resets the data state to the
+        // placeholder (the previous city's scalars never render under the
+        // new identity).
+        var stub = new StubHttpHandler(TieRespond);
+        var host = NewHost(stub);
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.Applied, await host.Flow.RunFetchAsync()); // NYC
+        Assert.AreEqual(11.1, host.State.CurrentTempC);
+
+        host.Location = BerlinTie;
+        var outcome = await host.Flow.RunFetchAsync(force: true);
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, outcome);
+        Assert.AreEqual(25.0, host.State.CurrentTempC, "the previous city's scalars must be reset to the placeholder");
+        Assert.AreEqual(2, host.State.DataVersion);
+        Assert.AreEqual("Berlin", host.Identity.CityName);
+        Assert.AreEqual(4, host.Identity.Candidates.Count);
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "only the NYC fetch fetched weather; the tie fetched none");
+    }
+
+    [TestMethod]
+    public async Task RunFetchAsync_TieOutcome_SecondRunIsThrottled()
+    {
+        // A tie stamps the client's throttle in the geocode leg: the render
+        // kick must not re-geocode a tie at frame rate (the tie must not spin).
+        var stub = new StubHttpHandler(TieRespond);
+        var host = NewHost(stub);
+        host.Location = BerlinTie;
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, await host.Flow.RunFetchAsync());
+        int callsAfterFirst = stub.Calls;
+
+        var outcome = await host.Flow.RunFetchAsync();
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.Skipped, outcome, "a tie must cool down like a success");
+        Assert.AreEqual(callsAfterFirst, stub.Calls, "the throttled run must not touch the wire");
+    }
+
+    [TestMethod]
+    public async Task RunFetchAsync_TieOutcome_PostAwaitIdentityChange_DropsTieAndForceRefetches()
+    {
+        // The edit lands mid-geocode — inside the client's capture window the
+        // client's Stale verdict CANNOT see (the client still matches its own
+        // captured key, so the outcome comes back as a live Tie): the flow's
+        // post-await live re-check is the gate that must drop the old
+        // identity's candidates, then re-fetch the NEW identity.
+        FlowHost? host = null;
+        var stub = new StubHttpHandler(request =>
+        {
+            if (request.RequestUri is { AbsoluteUri: string url } && url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                host!.Location = LondonCoords; // the user refines the query while the geocode is in flight
+            }
+            return TieRespond(request);
+        });
+        host = NewHost(stub);
+        host.Location = BerlinTie;
+
+        var outcome = await host.Flow.RunFetchAsync();
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
+        Assert.AreEqual(0, host.State.DataVersion, "the dropped tie must never reach the display state");
+        Assert.AreEqual("Default Location", host.Identity.CityName);
+        Assert.AreEqual(0, host.Identity.Candidates.Count, "the old identity's tie candidates must not populate the new identity's dropdown");
+        // The forced re-fetch resolves the NEW identity (the London pair):
+        // wait for it to land and pin that the drop triggered the fetch.
+        await TestWait.WaitUntilAsync(() => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
+            "the re-fetched pair location must not re-geocode");
+    }
+
+    [TestMethod]
+    public async Task RunFetchAsync_TieOutcome_OutcomeKeyMismatch_DropsTieAndForceRefetches()
+    {
+        // The flow reads the current location twice around the fetch (the key
+        // capture, then the fetch call). An edit landing between those two
+        // reads resolves a DIFFERENT identity the live re-check cannot see —
+        // the carried-key comparison (now covering Tie, not just Fetched)
+        // rides WeatherQueryKey.SameKey and is the gate that catches it. The
+        // seam walks THREE identities (the capture key, the fetched-into
+        // Berlin tie that must be dropped, then the live Springfield tie the
+        // re-fetch resolves — a DIFFERENT candidate set, so the drop is
+        // observable even if the re-fetch applies before the assertions).
+        int seamCalls = 0;
+        var springCity = new WeatherLocation("City", "Springfield", null, null, null);
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal))
+            {
+                return url.Contains("name=Springfield", StringComparison.Ordinal)
+                    ? StubHttpHandler.Ok(WeatherTestData.SampleSpringfields)
+                    : StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            }
+            return StubHttpHandler.NotFound();
+        });
+        var host = NewHost(stub,
+            locationSeam: () => Interlocked.Increment(ref seamCalls) switch
+            {
+                1 => NycCoords,
+                2 => BerlinTie,
+                _ => springCity,
+            });
+
+        var outcome = await host.Flow.RunFetchAsync();
+
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
+        // The drop's forced re-fetch (fire-and-forget) re-geocodes the LIVE
+        // identity (the Springfield tie): wait for the final applied state,
+        // then pin the drop and the re-fetch against it — the re-fetch runs
+        // concurrently with the dropped run's return, so no right-after-drop
+        // version snapshot is asserted.
+        await TestWait.WaitUntilAsync(() => host.State.DataVersion == 1 && host.Identity.CityName == "Springfield", TimeSpan.FromSeconds(5));
+        Assert.AreEqual(2, host.Identity.Candidates.Count,
+            "the applied candidates are the LIVE identity's tie (2 Springfields) — the dropped Berlin tie's 4 never reached the state");
+        Assert.AreEqual("Springfield", host.Identity.CityName);
+        Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
+            "the drop triggered a re-geocode of the live identity");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "neither tie fetches weather — there are no coordinates");
+    }
+
     // -- The inspector-refresh stamp ------------------------------------------
 
     [TestMethod]
@@ -427,6 +593,27 @@ public class WeatherFetchFlowTests
         bool IWeatherFetchHost.TryApply(WeatherApplyRequest request)
             => ApplySnapshot(request.Snapshot, request.ExpectedVersion, request.IdentityGuard,
                 request.Candidates, request.Population, request.ResolvedName);
+
+        /// <summary>The gated tie apply — mirrors the widget's TryApplyTie
+        /// seam: the identity guard first (an edit that changed the resolution
+        /// inputs since the fetch wins), then the placeholder reset with the
+        /// data version bumped and the identity copies (the tied candidates —
+        /// the dropdown — the queried name as the header, a cleared
+        /// population) under ONE lock.</summary>
+        bool IWeatherFetchHost.TryApplyTie(IReadOnlyList<GeocodeCandidate> candidates, Func<bool> identityGuard)
+        {
+            lock (Gate)
+            {
+                if (!identityGuard()) return false;
+                State = new WeatherSnapshotState { DataVersion = State.DataVersion + 1 };
+                WeatherLocation current = LocationSeam?.Invoke() ?? Location;
+                string headerText = string.IsNullOrWhiteSpace(current.Location)
+                    ? WeatherFetchControl.UnknownLocationLabel
+                    : current.Location;
+                Identity.Apply(candidates, 0, headerText);
+                return true;
+            }
+        }
 
         /// <summary>The gated write-back queue: check + set under ONE lock —
         /// one critical section, mirroring the widget's seam.</summary>

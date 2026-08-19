@@ -567,6 +567,32 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
+    /// <summary>
+    /// The host apply for a same-name tie: under the same gate, the identity
+    /// guard must still pass (an edit that changed the resolution inputs
+    /// since the fetch wins — the tie's candidates and header must not belong
+    /// to the OLD identity), then one atomic step: the snapshot state resets
+    /// to its placeholder (a tie has no data — a previous city's scalars must
+    /// never render under a tie's header) with the data version bumped so the
+    /// render model rebuilds, and the resolved-identity copies take the tied
+    /// candidates (the Location Match dropdown), the queried name as the
+    /// honest header (there is no winner to name), and a cleared population.
+    /// </summary>
+    bool IWeatherFetchHost.TryApplyTie(IReadOnlyList<GeocodeCandidate> candidates, Func<bool> identityGuard)
+    {
+        lock (_forecastGate)
+        {
+            if (!identityGuard()) return false;
+            _snapshotState = new WeatherSnapshotState { DataVersion = _snapshotState.DataVersion + 1 };
+            string location = BuildLocation().Location;
+            string headerText = string.IsNullOrWhiteSpace(location)
+                ? WeatherFetchControl.UnknownLocationLabel
+                : location;
+            _identity.Apply(candidates, 0, headerText);
+            return true;
+        }
+    }
+
     /// <summary>Test seam: replaces the client cache-load leg so the boot-race
     /// version guard is drivable deterministically (forwards to the flow's
     /// seam; defaults to the client's identity-checked load).</summary>

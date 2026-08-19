@@ -30,6 +30,20 @@ internal interface IWeatherFetchHost
     /// </summary>
     bool TryApply(WeatherApplyRequest request);
 
+    /// <summary>
+    /// Applies a same-name tie to the display state under the host's gate: the
+    /// identity guard first, then — as one atomic step — the snapshot state
+    /// reset to its placeholder (a tie has no data: a previous city's scalars
+    /// must never render under a tie's header) and the resolved-identity
+    /// copies (the tied candidates — the Location Match dropdown — the
+    /// queried name as the honest header, a cleared population). Returns
+    /// whether the tie was applied. No snapshot exists on a tie, so this seam
+    /// is the tie's named apply payload beside <see cref="TryApply"/>'s
+    /// snapshot payload (ADR-0008: a new payload field is a named addition,
+    /// never a positional signature change).
+    /// </summary>
+    bool TryApplyTie(IReadOnlyList<GeocodeCandidate> candidates, Func<bool> identityGuard);
+
     /// <summary>The display state's data version (read under the host's gate
     /// — that is where the fetch thread writes it).</summary>
     int DataVersion { get; }

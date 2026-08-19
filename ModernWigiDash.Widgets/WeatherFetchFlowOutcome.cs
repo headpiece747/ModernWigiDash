@@ -14,6 +14,14 @@ internal enum WeatherFetchFlowOutcome
     /// <summary>A fresh snapshot passed every gate and was applied.</summary>
     Applied,
 
+    /// <summary>A genuine same-name tie passed the identity/apply gates and
+    /// was applied: the tied candidates populate the Location Match dropdown,
+    /// the queried name becomes the header (the honest "this is what you
+    /// asked for"), and the data state resets to its placeholder — no
+    /// snapshot exists, and a previous city's scalars never render under a
+    /// tie's header. The user escapes the tie through the pick path.</summary>
+    AppliedTie,
+
     /// <summary>The result was stale, or the identity no longer matched at an
     /// await boundary, or the apply guard refused it — dropped (weather AND
     /// label), and a re-fetch of the current identity was requested.</summary>

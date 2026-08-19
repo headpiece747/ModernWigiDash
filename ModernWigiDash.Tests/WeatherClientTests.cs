@@ -712,6 +712,87 @@ public class WeatherClientTests
     }
 
     [TestMethod]
+    public async Task FetchCurrentAsync_CityTie_ReturnsTieWithCandidatesAndQueryKey()
+    {
+        // A genuine same-name tie (four places bear the exact name, no rule can
+        // break it) is an OUTCOME, not a failure: the result carries the tied
+        // candidates (the widget's Location Match dropdown) and the key it was
+        // resolved for — the widget can offer the pick, not a dead end.
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleBerlines)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+        var location = new WeatherLocation("Fixed Location", "Berlin", null, null, null);
+
+        var result = await client.FetchCurrentAsync(location);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Tie));
+        var tie = (WeatherFetchResult.Tie)result;
+        Assert.AreEqual(4, tie.Candidates.Count, "4 of the 5 rows bear the exact name; the fuzzy row is not offered");
+        Assert.AreEqual(WeatherQueryKey.Build(location), tie.QueryKey,
+            "the tie must carry the key it was resolved for — the flow verifies against it");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "no coordinates exist for a tie — no forecast request may go out");
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_CityTie_ThrottlesRetries()
+    {
+        // A tie stamps the throttle like any attempt (the geocode leg stamps
+        // Ambiguous/Unresolved): the render kick must not re-geocode a tie at
+        // frame rate.
+        var stub = new StubHttpHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleBerlines)
+                : StubHttpHandler.NotFound());
+        var client = CreateClient(stub);
+        var location = new WeatherLocation("Fixed Location", "Berlin", null, null, null);
+
+        Assert.IsInstanceOfType(await client.FetchCurrentAsync(location), typeof(WeatherFetchResult.Tie));
+        int callsAfterFirst = stub.Calls;
+
+        var second = await client.FetchCurrentAsync(location);
+
+        Assert.IsInstanceOfType(second, typeof(WeatherFetchResult.Throttled), "a tie must cool down like a success");
+        Assert.AreEqual(callsAfterFirst, stub.Calls);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_TieThenLocationMatchPick_ResolvesPickedCandidateWithoutRegeocode()
+    {
+        // The full escape route from a tie: the user picks one of the carried
+        // dropdown candidates, and the pick resolves against the tie's cached
+        // candidates with ZERO additional geocode (the pick fast path), so a
+        // forecast lands for the exact place the user chose.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleBerlines);
+            if (url.Contains("/v1/forecast", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleForecast);
+            return StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+        var location = new WeatherLocation("Fixed Location", "Berlin", null, null, null);
+
+        var result = await client.FetchCurrentAsync(location);
+        var tie = (WeatherFetchResult.Tie)result;
+        string pickedQuery = tie.Candidates[0].Query;
+        Assert.AreEqual("Berlin, State of Berlin, Germany", pickedQuery);
+
+        var picked = new WeatherLocation("Fixed Location", "Berlin", null, null, null) { LocationMatch = pickedQuery };
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(picked, force: true));
+
+        Assert.IsNotNull(snapshot, "a pick against the tie's candidates must resolve to coordinates");
+        Assert.AreEqual(52.52437, snapshot.Lat);
+        Assert.AreEqual(13.41053, snapshot.Lon);
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
+            "the pick resolves from the tie's cached candidates — no second geocode");
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
+        Assert.AreEqual("Berlin, State of Berlin, Germany", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
     public async Task FetchCurrentAsync_PersistedPickOnFreshInstance_ResolvesToPickedCandidate()
     {
         // Restart/import: candidates are in-memory per instance, so a stored

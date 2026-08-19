@@ -24,6 +24,20 @@ internal abstract record WeatherFetchResult
         double Population,
         string QueryKey) : WeatherFetchResult;
 
+    /// <summary>A genuine same-name tie: the geocoder found multiple places
+    /// bearing the query's name and the rules refuse to guess coordinates. No
+    /// snapshot exists, but the tied candidates are carried (they are the
+    /// widget's "Location Match" dropdown) with the resolution query key, so
+    /// the caller can OFFER the user a pick instead of collapsing the outcome
+    /// into a bare <see cref="Failed"/> dead end, and can verify the result
+    /// belongs to the identity it requested. A pick then rides the normal pick
+    /// path (Location Match → the geocoder's zero-HTTP fast path). The
+    /// distinction matters: a <see cref="Failed"/> for a typo'd city has no
+    /// candidates to offer, but a tie does — the dropdown is the escape hatch.</summary>
+    public sealed record Tie(
+        IReadOnlyList<GeocodeCandidate> Candidates,
+        string QueryKey) : WeatherFetchResult;
+
     /// <summary>The throttle window was open; no request was made and the
     /// caller keeps its previous state.</summary>
     public sealed record Throttled : WeatherFetchResult;

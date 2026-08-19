@@ -168,19 +168,31 @@ internal sealed class WeatherClient
 
         try
         {
+            WeatherResolutionOutcome? resolution = null;
             if (!_fetchControl.Lat.HasValue || !_fetchControl.MatchesCurrent(fetchQueryKey) || force)
-                await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
+                resolution = await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
 
             if (!_fetchControl.Lat.HasValue || !_fetchControl.Lon.HasValue)
             {
-                // No coordinates: the resolution failed or was left
-                // unresolved. If the identity changed while it was in flight,
-                // this is a STALE failure (the stale success path's verdict) —
-                // the widget must re-fetch the new identity immediately, not
-                // treat it as a plain failed attempt.
+                // No coordinates: the resolution failed, was left
+                // unresolved, or refused to break a tie. If the identity
+                // changed while it was in flight, this is a STALE failure
+                // (the stale success path's verdict) — the widget must
+                // re-fetch the new identity immediately, not treat it as a
+                // plain failed attempt.
                 if (!_fetchControl.MatchesCurrent(fetchQueryKey))
                 {
                     return new WeatherFetchResult.Stale(fetchQueryKey);
+                }
+                // A genuine tie CARRIES the tied candidates (they are the
+                // widget's Location Match dropdown) instead of collapsing
+                // into a bare failure: the user should be offered the pick,
+                // not a dead end. Every other no-coordinates outcome — a
+                // failed geocode, or an empty-candidate tie that is
+                // unresolvable anyway — stays a plain failure.
+                if (resolution is WeatherResolutionOutcome.Ambiguous ambiguous && ambiguous.Candidates.Count > 0)
+                {
+                    return new WeatherFetchResult.Tie(ambiguous.Candidates, fetchQueryKey);
                 }
                 return new WeatherFetchResult.Failed();
             }
@@ -330,7 +342,7 @@ internal sealed class WeatherClient
     /// clears the cache at runtime).</summary>
     internal void ClearCache() => _cache.Clear();
 
-    private async Task ResolveCoordinatesAsync(WeatherLocation location, string currentQuery, CancellationToken cancellationToken)
+    private async Task<WeatherResolutionOutcome> ResolveCoordinatesAsync(WeatherLocation location, string currentQuery, CancellationToken cancellationToken)
     {
         // The identity advances BEFORE the outcome is known. If the key
         // changed (a silent reassignment — hydration, or a direct property
@@ -392,6 +404,7 @@ internal sealed class WeatherClient
         {
             _fetchControl.Stamp(currentQuery);
         }
+        return outcome;
     }
 
     /// <summary>

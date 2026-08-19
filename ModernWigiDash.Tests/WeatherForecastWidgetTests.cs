@@ -80,6 +80,73 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task LocationMatchOptions_AfterTie_CarriesTiedCandidates()
+    {
+        // The gap this fix closes: a genuine same-name tie used to resolve to
+        // a bare failure and leave the Location Match dropdown EMPTY even
+        // though the resolver held the tied candidates. The tie-aware result
+        // arm carries the candidates into the widget's identity — the
+        // dropdown offers the pick, and the pane keeps its placeholder.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleBerlines)
+                : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
+        });
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Berlin" };
+
+        await widget.FetchLiveWeatherAsync(force: true);
+
+        var options = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch));
+        Assert.AreEqual(5, options.Count, "Automatic entry + the FOUR exact-name Berlin candidates");
+        Assert.AreEqual("", options[0].Value);
+        CollectionAssert.Contains(options.Select(o => o.Value).ToArray(), "Berlin, State of Berlin, Germany");
+        CollectionAssert.DoesNotContain(options.Select(o => o.Value).ToArray(), "Brunswick, Maryland, United States",
+            "the fuzzy row (a geocoder non-match) must not be offerable");
+        Assert.AreEqual("Berlin", widget.ResolvedCityName,
+            "the header is the queried name — there is no winner to name");
+        Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
+            "a tie fetches no weather — there are no coordinates");
+        Assert.AreEqual(1, widget._snapshotState.DataVersion,
+            "the tie's apply must reset the data state to its placeholder and bump the version");
+    }
+
+    [TestMethod]
+    public async Task LocationMatchPick_AfterTie_ResolvesPickedCandidateWithoutRegeocode()
+    {
+        // The escape route end-to-end: the tie populates the dropdown, the
+        // user picks a tied candidate (the inspector's write-back path), and
+        // the pick resolves against the tie's cached candidates — zero
+        // additional geocode — so the weather lands for the exact place
+        // picked. The pick is a Coordinates drop: the candidates it was
+        // offered from survive, so the dropdown stays populated.
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return url.Contains("/v1/search", StringComparison.Ordinal)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleBerlines)
+                : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
+        });
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Berlin" };
+
+        await widget.FetchLiveWeatherAsync(force: true); // the tie: geocode once, no forecast
+        string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))
+            .Single(o => o.Value == "Berlin, State of Berlin, Germany").Value;
+
+        widget.LocationMatch = picked;
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
+
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Berlin, State of Berlin, Germany", TimeSpan.FromSeconds(5));
+        Assert.AreEqual("Berlin, State of Berlin, Germany", widget.ResolvedCityName);
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
+            "the pick resolves from the tie's cached candidates — no second geocode");
+        Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
+        Assert.AreEqual(5, widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch)).Count,
+            "the pick's Coordinates drop keeps the candidates it was offered from");
+    }
+
+    [TestMethod]
     public async Task LocationMatchPick_ChangingLocation_ClearsCandidatesAndRegeocodes()
     {
         var stub = new StubHttpHandler(request =>
