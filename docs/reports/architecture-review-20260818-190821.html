@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Architecture review — ModernWigiDash (weather forecast cluster)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+  </script>
+  <style>
+    .seam { stroke-dasharray: 5 4; }
+    .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .chip { @apply text-[10px] uppercase tracking-wider; }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+  <!-- ============ HEADER ============ -->
+  <header>
+    <p class="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Architecture review · deepening opportunities</p>
+    <h1 class="font-serif text-3xl md:text-4xl text-slate-900">ModernWigiDash <span class="text-slate-400 font-sans text-xl">— weather forecast widget cluster</span></h1>
+    <p class="mt-2 text-sm text-slate-600">2026-08-18 · <span class="font-mono text-xs">ModernWigiDash.Widgets</span> · ~4,400 lines across 21 modules + 17 test files · scope named: <em>weather forecast widget</em></p>
+    <div class="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 border-t border-slate-200 pt-4">
+      <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 border-2 border-slate-700 bg-white"></span> module</span>
+      <span class="flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" class="seam" stroke="#475569" stroke-width="2"/></svg> seam</span>
+      <span class="flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="#dc2626" stroke-width="2"/><path d="M24 1 L28 4 L24 7 Z" fill="#dc2626"/></svg> leakage</span>
+      <span class="flex items-center gap-2"><span class="inline-block w-4 h-4 deep border border-slate-900"></span> deep module</span>
+    </div>
+  </header>
+
+  <section id="candidates" class="space-y-14">
+
+    <!-- ================================================================ -->
+    <!-- CANDIDATE 1 -->
+    <!-- ================================================================ -->
+    <article id="c1" class="scroll-mt-8">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+        <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1 border border-slate-200">in-process</span>
+        <span class="text-xs text-slate-400 font-mono ml-auto">C1</span>
+      </div>
+      <h2 class="mt-3 font-serif text-2xl">Build the fetch-flow module its outcome enum already names</h2>
+
+      <div class="mt-4 font-mono text-sm text-slate-700 bg-slate-100 rounded-md p-3 leading-6">
+        <div>ModernWigiDash.Widgets\WeatherForecastWidget.cs <span class="text-slate-500">— sequence 425–551 · cadence gate 235–239, 409 · edit branches 279–302 · boot load 635–686 · key coercion 576–591</span></div>
+        <div>ModernWigiDash.Widgets\WeatherFetchFlowOutcome.cs <span class="text-slate-500">— the 4-value vocabulary, zero behaviour</span></div>
+        <div class="text-slate-500">composed over (unchanged): WeatherClient.cs · WeatherQueryKey.cs · WeatherSnapshotApplyPolicy.cs · WeatherResolvedIdentity.cs</div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <!-- BEFORE -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — one edit-to-apply is 10 rounds across the seam</p>
+          <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant W as WeatherForecastWidget
+    participant C as WeatherClient
+    participant P as Apply policy
+    W->>W: BuildLocation -> key (coercion in widget)
+    W->>C: FetchCurrentAsync
+    C->>C: claim + stale window (control)
+    C-->>W: Fetched(snapshot, key)
+    W->>W: outcome-key compare — raw Equals (2nd spelling)
+    W->>W: StillCurrent post-await re-check
+    W->>P: guarded apply under widget gate
+    W->>C: stale => InvalidateLocation + forced re-fetch
+    W->>W: write-back gate + pending flag
+    W->>W: RequestRender / inspector refresh
+          </pre>
+        </div>
+        <!-- AFTER -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — the sequence sits behind one seam</p>
+          <div class="relative flex flex-col items-center gap-0">
+            <div class="w-full border-2 border-slate-400 bg-white rounded-md px-3 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">WeatherForecastWidget — host</p>
+              <p class="text-xs text-slate-700 mt-1">gate discipline · UI-thread write-back flush · context calls (render, inspector)</p>
+            </div>
+            <svg width="100%" height="26" class="block"><line x1="20" y1="13" x2="98%" y2="13" transform="scale(0.995,1)" class="seam" stroke="#475569" stroke-width="2"/><text x="50%" y="10" text-anchor="middle" class="fill-slate-500" style="font-size:9px; letter-spacing:0.1em">SEAM — fetch / load / invalidate / apply</text></svg>
+            <div class="deep w-full rounded-md px-4 py-3 border-2 border-slate-900">
+              <p class="text-white text-sm font-semibold tracking-wide">WeatherFetchFlow <span class="text-slate-400 font-normal">(deep)</span></p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">capture key</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">SameKey check</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">post-await re-check</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">drop → re-fetch</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">write-back gate</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">static-snapshot gate</span>
+                <span class="text-[9px] uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5">boot-load rollback</span>
+              </div>
+            </div>
+            <div class="mt-2 flex gap-1.5 w-full">
+              <span class="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-300 bg-white rounded px-1.5 py-0.5 flex-1 text-center">WeatherClient</span>
+              <span class="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-300 bg-white rounded px-1.5 py-0.5 flex-1 text-center">WeatherQueryKey</span>
+              <span class="text-[9px] uppercase tracking-wider text-slate-500 border border-slate-300 bg-white rounded px-1.5 py-0.5 flex-1 text-center">Apply policy</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+          <p>The fetch flow is ~150 lines of widget sequence across five methods, and its one interface-level invariant — capture the identity key before the await, re-validate after — is enforced by comments only. The ADR-0006 predicate is spelled a second time inline (widget 465), and “a discarded cache load must roll the client back” is split across two modules, held together by a comment.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+          <p>A <span class="font-mono text-xs">WeatherFetchFlow</span> module owns the sequence — key capture, outcome verification, guarded drop, skip mapping, write-back gating, the static-snapshot gate, the boot-load rollback — composed over the cluster’s existing seams (fetch, load, invalidate, apply). The widget keeps only gate discipline, the UI-thread flush, and the context calls.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+        <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 list-disc list-inside">
+          <li>ADR-0006 predicate single-spelled again</li>
+          <li>locality: rollback lives with its effect</li>
+          <li>locality: capture-window order lives in one module</li>
+          <li>leverage: race tests drive one flow interface</li>
+          <li>widget sheds ~150 sequence lines</li>
+          <li>deletion test: the enum was the module’s absence</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- ================================================================ -->
+    <!-- CANDIDATE 2 -->
+    <!-- ================================================================ -->
+    <article id="c2" class="scroll-mt-8">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+        <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1 border border-slate-200">in-process</span>
+        <span class="text-xs text-slate-400 font-mono ml-auto">C2</span>
+      </div>
+      <h2 class="mt-3 font-serif text-2xl">Narrow the <span class="font-mono text-lg">WeatherClient</span> interface: the hidden load effect, the test-only surface</h2>
+
+      <div class="mt-4 font-mono text-sm text-slate-700 bg-slate-100 rounded-md p-3 leading-6">
+        <div>ModernWigiDash.Widgets\WeatherClient.cs <span class="text-slate-500">— hidden state mutation 306–310 · doc gap 267–278 · test-only surface 60, 67, 75, 79, 112, 120, 331</span></div>
+        <div>ModernWigiDash.Widgets\WeatherFetchControl.cs <span class="text-slate-500">— the state a load mutates: 205–233</span></div>
+        <div>ModernWigiDash.Widgets\WeatherForecastWidget.cs <span class="text-slate-500">— the caller compensation: 409, 664–679</span></div>
+        <div class="text-slate-500">ModernWigiDash.Tests\WeatherClientTests.cs — the forward consumers (211, 854, 1163, 1406, 1427…)</div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <!-- BEFORE: mass diagram -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — interface nearly as wide as the implementation</p>
+          <div class="flex items-end gap-6 h-64 pt-2">
+            <div class="flex-1">
+              <div class="h-48 border-2 border-slate-700 bg-amber-50 rounded-t-md p-2 flex flex-col justify-between">
+                <p class="text-[9px] uppercase tracking-wider text-amber-800 font-semibold">caller obligation</p>
+                <ul class="text-[10px] text-slate-700 space-y-0.5 leading-tight">
+                  <li>· fetch / load / search / invalidate ×2</li>
+                  <li>· capture key pre-await, re-check post (comments)</li>
+                  <li>· discarded load ⇒ roll client back (comments)</li>
+                  <li>· failure-stamp rules incl. stale exemption</li>
+                  <li>· throttle pre-check for the tick</li>
+                  <li>· test-only: count, candidates, population, filename, save-seam, clear</li>
+                </ul>
+              </div>
+              <div class="h-10 bg-slate-300 rounded-b-md mt-0.5 text-center text-[10px] uppercase tracking-wider text-slate-700 pt-2.5">behind</div>
+            </div>
+            <div class="w-16 text-center">
+              <p class="text-xs text-red-600 font-semibold rotate-0">shallow</p>
+              <p class="text-[10px] text-slate-500">ratio ≈ 1 : 1</p>
+            </div>
+          </div>
+        </div>
+        <!-- AFTER: mass diagram -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — effects first-class, surface narrow</p>
+          <div class="flex items-end gap-6 h-64 pt-2">
+            <div class="flex-1">
+              <div class="h-16 border-2 border-slate-700 bg-emerald-50 rounded-t-md p-2">
+                <p class="text-[9px] uppercase tracking-wider text-emerald-800 font-semibold">caller obligation</p>
+                <ul class="text-[10px] text-slate-700 mt-1 space-y-0.5 leading-tight">
+                  <li>· fetch / search / invalidate ×2</li>
+                  <li>· load tells you what it applied</li>
+                </ul>
+              </div>
+              <div class="h-44 deep rounded-b-md mt-0.5 p-2">
+                <p class="text-[9px] uppercase tracking-wider text-slate-300 font-semibold">behind</p>
+                <ul class="text-[10px] text-slate-400 mt-1 space-y-0.5 leading-tight">
+                  <li>· claim / throttle / stale window</li>
+                  <li>· load effect committed atomically</li>
+                  <li>· observables live in control &amp; store</li>
+                </ul>
+              </div>
+            </div>
+            <div class="w-16 text-center">
+              <p class="text-xs text-emerald-700 font-semibold">deep</p>
+              <p class="text-[10px] text-slate-500">ratio ≈ 1 : 3</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+          <p><span class="font-mono text-xs">LoadCacheAsync</span> mutates the fetch-control’s resolved state (lat/lon/name/throttle) while its documentation mentions only the throttle — a caller who discards the snapshot must compensate with a rollback it had to rediscover (widget 664–679, joined to the effect by a comment). Six test-only members ride the production surface; correct calling today means five invariants, four of them in comments.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+          <p>Make the load’s effect first-class — a load that applies state says so, a discarded one needs no caller rollback — and move the observables behind <span class="font-mono text-xs">WeatherFetchControl</span> / <span class="font-mono text-xs">WeatherCacheStore</span>, which the tests already construct directly.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+        <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 list-disc list-inside">
+          <li>caller owes one invariant, not five</li>
+          <li>discarded load needs no compensation</li>
+          <li>six members off the production surface</li>
+          <li>deletion test: the forwards were indirection</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- ================================================================ -->
+    <!-- CANDIDATE 3 -->
+    <!-- ================================================================ -->
+    <article id="c3" class="scroll-mt-8">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+        <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1 border border-slate-200">in-process</span>
+        <span class="text-xs text-slate-400 font-mono ml-auto">C3</span>
+      </div>
+      <h2 class="mt-3 font-serif text-2xl">The transport adapter hosts the place-name rules; the state machine reaches through it</h2>
+
+      <div class="mt-4 font-mono text-sm text-slate-700 bg-slate-100 rounded-md p-3 leading-6">
+        <div>ModernWigiDash.Widgets\WeatherGeocoder.cs <span class="text-slate-500">— co-housed rules: ZIP label join 392–400 · TryParseCoordinatePair 415 · IsValidCoordinate 430 · FormatCoordinates 438</span></div>
+        <div>ModernWigiDash.Widgets\WeatherLocationResolver.cs <span class="text-slate-500">— the leaf that already owns the siblings: ComposeLabel 132 · URL builders 81, 96, 116</span></div>
+        <div>ModernWigiDash.Widgets\WeatherFetchControl.cs <span class="text-slate-500">— the seam-crossing call: line 221</span></div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <!-- BEFORE -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — decision logic co-housed in the transport adapter</p>
+          <pre class="mermaid">
+flowchart LR
+    FC["WeatherFetchControl<br/>(state machine)"]
+    G["WeatherGeocoder<br/>(HTTP + parse)"]
+    RL["WeatherLocationResolver<br/>(pure decision leaf)"]
+    R1["coordinate parse /<br/>validate / format"]
+    R2["ZIP label join"]
+    FC -.->|"reaches across the seam<br/>FormatCoordinates (static)"| G
+    G --- R1
+    G --- R2
+    RL -->|"ComposeLabel + URL builders"| G
+    classDef leak stroke:#dc2626,stroke-width:2px;
+    class FC leak
+          </pre>
+        </div>
+        <!-- AFTER -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one home for the label family; the adapter stays pure</p>
+          <pre class="mermaid">
+flowchart LR
+    FC["WeatherFetchControl"]
+    G["WeatherGeocoder<br/>(pure HTTP + parse)"]
+    RL["WeatherLocationResolver<br/>labels + coordinates + URLs (deep)"]
+    FC -->|"name-from-parts rule"| RL
+    G -->|"candidates / raw rows"| RL
+    classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0;
+    class RL deep
+          </pre>
+        </div>
+      </div>
+
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+          <p>The pure decision rules — coordinate parse/validate/format and the ZIP label join — sit inside the geocoding transport adapter, and the fetch-control state machine depends on the adapter’s static for a display rule. The “compose a display name from place parts” family (city <span class="font-mono text-xs">ComposeLabel</span>, ZIP join, coordinate format) has no single home; its three spellings are held apart by file placement.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+          <p>Move the coordinate rules and every label composition into the <span class="font-mono text-xs">WeatherLocationResolver</span> leaf — it already owns the sibling rules and all three URL builders — leaving the geocoder a pure HTTP + parse adapter behind one interface.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+        <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 list-disc list-inside">
+          <li>one home for label composition</li>
+          <li>locality: the state machine stops crossing the seam</li>
+          <li>geocoder interface shrinks (4 publics go)</li>
+          <li>decision vs transport, finally separated</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- ================================================================ -->
+    <!-- CANDIDATE 4 -->
+    <!-- ================================================================ -->
+    <article id="c4" class="scroll-mt-8">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+        <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1 border border-slate-200">in-process</span>
+        <span class="text-xs text-slate-400 font-mono ml-auto">C4</span>
+      </div>
+      <h2 class="mt-3 font-serif text-2xl">The layout-mode table is spelled five ways, pinned in zero</h2>
+
+      <div class="mt-4 font-mono text-sm text-slate-700 bg-slate-100 rounded-md p-3 leading-6">
+        <div>ModernWigiDash.Widgets\WeatherLayout.cs <span class="text-slate-500">— enum order 41–48 · ParseMode 114–121 · NextMode ×2 129–148 · DisplayName 155–162 · the “other copy” admission 150–154</span></div>
+        <div>ModernWigiDash.Widgets\WeatherForecastWidget.cs <span class="text-slate-500">— the [WidgetProperty] choice array: line 29</span></div>
+        <div>ModernWigiDash.Tests\WeatherForecastWidgetTests.cs <span class="text-slate-500">— the unit-system lockstep pin it lacks: 1035–1062 · the mode-cycle test that never reads the attribute: 1068–1084</span></div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <!-- BEFORE -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — five spellings, no pin</p>
+          <div class="space-y-1.5">
+            <div class="h-9 border-l-4 border-slate-400 bg-white border border-slate-200 rounded-r px-3 flex items-center text-xs text-slate-700">enum declaration order <span class="ml-auto font-mono text-[10px] text-slate-400">WeatherLayout:41</span></div>
+            <div class="h-9 border-l-4 border-slate-400 bg-white border border-slate-200 rounded-r px-3 flex items-center text-xs text-slate-700">ParseMode literals <span class="ml-auto font-mono text-[10px] text-slate-400">:114</span></div>
+            <div class="h-9 border-l-4 border-slate-400 bg-white border border-slate-200 rounded-r px-3 flex items-center text-xs text-slate-700">NextMode switch <span class="ml-auto font-mono text-[10px] text-slate-400">:129</span></div>
+            <div class="h-9 border-l-4 border-slate-400 bg-white border border-slate-200 rounded-r px-3 flex items-center text-xs text-slate-700">DisplayName table <span class="ml-auto font-mono text-[10px] text-slate-400">:155</span></div>
+            <div class="h-9 border-l-4 border-red-400 bg-red-50 border border-red-200 rounded-r px-3 flex items-center text-xs text-red-800">[WidgetProperty] choice array <span class="ml-auto font-mono text-[10px] text-red-500">widget:29</span></div>
+            <div class="h-9 border-l-4 border-emerald-400 bg-emerald-50 border border-emerald-200 rounded-r px-3 flex items-center text-xs text-emerald-800">UnitSystem — same shape, <strong>pinned</strong> (test 1035) <span class="ml-auto font-mono text-[10px] text-emerald-500">the contrast</span></div>
+          </div>
+          <p class="mt-2 text-[11px] text-red-600">a hand-rename surfaces at runtime as the <span class="font-mono text-[10px]">default:</span> fallback in Render — never in a test</p>
+        </div>
+        <!-- AFTER -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one catalog, one pin</p>
+          <div class="space-y-1.5">
+            <div class="deep h-28 rounded-md px-3 py-2 border border-slate-900">
+              <p class="text-white text-xs font-semibold">mode catalog (WeatherLayout)</p>
+              <p class="text-[11px] text-slate-300 mt-1">name × order × parse × next × display × default</p>
+              <p class="text-[10px] text-slate-500 mt-1 font-mono">one table; the switch expressions become lookups</p>
+            </div>
+            <svg width="100%" height="22"><line x1="30%" y1="11" x2="70%" y2="11" class="seam" stroke="#475569" stroke-width="2"/></svg>
+            <div class="h-14 border-l-4 border-emerald-400 bg-emerald-50 border border-emerald-200 rounded-r px-3 flex flex-col justify-center">
+              <p class="text-xs text-emerald-800">lockstep test reads the attribute’s choice array → asserts the catalog</p>
+              <p class="text-[10px] text-emerald-600">the unit-system pattern (1035–1062), generalized — the attribute stays a literal; the pin reads it</p>
+            </div>
+          </div>
+          <p class="mt-2 text-[11px] text-emerald-700">a rename fails at the authoring boundary, with the unit system beside it</p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+          <p>The mode names live in the enum order, <span class="font-mono text-xs">ParseMode</span>, both <span class="font-mono text-xs">NextMode</span> overloads, <span class="font-mono text-xs">DisplayName</span>, and the inspector choice array — the code itself admits the attribute is “the other copy.” Only the unit system has the lockstep pin; the mode table’s drift is unpinned.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+          <p>One mode catalog in <span class="font-mono text-xs">WeatherLayout</span> (name × order × parse × next × display × default) and a derived lockstep test that pins the <span class="font-mono text-xs">[WidgetProperty]</span> choice array to it — keeping the attribute literal, as the geometry demands.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+        <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 list-disc list-inside">
+          <li>five spellings collapse to one table</li>
+          <li>a rename fails at the authoring boundary</li>
+          <li>locality: mode knowledge in one module</li>
+          <li>the house pin pattern gains a second citizen</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- ================================================================ -->
+    <!-- CANDIDATE 5 -->
+    <!-- ================================================================ -->
+    <article id="c5" class="scroll-mt-8">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-slate-200 text-slate-600 text-xs font-semibold px-3 py-1">Speculative</span>
+        <span class="rounded-full bg-slate-100 text-slate-600 text-xs px-3 py-1 border border-slate-200">in-process</span>
+        <span class="text-xs text-slate-400 font-mono ml-auto">C5</span>
+      </div>
+      <h2 class="mt-3 font-serif text-2xl">Twin drop rules: declare the drop granularity once</h2>
+
+      <div class="mt-4 font-mono text-sm text-slate-700 bg-slate-100 rounded-md p-3 leading-6">
+        <div>ModernWigiDash.Widgets\WeatherFetchControl.cs <span class="text-slate-500">— Invalidate 243–253 · ClearCoordinates 185–193 · ClearCandidates 258–265</span></div>
+        <div>ModernWigiDash.Widgets\WeatherResolvedIdentity.cs <span class="text-slate-500">— InvalidateCoordinates 65–70 · InvalidateLocation 79–85</span></div>
+        <div>ModernWigiDash.Widgets\WeatherForecastWidget.cs <span class="text-slate-500">— the per-edit pairing: 279–302</span></div>
+        <div>ModernWigiDash.Tests\WeatherForecastWidgetTests.cs <span class="text-slate-500">— the field-set pin that is not a drop-semantics pin: ~960</span></div>
+      </div>
+
+      <div class="mt-6 grid md:grid-cols-2 gap-4">
+        <!-- BEFORE -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — the drop sets are spelled twice, paired in a third file</p>
+          <div class="flex flex-col items-center gap-1">
+            <div class="w-full flex gap-2 items-stretch">
+              <div class="flex-1 border-2 border-slate-700 bg-white rounded-md p-2">
+                <p class="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">control</p>
+                <div class="mt-1.5 space-y-1">
+                  <div class="text-[10px] bg-slate-200 rounded px-1.5 py-0.5 text-slate-700">drops: coords · name · query · throttle</div>
+                  <div class="text-[10px] bg-slate-200 rounded px-1.5 py-0.5 text-slate-700">keeps: candidates · population</div>
+                </div>
+              </div>
+              <div class="flex-1 border-2 border-slate-700 bg-white rounded-md p-2">
+                <p class="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">identity</p>
+                <div class="mt-1.5 space-y-1">
+                  <div class="text-[10px] bg-slate-200 rounded px-1.5 py-0.5 text-slate-700">drops: name · population · pending</div>
+                  <div class="text-[10px] bg-slate-200 rounded px-1.5 py-0.5 text-slate-700">keeps: candidates</div>
+                </div>
+              </div>
+            </div>
+            <svg width="100%" height="34">
+              <line x1="30%" y1="4" x2="22%" y2="28" stroke="#dc2626" stroke-width="1.5"/><path d="M20 26 L22 30 L25 26 Z" fill="#dc2626"/>
+              <line x1="70%" y1="4" x2="78%" y2="28" stroke="#dc2626" stroke-width="1.5"/><path d="M76 26 L79 30 L81 26 Z" fill="#dc2626"/>
+              <text x="50%" y="16" text-anchor="middle" style="font-size:9px" class="fill-red-600">pairing spelled per edit</text>
+            </svg>
+            <div class="border-2 border-red-400 bg-red-50 rounded-md px-3 py-1.5 w-fit text-xs text-red-800">OnPropertyChanged — LocationMatch → ×InvalidateCoordinates · else → ×InvalidateLocation</div>
+            <p class="text-[11px] text-red-600 mt-1">nothing pins twin equivalence — a new pending state must land in both twins</p>
+          </div>
+        </div>
+        <!-- AFTER -->
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one declaration, two consumers, one pin</p>
+          <div class="flex flex-col items-center gap-1">
+            <div class="deep w-full rounded-md px-3 py-2 border border-slate-900">
+              <p class="text-white text-xs font-semibold">drop granularity — declared once (the WeatherQueryKey set-declaration pattern)</p>
+              <p class="text-[10px] text-slate-400 mt-0.5 font-mono">coordinates-drop · location-drop · sets named exactly once</p>
+            </div>
+            <svg width="100%" height="34">
+              <line x1="30%" y1="4" x2="22%" y2="28" stroke="#475569" stroke-width="1.5"/><path d="M20 26 L22 30 L25 26 Z" fill="#475569"/>
+              <line x1="70%" y1="4" x2="78%" y2="28" stroke="#475569" stroke-width="1.5"/><path d="M76 26 L79 30 L81 26 Z" fill="#475569"/>
+              <text x="50%" y="16" text-anchor="middle" style="font-size:9px" class="fill-slate-500">both twins consume the declaration</text>
+            </svg>
+            <div class="w-full flex gap-2 items-stretch">
+              <div class="flex-1 border-2 border-slate-700 bg-white rounded-md p-2">
+                <p class="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">control</p>
+                <p class="text-[10px] text-slate-500 mt-1">Invalidate / ClearCoordinates / ClearCandidates read the sets</p>
+              </div>
+              <div class="flex-1 border-2 border-slate-700 bg-white rounded-md p-2">
+                <p class="text-[10px] uppercase tracking-wider text-slate-600 font-semibold">identity</p>
+                <p class="text-[10px] text-slate-500 mt-1">InvalidateCoordinates / InvalidateLocation read the sets</p>
+              </div>
+            </div>
+            <div class="border-l-4 border-emerald-400 bg-emerald-50 border border-emerald-200 rounded-r px-3 py-1.5 w-full text-[11px] text-emerald-800 text-center">twin-equivalence pin — the drop sets assert equal</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</p>
+          <p>“What an invalidation drops” is spelled twice — the control’s <span class="font-mono text-xs">Invalidate</span> and the identity’s <span class="font-mono text-xs">InvalidateCoordinates</span> (keep-candidates), plus <span class="font-mono text-xs">ClearCandidates</span> / <span class="font-mono text-xs">InvalidateLocation</span> (full) — and the widget’s <span class="font-mono text-xs">OnPropertyChanged</span> pairs the twins per edit. The existing pin covers the resolution-input <em>set</em>, not the drop semantics. The widget-side twin is justified (different gate, UI-thread write-back); the duplicated drop rules are the trap.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</p>
+          <p>Declare the drop granularity once — the same set-declaration shape <span class="font-mono text-xs">WeatherQueryKey</span> already uses for <span class="font-mono text-xs">KeyPropertyNames</span> / <span class="font-mono text-xs">InvalidationProperties</span> — with both twins consuming it, and a pin asserting the twins agree.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Wins</p>
+        <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700 list-disc list-inside">
+          <li>locality: a new pending state lands once</li>
+          <li>twin drift becomes a test failure</li>
+          <li>the cluster’s own pattern, reused</li>
+        </ul>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ============ NOTED, NOT SCORED ============ -->
+  <section>
+    <h3 class="text-xs uppercase tracking-[0.2em] text-slate-400 mb-3">Noted, not scored</h3>
+    <div class="border border-slate-200 bg-white rounded-lg p-4 text-sm space-y-2">
+      <p>· The mid-read-growth contention harness is near-verbatim duplicated across <span class="font-mono text-xs">WeatherClientTests</span> (1261–1322) and <span class="font-mono text-xs">WeatherCacheStoreTests</span> (167–213) — extract it once.</p>
+      <p>· The two widget render smoke tests run on an <em>empty</em> widget; full-data rows for the five layout modes exist only through renderer-direct models.</p>
+      <p>· <span class="font-mono text-xs">LocationType</span> is an identity dimension in <span class="font-mono text-xs">WeatherQueryKey</span> that no test varies — a single-choice property in practice.</p>
+    </div>
+  </section>
+
+  <!-- ============ TOP RECOMMENDATION ============ -->
+  <section id="top-recommendation">
+    <div class="deep rounded-xl p-8 border border-slate-900">
+      <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Top recommendation</p>
+      <h3 class="mt-2 font-serif text-2xl text-white">C1 — build the <span class="font-mono text-xl text-slate-300">WeatherFetchFlow</span> module</h3>
+      <p class="mt-3 text-slate-300 text-sm max-w-3xl">It is the module the cluster already named: <span class="font-mono text-xs">WeatherFetchFlowOutcome</span> documents “the verdict of one <span class="font-mono text-xs">FetchLiveWeatherAsync</span> run” while the behaviour it names sits in 150 lines of widget sequence. Deepening it absorbs the ADR-0006 residual (the second predicate spelling at widget 465), the split rollback rule (widget 664–679 ↔ client 306), the comment-only capture-window order, and gives the 1,142-line <span class="font-mono text-xs">WeatherForecastWidgetTests</span> a real interface to drive instead of widget internals. C2 falls into place behind it: once the flow module is the client’s only production caller, the capture-window knowledge sinks below the client’s surface instead of riding it.</p>
+      <a href="#c1" class="inline-block mt-5 text-xs font-semibold text-emerald-300 border border-emerald-400 rounded-full px-4 py-2 hover:bg-emerald-400 hover:text-slate-900 transition-colors">Jump to candidate C1 ↑</a>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-slate-400 pt-4">
+    vocabulary: /codebase-design · domain: CONTEXT.md + ADR-0006 (stale-identity invariant — taken as settled; C1 absorbs its residual, does not re-litigate it)
+  </footer>
+
+</main>
+</body>
+</html>
