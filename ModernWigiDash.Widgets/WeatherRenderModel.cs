@@ -20,7 +20,8 @@ internal sealed record WeatherRenderModelKey(
     bool ShowHumidity,
     bool ShowWind,
     bool ShowHighLow,
-    bool ShowForecast);
+    bool ShowForecast,
+    int CandidateCount);
 
 /// <summary>
 /// The cached render model: every formatted string the five layout modes
@@ -47,11 +48,13 @@ internal sealed class WeatherRenderModel
     public bool ShowWind;
     public bool ShowHighLow;
     public bool ShowForecast;
+    public int CandidateCount;
 
     public int WeatherCode;
     public DailyForecastItem[] Daily = [];
     public HourlyForecastItem[] Hourly = [];
     public WeatherDisplay Display = new("", [], [], [], []);
     public string TruncatedHeader = "";
+    public string? SubtitleText;
     public float[] MetricWidths = [];
 }

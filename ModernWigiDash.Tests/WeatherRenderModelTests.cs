@@ -17,9 +17,10 @@ public class WeatherRenderModelTests
         bool showHumidity = true,
         bool showWind = true,
         bool showHighLow = true,
-        bool showForecast = true)
+        bool showForecast = true,
+        int candidateCount = 0)
         => new(dataVersion, bounds ?? new SKRect(0, 0, 400, 200), layoutMode, unitSystem, customLabel, resolvedCity,
-            showFeelsLike, showHumidity, showWind, showHighLow, showForecast);
+            showFeelsLike, showHumidity, showWind, showHighLow, showForecast, candidateCount);
 
     /// <summary>The widget's cache-hit rule (EnsureRenderModel), pinned
     /// here verbatim in shape: the model must exist and its stored key must
@@ -72,6 +73,7 @@ public class WeatherRenderModelTests
         Assert.AreNotEqual(baseline, MakeKey(showWind: false), "a wind toggle must rebuild");
         Assert.AreNotEqual(baseline, MakeKey(showHighLow: false), "a high/low toggle must rebuild");
         Assert.AreNotEqual(baseline, MakeKey(showForecast: false), "a forecast toggle must rebuild");
+        Assert.AreNotEqual(baseline, MakeKey(candidateCount: 3), "a candidate-count change must rebuild");
     }
 
     [TestMethod]

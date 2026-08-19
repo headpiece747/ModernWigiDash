@@ -226,12 +226,16 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private readonly WeatherWidgetRenderer _renderer = new();
     private readonly SKPaint _titlePaint = new() { IsAntialias = true };
     private readonly SKPaint _unitPaint = new() { IsAntialias = true };
+    private readonly SKPaint _subtitlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _stalePaint = new() { IsAntialias = true };
 
     private readonly Lock _forecastGate = new();
     private IReadOnlyList<DailyForecastItem> _dailyForecastSnapshot = [];
     private IReadOnlyList<HourlyForecastItem> _hourlyForecastSnapshot = [];
     private int _renderedForecastVersion = -1;
     private SKRect _lastBounds;
+    private DateTime _lastSuccessFetchTime = DateTime.MinValue;
+    private volatile bool _isFetching;
 
     // The render-model cache: every formatted string the draw paths need is
     // rebuilt only when (data version, bounds, property snapshot) changes —
@@ -291,7 +295,21 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private void RequestRefresh(bool force = false)
     {
         if (!_flow.CanFetch(force)) return;
-        _ = _flow.RunFetchAsync(force);
+        _isFetching = true;
+        _ = TrackFetchAsync(force);
+    }
+
+    private async Task TrackFetchAsync(bool force)
+    {
+        try
+        {
+            await _flow.RunFetchAsync(force).ConfigureAwait(false);
+        }
+        finally
+        {
+            _isFetching = false;
+            Context?.RequestRender();
+        }
     }
 
     public override async ValueTask DisposeAsync()
@@ -308,6 +326,8 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _renderer.Dispose();
         _titlePaint.Dispose();
         _unitPaint.Dispose();
+        _subtitlePaint.Dispose();
+        _stalePaint.Dispose();
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -408,11 +428,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 new WeatherRenderModelKey(
                     state.DataVersion, bounds,
                     LayoutMode, UnitSystem, CustomLabel, _identity.CityName,
-                    ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast),
+                    ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast,
+                    _identity.Candidates.Count),
                 state.WeatherCode, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
                 state.WindSpeedKmH, state.HighTempC, state.LowTempC,
                 _dailyForecastSnapshot, _hourlyForecastSnapshot,
-                header, s);
+                header, s,
+                Location, _identity.Candidates.Count);
         }
 
         // The render model owns every formatted string; the draw paths only
@@ -433,8 +455,46 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         float uW = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
         canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, _unitPaint);
 
-        // Content Area Bounds
-        SKRect contentBounds = new(bounds.Left + header.Pad, bounds.Top + header.HeaderHeight + 6f * sy, bounds.Right - header.Pad, bounds.Bottom - header.Pad);
+        // Subtitle line below the header: guidance or confirmation text
+        // computed once per model rebuild (the key includes CandidateCount).
+        float subtitleH = 0f;
+        if (model.SubtitleText is { Length: > 0 } subtitle)
+        {
+            float subtitleFontSize = Math.Clamp(header.TitleFontSize * 0.6f, 9f, 18f);
+            var subtitleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, subtitleFontSize);
+            _subtitlePaint.Color = new SKColor(255, 255, 255, 160);
+            float subtitleY = header.HeaderTextY + header.TitleFontSize * 0.85f;
+            canvas.DrawTextWithFallback(subtitle, bounds.Left + header.Pad, subtitleY, subtitleFont, _subtitlePaint);
+            subtitleH = header.TitleFontSize * 1.1f;
+        }
+
+        // Staleness indicator at the bottom: "Updated X ago" or "Updating..."
+        string? staleText = null;
+        if (_isFetching)
+        {
+            staleText = "Updating\u2026";
+        }
+        else if (_lastSuccessFetchTime > DateTime.MinValue)
+        {
+            var elapsed = Clock.GetUtcNow().UtcDateTime - _lastSuccessFetchTime;
+            staleText = FormatTimeAgo(elapsed);
+        }
+        float staleH = 0f;
+        if (staleText is { Length: > 0 })
+        {
+            float staleFontSize = Math.Clamp(10f * s, 7f, 14f);
+            var staleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, staleFontSize);
+            _stalePaint.Color = new SKColor(255, 255, 255, 120);
+            canvas.DrawTextWithFallback(staleText, bounds.Left + header.Pad, bounds.Bottom - header.Pad + 2f * s, staleFont, _stalePaint);
+            staleH = staleFontSize * 1.4f;
+        }
+
+        // Content Area Bounds — shrunk for subtitle (top) and staleness (bottom)
+        SKRect contentBounds = new(
+            bounds.Left + header.Pad,
+            bounds.Top + header.HeaderHeight + 6f * sy + subtitleH,
+            bounds.Right - header.Pad,
+            bounds.Bottom - header.Pad - staleH);
 
         switch (WeatherLayout.ParseMode(LayoutMode))
         {
@@ -454,6 +514,19 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _renderer.RenderDetailed(canvas, contentBounds, accentColor, textPrimary, textSecondary, sx, sy, model);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Formats a time-ago span into a human-readable staleness string.
+    /// Internal test seam: the format rules are pinned by
+    /// <c>WeatherForecastWidgetStalenessTests</c>.
+    /// </summary>
+    internal static string FormatTimeAgo(TimeSpan elapsed)
+    {
+        if (elapsed.TotalMinutes < 1) return "Updated just now";
+        if (elapsed.TotalMinutes < 60) return $"Updated {(int)elapsed.TotalMinutes}m ago";
+        if (elapsed.TotalHours < 24) return $"Updated {(int)elapsed.TotalHours}h ago";
+        return $"Updated {(int)elapsed.TotalDays}d ago";
     }
 
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
@@ -563,6 +636,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             if (!WeatherSnapshotApplyPolicy.GuardsPass(request.ExpectedVersion, _snapshotState.DataVersion, request.IdentityGuard)) return false;
             _snapshotState = WeatherSnapshotApplyPolicy.Merge(request.Snapshot, _snapshotState);
             _identity.Apply(request.Candidates, request.Population, request.ResolvedName);
+            _lastSuccessFetchTime = Clock.GetUtcNow().UtcDateTime;
             return true;
         }
     }

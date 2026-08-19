@@ -23,7 +23,9 @@ internal sealed record WeatherRenderModelInputs(
     IReadOnlyList<DailyForecastItem> Daily,
     IReadOnlyList<HourlyForecastItem> Hourly,
     WeatherHeaderLayout Header,
-    float Scale);
+    float Scale,
+    string LocationText,
+    int CandidateCount);
 
 /// <summary>
 /// The render-model build module: the ONE place the weather render model is
@@ -79,6 +81,7 @@ internal static class WeatherRenderModelFactory
             ShowWind = inputs.Key.ShowWind,
             ShowHighLow = inputs.Key.ShowHighLow,
             ShowForecast = inputs.Key.ShowForecast,
+            CandidateCount = inputs.Key.CandidateCount,
             WeatherCode = inputs.WeatherCode,
             Daily = inputs.Daily.ToArray(),
             Hourly = inputs.Hourly.ToArray(),
@@ -100,6 +103,35 @@ internal static class WeatherRenderModelFactory
             display.Metrics,
             WeatherLayout.PillFontSize(inputs.Scale),
             WeatherLayout.PillPadX(inputs.Scale));
+
+        // Subtitle line below the header: the ONE spelling of guidance or
+        // confirmation text. The priority order ensures the most actionable
+        // message wins — a tie always beats "set a location", a custom label
+        // always shows the resolved city for confirmation.
+        bool isUnresolved = string.IsNullOrWhiteSpace(inputs.Key.ResolvedCity)
+            || string.Equals(inputs.Key.ResolvedCity, WeatherFetchControl.UnknownLocationLabel, StringComparison.Ordinal);
+        if (inputs.CandidateCount > 0 && inputs.Daily.Count == 0)
+        {
+            // Ambiguous tie: candidates exist but no weather data — the
+            // Location Match dropdown is the documented escape route.
+            model.SubtitleText = "Multiple cities found \u2014 pick one in Settings";
+        }
+        else if (isUnresolved && string.IsNullOrWhiteSpace(inputs.LocationText))
+        {
+            // No location set yet.
+            model.SubtitleText = "Set a location in Settings";
+        }
+        else if (isUnresolved && !string.IsNullOrWhiteSpace(inputs.LocationText))
+        {
+            // Location was set but failed to resolve.
+            model.SubtitleText = "Check spelling \u2014 try 'City, State' or 'City, Country'";
+        }
+        else if (!isUnresolved && !string.IsNullOrWhiteSpace(inputs.Key.CustomLabel)
+                 && !string.Equals(inputs.Key.CustomLabel, inputs.Key.ResolvedCity, StringComparison.Ordinal))
+        {
+            // Custom label set: show the resolved city for confirmation.
+            model.SubtitleText = inputs.Key.ResolvedCity;
+        }
 
         return model;
     }
