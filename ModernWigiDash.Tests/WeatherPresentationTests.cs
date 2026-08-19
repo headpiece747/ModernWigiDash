@@ -175,6 +175,15 @@ public class WeatherPresentationTests
             Assert.IsFalse(string.IsNullOrEmpty(icon), $"night code {code} must map to a non-empty icon");
             Assert.AreEqual(WeatherPresentation.MapWmoCode(code).Description, desc,
                 $"night code {code} must keep the day-neutral description");
+            if (code is not 0 and not 1 and not 2)
+            {
+                // The fall-through arm pinned per code: a night override that
+                // leaks onto a non-clear code (fog, snow, ...) would pass the
+                // non-empty and description checks above, so every other code
+                // must read exactly its day icon.
+                Assert.AreEqual(WeatherPresentation.MapWmoCode(code).Icon, icon,
+                    $"night code {code} must keep its day icon (no night override)");
+            }
         }
     }
 
