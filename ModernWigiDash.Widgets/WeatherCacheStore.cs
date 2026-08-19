@@ -141,7 +141,8 @@ internal sealed class WeatherCacheStore
                 Lat = snapshot.Lat,
                 Lon = snapshot.Lon,
                 // The day/night fact rides the cache (null on a snapshot that
-                // never carried is_day — a legacy cache reads as day).
+                // never carried is_day — the payload reads as unknown, and
+                // the display's default is day).
                 IsDay = snapshot.IsDay,
                 // The identity stamp: the query key this snapshot was fetched
                 // for. LoadAsync returns it with the payload; the caller
