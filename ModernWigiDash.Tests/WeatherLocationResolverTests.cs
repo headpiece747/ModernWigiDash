@@ -351,6 +351,26 @@ public class WeatherLocationResolverTests
     }
 
     [TestMethod]
+    public void Resolve_LocationMatchPick_FuzzyRowName_NotPromotedAndRankingDecides()
+    {
+        // A persisted Location Match pick must name the place the query typed:
+        // the geocoder's candidate set is fuzzy ("Vitória" inside a "Victoria"
+        // search), and a pick of such a row persisted before the pick list
+        // learned the exact-name rule must not outlive the query — the ranking
+        // re-decides for the city the user typed, or the wrong-city weather
+        // returns on every restart/import. The fuzzy row even carries the
+        // HIGHER population: the exact-name tier, not population, must win.
+        var result = WeatherLocationResolver.Resolve(
+            [C("British Columbia", "Canada", "CA", 335696, "Victoria"), C("Espírito Santo", "Brazil", "BR", 1962476, "Vitória")],
+            "Victoria", null, null, "Vitória, Espírito Santo, Brazil");
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual("Victoria, British Columbia, Canada", resolved.Label,
+            "the fuzzy pick must fall back to the exact-name ranking");
+    }
+
+    [TestMethod]
     public void SplitQuery_WithSuffix_SplitsNameAndSuffix()
     {
         var (name, suffix) = WeatherLocationResolver.SplitQuery("Springfield, MA");
@@ -367,14 +387,103 @@ public class WeatherLocationResolverTests
     }
 
     [TestMethod]
-    public void IsZipCode_FiveAsciiDigits_ReturnsTrue() =>
-        Assert.IsTrue(WeatherLocationResolver.IsZipCode("10115"));
+    public void TryPostalRoute_FiveDigit_NoHint_RoutesUs()
+    {
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("10115", null, out string lookup, out string route));
+        Assert.AreEqual("10115", lookup);
+        Assert.AreEqual("us", route, "a numeric code without a hint reads as US — the geocoder's own index is US-biased too");
+    }
 
     [TestMethod]
-    public void IsZipCode_NonAsciiDigits_ReturnsFalse()
+    public void TryPostalRoute_FiveDigit_Hinted_RoutesHint()
     {
-        Assert.IsFalse(WeatherLocationResolver.IsZipCode("٠١١٥١"), "Unicode digits must not count as a ZIP");
-        Assert.IsFalse(WeatherLocationResolver.IsZipCode("1011"), "Four digits are not a ZIP");
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("10115", "DE", out string lookup, out string route));
+        Assert.AreEqual("10115", lookup);
+        Assert.AreEqual("de", route);
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_ZipPlus4_NoHint_FiveDigitLookupOnUsRoute()
+    {
+        // The US delivery suffix never changes the place and the US zippopotam
+        // index is 5-digit only — "12345-6789" looks up as "12345".
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("10001-1234", null, out string lookup, out string route));
+        Assert.AreEqual("10001", lookup);
+        Assert.AreEqual("us", route);
+
+        // The -4 strip is US-route only: a hinted non-US route keeps the
+        // hyphenated code (JP's hyphen IS the indexed shape).
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("10001-1234", "jp", out lookup, out route));
+        Assert.AreEqual("10001-1234", lookup);
+        Assert.AreEqual("jp", route);
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_HyphenatedForeignCode_KeptOnForeignRoute()
+    {
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("100-0001", "JP", out string lookup, out string route));
+        Assert.AreEqual("100-0001", lookup);
+        Assert.AreEqual("jp", route);
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_GbAlphanumeric_ShortFormLookup()
+    {
+        // zippopotam's GB index keys on the 3-char outward code — the full
+        // "M1 1AA" 404s (live-probed), "M11" resolves Manchester.
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("M1 1AA", "GB", out string lookup, out string route));
+        Assert.AreEqual("M11", lookup);
+        Assert.AreEqual("gb", route);
+
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("SW1A 1AA", "gb", out lookup, out _));
+        Assert.AreEqual("SW1", lookup);
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_CaFsa_ShortFormLookup()
+    {
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("K1A 0A1", "CA", out string lookup, out string route));
+        Assert.AreEqual("K1A", lookup);
+        Assert.AreEqual("ca", route);
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_AlphanumericWithoutHint_NotPostal()
+    {
+        // An alphanumeric code carries no self-describing route — guessing US
+        // would be a coin flip, so the query keeps the (failing-safe) city leg.
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("M1 1AA", null, out _, out _));
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_CityNames_NotPostal()
+    {
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("Paris", null, out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("Springfield, MA", "US", out _, out _), "a comma query is a city query");
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("40.71,-74.00", null, out _, out _), "a coordinate pair is never a postal code");
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("", null, out _, out _));
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("٠١١٥١", null, out _, out _), "Unicode digits must not route into the postal leg");
+    }
+
+    [TestMethod]
+    public void TryPostalRoute_NumericShapes_Gate()
+    {
+        // 2–10 bare digits route (US ZIP, DE/FR/ES/IT 5-digit, NO/SE 4-digit,
+        // IN 6-digit); 11+ is not a postal code shape.
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("110001", "IN", out _, out _));
+        Assert.IsTrue(WeatherLocationResolver.TryPostalRoute("7005", null, out string lookup, out _));
+        Assert.AreEqual("7005", lookup);
+        Assert.IsFalse(WeatherLocationResolver.TryPostalRoute("12345678901", null, out _, out _));
+    }
+
+    [TestMethod]
+    public void IsExactNameMatch_Predicate()
+    {
+        Assert.IsTrue(WeatherLocationResolver.IsExactNameMatch("Springfield", "Springfield"));
+        Assert.IsTrue(WeatherLocationResolver.IsExactNameMatch("springfield", "Springfield"), "case-insensitive");
+        Assert.IsFalse(WeatherLocationResolver.IsExactNameMatch("Palmyra", "Springfield"), "fuzzy rows are not exact matches");
+        Assert.IsFalse(WeatherLocationResolver.IsExactNameMatch("East Springfield", "Springfield"));
+        Assert.IsFalse(WeatherLocationResolver.IsExactNameMatch(null, "Springfield"), "a geocoder-omitted name is not an exact match");
     }
 
     [TestMethod]
@@ -383,6 +492,8 @@ public class WeatherLocationResolverTests
         var uri = WeatherLocationResolver.BuildSearchUri("Springfield", "US");
         Assert.IsTrue(uri.AbsoluteUri.Contains("name=Springfield", StringComparison.OrdinalIgnoreCase));
         Assert.IsTrue(uri.AbsoluteUri.Contains("countryCode=US", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(uri.AbsoluteUri.Contains("count=100", StringComparison.OrdinalIgnoreCase),
+            "the geocoder's maximum — the top-10 default hid the user's city from the pick list (Springfield, Oregon absent at count=10)");
     }
 
     [TestMethod]

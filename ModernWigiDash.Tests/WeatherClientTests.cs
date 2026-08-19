@@ -211,16 +211,21 @@ public class WeatherClientTests
         // never by re-geocoding).
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
 
-        // A user pick resolves DIRECTLY to that candidate — no re-geocode. The
-        // pick's label is what the inspector's search offers (the same data
-        // the fetch path cached on resolution).
-        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil
+        // The pick list (the cached dropdown candidates from the first
+        // resolution) offers only EXACT-name candidates — the fuzzy live
+        // "Vitória" row is still searchable through the inspector's
+        // search box (SearchCitiesAsync keeps every row) but is no longer
+        // a pickable Location Match value. Picking the exact candidate
+        // resolves DIRECTLY to it — no re-geocode (a pick of a
+        // no-longer-offered label instead falls back to geocoding, like
+        // FetchCurrentAsync_StaleLocationMatch_FallsBackToGeocode).
+        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[0].Label; // Victoria, Canada (the exact row)
         int geocodesBefore = stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal));
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(-20.3194, snapshot.Lat);
-        Assert.AreEqual(-40.3378, snapshot.Lon);
+        Assert.AreEqual(48.4284, snapshot.Lat);
+        Assert.AreEqual(-123.3656, snapshot.Lon);
         Assert.AreEqual(picked, snapshot.ResolvedCityName);
         Assert.AreEqual(geocodesBefore, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
             "A pick must not re-geocode — it resolves from the cached candidates");
@@ -263,11 +268,15 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // Pick Vitoria (the last candidate) from the "Victoria" resolution.
+        // Pick the EXACT row (the warm pick path resolves from the cached dropdown,
+        // which now offers only exact-name candidates — the fuzzy "Vitória"
+        // row left it; its persisted-pick behavior is pinned by
+        // FetchCurrentAsync_PersistedPickOnFreshInstance_FuzzyPick_FallsBackToRanking).
         await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil
+        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[0].Label; // Victoria, Canada (the exact row)
         var pickSnapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true));
-        Assert.AreEqual(-20.3194, pickSnapshot!.Lat, "The pick itself must still resolve to Vitoria");
+        Assert.AreEqual(48.4284, pickSnapshot!.Lat, "the pick resolves from the cached candidates");
+        Assert.AreEqual(-123.3656, pickSnapshot.Lon);
 
         // Changing Location must drop the candidates, so the stale pick cannot
         // win: "Berlin" must geocode to Berlin.
@@ -316,9 +325,10 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // "10115" + "DE": the US-only zippopotam path fails, and the worldwide
-        // fallback must carry the country-code hint so Berlin's postal district
-        // resolves (the spec's named scenario).
+        // "10115" + "DE": the zippopotam /de/ route 404s (the stub fails every
+        // zippopotam route), and the geocoder's postal fallback must carry the
+        // country-code hint first so Berlin's postal district resolves (the
+        // spec's named scenario).
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "10115", null, null, null, "DE")));
 
         Assert.IsNotNull(snapshot);
@@ -353,7 +363,7 @@ public class WeatherClientTests
         Assert.AreEqual(13.405, snapshot.Lon);
         Assert.AreEqual(2, stub.Calls, "Geocode + forecast must be exactly two calls");
         Assert.IsNotNull(searchUrl);
-        Assert.IsTrue(searchUrl.Contains("count=10", StringComparison.Ordinal), "The geocoder must fetch 10 candidates for ranking");
+        Assert.IsTrue(searchUrl.Contains("count=100", StringComparison.Ordinal), "The geocoder must fetch its maximum (100) candidates — the top-10 cap hid the user's city from the pick list");
     }
 
     [TestMethod]
@@ -707,7 +717,39 @@ public class WeatherClientTests
         // Restart/import: candidates are in-memory per instance, so a stored
         // Location Match pick cannot resolve from cache. A fresh geocode must
         // promote the picked candidate to the winner instead of silently
-        // reverting to the population ranking (the wrong-city bug returns).
+        // reverting to the population ranking (the wrong-city bug returns) —
+        // the pick names the place the query typed (the exact-name rule the
+        // pick list offers under).
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleGhanaAccras);
+            return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
+        });
+        var client = CreateClient(stub);
+
+        // Fresh instance, no prior geocode: the persisted pick (the LOWER
+        // population Accra — the population tiebreak resolves the higher one)
+        // must win over the ranking and resolve to the picked candidate.
+        var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null)
+        {
+            LocationMatch = "Accra, Greater Accra, Ghana"
+        }));
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(5.60372, snapshot.Lat, "the picked (lower-population) Accra must beat the population tiebreak");
+        Assert.AreEqual(-0.18699, snapshot.Lon);
+        Assert.AreEqual("Accra, Greater Accra, Ghana", snapshot.ResolvedCityName);
+    }
+
+    [TestMethod]
+    public async Task FetchCurrentAsync_PersistedPickOnFreshInstance_FuzzyPick_FallsBackToRanking()
+    {
+        // A persisted pick of a FUZZY search row (a place the geocoder SUGGESTED
+        // for the query, not named by it) no longer resolves on a fresh
+        // instance: the pick must name the place the query typed, or the
+        // wrong-city weather returns on every restart/import ("Victoria"
+        // showing Vitória, Espírito Santo — exactly the reported bug).
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
@@ -716,17 +758,15 @@ public class WeatherClientTests
         });
         var client = CreateClient(stub);
 
-        // Fresh instance, no prior geocode: the persisted pick must win over
-        // the exact-name ranking (Victoria, Canada) and resolve to Vitoria.
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null)
         {
             LocationMatch = "Vitória, Espírito Santo, Brazil"
         }));
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(-20.3194, snapshot.Lat);
-        Assert.AreEqual(-40.3378, snapshot.Lon);
-        Assert.AreEqual("Vitória, Espírito Santo, Brazil", snapshot.ResolvedCityName);
+        Assert.AreEqual(48.4284, snapshot.Lat, "the query's exact-name candidate must win the fresh ranking");
+        Assert.AreEqual(-123.3656, snapshot.Lon);
+        Assert.AreEqual("Victoria, British Columbia, Canada", snapshot.ResolvedCityName);
     }
 
     [TestMethod]
@@ -1416,19 +1456,25 @@ public class WeatherClientTests
     [TestMethod]
     public async Task FetchCurrentAsync_WarmLocationMatchPick_ExposesPickedPopulation()
     {
+        // The same-country population tiebreak resolves "Accra, Ghana" to the
+        // LARGER entry, but BOTH exact-name candidates enter the pick list —
+        // the warm in-memory pick path must expose the PICKED candidate's
+        // population (the other entry's), on the Fetched outcome, the
+        // resolution payload's one channel.
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
-            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleSameNameMultiCountry);
+            if (url.Contains("/v1/search", StringComparison.Ordinal)) return StubHttpHandler.Ok(WeatherTestData.SampleGhanaAccras);
             return url.Contains("/v1/forecast", StringComparison.Ordinal) ? StubHttpHandler.Ok(WeatherTestData.SampleForecast) : StubHttpHandler.NotFound();
         });
         var client = CreateClient(stub);
 
-        // First resolution caches the candidates; the warm in-memory pick path
-        // resolves against them (no re-geocode).
-        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null));
-        string picked = (await client.SearchCitiesAsync("Victoria", CancellationToken.None))[^1].Label; // Vitoria, Brazil (population 1962476)
-        var result = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null) { LocationMatch = picked }, force: true);
+        // First resolution (population tiebreak -> the 200000 entry) caches
+        // the pick list; the warm in-memory pick of the OTHER row resolves
+        // against it (no re-geocode).
+        await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null));
+        string picked = (await client.SearchCitiesAsync("Accra, Ghana", CancellationToken.None))[0].Label; // the first row (population 100000)
+        var result = await client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Accra, Ghana", null, null, null) { LocationMatch = picked }, force: true);
         var snapshot = result is WeatherFetchResult.Fetched { Snapshot: var resolvedSnapshot } ? resolvedSnapshot : null;
 
         Assert.IsNotNull(snapshot);
@@ -1436,7 +1482,8 @@ public class WeatherClientTests
         // population — on the Fetched outcome, the resolution payload's one
         // channel.
         Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Fetched), "a pick fetch must fetch");
-        Assert.AreEqual(1962476, ((WeatherFetchResult.Fetched)result).Population, 0.0001);
+        Assert.AreEqual(100000, ((WeatherFetchResult.Fetched)result).Population, 0.0001,
+            "the picked (lower-population) Accra must carry its OWN population, not the tiebreak winner's");
     }
 
     [TestMethod]

@@ -135,4 +135,73 @@ public static class WeatherTestData
       ]
     }
     """;
+
+    /// <summary>The zippopotam GB short-form shape (live shape: the 3-char
+    /// outward code "M11" indexes; the full "M1 1AA" 404s).</summary>
+    internal const string SampleZipGbM11 = """
+    {
+      "country": "United Kingdom",
+      "post code": "M11",
+      "places": [
+        {
+          "place name": "Manchester",
+          "longitude": "-2.2374",
+          "latitude": "53.4809",
+          "state": "England"
+        }
+      ]
+    }
+    """;
+
+    /// <summary>A single postal-search hit — the place whose postcode index
+    /// carries the code (the geocoder's postal search returns city entries,
+    /// not a place named after the code).</summary>
+    internal const string SamplePostalSingleTown = """
+    {
+      "results": [
+        { "name": "Addison", "admin1": "Texas", "country": "United States", "country_code": "US", "population": 15518, "latitude": 32.96593, "longitude": -96.88227 }
+      ]
+    }
+    """;
+
+    /// <summary>The live shape of a cross-country postal-code collision
+    /// (75001: Paris 01, FR and Addison, TX both carry it): the tie must be
+    /// gated — its candidates are the pick list, and the postal query keeps
+    /// EVERY candidate (there is no exact-name row).</summary>
+    internal const string SamplePostalTie = """
+    {
+      "results": [
+        { "name": "Paris", "admin1": "Ile-de-France Region", "country": "France", "country_code": "FR", "population": 2138551, "latitude": 48.85341, "longitude": 2.3488 },
+        { "name": "Addison", "admin1": "Texas", "country": "United States", "country_code": "US", "population": 15518, "latitude": 32.96593, "longitude": -96.88227 },
+        { "name": "Paris 01 Louvre", "admin1": "Ile-de-France Region", "country": "France", "country_code": "FR", "population": 15114, "latitude": 48.8592, "longitude": 2.3412 }
+      ]
+    }
+    """;
+
+    /// <summary>The same-country population-tiebreak shape (the Accra case): two
+    /// exact-name candidates in one country where the country-name suffix
+    /// matches both — the ranking resolves the larger population, but BOTH
+    /// enter the pick list, so a warm pick of the smaller one must expose its
+    /// own population (the pick path's one channel).</summary>
+    internal const string SampleGhanaAccras = """
+    {
+      "results": [
+        { "name": "Accra", "admin1": "Greater Accra", "country": "Ghana", "country_code": "GH", "population": 100000, "latitude": 5.60372, "longitude": -0.18699 },
+        { "name": "Accra", "admin1": "Accra West", "country": "Ghana", "country_code": "GH", "population": 200000, "latitude": 5.65000, "longitude": -0.15000 }
+      ]
+    }
+    """;
+
+    /// <summary>The live "Springfield" search shape with its fuzzy rows —
+    /// the geocoder returns "Palmyra" and "Jackson" inside a "Springfield"
+    /// result set; the fuzzy rows must never enter the pick list.</summary>
+    internal const string SampleSpringfieldsWithFuzzy = """
+    {
+      "results": [
+        { "name": "Springfield", "latitude": 42.10148, "longitude": -72.58981, "admin1": "Massachusetts", "country": "United States", "country_code": "US", "population": 154341 },
+        { "name": "Palmyra", "latitude": 39.79421, "longitude": -91.52321, "admin1": "Missouri", "country": "United States", "country_code": "US", "population": 3616 },
+        { "name": "Springfield", "latitude": 37.21533, "longitude": -93.29824, "admin1": "Missouri", "country": "United States", "country_code": "US", "population": 170188 }
+      ]
+    }
+    """;
 }

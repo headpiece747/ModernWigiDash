@@ -69,21 +69,151 @@ internal static class WeatherLocationResolver
         return (namePart, suffixPart);
     }
 
-    /// <summary>A 5-digit ZIP/postal code (the US ZIP shape).</summary>
-    public static bool IsZipCode(string query)
+    /// <summary>
+    /// The postal-code routing decision: whether the location query is a
+    /// postal code, the code shape the zippopotam lookup sends, and the
+    /// route country. Numeric codes (a 2–10 digit code, or a hyphenated
+    /// n-n code — US ZIP+4, JP "100-0001", PT "0000-000", BR "01000-000")
+    /// always enter the postal leg: with a country hint the hint routes the
+    /// lookup, and WITHOUT a hint the route is "us" — the geocoder's own
+    /// postal index is US-biased ("10115" reads as the Manhattan ZIP there
+    /// too), so the US route is the least-wrong default; the resolved city
+    /// label stays visible in the widget title, never silent. Alphanumeric
+    /// codes (GB "M1 1AA", CA "K1A 0A1" — a letter+digit mix; a bare city
+    /// name like "Paris" never matches) carry no self-describing route, so
+    /// they enter the postal leg ONLY under an explicit country hint; a
+    /// hintless alphanumeric query keeps the city-name leg (it resolves
+    /// nothing there today anyway — the failure is safe either way).
+    /// The lookup key is the indexed shape, not the typed string
+    /// (<see cref="NormalizePostalLookup"/>).
+    /// </summary>
+    public static bool TryPostalRoute(string query, string? countryCode, out string postalLookup, out string routeCountry)
     {
+        postalLookup = "";
+        routeCountry = "";
         string trimmed = query.Trim();
-        return trimmed.Length == 5 && trimmed.All(char.IsAsciiDigit);
+        if (trimmed.Length == 0) return false;
+
+        bool numeric = IsNumericPostalCode(trimmed);
+        if (!numeric && !IsAlphanumericPostalCode(trimmed)) return false;
+        if (!numeric && string.IsNullOrWhiteSpace(countryCode)) return false;
+
+        // The route: the hint when present, the US default otherwise (a numeric
+        // code without a hint reads as US — the geocoder's own postal index
+        // is US-biased too, so the least-wrong default; an alphanumeric code
+        // cannot reach here without a hint).
+        routeCountry = string.IsNullOrWhiteSpace(countryCode)
+            ? UsRoute
+            : countryCode.Trim().ToLowerInvariant();
+        postalLookup = NormalizePostalLookup(trimmed, routeCountry);
+        return true;
     }
+
+    /// <summary>The numeric postal-code shapes: a bare 2–10 ASCII-digit
+    /// code (US ZIP, DE/FR/ES/IT 5-digit, NO/SE 4-digit, IN 6-digit) or a
+    /// hyphenated n-n code with a 3–5 digit group and a 3–4 digit group
+    /// (US ZIP+4 "12345-6789", JP "100-0001", PT "0000-000", BR "01000-000").
+    /// ASCII digits only — Unicode digit scripts must not route into the
+    /// postal leg.</summary>
+    private static bool IsNumericPostalCode(string trimmed)
+    {
+        string[] groups = trimmed.Split('-');
+        if (groups.Length == 1)
+            return groups[0].Length is >= 2 and <= 10 && groups[0].All(char.IsAsciiDigit);
+        if (groups.Length == 2)
+            return groups[0].Length is >= 3 and <= 5 && groups[0].All(char.IsAsciiDigit)
+                && groups[1].Length is >= 3 and <= 4 && groups[1].All(char.IsAsciiDigit);
+        return false;
+    }
+
+    /// <summary>An alphanumeric postal code: letter AND digit mix, ASCII
+    /// only, at most one internal space, 4–9 compact characters (GB "M1 1AA",
+    /// CA "K1A 0A1"). A bare name ("Paris", "Springfield") has no digit and
+    /// never matches; a bare number has no letter.</summary>
+    private static bool IsAlphanumericPostalCode(string trimmed)
+    {
+        if (trimmed.Length is < 4 or > 10) return false;
+        int spaces = 0;
+        bool hasLetter = false, hasDigit = false;
+        foreach (char c in trimmed)
+        {
+            if (c == ' ')
+            {
+                spaces++;
+                if (spaces > 1) return false;
+            }
+            else if (char.IsAsciiLetter(c)) hasLetter = true;
+            else if (char.IsAsciiDigit(c)) hasDigit = true;
+            else return false;
+        }
+        return hasLetter && hasDigit && trimmed.Length - spaces is >= 4 and <= 9;
+    }
+
+    /// <summary>The zippopotam lookup key for a typed postal code: internal
+    /// spaces stripped (the indexed codes carry none — GB "M1 1AA" indexes as
+    /// "M11"), the US delivery suffix dropped (the -4 of "12345-6789" never
+    /// changes the place and the US index is 5-digit only — but NEVER on
+    /// other routes: JP's hyphen IS the indexed shape, "100-0001"), and the
+    /// GB/CA short form (their indexes are keyed by the 3-char outward code
+    /// / FSA — "SW1", "M11", "K1A" — while full codes 404; IM/JE/GG index
+    /// under the same crown-FSA scheme). Live-probed against the API
+    /// 2026-08: full GB/CA codes 404, the short forms resolve.
+    /// </summary>
+    private static string NormalizePostalLookup(string code, string routeCountry)
+    {
+        string compact = code.Replace(" ", string.Empty);
+        if (string.Equals(routeCountry, UsRoute, StringComparison.Ordinal) && compact.Length == 10 && compact[5] == '-')
+            compact = compact[..5];
+        if (ShortFormRoutes.Contains(routeCountry) && compact.Length > 3)
+            compact = compact[..3];
+        return compact;
+    }
+
+    /// <summary>The route countries whose zippopotam index keys on the
+    /// short outward code (3 chars) instead of the full postal code.</summary>
+    private static readonly HashSet<string> ShortFormRoutes =
+    [
+        "gb", "ca", "im", "je", "gg",
+    ];
+
+    /// <summary>The zippopotam route the postal leg takes for a numeric
+    /// code without a country hint (see <see cref="TryPostalRoute"/>).</summary>
+    private const string UsRoute = "us";
+
+    /// <summary>
+    /// Whether a geocoder candidate bears the query's exact place name —
+    /// the ranking's name-exact tier applied to the pick list: the geocoder
+    /// returns fuzzy rows alongside the real matches (a live "Springfield"
+    /// search carries "Palmyra" and "Jackson"), and those must never enter
+    /// the Location Match dropdown — a user who picks one would persist a
+    /// place their query did not name. Null (omitted by the geocoder) is
+    /// not an exact match.
+    /// </summary>
+    public static bool IsExactNameMatch(string? candidateName, string namePart)
+        => candidateName is not null && EqualsInsensitive(candidateName, namePart);
 
     /// <summary>
     /// The geocoder search URL — the single URL builder shared by the
     /// resolution flow and the inspector's search-as-you-type (cities and
-    /// postal codes both resolve as a name query).
+    /// postal codes both resolve as a name query). <paramref name="query"/>
+    /// is the NAME PART only: the comma qualifier is deliberately NOT sent —
+    /// the server's qualifier rule gives admin1 abbreviations precedence over
+    /// country codes ("Amsterdam, NL" reads as the Canadian province and
+    /// returns nothing), while the ranking's client-side suffix tiers (state
+    /// table, weak-ISO fallback, aliases) own that disambiguation on purpose.
     /// </summary>
     public static Uri BuildSearchUri(string query, string? countryCode)
     {
-        string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=10&language=en&format=json";
+        // count=100 is the geocoder's maximum (101 is a 400). The top-10
+        // default hid the user's city from BOTH the ranking and the pick list
+        // whenever a same-named city ranked >10th by population (live probed
+        // 2026-08: "Springfield" + count=10 omits Springfield, Oregon, a
+        // 60k city — the user's city was unpickable and the query resolved a
+        // different Springfield or none). The server applies the
+        // country/admin filters BEFORE the limit, so this only widens the
+        // same-name set the client ranking and the Location Match dropdown
+        // see.
+        string url = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(query)}&count=100&language=en&format=json";
         if (!string.IsNullOrWhiteSpace(countryCode))
             url += $"&countryCode={Uri.EscapeDataString(countryCode.Trim())}";
         return new Uri(url);
@@ -221,11 +351,21 @@ internal static class WeatherLocationResolver
         // geocoded candidate, promote that candidate to the winner instead of
         // silently reverting to the ranking. The pick resolves a tie
         // deterministically — it runs before the ambiguity gate, so a picked
-        // place never reads ambiguous.
+        // place never reads ambiguous. The promotion requires the picked place
+        // to BEAR THE NAME THE QUERY TYPED (the dropdown offers only its
+        // exact-name candidates, so the pick obeys the same rule through the
+        // same predicate): the live geocoder is fuzzy, so its candidate set
+        // can carry places the query did not name ("Vitória" inside a
+        // "Victoria" search) — a pick of such a row persisted from before the
+        // pick list learned the exact-name rule must not outlive the query
+        // that suggested it: the ranking re-decides for the city the user
+        // typed, or the wrong-city weather returns on every restart.
         if (!string.IsNullOrWhiteSpace(locationMatch))
         {
+            string trimmedPick = locationMatch.Trim();
             var picked = candidates.FirstOrDefault(c =>
-                ComposeLabel(c, namePart).Equals(locationMatch.Trim(), StringComparison.OrdinalIgnoreCase));
+                ComposeLabel(c, namePart).Equals(trimmedPick, StringComparison.OrdinalIgnoreCase)
+                && IsExactNameMatch(c.Name, namePart));
             // The pick is promoted ONLY when it is consistent with the
             // current query: a suffix the picked candidate does not satisfy
             // ("Springfield, IL" + a persisted "Springfield, Massachusetts"

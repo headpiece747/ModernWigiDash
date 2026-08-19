@@ -181,14 +181,14 @@ internal sealed class WeatherGeocoder
     /// <summary>
     /// The cluster's single resolution door: walks the ladder — explicit
     /// coordinates (authoritative, honoring the custom label), a "lat,lon"
-    /// pair (never honoring it), a postal code (zippopotam with the country
-    /// hint; a failed lookup falls back to the city leg WITH the original
-    /// location, so the hint is carried), a "Location Match" pick (honored
-    /// ONLY on the non-ZIP path — a ZIP input never sees the pick — honoring
-    /// the custom label), and finally the city-name geocode — and returns the
-    /// verdict. Applies no resolved state (the client owns lat/lon/name
-    /// application and the throttle stamp) and never throws for HTTP
-    /// failures — the unresolved verdict is the failure shape.
+    /// pair (never honoring it), a postal code (the zippopotam route the hint
+    /// selects and, when that route 404s, the geocoder's own postal search —
+    /// WITH the hint first, then without), a "Location Match" pick
+    /// (honored ONLY on the non-postal path — a postal input never sees the
+    /// pick — honoring the custom label), and finally the city-name geocode —
+    /// and returns the verdict. Applies no resolved state (the client owns
+    /// lat/lon/name application and the throttle stamp) and never throws for
+    /// HTTP failures — the unresolved verdict is the failure shape.
     /// </summary>
     public async Task<WeatherResolutionOutcome> ResolveAsync(
         WeatherLocation location,
@@ -217,21 +217,26 @@ internal sealed class WeatherGeocoder
             return new WeatherResolutionOutcome.Resolved(pairLat, pairLon, WeatherLocationResolver.FormatCoordinates(pairLat, pairLon), 0);
         }
 
-        if (WeatherLocationResolver.IsZipCode(location.Location))
+        if (WeatherLocationResolver.TryPostalRoute(location.Location, location.CountryCode, out string postalLookup, out string postalRoute))
         {
-            // The ZIP path routes by the country hint (zippopotam /de/, /us/,
-            // ...); unsupported countries 404 and fall back to the geocoder.
-            WeatherZipGeocodeResult? zip = await GeocodeZipAsync(location.Location, location.CountryCode, cancellationToken).ConfigureAwait(false);
-            if (zip is not null)
+            // The postal leg routes by the resolver's rule: zippopotam is NOT
+            // US-only (60+ countries — /de/10115 is Berlin, /fr/75001 is
+            // Paris), the hint selects the route, and a numeric code without
+            // a hint reads as US (the geocoder's postal index is US-biased
+            // too — the least-wrong default; the resolved label stays
+            // visible). The lookup key is the indexed shape (ZIP+4 -> 5
+            // digits on the US route, GB/CA full code -> 3-char short form).
+            WeatherZipGeocodeResult? postal = await GeocodeZipAsync(postalLookup, postalRoute, cancellationToken).ConfigureAwait(false);
+            if (postal is not null)
             {
-                return new WeatherResolutionOutcome.Resolved(zip.Lat, zip.Lon, zip.CityName, 0);
+                return new WeatherResolutionOutcome.Resolved(postal.Lat, postal.Lon, postal.CityName, 0);
             }
 
-            // The zippopotam path is US-only; fall back to the worldwide
-            // Open-Meteo geocoder WITH the original location (so the
-            // CountryCode hint is carried — e.g. "10115" + "DE" resolves the
-            // Berlin postal district).
-            return await ResolveCityLegAsync(location, cancellationToken).ConfigureAwait(false);
+            // The route 404ed (unsupported country or code) — the worldwide
+            // geocoder's postal search is the fallback: its name parameter
+            // accepts postal codes (a live 5-digit code resolves at least the
+            // US ZIPs and some foreign codes).
+            return await ResolvePostalFallbackAsync(location, cancellationToken).ConfigureAwait(false);
         }
 
         // A user pick from the "Location Match" dropdown resolves directly to
@@ -263,13 +268,51 @@ internal sealed class WeatherGeocoder
     private async Task<WeatherResolutionOutcome> ResolveCityLegAsync(WeatherLocation location, CancellationToken cancellationToken)
     {
         WeatherCityGeocodeResult result = await GeocodeCityAsync(location.Location, location.CountryCode, location.LocationMatch, cancellationToken).ConfigureAwait(false);
-        return result switch
+        return MapCityGeocodeToOutcome(result);
+    }
+
+    /// <summary>
+    /// The postal leg's fallback when the zippopotam route 404s: the
+    /// geocoder's own postal search (its name parameter accepts postal
+    /// codes — a live-probed 5-digit code resolves at least the US ZIPs and
+    /// some foreign codes, while UK/CA alphanumeric codes resolve nothing).
+    /// A hinted code searches WITH the hint first — the user's
+    /// disambiguation is worth one (possibly empty) leg — and only a hinted
+    /// leg that returned NOTHING retries without the hint (the geocoder's
+    /// postal index is US-biased, and a hint the index lacks must not leave
+    /// the user with no weather the geocoder could have resolved; a leg that
+    /// DID answer is the complete verdict). The city pipeline ranks the
+    /// answers under the no-guess rule: a single candidate resolves (the
+    /// postal search returns the places whose postcode index carries the
+    /// code), a cross-country tie returns the pick list.
+    /// </summary>
+    private async Task<WeatherResolutionOutcome> ResolvePostalFallbackAsync(WeatherLocation location, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(location.CountryCode))
+        {
+            WeatherCityGeocodeResult hinted = await GeocodeCityAsync(location.Location, location.CountryCode, null, cancellationToken).ConfigureAwait(false);
+            if (hinted is not WeatherCityGeocodeResult.Unresolved)
+            {
+                return MapCityGeocodeToOutcome(hinted);
+            }
+        }
+
+        return MapCityGeocodeToOutcome(await GeocodeCityAsync(location.Location, null, null, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>The one mapping of the city-geocode outcome onto the door's
+    /// outcome union — the city leg and the postal fallback both ride it, so
+    /// the Resolved/Ambiguous/Unresolved shape cannot drift between them.
+    /// The pick is passed through the city leg only: a postal input never
+    /// sees a persisted Location Match (a pick from a previous city query
+    /// must not answer a postal one).</summary>
+    private static WeatherResolutionOutcome MapCityGeocodeToOutcome(WeatherCityGeocodeResult result)
+        => result switch
         {
             WeatherCityGeocodeResult.Resolved r => new WeatherResolutionOutcome.Resolved(r.Lat, r.Lon, r.Label, r.Population, r.Candidates),
             WeatherCityGeocodeResult.Ambiguous a => new WeatherResolutionOutcome.Ambiguous(a.Candidates),
             _ => new WeatherResolutionOutcome.Unresolved(),
         };
-    }
 
     /// <summary>
     /// The inspector's search-as-you-type surface: geocodes <paramref name="query"/>
@@ -331,7 +374,20 @@ internal sealed class WeatherGeocoder
                         candidates.Add(parsed);
                 }
                 if (candidates.Count == 0) return new WeatherCityGeocodeResult.Unresolved([]);
-                var dropdown = candidates.Select(c => ToDropdownCandidate(c, namePart)).ToArray();
+                // The RANKING sees every candidate (the fuzzy rows simply
+                // score zero and can never win); the PICK LIST offers only
+                // the exact-name candidates — fuzzy search rows ("Palmyra"
+                // inside a live "Springfield" search) must never be
+                // persistable as the user's location. A postal-shaped query
+                // has no exact-name candidates by definition (the code
+                // matched the places' postcode index, not their names), so
+                // its pick list keeps every returned candidate — the
+                // cross-country postal tie is only escapable through them.
+                bool postalQuery = WeatherLocationResolver.TryPostalRoute(trimmed, countryCode, out _, out _);
+                var dropdown = candidates
+                    .Where(c => postalQuery || WeatherLocationResolver.IsExactNameMatch(c.Name, namePart))
+                    .Select(c => ToDropdownCandidate(c, namePart))
+                    .ToArray();
 
                 return WeatherLocationResolver.Resolve(candidates, namePart, suffixPart, countryCode, locationMatch) switch
                 {
@@ -349,9 +405,10 @@ internal sealed class WeatherGeocoder
     }
 
     /// <summary>
-    /// One ZIP lookup via zippopotam; null when the lookup failed (the caller
-    /// falls back to the worldwide Open-Meteo geocoder with the original
-    /// location so the CountryCode hint is carried).
+    /// One postal-code lookup via zippopotam (60+ route countries — not
+    /// US-only); null when the route 404s or the response is unusable (the
+    /// caller then runs the postal fallback: the geocoder's own postal
+    /// search, hinted first, then bare).
     /// </summary>
     public async Task<WeatherZipGeocodeResult?> GeocodeZipAsync(string zipCode, string? countryCode, CancellationToken cancellationToken = default)
     {

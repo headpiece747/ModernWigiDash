@@ -67,16 +67,16 @@ public class WeatherForecastWidgetTests
         await widget.FetchLiveWeatherAsync(force: true);
 
         var options = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch));
-        Assert.AreEqual(3, options.Count, "Automatic entry + 2 candidates");
+        Assert.AreEqual(2, options.Count, "Automatic entry + the ONE exact-name candidate");
         Assert.AreEqual("", options[0].Value, "The first option must be the empty 'Automatic' entry so a pick can be cleared");
         CollectionAssert.Contains(
             options.Select(o => o.Value).ToArray(),
             "Victoria, British Columbia, Canada",
             "The exact-match candidate must be pickable by its label");
-        CollectionAssert.Contains(
-            options.Select(o => o.DisplayName).ToArray(),
+        CollectionAssert.DoesNotContain(
+            options.Select(o => o.Value).ToArray(),
             "Vitória, Espírito Santo, Brazil",
-            "The alternative candidate must be pickable by its label");
+            "the fuzzy 'Vitória' row (a live-geocoder non-match for 'Victoria') must not be offerable — a pick of it would persist a place the query did not name");
     }
 
     [TestMethod]
@@ -87,36 +87,40 @@ public class WeatherForecastWidgetTests
             string url = request.RequestUri?.AbsoluteUri ?? "";
             if (url.Contains("/v1/search", StringComparison.Ordinal))
             {
+                // The suffixed query ("Springfield, MA") RESOLVES (the suffix
+                // beats the tie), so the fetch succeeds and the dropdown is
+                // populated from the winner's candidates — and the exact-name
+                // filter keeps BOTH same-named Springfields pickable (the
+                // fuzzy-row filter touches nothing here). An unsuffixed tie
+                // resolves Ambiguous (no coordinates, no fetch) and would
+                // never populate the display state this test drives.
                 return StubHttpHandler.Ok(url.Contains("name=Berlin", StringComparison.OrdinalIgnoreCase)
                     ? """{ "results": [ { "name": "Berlin", "latitude": 52.52, "longitude": 13.405, "country": "Germany" } ] }"""
-                    : """
-                    {
-                      "results": [
-                        { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
-                        { "name": "Vit\u00f3ria", "latitude": -20.3194, "longitude": -40.3378, "admin1": "Esp\u00edrito Santo", "country": "Brazil", "country_code": "BR", "population": 1962476 }
-                      ]
-                    }
-                    """);
+                    : WeatherTestData.SampleSpringfields);
             }
             return StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
         });
-        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Springfield, MA" };
 
         await widget.FetchLiveWeatherAsync(force: true); // geocode(1) + forecast(2)
+        // The suffix resolved the ranking: Springfield, Massachusetts.
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Massachusetts, United States", TimeSpan.FromSeconds(5));
 
-        // Picking a candidate resolves to it; then changing the Location
-        // (via OnPropertyChanged, the inspector's write-back path) must drop
-        // the candidates and re-geocode the new city — the stale pick must not win.
-        // options[0] = "Automatic", options[1] = Victoria (Canada), options[2] = Vitoria (Brazil)
-        string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
+        // Picking the OTHER same-named candidate (a pick overrides the
+        // ranking), then changing the Location (via OnPropertyChanged, the
+        // inspector's write-back path) must drop the candidates and
+        // re-geocode the new city — the stale pick must not win.
+        // options[0] = "Automatic", options[1] = Springfield (Missouri —
+        // the unranked one here), options[2] = Springfield (Massachusetts)
+        string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[1].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
         // Wait for the APPLIED state, not the client's fetch-completion count:
         // the count increments inside the client's finally BEFORE the widget's
         // continuation applies the snapshot, so a count-based wait can race
         // the apply on a busy scheduler.
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Vitória, Espírito Santo, Brazil", TimeSpan.FromSeconds(5));
-        Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Missouri, United States", TimeSpan.FromSeconds(5));
+        Assert.AreEqual("Springfield, Missouri, United States", widget.ResolvedCityName);
 
         widget.Location = "Berlin";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Berlin");
@@ -127,22 +131,18 @@ public class WeatherForecastWidgetTests
     [TestMethod]
     public async Task LocationMatchOptions_ClearPick_RevertsToAutoRanking()
     {
-        const string multi = """
-        {
-          "results": [
-            { "name": "Victoria", "latitude": 48.4284, "longitude": -123.3656, "admin1": "British Columbia", "country": "Canada", "country_code": "CA", "population": 335696 },
-            { "name": "Vit\u00f3ria", "latitude": -20.3194, "longitude": -40.3378, "admin1": "Esp\u00edrito Santo", "country": "Brazil", "country_code": "BR", "population": 1962476 }
-          ]
-        }
-        """;
+        // The suffixed query ("Springfield, MA") RESOLVES (the suffix beats the
+        // same-name tie), so the fetch succeeds, the dropdown is populated, and
+        // the exact-name filter keeps BOTH same-named Springfields pickable
+        // (the fuzzy-row filter touches nothing here).
         var stub = new StubHttpHandler(request =>
         {
             string url = request.RequestUri?.AbsoluteUri ?? "";
             return url.Contains("/v1/search", StringComparison.Ordinal)
-                ? StubHttpHandler.Ok(multi)
+                ? StubHttpHandler.Ok(WeatherTestData.SampleSpringfields)
                 : StubHttpHandler.Ok(WeatherTestData.SampleForecastLegacy);
         });
-        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Victoria" };
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Springfield, MA" };
 
         await widget.FetchLiveWeatherAsync(force: true); // geocode(1) + forecast(2)
         // Deterministic write-back flush: FetchCompletedCount increments in
@@ -150,12 +150,14 @@ public class WeatherForecastWidgetTests
         // write-back, so waiting on the count alone lets fetch #1's
         // continuation land late and clobber fetch #2's — wait for the
         // applied state, then flush.
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Massachusetts, United States", TimeSpan.FromSeconds(5));
         widget.ApplyPendingLocationWriteback();
-        Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location);
+        Assert.AreEqual("Springfield, Massachusetts, United States", widget.Location);
 
-        // options[0] = "Automatic", options[1] = Victoria (Canada), options[2] = Vitoria (Brazil)
-        string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[2].Value;
+        // options[0] = "Automatic", options[1] = Springfield (Missouri — the
+        // pick overrides the suffix-ranked winner), options[2] = Springfield
+        // (Massachusetts, the ranked one)
+        string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[1].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
         // Wait for the APPLIED state - the pick's label landed in Location via
@@ -167,27 +169,27 @@ public class WeatherForecastWidgetTests
         await TestWait.WaitUntilAsync(() =>
         {
             widget.ApplyPendingLocationWriteback();
-            return string.Equals(widget.Location, "Vitória, Espírito Santo, Brazil", StringComparison.Ordinal);
+            return string.Equals(widget.Location, "Springfield, Missouri, United States", StringComparison.Ordinal);
         }, TimeSpan.FromSeconds(5));
-        Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.ResolvedCityName);
-        Assert.AreEqual("Vitória, Espírito Santo, Brazil", widget.Location,
+        Assert.AreEqual("Springfield, Missouri, United States", widget.ResolvedCityName);
+        Assert.AreEqual("Springfield, Missouri, United States", widget.Location,
             "the write-back must leave the field showing the picked place");
 
         // Clearing the pick (the empty "Automatic" option) reverts to ranking.
         // The write-back made Location carry the picked label, so the label
-        // self-resolves to the same city; returning the field to the bare
-        // query then lets the auto ranking of "Victoria" decide - a stale
-        // pick must never win it. (No completion-count wait between the
+        // self-resolves to the same city; returning the field to the original
+        // query then lets the suffix rule of "Springfield, MA" decide - a
+        // stale pick must never win it. (No completion-count wait between the
         // changes: if the clear-pick fetch is still in flight when Location
         // changes, its stale result is dropped and the forced re-fetch covers
         // the new identity.)
         widget.LocationMatch = "";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), "");
-        widget.Location = "Victoria";
-        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Victoria");
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Victoria, British Columbia, Canada", TimeSpan.FromSeconds(5));
+        widget.Location = "Springfield, MA";
+        widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Springfield, MA");
+        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Massachusetts, United States", TimeSpan.FromSeconds(5));
         widget.ApplyPendingLocationWriteback();
-        Assert.AreEqual("Victoria, British Columbia, Canada", widget.ResolvedCityName);
+        Assert.AreEqual("Springfield, Massachusetts, United States", widget.ResolvedCityName);
     }
 
     [TestMethod]
