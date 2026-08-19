@@ -854,7 +854,7 @@ public class WeatherClientTests
 
         Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
             "an invalidated identity must report the result stale");
-        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+        Assert.IsFalse(client.HasFetched,
             "a stale result must not stamp the throttle window");
         var stale = (WeatherFetchResult.Stale)result;
         Assert.AreEqual(WeatherQueryKey.Build(new WeatherLocation("Fixed Location", "Victoria", null, null, null)), stale.QueryKey,
@@ -886,7 +886,7 @@ public class WeatherClientTests
         // Wait until the fetch has confirmed its identity (the throttle is
         // stamped): everything from here to the post-save re-validation is
         // the save window under test.
-        await TestWait.WaitUntilAsync(() => client.LastFetchTimeUtc != DateTime.MinValue, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => client.HasFetched, TimeSpan.FromSeconds(5));
 
         client.InvalidateLocation(); // the widget's edit-time invalidation lands in the save window
         gate.SetResult();
@@ -894,7 +894,7 @@ public class WeatherClientTests
 
         Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
             "an invalidation inside the cache-save window must report the result stale, never fetched");
-        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+        Assert.IsFalse(client.HasFetched,
             "the invalidation reset the throttle stamp the confirmation wrote — the new identity must not cool down");
         var stale = (WeatherFetchResult.Stale)result;
         Assert.AreEqual(WeatherQueryKey.Build(location), stale.QueryKey,
@@ -928,7 +928,7 @@ public class WeatherClientTests
 
         Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Stale),
             "a geocode failure after an identity change must report Stale (the re-fetch runs immediately)");
-        Assert.AreEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+        Assert.IsFalse(client.HasFetched,
             "a stale geocode failure must not stamp the new identity's throttle");
         var stale = (WeatherFetchResult.Stale)result;
         Assert.AreEqual(WeatherQueryKey.Build(new WeatherLocation("Fixed Location", "Atlantis", null, null, null)), stale.QueryKey,
@@ -997,7 +997,7 @@ public class WeatherClientTests
         Assert.AreEqual(2, loaded.HourlyForecasts!.Count);
         Assert.AreEqual(40.71, loaded.Lat);
         Assert.AreEqual("40.71, -74.00", loaded.ResolvedCityName);
-        Assert.AreNotEqual(DateTime.MinValue, reader.LastFetchTimeUtc, "A successful cache load must prime the fetch throttle");
+        Assert.IsTrue(reader.HasFetched, "A successful cache load must prime the fetch throttle");
     }
 
     [TestMethod]
@@ -1163,7 +1163,7 @@ public class WeatherClientTests
 
         Assert.IsInstanceOfType(result, typeof(WeatherFetchResult.Failed),
             "the forecast-leg deadline must report Failed, not surface as OCE");
-        Assert.AreNotEqual(DateTime.MinValue, client.LastFetchTimeUtc,
+        Assert.IsTrue(client.HasFetched,
             "a timed-out fetch must stamp the throttle like any failure");
     }
 

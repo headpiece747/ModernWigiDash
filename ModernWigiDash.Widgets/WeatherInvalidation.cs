@@ -35,6 +35,31 @@ internal static class WeatherInvalidation
             ? WeatherInvalidationKind.Location
             : WeatherInvalidationKind.None;
     }
+
+    /// <summary>
+    /// The single drop rule over the shared identity value
+    /// (<see cref="WeatherResolutionState"/>), per
+    /// <see cref="WeatherInvalidationKind"/>: None keeps the value as-is;
+    /// Coordinates drops the name and population but KEEPS the candidates (a
+    /// pick resolves against the candidates it was offered from); Location
+    /// empties the WHOLE identity into the one
+    /// <see cref="WeatherResolutionState.Empty"/> state. Both twins apply the
+    /// rule under their own gate and then clear their OWN unique fields (the
+    /// client's coordinates + query + throttle, the widget's pending
+    /// write-back) — the rule owns the shared part only, so the twins can
+    /// never disagree on what each kind drops.
+    /// </summary>
+    internal static WeatherResolutionState Drop(WeatherInvalidationKind kind, WeatherResolutionState state)
+        => kind switch
+        {
+            WeatherInvalidationKind.None => state,
+            WeatherInvalidationKind.Coordinates => state.With(resolvedName: "", population: 0),
+            WeatherInvalidationKind.Location => WeatherResolutionState.Empty,
+            // A kind added to the enum later must not silently erase the
+            // identity: it drops nothing until its rule is declared in this
+            // table (the kind's pin test is what forces the entry).
+            _ => state,
+        };
 }
 
 /// <summary>

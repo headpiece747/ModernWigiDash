@@ -66,8 +66,11 @@ internal sealed class WeatherClient
     /// </summary>
     internal int FetchCompletedCount { get; private set; }
 
-    /// <summary>UTC timestamp of the last successful fetch or cache load (drives throttling).</summary>
-    internal DateTime LastFetchTimeUtc => _fetchControl.LastFetchTimeUtc;
+    /// <summary>Whether the throttle has ever been stamped — by a fetch
+    /// attempt (failures cool down like successes) or a cache load. The cadence
+    /// gate reads this as a named client fact, never by comparing the raw
+    /// timestamp against a sentinel.</summary>
+    internal bool HasFetched => _fetchControl.HasFetched;
 
     /// <param name="cacheDirectory">Directory for the disk cache (created on demand).</param>
     /// <param name="cacheFileName">Per-instance cache file name; defaults to a shared "weather_default.json".</param>

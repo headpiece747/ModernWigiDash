@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — ModernWigiDash (weather forecast widget)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .chip { @apply inline-block border border-slate-300 bg-white rounded px-1.5 py-0.5 text-[10px] leading-3 tracking-wide; }
+      .chip-apply { @apply inline-block border-2 border-red-400 bg-red-50 rounded px-2 py-1 text-[10px] leading-3 tracking-wide font-semibold; }
+      .modlab { @apply text-[10px] uppercase tracking-widest text-slate-500; }
+      .faded { opacity: .55; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <!-- ============================== HEADER ============================== -->
+      <header class="space-y-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.25em] text-slate-500 mb-2">Architecture review · deepening opportunities</p>
+          <h1 class="font-serif text-4xl">Weather forecast widget — residual friction after ADR-0006 / 0007</h1>
+          <p class="mt-2 text-sm text-slate-600">ModernWigiDash · 2026-08-18 · scope: the weather cluster as it stands today — 21 modules ≈ 3.8k lines, the 647-line host widget, the 275-line fetch flow, and the 1.2k-line widget test file. The stale-identity invariant (ADR-0006) and the fetch sequence (ADR-0007) were deepened <em>today</em>; this pass looks at what friction that left behind.</p>
+        </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 border border-slate-200 rounded-lg bg-white px-4 py-3">
+          <span class="flex items-center gap-2"><span class="w-5 h-3.5 border-2 border-slate-400 bg-white inline-block"></span> module</span>
+          <span class="flex items-center gap-2"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" class="seam" stroke="#64748b" stroke-width="2"/></svg> seam</span>
+          <span class="flex items-center gap-2"><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" class="leak" stroke="#dc2626" stroke-width="2"/></svg> leakage / comment-held discipline</span>
+          <span class="flex items-center gap-2"><span class="w-5 h-3.5 deep inline-block rounded-sm"></span> deep module</span>
+        </div>
+        <p class="text-xs text-slate-500">Vocabulary: <span class="font-semibold">module · interface · implementation · depth · seam · adapter · leverage · locality</span> (design skill). Domain names from CONTEXT.md: fetch flow, capture window, cadence gate, resolved-identity twins, render model, layout modes, display rules.</p>
+      </header>
+
+      <!-- ============================ CANDIDATES ============================ -->
+      <section id="candidates" class="space-y-12">
+
+        <!-- ========================== CARD 1 ========================== -->
+        <article id="card-typed-host-seam" class="space-y-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">1 · Give the fetch flow a typed host seam</h2>
+            <span class="text-[11px] font-semibold uppercase tracking-widest bg-emerald-600 text-white rounded-full px-3 py-1">Strong</span>
+            <span class="text-[11px] uppercase tracking-widest bg-slate-200 text-slate-600 rounded-full px-3 py-1">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-700 space-x-1">
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Widgets/WeatherFetchFlow.cs</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Widgets/WeatherForecastWidget.cs (ctor 136–159, ApplySnapshot 514–524)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Tests/WeatherFetchFlowTests.cs (FlowHost 71–100)</span>
+          </p>
+
+          <!-- before / after -->
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+              <p class="modlab">Before — the interface is a 10-slot delegate bag</p>
+              <div class="border-2 border-slate-400 rounded-md overflow-hidden">
+                <div class="bg-red-50 border-b-2 border-red-300 p-2" style="min-height:9.5rem">
+                  <p class="text-[10px] uppercase tracking-widest text-red-700 mb-2 font-semibold">interface — everything a caller must know</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span class="chip">client</span><span class="chip">identity</span><span class="chip">currentLocation()</span>
+                    <span class="chip-apply">apply(snapshot, version?, guard?, candidates, population, name) → bool&nbsp; — 7 positional</span>
+                    <span class="chip">dataVersion()</span><span class="chip">isStaticSnapshot()</span><span class="chip">runToken()</span>
+                    <span class="chip">setPendingWritebackIfCurrent(guard, v)</span><span class="chip">requestRender()</span><span class="chip">requestInspectorRefresh()</span>
+                  </div>
+                </div>
+                <div class="bg-slate-50 p-2" style="min-height:5.5rem">
+                  <p class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">implementation</p>
+                  <p class="text-[11px] text-slate-600 mt-1">capture window · two drop gates through the ADR-0006 predicate · drop-and-refetch routing · write-back gating · cadence gate · boot-load rollback</p>
+                </div>
+              </div>
+              <div class="relative pt-3">
+                <svg class="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+                  <path d="M 8 6 Q 40 -8 120 28" fill="none" class="leak" stroke="#dc2626" stroke-width="1.5"/>
+                  <path d="M 150 10 Q 200 -10 260 26" fill="none" class="leak" stroke="#dc2626" stroke-width="1.5"/>
+                  <path d="M 300 10 Q 340 -8 380 26" fill="none" class="leak" stroke="#dc2626" stroke-width="1.5"/>
+                </svg>
+                <div class="grid grid-cols-3 gap-2">
+                  <div class="border border-red-300 bg-white rounded px-2 py-1.5 text-center">
+                    <p class="text-[10px] font-semibold text-slate-700">widget ctor<br/>136–159</p>
+                    <p class="text-[9px] text-slate-500">lock-wraps 3 seams by hand</p>
+                  </div>
+                  <div class="border border-red-300 bg-white rounded px-2 py-1.5 text-center">
+                    <p class="text-[10px] font-semibold text-slate-700">test FlowHost<br/>71–100</p>
+                    <p class="text-[9px] text-slate-500">lock-wraps the same 3 seams, copied</p>
+                  </div>
+                  <div class="border border-red-300 bg-white rounded px-2 py-1.5 text-center">
+                    <p class="text-[10px] font-semibold text-slate-700">flow docs<br/>44–57</p>
+                    <p class="text-[9px] text-slate-500">the rule again, in comments</p>
+                  </div>
+                </div>
+                <p class="text-[10px] text-red-700 mt-2 text-center">the gate discipline — “apply runs under _forecastGate, only when the guard passes” — is spelled 3 ways, held by comments. ADR-0007’s own negative: <em>“a discipline, not a type.”</em></p>
+              </div>
+            </div>
+            <!-- AFTER -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+              <p class="modlab">After — one named seam, one apply request</p>
+              <div class="deep rounded-md overflow-hidden text-white">
+                <div class="deep border-b-2 border-slate-600 p-2" style="min-height:3.6rem">
+                  <p class="text-[10px] uppercase tracking-widest text-slate-300 mb-2 font-semibold">interface — 3 slots</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span class="chip !border-slate-500 !bg-slate-800 !text-slate-200">client</span>
+                    <span class="chip !border-slate-500 !bg-slate-800 !text-slate-200">identity</span>
+                    <span class="chip !border-emerald-500 !bg-slate-800 !text-emerald-300">host — named seam</span>
+                  </div>
+                </div>
+                <div class="deep p-2" style="min-height:8rem">
+                  <p class="text-[10px] uppercase tracking-widest text-slate-300 font-semibold">implementation — unchanged: sequence, gates, routing, rollback</p>
+                  <p class="text-[11px] text-slate-400 mt-1">calls <span class="font-mono text-emerald-300">host.TryApply(request)</span>, reads <span class="font-mono text-emerald-300">host.DataVersion</span>, asks <span class="font-mono text-emerald-300">host.IsStaticSnapshot</span> — named members, each with its discipline in one place.</p>
+                </div>
+              </div>
+              <div class="border-2 border-emerald-500 rounded-md bg-emerald-50 p-2.5">
+                <p class="text-[10px] uppercase tracking-widest text-emerald-800 font-semibold">host adapter (widget) — the gate lives here, once</p>
+                <div class="flex flex-wrap gap-1.5 mt-1.5">
+                  <span class="chip !border-emerald-400">TryApply(apply&nbsp;request) → bool</span>
+                  <span class="chip !border-emerald-400">QueueLabelWriteback(guard, value)</span>
+                  <span class="chip !border-emerald-400">DataVersion</span>
+                  <span class="chip !border-emerald-400">IsStaticSnapshot</span>
+                  <span class="chip !border-emerald-400">RunToken</span>
+                  <span class="chip !border-emerald-400">RequestRender / RequestInspectorRefresh</span>
+                </div>
+                <div class="mt-2 border border-emerald-300 bg-white rounded px-2 py-1.5">
+                  <p class="text-[10px] font-semibold text-slate-700">the 7-tuple is now a <em>request value</em></p>
+                  <p class="text-[10px] text-slate-500 font-mono">snapshot · expectedVersion? · identityGuard? · candidates · population · resolvedName — named fields, one spelling, shared by flow, widget, and tests</p>
+                </div>
+                <p class="text-[10px] text-emerald-900 mt-2">the test FlowHost becomes an <em>adapter over the same seam</em> — the mirror host implements the interface instead of re-wiring 10 delegates; the flow’s <span class="font-mono">_identity.Candidates</span> peek (inspector stamp, flow line 205) moves behind the host.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4 text-sm">
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Problem</p>
+              <p>WeatherFetchFlow is the cluster’s deep module — but its <em>interface</em> is the widest in the cluster: a 10-parameter constructor whose apply param is a 7-arg positional function that serves two different call shapes (fetch path passes <span class="font-mono">null</span> version, boot path passes the captured version), and three anonymous delegates that only make sense with the host’s <span class="font-mono">_forecastGate</span>. The flow even reads the client’s raw timestamp (its own cadence leak, card 4) and the identity module’s candidates list through the bag.</p>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Solution</p>
+              <p>Replace the delegate bag with one named host seam: a small interface the widget implements (named members with the gate discipline documented per member) and one apply-request record that replaces the 7-positional-arg function. The flow keeps its two entry points and its modules; the host adapter owns the gate wrap in exactly one place, and the test host becomes an adapter over the same seam — exact member shape is the grill’s job, not the report’s.</p>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <p class="modlab mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+              <li>locality: the gate discipline is one named member, not three comment spellings</li>
+              <li>the apply request value is shared by flow, widget, tests — one spelling per field</li>
+              <li>leverage: flow interface drops 10 params → 3; new flow behaviour costs zero host wiring</li>
+              <li>tests: host-adapter fidelity is pinnable without a render tick or HTTP stub</li>
+              <li>the <span class="font-mono">_identity.Candidates</span> peek and the client-sentinel read (card 4) both lose their seats</li>
+              <li>ADR-0007’s negative (“a discipline, not a type”) becomes a type</li>
+            </ul>
+          </div>
+
+          <p class="text-sm bg-white border border-slate-300 rounded-lg p-3 text-slate-700"><span class="font-semibold text-slate-900">Not an ADR conflict.</span> ADR-0007 decided <em>who owns the sequence</em> (the flow) and deliberately left the host seams implicit — its Consequences/negative section names the open debt. This card completes that seam, it does not reopen the ownership decision.</p>
+        </article>
+
+        <!-- ========================== CARD 2 ========================== -->
+        <article id="card-render-model-build" class="space-y-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">2 · Lift the render-model build out of the widget</h2>
+            <span class="text-[11px] font-semibold uppercase tracking-widest bg-amber-500 text-white rounded-full px-3 py-1">Worth exploring</span>
+            <span class="text-[11px] uppercase tracking-widest bg-slate-200 text-slate-600 rounded-full px-3 py-1">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-700 space-x-1 flex flex-wrap gap-1">
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Widgets/WeatherForecastWidget.cs (EnsureRenderModel 553–645, Render 340–413)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Widgets/WeatherRenderModel.cs</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">ModernWigiDash.Tests/WeatherRenderModelTests.cs · WeatherForecastWidgetTests.cs</span>
+          </p>
+
+          <!-- before / after: call-graph collapse -->
+          <div class="grid md:grid-cols-2 gap-4">
+            <!-- BEFORE -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+              <p class="modlab">Before — the build is a 93-line private method inside the render tick</p>
+              <div class="border-2 border-slate-400 rounded-md p-2.5 space-y-1.5 bg-white" style="min-height:320px">
+                <p class="text-[11px] font-semibold text-slate-700">Render() — 74 lines, widget</p>
+                <div class="pl-3 border-l-2 border-slate-200 space-y-1.5">
+                  <span class="chip">UI-thread write-back flush</span>
+                  <span class="chip">RequestRefresh() — the cadence gate kick</span>
+                  <span class="chip">gated forecast-list copy</span>
+                  <span class="chip">Scale() + ComputeHeader() <span class="text-red-600">← computed here</span></span>
+                  <div class="border-2 border-red-300 bg-red-50 rounded-md p-2 my-1">
+                    <p class="text-[11px] font-semibold text-red-800">EnsureRenderModel — private · 93 lines · no covering tests at any interface</p>
+                    <div class="pl-2 border-l-2 border-red-200 space-y-1 mt-1.5">
+                      <span class="chip !border-red-300">Scale() + ComputeHeader() <span class="text-red-700 font-semibold">← again, same bounds, same frame</span></span>
+                      <span class="chip">WeatherPresentation.Build(display input)</span>
+                      <span class="chip">header: uppercase + font measure + truncate</span>
+                      <span class="chip">pills: MeasurePillWidths</span>
+                      <span class="chip">11-field key record + cache slot</span>
+                    </div>
+                    <p class="text-[10px] text-red-700 mt-1.5">what goes into the key, how the display input composes, and the per-frame allocation discipline all live here — assertable only through a live widget render.</p>
+                  </div>
+                  <span class="chip">title + unit badge paint</span>
+                  <span class="chip faded">mode dispatch → renderer (5 layout modes)</span>
+                </div>
+              </div>
+            </div>
+            <!-- AFTER -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+              <p class="modlab">After — one build module behind a small interface</p>
+              <div class="border-2 border-slate-400 rounded-md p-2.5 space-y-1.5 bg-white" style="min-height:320px">
+                <p class="text-[11px] font-semibold text-slate-700">Render() — thin: flush · refresh kick · gate-read · paint · dispatch</p>
+                <div class="pl-3 border-l-2 border-slate-200 space-y-1.5">
+                  <div class="deep rounded-md p-2.5 text-white my-1">
+                    <p class="text-[11px] font-semibold text-emerald-300">render-model build module — deep: one build call, whole policy inside</p>
+                    <p class="text-[10px] text-slate-400 mt-0.5">input: a value-snapshot of the display state (consistent view) + the property snapshot + bounds</p>
+                    <div class="pl-2 border-l-2 border-slate-700 space-y-1 mt-1.5">
+                      <span class="chip !border-slate-600 !bg-slate-800 !text-slate-300 faded">Scale + ComputeHeader — <span class="!text-emerald-300">once per frame</span></span>
+                      <span class="chip !border-slate-600 !bg-slate-800 !text-slate-300 faded">Presentation.Build · truncate · pill widths</span>
+                      <span class="chip !border-emerald-600 !bg-slate-800 !text-emerald-300">key record: which inputs rebuild the model</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1.5">house-pattern precedent: FrameTimeSnapshotFactory — “the only place the snapshot gets shaped, extracted so the conversions are directly testable.” The weather cluster is the one deviant.</p>
+                  </div>
+                  <span class="chip">widget keeps: gate read + the cache slot (the _renderModel field)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4 text-sm">
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Problem</p>
+              <p>The display path was deepened all the way down — layout modes, display rules, the key record, the apply policy are all modules with their own tests — except the <em>composition</em>: which state fields and property fields feed the key and the display input, and the header truncation + pill-width derivation, sit in a private widget method with no test surface. The key’s <em>record</em> is pinned component-by-component in WeatherRenderModelTests; the <em>build</em> that populates it is not pinned anywhere at an interface. And the 30&nbsp;FPS tick computes the header geometry twice per frame (Render and the build), because two call sites each reach for the layout module.</p>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Solution</p>
+              <p>A build module — a factory on or beside the render model — that takes a value-snapshot of the display state plus the property snapshot and bounds, and returns the model-or-reuse decision (with the key). The widget’s render tick shrinks to: read the state under the gate, call the build, paint. The geometry is computed once, inside the module, per frame.</p>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <p class="modlab mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+              <li>locality: “which inputs change the formatted strings” is one module’s interface, not a private method’s comments</li>
+              <li>tests: key-field coverage and display-input composition pin at the build’s interface — no live widget, no render tick</li>
+              <li>the per-frame double geometry compute collapses to one site (30&nbsp;FPS path, allocation discipline)</li>
+              <li>leverage: a new display field touches the input shape + the model in one place</li>
+              <li>deletion test: deleting the build method concentrates ~93 lines of policy inside the render tick; as a module it earns the seam</li>
+            </ul>
+          </div>
+
+          <p class="text-sm bg-white border border-amber-300 rounded-lg p-3 text-amber-900"><span class="font-semibold">ADR note.</span> No ADR covers the model build — CONTEXT.md names the render model and its key but the build site is the widget. This is the same deepening shape the cluster already accepted for the fetch path (ADR-0007: “the widget keeps only host concerns”).</p>
+        </article>
+
+        <!-- ========================== CARD 3 ========================== -->
+        <article id="card-twin-state-value" class="space-y-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">3 · One resolution-state value behind both resolved-identity twins</h2>
+            <span class="text-[11px] font-semibold uppercase tracking-widest bg-slate-500 text-white rounded-full px-3 py-1">Speculative</span>
+            <span class="text-[11px] uppercase tracking-widest bg-slate-200 text-slate-600 rounded-full px-3 py-1">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-700 space-x-1 flex flex-wrap gap-1">
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherResolvedIdentity.cs (96 ln)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherFetchControl.cs (288 ln)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherInvalidation.cs (70 ln)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherInvalidationTests.cs (twin-equivalence pin)</span>
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="modlab mb-2">Before — two field sets, one rule, a test holding them together</p>
+              <pre class="mermaid">
+flowchart TB
+  W["WeatherForecastWidget<br/>(_forecastGate)"] --> TA
+  C["WeatherClient"] --> TB
+  I["WeatherInvalidation<br/>kind → drop granularity"] -. "declared once" .-> TA
+  I -. "declared once" .-> TB
+  T["WeatherInvalidationTests<br/>twin-equivalence pin"] -."drives every kind<br/>through BOTH twins".-> TA
+  T -."drives every kind<br/>through BOTH twins".-> TB
+  TA["twin A — WeatherResolvedIdentity<br/>candidates · population · city name<br/>+ pending writeback"]
+  TB["twin B — WeatherFetchControl<br/>lat/lon · name · population · candidates<br/>+ throttle · identity query"]
+  classDef shallowBox fill:#fff,stroke:#94a3b8,stroke-width:2px;
+  class TA,TB shallowBox;
+  linkStyle 2,3,4,5 stroke:#dc2626,stroke-width:2px,stroke-dasharray:4 4;
+              </pre>
+              <p class="text-xs text-slate-600 mt-2">The rule is one (<span class="font-mono">KindForProperty</span>), but <em>what each kind drops</em> is implemented twice: <span class="font-mono">InvalidateCoordinates</span>/<span class="font-mono">InvalidateLocation</span> on each twin, with parallel comments saying the same thing. Parity is held by the pin — a test, not the construction.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="modlab mb-2">After — the shared fields are one value; the twins keep only what differs</p>
+              <pre class="mermaid">
+flowchart TB
+  S["resolution state value<br/>candidates · name · population (+ coordinates) —<br/>built, dropped per kind, and pinned ONCE"]
+  A["twin A — widget state (thin)<br/>resolution value + pending writeback, under the gate"]
+  B["twin B — fetch control (thin delta)<br/>resolution value + throttle + identity query, under its own gate"]
+  A --- S
+  B --- S
+  classDef deep fill:#0f172a,stroke:#0f172a,stroke-width:2px,color:#fff;
+  class S deep;
+              </pre>
+              <p class="text-xs text-slate-600 mt-2">A new resolved field is added to the value <em>and</em> to one drop path, and the pin degrades from “both twins agree” to “the value’s drop is right.” The twins’ genuinely different state (pending writeback vs. throttle + identity query) stays with each. Honest caveat: the duplication cost today is <em>managed</em> — the twins are small, the field set is stable, and the pin is explicit.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4 text-sm">
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Problem</p>
+              <p>The cluster’s mutable identity state is spelled twice with parallel invariants. Every edit kind clears the same fields in two modules through two method pairs whose only enforcer is the twin-equivalence test. When the field set grows (a new resolution output, a new pending piece of state), the maintenance cost lands in two places at once.</p>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
+              <p class="modlab">Solution (if pursued)</p>
+              <p>Extract the shared fields into one resolution-state value whose drop-per-kind is the single implementation the invalidation rule points at. Both twins store it; each keeps its delta. The pin survives as a belt-and-braces check but is no longer load-bearing.</p>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <p class="modlab mb-2">Wins — if the field set keeps growing</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+              <li>locality: a new resolved field exists once, with one drop path</li>
+              <li>the invalidation rule and its state finally live in the same place</li>
+              <li>tests: drop-per-kind pins the value, not two twins</li>
+            </ul>
+            <p class="text-xs text-slate-500 mt-2">Deletion test on today’s twins: deleting either twin re-concentrates its state in the widget or the client — both earn their keep. The candidate is about the <em>shared half</em> of what they hold, so the badge stays Speculative until a concrete field-set growth shows up.</p>
+          </div>
+
+          <p class="text-sm bg-white border border-amber-300 rounded-lg p-3 text-amber-900"><span class="font-semibold">ADR note.</span> The twin design is deliberate (CONTEXT.md names both; ADR-0006’s alternatives explicitly rejected moving the key into the fetch control). This card does not re-design the twins — it shrinks the duplication <em>inside</em> them. Surface it only because the drift cost is real, not because the current state is broken.</p>
+        </article>
+
+        <!-- ========================== CARD 4 ========================== -->
+        <article id="card-throttle-sentinel" class="space-y-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">4 · Stop leaking the raw throttle timestamp across the client→flow seam</h2>
+            <span class="text-[11px] font-semibold uppercase tracking-widest bg-amber-500 text-white rounded-full px-3 py-1">Worth exploring</span>
+            <span class="text-[11px] uppercase tracking-widest bg-slate-200 text-slate-600 rounded-full px-3 py-1">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-700 space-x-1 flex flex-wrap gap-1">
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherClient.cs (LastFetchTimeUtc 70, IsFetchWindowElapsed 118)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherFetchControl.cs (LastFetchTimeUtc 44)</span>
+            <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5">WeatherFetchFlow.cs (CanFetch 90–95)</span>
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="modlab mb-2">Before — the sentinel crosses the seam</p>
+              <pre class="mermaid">
+flowchart LR
+  FC["WeatherFetchControl<br/>(_lastFetchTime)"] --> CL["WeatherClient"]
+  CL -- "LastFetchTimeUtc — raw DateTime" --> F["WeatherFetchFlow.CanFetch"]
+  CL -- "IsFetchWindowElapsed — pass-through" --> F
+  F -- "!= DateTime.MinValue" --> V["static-snapshot veto<br/>(the cadence gate)"]
+  classDef leak fill:#fef2f2,stroke:#dc2626,stroke-width:2px;
+  class F,V leak;
+  linkStyle 1,2 stroke:#dc2626,stroke-width:2px;
+              </pre>
+              <p class="text-xs text-slate-600 mt-2"><span class="font-mono">HasFetched</span> is a client fact: “has a fetch stamp been set.” Today the flow learns it by comparing the client’s raw timestamp against <span class="font-mono">DateTime.MinValue</span> — a storage detail crossing the seam — and reads it through two separate single-door pass-throughs whose only production caller is the flow.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="modlab mb-2">After — one named predicate</p>
+              <pre class="mermaid">
+flowchart LR
+  CL2["WeatherClient"] -- "HasFetched — named predicate" --> F2["WeatherFetchFlow.CanFetch"]
+  F2 -- "window check stays: IsFetchWindowElapsed" --> V2["static-snapshot veto<br/>(the cadence gate)"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#fff;
+  class CL2 deep;
+              </pre>
+              <p class="text-xs text-slate-600 mt-2">One-line change on the client surface (this cluster’s own history — “narrow the WeatherClient interface” — points this direction). The sentinel vanishes from the caller’s vocabulary; the placement of the cadence gate (ADR-0007: it lives in the flow) is untouched — the flow just stops reading implementation facts to implement it.</p>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded-lg p-4">
+            <p class="modlab mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-slate-700 list-disc list-inside">
+              <li>locality: “has the throttle ever been stamped” is one client fact, one spelling</li>
+              <li>the interface the flow must know loses a raw timestamp + a sentinel comparison</li>
+              <li>rides along with card 1 if that seam is re-cut anyway</li>
+            </ul>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================== FRICTION LOG ============================== -->
+      <section id="friction-log" class="space-y-3">
+        <h2 class="font-serif text-2xl">Friction log — noted, not carded</h2>
+        <ul class="bg-white border border-slate-200 rounded-lg p-5 space-y-2 text-sm text-slate-700 list-disc list-inside">
+          <li><span class="font-semibold">The widget test file is a superset harness.</span> <span class="font-mono">WeatherForecastWidgetTests</span> (1.2k lines, 27 tests) re-drives, through a live widget + HTTP stub and a 5-minute throttled client, races that <span class="font-mono">WeatherFetchFlowTests</span> already pins at the flow’s interface (in-flight edits, dropped-and-refetched outcomes, the boot-load race). Card 1’s typed seam is what lets the host wiring itself be pinned as a small adapter test — and lets the pure-duplicate race pins retire in favour of a fidelity pin (the host adapter <em>is</em> the mirror host).</li>
+          <li><span class="font-semibold">The widget’s interface carries a test-forward row.</span> <span class="font-mono">Clock</span>, <span class="font-mono">TestHttpClient</span>, <span class="font-mono">ResolvedCityName</span>, <span class="font-mono">CacheFileName</span>, <span class="font-mono">FetchCompletedCount</span>, plus <span class="font-mono">_snapshotState</span> / <span class="font-mono">_renderModel</span> / <span class="font-mono">_pollCts</span> / <span class="font-mono">CacheLoadOverride</span> — mostly for-wards to the flow, client and identity modules. Accepted cost of reflection-instantiated widgets (no injection); noted because a seam cut (card 2) or a shared test-surface module could shrink it, but the cost today is bounded and deliberate.</li>
+          <li><span class="font-semibold">The inspector search seam is clean.</span> Praise, for scope: <span class="font-mono">IWidgetLocationSearch</span> + <span class="font-mono">EditorKind.LocationSearch</span> keeps the App’s location-search editor generic over any widget; the weather knowledge (geocoding, the commit rule “a pick writes only the label”) sits in the widget, not the App. The one thin spot: the widget’s <span class="font-mono">SearchAsync</span> forward has no covering test (the geocoder’s search is tested through the client).</li>
+          <li><span class="font-semibold">Two client interface members exist only for the flow.</span> <span class="font-mono">LastFetchTimeUtc</span> and <span class="font-mono">IsFetchWindowElapsed</span> are single-door pass-throughs (the widget never sees <span class="font-mono">WeatherFetchControl</span>) — the single-door pattern is deliberate here; card 4 trims only the raw-state one.</li>
+        </ul>
+      </section>
+
+      <!-- ============================== TOP RECOMMENDATION ============================== -->
+      <section id="top-recommendation" class="space-y-3">
+        <h2 class="font-serif text-2xl">Top recommendation</h2>
+        <div class="deep rounded-xl p-6 text-white space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <p class="font-serif text-xl text-emerald-300">Give the fetch flow a typed host seam</p>
+            <span class="text-[11px] font-semibold uppercase tracking-widest bg-emerald-600 text-white rounded-full px-3 py-1">Strong</span>
+            <a href="#card-typed-host-seam" class="text-xs underline underline-offset-4 text-slate-300 hover:text-white">jump to card ↑</a>
+          </div>
+          <p class="text-sm text-slate-300 leading-relaxed">It is the one friction the cluster’s own ADR flagged and left deliberately: ADR-0007’s consequences end with “a discipline, not a type” — and that discipline is now spelled in three places (the flow’s docs, the widget’s constructor, the test host’s wiring) around a 7-positional-arg function that carries the cluster’s subtlest bugs (the capture window, the gate) as unnamed slots. Cutting one named seam with one apply-request value gives the flow a smaller interface <em>and</em> turns the mirror test host from a copied wiring into an adapter — leverage for every future flow change, locality for the gate rule, and a test surface where host fidelity stops needing a render tick. Cards 4 rides along if the seam is re-cut; card 2 is the safe second; card 3 waits for the field set to grow.</p>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-4">
+        Scope: the weather forecast widget cluster after ADR-0006 (2026-08-18) and ADR-0007 (2026-08-18). Line numbers refer to on-disk source at review time (2026-08-18 20:36). Diagrams are schematic; member names in “after” shapes are illustrative, not proposals — those are the grill’s output.
+      </footer>
+    </main>
+  </body>
+</html>

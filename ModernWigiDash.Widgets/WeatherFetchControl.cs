@@ -3,13 +3,17 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The client-side fetch-control state machine: the 5-minute throttle window,
 /// the single-flight claim, and the resolved-identity stamp — the mutable twin
-/// of the widget's pure <see cref="WeatherResolvedIdentity"/>. Every state
-/// transition that carries a rule (compare + stamp under one gate, the
-/// advance-clears-old-coordinates rule, invalidation) is an atomic operation
-/// here; the client keeps only the orchestration. One gate owns the resolved
-/// identity fields (query, coordinates, name, candidates, population) with the
-/// throttle, so no caller can tear the compare from the stamp or leave old
-/// coordinates under a new query.
+/// of the widget's pure <see cref="WeatherResolvedIdentity"/>. The resolved
+/// identity itself is the shared <see cref="WeatherResolutionState"/> value
+/// (candidates, name, population) — the widget's twin holds the same type,
+/// and both route their drops through
+/// <see cref="WeatherInvalidation.Drop"/>. Every state transition that carries
+/// a rule (compare + stamp under one gate, the advance-clears-old-coordinates
+/// rule, invalidation) is an atomic operation here; the client keeps only the
+/// orchestration. One gate owns the resolved identity fields (query,
+/// coordinates, the shared identity value) with the throttle, so no caller
+/// can tear the compare from the stamp or leave old coordinates under a new
+/// query.
 /// </summary>
 internal sealed class WeatherFetchControl
 {
@@ -32,9 +36,11 @@ internal sealed class WeatherFetchControl
     private string _lastLocationQuery = "";
     private double? _lat;
     private double? _lon;
-    private string _resolvedCityName = "";
-    private IReadOnlyList<GeocodeCandidate> _candidates = [];
-    private double _resolvedPopulation;
+    // The shared resolved-identity value — the ONE storage the client twin
+    // keeps for the candidates/name/population. The widget's resolved-identity
+    // twin holds the same value type, and both route their drops through
+    // WeatherInvalidation.Drop, so the two twins can never drift.
+    private WeatherResolutionState _resolution = WeatherResolutionState.Empty;
 
     internal WeatherFetchControl(TimeProvider clock) => Clock = clock;
 
@@ -42,13 +48,23 @@ internal sealed class WeatherFetchControl
     /// rules are exercised through the atomic operations; these exist so
     /// assertions can observe the state after a transition).</summary>
     internal DateTime LastFetchTimeUtc => _lastFetchTime;
+
+    /// <summary>Whether the throttle has ever been stamped — the one client
+    /// fact the cadence gate needs, as a named predicate (callers never
+    /// compare the raw timestamp against <see cref="DateTime.MinValue"/>).</summary>
+    internal bool HasFetched => _lastFetchTime != DateTime.MinValue;
     internal bool IsClaimHeld => _claim != 0;
     internal string LastLocationQuery => _lastLocationQuery;
-    internal IReadOnlyList<GeocodeCandidate> Candidates => _candidates;
-    internal double ResolvedPopulation => _resolvedPopulation;
+
+    /// <summary>The shared resolved-identity value (the same type the
+    /// widget's twin holds) — both twins route their drops through
+    /// <see cref="WeatherInvalidation.Drop"/>.</summary>
+    internal WeatherResolutionState ResolutionState => _resolution;
+    internal IReadOnlyList<GeocodeCandidate> Candidates => _resolution.Candidates;
+    internal double ResolvedPopulation => _resolution.Population;
     internal double? Lat => _lat;
     internal double? Lon => _lon;
-    internal string ResolvedCityName => _resolvedCityName;
+    internal string ResolvedCityName => _resolution.ResolvedName;
 
     /// <summary>Sync throttle pre-check for the render tick: true when the
     /// throttle window has elapsed since the last attempt. The first attempt
@@ -118,8 +134,8 @@ internal sealed class WeatherFetchControl
                 return false;
             }
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            candidates = _candidates;
-            population = _resolvedPopulation;
+            candidates = _resolution.Candidates;
+            population = _resolution.Population;
             return true;
         }
     }
@@ -152,9 +168,12 @@ internal sealed class WeatherFetchControl
             {
                 _lat = null;
                 _lon = null;
-                _resolvedCityName = "";
+                _resolution = _resolution.With(resolvedName: "", population: 0);
             }
-            _resolvedPopulation = 0;
+            else
+            {
+                _resolution = _resolution.With(population: 0);
+            }
         }
     }
 
@@ -163,7 +182,7 @@ internal sealed class WeatherFetchControl
     /// last list untouched).</summary>
     internal void SetCandidates(IReadOnlyList<GeocodeCandidate> candidates)
     {
-        lock (_gate) { _candidates = candidates; }
+        lock (_gate) { _resolution = _resolution.With(candidates: candidates); }
     }
 
     /// <summary>Applies a winning resolution: the exact coordinates, the
@@ -174,8 +193,7 @@ internal sealed class WeatherFetchControl
         {
             _lat = lat;
             _lon = lon;
-            _resolvedCityName = name;
-            _resolvedPopulation = population;
+            _resolution = _resolution.With(resolvedName: name, population: population);
         }
     }
 
@@ -188,7 +206,7 @@ internal sealed class WeatherFetchControl
         {
             _lat = null;
             _lon = null;
-            _resolvedCityName = "";
+            _resolution = _resolution.With(resolvedName: "");
         }
     }
 
@@ -214,20 +232,20 @@ internal sealed class WeatherFetchControl
             }
             if (!string.IsNullOrWhiteSpace(cachedName))
             {
-                _resolvedCityName = cachedName;
+                appliedName = cachedName;
             }
             else if (lat is double cachedLat && lon is double cachedLon)
             {
-                _resolvedCityName = WeatherLocationResolver.FormatCoordinates(cachedLat, cachedLon);
+                appliedName = WeatherLocationResolver.FormatCoordinates(cachedLat, cachedLon);
             }
             else
             {
-                _resolvedCityName = UnknownLocationLabel;
+                appliedName = UnknownLocationLabel;
             }
+            _resolution = _resolution.With(resolvedName: appliedName);
             _lat = lat;
             _lon = lon;
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            appliedName = _resolvedCityName;
             return true;
         }
     }
@@ -252,8 +270,7 @@ internal sealed class WeatherFetchControl
         {
             _lat = null;
             _lon = null;
-            _resolvedCityName = "";
-            _resolvedPopulation = 0;
+            _resolution = WeatherInvalidation.Drop(WeatherInvalidationKind.Coordinates, _resolution);
             _lastFetchTime = DateTime.MinValue;
             _lastLocationQuery = "";
         }
@@ -266,8 +283,7 @@ internal sealed class WeatherFetchControl
     {
         lock (_gate)
         {
-            _candidates = [];
-            _resolvedPopulation = 0;
+            _resolution = _resolution.With(population: 0, candidates: []);
         }
     }
 }

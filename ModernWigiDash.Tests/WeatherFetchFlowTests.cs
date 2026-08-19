@@ -70,32 +70,9 @@ public class WeatherFetchFlowTests
 
     private FlowHost NewHost(StubHttpHandler stub, FakeTimeProvider? clock = null, Func<WeatherLocation>? locationSeam = null)
     {
-        var host = new FlowHost();
+        var host = new FlowHost { LocationSeam = locationSeam };
         host.Client = new WeatherClient(NewCacheDir(), "weather_flow.json", timeProvider: clock, http: new HttpClient(stub));
-        host.Flow = new WeatherFetchFlow(
-            client: host.Client,
-            identity: host.Identity,
-            currentLocation: locationSeam ?? (() => host.Location),
-            applySnapshot: (snapshot, expectedVersion, identityGuard, candidates, population, resolvedName) =>
-                host.ApplySnapshot(snapshot, expectedVersion, identityGuard, candidates, population, resolvedName),
-            dataVersion: () =>
-            {
-                lock (host.Gate) { return host.State.DataVersion; }
-            },
-            isStaticSnapshot: () => host.StaticSnapshotFlag,
-            runToken: () => host.RunCts?.Token ?? CancellationToken.None,
-            setPendingWritebackIfCurrent: (identityGuard, value) =>
-            {
-                lock (host.Gate)
-                {
-                    if (identityGuard())
-                    {
-                        host.Identity.SetPendingWriteback(value);
-                    }
-                }
-            },
-            requestRender: () => host.RenderRequests++,
-            requestInspectorRefresh: () => host.InspectorRefreshes++);
+        host.Flow = new WeatherFetchFlow(host.Client, host.Identity, host);
         return host;
     }
 
@@ -401,17 +378,26 @@ public class WeatherFetchFlowTests
     }
 
     /// <summary>
-    /// The test host: mirrors the widget's real seam wiring around the flow —
-    /// the same apply policy under a gate, the same identity module, the same
-    /// version-read and write-back discipline — so the flow sees exactly what
-    /// the production host hands it.
+    /// The test host: an adapter over the flow's host seam mirroring the
+    /// widget's real seam wiring — the same apply policy under a gate, the
+    /// same identity module, the same version-read and write-back discipline
+    /// — so the flow sees exactly what the production host hands it. The
+    /// mirror's fidelity is this adapter's discipline, not a copy of the
+    /// wiring.
     /// </summary>
-    private sealed class FlowHost
+    private sealed class FlowHost : IWeatherFetchHost
     {
         public readonly Lock Gate = new();
         public WeatherSnapshotState State = new();
         public WeatherResolvedIdentity Identity = new("Default Location");
         public WeatherLocation Location = NycCoords;
+
+        /// <summary>Optional override of the location read (the outcome-key
+        /// mismatch test): when null, the read returns <see cref="Location"/>
+        /// — one read per flow step, mirroring the widget's property
+        /// coercion.</summary>
+        public Func<WeatherLocation>? LocationSeam;
+
         public bool StaticSnapshotFlag { get; set; }
         public CancellationTokenSource? RunCts { get; set; }
         public int RenderRequests { get; set; }
@@ -419,10 +405,46 @@ public class WeatherFetchFlowTests
         public WeatherClient Client = null!;
         public WeatherFetchFlow Flow = null!;
 
+        // -- IWeatherFetchHost: the seam the flow carries its host concerns across --
+
+        /// <summary>The location read: the seam override when set, else the
+        /// <see cref="Location"/> field.</summary>
+        WeatherLocation IWeatherFetchHost.CurrentLocation => LocationSeam?.Invoke() ?? Location;
+
+        /// <summary>The version read under the gate — mirrors the widget's
+        /// gated read.</summary>
+        int IWeatherFetchHost.DataVersion
+        {
+            get { lock (Gate) { return State.DataVersion; } }
+        }
+
+        bool IWeatherFetchHost.IsStaticSnapshot => StaticSnapshotFlag;
+        CancellationToken IWeatherFetchHost.RunToken => RunCts?.Token ?? CancellationToken.None;
+        void IWeatherFetchHost.RequestRender() => RenderRequests++;
+        void IWeatherFetchHost.RequestInspectorRefresh() => InspectorRefreshes++;
+
+        /// <summary>The gated apply — mirrors the widget's TryApply seam.</summary>
+        bool IWeatherFetchHost.TryApply(WeatherApplyRequest request)
+            => ApplySnapshot(request.Snapshot, request.ExpectedVersion, request.IdentityGuard,
+                request.Candidates, request.Population, request.ResolvedName);
+
+        /// <summary>The gated write-back queue: check + set under ONE lock —
+        /// one critical section, mirroring the widget's seam.</summary>
+        void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
+        {
+            lock (Gate)
+            {
+                if (identityGuard())
+                {
+                    Identity.SetPendingWriteback(value);
+                }
+            }
+        }
+
         /// <summary>
         /// The gated apply: the policy's version-then-identity guard first,
         /// then the merge and the identity copies under ONE lock — the exact
-        /// discipline the widget's ApplySnapshot spells (so the flow's
+        /// discipline the widget's TryApply seam spells (so the flow's
         /// guarantees are tested against the real gate shape).
         /// </summary>
         public bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,

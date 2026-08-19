@@ -7,7 +7,7 @@ using ModernWigiDash.Core.Rendering;
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
-public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider
+public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider, IWeatherFetchHost
 {
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
@@ -116,6 +116,53 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     public EditorKind? GetEditorKind(PropertyInfo property)
         => string.Equals(property.Name, nameof(Location), StringComparison.Ordinal) ? EditorKind.LocationSearch : null;
 
+    // -- IWeatherFetchHost (the flow's host seam) ------------------------------
+    // The flow owns the fetch sequence; these members carry the host
+    // concerns across the seam. The gate discipline is spelled ONCE here —
+    // the apply and the version read run under _forecastGate, and the
+    // write-back guard's check + set is one critical section. Explicit
+    // implementations: the seam is for the flow, not for callers.
+
+    /// <summary>The flow's location read: the property → identity-input
+    /// coercion (blank → null, trim of the optional fields).</summary>
+    WeatherLocation IWeatherFetchHost.CurrentLocation => BuildLocation();
+
+    /// <summary>The display state's data version — read under the gate,
+    /// since the fetch thread writes it under the same gate.</summary>
+    int IWeatherFetchHost.DataVersion
+    {
+        get { lock (_forecastGate) { return _snapshotState.DataVersion; } }
+    }
+
+    /// <summary>The Static Snapshot property — the cadence gate's veto
+    /// input.</summary>
+    bool IWeatherFetchHost.IsStaticSnapshot => StaticSnapshot;
+
+    /// <summary>The fetch cancellation token (teardown).</summary>
+    CancellationToken IWeatherFetchHost.RunToken => _pollCts?.Token ?? CancellationToken.None;
+
+    /// <summary>Queues a resolved-label write-back for the UI thread, only
+    /// when the identity guard still passes — the check + set under the gate
+    /// is one critical section (the edit-side clears take the same gate, so
+    /// an edit either erases the queued value or is seen by the guard).</summary>
+    void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
+    {
+        lock (_forecastGate)
+        {
+            if (identityGuard())
+            {
+                _identity.SetPendingWriteback(value);
+            }
+        }
+    }
+
+    /// <summary>Requests a canvas repaint.</summary>
+    void IWeatherFetchHost.RequestRender() => Context?.RequestRender();
+
+    /// <summary>Requests an inspector refresh (the Location Match candidates
+    /// changed).</summary>
+    void IWeatherFetchHost.RequestInspectorRefresh() => Context?.RequestInspectorRefresh();
+
     public WeatherForecastWidget()
     {
         // The cache name is resolved lazily from the CURRENT InstanceId, not
@@ -126,37 +173,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // already regenerates unsafe ids, but the name builder also refuses
         // one here so a cache file can never escape the cache directory.
         _client = new WeatherClient(CacheDir, () => $"weather_{SafeCacheToken(InstanceId)}.json", logError: (message, exception) => Context?.LogError(message, exception));
-        // The fetch flow is the deep module behind the host seams: the client
-        // (fetch/load legs, throttle truth, the discarded-load rollback) and
-        // the identity module are the cluster's real modules; these seams
-        // carry the host concerns across its interface — the property
-        // coercion, the gate around the display state (the apply and the
-        // version read run under _forecastGate), the UI-thread write-back
-        // flush's gate, and the context requests.
-        _flow = new WeatherFetchFlow(
-            _client,
-            _identity,
-            currentLocation: BuildLocation,
-            applySnapshot: (snapshot, expectedVersion, identityGuard, candidates, population, resolvedName) =>
-                ApplySnapshot(snapshot, expectedVersion, identityGuard, candidates, population, resolvedName),
-            dataVersion: () =>
-            {
-                lock (_forecastGate) { return _snapshotState.DataVersion; }
-            },
-            isStaticSnapshot: () => StaticSnapshot,
-            runToken: () => _pollCts?.Token ?? CancellationToken.None,
-            setPendingWritebackIfCurrent: (identityGuard, value) =>
-            {
-                lock (_forecastGate)
-                {
-                    if (identityGuard())
-                    {
-                        _identity.SetPendingWriteback(value);
-                    }
-                }
-            },
-            requestRender: () => Context?.RequestRender(),
-            requestInspectorRefresh: () => Context?.RequestInspectorRefresh());
+        // The fetch flow owns the sequence; the host concerns travel across
+        // the IWeatherFetchHost seam. This widget IS the production host
+        // adapter: the gate around the display state (the apply and the
+        // version read run under _forecastGate) and the write-back guard are
+        // typed members of this class (the IWeatherFetchHost section below),
+        // and the flow's tests carry an adapter over the same seam.
+        _flow = new WeatherFetchFlow(_client, _identity, this);
     }
 
     /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
@@ -357,9 +380,21 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         _lastBounds = bounds;
 
-        // Snapshot the forecast lists so the fetch thread's swaps never mutate
-        // a list mid-render — but only when the source actually changed (the
-        // snapshot copies are skipped on the frames in between).
+        // Per-frame geometry: the scale and the header layout are computed
+        // ONCE here and shared by the draw path and the render-model build —
+        // one site reaches the layout module per frame.
+        var (sx, sy, s) = WeatherLayout.Scale(bounds);
+        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
+        // The badge draws the temperature unit; the build module derives the pair
+        // from the key's UnitSystem (one rule, not two).
+        var (tempUnit, _) = WeatherPresentation.ParseUnitSystem(UnitSystem);
+
+        // One consistent view under the gate: the forecast-list copies refresh
+        // only when the source actually changed (the snapshot copies are
+        // skipped on the frames in between), the state scalars and the
+        // resolved city are read from that ONE value, and the whole input is
+        // handed to the build module.
+        WeatherRenderModelInputs buildInputs;
         lock (_forecastGate)
         {
             if (_renderedForecastVersion != _snapshotState.ForecastVersion)
@@ -368,15 +403,24 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                 _dailyForecastSnapshot = _snapshotState.DailyForecasts.ToArray();
                 _hourlyForecastSnapshot = _snapshotState.HourlyForecasts.ToArray();
             }
+            var state = _snapshotState;
+            buildInputs = new WeatherRenderModelInputs(
+                new WeatherRenderModelKey(
+                    state.DataVersion, bounds,
+                    LayoutMode, UnitSystem, CustomLabel, _identity.CityName,
+                    ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast),
+                state.WeatherCode, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
+                state.WindSpeedKmH, state.HighTempC, state.LowTempC,
+                _dailyForecastSnapshot, _hourlyForecastSnapshot,
+                header, s);
         }
 
-        var (sx, sy, s) = WeatherLayout.Scale(bounds);
-        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
-        var (tempUnit, speedUnit) = WeatherPresentation.ParseUnitSystem(UnitSystem);
-
         // The render model owns every formatted string; the draw paths only
-        // measure and paint (the model rebuilds when its key components change).
-        var model = EnsureRenderModel(bounds, tempUnit, speedUnit);
+        // measure and paint. The build module is the ONE place the model is
+        // composed — on a key hit it returns the cached model and the
+        // per-frame path allocates nothing.
+        var model = WeatherRenderModelFactory.Resolve(_renderModel, buildInputs);
+        if (!ReferenceEquals(_renderModel, model)) _renderModel = model;
 
         // Prominent Location Name Header
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
@@ -483,8 +527,8 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>
     /// The property → identity-input coercion (blank → null, trim of the
     /// optional fields): the host owns its properties, so this shaping lives
-    /// here and is passed to the flow as the <c>currentLocation</c> seam. One
-    /// call site per fetch step — the flow never re-derives the shape.
+    /// here and crosses the seam through <c>IWeatherFetchHost.CurrentLocation</c>.
+    /// One read per fetch step — the flow never re-derives the shape.
     /// </summary>
     private WeatherLocation BuildLocation()
         => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim())
@@ -493,32 +537,32 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         };
 
     /// <summary>
-    /// Applies a fetched/cached snapshot to the display state, keeping the
-    /// "response omitted this section — keep the previous value" semantics.
-    /// The guard (version-then-identity) and the merge (null-keeps +
-    /// per-list version bump) live in <see cref="WeatherSnapshotApplyPolicy"/>;
-    /// this method adds only the gate discipline: under <see cref="_forecastGate"/>
-    /// it asks the guard, swaps in the merge's new state, and applies the
+    /// The flow's apply seam (the host adapter's gate discipline): applies a
+    /// fetched/cached snapshot to the display state, keeping the "response
+    /// omitted this section — keep the previous value" semantics. The guard
+    /// (version-then-identity) and the merge (null-keeps + per-list version
+    /// bump) live in <see cref="WeatherSnapshotApplyPolicy"/>; this member
+    /// adds only the gate discipline: under <see cref="_forecastGate"/> it
+    /// asks the guard, swaps in the merge's new state, and applies the
     /// resolved-identity copies under the SAME lock — an edit landing between
     /// the guard and the copies can no longer be resurrected over by the old
     /// identity's state (the edit cleared the copies under the same lock; the
     /// guarded assignment re-populates them only when the identity still
     /// matches — an edit that commits between the guard and the copies still
     /// clears them after the assignment lands, because the edit's clear takes
-    /// the same gate). <paramref name="population"/> follows the client's
-    /// no-data sentinel: when provided, 0 clears the resolved population (the
-    /// fetch reported none), a non-zero value replaces it — "no data" and
-    /// "keep previous" are distinguishable by null vs. provided. Returns
-    /// whether the snapshot was applied.
+    /// the same gate). The request's population field follows the client's
+    /// no-data sentinel: 0 clears the resolved population (the fetch reported
+    /// none), non-zero replaces — "no data" and "keep previous" are
+    /// distinguishable by null vs. provided. Returns whether the snapshot was
+    /// applied.
     /// </summary>
-    private bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,
-        IReadOnlyList<GeocodeCandidate>? candidates = null, double? population = null, string? resolvedName = null)
+    bool IWeatherFetchHost.TryApply(WeatherApplyRequest request)
     {
         lock (_forecastGate)
         {
-            if (!WeatherSnapshotApplyPolicy.GuardsPass(expectedVersion, _snapshotState.DataVersion, identityGuard)) return false;
-            _snapshotState = WeatherSnapshotApplyPolicy.Merge(snapshot, _snapshotState);
-            _identity.Apply(candidates, population, resolvedName);
+            if (!WeatherSnapshotApplyPolicy.GuardsPass(request.ExpectedVersion, _snapshotState.DataVersion, request.IdentityGuard)) return false;
+            _snapshotState = WeatherSnapshotApplyPolicy.Merge(request.Snapshot, _snapshotState);
+            _identity.Apply(request.Candidates, request.Population, request.ResolvedName);
             return true;
         }
     }
@@ -542,106 +586,5 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// </summary>
     internal Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
         => _flow.RunBootLoadAsync(cancellationToken);
-
-    /// <summary>
-    /// Returns the cached render model for the current frame, rebuilding it
-    /// when (data version, bounds, property snapshot) no longer matches. The
-    /// pill widths are measured here with the same pill font size the draw
-    /// path derives from the bounds, so the per-frame path allocates no
-    /// strings and no arrays for the static scene.
-    /// </summary>
-    private WeatherRenderModel EnsureRenderModel(SKRect bounds, string tempUnit, string speedUnit)
-    {
-        // One snapshot under the gate: the version and the seven scalars are
-        // written by the fetch thread; the model must build from one
-        // consistent view (a torn version read would freeze the cache key).
-        double currentTempC, feelsLikeC, humidity, windSpeedKmH, highTempC, lowTempC;
-        int weatherCode, dataVersion;
-        IReadOnlyList<DailyForecastItem> daily;
-        IReadOnlyList<HourlyForecastItem> hourly;
-        lock (_forecastGate)
-        {
-            dataVersion = _snapshotState.DataVersion;
-            currentTempC = _snapshotState.CurrentTempC;
-            feelsLikeC = _snapshotState.FeelsLikeC;
-            humidity = _snapshotState.Humidity;
-            windSpeedKmH = _snapshotState.WindSpeedKmH;
-            highTempC = _snapshotState.HighTempC;
-            lowTempC = _snapshotState.LowTempC;
-            weatherCode = _snapshotState.WeatherCode;
-            daily = _dailyForecastSnapshot;
-            hourly = _hourlyForecastSnapshot;
-        }
-
-        // One cache identity per build: the key record holds everything that
-        // can change the formatted strings (data version, bounds, property
-        // snapshot), so the hit test is a single record comparison — and the
-        // key is a value snapshot (an un-rendered property change cannot
-        // rewrite a cached model's key).
-        var key = new WeatherRenderModelKey(
-            dataVersion, bounds,
-            LayoutMode, UnitSystem, CustomLabel, _identity.CityName,
-            ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast);
-
-        if (_renderModel is { } cached && cached.Key == key)
-        {
-            return cached;
-        }
-
-        var (_, sy, s) = WeatherLayout.Scale(bounds);
-        var header = WeatherLayout.ComputeHeader(bounds, s, sy);
-
-        // The display facts (hero temp, pills, daily/hourly strings) compose
-        // in WeatherPresentation; the model caches them alongside the data
-        // slices the draw paths need.
-        var display = WeatherPresentation.Build(new WeatherDisplayInput(
-            currentTempC,
-            new WeatherMetricsInput(
-                ShowFeelsLike, feelsLikeC,
-                ShowHumidity, humidity,
-                ShowWind, windSpeedKmH,
-                ShowHighLow, highTempC, lowTempC,
-                tempUnit, speedUnit),
-            daily,
-            hourly));
-
-        var model = new WeatherRenderModel
-        {
-            Key = key,
-            DataVersion = dataVersion,
-            Bounds = bounds,
-            LayoutMode = LayoutMode,
-            UnitSystem = UnitSystem,
-            CustomLabel = CustomLabel,
-            ResolvedCity = _identity.CityName,
-            ShowFeelsLike = ShowFeelsLike,
-            ShowHumidity = ShowHumidity,
-            ShowWind = ShowWind,
-            ShowHighLow = ShowHighLow,
-            ShowForecast = ShowForecast,
-            WeatherCode = weatherCode,
-            Daily = daily.ToArray(),
-            Hourly = hourly.ToArray(),
-            Display = display,
-        };
-
-        // Auto-truncated header: the city name uppercased once per model, then
-        // truncated to the same max width the draw path uses.
-        string cityRaw = string.IsNullOrWhiteSpace(CustomLabel) ? _identity.CityName : CustomLabel;
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
-        float maxTitleW = WeatherLayout.TitleMaxWidth(bounds.Width, header.Pad, header.BadgeRect.Width);
-        model.TruncatedHeader = TextRenderHelper.TruncateText(cityRaw.ToUpperInvariant(), titleFont, maxTitleW);
-
-        // Pill widths: measured with the pill font the draw path derives from
-        // the same bounds — via the renderer's shared helper, so the model's
-        // cached widths and the draw path's shrink re-measure are ONE spelling.
-        model.MetricWidths = WeatherWidgetRenderer.MeasurePillWidths(
-            model.Display.Metrics,
-            WeatherLayout.PillFontSize(s),
-            WeatherLayout.PillPadX(s));
-
-        _renderModel = model;
-        return model;
-    }
 }
 

@@ -848,7 +848,7 @@ public class WeatherForecastWidgetTests
         await widget.FetchLiveWeatherAsync();
         await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Tokyo, Tokyo Prefecture, Japan", TimeSpan.FromSeconds(5));
         Assert.IsTrue(stub.Calls > callsAfterRollback,
-            "the rollback must reset the throttle (LastFetchTimeUtc = MinValue) so the new identity fetches immediately");
+            "the rollback must reset the throttle (HasFetched back to false) so the new identity fetches immediately");
         Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("name=Tokyo", StringComparison.OrdinalIgnoreCase)),
             "the follow-up fetch must resolve Tokyo fresh after the client rollback");
     }
