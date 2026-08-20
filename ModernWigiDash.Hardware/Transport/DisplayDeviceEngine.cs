@@ -113,10 +113,10 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// or background loops. The touch poll loop is created but not started —
     /// tests drive <see cref="TouchPollTick"/> directly (or call
     /// <see cref="Start"/> to exercise the loop wiring). The initial state is
-    /// seeded by the caller through <paramref name="initialState"/> — the seam
-    /// no longer asks the transport for its connection truth (the engine's
-    /// ConnectionState is the one truth; the transport's own connection state
-    /// is only meaningful after a Connect the engine observed). The transport
+    /// seeded by the caller through <paramref name="initialState"/> — the
+    /// engine's ConnectionState is the one truth; the transport's own
+    /// connection state is only meaningful after a Connect the engine
+    /// observed. The transport
     /// factory returns this same transport, so a Start() that reaches
     /// TryConnect reconnects through it instead of NRE-ing.
     /// </summary>

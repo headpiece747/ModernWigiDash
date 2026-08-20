@@ -349,14 +349,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// The ONE post-mutation contract: whatever shape a mutation takes, its
     /// post-conditions run exactly once here, so a call site never re-derives
     /// "what happens after a mutation" (refresh shape, dirty mark, structural
-    /// flag) per site — the doubled and missing marks the per-site variants
-    /// used to produce are unrepresentable. The shape selects the refresh bundle:
+    /// flag) per site — doubled or missing marks are unrepresentable. The
+    /// shape selects the refresh bundle:
     /// <see cref="ProfileMutationShape.Structural"/> re-syncs the tab strip and
     /// the page-background picker (the page set changed);
     /// <see cref="ProfileMutationShape.RawWrite"/> (an import) additionally
-    /// re-syncs the snap-to-grid toggle from the imported page — the import's
-    /// old direct control write is absorbed as this ordinary control resync,
-    /// whose handler routes through this same contract;
+    /// re-syncs the snap-to-grid toggle from the imported page, whose handler
+    /// routes through this same contract;
     /// <see cref="ProfileMutationShape.Transform"/> re-syncs nothing structural
     /// (in-page state only). Every shape then re-applies the selection (the
     /// caller always passes the post-mutation selection; in-page shapes pass the
@@ -507,9 +506,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     /// <summary>
     /// One forward only: the inspector's write-back seam fires onProfileChanged
-    /// (exactly once per landed write-back), and that callback IS the dirty mark
-    /// on the inspector-driven path — a mark here would double it (the old
-    /// doubled/spurious marks the per-site handlers used to produce).
+    /// (exactly once per landed write-back), and that callback IS the dirty
+    /// mark on the inspector-driven path — a mark here would double it.
     /// </summary>
     private void Transform_Changed(object sender, TextChangedEventArgs e)
     {

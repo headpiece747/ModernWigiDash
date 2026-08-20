@@ -34,7 +34,6 @@ public partial class App : Application
         FileLog.LogPath = Path.Combine(appDataDir, "display_device.log");
         CrashLog.LogPath = Path.Combine(appDataDir, "crash.log");
 
-        // Log startup so we know the app actually launched
         try
         {
             FileLog.Write($"[App] === Application starting === BaseDir={AppDomain.CurrentDomain.BaseDirectory}");
@@ -47,7 +46,7 @@ public partial class App : Application
 
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
-            LogCrash(e.ExceptionObject as Exception);
+            CrashLog.Append(e.ExceptionObject as Exception);
         };
 
         DispatcherUnhandledException += (s, e) =>
@@ -57,7 +56,7 @@ public partial class App : Application
             // it lands) or any OCE raised during the close/teardown sequence.
             // Everything else propagates so a real crash is visible.
             bool benign = CrashSuppression.ShouldSuppress(e.Exception, IsClosing);
-            LogCrash(e.Exception, handled: benign);
+            CrashLog.Append(e.Exception, handled: benign);
             e.Handled = benign;
         };
     }
@@ -68,7 +67,4 @@ public partial class App : Application
         ThemeManager.ApplyToApplication();
         base.OnStartup(e);
     }
-
-    private static void LogCrash(Exception? ex, bool handled = false)
-        => CrashLog.Append(ex, handled);
 }

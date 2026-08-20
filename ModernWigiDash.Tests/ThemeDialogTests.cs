@@ -17,7 +17,7 @@ public class ThemeDialogTests
         => Host.Run<object?>(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
@@ -31,7 +31,7 @@ public class ThemeDialogTests
         => Host.Run<object?>(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
@@ -46,7 +46,7 @@ public class ThemeDialogTests
         => Host.Run<object?>(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
@@ -63,7 +63,7 @@ public class ThemeDialogTests
         => Host.Run<object?>(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree

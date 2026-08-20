@@ -2,8 +2,7 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Pure display rules for the ticker widget: the price-decimal tier rule, the
-/// formatted price, and the display-label fallback order — previously inline
-/// in the widget.
+/// formatted price, and the display-label fallback order.
 /// </summary>
 public static class TickerPresentation
 {

@@ -6,9 +6,8 @@ namespace ModernWigiDash.Sdk;
 /// <see cref="Sent"/> reached the device, <see cref="Refused"/> was declined
 /// before the wire (no live connection, or the frame fails the transport's
 /// size contract), and <see cref="Failed"/> was attempted but the framing or
-/// bulk transfer failed. The old bool seam folded a device refusal and a
-/// broken pipe into one value, so the delivery's drop accounting could not
-/// tell them apart.
+/// bulk transfer failed. The refusal/failed split exists so the delivery's
+/// drop accounting can tell a refusal from a broken pipe.
 /// </summary>
 public enum FrameSendResult
 {

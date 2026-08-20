@@ -309,8 +309,6 @@ public class MediaSessionMonitorTests
         Assert.IsTrue(update.ArtKey.EndsWith(":track2"), $"artKey was '{update.ArtKey}'");
     }
 
-    // ── Sanitize (moved from the residual-coverage grab-bag) ──
-
     [TestMethod]
     public void MediaSessionMonitor_Sanitize_StripsControlCharsAndCaps()
     {

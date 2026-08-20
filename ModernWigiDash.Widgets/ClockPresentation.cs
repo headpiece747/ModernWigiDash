@@ -4,8 +4,7 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Pure display rules for the clock: the AM/PM suffix, the date string, the
-/// 12H/24H time format, and the analog hand angles — previously formatted or
-/// computed inline in the render path.
+/// 12H/24H time format, and the analog hand angles.
 /// </summary>
 public static class ClockPresentation
 {

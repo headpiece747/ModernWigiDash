@@ -182,11 +182,7 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[1].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        // Wait for the APPLIED state, not the client's fetch-completion count:
-        // the count increments inside the client's finally BEFORE the widget's
-        // continuation applies the snapshot, so a count-based wait can race
-        // the apply on a busy scheduler.
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Missouri, United States", TimeSpan.FromSeconds(5));
+        await TestWait.WaitForApplied(() => widget.ResolvedCityName == "Springfield, Missouri, United States");
         Assert.AreEqual("Springfield, Missouri, United States", widget.ResolvedCityName);
 
         widget.Location = "Berlin";
@@ -212,12 +208,8 @@ public class WeatherForecastWidgetTests
         var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub), Location = "Springfield, MA" };
 
         await widget.FetchLiveWeatherAsync(force: true); // geocode(1) + forecast(2)
-        // Deterministic write-back flush: FetchCompletedCount increments in
-        // the client before the widget's continuation sets the pending
-        // write-back, so waiting on the count alone lets fetch #1's
-        // continuation land late and clobber fetch #2's — wait for the
-        // applied state, then flush.
-        await TestWait.WaitUntilAsync(() => widget.ResolvedCityName == "Springfield, Massachusetts, United States", TimeSpan.FromSeconds(5));
+        // Wait for the applied state, then flush deterministically.
+        await TestWait.WaitForApplied(() => widget.ResolvedCityName == "Springfield, Massachusetts, United States");
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Springfield, Massachusetts, United States", widget.Location);
 
@@ -227,17 +219,12 @@ public class WeatherForecastWidgetTests
         string picked = widget.GetPropertyOptions(nameof(WeatherForecastWidget.LocationMatch))[1].Value;
         widget.LocationMatch = picked;
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.LocationMatch), picked);
-        // Wait for the APPLIED state - the pick's label landed in Location via
-        // the write-back - not the client's fetch-completion count: the count
-        // increments inside the client's finally BEFORE the widget's
-        // continuation sets the pending write-back, so a count-based wait can
-        // flush early and leave Location unchanged. The flush inside the
-        // predicate is idempotent and re-checks each poll until it lands.
-        await TestWait.WaitUntilAsync(() =>
+        // The pick's label lands in Location via the write-back.
+        await TestWait.WaitForApplied(() =>
         {
             widget.ApplyPendingLocationWriteback();
             return string.Equals(widget.Location, "Springfield, Missouri, United States", StringComparison.Ordinal);
-        }, TimeSpan.FromSeconds(5));
+        });
         Assert.AreEqual("Springfield, Missouri, United States", widget.ResolvedCityName);
         Assert.AreEqual("Springfield, Missouri, United States", widget.Location,
             "the write-back must leave the field showing the picked place");
@@ -434,11 +421,8 @@ public class WeatherForecastWidgetTests
 
         widget.Render(surface.Canvas, bounds);
         // The render's own kick may have fired a fetch (the stub completes
-        // synchronously) - wait for it to APPLY (the daily rows land in the
-        // widget's lists) so `before` is stable. The client's completion
-        // count increments before the widget's continuation applies the
-        // snapshot, so a count-based wait can race the apply.
-        await TestWait.WaitUntilAsync(() => widget._snapshotState.DailyForecasts.Count >= 2, TimeSpan.FromSeconds(5));
+        // synchronously) - wait for it to APPLY so `before` is stable.
+        await TestWait.WaitForApplied(() => widget._snapshotState.DailyForecasts.Count >= 2);
         var before = widget._renderModel;
         Assert.IsNotNull(before);
 
@@ -550,16 +534,11 @@ public class WeatherForecastWidgetTests
         profile.ActivePage.Widgets.Add(placed);
         var context = new PersistingContext(profile);
         widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
-        // Poll the write-back application until the label lands: the
-        // fetch-completion count increments inside the client's finally BEFORE
-        // the widget's continuation sets the pending write-back, so a
-        // count-based wait can race the apply on a busy scheduler. The apply
-        // is idempotent — a no-op while the pending field is not yet set.
-        await TestWait.WaitUntilAsync(() =>
+        await TestWait.WaitForApplied(() =>
         {
             widget.ApplyPendingLocationWriteback();
             return string.Equals(widget.Location, "Victoria, British Columbia, Canada", StringComparison.Ordinal);
-        }, TimeSpan.FromSeconds(5));
+        });
 
         Assert.AreEqual("Victoria, British Columbia, Canada", widget.Location,
             "a successful resolution must write the resolved label back into Location");
@@ -731,17 +710,13 @@ public class WeatherForecastWidgetTests
         // and applies nothing, so the flush below is the only writer.
         widget.Location = "Tokyo";
         widget.OnPropertyChanged(nameof(WeatherForecastWidget.Location), "Tokyo");
-        // Wait for the APPLIED state - the edit still stands after the flush -
-        // not the client's completion count: the count increments inside the
-        // client's finally BEFORE the widget's continuation runs, so a
-        // count-based wait can flush while the re-fetch is still settling.
-        // The flush is idempotent; the edit already cleared the pending
-        // write-back, so the field can only stay "Tokyo".
-        await TestWait.WaitUntilAsync(() =>
+        // Wait for the re-fetch to settle: the edit already cleared the
+        // pending write-back, so the field can only stay "Tokyo".
+        await TestWait.WaitForApplied(() =>
         {
             widget.ApplyPendingLocationWriteback();
             return string.Equals(widget.Location, "Tokyo", StringComparison.Ordinal);
-        }, TimeSpan.FromSeconds(5));
+        });
 
         widget.ApplyPendingLocationWriteback();
         Assert.AreEqual("Tokyo", widget.Location,
@@ -1223,7 +1198,7 @@ public class WeatherForecastWidgetTests
         }
     }
 
-    // --- FormatTimeAgo tests (Fix #4) ---
+    // --- FormatTimeAgo tests ---
 
     [TestMethod]
     public void FormatTimeAgo_SubMinute_ReturnsUpdatedJustNow()

@@ -112,9 +112,9 @@ internal sealed class WeatherGeocoder
     internal static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
     /// <summary>Per-instance test seam: overrides the per-leg deadline (see
     /// <see cref="ReadBoundedAsync"/>) so the timeout path is drivable without
-    /// waiting the real 30 s. Injected at construction (never a process-wide
-    /// knob — one test's override can no longer leak into every other
-    /// geocoder's deadline).</summary>
+    /// waiting the real 30 s. Injected at construction (per-instance, so one
+    /// test's override cannot leak into every other geocoder's deadline).
+    /// </summary>
     internal TimeSpan? HttpTimeoutOverride { get; set; }
 
     /// <summary>

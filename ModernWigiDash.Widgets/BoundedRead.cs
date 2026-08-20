@@ -9,14 +9,13 @@ namespace ModernWigiDash.Widgets;
 /// the buffered bytes. The HTTP leg (<see cref="WeatherGeocoder.ReadBoundedAsync"/>)
 /// and the disk-cache leg (the WeatherClient cache load) are adapters that
 /// apply their own guards (declared-length pre-check, growth-after-read
-/// detection) on top of this core — one chunking/limit implementation
-/// instead of two hand-rolled loops that could drift.
+/// detection) on top of this core.
 /// </summary>
 internal static class BoundedRead
 {
     /// <summary>The chunk size for the pooled reads — large enough to make the
     /// pooled-buffer traffic negligible, small enough to bound the rented
-    /// array. The same size the two replaced loops shared.</summary>
+    /// array.</summary>
     private const int ChunkSize = 81920;
 
     public static async Task<byte[]> ReadAsync(Stream stream, long cap, CancellationToken cancellationToken)

@@ -137,7 +137,7 @@ internal static class InspectorPanelRenderer
                     }
                     // The widget advertises the location-search editor without
                     // implementing the contract: degrade to the plain text
-                    // editor (the fallthrough the former goto default expressed).
+                    // editor.
                     propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
                     break;
                 default:

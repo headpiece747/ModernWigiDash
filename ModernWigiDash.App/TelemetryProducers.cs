@@ -10,8 +10,7 @@ namespace ModernWigiDash.App;
 /// via LibreHardwareService shared memory (ADR-0004), frame-time via the
 /// PresentMon Service (ADR-0003) — with their producer, reader, and
 /// error-dedup state. The window keeps one Start() and one Stop(); the whole
-/// cluster is testable without WPF (previously, exercising this wiring meant
-/// constructing the entire window).
+/// cluster is testable without WPF.
 /// </summary>
 internal sealed class TelemetryProducers : IDisposable
 {
@@ -21,8 +20,7 @@ internal sealed class TelemetryProducers : IDisposable
     private readonly PollLoop _frameTimePoll;
     private readonly Action<string> _log;
 
-    // Message-change dedup for the two error surfaces — one rule, two uses
-    // (the old code mirrored the same comparison in both tick bodies).
+    // Message-change dedup for the two error surfaces — one rule, two uses.
     private readonly LogOnChange _sensorErrors = new();
     private readonly LogOnChange _frameTimeErrors = new();
     private readonly LogOnChange _frameTimeDiag = new();

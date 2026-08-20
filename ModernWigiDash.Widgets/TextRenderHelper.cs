@@ -45,9 +45,8 @@ internal static class TextRenderHelper
         float ellipsisW = Measure(ellipsis);
         if (ellipsisW >= maxWidth) return "";
 
-        // Binary-search the longest prefix that fits with the ellipsis —
-        // the old linear probe allocated a substring + concat per step (O(n²)
-        // on the 30 FPS path for long labels).
+        // Binary-search the longest prefix that fits with the ellipsis: a
+        // linear probe is O(n²) substring work on the 30 FPS path for long labels.
         int lo = 0;
         int hi = text.Length - 1;
         int best = 0;

@@ -63,9 +63,6 @@ public class TelemetryProducersTests
             "The missing-map state must be logged once per change, not per tick");
     }
 
-    // ── success ticks through the cluster seams (moved from the
-    // residual-coverage grab-bag) ──
-
     [TestMethod]
     public void FrameTimePollTick_Success_UpdatesStore()
     {

@@ -45,10 +45,10 @@ internal readonly record struct InputState(PageLayout ActivePage, int PageCount,
 ///    application of its outcomes — page navigation, widget-touch routing,
 ///    and the edit-mode veto that suppresses routing for every source;
 ///  • edit-mode manipulation — the drag/resize/icon-grab decision and the
-///    move/snap-to-grid math that used to live in MainWindow's mouse handlers;
-///  • the press orchestration that used to live in the window's mouse
-///    handlers — hit-test → select → begin-manipulation-or-feed — so every
-///    input source (mouse, device) crosses the same tested policy.
+///    move/snap-to-grid math;
+///  • the press orchestration — hit-test → select →
+///    begin-manipulation-or-feed — so every input source (mouse, device)
+///    crosses the same tested policy.
 ///
 /// Callers feed the source-aware <see cref="Press"/>/<see cref="Move"/>/
 /// <see cref="Release"/> surface with coordinates and the edit-mode flag; the

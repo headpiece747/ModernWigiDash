@@ -14,10 +14,12 @@ namespace ModernWigiDash.Sdk;
 /// cadence-based (8 KB or 250 ms) instead of per line, so the send path never
 /// pays a syscall per frame.
 ///
-/// The file is rotated when it exceeds 5 MB: the current file is moved to
-/// <c>display_device.log.1</c> (an existing backup is replaced) and a fresh
-/// file is started. The size check runs on a write cadence (every 100 writes),
-/// not per write, so the send path does not stat the file every frame.
+/// The file is rotated when it exceeds the shared rotation cap
+/// (<see cref="RotationCapBytes"/> — the App's crash log rotates at the same
+/// bound): the current file is moved to <c>display_device.log.1</c> (an
+/// existing backup is replaced) and a fresh file is started. The size check
+/// runs on a write cadence (every 100 writes), not per write, so the send
+/// path does not stat the file every frame.
 /// </summary>
 public static class FileLog
 {
@@ -30,7 +32,11 @@ public static class FileLog
     private static int _writesSinceRotationCheck;
 
     private const int FlushThresholdBytes = 8 * 1024;
-    private const int RotationCapBytes = 5 * 1024 * 1024;
+    /// <summary>
+    /// The file-log rotation cap (5 MB) — the one shared rotation bound: the
+    /// App's crash log rotates at this same cap (CrashLog).
+    /// </summary>
+    public const int RotationCapBytes = 5 * 1024 * 1024;
     private const int RotationCheckIntervalWrites = 100;
     private static readonly TimeSpan FlushInterval = TimeSpan.FromMilliseconds(250);
 

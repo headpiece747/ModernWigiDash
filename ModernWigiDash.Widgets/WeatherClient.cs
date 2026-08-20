@@ -305,9 +305,8 @@ internal sealed class WeatherClient
             {
                 return null;
             }
-            // A cache without a resolved name must not invent one (the old
-            // "New York" fallback mislabeled any location) — the naming and
-            // the boot/conflict guard are the fetch-control module's rules.
+            // A cache without a resolved name must not invent one — the naming
+            // and the boot/conflict guard are the fetch-control module's rules.
             // The identity fields are mutated UNDER the module's gate, and
             // only when no resolution for a DIFFERENT identity has started:
             // the boot load runs concurrently with the boot fetch, and a slow

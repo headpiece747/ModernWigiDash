@@ -2,10 +2,9 @@ namespace ModernWigiDash.Sdk;
 
 /// <summary>
 /// One parameterized poll loop. Owns its cancellation lifecycle, the readiness
-/// guard, failure logging, and the inter-tick delay — the scaffold both sides
-/// of the pipe used to copy by hand. The probe is injected; the loop runs on a
-/// background thread and calls the sample sink there (sinks that need another
-/// thread marshal themselves).
+/// guard, failure logging, and the inter-tick delay. The probe is injected;
+/// the loop runs on a background thread and calls the sample sink there (sinks
+/// that need another thread marshal themselves).
 ///
 /// Used by the App's two 1s direct producers (LibreHardwareService sensors,
 /// PresentMon frame-time) and by the DisplayDeviceEngine's 16ms direct-USB
@@ -22,8 +21,7 @@ public sealed class PollLoop : IDisposable
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _stoppedCts;
     private Task? _loopTask;
-    // The failure-message dedup rule, owned once (the LogOnChange module —
-    // the hand-rolled field comparison this used to carry is the same rule).
+    // The failure-message dedup rule, owned once (the LogOnChange module).
     private readonly LogOnChange _failureDedup = new();
 
     /// <param name="name">Log tag, e.g. "TOUCH".</param>

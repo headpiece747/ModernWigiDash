@@ -24,8 +24,9 @@ public abstract class ModernWidgetBase : IModernWidget
     private SKSize? _defaultSize;
 
     /// <summary>The default placement size: this type's
-    /// <see cref="WidgetMetadataAttribute.DefaultGridSize"/> preset (the 2×2
-    /// house size when the attribute is absent), resolved once per instance.</summary>
+    /// <see cref="WidgetMetadataAttribute.DefaultGridSize"/> preset (the
+    /// property's default value when the attribute is absent), resolved once
+    /// per instance.</summary>
     public virtual SKSize DefaultSize
     {
         get
@@ -104,8 +105,6 @@ public abstract class ModernWidgetBase : IModernWidget
     /// per write is measurable on the 30 FPS path. A missing property caches a
     /// sentinel so the miss is diagnosed once instead of thrashing reflection.
     /// </summary>
-    // Cached PropertyInfo per (type, name) — a miss is cached as null so a
-    // repeated typo doesn't re-reflect every call.
     private static readonly ConcurrentDictionary<(Type Type, string Name), PropertyInfo?> PropertyCache = new();
 
     /// <summary>

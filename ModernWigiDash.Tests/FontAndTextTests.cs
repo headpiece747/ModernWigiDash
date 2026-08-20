@@ -238,9 +238,6 @@ public class FontAndTextTests
         StringAssert.EndsWith(display[0], "…", "an over-wide word must be truncated, not spill past the width");
     }
 
-    // ── TextRenderHelper: the most-used shared helper (moved from the
-    // residual-coverage grab-bag) ──
-
     [TestMethod]
     public void TruncateText_ShortText_Unchanged()
     {

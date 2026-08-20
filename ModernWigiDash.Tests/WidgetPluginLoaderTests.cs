@@ -75,8 +75,6 @@ public class WidgetPluginLoaderTests
         Assert.AreEqual("#FAFAFA", new TextLabelWidget().TextColorHex);
     }
 
-    // ── loader branch coverage (moved from the residual-coverage grab-bag) ──
-
     [TestMethod]
     public void WidgetPluginLoader_NonWidgetTypes_Skipped()
     {

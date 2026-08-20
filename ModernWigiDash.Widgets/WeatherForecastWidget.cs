@@ -262,8 +262,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // fetch-window cadence — the one cadence constant (visible pages are
         // driven by the render kick at the same window; the loop is the sole
         // driver for hidden pages, whose reveal-kick then refreshes anyway).
-        // The old code used the last raw System.Threading.Timer: fire-and-
-        // forget async callback, no readiness guard, no failure logging.
         _refreshPoll = new PollLoop(
             "WEATHER", WeatherFetchControl.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));

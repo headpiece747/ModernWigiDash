@@ -7,10 +7,9 @@ namespace ModernWigiDash.App;
 /// <summary>
 /// Defines the default 6-page starter profile. The layout spec is pure,
 /// immutable data (<see cref="Layout"/>): page names, plugin ids,
-/// coordinates. <see cref="Create"/> rehydrates it through the plugin loader
-/// the same way the window used to place widgets by hand. Tests and tooling
-/// can read <see cref="Layout"/> without instantiating widgets (no network,
-/// timer, or audio-capture side effects).
+/// coordinates. <see cref="Create"/> rehydrates it through the plugin loader.
+/// Tests and tooling can read <see cref="Layout"/> without instantiating
+/// widgets (no network, timer, or audio-capture side effects).
 /// </summary>
 internal sealed class StarterProfile
 {
@@ -29,7 +28,6 @@ internal sealed class StarterProfile
 
     public static IReadOnlyList<StarterPage> Layout { get; } =
     [
-        // ── Page 1: Main Dashboard ──
         new StarterPage("Main Dashboard",
         [
             new StarterPlacement("clock_modern", 0, 0, 406, 148),
@@ -42,26 +40,22 @@ internal sealed class StarterProfile
             new StarterPlacement("stopwatch_timer", 813, 148, 203, 148)
         ]),
 
-        // ── Page 2: Now Playing ──
         new StarterPage("Now Playing",
         [
             new StarterPlacement("now_playing", 0, 0, 1016, 592)
         ]),
 
-        // ── Page 3: Weather Forecast ──
         new StarterPage("Weather Forecast",
         [
             new StarterPlacement("weather_forecast", 0, 0, 1016, 592)
         ]),
 
-        // ── Page 4: Twitch & Picture ──
         new StarterPage("Twitch & Picture",
         [
             new StarterPlacement("twitch_chat", 0, 0, 406, 592),
             new StarterPlacement("picture_viewer", 406, 0, 610, 592)
         ]),
 
-        // ── Page 5: Hardware Monitor (2x2 sensor dashboard) ──
         new StarterPage("Hardware Monitor",
         [
             new StarterPlacement("hardware_monitor", 0, 0, 508, 296),
@@ -70,7 +64,6 @@ internal sealed class StarterProfile
             new StarterPlacement("hardware_monitor", 508, 296, 508, 296)
         ]),
 
-        // ── Page 6: FPS / Frame Time (full-screen hero) ──
         new StarterPage("FPS / Frame Time",
         [
             new StarterPlacement("frame_time", 0, 0, 1016, 592)
@@ -92,7 +85,7 @@ internal sealed class StarterProfile
     /// explicit spec entry, not the <see cref="ProfileLayout"/> ctor's default
     /// page riding along) is materialized by name, every placement rehydrated
     /// into a placed widget, active page reset to the first. Unknown plugin
-    /// ids are skipped (same as the old window placement path).
+    /// ids are skipped.
     /// </summary>
     public ProfileLayout Create()
     {

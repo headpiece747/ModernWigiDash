@@ -38,7 +38,7 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     /// <summary>Last folder scan time — files added to a cycling folder while
     /// the app runs appear on the next throttled rescan, not only after a
-    /// property change (the old one-shot latch froze the list forever).</summary>
+    /// property change.</summary>
     private DateTimeOffset _folderLastScan = DateTimeOffset.MinValue;
 
     /// <summary>How often a cycling folder is rescanned for new files.</summary>
@@ -408,8 +408,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             case PictureSourcePolicy.PictureSourceKind.Folder:
                 // Rescan on first use and then on a throttled cadence: files
                 // added to a cycling folder while the app runs appear within
-                // one period, without a per-frame disk scan (the old one-shot
-                // latch froze the list until a property change or restart).
+                // one period, without a per-frame disk scan.
                 if (!_folderScanned || Clock.GetUtcNow() - _folderLastScan >= FolderRescanPeriod)
                 {
                     _folderImages = Directory.GetFiles(ImagePath, "*.*")

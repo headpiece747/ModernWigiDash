@@ -64,7 +64,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     /// <summary>
     /// Re-subscribes when the feed identity (Symbol / AssetType) changes —
     /// inspector writes funnel through OnPropertyChanged, so Render stays a
-    /// pure draw (the old code subscribed as a draw side effect at 30 FPS).
+    /// pure draw.
     /// </summary>
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {

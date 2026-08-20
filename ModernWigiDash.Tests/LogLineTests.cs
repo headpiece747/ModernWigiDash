@@ -24,7 +24,7 @@ public class LogLineTests
     [TestMethod]
     public void Sanitize_MultiLineInput_FlattensToASingleLine()
     {
-string result = LogLine.Sanitize("line one\nline two\rline three");
+        string result = LogLine.Sanitize("line one\nline two\rline three");
 
         Assert.AreEqual("line one line two line three", result,
             "a multi-line value (an ex.ToString() stack trace) must reach the line-oriented log as one line");

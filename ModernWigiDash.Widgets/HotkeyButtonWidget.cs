@@ -45,8 +45,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
     public int IconOffsetY { get; set; } = 0;
 
-    // ── IWidgetIconGrab: the input module never needs to know this widget
-    // type. The icon geometry (0.62f max ratio, 0.4f auto-size, 0.31f anchor)
+    // The icon geometry (0.62f max ratio, 0.4f auto-size, 0.31f anchor)
     // lives exactly here, in the widget that draws the icon — Render, hit
     // testing, and grab-move math all derive from one helper.
 
@@ -304,7 +303,6 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     public static bool IsLaunchOrUrlAction(string actionType)
         => actionType is "Launch App" or "Open URL";
 
-    // ── IWidgetEditorProvider: special inspector editors ────────────────────
     // The inspector renderer discovers these through the interface instead of
     // branching on the widget type (no concrete-widget typeof checks).
 

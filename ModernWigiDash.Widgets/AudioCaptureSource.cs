@@ -56,10 +56,9 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
             var format = capture.WaveFormat;
             int bytesPerSample = format.BitsPerSample / 8;
 
-            // The mix format is not guaranteed IEEE-float: on PCM devices the
-            // old code read 4-byte floats over 2-byte samples and produced
-            // garbage. Convert per encoding instead — the conversion is the
-            // pure AudioSampleConverter (testable without a device).
+            // The mix format is not guaranteed IEEE-float — convert per
+            // encoding (the conversion is the pure AudioSampleConverter,
+            // testable without a device).
             if (ConvertRecorded(e.Buffer, e.BytesRecorded, format.Encoding, bytesPerSample) is { } samples)
             {
                 SamplesAvailable?.Invoke(samples);

@@ -57,7 +57,7 @@ public class WidgetPluginLoader
             // attribute: resolving it here (at registration) is what lets
             // placement centering read the catalog instead of constructing a
             // probe instance. No attribute (hand-rolled test types) falls
-            // back to the 2x2 house size.
+            // back to the DefaultGridSize property's default value.
             attr?.DefaultGridSize.ToSize() ?? GridSizePreset.Size2x2.ToSize(),
             widgetType);
     }

@@ -53,7 +53,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     // _messages.ToArray() allocation under the lock.
     private List<ChatMessage> _renderSnapshot = [];
     private readonly WrapCache _wrapCache = new();
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _pongCts;
     private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
     // Status + detail as ONE volatile reference: the render thread composes
@@ -206,9 +206,9 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private void StartConnection()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource(); // PONG token
+        _pongCts?.Cancel();
+        _pongCts?.Dispose();
+        _pongCts = new CancellationTokenSource();
         lock (_messagesLock)
         {
             _messages.Clear();
@@ -245,8 +245,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         // in-flight PONG task may still hold it (same deferral the Sdk's
         // PollLoop/FrameDelivery apply). The replaced source is dropped with
         // the object; StartConnection creates a fresh one.
-        _cts?.Cancel();
-        _cts = null;
+        _pongCts?.Cancel();
+        _pongCts = null;
         _chatState = TwitchChatPresentation.ChatState.Disconnected();
         Context.RequestRender();
     }
@@ -296,7 +296,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
                     var sock = _feedLoop?.Current;
                     if (sock != null)
                     {
-                        CancellationToken token = _cts?.Token ?? CancellationToken.None;
+                        CancellationToken token = _pongCts?.Token ?? CancellationToken.None;
                         _ = Task.Run(async () =>
                         {
                             try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token).ConfigureAwait(false); }
@@ -494,8 +494,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _msgPaint.Dispose();
         _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
         _feedLoop = null;
-        if (_cts is { } cts) await cts.CancelAsync().ConfigureAwait(false);
-        _cts?.Dispose();
+        if (_pongCts is { } cts) await cts.CancelAsync().ConfigureAwait(false);
+        _pongCts?.Dispose();
         await base.DisposeAsync().ConfigureAwait(false);
     }
 }

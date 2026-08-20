@@ -6,8 +6,7 @@ namespace ModernWigiDash.Core.Rendering;
 
 /// <summary>
 /// Owns the edit-mode authoring chrome: page grid, selection box, name/Z badge,
-/// and resize handle. Rendering logic that used to live inside the compositor —
-/// one module for the authoring overlay, one place to test it.
+/// and resize handle.
 /// </summary>
 internal sealed class EditOverlay
 {

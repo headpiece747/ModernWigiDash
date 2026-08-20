@@ -10,7 +10,7 @@ namespace ModernWigiDash.Widgets;
 /// retire-and-publish via <see cref="RetiredBitmapSet"/>. Snapshot updates
 /// arrive from the monitor's threads; each completed load — success, skipped,
 /// or failed — raises <see cref="ArtworkChanged"/> so the widget can request a
-/// render at the same point the old inline pipeline did. Retired bitmaps are
+/// render. Retired bitmaps are
 /// only disposed on the render thread through <see cref="DisposeRetired"/>,
 /// never from the background refresh threads that replaced them.
 /// </summary>

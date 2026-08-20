@@ -159,12 +159,9 @@ public class InspectorPanelRendererTests
             profile.ActivePage.Widgets.Add(placed);
             var context = new PersistingContext(profile);
             widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
-            // InitializeAsync kicks the startup fetch; wait for the ACTUAL
-            // precondition — the boot continuation's ApplySnapshot assigning
-            // the resolved population — rather than the fetch-completion
-            // counter (the counter increments before the widget's post-await
-            // apply, so it can be true while CurrentPopulation is still null).
-            TestWait.WaitUntilAsync(() => widget.CurrentPopulation is > 0, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            // InitializeAsync kicks the startup fetch; wait for the boot apply
+            // (the resolved population) before seeding from it.
+            TestWait.WaitForApplied(() => widget.CurrentPopulation is > 0).GetAwaiter().GetResult();
             widget._suppressLocationWriteback = true;
             widget.FetchLiveWeatherAsync().GetAwaiter().GetResult();
             Assert.AreEqual(9367, widget.CurrentPopulation, "precondition: the resolution must expose the population");

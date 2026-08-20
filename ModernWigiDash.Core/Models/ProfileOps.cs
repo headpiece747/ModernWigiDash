@@ -7,8 +7,8 @@ namespace ModernWigiDash.Core.Models;
 
 /// <summary>
 /// Profile operations: page CRUD, widget placement/rehydration, and JSON
-/// export/import. The pure-model mutations the window used to own — the
-/// window keeps only dialogs, selection, and refresh. Widgets are rehydrated
+/// export/import. The window keeps only dialogs, selection, and refresh.
+/// Widgets are rehydrated
 /// through the loader + host context, so a profile round-trips Export→Import
 /// with its custom property values intact.
 /// </summary>
@@ -138,7 +138,7 @@ public static class ProfileOps
     /// instance of <paramref name="current"/> and returns
     /// <paramref name="imported"/> as the new active profile. The swap is one
     /// site, so there is no in-between state where two profiles own live
-    /// widgets (the window used to hand-roll dispose-then-assign).
+    /// widgets.
     /// </summary>
     public static ProfileLayout ReplaceProfile(ProfileLayout current, ProfileLayout imported)
     {
@@ -187,8 +187,8 @@ public static class ProfileOps
     /// catalog's nominal default nearly fills the framebuffer) at the origin,
     /// smaller ones centered on the grid. The center is rounded to the
     /// snap-to-grid cells; the widget itself is not re-snapped (a 2-cell
-    /// widget cannot be both centered and cell-aligned — centering wins, as it
-    /// did when the window owned this math). The size comes from the catalog
+    /// widget cannot be both centered and cell-aligned — centering wins).
+    /// The size comes from the catalog
     /// entry's [WidgetMetadata] fact, so no probe instance is constructed —
     /// the only instance this method creates is the real one, inside
     /// <see cref="PlaceWidget"/>.
@@ -214,9 +214,11 @@ public static class ProfileOps
     /// <summary>
     /// Creates and initializes the active widget instance for a placed widget,
     /// then applies the user-configured custom property values (surviving
-    /// Export/Import round-trips). Failures are contained per widget: one
-    /// throwing widget (broken constructor or InitializeAsync) is logged and
-    /// skipped so it cannot abort the whole import.
+    /// Export/Import round-trips). A size the input omitted (the model default
+    /// still stands) is repaired to the widget's declared preset — explicit
+    /// sizes win. Failures are contained per widget: one throwing widget
+    /// (broken constructor or InitializeAsync) is logged and skipped so it
+    /// cannot abort the whole import.
     /// </summary>
     public static IModernWidget? RehydrateWidget(
         WidgetPluginLoader loader,
@@ -234,6 +236,14 @@ public static class ProfileOps
             }
             if (created is not WidgetCreateResult.Ok ok) return null;
             instance = ok.Widget;
+
+            // A size the imported JSON omitted (the model default still
+            // stands) falls back to the widget's declared preset — the same
+            // fallback PlaceWidget applies — so a hand-crafted profile missing
+            // width/height rehydrates at the widget's own size, not the
+            // model's 2×2. Explicit sizes win.
+            if (!placed.WidthPresent) placed.Width = instance.DefaultSize.Width;
+            if (!placed.HeightPresent) placed.Height = instance.DefaultSize.Height;
 
             // The instance and the placed widget share one identity: the
             // placed's InstanceId survives Export/Import, so rehydration must

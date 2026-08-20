@@ -9,8 +9,7 @@ namespace ModernWigiDash.Core.Rendering;
 /// cleared and refills on demand. A whole clear (rather than an LRU partial
 /// eviction) is safe because every entry recomputes; an evicted entry costs
 /// one recompute. Each cache's cap is declared here — the one place each
-/// cache's maximum is spelled (previously a magic 4096, a magic 2048, and
-/// the text-runs limit silently doubling as the cached-font limit).
+/// cache's maximum is spelled.
 /// </summary>
 public static class FontCacheEviction
 {

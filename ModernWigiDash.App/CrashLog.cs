@@ -5,8 +5,10 @@ namespace ModernWigiDash.App;
 
 /// <summary>
 /// The crash-log writer: appends a sanitized exception line — type name +
-/// message — and rotates the file past 5 MB to crash.log.1, mirroring
-/// FileLog's rotation. The message is sanitized before it lands through
+/// message, and rotates the file past the shared rotation cap
+/// (<see cref="FileLog.RotationCapBytes"/>) to crash.log.1 (the same rule as
+/// <see cref="FileLog"/> — spelled once in its type doc). The message
+/// is sanitized before it lands through
 /// <see cref="ModernWigiDash.Sdk.LogLine"/> (the shared log-line rule):
 /// exception text may embed a URL carrying a token, and crash.log is
 /// plaintext.
@@ -19,9 +21,6 @@ internal static class CrashLog
     /// <summary>The crash log path; pinned by the App at startup (see the
     /// type doc). Tests override it for isolation.</summary>
     internal static string LogPath { get; set; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
-
-    /// <summary>crash.log rotates to crash.log.1 past this size (FileLog's cap).</summary>
-    private const long RotationCapBytes = 5 * 1024 * 1024;
 
     public static void Append(Exception? ex, bool handled = false)
     {
@@ -45,15 +44,13 @@ internal static class CrashLog
         }
     }
 
-    /// <summary>
-    /// Rotates an oversized crash.log to crash.log.1 (replacing an existing
-    /// backup) so a fresh file is appended — mirrors FileLog's rotation.
-    /// Best-effort: a locked file just keeps appending past the cap.
-    /// </summary>
+    /// <summary>Rotates an oversized crash.log to crash.log.1 (replacing an
+    /// existing backup). Best-effort: a locked file just keeps appending past
+    /// the cap.</summary>
     private static void RotateIfNeeded()
     {
         var current = new FileInfo(LogPath);
-        if (!current.Exists || current.Length < RotationCapBytes) return;
+        if (!current.Exists || current.Length < FileLog.RotationCapBytes) return;
 
         string rotatedPath = LogPath + ".1";
         if (File.Exists(rotatedPath)) File.Delete(rotatedPath);

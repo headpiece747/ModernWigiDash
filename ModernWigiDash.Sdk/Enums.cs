@@ -39,7 +39,7 @@ public enum GridSizePreset
     Size5x1,
     /// <summary>1×2 cells: 203 × 296 px.</summary>
     Size1x2,
-    /// <summary>2×2 cells: 406 × 296 px (the default widget size).</summary>
+    /// <summary>2×2 cells: 406 × 296 px.</summary>
     Size2x2,
     /// <summary>3×2 cells: 609 × 296 px.</summary>
     Size3x2,

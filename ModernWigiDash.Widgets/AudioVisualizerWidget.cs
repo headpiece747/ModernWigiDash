@@ -110,8 +110,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         // Watchdog: when the widget is no longer rendered (page switched
         // away), stop capture instead of running forever. _lastRenderTimestamp
         // is primed before capture starts, so the first callback cannot kill a
-        // fresh capture (the old code left it at 0 — elapsed-since-epoch
-        // always exceeded the grace period).
+        // fresh capture.
         //
         // NAudio raises DataAvailable from inside ReadNextPacket on the capture
         // thread, and WasapiCapture.Dispose joins that same thread. Stopping
@@ -172,8 +171,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float barWidth = (availableWidth - ((bars - 1) * barSpacing)) / bars;
         float maxBarHeight = bounds.Height - (pad * 2);
 
-        // One paint shared by every bar (the old code allocated an SKPaint per
-        // bar per frame).
+        // One paint shared by every bar.
         using var barPaint = new SKPaint
         {
             Color = barColor,

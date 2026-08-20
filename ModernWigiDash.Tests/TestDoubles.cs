@@ -763,6 +763,8 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
 /// </summary>
 internal static class TestWait
 {
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
+
     public static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -777,4 +779,26 @@ internal static class TestWait
         // be stateful (e.g. a poll that acquires a pooled buffer on success).
         Assert.IsTrue(met, $"Condition was not met within {timeout}.");
     }
+
+    /// <summary>
+    /// Waits for the APPLIED state of the widget's post-await continuation —
+    /// the snapshot rows, the resolved label, the pending write-back — not the
+    /// client's fetch-completion counter: the counter increments inside the
+    /// client's finally BEFORE the continuation applies the result, so a
+    /// counter-based wait can race the apply on a busy scheduler (flush early,
+    /// read stale state). An idempotent flush belongs inside the predicate —
+    /// re-checked on every poll until it lands.
+    /// </summary>
+    public static Task WaitForApplied(Func<bool> appliedState, TimeSpan? timeout = null)
+        => WaitUntilAsync(appliedState, timeout ?? DefaultTimeout);
+}
+
+/// <summary>
+/// The WPF owner-window rule the dialog tests share: a window can only be
+/// taken as another window's Owner while it is already shown, so the owner's
+/// Show happens once with this one spelling of the requirement.
+/// </summary>
+internal static class WpfWindow
+{
+    public static void ShowOwner(Window owner) => owner.Show();
 }

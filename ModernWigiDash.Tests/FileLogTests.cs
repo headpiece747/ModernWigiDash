@@ -32,7 +32,7 @@ public class FileLogTests
     {
         // Seed an oversized file directly; the size check runs on a write
         // cadence (every 100 writes), not per write.
-        File.WriteAllBytes(_logPath, new byte[5 * 1024 * 1024 + 1]);
+        File.WriteAllBytes(_logPath, new byte[FileLog.RotationCapBytes + 1]);
 
         // The rotation check fires within the first 100 writes: the seeded
         // file is moved to .1 (buffered lines flushed first) and logging
@@ -49,8 +49,8 @@ public class FileLogTests
 
         Assert.IsTrue(File.Exists(_rotatedPath), "The oversized log must rotate to display_device.log.1");
         Assert.IsTrue(File.Exists(_logPath), "A fresh log file must exist after rotation");
-        Assert.IsTrue(new FileInfo(_rotatedPath).Length >= 5 * 1024 * 1024, "The .1 file must carry the oversized content");
-        Assert.IsTrue(new FileInfo(_logPath).Length < 5 * 1024 * 1024, "The active log must start fresh after rotation");
+        Assert.IsTrue(new FileInfo(_rotatedPath).Length >= FileLog.RotationCapBytes, "The .1 file must carry the oversized content");
+        Assert.IsTrue(new FileInfo(_logPath).Length < FileLog.RotationCapBytes, "The active log must start fresh after rotation");
 
         // FileLog keeps its write stream open, so reads must share read+write
         // access (File.ReadAllText's FileShare.Read would be rejected).

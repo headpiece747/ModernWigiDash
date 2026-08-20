@@ -104,9 +104,6 @@ public class StarterProfileTests
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
-    // ── Create(): unknown plugins are silently skipped, pages stay
-    // (moved from the residual-coverage grab-bag) ──
-
     [TestMethod]
     public void StarterProfile_Create_UnknownPluginsSilentlySkipped()
     {

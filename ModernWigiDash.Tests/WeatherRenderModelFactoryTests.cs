@@ -259,12 +259,12 @@ public class WeatherRenderModelFactoryTests
         Assert.AreEqual(inputs.Key, model.Key);
     }
 
-    // --- Subtitle text tests (Fixes #1, #2, #5) ---
+    // --- Subtitle text tests ---
 
     [TestMethod]
     public void Resolve_TieState_CandidateCountGtZeroNoData_DrawsAmbiguityHint()
     {
-        // Fix #1: candidates exist but no weather data (tie) — the widget
+        // Candidates exist but no weather data (tie) — the widget
         // shows "pick one in Settings" so the user knows what to do.
         var inputs = Inputs(Key(candidateCount: 3), candidateCount: 3, daily: [], hourly: []);
 
@@ -277,7 +277,7 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_EmptyLocation_Unresolved_DrawsSetLocationHint()
     {
-        // Fix #2: no location set yet — the widget tells the user where to go.
+        // No location set yet — the widget tells the user where to go.
         var inputs = Inputs(Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel),
             locationText: "", candidateCount: 0, daily: [], hourly: []);
 
@@ -290,7 +290,7 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_LocationSet_FailedResolution_DrawsCheckSpellingHint()
     {
-        // Fix #2: user typed something but resolution failed — suggest the format.
+        // User typed something but resolution failed — suggest the format.
         var inputs = Inputs(Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel),
             locationText: "xyz123", candidateCount: 0, daily: [], hourly: []);
 
@@ -303,7 +303,7 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_CustomLabelWithResolvedCity_DrawsResolvedCityConfirmation()
     {
-        // Fix #5: user set a custom label — the widget shows the resolved city
+        // User set a custom label — the widget shows the resolved city
         // so the user can confirm the widget resolved the right place.
         var inputs = Inputs(
             Key(resolvedCity: "Springfield, Massachusetts, United States", customLabel: "Home"),
@@ -347,7 +347,7 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_TieTakesPrecedenceOverCustomLabel()
     {
-        // Fix #1 priority: a tie with candidates always shows the ambiguity
+        // Priority: a tie with candidates always shows the ambiguity
         // hint, even if a custom label is set.
         var inputs = Inputs(
             Key(resolvedCity: "Berlin", customLabel: "Home", candidateCount: 5),
@@ -362,7 +362,7 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_FailedResolutionTakesPrecedenceOverCustomLabel()
     {
-        // Fix #2 priority: a failed resolution with a custom label still
+        // Priority: a failed resolution with a custom label still
         // shows the spelling guidance (the user typed something that didn't work).
         var inputs = Inputs(
             Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel, customLabel: "My Place"),

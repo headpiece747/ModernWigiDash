@@ -4,8 +4,7 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Pure display rules for the stopwatch widget: the elapsed-time format, the
-/// tap status line, and the running/stopped indicator color — previously
-/// inline in the render path.
+/// tap status line, and the running/stopped indicator color.
 /// </summary>
 public static class StopwatchPresentation
 {

@@ -57,7 +57,6 @@ public static class FontHelper
         }
         catch
         {
-            // Clean fallback
             System.Diagnostics.Debug.WriteLine("Geist font load failed, using clean fallback");
         }
 
@@ -65,7 +64,7 @@ public static class FontHelper
     });
 
     /// <summary>The project font family — the one name the widgets pass to
-    /// GetCachedFont (previously a string literal at 60+ call sites).</summary>
+    /// GetCachedFont.</summary>
     public const string DefaultFontName = "Geist";
 
     /// <summary>
@@ -325,9 +324,7 @@ public static class FontHelper
 
         if (align != SKTextAlign.Left)
         {
-            // Measure the runs we already built (the old code re-split the
-            // text via MeasureTextWithFallback — a second run computation
-            // per draw on the 30 FPS path).
+            // Measure the runs we already built — no second run computation per draw.
             float totalW = 0f;
             foreach (var run in runs)
             {
@@ -353,10 +350,8 @@ public static class FontHelper
         if (string.IsNullOrWhiteSpace(familyName) ||
             familyName.Equals(DefaultFontName, StringComparison.OrdinalIgnoreCase))
         {
-            // Geist is a variable font covering every style — the style-pinned
-            // FromFamilyName fallback chain after _geistTypeface.Value was dead
-            // (the lazy never yields null; GeistTypeface already ends in
-            // SKTypeface.Default).
+            // Geist is a variable font covering every style — no style-pinned
+            // fallback needed.
             return GeistTypeface;
         }
 
@@ -377,7 +372,6 @@ public static class FontHelper
         }
         catch
         {
-            // Fall through to the app font below.
             System.Diagnostics.Debug.WriteLine("Typeface lookup failed, falling back to app font");
         }
 

@@ -413,8 +413,6 @@ public sealed class PriceFeedManager : IDisposable
         ParseFinnhubMessage,
         new FixedReconnectPolicy(_reconnectDelay));
 
-    // ── REST cycle: one per-symbol fetch → parse → store hop per leg ──
-
     /// <summary>One crypto-cycle hop: the leg's fetch → parse, then the
     /// price-map store.</summary>
     internal Task PollCryptoAsync(string key) => PollLegAsync(key, CryptoRestLeg);

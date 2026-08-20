@@ -9,9 +9,9 @@ using ModernWigiDash.Widgets;
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// Small host dialogs the window used to own inline: the text prompt (page
-/// rename), the device-authorization window (Twitch device login), and the
-/// inspector's icon picker. Owns the authorization window's lifetime tracking;
+/// The small host dialogs: the text prompt (page rename), the
+/// device-authorization window (Twitch device login), and the inspector's icon
+/// picker. Owns the authorization window's lifetime tracking;
 /// the window just forwards calls.
 /// </summary>
 internal sealed class DialogHost

@@ -9,8 +9,9 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// STA-window tests for the themed host dialogs. DialogHost needs a Window
-/// owner and a resource-lookup delegate; the owner window is created (never
-/// shown) on the App's STA thread, and the OK/Cancel click is scheduled on the
+/// owner and a resource-lookup delegate; the owner window is created and
+/// shown on the App's STA thread (WPF requires a shown owner —
+/// WpfWindow.ShowOwner), and the OK/Cancel click is scheduled on the
 /// owner's dispatcher so it runs inside the dialog's own modal pump. A live
 /// Application is required because showing a dialog fires SourceInitialized →
 /// WindowChrome.ApplyDarkTitleBar, which resolves the logo via a
@@ -27,8 +28,7 @@ public class DialogHostTests
         bool confirmed = Host.Run(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var host = new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { });
             owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => ClickOwnedButton(owner, "OK"));
             return host.Confirm("Title", "Message");
@@ -43,8 +43,7 @@ public class DialogHostTests
         bool confirmed = Host.Run(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var host = new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { });
             owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => ClickOwnedButton(owner, "Cancel"));
             return host.Confirm("Title", "Message");
@@ -59,8 +58,7 @@ public class DialogHostTests
         string? result = Host.Run(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var host = new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { });
             owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
             {
@@ -82,8 +80,7 @@ public class DialogHostTests
         string? result = Host.Run(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var host = new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { });
             owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => ClickOwnedButton(owner, "Cancel"));
             return host.PromptForText("Rename Page", "New name:", "initial");
@@ -98,8 +95,7 @@ public class DialogHostTests
         string? result = Host.Run(() =>
         {
             var owner = new Window();
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
-            owner.Show(); // WPF requires a shown owner before another window can take it as Owner
+            WpfWindow.ShowOwner(owner);
             var host = new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { });
             owner.Dispatcher.BeginInvoke(DispatcherPriority.Background, () => ClickOwnedButton(owner, "OK"));
             return host.PromptForText("Rename Page", "New name:", "kept value");

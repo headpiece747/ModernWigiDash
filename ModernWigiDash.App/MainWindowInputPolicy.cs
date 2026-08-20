@@ -6,7 +6,7 @@ namespace ModernWigiDash.App;
 /// <summary>
 /// The main window's input predicates, pure so the geometry rules are
 /// assertable without a UI tree: the Delete/Back-key focus guard and the
-/// click-outside-deselect rule (both previously inline in MainWindow.xaml.cs).
+/// click-outside-deselect rule.
 /// </summary>
 internal static class MainWindowInputPolicy
 {

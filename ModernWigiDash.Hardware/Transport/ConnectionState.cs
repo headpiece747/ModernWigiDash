@@ -1,10 +1,9 @@
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
-/// The engine's single connection truth. One value instead of the old
-/// lockstep trio (IsConnected / IsHardwareActive / IsSimulationMode) that
-/// callers disagreed on: the presenter gate reads "Connected", the badge reads
-/// "Connected", and simulation is an explicit state, not a negation.
+/// The engine's single connection truth — the presenter gate and the USB
+/// badge read the same state, and simulation is an explicit state, not a
+/// negation.
 /// </summary>
 public enum ConnectionState
 {

@@ -60,9 +60,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// (an in-flight frame write holds the transport lock for up to that long)
     /// and the LibUsb leg's chunk-timeout product over a full frame (every
     /// chunk exhausting its timeout). The engine's close waits are deliberately
-    /// shorter than this — it abandons a slow close rather than follow it — but
-    /// the rationale no longer re-spells the backend numbers: both sides read
-    /// this one value.
+    /// shorter than this — it abandons a slow close rather than follow it.
     /// </summary>
     internal static TimeSpan CloseBound => TimeSpan.FromMilliseconds(Math.Max(
         DisplayProtocolConstants.BulkPipeTimeoutMs,
@@ -195,10 +193,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     /// <summary>
     /// WinUSB attempt: open a real <see cref="WinUsbBulkDevice"/> → backend.
-    /// There is deliberately no PING
-    /// here — the only PING lives in <see cref="SendInitCommands"/> (the
-    /// pre-PING that used to run in <see cref="Connect"/> duplicated it and had
-    /// drifted). Partial-state teardown is owned here: a failed open disposes
+    /// There is deliberately no PING here — the only PING lives in
+    /// <see cref="SendInitCommands"/>. Partial-state teardown is owned here: a
+    /// failed open disposes
     /// the device under <c>_usbLock</c> (same rule as <see cref="Cleanup"/>).
     /// Both failure exits dispose the LOCAL device — never the adopted global
     /// backend, which belongs to a previous provider attempt.
@@ -240,7 +237,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// closes the LOCAL device — the claim-failure path closes it directly,
     /// the terminal catch closes the open/config/claimed device it created.
     /// Never the adopted global backend, which belongs to a previous provider
-    /// attempt (the old catch disposed <c>_backend</c> and leaked this device).
+    /// attempt.
     /// </summary>
     private ITransferBackend? TryCreateLibUsbBackend()
     {
@@ -376,7 +373,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             descLog.Write($"Descriptor scan failed: {ex.Message}");
         }
 
-        // Fallback to known endpoint from protocol constants
         descLog.Write($"Using fallback endpoint: {DisplayProtocolConstants.BulkOutPipeId}");
         return (WriteEndpointID)DisplayProtocolConstants.BulkOutPipeId;
     }
@@ -549,8 +545,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     // Diagnostic cadences: the two touch-diag failure sites share one counter
     // (they are mutually exclusive branches), the Raw dump is every 200th.
     // Note: the raw-dump cadence counts success-path calls only (every 200th
-    // successful read) — the old single shared counter made it positional in
-    // total ReadTouch calls; steady states are identical.
+    // successful read).
     private const string TouchDiagCategory = "TOUCH-DIAG";
     private readonly DiagLog _touchDiagLog = new(TouchDiagCategory, 20, logFirst: true);
     private readonly DiagLog _touchDiagRawLog = new(TouchDiagCategory, 200);

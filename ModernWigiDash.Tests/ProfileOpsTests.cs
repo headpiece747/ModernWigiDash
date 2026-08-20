@@ -487,6 +487,35 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void ImportJson_OmittedSize_RehydratesAtTheWidgetsDeclaredPreset()
+    {
+        // Hand-crafted JSON (the export always writes explicit sizes, so this
+        // is the only path that can omit them): a size-less placement of the
+        // Size5x4-declared widget rehydrates at the declared preset, not the
+        // model's 2×2 default.
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(FullScreenTestWidget));
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"fullscreen_test_widget"}]}]}""", loader, new TestContext());
+
+        var placed = loaded!.ActivePage.Widgets.Single();
+        Assert.IsNotNull(placed.ActiveInstance, "Rehydration must succeed for the declared preset to apply");
+        Assert.AreEqual(GridSizePreset.Size5x4.ToSize().Width, placed.Width, "the omitted width must fall back to the widget's declared preset");
+        Assert.AreEqual(GridSizePreset.Size5x4.ToSize().Height, placed.Height, "the omitted height must fall back to the widget's declared preset");
+    }
+
+    [TestMethod]
+    public void ImportJson_ExplicitSize_WinsOverTheDeclaredPreset()
+    {
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(FullScreenTestWidget));
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"fullscreen_test_widget","Width":406,"Height":296}]}]}""", loader, new TestContext());
+
+        var placed = loaded!.ActivePage.Widgets.Single();
+        Assert.AreEqual(406, placed.Width, "an explicit width must survive import");
+        Assert.AreEqual(296, placed.Height, "an explicit height must survive import");
+    }
+
+    [TestMethod]
     public void ClearPage_DisposesWidgetInstances()
     {
         var page = new PageLayout();

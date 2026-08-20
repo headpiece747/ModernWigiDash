@@ -44,13 +44,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     /// <summary>Test seam: injectable clock for the progress estimate.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
-    // ── Frame geometry written during Render (used by OnTouch) ────────────
     // One layout record per frame: Render draws from it, OnTouch hit-tests
     // the same record, so the drawn controls and the tap targets can never
     // drift apart.
     private NowPlayingGeometry _layout;
 
-    // ── Cached control-icon geometry ──────────────────────────────────────
     // The icon paths are pure geometry of their button rects, which change
     // only when the widget resizes; rebuilt once per rect instead of per
     // frame. All five button rects derive from the same placement scale, so
@@ -66,8 +64,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
-
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -82,8 +78,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     /// Forwards snapshot updates to the <see cref="ArtworkLoader"/>, which owns
     /// key-change detection, the reload decision, the load pipeline, and the
     /// retire-and-publish discipline. The loader raises <see cref="ArtworkLoader.ArtworkChanged"/>
-    /// after each completed load (success, skipped, or failed), so render
-    /// requests land at the same point the old inline pipeline produced them.
+    /// after each completed load (success, skipped, or failed).
     /// </summary>
     private void OnMediaSnapshotChanged(MediaSessionUpdate? update)
     {
@@ -94,8 +89,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     {
         Context?.RequestRender();
     }
-
-    // ── Render ────────────────────────────────────────────────────────────
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -391,7 +384,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             DrawPlayIcon(canvas, iconPaint);
     }
 
-    // ── Upgraded Vector Icon Drawing ──────────────────────────────────────────
     // The icon paths are cached per layout rect (EnsureIconPaths); these
     // methods only draw the cached geometry with the frame's paints.
 
@@ -469,8 +461,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             canvas.DrawTextWithFallback("1", cx - nb.Width / 2f, cy + nb.Height / 3f, numFont, numPaint);
         }
     }
-
-    // ── Cached icon path management ────────────────────────────────────────
 
     /// <summary>
     /// Rebuilds the cached control-icon paths when the layout rects change
@@ -621,8 +611,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         return tri.Detach();
     }
 
-    // ── Touch ─────────────────────────────────────────────────────────────
-
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchDown)
@@ -694,8 +682,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
         _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
 

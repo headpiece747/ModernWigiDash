@@ -58,8 +58,8 @@ internal sealed class UpdateFlow
 
     /// <summary>
     /// The download outcome: success arms the Ready state (the pending update
-    /// is set), failure falls back to Hidden (the silent-fail spelling the
-    /// window used to inline). The progress callback is the window's
+    /// is set), failure falls back to Hidden (silent fail). The progress
+    /// callback is the window's
     /// download tooltip update — routed through here so the tooltip spelling
     /// has one owner.
     /// </summary>

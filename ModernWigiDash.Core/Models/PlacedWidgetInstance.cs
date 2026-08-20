@@ -10,11 +10,22 @@ public class PlacedWidgetInstance
     public string PluginId { get; set; } = string.Empty;
     public string DisplayName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Widget" : value.Trim(); } = "Widget";
 
-    // Absolute pixel positioning on active framebuffer (1016x592)
+    // Absolute pixel positioning on active framebuffer (1016x592).
+    // The 2×2 house default is the model-level fallback when a placement
+    // arrives without a size; rehydration upgrades the omitted size to the
+    // widget's declared preset (the presence flags tell the two apart — the
+    // export always writes explicit sizes).
     public float X { get; set; }
     public float Y { get; set; }
-    public float Width { get; set => field = Math.Max(10f, value); } = GridSizePreset.Size2x2.ToSize().Width;
-    public float Height { get; set => field = Math.Max(10f, value); } = GridSizePreset.Size2x2.ToSize().Height;
+    public float Width { get; set { field = Math.Max(10f, value); WidthPresent = true; } } = GridSizePreset.Size2x2.ToSize().Width;
+    public float Height { get; set { field = Math.Max(10f, value); HeightPresent = true; } } = GridSizePreset.Size2x2.ToSize().Height;
+
+    // Serialization-presence markers (never serialized): set once the
+    // Width/Height setter has run, so rehydration can tell "the imported JSON
+    // carried no width" (the model default still stands) from "the JSON set it
+    // explicitly" (which wins).
+    internal bool WidthPresent { get; private set; }
+    internal bool HeightPresent { get; private set; }
 
     // Layering & Transparency
     public int ZIndex { get; set; }

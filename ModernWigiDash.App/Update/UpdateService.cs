@@ -130,7 +130,7 @@ internal sealed class UpdateService
     }
 
     /// <summary>One startup recovery call: heal an interrupted swap and clear
-    /// stale stages/downloads (what the window used to do in two steps).</summary>
+    /// stale stages/downloads.</summary>
     public void RecoverAtStartup(string installDir)
     {
         CleanupStale();
