@@ -13,11 +13,14 @@ public interface IModernWigiDashContext
 {
     /// <summary>Writes an informational line to the shared application log
     /// (display_device.log). Use for diagnostics; never log tokens or PII at
-    /// this level.</summary>
+    /// this level. The host flattens, bounds, and redacts the text before
+    /// writing — the line that reaches the log is one bounded line.</summary>
     void LogInfo(string message);
 
     /// <summary>Writes an error line (message plus optional exception) to the
-    /// shared application log. The host sanitizes the text before writing.</summary>
+    /// shared application log. The host flattens, bounds, and redacts the text
+    /// before writing — a multi-line exception becomes one bounded line and
+    /// token-shaped values are redacted.</summary>
     void LogError(string message, Exception? ex = null);
 
     /// <summary>Requests a repaint of the compositor canvas — the standard way

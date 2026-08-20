@@ -35,8 +35,9 @@ internal class TestContext : IModernWigiDashContext
     public List<string> Errors { get; } = [];
     public List<string> Infos { get; } = [];
 
-    public void LogInfo(string message) => Infos.Add(message);
-    public void LogError(string message, Exception? ex = null) => Errors.Add(message);
+    public void LogInfo(string message) => Infos.Add(LogLine.Sanitize(message));
+    public void LogError(string message, Exception? ex = null)
+        => Errors.Add(LogLine.Sanitize(message) + (ex != null ? $": {LogLine.Sanitize(ex.ToString())}" : ""));
     public void RequestRender() => Renders++;
     public void RequestInspectorRefresh() { }
     public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) => AuthShown++;

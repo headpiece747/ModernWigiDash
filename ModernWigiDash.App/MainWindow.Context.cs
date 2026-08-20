@@ -12,9 +12,9 @@ public partial class MainWindow
 {
     #region IModernWigiDashContext Implementation for Telemetry & Host Services
 
-    public void LogInfo(string message) => FileLog.Write($"[Display INFO] {message}");
+    public void LogInfo(string message) => FileLog.Write($"[Display INFO] {LogLine.Sanitize(message)}");
     public void LogError(string message, Exception? ex = null)
-        => FileLog.Write($"[Display ERROR] {CrashLog.SanitizeMessage(message)}{(ex != null ? $": {CrashLog.SanitizeMessage(ex.ToString())}" : "")}");
+        => FileLog.Write($"[Display ERROR] {LogLine.Sanitize(message)}{(ex != null ? $": {LogLine.Sanitize(ex.ToString())}" : "")}");
     public void RequestRender() => _ = Dispatcher.InvokeAsync(() => SkiaCanvas?.InvalidateVisual());
 
     public void RequestInspectorRefresh()
