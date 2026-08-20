@@ -210,4 +210,13 @@ public class WeatherSnapshotApplyPolicyTests
         Assert.IsFalse(next.IsDay,
             "an absent day/night fact null-keeps — a response that omitted is_day must not reset the flag");
     }
+
+    [TestMethod]
+    public void DefaultState_UnknownDayNight_ReadsAsDay()
+    {
+        var state = new WeatherSnapshotState();
+
+        Assert.IsTrue(state.IsDay,
+            "the pre-fetch placeholder scene reads as day — an unknown is_day must never render as night");
+    }
 }

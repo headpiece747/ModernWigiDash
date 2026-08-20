@@ -249,6 +249,8 @@ public class ThemeSettingsTests
         Assert.AreEqual("#1A1A1E", theme.BgPanel);
         Assert.AreEqual("#26262B", theme.BgCard);
         Assert.AreEqual("#3F3F46", theme.Border);
+        Assert.AreEqual(theme.Border, theme.M3PrimaryContainer, "zinc-700 trio: M3PrimaryContainer follows Border");
+        Assert.AreEqual(theme.Border, theme.ControlHover, "zinc-700 trio: ControlHover follows Border");
         Assert.AreEqual("#F59E0B", theme.AccentRed);
         Assert.AreEqual("#FBBF24", theme.M3Primary);
         Assert.AreEqual("#FAFAFA", theme.TextPrimary);
