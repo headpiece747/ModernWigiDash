@@ -3,7 +3,9 @@ root = true
 [*]
 indent_style = space
 indent_size = 4
-end_of_line = lf
+# No end_of_line pin: .gitattributes (text=auto) makes Windows checkouts CRLF
+# while the index stores LF, and pinning lf would fail `dotnet format
+# --verify-no-changes` on every clean Windows checkout (45K ENDOFLINE errors).
 charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
