@@ -58,8 +58,8 @@ public class SkiaFrameCompositor : IDisposable
     {
         SKCanvas canvas = _canvas;
 
-        // 1. Clear background with charcoal slate / page background color
-        // (the string parse is hoisted: reparse only when the hex changes).
+        // Clear the page background (the string parse is hoisted: reparse only
+        // when the hex changes).
         if (!string.Equals(page.BackgroundHexColor, _lastBgHex, StringComparison.Ordinal))
         {
             _lastBgHex = page.BackgroundHexColor;
@@ -69,12 +69,11 @@ public class SkiaFrameCompositor : IDisposable
         }
         canvas.Clear(_lastBgColor);
 
-        // 2. Draw Grid Lines if SnapToGrid and Edit Mode are enabled (the
-        //    authoring chrome lives in EditOverlay)
         _editOverlay.DrawGrid(canvas, page, _isEditMode);
-        // 3. Render all placed widgets sorted by ZIndex (low to high).
-        // Zero-alloc fast path: stack-allocated copy + insertion sort for the
-        // common small page (<= 32 widgets); LINQ fallback for oversized pages.
+
+        // Render placed widgets by ZIndex (low to high). Zero-alloc fast path:
+        // insertion sort on a stack-allocated index span for the common small
+        // page (<= 32 widgets); LINQ fallback for oversized pages.
         List<PlacedWidgetInstance> widgetList = page.Widgets;
         void RenderOne(PlacedWidgetInstance widget)
         {
@@ -84,16 +83,13 @@ public class SkiaFrameCompositor : IDisposable
             int saveCount = canvas.Save();
             try
             {
-                // Translate canvas to widget coordinate
                 canvas.Translate(widget.X, widget.Y);
 
-                // Apply rotation around center of widget if any
                 if (Math.Abs(widget.Rotation) > 0.01f)
                 {
                     canvas.RotateDegrees(widget.Rotation, widget.Width / 2f, widget.Height / 2f);
                 }
 
-                // Apply opacity using layer or paint setting
                 var bounds = new SKRect(0, 0, widget.Width, widget.Height);
 
                 if (widget.Opacity < 0.99f)
@@ -102,7 +98,6 @@ public class SkiaFrameCompositor : IDisposable
                     canvas.SaveLayer(_alphaPaint);
                 }
 
-                // Render the widget content directly to Skia canvas
                 widget.ActiveInstance.Render(canvas, bounds);
 
                 if (widget.Opacity < 0.99f)
@@ -110,8 +105,6 @@ public class SkiaFrameCompositor : IDisposable
                     canvas.Restore();
                 }
 
-                // If in Edit Mode, draw the selection bounding box & handles on
-                // the selected widget (authoring chrome lives in EditOverlay)
                 _editOverlay.DrawSelection(canvas, widget, _isEditMode, widget == _selectedWidget);
             }
             finally

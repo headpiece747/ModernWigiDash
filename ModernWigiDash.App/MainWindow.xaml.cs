@@ -130,11 +130,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // Do NOT block the UI thread waiting for USB — the render timer will
         // start sending frames as soon as the connection succeeds.
 
-        // 1. Register Built-In Display Suite (attribute-driven catalog — adding a
-        //    widget to the Widgets assembly needs no registration here)
+        // Attribute-driven catalog: adding a widget to the Widgets assembly
+        // needs no registration here.
         _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
 
-        // 2. Populate Catalog UI (sorted alphabetically by display name)
+        // Populate the catalog UI (sorted alphabetically by display name).
         RefreshCatalog();
 
         // Profile persistence: owns the LocalAppData path and the debounced
@@ -268,9 +268,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
             requestRepaint: () => SkiaCanvas.InvalidateVisual(),
             onTick: UpdateUsbBadge,
             composeGate: () => _presenter.ShouldCompose);
-        _framePump.Start(); // Start the render loop immediately
+        _framePump.Start();
 
-        // 6b. Power lifecycle: SystemEvents fires on a system thread, so both
+        // Power lifecycle: SystemEvents fires on a system thread, so both
         // actions hop to the dispatcher via the single Hop helper. Suspend
         // stops the pump (no dead compose ticks while the display is powered
         // down); resume restarts it and forces the USB engine to reconnect —
@@ -311,7 +311,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
             lastResort: _usbDevice.Dispose).Run();
         };
 
-        // Update USB badge
         UpdateUsbBadge();
         UpdateActiveCount();
         _inspector.Refresh();

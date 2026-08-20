@@ -444,19 +444,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         var model = WeatherRenderModelFactory.Resolve(_renderModel, buildInputs);
         if (!ReferenceEquals(_renderModel, model)) _renderModel = model;
 
-        // Prominent Location Name Header
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, header.TitleFontSize);
         _titlePaint.Color = textPrimary;
         canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, _titlePaint);
 
-        // Styled Unit Toggle Badge [°F] / [°C] (No background card)
         var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, WeatherLayout.BadgeFontSize(s));
         _unitPaint.Color = SKColors.White;
         float uW = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
         canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, _unitPaint);
 
-        // Subtitle line below the header: guidance or confirmation text
-        // computed once per model rebuild (the key includes CandidateCount).
+        // Guidance or confirmation text, computed once per model rebuild (the
+        // key includes CandidateCount).
         float subtitleH = 0f;
         if (model.SubtitleText is { Length: > 0 } subtitle)
         {
@@ -468,7 +466,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             subtitleH = header.TitleFontSize * 1.1f;
         }
 
-        // Staleness indicator at the bottom: "Updated X ago" or "Updating..."
         string? staleText = null;
         if (_isFetching)
         {
@@ -489,7 +486,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             staleH = staleFontSize * 1.4f;
         }
 
-        // Content Area Bounds — shrunk for subtitle (top) and staleness (bottom)
         SKRect contentBounds = new(
             bounds.Left + header.Pad,
             bounds.Top + header.HeaderHeight + 6f * sy + subtitleH,
