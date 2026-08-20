@@ -108,7 +108,7 @@ public class WeatherRenderModelFactoryTests
         var cached = WeatherRenderModelFactory.Resolve(null, inputs);
         WeatherRenderModelKey baseKey = inputs.Key;
 
-        var driftedKeys = new []
+        var driftedKeys = new[]
         {
             baseKey with { DataVersion = 2 },
             baseKey with { Bounds = new SKRect(0, 0, 407, 296) },
