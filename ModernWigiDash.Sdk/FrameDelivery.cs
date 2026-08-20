@@ -53,6 +53,7 @@ public sealed class FrameDelivery : IDisposable
     private readonly DiagLog _sendFailLog;
     private readonly DiagLog _sendRefuseLog;
     private readonly DiagLog _encodeFailLog;
+    private readonly DiagLog _dropLog;
 
     /// <param name="encoder">Converts <see cref="SKBitmap"/> to RGB565 using a
     /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
@@ -105,6 +106,7 @@ public sealed class FrameDelivery : IDisposable
         _sendFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _sendRefuseLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _encodeFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
+        _dropLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
         _channel = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(capacity)
         {
             SingleWriter = true,
@@ -204,6 +206,7 @@ public sealed class FrameDelivery : IDisposable
         {
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedPool);
+            _dropLog.Write(() => $"pool exhausted, frame dropped; total dropped: {Interlocked.Read(ref _dropped)}");
             return FrameDeliveryResult.Dropped;
         }
 
@@ -270,8 +273,8 @@ public sealed class FrameDelivery : IDisposable
                         : FrameSendResult.Refused;
 #pragma warning disable S125 // log-cadence documentation, not commented-out code
                     // Per-frame success log would grow unbounded at ~30/s;
-                    // every-60th cadence keeps it bounded.
-                    // (Drops are counted in DroppedCount, not logged.)
+                    // every-60th cadence keeps it bounded. Drops log through
+                    // _dropLog at the same first-plus-every-60th cadence.
 #pragma warning restore S125
                     switch (result)
                     {
@@ -315,6 +318,7 @@ public sealed class FrameDelivery : IDisposable
         {
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedCoalesced);
+            _dropLog.Write(() => $"stale frame dropped (coalesced or post-dispose); total dropped: {Interlocked.Read(ref _dropped)}");
         }
         if (_pool is not null)
         {

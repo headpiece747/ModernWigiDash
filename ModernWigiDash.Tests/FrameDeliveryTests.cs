@@ -386,6 +386,34 @@ public class FrameDeliveryTests
     }
 
     [TestMethod]
+    public void PoolExhaustion_LogsFirstDropThroughTheLogSeam()
+    {
+        List<string> logs = [];
+        using var blocker = new ManualResetEventSlim(false);
+        using var release = new ManualResetEventSlim(false);
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            send: _ =>
+            {
+                blocker.Set();
+                release.Wait();
+                return FrameSendResult.Sent;
+            },
+            log: logs.Add,
+            capacity: 1);
+        using var bitmap = CreateFrameBitmap();
+
+        delivery.Push(bitmap);
+        Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
+        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "The in-flight-margin buffer must queue");
+        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+
+        Assert.IsTrue(logs.Count > 0 && logs[0].Contains("dropped"),
+            "the first pool-exhaustion drop must surface through the log seam — a wedged pipe that drops frames is visible, not silent");
+        release.Set();
+    }
+
+    [TestMethod]
     public void PoolExhaustion_CountsAsPoolDropNotCoalescerDrop()
     {
         using var blocker = new ManualResetEventSlim(false);

@@ -92,4 +92,21 @@ public class DisplayPresenterTests
 
         Assert.AreEqual(0, sent, "Nothing may reach the transport after dispose");
     }
+
+    [TestMethod]
+    public async Task Refusal_LogsThroughTheInjectedLogSeam()
+    {
+        List<string> logs = [];
+        using var presenter = new DisplayPresenter(
+            send: _ => FrameSendResult.Refused,
+            isReady: () => true,
+            log: logs.Add);
+        using var frame = CreateFrame();
+
+        presenter.Send(frame);
+
+        await TestWait.WaitUntilAsync(() => logs.Count > 0, TimeSpan.FromSeconds(5));
+        Assert.IsTrue(logs[0].Contains("refused"),
+            "the refusal verdict must surface through the presenter's log seam — the verdict is observable end-to-end");
+    }
 }
