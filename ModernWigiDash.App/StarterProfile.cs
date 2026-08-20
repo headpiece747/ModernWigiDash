@@ -99,11 +99,14 @@ internal sealed class StarterProfile
         var profile = new ProfileLayout();
         // The ctor creates one default page; replace it with the explicit
         // starter list so the layout spec is the single source of page truth.
-        profile.Pages.Clear();
+        // Assign the full list in one go — the Pages setter repairs empty,
+        // so the list is never left emptied in place.
+        var pages = new List<PageLayout>(Layout.Count);
         foreach (var page in Layout)
         {
-            profile.Pages.Add(new PageLayout { PageName = page.Name });
+            pages.Add(new PageLayout { PageName = page.Name });
         }
+        profile.Pages = pages;
 
         for (int pageIndex = 0; pageIndex < Layout.Count; pageIndex++)
         {

@@ -23,7 +23,21 @@ public class ProfileLayout
     // Export-schema surface: written by ExportJson, never read back by ImportJson.
     public string ProfileId { get; set; } = Guid.NewGuid().ToString();
     public string ProfileName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Default Profile" : value.Trim(); } = "Default Profile";
-    public List<PageLayout> Pages { get; set; } = [new PageLayout()];
+    /// <summary>
+    /// The profile's pages. The non-empty invariant is enforced at this
+    /// boundary — a null or empty assignment repairs to a single default
+    /// page (the same repair rule the <see cref="PageName"/> and
+    /// <see cref="BackgroundHexColor"/> setters apply) — so
+    /// <see cref="ActivePage"/> is total and the old orphan-page fallback is
+    /// unrepresentable. In-place removal stays safe: ProfileOps refuses to
+    /// delete the last page, and the import sanitizer repairs untrusted input
+    /// before it reaches this boundary.
+    /// </summary>
+    public List<PageLayout> Pages
+    {
+        get => field;
+        set => field = value is { Count: > 0 } ? value : [new PageLayout()];
+    } = [new PageLayout()];
 
     /// <summary>
     /// The active page index, clamped to the page range: never negative and
@@ -37,14 +51,14 @@ public class ProfileLayout
         set => field = Pages.Count > 0 ? Math.Clamp(value, 0, Pages.Count - 1) : 0;
     }
 
-    /// <summary>The active page. WARNING: the empty-Pages fallback hands out a
-    /// freshly constructed orphan page that is NOT part of <see cref="Pages"/>
-    /// — mutations on it (widget placement, renaming) are lost. It is
-    /// unreachable in practice (the ctor creates one page, ProfileOps refuses
-    /// to delete the last, the import sanitizer repairs empty pages) and is
-    /// kept only as pure defense against a hand-constructed empty profile;
-    /// any code that relies on it is a bug.</summary>
-    public PageLayout ActivePage => Pages.Count > 0 && ActivePageIndex >= 0 && ActivePageIndex < Pages.Count
-        ? Pages[ActivePageIndex]
-        : Pages.FirstOrDefault() ?? new PageLayout();
+    /// <summary>
+    /// The active page — total by construction: <see cref="Pages"/> is never
+    /// empty (the setter repairs, ProfileOps refuses to delete the last page,
+    /// the import sanitizer repairs untrusted input) and the index is
+    /// clamped on write, re-clamped on read, so the old orphan-page fallback
+    /// (a detached page whose mutations were silently lost) is unrepresentable.
+    /// A violation of the non-empty invariant fails loudly
+    /// (IndexOutOfRangeException) instead of fabricating a page.
+    /// </summary>
+    public PageLayout ActivePage => Pages[Math.Clamp(ActivePageIndex, 0, Pages.Count - 1)];
 }
