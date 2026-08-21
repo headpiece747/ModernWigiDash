@@ -160,7 +160,7 @@ internal sealed class WeatherClient
         // timer, and OnTouch can race, and a check-then-set would let two of
         // them through. The claim's failure reason is reported so the caller
         // can tell "already being fetched" from "cooling down".
-        var begin = _fetchControl.Begin(fetchQueryKey, force);
+        var begin = _fetchControl.Begin(force);
         if (begin == BeginResult.InFlight) return new WeatherFetchResult.InFlight();
         if (begin == BeginResult.Throttled) return new WeatherFetchResult.Throttled();
 

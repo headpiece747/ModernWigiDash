@@ -24,7 +24,7 @@ public class WeatherFetchControlTests
     {
         var control = CreateControl(out _);
 
-        var result = control.Begin("Paris", force: false);
+        var result = control.Begin(force: false);
 
         Assert.AreEqual(BeginResult.Started, result, "the first attempt must always start");
         Assert.IsTrue(control.IsClaimHeld, "the started attempt holds the claim");
@@ -35,8 +35,8 @@ public class WeatherFetchControlTests
     {
         var control = CreateControl(out _);
 
-        control.Begin("Paris", force: false);
-        var second = control.Begin("Paris", force: false);
+        control.Begin(force: false);
+        var second = control.Begin(force: false);
 
         Assert.AreEqual(BeginResult.InFlight, second, "the in-flight fetch owns the claim");
         Assert.IsTrue(control.IsClaimHeld, "the first claim must stay held for the in-flight fetch");
@@ -50,7 +50,7 @@ public class WeatherFetchControlTests
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"), "the first attempt stamps the throttle");
         clock.Advance(TimeSpan.FromMinutes(1));
-        var second = control.Begin("Paris", force: false);
+        var second = control.Begin(force: false);
 
         Assert.AreEqual(BeginResult.Throttled, second, "inside the 5-minute window the attempt cools down");
         Assert.IsFalse(control.IsClaimHeld, "a throttled attempt must release its own claim");
@@ -65,7 +65,7 @@ public class WeatherFetchControlTests
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"));
         clock.Advance(TimeSpan.FromMinutes(1));
-        var forced = control.Begin("Paris", force: true);
+        var forced = control.Begin(force: true);
 
         Assert.AreEqual(BeginResult.Started, forced, "a forced attempt (explicit user refresh) bypasses the window");
         Assert.IsTrue(control.IsClaimHeld);
@@ -79,7 +79,7 @@ public class WeatherFetchControlTests
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"));
         clock.Advance(TimeSpan.FromMinutes(5));
-        var next = control.Begin("Paris", force: false);
+        var next = control.Begin(force: false);
 
         Assert.AreEqual(BeginResult.Started, next, "exactly 5 minutes elapses the window (>= comparison)");
         Assert.IsTrue(control.IsClaimHeld);
@@ -90,7 +90,7 @@ public class WeatherFetchControlTests
     {
         var control = CreateControl(out _);
 
-        control.Begin("Paris", force: false);
+        control.Begin(force: false);
         control.End();
 
         Assert.IsFalse(control.IsClaimHeld, "the fetch's finally released the claim");

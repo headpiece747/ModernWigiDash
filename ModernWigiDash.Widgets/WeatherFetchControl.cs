@@ -77,7 +77,7 @@ internal sealed class WeatherFetchControl
     /// releases our claim before returning — the caller's finally must release
     /// only for <see cref="BeginResult.Started"/>.
     /// </summary>
-    internal BeginResult Begin(string queryKey, bool force)
+    internal BeginResult Begin(bool force)
     {
         if (Interlocked.CompareExchange(ref _claim, 1, 0) != 0) return BeginResult.InFlight;
         if (!force && (Clock.GetUtcNow().UtcDateTime - _lastFetchTime) < FetchWindow)
