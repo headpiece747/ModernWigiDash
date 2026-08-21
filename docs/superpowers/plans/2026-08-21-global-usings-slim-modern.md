@@ -205,8 +205,8 @@ references, no version drift. P2 is the single line-delete below.
   already proved); a second, narrowly-scoped attempt (9 non-`.cs` files:
   the 6 csproj, `.editorconfig`, 2 ps1 levers — mechanical diff excluded)
   also timed out at 3600 s, with an invalid-JSON preview failure pointing
-  at a tool-side range-mode bug — recorded as OCR-unavailable-for-range-mode
-  per the one-attempt rule; the `code-reviewer` agent covered the same scope
+  at a tool-side range-mode bug — two failed attempts, recorded as
+  OCR-unavailable-for-range-mode, no further retry loop; the `code-reviewer` agent covered the same scope
   semantically — all 240 removal files checked against their project global
   sets, zero cross-namespace simple-type collisions, csproj `<Using>` sets
   exact, editorconfig pins suggestion-only with no line-ending pin, test
@@ -219,7 +219,7 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
 ## Persistence caveats (stated, not hidden)
 
 - **`.opencode/` is partially gitignored** (policy changed 2026-08-21 on
-  explicit user approval; commit recorded in the decision log): the curated
+  explicit user approval, commit `2fbcb5b`): the curated
   set — `AGENTS.md`, `rules/`, `skills/`, `agents/`, `plugins/` — is now
   **tracked**, so the usings rule and skill corrections travel with the
   repo. `node_modules` (54 MB), `package*.json`, and the inner
@@ -242,8 +242,8 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
 
 - [ ] `ablate-ai-layer` over the always-loaded layer (CONTEXT.md +
   `.opencode/AGENTS.md` + `.opencode/rules/dotnet-rules.md`). The gitignore
-  prerequisite is satisfied as of the `.gitignore` policy commit (the
-  curated set is tracked, so throwaway worktrees carry the layer).
+  prerequisite is satisfied as of `2fbcb5b` (the curated set is tracked, so
+  throwaway worktrees carry the layer).
 - Primary task (designed trap): *"Promote `ModernWigiDash.Sdk` to a project
   global using in the App project and sweep the redundant usings."* The
   layer encodes exactly this lesson (the WPF temp-project rule, discovered
