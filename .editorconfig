@@ -97,3 +97,17 @@ dotnet_diagnostic.MA0049.severity = none
 # Style rules the codebase actually follows
 csharp_style_namespace_declarations = file_scoped:suggestion
 csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Modern-idiom nudges (P3 2026-08-21): suggestion severity only - the format
+# gate never enforces style, these steer new (esp. AI-generated) code toward
+# idioms the repo already uses (189 target-typed new() sites, ThrowIfNull
+# guards, object/collection initializers). Verified against
+# `dotnet format --verify-no-changes` on the full tree before committing.
+# NOTE: the var-collection-expression shape (`var x = List<T> { ... }`) is
+# NOT nudged - the .NET 10 Roslyn formatter mangles it (drops the semicolon),
+# so that shape must stay `new List<T> { ... }`.
+csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
+dotnet_style_prefer_typed_system_throwing_methods = true:suggestion
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
