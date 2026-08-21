@@ -109,13 +109,13 @@ public sealed class ProfilePersistenceTests
                         {
                             PluginId = "hotkey_button",
                             X = 0, Y = 0, Width = 203, Height = 148,
-                            PropertyValues = new Dictionary<string, object?> { ["ActionCommand"] = @"C:\Tools\launch.bat" }
+                            PropertyValues = { ["ActionCommand"] = @"C:\Tools\launch.bat" }
                         },
                         new PlacedWidgetInstance
                         {
                             PluginId = "picture_viewer",
                             X = 203, Y = 0, Width = 406, Height = 296,
-                            PropertyValues = new Dictionary<string, object?> { ["ImagePath"] = @"C:\Pictures\Wallpapers" }
+                            PropertyValues = { ["ImagePath"] = @"C:\Pictures\Wallpapers" }
                         }
                     ]
                 }
