@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text;
-using SkiaSharp;
 
 namespace ModernWigiDash.Core.Rendering;
 

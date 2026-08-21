@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
 using ModernWigiDash.Core.Plugins;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Core.Models;
 

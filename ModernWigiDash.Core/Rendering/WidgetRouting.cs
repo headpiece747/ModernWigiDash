@@ -1,5 +1,4 @@
 using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Core.Rendering;
 

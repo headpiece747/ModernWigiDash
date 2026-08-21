@@ -1,6 +1,4 @@
 using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
-using SkiaSharp;
 
 namespace ModernWigiDash.Core.Rendering;
 

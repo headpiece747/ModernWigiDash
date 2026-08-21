@@ -1,12 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Project global usings (P1 2026-08-21): namespaces every file in this
+       assembly already needs; per-file restatements removed in the same pass. -->
+  <ItemGroup>
+    <Using Include="ModernWigiDash.Sdk" />
+    <Using Include="SkiaSharp" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />
-
   </ItemGroup>
 
   <PropertyGroup>

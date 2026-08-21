@@ -1,4 +1,3 @@
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Core.Plugins;
 

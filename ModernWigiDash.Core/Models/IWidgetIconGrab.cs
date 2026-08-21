@@ -1,4 +1,3 @@
-using SkiaSharp;
 
 namespace ModernWigiDash.Core.Models;
 

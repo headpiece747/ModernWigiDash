@@ -1,6 +1,4 @@
 using System.Reflection;
-using ModernWigiDash.Sdk;
-using SkiaSharp;
 
 namespace ModernWigiDash.Core.Plugins;
 
