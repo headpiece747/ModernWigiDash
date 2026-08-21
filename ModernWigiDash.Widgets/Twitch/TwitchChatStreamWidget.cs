@@ -1,8 +1,4 @@
-using System.Globalization;
 
-using SkiaSharp;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets.Twitch;
 

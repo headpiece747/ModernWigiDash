@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Text.Json;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 

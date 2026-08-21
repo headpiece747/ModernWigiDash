@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets.Twitch;
 

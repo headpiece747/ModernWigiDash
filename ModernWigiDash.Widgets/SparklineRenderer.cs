@@ -1,5 +1,4 @@
 using System.Buffers;
-using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 

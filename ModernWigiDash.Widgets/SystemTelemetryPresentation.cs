@@ -1,5 +1,3 @@
-using System.Globalization;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 

@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Xml.Linq;
-using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 

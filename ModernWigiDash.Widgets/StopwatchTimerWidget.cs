@@ -1,6 +1,3 @@
-using ModernWigiDash.Sdk;
-using SkiaSharp;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 

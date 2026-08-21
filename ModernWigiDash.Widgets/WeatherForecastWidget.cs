@@ -1,8 +1,5 @@
 using System.Reflection;
-using SkiaSharp;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Core.Models;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 

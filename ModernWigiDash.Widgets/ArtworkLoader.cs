@@ -1,5 +1,4 @@
 using Windows.Storage.Streams;
-using SkiaSharp;
 
 namespace ModernWigiDash.Widgets;
 
