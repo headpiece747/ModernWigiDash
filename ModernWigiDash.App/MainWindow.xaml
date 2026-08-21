@@ -90,32 +90,52 @@
                     
                     <TextBox x:Name="TxtSearchCatalog" Grid.Row="1" Margin="0,0,0,12" TextChanged="TxtSearchCatalog_TextChanged"/>
 
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl x:Name="ListCatalog">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,10" Padding="12">
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="Auto"/>
-                                            </Grid.RowDefinitions>
+                    <!-- ListBox, not ItemsControl: a plain ItemsControl exposes each data item as a
+                         leaf DataItem UIA peer that never bridges to the template's children, so the
+                         row's button is invisible to automation; a ListBoxItem container peer does
+                         expose them. The no-op item template keeps the rows visually unchanged. -->
+                    <ListBox x:Name="ListCatalog" Grid.Row="2" Background="Transparent" BorderThickness="0"
+                             VirtualizingStackPanel.IsVirtualizing="False"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,10" Padding="12">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
 
-                                            <!-- Header: Name -->
-                                            <TextBlock Grid.Row="0" Text="{Binding DisplayName}" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                        <!-- Header: Name -->
+                                        <TextBlock Grid.Row="0" Text="{Binding DisplayName}" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
 
-                                            <!-- Category / Author -->
-                                            <TextBlock Grid.Row="1" Text="{Binding Category}" FontSize="11" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,8"/>
+                                        <!-- Category / Author -->
+                                        <TextBlock Grid.Row="1" Text="{Binding Category}" FontSize="11" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,8"/>
 
-                                            <!-- Action Button -->
-                                            <Button Grid.Row="2" Content="+ Place on Canvas" Click="BtnPlaceWidget_Click" Tag="{Binding PluginId}"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                                        <!-- Action Button: the unique per-row AutomationId lets automation
+                                             address the button directly (a display-name needle can no
+                                             longer hit a page tab instead) -->
+                                        <Button Grid.Row="2" Content="+ Place on Canvas" AutomationProperties.AutomationId="{Binding PluginId, StringFormat=BtnPlace_{0}}" Click="BtnPlaceWidget_Click" Tag="{Binding PluginId}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </Grid>
             </Border>
 
