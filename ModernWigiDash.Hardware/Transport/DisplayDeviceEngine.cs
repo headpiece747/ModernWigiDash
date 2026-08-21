@@ -430,30 +430,54 @@ public sealed class DisplayDeviceEngine : IDisposable
         _reconnectTimer.Dispose();
 
         // Direct-USB mode owns the device, so the app is responsible for putting
-        // the display into standby when it exits. When the transport is null
-        // (no device attached), there is nothing to put to standby — the
-        // display sleeps on its own timeout once heartbeats stop.
+        // the display into standby when it exits (the standby path's sleep command
+        // turns the backlight off). When the transport is null (no device
+        // attached), there is nothing to put to standby.
+        IDisplayTransport? transport;
+        lock (_lock)
+        {
+            transport = _transport;
+        }
+
+        // Off-thread with a bounded wait: close must not hang behind an
+        // in-flight frame write holding the transport lock (the LibUsb
+        // chunked write can block on its chunk timeouts — worst case the
+        // transport's CloseBound). Standby itself is a pair of fast control
+        // transfers (the Welcome screen and the sleep command, bounded by
+        // the control pipe timeout) once the lock frees; StandbyCloseBudget
+        // is the abandon point, deliberately shorter than CloseBound, so
+        // close can never stall on the write.
+        bool standbyConfirmed = false;
+        bool standbySettled = false;
+        bool standbyThrew = false;
         try
         {
-            // Off-thread with a bounded wait: close must not hang behind an
-            // in-flight frame write holding the transport lock (the LibUsb
-            // chunked write can block on its chunk timeouts — worst case the
-            // transport's CloseBound). Standby itself is a fast control
-            // transfer (bounded by the control pipe timeout) once the lock
-            // frees; StandbyCloseBudget is the abandon point, deliberately
-            // shorter than CloseBound, so close can never stall on the write.
-            // The transport is snapshotted under the lock (the touch-poll
-            // pattern).
-            IDisplayTransport? transport;
-            lock (_lock)
+            var standbyTask = Task.Run(() => transport?.GoToStandby() ?? false);
+            // Wait(timeout) reports only that the task finished inside the
+            // budget; the device's verdict rides the task's RESULT, readable
+            // only once completion is known — on the abandon path the hung
+            // standby is left to run out (a leaked handle at exit beats a
+            // frozen window).
+            standbySettled = standbyTask.Wait(StandbyCloseBudget);
+            if (standbySettled)
             {
-                transport = _transport;
+                standbyConfirmed = standbyTask.Result;
             }
-            Task.Run(() => transport?.GoToStandby()).Wait(StandbyCloseBudget);
         }
         catch (Exception ex)
         {
+            standbyThrew = true;
             Log($"[STANDBY] Standby failed during dispose: {ex.Message}");
+        }
+        // The standby verdict is observable: a standby that did not confirm
+        // (no live connection, the control writes failed, or the bounded
+        // wait expired) must not go silent — the display may stay lit on
+        // the Welcome screen, and that is a fact the log must carry.
+        if (transport is not null && !standbyConfirmed && !standbyThrew)
+        {
+            Log(standbySettled
+                ? "[STANDBY] Standby NOT confirmed during dispose: the standby control writes did not succeed — the display may stay lit"
+                : "[STANDBY] Standby NOT confirmed during dispose: the bounded close wait expired — a hung standby was abandoned at exit, and the display may stay lit");
         }
 
         DisconnectInternal();

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using ModernWigiDash.Hardware.Transport;
 using ModernWigiDash.Sdk;
 using SkiaSharp;
@@ -7,6 +9,27 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class DisplayDeviceEngineTests
 {
+    private string _logDir = "";
+    private string _logPath = "";
+
+    [TestInitialize]
+    public void Init()
+    {
+        // The engine's Dispose logs the standby verdict through FileLog (a
+        // shared static): redirect to a per-test temp file so the verdict
+        // lines are assertable and the test output dir stays clean.
+        _logDir = Path.Combine(Path.GetTempPath(), $"wmd-engine-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_logDir);
+        _logPath = Path.Combine(_logDir, "display_device.log");
+        FileLog.LogPath = _logPath;
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        FileLog.LogPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
+        try { Directory.Delete(_logDir, recursive: true); } catch (IOException) { /* best-effort */ }
+    }
     // ── Touch type normalization (TouchReport.ToEventType) ────────────
 
     [TestMethod]
@@ -187,16 +210,94 @@ public class DisplayDeviceEngineTests
         Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(new byte[8]));
     }
 
+    // ── the standby verdict on dispose (observable in the display log) ──
+
+    [TestMethod]
+    public void Dispose_WhenStandbyNotConfirmed_LogsTheVerdict()
+    {
+        // The standby verdict is observable: a standby that did not confirm
+        // (the control writes did not succeed) must land a line in the log —
+        // a silent dispose would hide a display left lit on the Welcome screen.
+        var fake = new FakeTransport(); // GoToStandbyResult defaults to false
+        var engine = new DisplayDeviceEngine(fake);
+
+        engine.Dispose();
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("Standby NOT confirmed"), "an unconfirmed standby must leave a verdict line in the log");
+    }
+
+    [TestMethod]
+    public void Dispose_WhenStandbyHangsPastTheBudget_AbandonsAndLogsTheVerdict()
+    {
+        // The wedged-pipe scenario: a standby that wedges past
+        // StandbyCloseBudget must not freeze the close — the bounded wait
+        // abandons it, and the log carries the verdict (the display may
+        // still be lit).
+        var fake = new FakeTransport { GoToStandbyBlockMs = 3000 };
+        var engine = new DisplayDeviceEngine(fake);
+
+        var stopwatch = Stopwatch.StartNew();
+        engine.Dispose();
+        stopwatch.Stop();
+        FileLog.Flush();
+
+        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"dispose must stay inside the bounded budgets (2 s standby + the fast fake dispose), took {stopwatch.Elapsed.TotalSeconds:0.0} s");
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("bounded close wait expired"), "an abandoned standby must leave its verdict line in the log");
+    }
+
+    [TestMethod]
+    public void Dispose_WhenStandbyConfirms_LogsNoFailureVerdict()
+    {
+        var fake = new FakeTransport { GoToStandbyResult = true };
+        var engine = new DisplayDeviceEngine(fake);
+
+        engine.Dispose();
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsFalse(content.Contains("Standby NOT confirmed"), "a confirmed standby leaves no failure verdict");
+        Assert.IsFalse(content.Contains("Standby failed"), "a confirmed standby leaves no failure line");
+    }
+
+    [TestMethod]
+    public void Dispose_WhenNoDevice_LogsNoStandbyVerdict()
+    {
+        // Production ctor, never started: no device, no transport — nothing to
+        // put to standby, and no verdict line either: the absent standby
+        // attempt is the expected no-device state, not a failure.
+        var engine = new DisplayDeviceEngine();
+
+        engine.Dispose();
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsFalse(content.Contains("Standby NOT confirmed"), "a no-device dispose is not a standby failure");
+    }
+
+    private static string ReadLog(string path)
+    {
+        if (!File.Exists(path)) return "";
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>
     /// Minimal <see cref="IDisplayTransport"/> fake: returns the canned
     /// <see cref="NextReport"/> from <see cref="ReadTouch"/>, and answers the
-    /// connect outcome per test (default: never connects).
+    /// connect and standby outcomes per test (default: never connects, standby
+    /// never confirms).
     /// </summary>
     private sealed class FakeTransport : IDisplayTransport
     {
         public TouchReport? NextReport { get; set; }
         public bool ConnectResult { get; set; }
         public bool ConnectedAfterConnect { get; set; }
+        public bool GoToStandbyResult { get; set; }
         public bool Disposed { get; private set; }
         public Action? OnConnect { get; set; }
 
@@ -209,7 +310,14 @@ public class DisplayDeviceEngineTests
         }
         public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected ? FrameSendResult.Sent : FrameSendResult.Refused;
         public TouchReport? ReadTouch() => NextReport;
-        public bool GoToStandby() => false;
+        /// <summary>Simulates a standby that wedges past the engine's
+        /// StandbyCloseBudget (the wedged bulk-pipe scenario).</summary>
+        public int GoToStandbyBlockMs { get; set; }
+        public bool GoToStandby()
+        {
+            if (GoToStandbyBlockMs > 0) Thread.Sleep(GoToStandbyBlockMs);
+            return GoToStandbyResult;
+        }
         /// <summary>Simulates a device whose Dispose hangs behind an in-flight
         /// frame write (the bulk-write timeout path).</summary>
         public int DisposeBlockMs { get; set; }
