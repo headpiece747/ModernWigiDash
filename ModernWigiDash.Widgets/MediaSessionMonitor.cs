@@ -483,10 +483,10 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
             manager.SessionsChanged += OnSessionsChanged;
         }
 
-        private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args)
+        private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object _)
             => CurrentSessionChanged?.Invoke();
 
-        private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, object args)
+        private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, object _)
             => SessionsChanged?.Invoke();
 
         public IMediaSessionSourceSession? GetCurrentSession()
@@ -523,13 +523,13 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
             session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
         }
 
-        private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+        private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object _)
             => MediaPropertiesChanged?.Invoke();
 
-        private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+        private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object _)
             => PlaybackInfoChanged?.Invoke();
 
-        private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object args)
+        private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object _)
             => TimelinePropertiesChanged?.Invoke();
 
         public object Identity => _session;

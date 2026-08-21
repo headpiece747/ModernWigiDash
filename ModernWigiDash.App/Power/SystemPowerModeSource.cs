@@ -17,7 +17,7 @@ internal sealed class SystemPowerModeSource : IPowerModeSource
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
     }
 
-    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    private void OnPowerModeChanged(object? _, PowerModeChangedEventArgs e)
     {
         if (e.Mode is PowerModes.Suspend or PowerModes.Resume)
         {

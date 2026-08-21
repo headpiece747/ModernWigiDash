@@ -74,7 +74,7 @@ internal sealed class PageTabsView
     /// <summary>The strip scrolls horizontally with the wheel like a
     /// horizontal scroller (the wheel's vertical delta maps to horizontal
     /// offset, inverted to match the scroll direction).</summary>
-    private void OnScrollViewerMouseWheel(object sender, MouseWheelEventArgs e)
+    private void OnScrollViewerMouseWheel(object _, MouseWheelEventArgs e)
     {
         _scrollViewer.ScrollToHorizontalOffset(_scrollViewer.HorizontalOffset - e.Delta);
     }

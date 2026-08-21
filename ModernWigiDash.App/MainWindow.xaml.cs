@@ -470,14 +470,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     #region Skia Canvas Rendering & Mouse Interaction
 
-    private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
+    private void SkiaCanvas_PaintSurface(object _, SKPaintSurfaceEventArgs e)
     {
         // Pure draw: the FramePump composed this buffer and queued it for
         // delivery on this tick, so what is drawn is exactly what was sent.
         e.Surface.Canvas.DrawBitmap(_compositor.FrameBuffer, 0, 0, FrameSamplingOptions);
     }
 
-    private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    private void OnWindowPreviewMouseDown(object _, MouseButtonEventArgs e)
     {
         // The click-outside-deselect geometry rule is pure
         // (MainWindowInputPolicy) — the handler only feeds it the two
@@ -490,7 +490,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SelectWidget(null);
     }
 
-    private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
+    private void SkiaCanvas_MouseDown(object _, MouseButtonEventArgs e)
     {
         _isMouseDown = true;
         // Capture the mouse so a drag that leaves the canvas still delivers
@@ -591,7 +591,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     #region Widget Selection & Deletion
 
-    private void BtnDeleteWidget_Click(object sender, RoutedEventArgs e)
+    private void BtnDeleteWidget_Click(object _, RoutedEventArgs e)
     {
         DeleteSelectedWidget();
     }
@@ -612,7 +612,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// deletes: a field that momentarily lost focus (inspector rebuild)
     /// would otherwise lose the selection while the user corrects text.
     /// </summary>
-    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void MainWindow_PreviewKeyDown(object _, KeyEventArgs e)
     {
         if (MainWindowInputPolicy.ShouldHandleDeleteKey(e.Key, Keyboard.FocusedElement is TextBox))
         {
@@ -625,7 +625,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     #region Catalog, Header, and Action Handlers
 
-    private void TxtSearchCatalog_TextChanged(object sender, TextChangedEventArgs e) => RefreshCatalog();
+    private void TxtSearchCatalog_TextChanged(object _, TextChangedEventArgs e) => RefreshCatalog();
 
     /// <summary>One catalog sort, three call sites: the initial fill, the
     /// filter box, and the empty-query reset all render through this.</summary>
@@ -634,7 +634,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         ListCatalog.ItemsSource = CatalogFilter.Apply(_loader.RegisteredPlugins, TxtSearchCatalog.Text.Trim());
     }
 
-    private void BtnPlaceWidget_Click(object sender, RoutedEventArgs e)
+    private void BtnPlaceWidget_Click(object sender, RoutedEventArgs _)
     {
         if (sender is Button btn && btn.Tag is string pluginId)
         {
@@ -686,27 +686,27 @@ public partial class MainWindow : Window, IModernWigiDashContext
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
-    private void BtnAddPage_Click(object sender, RoutedEventArgs e)
+    private void BtnAddPage_Click(object _, RoutedEventArgs e)
     {
         ProfileOps.AddPage(_profile);
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
-    private void ChkSnapToGrid_Changed(object sender, RoutedEventArgs e)
+    private void ChkSnapToGrid_Changed(object _, RoutedEventArgs e)
     {
         if (!_wired) return;
         _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
         ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
     }
 
-    private void ChkEditMode_Changed(object sender, RoutedEventArgs e)
+    private void ChkEditMode_Changed(object _, RoutedEventArgs e)
     {
         if (!_wired) return;
         _compositor.IsEditMode = ChkEditMode.IsChecked == true;
         SkiaCanvas.InvalidateVisual();
     }
 
-    private void BtnExport_Click(object sender, RoutedEventArgs e)
+    private void BtnExport_Click(object _, RoutedEventArgs e)
     {
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
@@ -724,7 +724,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         }
     }
 
-    private void BtnImport_Click(object sender, RoutedEventArgs e)
+    private void BtnImport_Click(object _, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog { Filter = "Display Profile (*.json)|*.json" };
         if (dlg.ShowDialog() == true)
@@ -761,7 +761,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         }
     }
 
-    private void BtnClear_Click(object sender, RoutedEventArgs e)
+    private void BtnClear_Click(object _, RoutedEventArgs e)
     {
         if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
@@ -785,7 +785,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         TxtUsbStatus.Text = label;
     }
 
-    private void BtnTheme_Click(object sender, RoutedEventArgs e)
+    private void BtnTheme_Click(object _, RoutedEventArgs e)
     {
         ShowThemeDialog();
     }

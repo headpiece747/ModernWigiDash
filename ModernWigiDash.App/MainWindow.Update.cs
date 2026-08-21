@@ -24,7 +24,7 @@ public partial class MainWindow
     private readonly UpdateService _updateService = new();
     private readonly UpdateFlow _updateFlow = new();
 
-    private async void OnUpdateCheckAtStartup(object? sender, EventArgs e)
+    private async void OnUpdateCheckAtStartup(object? _, EventArgs e)
     {
         // SourceInitialized: the window is visible; run the check off-thread.
         // The real network path throws (DNS failure, connection refused, the
@@ -73,7 +73,7 @@ public partial class MainWindow
         UpdateIconPath.Fill = new SolidColorBrush(Color.FromRgb(badge.Red, badge.Green, badge.Blue));
     }
 
-    private void UpdateButton_Click(object sender, RoutedEventArgs e)
+    private void UpdateButton_Click(object _, RoutedEventArgs e)
     {
         switch (_updateFlow.OnClick())
         {
