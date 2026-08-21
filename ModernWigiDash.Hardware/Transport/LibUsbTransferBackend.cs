@@ -1,7 +1,6 @@
 using LibUsbDotNet;
 using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Transport;
 

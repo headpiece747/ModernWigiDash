@@ -4,7 +4,6 @@
 // </copyright>
 
 using System.Runtime.InteropServices;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Transport;
 

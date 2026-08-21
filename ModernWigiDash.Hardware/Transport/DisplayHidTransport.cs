@@ -7,7 +7,6 @@ using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using ModernWigiDash.Sdk;
 using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Hardware.Transport;

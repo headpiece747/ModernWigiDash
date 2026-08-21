@@ -3,7 +3,6 @@
 // Licensed under the MIT license.
 // </copyright>
 
-using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.Hardware.Transport;

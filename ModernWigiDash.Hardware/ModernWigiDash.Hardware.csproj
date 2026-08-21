@@ -2,8 +2,13 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <AssemblyName>ModernWigiDash.Hardware</AssemblyName>
   </PropertyGroup>
+
+  <!-- Project global usings (P1 2026-08-21): namespaces every file in this
+       assembly already needs; per-file restatements removed in the same pass. -->
+  <ItemGroup>
+    <Using Include="ModernWigiDash.Sdk" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" />
