@@ -59,6 +59,16 @@ public partial class App : Application
             CrashLog.Append(e.Exception, handled: benign);
             e.Handled = benign;
         };
+
+        // The deterministic final flush (see FileLog.Flush): the cadence
+        // flushes may leave the last lines — including the shutdown standby
+        // verdict — buffered when the process exits. The exit marker doubles
+        // as the "the app reached a clean exit" line for log analysis.
+        Exit += (_, _) =>
+        {
+            FileLog.Write("[App] === Application exiting ===");
+            FileLog.Flush();
+        };
     }
 
     protected override void OnStartup(StartupEventArgs e)

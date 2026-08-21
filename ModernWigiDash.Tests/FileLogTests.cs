@@ -28,6 +28,34 @@ public class FileLogTests
     }
 
     [TestMethod]
+    public void Flush_FlushesBelowThreshold_LandsInFile()
+    {
+        // A short line stays under both flush cadences (8 KB or 250 ms), so
+        // it would sit in the buffer at process exit — the app's exit handler
+        // calls Flush exactly for this (the on-device close that lost the
+        // standby line: the line was written, the buffer never flushed).
+        FileLog.Write("the line the exit flush must land");
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("the line the exit flush must land"), "Flush must land buffered lines immediately");
+    }
+
+    [TestMethod]
+    public void Flush_WhenNoWriterOpened_IsNoOp()
+    {
+        // Must never throw, even with nothing buffered or written — and a
+        // flush must not corrupt the writer state: the next write still lands.
+        FileLog.Flush();
+        FileLog.Flush();
+
+        FileLog.Write("write after a writer-less flush");
+        FileLog.Flush();
+        Assert.IsTrue(ReadLog(_logPath).Contains("write after a writer-less flush"),
+            "a no-op flush must leave the writer path intact");
+    }
+
+    [TestMethod]
     public void Write_FileOverRotationCap_RotatesToDotOneAndContinuesFresh()
     {
         // Seed an oversized file directly; the size check runs on a write

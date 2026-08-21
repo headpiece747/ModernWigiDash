@@ -42,9 +42,25 @@ public static class FileLog
 
     /// <summary>
     /// Path of the display log. Defaults to <c>display_device.log</c> next to
-    /// the executable; overridable so tests can point at a temp path.
+    /// the executable; overridable so tests can point at a temp path. Setting
+    /// a new path closes any open writer so subsequent writes open the new
+    /// file — the writer is process-global and must not outlive a path change
+    /// (production sets the path exactly once at startup, before any write).
     /// </summary>
-    public static string LogPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "display_device.log");
+    public static string LogPath
+    {
+        get => _logPath;
+        set
+        {
+            lock (Gate)
+            {
+                _logPath = value;
+                ResetWriter();
+            }
+        }
+    }
+
+    private static string _logPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
 
     /// <summary>Test seam: the clock for the timestamp line (the rest of Sdk
     /// injects TimeProvider — this is the same policy for the shared log).</summary>
@@ -98,13 +114,39 @@ public static class FileLog
         }
     }
 
+    /// <summary>
+    /// Flushes buffered lines to disk immediately (idempotent; a no-op when no
+    /// writer is open). The app calls this exactly once at exit: the cadence
+    /// flushes (8 KB or 250 ms) may leave the final lines — including the
+    /// shutdown standby verdict — in the buffer, and a process exit does not
+    /// reliably run the writer's finalizer (observed on-device: one close lost
+    /// the standby line, the next kept it). Never throws.
+    /// </summary>
+    public static void Flush()
+    {
+        lock (Gate)
+        {
+            try
+            {
+                _writer?.Flush();
+                _bufferedBytes = 0;
+                _lastFlushTicks = Stopwatch.GetTimestamp();
+            }
+            catch (IOException)
+            {
+                ReportFailure();
+                ResetWriter();
+            }
+        }
+    }
+
     private static StreamWriter OpenWriter()
     {
         // An oversized file from a previous run is rotated here too (once, at
         // open) so the file is never appended past the cap from a fresh start.
         TryRotateIfNeeded();
 
-        var writer = new StreamWriter(new FileStream(LogPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
+        var writer = new StreamWriter(new FileStream(_logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite));
         _lastFlushTicks = Stopwatch.GetTimestamp();
         return writer;
     }
@@ -117,7 +159,7 @@ public static class FileLog
     /// </summary>
     private static void TryRotateIfNeeded()
     {
-        var current = new FileInfo(LogPath);
+        var current = new FileInfo(_logPath);
         if (!current.Exists || current.Length < RotationCapBytes) return;
 
         try
@@ -127,10 +169,10 @@ public static class FileLog
             _writer = null;
             _bufferedBytes = 0;
 
-            string rotatedPath = LogPath + ".1";
+            string rotatedPath = _logPath + ".1";
             if (File.Exists(rotatedPath))
                 File.Delete(rotatedPath);
-            File.Move(LogPath, rotatedPath);
+            File.Move(_logPath, rotatedPath);
         }
         catch (IOException)
         {
