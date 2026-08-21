@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("clock_modern", "Clock", Category = "Clock & Time", DefaultGridSize = GridSizePreset.Size2x1)]

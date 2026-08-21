@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The close-sequence policy — the standby guarantee pinned: every

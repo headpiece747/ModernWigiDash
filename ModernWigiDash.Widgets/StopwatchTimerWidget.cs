@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]

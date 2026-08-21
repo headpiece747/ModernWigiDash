@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The reconnect policies behind the WebSocket feed loops — one place

@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Core.Models;
 
 /// <summary>

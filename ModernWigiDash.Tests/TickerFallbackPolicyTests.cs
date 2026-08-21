@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The ticker's fallback-seed cadence — pinned without pixels; the

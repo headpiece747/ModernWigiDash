@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The cached hex-color parsing helper every widget color site now

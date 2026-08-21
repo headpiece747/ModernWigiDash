@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x2)]

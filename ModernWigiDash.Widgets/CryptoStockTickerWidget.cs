@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]

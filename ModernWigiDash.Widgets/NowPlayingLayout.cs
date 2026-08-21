@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>The touch zones of the Now Playing widget, in precedence order.</summary>

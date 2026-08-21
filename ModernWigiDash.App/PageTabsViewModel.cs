@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.App;
 
 /// <summary>The pure description of one page tab — the rules

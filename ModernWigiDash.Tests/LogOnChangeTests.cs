@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The log-on-change dedup rule behind the telemetry error surfaces.</summary>

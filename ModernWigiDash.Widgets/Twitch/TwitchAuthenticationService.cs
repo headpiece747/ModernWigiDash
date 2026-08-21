@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets.Twitch;
 
 internal sealed class TwitchSession

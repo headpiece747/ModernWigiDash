@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.App.Gestures;
 
 /// <summary>

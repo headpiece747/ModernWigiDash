@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets.Twitch;
 
 /// <summary>

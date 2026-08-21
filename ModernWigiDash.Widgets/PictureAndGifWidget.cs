@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("picture_viewer", "Picture & GIF Viewer", Category = "Social & Visual")]

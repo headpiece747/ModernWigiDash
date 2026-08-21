@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets.Twitch;
 
 /// <summary>The kinds of IRC lines the chat widget acts on.</summary>

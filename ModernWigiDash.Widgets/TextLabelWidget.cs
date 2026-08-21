@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("text_label", "Text", Category = "Utilities", DefaultGridSize = GridSizePreset.Size2x1)]

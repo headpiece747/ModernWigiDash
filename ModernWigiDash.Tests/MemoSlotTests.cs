@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The single-slot memo pattern the widgets' hand-rolled caches now

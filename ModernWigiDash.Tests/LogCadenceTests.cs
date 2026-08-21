@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>The diagnostic log-cadence rule — one tested rule for the five

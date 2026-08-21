@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>One labeled metric readout row (dashboard card or overlay line).</summary>

@@ -1,4 +1,3 @@
-
 namespace ModernWigiDash.Widgets;
 
 [WidgetMetadata("hardware_monitor", "Hardware Monitor", Category = "System Monitoring")]
