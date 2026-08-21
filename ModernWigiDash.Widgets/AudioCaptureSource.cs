@@ -29,7 +29,16 @@ internal interface IAudioCaptureSource : IDisposable
 /// </summary>
 internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
 {
+    // NAudio 3.0 marks WasapiLoopbackCapture [Obsolete] in favor of the
+    // async-iterable WasapiRecorder (WasapiRecorderBuilder.WithLoopbackCapture).
+    // That is a capture-lifecycle redesign (event-driven DataAvailable ->
+    // CaptureAsync IAsyncEnumerable + Task/CancellationToken management), not a
+    // drop-in, and the visualizer's sample path can only be verified against a
+    // real audio device - so the proven WasapiLoopbackCapture adapter is kept
+    // until a device-verified port lands.
+#pragma warning disable CS0618
     private WasapiLoopbackCapture? _capture;
+#pragma warning restore CS0618
 
     public bool IsCapturing => _capture != null;
 
@@ -50,6 +59,7 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
     {
         if (_capture != null) return;
 
+#pragma warning disable CS0618 // obsolete-API deferral documented at the field above
         var capture = new WasapiLoopbackCapture();
         capture.DataAvailable += (_, e) =>
         {
@@ -67,6 +77,7 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
 
         capture.StartRecording();
         _capture = capture;
+#pragma warning restore CS0618
     }
 
     public void Stop()
