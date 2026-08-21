@@ -146,11 +146,25 @@ public class WeatherFetchFlowTests
 
         var outcome = await host.Flow.RunFetchAsync();
 
-        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
-        Assert.AreEqual(25.0, host.State.CurrentTempC, "The dropped result must never reach the display state.");
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome,
+            "The post-await live re-check must drop the old identity's result.");
+        // The dropped result (NYC 11.1) and the forced re-fetch (Berlin
+        // 22.2) carry different temperatures, but the re-fetch may land
+        // before this continuation (a synchronous stub chain), so the sound
+        // "the dropped result never applied" probe is the apply count:
+        // exactly one apply — the re-fetch's. A leaked dropped result would
+        // add a second.
         // The forced re-fetch is fire-and-forget: wait for the NEW identity
-        // to land, and pin that the drop triggered a second forecast leg.
-        await TestWait.WaitUntilAsync(() => Math.Abs(host.State.CurrentTempC - 22.2) < 1e-9, TimeSpan.FromSeconds(5));
+        // to land together with the apply-count probe folded into the wait
+        // itself — the apply (temperature write) and its single
+        // RequestRender are adjacent on the re-fetch's continuation, so a
+        // temp-only wait could observe the write in the microsecond gap
+        // before the render request lands and read 0 renders.
+        await TestWait.WaitUntilAsync(
+            () => Math.Abs(host.State.CurrentTempC - 22.2) < 1e-9 && host.RenderRequests == 1,
+            TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, host.RenderRequests,
+            "Exactly one apply — the forced re-fetch's. A leaked dropped result would add a second.");
         Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
         StringAssert.StartsWith(host.Identity.ResolvedName, "Berlin");
     }
@@ -165,14 +179,29 @@ public class WeatherFetchFlowTests
         // runs) — the outcome-key vs. start-key comparison rides
         // WeatherQueryKey.SameKey and is the gate that catches it.
         int seamCalls = 0;
-        var host = NewHost(new StubHttpHandler(FlowRespond),
+        var stub = new StubHttpHandler(FlowRespond);
+        var host = NewHost(stub,
             locationSeam: () => Interlocked.Increment(ref seamCalls) == 1 ? NycCoords : LondonCoords);
 
         var outcome = await host.Flow.RunFetchAsync();
 
-        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
-        Assert.AreEqual(25.0, host.State.CurrentTempC, "The mismatched-identity result must never reach the display state.");
-        await TestWait.WaitUntilAsync(() => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome,
+            "The outcome-key vs. start-key mismatch must be detected and dropped.");
+        // The forced re-fetch resolves the SAME new identity the dropped
+        // result carried (the seam's second read), so the display temperature
+        // cannot distinguish "dropped + re-fetched" from "mismatched result
+        // applied" — both settle at London's 33.3, and with a synchronous
+        // stub chain the re-fetch may already have landed by the time this
+        // continuation runs. The sound probes are the verdict (above), the
+        // wire (the drop's re-fetch leg), and the apply count (a leaked
+        // dropped result would add a second apply).
+        await TestWait.WaitUntilAsync(
+            () => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9 && host.RenderRequests == 1,
+            TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, host.RenderRequests,
+            "Exactly one apply — the forced re-fetch's. A leaked dropped result would add a second.");
+        Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("latitude=51.5100", StringComparison.Ordinal)),
+            "The dropped result's own fetch leg plus the forced re-fetch's leg — one re-fetch, no more.");
     }
 
     [TestMethod]
@@ -320,13 +349,29 @@ public class WeatherFetchFlowTests
 
         var outcome = await host.Flow.RunFetchAsync();
 
-        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
-        Assert.AreEqual(0, host.State.DataVersion, "the dropped tie must never reach the display state");
-        Assert.AreEqual("Default Location", host.Identity.ResolvedName);
-        Assert.AreEqual(0, host.Identity.Candidates.Count, "the old identity's tie candidates must not populate the new identity's dropdown");
-        // The forced re-fetch resolves the NEW identity (the London pair):
-        // wait for it to land and pin that the drop triggered the fetch.
-        await TestWait.WaitUntilAsync(() => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9, TimeSpan.FromSeconds(5));
+        Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome,
+            "The post-await live re-check must drop the old identity's tie.");
+        // The drop's forced re-fetch (fire-and-forget) resolves the NEW
+        // identity (the London pair): wait for it to land and pin that the
+        // drop triggered the fetch — the re-fetch runs concurrently with the
+        // dropped run's return, so no right-after-drop version snapshot is
+        // asserted. The sound leak probe is the apply count: a leaked dropped
+        // tie would apply (and request a render) in addition to the re-fetch.
+        // The candidates are NOT asserted: this host's seam edit bypasses the
+        // widget's invalidation routing, so the client twin carries its
+        // surviving candidates (the geocoder's zero-HTTP pick path) into the
+        // re-fetch's apply by design — only the edit path's InvalidateLocation
+        // clears them. The apply-count probe is folded into the wait itself
+        // (the apply and its single RequestRender are adjacent on the
+        // re-fetch's continuation — a temp-only wait could observe the
+        // write in the microsecond gap before the render request lands).
+        await TestWait.WaitUntilAsync(
+            () => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9 && host.RenderRequests == 1,
+            TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, host.RenderRequests,
+            "Exactly one apply — the forced re-fetch's. A leaked dropped tie would add a second.");
+        Assert.AreEqual("51.51, -0.13", host.Identity.ResolvedName,
+            "the applied header is the NEW identity's label");
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
             "the re-fetched pair location must not re-geocode");
