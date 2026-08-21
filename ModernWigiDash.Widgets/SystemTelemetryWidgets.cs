@@ -36,6 +36,28 @@ public class HardwareMonitorWidget : ModernWidgetBase
 
     private readonly Queue<float> _history = new();
     private const int HistoryCapacity = 96;
+    private bool _disposed;
+
+    // Hoisted paints: the colors mutate per render (property-driven), so the
+    // 30 FPS render allocates no SKPaint — the gauge/bar strokes and the
+    // sparkline line/fill included.
+    private readonly SKPaint _headerPaint = new() { IsAntialias = true };
+    private readonly SKPaint _valuePaint = new() { IsAntialias = true };
+    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
+    private readonly SKPaint _gaugeTrackPaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _gaugeProgressPaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _barTrackPaint = new() { IsAntialias = true };
+    private readonly SKPaint _barProgressPaint = new() { IsAntialias = true };
+    private readonly SKPaint _sparkFillPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = true };
+    private readonly SKPaint _sparkLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
+
+    // The graph mode's sparkline paths are caller-owned and rewound per frame
+    // (the history appends a sample every frame, so the geometry is never
+    // stable — the paths themselves must not be reallocated either).
+    private SKPath? _sparkLinePath;
+    private SKPath? _sparkFillPath;
 
     // The SensorLabel→reading match was a linear scan per frame; the match is
     // cached keyed by (snapshot identity, label) — a new snapshot (~1/s) or a
@@ -115,14 +137,14 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
     }
 
-    private static void DrawPlaceholder(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
-        => TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, display.PlaceholderTitle, display.PlaceholderSubtitle, text);
+    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
+        => TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, display.PlaceholderTitle, display.PlaceholderSubtitle, text, _placeholderTitlePaint, _placeholderSubPaint);
 
-    private static void DrawHeader(SKCanvas canvas, SKRect bounds, string label, float pad, SKColor text)
+    private void DrawHeader(SKCanvas canvas, SKRect bounds, string label, float pad, SKColor text)
     {
         var headerFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
-        using var headerPaint = new SKPaint { Color = text, IsAntialias = true };
-        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, headerFont, headerPaint);
+        _headerPaint.Color = text;
+        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, headerFont, _headerPaint);
     }
 
     /// <summary>
@@ -155,18 +177,18 @@ public class HardwareMonitorWidget : ModernWidgetBase
         string valStr = display.ValueText;
 
         var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
-        using var valPaint = new SKPaint { Color = valueColor, IsAntialias = true };
-        valFont.MeasureText(valStr, out var valBounds, valPaint);
+        _valuePaint.Color = valueColor;
+        valFont.MeasureText(valStr, out var valBounds, _valuePaint);
 
         float valueX = rightAligned ? anchorX - valBounds.Width : anchorX - valBounds.Width / 2f;
         float baselineY = baselineAnchor + valBounds.Height * baselineFromValue;
-        canvas.DrawTextWithFallback(valStr, valueX, baselineY, valFont, valPaint);
+        canvas.DrawTextWithFallback(valStr, valueX, baselineY, valFont, _valuePaint);
 
         if (!string.IsNullOrWhiteSpace(display.Unit))
         {
             var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, unitFontSize);
-            using var unitPaint = new SKPaint { Color = unitColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(display.Unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, unitPaint);
+            _unitPaint.Color = unitColor;
+            canvas.DrawTextWithFallback(display.Unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, _unitPaint);
         }
     }
 
@@ -181,12 +203,12 @@ public class HardwareMonitorWidget : ModernWidgetBase
         float radius = (gaugeSize / 2f) - 10f;
         var arcBounds = new SKRect(cx - radius, cy - radius, cx + radius, cy + radius);
 
-        using var trackPaint = new SKPaint { Color = text.WithAlpha(20), Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        canvas.DrawArc(arcBounds, 135f, 270f, false, trackPaint);
+        _gaugeTrackPaint.Color = text.WithAlpha(20);
+        canvas.DrawArc(arcBounds, 135f, 270f, false, _gaugeTrackPaint);
 
         float progress = display.Progress;
-        using var progressPaint = new SKPaint { Color = accent, Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        canvas.DrawArc(arcBounds, 135f, 270f * progress, false, progressPaint);
+        _gaugeProgressPaint.Color = accent;
+        canvas.DrawArc(arcBounds, 135f, 270f * progress, false, _gaugeProgressPaint);
 
         DrawHeroValue(canvas, display, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), 11f, 4f);
     }
@@ -202,15 +224,15 @@ public class HardwareMonitorWidget : ModernWidgetBase
         var barRect = new SKRect(bounds.Left + pad, bounds.MidY + 20f, bounds.Right - pad, bounds.MidY + 32f);
         float trackRadius = barRect.Height / 2f;
 
-        using var trackPaint = new SKPaint { Color = text.WithAlpha(20), IsAntialias = true };
-        canvas.DrawRoundRect(barRect, trackRadius, trackRadius, trackPaint);
+        _barTrackPaint.Color = text.WithAlpha(20);
+        canvas.DrawRoundRect(barRect, trackRadius, trackRadius, _barTrackPaint);
 
         float progress = display.Progress;
         float progressWidth = Math.Max(barRect.Height, barRect.Width * progress);
         var progressRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + progressWidth, barRect.Bottom);
         float progressRadius = Math.Min(trackRadius, progressWidth / 2f);
-        using var progressPaint = new SKPaint { Color = accent, IsAntialias = true };
-        canvas.DrawRoundRect(progressRect, progressRadius, progressRadius, progressPaint);
+        _barProgressPaint.Color = accent;
+        canvas.DrawRoundRect(progressRect, progressRadius, progressRadius, _barProgressPaint);
     }
 
     private void RenderValue(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
@@ -266,12 +288,42 @@ public class HardwareMonitorWidget : ModernWidgetBase
                 hi = value + 1f;
             }
 
-            SparklineRenderer.DrawSparkline(canvas, area, samples, lo, hi, accent);
+            // The caller-owned paths are rewound per frame (the sample history
+            // changes every frame, so the geometry is never stable — the paths
+            // themselves are not reallocated either), and the hoisted paints
+            // are re-colored per frame.
+            _sparkFillPath ??= new SKPath();
+            _sparkLinePath ??= new SKPath();
+            SparklineRenderer.RebuildSparklinePaths(area, samples, lo, hi, _sparkLinePath, _sparkFillPath);
+            _sparkFillPaint.Color = accent.WithAlpha(40);
+            canvas.DrawPath(_sparkFillPath, _sparkFillPaint);
+            _sparkLinePaint.Color = accent;
+            canvas.DrawPath(_sparkLinePath, _sparkLinePaint);
         }
 
         const float valFontSize = 22f;
         DrawHeroValue(canvas, display, area.Right, area.Top + valFontSize, 0f,
             valFontSize, accent, text.WithAlpha(180), 11f, 4f, rightAligned: true);
+    }
+
+    public override ValueTask DisposeAsync()
+    {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
+        _headerPaint.Dispose();
+        _valuePaint.Dispose();
+        _unitPaint.Dispose();
+        _gaugeTrackPaint.Dispose();
+        _gaugeProgressPaint.Dispose();
+        _barTrackPaint.Dispose();
+        _barProgressPaint.Dispose();
+        _sparkFillPaint.Dispose();
+        _sparkLinePaint.Dispose();
+        _placeholderTitlePaint.Dispose();
+        _placeholderSubPaint.Dispose();
+        _sparkLinePath?.Dispose();
+        _sparkFillPath?.Dispose();
+        return base.DisposeAsync();
     }
 }
 

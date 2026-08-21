@@ -146,12 +146,18 @@ internal sealed class WeatherFetchControl
     /// Advances the resolution identity BEFORE the outcome is known. If the
     /// key changed (a silent reassignment — hydration, or a direct property
     /// write that bypassed invalidation — raced a previous resolution), the
-    /// OLD identity's coordinates/name/candidates/population are cleared: a
-    /// failed geocode for the new identity must not fall through with the
-    /// previous place's state still set, and the completion check (which
-    /// compares against THIS new key) would otherwise pass — fetching and
-    /// caching the wrong city under the new identity. The population reset
-    /// rides the same lock so the fetch's next read is one consistent view.
+    /// OLD identity's coordinates/name/population are cleared: a failed
+    /// geocode for the new identity must not fall through with the previous
+    /// place's state still set, and the completion check (which compares
+    /// against THIS new key) would otherwise pass — fetching and caching the
+    /// wrong city under the new identity. The geocode candidates SURVIVE the
+    /// key change — they are cleared explicitly by the edit path's
+    /// invalidation (InvalidateLocation / ClearCandidates), because the
+    /// LocationMatch edit's own drop resets the query to empty while KEEPING
+    /// the candidates the pick resolves against: the pick's fetch then
+    /// advances from empty and must still find its row (the geocoder's
+    /// zero-HTTP fast path). The population reset rides the same lock so the
+    /// fetch's next read is one consistent view.
     /// </summary>
     internal void AdvanceResolution(string queryKey)
     {

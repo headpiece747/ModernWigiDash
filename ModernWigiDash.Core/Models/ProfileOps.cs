@@ -250,9 +250,29 @@ public static class ProfileOps
             // sync it back onto the fresh instance (widgets key caches by it).
             instance.InstanceId = placed.InstanceId;
 
-#pragma warning disable S6966 // Widget initialization must complete before placement — sync wrapper during startup
-            instance.InitializeAsync(context).GetAwaiter().GetResult();
+            ValueTask init = instance.InitializeAsync(context);
+            if (init.IsCompletedSuccessfully)
+            {
+                // The sync module's documented invariant: every widget's
+                // initialization completes synchronously, so this wait is a
+                // no-op that blocks no thread (the IsCompletedSuccessfully
+                // guard is what makes that true — see the else branch).
+#pragma warning disable S6966 // guarded by the IsCompletedSuccessfully check above — no async work is awaited synchronously
+                init.GetAwaiter().GetResult();
 #pragma warning restore S6966
+            }
+            else
+            {
+                // A widget that YIELDS from InitializeAsync would deadlock the
+                // UI thread here: its continuation posts back to the WPF
+                // SynchronizationContext this call site is about to block on.
+                // Fail it loudly instead of a silent freeze — the widget is
+                // skipped (the rest of the profile still loads) and its
+                // teardown is detached to a background task.
+                context.LogError($"Widget '{placed.PluginId}' yielded from InitializeAsync; synchronous rehydration cannot block the UI thread — the widget is skipped.");
+                _ = SkipAndDisposeAsync(init, instance, placed.PluginId, context);
+                return null;
+            }
 
             var type = instance.GetType();
             foreach (var prop in type.GetProperties())
@@ -285,13 +305,17 @@ public static class ProfileOps
             context.LogError($"Widget rehydration failed for '{placed.PluginId}'; the widget is skipped.", ex);
             if (instance is not null && !ReferenceEquals(instance, placed.ActiveInstance))
             {
-                try
+                ValueTask dispose = instance.DisposeAsync();
+                if (dispose.IsCompletedSuccessfully)
                 {
-                    instance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning disable S6966 // guarded by the IsCompletedSuccessfully check above — no async work is awaited synchronously
+                    dispose.GetAwaiter().GetResult();
+#pragma warning restore S6966
                 }
-                catch
+                else
                 {
-                    // Teardown of the failed instance must not mask the original error.
+                    FileLog.Write($"[PROFILE] Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}) — teardown detached to a background task.");
+                    _ = DetachDisposeAsync(dispose);
                 }
             }
             return null;
@@ -301,21 +325,71 @@ public static class ProfileOps
     /// <summary>
     /// Tears down a placed widget's active instance. Widget teardown (timers,
     /// sockets, subscriptions) must never break profile operations, so failures
-    /// are swallowed. ProfileOps is a synchronous module (ADR-0001), so async
-    /// disposal is awaited synchronously.
+    /// are swallowed. The sync module's invariant is that teardown completes
+    /// synchronously (the IsCompletedSuccessfully guard makes the wait a
+    /// no-op); a widget that yields is detached to a background task instead
+    /// of blocking the UI thread on its WPF-posted continuation.
     /// </summary>
     private static void DisposeWidgetInstance(PlacedWidgetInstance? placed)
     {
         if (placed?.ActiveInstance is null) return;
+        ValueTask dispose = placed.ActiveInstance.DisposeAsync();
+        if (dispose.IsCompletedSuccessfully)
+        {
+#pragma warning disable S6966 // guarded by the IsCompletedSuccessfully check above — no async work is awaited synchronously
+            dispose.GetAwaiter().GetResult();
+#pragma warning restore S6966
+        }
+        else
+        {
+            // The instance is already detached from the profile (nulled below),
+            // so its in-flight teardown cannot outlive a rendered frame — it
+            // just cannot be awaited on this thread.
+            FileLog.Write($"[PROFILE] Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}) — teardown detached to a background task.");
+            _ = DetachDisposeAsync(dispose);
+        }
+        placed.ActiveInstance = null;
+    }
+
+    /// <summary>
+    /// Completes the skipped widget's yielded initialization (on a background
+    /// task — this never runs on the UI thread), then disposes the instance so
+    /// a skipped widget leaves no orphaned resources (the skipped NowPlaying
+    /// monitor, for instance, is torn down here).
+    /// </summary>
+    private static async Task SkipAndDisposeAsync(ValueTask init, IModernWidget instance, string pluginId, IModernWigiDashContext context)
+    {
         try
         {
-            placed.ActiveInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            await init.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            context.LogError($"Widget '{pluginId}' initialization faulted after it was skipped.", ex);
+        }
+
+        try
+        {
+            await instance.DisposeAsync().ConfigureAwait(false);
         }
         catch
         {
-            // Widget teardown must not break profile operations.
+            // Teardown of the skipped instance must not surface.
         }
-        placed.ActiveInstance = null;
+    }
+
+    /// <summary>Awaiting a yielded teardown off-thread; failures are swallowed
+    /// by design (widget teardown must not break profile operations).</summary>
+    private static async Task DetachDisposeAsync(ValueTask dispose)
+    {
+        try
+        {
+            await dispose.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Swallowed by design.
+        }
     }
 
     /// <summary>

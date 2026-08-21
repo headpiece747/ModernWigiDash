@@ -40,8 +40,8 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
         if (bgColor.Alpha > 0)
         {
-            using var bgPaint = new SKPaint { Color = bgColor, IsAntialias = true };
-            canvas.DrawRoundRect(bounds, 12f, 12f, bgPaint);
+            _bgPaint.Color = bgColor;
+            canvas.DrawRoundRect(bounds, 12f, 12f, _bgPaint);
         }
 
         var alignment = Alignment switch
@@ -53,7 +53,7 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
         float fontSize = Math.Max(6f, Math.Min(FontSize, bounds.Height / 2f));
         var font = FontHelper.GetCachedFont(FontHelper.GetTypeface(FontFamily, SKFontStyle.Normal), fontSize);
-        using var paint = new SKPaint { Color = textColor, IsAntialias = true };
+        _textPaint.Color = textColor;
 
         float padding = Math.Min(12f, bounds.Width * 0.04f);
         float textWidth = bounds.Width - padding * 2f;
@@ -70,8 +70,10 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
         // what the height fits (ellipsis on the last visible line when cut),
         // and truncate any single line wider than the text width (a word wider
         // than the widget wraps onto its own line by design and would spill).
+        // The fit result is single-slot memoized on the wrapped reference +
+        // geometry — a static scene recomputes it never, not 30×/s.
         float availableHeight = bounds.Height - padding * 2f;
-        IReadOnlyList<string> display = FitLinesToBounds(wrapped, font, textWidth, lineHeight, availableHeight);
+        IReadOnlyList<string> display = GetFittedLines(wrapped, font, textWidth, lineHeight, availableHeight);
         if (display.Count == 0) return;
 
         float totalHeight = display.Count * lineHeight;
@@ -86,8 +88,36 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 
         for (int i = 0; i < display.Count; i++)
         {
-            canvas.DrawTextWithFallback(display[i], anchorX, firstBaseline + i * lineHeight, font, paint, alignment);
+            canvas.DrawTextWithFallback(display[i], anchorX, firstBaseline + i * lineHeight, font, _textPaint, alignment);
         }
+    }
+
+    /// <summary>
+    /// The fit-lines rule's single-slot memo: a static scene (same wrapped
+    /// reference — which itself only changes when the text/size/width key
+    /// turns — and same geometry) reuses the fitted list, so the per-frame
+    /// path allocates nothing.
+    /// </summary>
+    private IReadOnlyList<string> GetFittedLines(IReadOnlyList<string> wrapped, SKFont font, float maxWidth, float lineHeight, float availableHeight)
+    {
+        // The float keys compare by bits (the house's SingleToInt32Bits
+        // pattern): the memo key is an identity, not a measurement — any
+        // change to the geometry rebuilds, a bit-identical geometry reuses.
+        if (_fitMemoDisplay is not null && ReferenceEquals(wrapped, _fitMemoWrapped) && ReferenceEquals(font, _fitMemoFont)
+            && BitConverter.SingleToInt32Bits(_fitMemoMaxWidth) == BitConverter.SingleToInt32Bits(maxWidth)
+            && BitConverter.SingleToInt32Bits(_fitMemoLineHeight) == BitConverter.SingleToInt32Bits(lineHeight)
+            && BitConverter.SingleToInt32Bits(_fitMemoAvailableHeight) == BitConverter.SingleToInt32Bits(availableHeight))
+        {
+            return _fitMemoDisplay;
+        }
+
+        _fitMemoWrapped = wrapped;
+        _fitMemoFont = font;
+        _fitMemoMaxWidth = maxWidth;
+        _fitMemoLineHeight = lineHeight;
+        _fitMemoAvailableHeight = availableHeight;
+        _fitMemoDisplay = FitLinesToBounds(wrapped, font, maxWidth, lineHeight, availableHeight);
+        return _fitMemoDisplay;
     }
 
     /// <summary>
@@ -124,4 +154,26 @@ public class TextLabelWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
     }
 
     private readonly WrapCache _wrappedLines = new();
+
+    // Hoisted paints (the 30 FPS render allocates no SKPaint).
+    private readonly SKPaint _bgPaint = new() { IsAntialias = true };
+    private readonly SKPaint _textPaint = new() { IsAntialias = true };
+    private bool _disposed;
+
+    // The fit-lines memo fields (see GetFittedLines).
+    private IReadOnlyList<string>? _fitMemoWrapped;
+    private SKFont? _fitMemoFont;
+    private float _fitMemoMaxWidth;
+    private float _fitMemoLineHeight;
+    private float _fitMemoAvailableHeight;
+    private IReadOnlyList<string>? _fitMemoDisplay;
+
+    public override ValueTask DisposeAsync()
+    {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
+        _bgPaint.Dispose();
+        _textPaint.Dispose();
+        return base.DisposeAsync();
+    }
 }

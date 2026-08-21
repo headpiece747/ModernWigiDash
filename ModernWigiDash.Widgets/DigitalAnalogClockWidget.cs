@@ -38,6 +38,33 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     private readonly SKPaint _secondHandPaint = new() { StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
     private readonly SKPaint _centerDotPaint = new() { IsAntialias = true };
 
+    // The digital-mode strings are memoized on the displayed second + date +
+    // format: the time string changes once per second (the date once a day),
+    // so the 30 FPS render reformats once per second, not once per frame.
+    private long _memoSecond = -1;
+    private DateTime _memoDay;
+    private string _memoFormat = "";
+    private string _memoTime = "";
+    private string _memoAmpm = "";
+    private string _memoDate = "";
+
+    private (string Time, string Ampm, string Date) DigitalStrings(DateTime now)
+    {
+        long second = (long)now.TimeOfDay.TotalSeconds;
+        if (_memoSecond == second && _memoDay == now.Date && string.Equals(_memoFormat, TimeFormat, StringComparison.Ordinal))
+        {
+            return (_memoTime, _memoAmpm, _memoDate);
+        }
+
+        _memoSecond = second;
+        _memoDay = now.Date;
+        _memoFormat = TimeFormat;
+        _memoTime = ClockPresentation.FormatClockTime(now, TimeFormat);
+        _memoAmpm = ClockPresentation.AmPm(now, TimeFormat);
+        _memoDate = ClockPresentation.Date(now);
+        return (_memoTime, _memoAmpm, _memoDate);
+    }
+
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var now = Clock.GetLocalNow().LocalDateTime;
@@ -56,9 +83,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
 
     private void RenderDigital(SKCanvas canvas, SKRect bounds, DateTime now, SKColor accentColor, SKColor textColor)
     {
-        string timeStr = ClockPresentation.FormatClockTime(now, TimeFormat);
-        string amPmStr = ClockPresentation.AmPm(now, TimeFormat);
-        string dateStr = ClockPresentation.Date(now);
+        var (timeStr, amPmStr, dateStr) = DigitalStrings(now);
 
         float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);

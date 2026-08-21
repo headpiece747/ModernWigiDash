@@ -79,16 +79,17 @@ internal static class TextRenderHelper
     }
 
     /// <summary>
-    /// Draws a centered title/subtitle placeholder (bold title above a dimmer subtitle).
+    /// Draws a centered title/subtitle placeholder (bold title above a dimmer
+    /// subtitle). The caller supplies its own hoisted paints — the placeholder
+    /// is the per-frame state of the unavailable widgets, so the paints must
+    /// not be allocated here.
     /// </summary>
-    internal static void DrawTitleSubtitlePlaceholder(SKCanvas canvas, SKRect bounds, string title, string subtitle, SKColor text)
+    internal static void DrawTitleSubtitlePlaceholder(SKCanvas canvas, SKRect bounds, string title, string subtitle, SKColor text, SKPaint titlePaint, SKPaint subPaint)
     {
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f);
-        using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
-        DrawCenteredText(canvas, title, bounds.MidX, bounds.MidY - 2f, titleFont, titlePaint);
+        titlePaint.Color = text;
+        DrawCenteredText(canvas, title, bounds.MidX, bounds.MidY - 2f, FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f), titlePaint);
 
-        var subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 11f);
-        using var subPaint = new SKPaint { Color = text.WithAlpha(150), IsAntialias = true };
-        DrawCenteredText(canvas, subtitle, bounds.MidX, bounds.MidY + 20f, subFont, subPaint);
+        subPaint.Color = text.WithAlpha(150);
+        DrawCenteredText(canvas, subtitle, bounds.MidX, bounds.MidY + 20f, FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 11f), subPaint);
     }
 }

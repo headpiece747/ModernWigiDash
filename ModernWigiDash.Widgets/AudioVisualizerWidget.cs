@@ -25,6 +25,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
     // a source mid-start (a lost race self-heals on the next render tick,
     // which re-arms capture).
     private readonly Lock _captureLock = new();
+    private bool _disposed;
 
     /// <summary>
     /// Test seam for the watchdog clock. Defaults to the system clock; tests
@@ -171,12 +172,8 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float barWidth = (availableWidth - ((bars - 1) * barSpacing)) / bars;
         float maxBarHeight = bounds.Height - (pad * 2);
 
-        // One paint shared by every bar.
-        using var barPaint = new SKPaint
-        {
-            Color = barColor,
-            IsAntialias = true
-        };
+        // One paint shared by every bar (hoisted, re-colored per render).
+        _barPaint.Color = barColor;
 
         for (int i = 0; i < bars; i++)
         {
@@ -186,7 +183,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
             float y = bounds.Bottom - pad - h;
 
             var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
-            canvas.DrawRoundRect(barBounds, 4f, 4f, barPaint);
+            canvas.DrawRoundRect(barBounds, 4f, 4f, _barPaint);
         }
     }
 
@@ -196,15 +193,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float midY = bounds.MidY;
         float amp = (bounds.Height - pad * 2f) * 0.45f;
 
-        using var linePaint = new SKPaint
-        {
-            Color = color,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2.5f,
-            IsAntialias = true,
-            StrokeCap = SKStrokeCap.Round,
-            StrokeJoin = SKStrokeJoin.Round
-        };
+        _oscilloscopeLinePaint.Color = color;
 
         // The wave shape changes every frame, so the SKPath object is reused
         // and re-lined instead of building + detaching a new one (SKPathBuilder
@@ -228,7 +217,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
             }
         }
 #pragma warning restore CS0618
-        canvas.DrawPath(_oscilloscopePath, linePaint);
+        canvas.DrawPath(_oscilloscopePath, _oscilloscopeLinePaint);
     }
 
     private void DrawRadialPulse(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> spectrum)
@@ -238,14 +227,8 @@ public class AudioVisualizerWidget : ModernWidgetBase
         float maxR = Math.Min(bounds.Width, bounds.Height) * 0.42f;
         int n = spectrum.Length;
 
-        using var linePaint = new SKPaint
-        {
-            Color = color,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = Math.Clamp(bounds.Width / 64f, 2f, 5f),
-            IsAntialias = true,
-            StrokeCap = SKStrokeCap.Round
-        };
+        _radialLinePaint.Color = color;
+        _radialLinePaint.StrokeWidth = Math.Clamp(bounds.Width / 64f, 2f, 5f);
 
         for (int i = 0; i < n; i++)
         {
@@ -254,17 +237,28 @@ public class AudioVisualizerWidget : ModernWidgetBase
             float dirX = MathF.Cos(angle);
             float dirY = MathF.Sin(angle);
             float len = 10f + v * maxR;
-            canvas.DrawLine(cx + dirX * 6f, cy + dirY * 6f, cx + dirX * len, cy + dirY * len, linePaint);
+            canvas.DrawLine(cx + dirX * 6f, cy + dirY * 6f, cx + dirX * len, cy + dirY * len, _radialLinePaint);
         }
     }
 
     public override ValueTask DisposeAsync()
     {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
         StopLiveAudioCapture();
         _oscilloscopePath?.Dispose();
+        _barPaint.Dispose();
+        _oscilloscopeLinePaint.Dispose();
+        _radialLinePaint.Dispose();
         return base.DisposeAsync();
     }
 
     // The reused oscilloscope wave path (re-lined per frame, never reallocated).
     private SKPath? _oscilloscopePath;
+
+    // Hoisted paints (the 30 FPS render allocates no SKPaint): one per draw
+    // role, colors and the radial width mutated per render.
+    private readonly SKPaint _barPaint = new() { IsAntialias = true };
+    private readonly SKPaint _oscilloscopeLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2.5f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+    private readonly SKPaint _radialLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
 }

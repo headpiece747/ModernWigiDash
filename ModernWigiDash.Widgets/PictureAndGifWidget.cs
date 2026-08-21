@@ -32,6 +32,7 @@ public class PictureAndGifWidget : ModernWidgetBase
     private long _gifNextFrameTick;
     private string _loadedPath = "";
     private int _loadVersion;
+    private bool _disposed;
 
     /// <summary>Test seam: clock for the folder-rescan throttle (defaults to the system clock).</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -59,6 +60,28 @@ public class PictureAndGifWidget : ModernWidgetBase
     // the key on ImagePath/SourceMode changes).
     private string _lastProbePath = "";
     private bool _lastProbeExists;
+
+    // The folder-existence probe follows the same rule (Directory.Exists is a
+    // syscall per frame; the cached verdict re-probes only when the path
+    // changes). The folder's file list already rescans on its own 30 s
+    // throttle, so a folder added or removed mid-run is picked up on the
+    // next rescan (or on a path change) without a per-frame disk hit.
+    private string _lastDirProbePath = "";
+    private bool _lastDirProbeExists;
+
+    private bool ProbeDirExists(string path)
+    {
+        if (!string.Equals(path, _lastDirProbePath, StringComparison.Ordinal))
+        {
+            _lastDirProbePath = path;
+            _lastDirProbeExists = Directory.Exists(path);
+        }
+        return _lastDirProbeExists;
+    }
+
+    // Hoisted placeholder paints (the 30 FPS render allocates no SKPaint).
+    private readonly SKPaint _placeholderIconPaint = new() { IsAntialias = true };
+    private readonly SKPaint _placeholderLabelPaint = new() { IsAntialias = true };
 
     private bool ProbeFileExists(string path)
     {
@@ -315,6 +338,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         _folderScanned = false;
         _imageIndex = 0;
         _lastProbePath = "";
+        _lastDirProbePath = "";
         _clipPath?.Dispose();
         _clipPath = null;
 
@@ -385,22 +409,22 @@ public class PictureAndGifWidget : ModernWidgetBase
     {
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 36f);
-        using var iconPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        TextRenderHelper.DrawCenteredText(canvas, "🖼️", bounds.MidX, bounds.MidY - 10f, iconFont, iconPaint);
+        _placeholderIconPaint.Color = textColor;
+        TextRenderHelper.DrawCenteredText(canvas, "🖼️", bounds.MidX, bounds.MidY - 10f, iconFont, _placeholderIconPaint);
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 12f);
-        using var labelPaint = new SKPaint { Color = textColor, IsAntialias = true };
+        _placeholderLabelPaint.Color = textColor;
         // The cycle hint only applies when the source actually cycles (the
         // policy verdict) — a single-image widget or a missing folder must not
         // promise a tap-to-cycle behavior it cannot keep.
         string hint = PictureSourcePolicy.PlaceholderHint(
-            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)));
-        TextRenderHelper.DrawCenteredText(canvas, hint, bounds.MidX, bounds.MidY + 25f, labelFont, labelPaint);
+            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), ProbeDirExists(ImagePath)));
+        TextRenderHelper.DrawCenteredText(canvas, hint, bounds.MidX, bounds.MidY + 25f, labelFont, _placeholderLabelPaint);
     }
 
     private string? GetActiveImageFile()
     {
-        switch (PictureSourcePolicy.Resolve(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)))
+        switch (PictureSourcePolicy.Resolve(SourceMode, ProbeFileExists(ImagePath), ProbeDirExists(ImagePath)))
         {
             case PictureSourcePolicy.PictureSourceKind.File:
                 return ImagePath;
@@ -408,17 +432,35 @@ public class PictureAndGifWidget : ModernWidgetBase
             case PictureSourcePolicy.PictureSourceKind.Folder:
                 // Rescan on first use and then on a throttled cadence: files
                 // added to a cycling folder while the app runs appear within
-                // one period, without a per-frame disk scan.
+                // one period, without a per-frame disk scan. A folder removed
+                // (or made unreadable) mid-run degrades to "no images" instead
+                // of throwing into the render tick — the next rescan or path
+                // change picks the folder back up.
                 if (!_folderScanned || Clock.GetUtcNow() - _folderLastScan >= FolderRescanPeriod)
                 {
-                    _folderImages = Directory.GetFiles(ImagePath, "*.*")
-                        .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                                    f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                                    f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
-                                    f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
-                        .ToArray();
+                    try
+                    {
+                        _folderImages = Directory.GetFiles(ImagePath, "*.*")
+                            .Where(f => f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                                        f.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                                        f.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+                                        f.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
+                            .ToArray();
+                    }
+                    catch (Exception ex) when (ex is DirectoryNotFoundException or UnauthorizedAccessException)
+                    {
+                        _folderImages = [];
+                    }
                     _folderScanned = true;
                     _folderLastScan = Clock.GetUtcNow();
+                    // The rescan is the folder's existence verdict too: a
+                    // folder deleted mid-run must stop promising a
+                    // tap-to-cycle within one rescan period (the CanCycle
+                    // promise reads the probe), not only on the next path
+                    // edit. Invalidating the probe makes the next
+                    // ProbeDirExists re-stat, then re-caches for the
+                    // following period.
+                    _lastDirProbePath = "";
                 }
 
                 if (_folderImages.Length > 0)
@@ -439,7 +481,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         // cycling folder advances on tap (the scanned-list guard stays — a
         // folder with no images yet has nothing to cycle).
         if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 &&
-            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), Directory.Exists(ImagePath)))
+            PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), ProbeDirExists(ImagePath)))
         {
             _imageIndex = (_imageIndex + 1) % _folderImages.Length;
             _loadedPath = "";
@@ -449,7 +491,11 @@ public class PictureAndGifWidget : ModernWidgetBase
 
     public override ValueTask DisposeAsync()
     {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
         ResetMedia();
+        _placeholderIconPaint.Dispose();
+        _placeholderLabelPaint.Dispose();
         _mediaRetirement.DisposeAll();
         return base.DisposeAsync();
     }

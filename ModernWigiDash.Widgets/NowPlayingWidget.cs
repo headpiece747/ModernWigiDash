@@ -62,6 +62,46 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private SKPath? _nextTriangle;
     private SKPath? _repeatArrow;
 
+    // Hoisted paints: the colors mutate per render (property/snapshot-driven),
+    // so the 30 FPS render allocates no SKPaint.
+    private readonly SKPaint _bgPaint = new() { IsAntialias = true };
+    private readonly SKPaint _idleIconPaint = new() { IsAntialias = true };
+    private readonly SKPaint _idleLabelPaint = new() { IsAntialias = true };
+    private readonly SKPaint _pillBgPaint = new() { Color = new SKColor(255, 255, 255, 25), IsAntialias = true };
+    private readonly SKPaint _pillBorderPaint = new() { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, IsAntialias = true };
+    private readonly SKPaint _statusDotPaint = new() { IsAntialias = true };
+    private readonly SKPaint _badgeTextPaint = new() { IsAntialias = true };
+    private readonly SKPaint _shadowPaint = new() { Color = new SKColor(0, 0, 0, 110), IsAntialias = true };
+    private readonly SKPaint _artFillPaint = new() { IsAntialias = true };
+    private readonly SKPaint _artIconPaint = new() { IsAntialias = true };
+    private readonly SKPaint _artBorderPaint = new() { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, IsAntialias = true };
+    private readonly SKPaint _titlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _artistPaint = new() { IsAntialias = true };
+    private readonly SKPaint _albumTextPaint = new() { IsAntialias = true };
+    private readonly SKPaint _metaPaint = new() { IsAntialias = true };
+    private readonly SKPaint _timePaint = new() { IsAntialias = true };
+    private readonly SKPaint _progressTrackPaint = new() { Color = new SKColor(255, 255, 255, 35), Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _progressFillPaint = new() { Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _progressDotPaint = new() { IsAntialias = true };
+    private readonly SKPaint _progressDotCorePaint = new() { Color = SKColors.White, IsAntialias = true };
+    private readonly SKPaint _shufflePaint = new() { IsAntialias = true };
+    private readonly SKPaint _prevPaint = new() { IsAntialias = true };
+    private readonly SKPaint _nextPaint = new() { IsAntialias = true };
+    private readonly SKPaint _repeatPaint = new() { IsAntialias = true };
+    private readonly SKPaint _shuffleStrokePaint = new() { Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _repeatPenPaint = new() { Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+    private readonly SKPaint _heroBgPaint = new() { IsAntialias = true };
+    private readonly SKPaint _heroGlowPaint = new() { Style = SKPaintStyle.Stroke, IsAntialias = true };
+    private readonly SKPaint _heroIconPaint = new() { Color = new SKColor(18, 18, 24), IsAntialias = true };
+    private readonly SKPaint _repeatNumPaint = new() { IsAntialias = true };
+
+    // The album-art clip path is caller-owned and rebuilt in place (the
+    // PictureAndGif precedent): SKPathBuilder's Snapshot()/Detach() would
+    // allocate a new SKPath per frame.
+    private SKPath? _albumClipPath;
+    private SKRect _albumClipRect;
+    private float _albumClipRadius = -1f;
+
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
@@ -99,8 +139,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         // Background panel tinted by artwork-derived color
         var artState = _artworkLoader?.Current;
         var bgColor = NowPlayingLayout.BlendToward(artState?.BackgroundColor ?? new SKColor(18, 18, 24), new SKColor(18, 18, 24), 0.25f);
-        using var bg = new SKPaint { Color = bgColor, IsAntialias = true };
-        canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, bg);
+        _bgPaint.Color = bgColor;
+        canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, _bgPaint);
 
         var snap = _mediaMonitor?.CurrentSnapshot;
         if (snap is null || snap.Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed ||
@@ -137,17 +177,17 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
         var iconFont = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, 64f * scale);
-        using var iconPaint = new SKPaint { Color = accent.WithAlpha(200), IsAntialias = true };
+        _idleIconPaint.Color = accent.WithAlpha(200);
         var tb = new SKRect();
-        iconFont.MeasureText("🎵", out tb, iconPaint);
-        canvas.DrawTextWithFallback("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, iconFont, iconPaint);
+        iconFont.MeasureText("🎵", out tb, _idleIconPaint);
+        canvas.DrawTextWithFallback("🎵", bounds.MidX - tb.MidX, bounds.MidY - 24f * scale, iconFont, _idleIconPaint);
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
-        using var labelPaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(180), IsAntialias = true };
+        _idleLabelPaint.Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(180);
         string hint = "No media playing — press play in any app";
         var lb = new SKRect();
-        labelFont.MeasureText(hint, out lb, labelPaint);
-        canvas.DrawTextWithFallback(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 30f * scale, labelFont, labelPaint);
+        labelFont.MeasureText(hint, out lb, _idleLabelPaint);
+        canvas.DrawTextWithFallback(hint, bounds.MidX - (lb.Width / 2f), bounds.MidY + 30f * scale, labelFont, _idleLabelPaint);
     }
 
     private void DrawSourceBadge(SKCanvas canvas, MediaSnapshot snap, float scale)
@@ -160,17 +200,16 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         string name = NowPlayingPresentation.FriendlyAppName(snap.SourceAppId);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
 
-        using var pillBg = new SKPaint { Color = new SKColor(255, 255, 255, 25), IsAntialias = true };
-        canvas.DrawRoundRect(pill, h / 2f, h / 2f, pillBg);
+        canvas.DrawRoundRect(pill, h / 2f, h / 2f, _pillBgPaint);
 
-        using var pillBorder = new SKPaint { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, StrokeWidth = 1f * scale, IsAntialias = true };
-        canvas.DrawRoundRect(pill, h / 2f, h / 2f, pillBorder);
+        _pillBorderPaint.StrokeWidth = 1f * scale;
+        canvas.DrawRoundRect(pill, h / 2f, h / 2f, _pillBorderPaint);
 
-        using var dot = new SKPaint { Color = snap.IsPlaying ? new SKColor(34, 197, 94) : new SKColor(239, 68, 68), IsAntialias = true };
-        canvas.DrawCircle(x + 11f * scale, pill.MidY, 3.5f * scale, dot);
+        _statusDotPaint.Color = snap.IsPlaying ? new SKColor(34, 197, 94) : new SKColor(239, 68, 68);
+        canvas.DrawCircle(x + 11f * scale, pill.MidY, 3.5f * scale, _statusDotPaint);
 
-        using var textPaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White), IsAntialias = true };
-        canvas.DrawTextWithFallback(name, x + 18f * scale, pill.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, textPaint);
+        _badgeTextPaint.Color = ColorOf(TextColorHex, SKColors.White);
+        canvas.DrawTextWithFallback(name, x + 18f * scale, pill.MidY - font.Metrics.Top * 0.42f - 1f * scale, font, _badgeTextPaint);
     }
 
     private void DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
@@ -184,9 +223,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         float r = 16f * scale;
         float shadowOff = 6f * scale;
-        using var shadow = new SKPaint { Color = new SKColor(0, 0, 0, 110), IsAntialias = true };
         canvas.DrawRoundRect(new SKRect(artRect.Left + shadowOff, artRect.Top + shadowOff,
-                                        artRect.Right + shadowOff, artRect.Bottom + shadowOff), r, r, shadow);
+                                        artRect.Right + shadowOff, artRect.Bottom + shadowOff), r, r, _shadowPaint);
 
         // Snapshot the artwork once: background SMTC refreshes can replace (or
         // null) the published artwork between two reads, which would NRE the
@@ -196,29 +234,47 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (art is not null)
         {
             canvas.Save();
-            using (var clip = new SKPathBuilder())
-            {
-                clip.AddRoundRect(artRect, r, r);
-                using var path = clip.Snapshot();
-                canvas.ClipPath(path);
-                canvas.DrawBitmap(art, artRect, HighQualitySampling);
-            }
+            EnsureAlbumClipPath(artRect, r);
+            canvas.ClipPath(_albumClipPath);
+            canvas.DrawBitmap(art, artRect, HighQualitySampling);
             canvas.Restore();
         }
         else
         {
-            using var fill = new SKPaint { Color = ColorOf(AccentColorHex, WidgetPalette.Accent).WithAlpha(80), IsAntialias = true };
-            canvas.DrawRoundRect(artRect, r, r, fill);
+            _artFillPaint.Color = ColorOf(AccentColorHex, WidgetPalette.Accent).WithAlpha(80);
+            canvas.DrawRoundRect(artRect, r, r, _artFillPaint);
 
             var font = FontHelper.GetCachedFont("Segoe UI Emoji", SKFontStyle.Bold, artSide * 0.45f);
-            using var iconPaint = new SKPaint { Color = SKColors.White.WithAlpha(220), IsAntialias = true };
+            _artIconPaint.Color = SKColors.White.WithAlpha(220);
             var tb = new SKRect();
-            font.MeasureText("🎵", out tb, iconPaint);
-            canvas.DrawTextWithFallback("🎵", artRect.MidX - tb.MidX, artRect.MidY - tb.MidY, font, iconPaint);
+            font.MeasureText("🎵", out tb, _artIconPaint);
+            canvas.DrawTextWithFallback("🎵", artRect.MidX - tb.MidX, artRect.MidY - tb.MidY, font, _artIconPaint);
         }
 
-        using var border = new SKPaint { Color = new SKColor(255, 255, 255, 45), Style = SKPaintStyle.Stroke, StrokeWidth = 1f * scale, IsAntialias = true };
-        canvas.DrawRoundRect(artRect, r, r, border);
+        _artBorderPaint.StrokeWidth = 1f * scale;
+        canvas.DrawRoundRect(artRect, r, r, _artBorderPaint);
+    }
+
+    /// <summary>
+    /// Rebuilds the caller-owned album clip path in place when the art rect or
+    /// radius changes (a resize or a corner-radius edit). The clip is applied
+    /// every frame, but the geometry changes only on those two inputs.
+    /// </summary>
+    private void EnsureAlbumClipPath(SKRect rect, float radius)
+    {
+        if (_albumClipPath is not null && _albumClipRect == rect
+            && BitConverter.SingleToInt32Bits(_albumClipRadius) == BitConverter.SingleToInt32Bits(radius))
+        {
+            return;
+        }
+
+        _albumClipRect = rect;
+        _albumClipRadius = radius;
+        _albumClipPath ??= new SKPath();
+#pragma warning disable CS0618 // SKPath.Rewind/AddRoundRect are obsolete in favor of SKPathBuilder, whose Snapshot() allocates a new SKPath per call — the clip path object is reused and rebuilt instead (zero-alloc hot path).
+        _albumClipPath.Rewind();
+        _albumClipPath.AddRoundRect(rect, radius, radius);
+#pragma warning restore CS0618
     }
 
     private void DrawTextInfo(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
@@ -239,36 +295,36 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         var albumFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 22f * scale);
         var metaFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 18f * scale);
 
-        using var titlePaint = new SKPaint { Color = text, IsAntialias = true };
-        using var artistPaint = new SKPaint { Color = text.WithAlpha(230), IsAntialias = true };
-        using var albumPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
-        using var metaPaint = new SKPaint { Color = accent, IsAntialias = true };
+        _titlePaint.Color = text;
+        _artistPaint.Color = text.WithAlpha(230);
+        _albumTextPaint.Color = text.WithAlpha(180);
+        _metaPaint.Color = accent;
 
         float titleH = titleFont.Metrics.Bottom - titleFont.Metrics.Top;
         float artistH = artistFont.Metrics.Bottom - artistFont.Metrics.Top;
         float albumH = albumFont.Metrics.Bottom - albumFont.Metrics.Top;
 
         canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(IsEmpty(snap.Title) ? "Unknown Title" : snap.Title, titleFont, textW),
-                        textX, textTop - titleFont.Metrics.Top, titleFont, titlePaint);
+                        textX, textTop - titleFont.Metrics.Top, titleFont, _titlePaint);
 
         float currentY = textTop + titleH + 6f * scale;
 
         if (!IsEmpty(snap.Artist))
         {
-            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, artistFont, artistPaint);
+            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Artist, artistFont, textW), textX, currentY - artistFont.Metrics.Top, artistFont, _artistPaint);
             currentY += artistH + 5f * scale;
         }
 
         if (!IsEmpty(snap.Album))
         {
-            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, albumFont, albumPaint);
+            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(snap.Album, albumFont, textW), textX, currentY - albumFont.Metrics.Top, albumFont, _albumTextPaint);
             currentY += albumH + 5f * scale;
         }
 
         string meta = NowPlayingPresentation.MetaLine(snap.TrackNumber, snap.AlbumTrackCount, snap.Genres);
         if (!string.IsNullOrEmpty(meta))
         {
-            canvas.DrawTextWithFallback(meta, textX, currentY - metaFont.Metrics.Top, metaFont, metaPaint);
+            canvas.DrawTextWithFallback(meta, textX, currentY - metaFont.Metrics.Top, metaFont, _metaPaint);
         }
     }
 
@@ -292,34 +348,34 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
-        using var timePaint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(210), IsAntialias = true };
-        canvas.DrawTextWithFallback(NowPlayingPresentation.FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, timePaint);
+        _timePaint.Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(210);
+        canvas.DrawTextWithFallback(NowPlayingPresentation.FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, _timePaint);
 
         string durStr = NowPlayingPresentation.FormatTime(durSec);
         var db = new SKRect();
-        timeFont.MeasureText(durStr, out db, timePaint);
-        canvas.DrawTextWithFallback(durStr, right - db.Width, timeY, timeFont, timePaint);
+        timeFont.MeasureText(durStr, out db, _timePaint);
+        canvas.DrawTextWithFallback(durStr, right - db.Width, timeY, timeFont, _timePaint);
 
         if (NowPlayingPresentation.PlaybackRateText(snap.PlaybackRate) is { } rate)
         {
-            canvas.DrawTextWithFallback(rate, left + db.Width + 20f * scale, timeY, timeFont, timePaint);
+            canvas.DrawTextWithFallback(rate, left + db.Width + 20f * scale, timeY, timeFont, _timePaint);
         }
 
         // Background progress track
-        using var bgPen = new SKPaint { Color = new SKColor(255, 255, 255, 35), StrokeWidth = 7f * scale, StrokeCap = SKStrokeCap.Round, IsAntialias = true, Style = SKPaintStyle.Stroke };
-        canvas.DrawLine(left, barY, right, barY, bgPen);
+        _progressTrackPaint.StrokeWidth = 7f * scale;
+        canvas.DrawLine(left, barY, right, barY, _progressTrackPaint);
 
         if (ratio > 0)
         {
-            using var fillPen = new SKPaint { Color = accent, StrokeWidth = 7f * scale, StrokeCap = SKStrokeCap.Round, IsAntialias = true, Style = SKPaintStyle.Stroke };
-            canvas.DrawLine(left, barY, left + barW * (float)ratio, barY, fillPen);
+            _progressFillPaint.Color = accent;
+            _progressFillPaint.StrokeWidth = 7f * scale;
+            canvas.DrawLine(left, barY, left + barW * (float)ratio, barY, _progressFillPaint);
 
             float dotR = 9f * scale;
             float dotX = left + barW * (float)ratio;
-            using var dot = new SKPaint { Color = accent, IsAntialias = true };
-            canvas.DrawCircle(dotX, barY, dotR, dot);
-            using var dotCore = new SKPaint { Color = SKColors.White, IsAntialias = true };
-            canvas.DrawCircle(dotX, barY, 4f * scale, dotCore);
+            _progressDotPaint.Color = accent;
+            canvas.DrawCircle(dotX, barY, dotR, _progressDotPaint);
+            canvas.DrawCircle(dotX, barY, 4f * scale, _progressDotCorePaint);
         }
     }
 
@@ -333,32 +389,34 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
         // One paint set per frame for all five controls; the icon geometry
         // itself is cached (EnsureIconPaths) and rebuilt only on resize.
-        using var shufflePaint = new SKPaint { Color = IconColor(snap.Shuffle, snap.CanShuffle, accent, text), IsAntialias = true };
-        using var prevPaint = new SKPaint { Color = IconColor(false, snap.CanPrev, accent, text), IsAntialias = true };
-        using var nextPaint = new SKPaint { Color = IconColor(false, snap.CanNext, accent, text), IsAntialias = true };
-        using var repeatPaint = new SKPaint { Color = IconColor(repeatActive, snap.CanRepeat, accent, text), IsAntialias = true };
+        _shufflePaint.Color = IconColor(snap.Shuffle, snap.CanShuffle, accent, text);
+        _prevPaint.Color = IconColor(false, snap.CanPrev, accent, text);
+        _nextPaint.Color = IconColor(false, snap.CanNext, accent, text);
+        _repeatPaint.Color = IconColor(repeatActive, snap.CanRepeat, accent, text);
 
-        using var shuffleStroke = new SKPaint { Color = shufflePaint.Color, Style = SKPaintStyle.Stroke, StrokeWidth = _layout.ShuffleButton.Width * 0.07f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-        using var repeatPen = new SKPaint { Color = repeatPaint.Color, Style = SKPaintStyle.Stroke, StrokeWidth = _layout.RepeatButton.Width * 0.07f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
+        _shuffleStrokePaint.Color = _shufflePaint.Color;
+        _shuffleStrokePaint.StrokeWidth = _layout.ShuffleButton.Width * 0.07f;
+        _repeatPenPaint.Color = _repeatPaint.Color;
+        _repeatPenPaint.StrokeWidth = _layout.RepeatButton.Width * 0.07f;
 
-        using var heroBg = new SKPaint { Color = accent.WithAlpha(canPp ? (byte)245 : (byte)100), IsAntialias = true };
-        using var heroGlow = new SKPaint { Color = accent.WithAlpha(canPp ? (byte)90 : (byte)20), Style = SKPaintStyle.Stroke, StrokeWidth = 2f * scale, IsAntialias = true };
-        using var heroIcon = new SKPaint { Color = new SKColor(18, 18, 24), IsAntialias = true };
+        _heroBgPaint.Color = accent.WithAlpha(canPp ? (byte)245 : (byte)100);
+        _heroGlowPaint.Color = accent.WithAlpha(canPp ? (byte)90 : (byte)20);
+        _heroGlowPaint.StrokeWidth = 2f * scale;
 
         // Shuffle (Clean icon button without glass circle)
-        DrawShuffleIcon(canvas, shufflePaint, shuffleStroke);
+        DrawShuffleIcon(canvas, _shufflePaint, _shuffleStrokePaint);
 
         // Prev (Clean icon button without glass circle)
-        DrawPrevIcon(canvas, _layout.PreviousButton, prevPaint);
+        DrawPrevIcon(canvas, _layout.PreviousButton, _prevPaint);
 
         // Play / Pause (Hero Glowing Accent Button)
-        DrawHeroPlayButton(canvas, _layout.PlayPauseButton, scale, heroBg, heroGlow, heroIcon, snap.IsPlaying);
+        DrawHeroPlayButton(canvas, _layout.PlayPauseButton, scale, _heroBgPaint, _heroGlowPaint, _heroIconPaint, snap.IsPlaying);
 
         // Next (Clean icon button without glass circle)
-        DrawNextIcon(canvas, _layout.NextButton, nextPaint);
+        DrawNextIcon(canvas, _layout.NextButton, _nextPaint);
 
         // Repeat (Clean icon button without glass circle)
-        DrawRepeatIcon(canvas, _layout.RepeatButton, repeatPaint, repeatPen, snap.Repeat == MediaPlaybackAutoRepeatMode.Track);
+        DrawRepeatIcon(canvas, _layout.RepeatButton, _repeatPaint, _repeatPenPaint, snap.Repeat == MediaPlaybackAutoRepeatMode.Track);
     }
 
     private static SKColor IconColor(bool active, bool enabled, SKColor accent, SKColor text)
@@ -456,9 +514,9 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         if (repeatOne)
         {
             var numFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, r.Width * 0.24f);
-            using var numPaint = new SKPaint { Color = paint.Color, IsAntialias = true };
-            numFont.MeasureText("1", out var nb, numPaint);
-            canvas.DrawTextWithFallback("1", cx - nb.Width / 2f, cy + nb.Height / 3f, numFont, numPaint);
+            _repeatNumPaint.Color = paint.Color;
+            numFont.MeasureText("1", out var nb, _repeatNumPaint);
+            canvas.DrawTextWithFallback("1", cx - nb.Width / 2f, cy + nb.Height / 3f, numFont, _repeatNumPaint);
         }
     }
 
@@ -691,6 +749,39 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _disposed = true;
 
         DisposeIconPaths();
+        _albumClipPath?.Dispose();
+        _albumClipPath = null;
+
+        _bgPaint.Dispose();
+        _idleIconPaint.Dispose();
+        _idleLabelPaint.Dispose();
+        _pillBgPaint.Dispose();
+        _pillBorderPaint.Dispose();
+        _statusDotPaint.Dispose();
+        _badgeTextPaint.Dispose();
+        _shadowPaint.Dispose();
+        _artFillPaint.Dispose();
+        _artIconPaint.Dispose();
+        _artBorderPaint.Dispose();
+        _titlePaint.Dispose();
+        _artistPaint.Dispose();
+        _albumTextPaint.Dispose();
+        _metaPaint.Dispose();
+        _timePaint.Dispose();
+        _progressTrackPaint.Dispose();
+        _progressFillPaint.Dispose();
+        _progressDotPaint.Dispose();
+        _progressDotCorePaint.Dispose();
+        _shufflePaint.Dispose();
+        _prevPaint.Dispose();
+        _nextPaint.Dispose();
+        _repeatPaint.Dispose();
+        _shuffleStrokePaint.Dispose();
+        _repeatPenPaint.Dispose();
+        _heroBgPaint.Dispose();
+        _heroGlowPaint.Dispose();
+        _heroIconPaint.Dispose();
+        _repeatNumPaint.Dispose();
 
         if (_mediaMonitor is not null)
         {

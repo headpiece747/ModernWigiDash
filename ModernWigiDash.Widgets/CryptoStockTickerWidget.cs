@@ -41,6 +41,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     private static readonly PriceFeedManager SharedFeed = new();
     private readonly FeedSubscription _subscription;
+    private bool _disposed;
     private readonly TickerFallbackPolicy _fallbackPolicy;
     private bool _lastChangePositive;
 
@@ -82,13 +83,27 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     public override ValueTask DisposeAsync()
     {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
         // Stop polling this widget's symbol once it is removed from the canvas.
         _subscription.Untrack();
+        _symbolPaint.Dispose();
+        _pricePaint.Dispose();
+        _badgePaint.Dispose();
+        _placeholderTitlePaint.Dispose();
+        _placeholderHintPaint.Dispose();
         return base.DisposeAsync();
     }
 
     private AssetKind AssetKindValue => SymbolCatalog.DetectAssetKind(Symbol, AssetType);
     private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
+
+    // Hoisted paints (the 30 FPS render allocates no SKPaint).
+    private readonly SKPaint _symbolPaint = new() { IsAntialias = true };
+    private readonly SKPaint _pricePaint = new() { IsAntialias = true };
+    private readonly SKPaint _badgePaint = new() { IsAntialias = true };
+    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _placeholderHintPaint = new() { IsAntialias = true };
 
     // The label and formatted price are memoized per input: Render composes
     // them every frame, but the inputs change only via the inspector (label
@@ -159,13 +174,13 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         float priceSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
 
         var symFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-        using var symPaint = new SKPaint { Color = textColor, IsAntialias = true };
-        string symbolText = TextRenderHelper.TruncateText(DisplayLabel, symFont, symPaint, bounds.Width - pad * 2f);
-        canvas.DrawTextWithFallback(symbolText, pad, pad + priceSize * 0.8f, symFont, symPaint);
+        _symbolPaint.Color = textColor;
+        string symbolText = TextRenderHelper.TruncateText(DisplayLabel, symFont, _symbolPaint, bounds.Width - pad * 2f);
+        canvas.DrawTextWithFallback(symbolText, pad, pad + priceSize * 0.8f, symFont, _symbolPaint);
 
         var priceFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-        using var pricePaint = new SKPaint { Color = textColor, IsAntialias = true };
-        canvas.DrawTextWithFallback(Price, pad, bounds.MidY + priceSize * 0.35f, priceFont, pricePaint);
+        _pricePaint.Color = textColor;
+        canvas.DrawTextWithFallback(Price, pad, bounds.MidY + priceSize * 0.35f, priceFont, _pricePaint);
 
         if (ShowChange)
         {
@@ -174,13 +189,9 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             SKColor badgeColor = isPositive ? posColor : negColor;
             if (isStale) badgeColor = textColor.WithAlpha(TickerStalenessPresentation.StaleBadgeAlpha);
             var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-            using var badgePaint = new SKPaint
-            {
-                Color = badgeColor,
-                IsAntialias = true
-            };
+            _badgePaint.Color = badgeColor;
             string badgeText = TickerStalenessPresentation.BadgeText(ChangeBadge, isStale);
-            canvas.DrawTextWithFallback(badgeText, pad, bounds.Bottom - pad, badgeFont, badgePaint);
+            canvas.DrawTextWithFallback(badgeText, pad, bounds.Bottom - pad, badgeFont, _badgePaint);
         }
     }
 
@@ -190,12 +201,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         float mainSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
 
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
-        using var titlePaint = new SKPaint { Color = textColor, IsAntialias = true };
-        TextRenderHelper.DrawCenteredText(canvas, "Enter a symbol", bounds.MidX, bounds.MidY - 4f, titleFont, titlePaint);
+        _placeholderTitlePaint.Color = textColor;
+        TextRenderHelper.DrawCenteredText(canvas, "Enter a symbol", bounds.MidX, bounds.MidY - 4f, titleFont, _placeholderTitlePaint);
 
         var hintFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(mainSize * 0.4f, 11f));
-        using var hintPaint = new SKPaint { Color = textColor.WithAlpha(160), IsAntialias = true };
-        TextRenderHelper.DrawCenteredText(canvas, "e.g. BTC, ETH, AAPL, MSFT", bounds.MidX, bounds.MidY + 16f, hintFont, hintPaint);
+        _placeholderHintPaint.Color = textColor.WithAlpha(160);
+        TextRenderHelper.DrawCenteredText(canvas, "e.g. BTC, ETH, AAPL, MSFT", bounds.MidX, bounds.MidY + 16f, hintFont, _placeholderHintPaint);
     }
 
     /// <summary>

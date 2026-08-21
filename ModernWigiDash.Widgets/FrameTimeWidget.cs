@@ -41,6 +41,30 @@ public class FrameTimeWidget : ModernWidgetBase
     private readonly SKPaint _valuePaint = new() { Color = SKColors.White, IsAntialias = true };
     private readonly SKPaint _fillPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = true };
     private readonly SKPaint _linePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
+    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
+    private bool _disposed;
+
+    // The presentation model is memoized on (snapshot reference, placement
+    // size): the store hands the same snapshot back for ~30 frames (the
+    // producer polls at 1/s), so the ~40-object rebuild runs once per second
+    // instead of once per frame.
+    private FrameTimeSnapshotDto? _memoSnapshot;
+    private SKSize _memoSize;
+    private FrameTimeDisplay? _memoDisplay;
+
+    private FrameTimeDisplay BuildDisplay(FrameTimeSnapshotDto snapshot, SKSize size)
+    {
+        if (_memoDisplay is not null && ReferenceEquals(snapshot, _memoSnapshot) && _memoSize == size)
+        {
+            return _memoDisplay;
+        }
+
+        _memoSnapshot = snapshot;
+        _memoSize = size;
+        _memoDisplay = FrameTimePresentation.Build(snapshot, size);
+        return _memoDisplay;
+    }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -52,17 +76,17 @@ public class FrameTimeWidget : ModernWidgetBase
         FrameTimeSnapshotDto? snapshot = FrameTimeStore.TryReadFresh();
         if (snapshot is null || !snapshot.IsAvailable)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text);
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text, _placeholderTitlePaint, _placeholderSubPaint);
             return;
         }
 
         if (!snapshot.CaptureHealthy)
         {
-            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "PresentMon capture inactive", "The service is not producing present data", text);
+            TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, "PresentMon capture inactive", "The service is not producing present data", text, _placeholderTitlePaint, _placeholderSubPaint);
             return;
         }
 
-        var display = FrameTimePresentation.Build(snapshot, bounds.Size);
+        var display = BuildDisplay(snapshot, bounds.Size);
         if (IsOverlayView)
         {
             RenderOverlayView(canvas, bounds, text, display);
@@ -172,6 +196,8 @@ public class FrameTimeWidget : ModernWidgetBase
 
     public override ValueTask DisposeAsync()
     {
+        if (_disposed) return ValueTask.CompletedTask;
+        _disposed = true;
         _processPaint.Dispose();
         _fpsPaint.Dispose();
         _unitPaint.Dispose();
@@ -182,6 +208,8 @@ public class FrameTimeWidget : ModernWidgetBase
         _valuePaint.Dispose();
         _fillPaint.Dispose();
         _linePaint.Dispose();
+        _placeholderTitlePaint.Dispose();
+        _placeholderSubPaint.Dispose();
         return base.DisposeAsync();
     }
 

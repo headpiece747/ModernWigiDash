@@ -73,45 +73,10 @@ public class SkiaFrameCompositor : IDisposable
 
         // Render placed widgets by ZIndex (low to high). Zero-alloc fast path:
         // insertion sort on a stack-allocated index span for the common small
-        // page (<= 32 widgets); LINQ fallback for oversized pages.
+        // page (<= 32 widgets); LINQ fallback for oversized pages. RenderOne
+        // is a plain method (no local function — a capturing local function
+        // would allocate a closure object per compose).
         List<PlacedWidgetInstance> widgetList = page.Widgets;
-        void RenderOne(PlacedWidgetInstance widget)
-        {
-            if (widget.ActiveInstance == null)
-                return;
-
-            int saveCount = canvas.Save();
-            try
-            {
-                canvas.Translate(widget.X, widget.Y);
-
-                if (Math.Abs(widget.Rotation) > 0.01f)
-                {
-                    canvas.RotateDegrees(widget.Rotation, widget.Width / 2f, widget.Height / 2f);
-                }
-
-                var bounds = new SKRect(0, 0, widget.Width, widget.Height);
-
-                if (widget.Opacity < 0.99f)
-                {
-                    _alphaPaint.Color = new SKColor(255, 255, 255, (byte)(widget.Opacity * 255));
-                    canvas.SaveLayer(_alphaPaint);
-                }
-
-                widget.ActiveInstance.Render(canvas, bounds);
-
-                if (widget.Opacity < 0.99f)
-                {
-                    canvas.Restore();
-                }
-
-                _editOverlay.DrawSelection(canvas, widget, _isEditMode, widget == _selectedWidget);
-            }
-            finally
-            {
-                canvas.RestoreToCount(saveCount);
-            }
-        }
 
         if (widgetList.Count <= 32)
         {
@@ -136,6 +101,44 @@ public class SkiaFrameCompositor : IDisposable
             }
         }
 
+    }
+
+    private void RenderOne(PlacedWidgetInstance widget)
+    {
+        if (widget.ActiveInstance == null)
+            return;
+
+        int saveCount = _canvas.Save();
+        try
+        {
+            _canvas.Translate(widget.X, widget.Y);
+
+            if (Math.Abs(widget.Rotation) > 0.01f)
+            {
+                _canvas.RotateDegrees(widget.Rotation, widget.Width / 2f, widget.Height / 2f);
+            }
+
+            var bounds = new SKRect(0, 0, widget.Width, widget.Height);
+
+            if (widget.Opacity < 0.99f)
+            {
+                _alphaPaint.Color = new SKColor(255, 255, 255, (byte)(widget.Opacity * 255));
+                _canvas.SaveLayer(_alphaPaint);
+            }
+
+            widget.ActiveInstance.Render(_canvas, bounds);
+
+            if (widget.Opacity < 0.99f)
+            {
+                _canvas.Restore();
+            }
+
+            _editOverlay.DrawSelection(_canvas, widget, _isEditMode, widget == _selectedWidget);
+        }
+        finally
+        {
+            _canvas.RestoreToCount(saveCount);
+        }
     }
 
     /// <summary>

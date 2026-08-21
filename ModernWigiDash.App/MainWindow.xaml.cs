@@ -55,6 +55,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private bool _isMouseDown = false;
     private readonly Input.InputController _inputController;
 
+    // Device touch events arrive on the engine's 16 ms poll thread and must
+    // reach the gesture machine on the UI thread IN ORDER (the Down/Move/Up
+    // sequence is one gesture). The per-event work is a lock + a struct
+    // enqueue (Queue<T> over a value tuple never boxes); one drain callback
+    // per burst feeds the input module instead of one closure +
+    // DispatcherOperation per event.
+    private readonly Queue<(float X, float Y, TouchEventType Type)> _deviceTouchQueue = new();
+    private readonly Lock _deviceTouchLock = new();
+    private bool _deviceTouchDrainScheduled;
+    private readonly Action _deviceTouchDrain;
+
     // Frame presentation — decouple the UI render timer from transport
     // round-trips: one DisplayPresenter (a FrameDelivery with the single
     // encode→pool→coalesce→pace policy and the 33ms pacing the engine's USB
@@ -164,6 +175,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
             select: SelectWidget,
             onManipulation: HandleManipulationChange);
 
+        // The drain callback is a cached delegate (a method group would be
+        // converted on every enqueue; the field holds one instance).
+        _deviceTouchDrain = DrainDeviceTouchQueue;
+
         // One stateful DialogHost for the whole window: the inspector receives
         // this instance (it must never build its own — a second instance could
         // never show the device-authorization window it owns).
@@ -234,24 +249,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // source-aware surface with the edit-mode flag off, so hotkeys fire on
         // the device even while the desktop is in edit mode — only the mouse
         // path carries the desktop edit-mode veto.
-        _usbDevice.OnTouchEvent += (point, touchType) =>
-        {
-            _ = Dispatcher.BeginInvoke(() =>
-            {
-                if (touchType == TouchEventType.TouchDown)
-                {
-                    _inputController.Press(point.X, point.Y, Input.InputSource.Device, editMode: false);
-                }
-                else if (touchType == TouchEventType.TouchMove)
-                {
-                    _inputController.Move(point.X, point.Y, Input.InputSource.Device, editMode: false, out _);
-                }
-                else
-                {
-                    _inputController.Release(point.X, point.Y, Input.InputSource.Device, editMode: false, out _);
-                }
-            });
-        };
+        _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
 
         // 6. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
         // composes + sends once per tick, then repaints so the window draws
@@ -322,6 +320,74 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _compositor.IsEditMode = ChkEditMode.IsChecked == true;
 
         _wired = true;
+    }
+
+    /// <summary>
+    /// The device-touch hop to the UI thread (engine 16 ms poll thread →
+    /// dispatcher): the struct is enqueued under the lock, and a drain callback
+    /// is scheduled only when none is pending — so a burst of N touch events
+    /// allocates one DispatcherOperation instead of N closures + N operations.
+    /// </summary>
+    private void EnqueueDeviceTouch(SKPoint point, TouchEventType touchType)
+    {
+        bool schedule;
+        lock (_deviceTouchLock)
+        {
+            _deviceTouchQueue.Enqueue((point.X, point.Y, touchType));
+            schedule = !_deviceTouchDrainScheduled;
+            _deviceTouchDrainScheduled = true;
+        }
+        if (schedule)
+        {
+            try
+            {
+                _ = Dispatcher.BeginInvoke(_deviceTouchDrain);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
+            {
+                // A shutting-down dispatcher rejects the post: unpoison the
+                // flag so the next event schedules a fresh drain (a redundant
+                // second drain is harmless — it runs to empty).
+                lock (_deviceTouchLock)
+                {
+                    _deviceTouchDrainScheduled = false;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drains the queued device-touch events on the UI thread, in order, into
+    /// the input controller (the gesture machine's Down/Move/Up vocabulary).
+    /// Runs to empty so a burst drained together still feeds every event —
+    /// the gesture machine needs the full sequence, not just the last point.
+    /// The drain holds the queue lock for the whole input pass (the deliberate
+    /// trade: the engine's 16 ms poll thread blocks on the lock during input
+    /// handling instead of the UI thread marshalling N closures — bursts are
+    /// bounded by one gesture, so the worst case stays a few milliseconds).
+    /// </summary>
+    private void DrainDeviceTouchQueue()
+    {
+        lock (_deviceTouchLock)
+        {
+            _deviceTouchDrainScheduled = false;
+            while (_deviceTouchQueue.Count > 0)
+            {
+                var (x, y, type) = _deviceTouchQueue.Dequeue();
+                if (type == TouchEventType.TouchDown)
+                {
+                    _inputController.Press(x, y, Input.InputSource.Device, editMode: false);
+                }
+                else if (type == TouchEventType.TouchMove)
+                {
+                    _inputController.Move(x, y, Input.InputSource.Device, editMode: false, out _);
+                }
+                else
+                {
+                    _inputController.Release(x, y, Input.InputSource.Device, editMode: false, out _);
+                }
+            }
+        }
     }
 
     private void SelectWidget(PlacedWidgetInstance? widget)

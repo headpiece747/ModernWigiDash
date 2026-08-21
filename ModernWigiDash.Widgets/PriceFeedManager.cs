@@ -300,9 +300,22 @@ public sealed class PriceFeedManager : IDisposable
         if (_cts.IsCancellationRequested)
         {
             var replacement = new CancellationTokenSource();
-            Interlocked.Exchange(ref _cts, replacement);
+            CancellationTokenSource retired = Interlocked.Exchange(ref _cts, replacement);
+            // The old source's token may still be held by in-flight work the
+            // shutdown cancelled (a mid-flight REST poll's HTTP cancellation
+            // registration). Retire it after a grace window so those
+            // registrations unwind first — disposing it now would turn the
+            // expected cancellations into ObjectDisposedExceptions. Cancel()
+            // aborts in-flight requests synchronously through the token
+            // callbacks; the window covers the queued cancellation callbacks
+            // unwinding, not request latency.
+            _ = Task.Delay(RetiredCtsGrace, CancellationToken.None).ContinueWith(_ => retired.Dispose(), TaskScheduler.Default);
         }
     }
+
+    /// <summary>The grace window before a retired (cancelled) CTS is disposed —
+    /// see <see cref="EnsureActive"/>.</summary>
+    internal static readonly TimeSpan RetiredCtsGrace = TimeSpan.FromSeconds(30);
 
     /// <summary>Cancels the feed loops and closes the sockets when no subscribers remain.</summary>
     private void ShutdownLoops()

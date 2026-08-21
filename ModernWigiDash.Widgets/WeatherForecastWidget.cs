@@ -237,6 +237,30 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private SKRect _lastBounds;
     private volatile bool _isFetching;
 
+    // The staleness line changes at most once per second (the time-ago
+    // buckets); the render recomputes it once per second, not once per frame.
+    private DateTime _staleMemoLastSuccess;
+    private bool _staleMemoFetching;
+    private long _staleMemoElapsedSecond = -1;
+    private string? _staleMemoText;
+
+    private string? BuildStalenessLine(bool fetching, DateTime lastSuccess, DateTime now)
+    {
+        long elapsedSecond = lastSuccess <= DateTime.MinValue
+            ? long.MinValue
+            : (long)(now - lastSuccess).TotalSeconds;
+        if (_staleMemoElapsedSecond == elapsedSecond && _staleMemoFetching == fetching && _staleMemoLastSuccess == lastSuccess)
+        {
+            return _staleMemoText;
+        }
+
+        _staleMemoElapsedSecond = elapsedSecond;
+        _staleMemoFetching = fetching;
+        _staleMemoLastSuccess = lastSuccess;
+        _staleMemoText = WeatherPresentation.BuildStalenessText(fetching, lastSuccess, now);
+        return _staleMemoText;
+    }
+
     // The render-model cache: every formatted string the draw paths need is
     // rebuilt only when (data version, bounds, property snapshot) changes —
     // weather data moves at most every 15 minutes, so the static scene
@@ -444,8 +468,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
 
         // The staleness line's display rule (Updating… / time-ago / nothing) lives
-        // in the presentation module.
-        string? staleText = WeatherPresentation.BuildStalenessText(
+        // in the presentation module; the string itself is memoized per second
+        // (the time-ago buckets change at most once per second).
+        string? staleText = BuildStalenessLine(
             _isFetching, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime);
         float staleH = 0f;
         if (staleText is { Length: > 0 })
