@@ -110,6 +110,29 @@ internal static class DisplayProtocolConstants
     public const byte ScreenBase2 = 0x22;
 
     /// <summary>
+    /// Vendor Command: Wake device / clear the pending sleep (0x12 = CMD_TIMEOUT_CLEAR).
+    /// Verified via vendor Manager decompilation (WigiDashDeviceLegacy.ClearScreenTimeout;
+    /// WigiDashDevice.WakeDevice forwards to it — the Manager's own wake ritual).
+    /// wValue=0, no data. Sent at the start of the init sequence so a display left
+    /// asleep by a previous session's standby is explicitly woken before the
+    /// brightness/page/frame work.
+    /// </summary>
+    public const byte CmdWakeDevice = 0x12;
+
+    /// <summary>
+    /// Vendor Command: Put the device to sleep immediately (0x13 = CMD_TIMEOUT_SET).
+    /// Verified via vendor Manager decompilation (WigiDashDeviceLegacy.SnoozeDevice —
+    /// the Manager's "Put the Device To Sleep" action; its exit ritual is the
+    /// Welcome screen followed by this command). wValue=0, no data. The backlight
+    /// turns off while the display stays USB-powered and accepts control transfers
+    /// while asleep (the touch report's byte 7 carries the sleep state), so a later
+    /// connect wakes it through the init sequence. The display has no active
+    /// auto-sleep of its own — without this command it idles on the Welcome screen
+    /// with the backlight on, so the standby path sends it after the Welcome screen.
+    /// </summary>
+    public const byte CmdSleepDevice = 0x13;
+
+    /// <summary>
     /// Vendor Command: Widget Framebuffer Write (0x61 = CMD_SDRAM_WIDGET_WRITE).
     /// Sent via control OUT with 8-byte data payload: [offset(4 LE), length(4 LE)].
     /// wValue = (page << 8) | widgetId.

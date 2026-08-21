@@ -46,9 +46,12 @@ internal interface IDisplayTransport : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Puts the display into standby: switches to the built-in vendor Welcome
-    /// screen. No heartbeats are sent afterwards — the display sleeps on its
-    /// own timeout once the heartbeat source stops. Returns false when not
-    /// connected.
+    /// screen, then sends the vendor's immediate-sleep command so the backlight
+    /// goes off (the display has no active auto-sleep of its own — without the
+    /// command it would idle on the Welcome screen with the backlight on).
+    /// The display stays USB-powered while asleep, so the next connect's init
+    /// sequence wakes it (its wake command, then brightness and frames).
+    /// Returns false when not connected or when a standby write fails.
     /// </summary>
     bool GoToStandby();
 }

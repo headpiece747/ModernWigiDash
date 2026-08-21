@@ -106,8 +106,8 @@ public class DisplayHidTransportTests
         // pre-PING that used to run in Connect duplicated it and had drifted —
         // the provider loop opens the device and hands it over without PING).
         Assert.AreEqual(1, fake.ControlInCalls);
-        // Init sequence: brightness + 3x (ClearPage + AddWidget) + FrameHeader + GoToScreen
-        Assert.AreEqual(9, fake.ControlOutCalls);
+        // Init sequence: wake + brightness + 3x (ClearPage + AddWidget) + FrameHeader + GoToScreen
+        Assert.AreEqual(10, fake.ControlOutCalls);
         Assert.AreEqual(1, fake.BulkWriteCalls); // blank framebuffer
     }
 
@@ -307,9 +307,12 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         bool ok = transport.SendInitCommands();
 
         Assert.IsTrue(ok);
-        // PING control-in, then per page: ClearPage (0x90), AddWidget (0x91)
+        // PING control-in, then the explicit wake, then per page: ClearPage (0x90),
+        // AddWidget (0x91)
         Assert.AreEqual("in", backend.ControlCalls[0].Direction);
         Assert.AreEqual(0x00, backend.ControlCalls[0].Request);
+        Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdWakeDevice, WValue: 0 }),
+            "a display left asleep by the previous session's standby must be explicitly woken before the brightness/page/frame work");
         for (int page = 0; page < 3; page++)
         {
             Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdClearPage } && c.WValue == page));
@@ -388,8 +391,15 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         bool ok = transport.GoToStandby();
 
         Assert.IsTrue(ok);
-        // Standby = the vendor Welcome screen (wValue = screenId, no transition).
+        // Standby = the vendor's own sleep ritual: the Welcome screen
+        // (wValue = screenId, no transition), then the immediate-sleep command
+        // that turns the backlight off — without it the display has no active
+        // auto-sleep and would idle on the Welcome screen with the backlight on.
         Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdGoToScreen, WValue: DisplayProtocolConstants.ScreenWelcome }));
+        Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdSleepDevice, WValue: 0 }));
+        int welcomeIdx = backend.ControlCalls.FindIndex(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdGoToScreen, WValue: DisplayProtocolConstants.ScreenWelcome });
+        int sleepIdx = backend.ControlCalls.FindIndex(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdSleepDevice });
+        Assert.IsTrue(welcomeIdx < sleepIdx, "the sleep command lands after the Welcome screen");
         // GoToScreen is only ever the standby path — page nav is compositor-side.
         Assert.IsTrue(backend.ControlCalls.Count(c => c.Request == DisplayProtocolConstants.CmdGoToScreen) == 1);
     }
@@ -402,6 +412,18 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
 
         Assert.IsFalse(transport.GoToStandby());
         Assert.AreEqual(0, backend.ControlCalls.Count);
+    }
+
+    [TestMethod]
+    public void GoToStandby_WhenControlWritesFail_ReturnsFalse()
+    {
+        // The standby verdict must cover the sleep command, not just the
+        // Welcome screen: a display that accepted neither write is not in
+        // standby.
+        var backend = new RecordingBackend { ControlOutResult = false };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsFalse(transport.GoToStandby());
     }
 
     [TestMethod]

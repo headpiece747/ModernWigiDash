@@ -56,7 +56,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly — no bac
 - **High-Rate SkiaSharp Rendering** — the App composites at a steady **30 FPS** via `SkiaFrameCompositor`, using a pooled `FrameBufferPool` and zero-allocation hot paths (stack-allocated Z-order sorting, span-based sparklines, array-reuse frame delivery) to keep GC pressure minimal.
 - **In-App Auto-Update** — an amber update button appears in the header when a newer release exists; one click downloads the slim app-only payload (SHA-256 verified), and restarting applies it **in place** — profile and theme are preserved.
 - **Power Lifecycle** — on Windows sleep the frame pump pauses; on resume it restarts and the USB transport reconnects, so the display resumes streaming cleanly.
-- **Standby on Exit** — the display returns to its vendor Welcome screen and sleeps on its own timeout whenever the app closes.
+- **Standby on Exit** — the display returns to its vendor Welcome screen and is put to sleep (backlight off) whenever the app closes; starting the app again wakes it.
 
 ---
 

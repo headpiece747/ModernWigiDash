@@ -398,6 +398,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         bool pingOk = ControlIn(0x00, 0, 0, pingBuf, out _);
         initLog.Write($"PING: ok={pingOk}");
 
+        // Explicit wake: a display left asleep by the previous session's standby
+        // (backlight off) is woken before the brightness/page/frame work — the
+        // vendor Manager's own wake ritual (WakeDevice = ClearScreenTimeout).
+        bool wakeOk = ControlOut(DisplayProtocolConstants.CmdWakeDevice, 0, null);
+        initLog.Write($"Wake: ok={wakeOk}");
+
         // Set brightness to 100%
         ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [100]);
 
@@ -753,14 +759,17 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             if (!_isConnected)
                 return false;
 
-            // The built-in Welcome screen is the vendor standby state. Deliberately
-            // no ClearTimeout afterwards: once the heartbeat source stops, the
-            // display sleeps on its own timeout.
-            bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome);
+            // The vendor's own sleep ritual (its Manager's exit path is exactly
+            // this): the Welcome screen, then the immediate-sleep command that
+            // turns the backlight off. Without the sleep command the display
+            // has no active auto-sleep — it would idle on the Welcome screen
+            // with the backlight on.
+            bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome)
+                && ControlOut(DisplayProtocolConstants.CmdSleepDevice, 0, null);
             if (ok)
             {
                 // One-shot per shutdown (the standby guarantee) — Cadence 1.
-                _standbyLog.Write("Display set to standby (welcome screen)");
+                _standbyLog.Write("Display set to standby (welcome screen + sleep, backlight off)");
             }
             return ok;
         }
