@@ -1,12 +1,7 @@
 using System.Reflection;
-using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Media;
 using Microsoft.Win32;
 using ModernWigiDash.App.Controls;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Inspector;

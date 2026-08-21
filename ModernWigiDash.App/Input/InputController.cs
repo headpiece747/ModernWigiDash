@@ -1,8 +1,5 @@
-using System.Windows;
 using ModernWigiDash.App.Gestures;
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
-using ModernWigiDash.Sdk;
 using SkiaSharp;
 
 namespace ModernWigiDash.App.Input;

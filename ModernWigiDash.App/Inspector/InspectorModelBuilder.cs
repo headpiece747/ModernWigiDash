@@ -1,6 +1,4 @@
 using System.Reflection;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Inspector;

@@ -1,6 +1,4 @@
-using ModernWigiDash.Sdk;
 using System.IO;
-using System.Windows;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;

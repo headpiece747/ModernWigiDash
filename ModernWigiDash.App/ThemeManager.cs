@@ -1,6 +1,4 @@
 using System.Collections.Frozen;
-using System.Windows;
-using System.Windows.Media;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;

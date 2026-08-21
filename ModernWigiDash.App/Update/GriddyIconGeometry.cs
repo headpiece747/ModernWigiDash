@@ -1,5 +1,3 @@
-using System.Windows.Media;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Update;

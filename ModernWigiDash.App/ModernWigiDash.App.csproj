@@ -1,5 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Project global usings (P1 2026-08-21): namespaces every file in this
+       assembly already needs; per-file restatements removed in the same pass. -->
+  <ItemGroup>
+    <Using Include="ModernWigiDash.Core.Models" />
+    <Using Include="ModernWigiDash.Sdk" />
+    <Using Include="System.Windows" />
+    <Using Include="System.Windows.Controls" />
+    <Using Include="System.Windows.Media" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\ModernWigiDash.Core\ModernWigiDash.Core.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Hardware\ModernWigiDash.Hardware.csproj" />

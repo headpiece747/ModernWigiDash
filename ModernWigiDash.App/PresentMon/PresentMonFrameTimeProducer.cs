@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.PresentMon;
 

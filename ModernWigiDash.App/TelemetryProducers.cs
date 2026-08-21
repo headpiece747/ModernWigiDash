@@ -1,6 +1,5 @@
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;

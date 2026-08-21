@@ -1,19 +1,14 @@
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using ModernWigiDash.App.Power;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Hardware.Transport;
 
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;

@@ -1,5 +1,4 @@
 using System.Windows.Threading;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App;
 

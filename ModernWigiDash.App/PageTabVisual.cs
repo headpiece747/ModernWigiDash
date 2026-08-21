@@ -1,4 +1,3 @@
-using System.Windows;
 
 namespace ModernWigiDash.App;
 

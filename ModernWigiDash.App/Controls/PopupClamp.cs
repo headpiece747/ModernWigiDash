@@ -1,4 +1,3 @@
-using System.Windows;
 using System.Windows.Controls.Primitives;
 
 namespace ModernWigiDash.App.Controls;

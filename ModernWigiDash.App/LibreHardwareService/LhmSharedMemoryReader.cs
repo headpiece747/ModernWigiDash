@@ -1,6 +1,5 @@
 using System.Text.Json;
 using MessagePack;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.LibreHardwareService;
 
