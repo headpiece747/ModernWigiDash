@@ -926,7 +926,7 @@ public class WeatherForecastWidgetTests
         // End-to-end boot: a legacy (unstamped) cache file is applied by the
         // boot load through the widget's identity-threaded load, and the
         // concurrent boot fetch's fresh data wins afterwards.
-        string cacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
+        string cacheDir = Path.Combine(AppContext.BaseDirectory, "weather_cache");
         Directory.CreateDirectory(cacheDir);
         var widget = new WeatherForecastWidget { InstanceId = "bootrace-id", Location = "Victoria" };
         widget.TestHttpClient = new HttpClient(new StubHttpHandler(request =>

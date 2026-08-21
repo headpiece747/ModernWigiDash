@@ -20,7 +20,7 @@ internal static class CrashLog
 {
     /// <summary>The crash log path; pinned by the App at startup (see the
     /// type doc). Tests override it for isolation.</summary>
-    internal static string LogPath { get; set; } = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
+    internal static string LogPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "crash.log");
 
     public static void Append(Exception? ex, bool handled = false)
     {

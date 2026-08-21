@@ -36,7 +36,7 @@ public partial class App : Application
 
         try
         {
-            FileLog.Write($"[App] === Application starting === BaseDir={AppDomain.CurrentDomain.BaseDirectory}");
+            FileLog.Write($"[App] === Application starting === BaseDir={AppContext.BaseDirectory}");
         }
         catch (IOException)
         {

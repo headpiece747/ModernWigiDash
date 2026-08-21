@@ -47,7 +47,7 @@ public static class FontHelper
     {
         try
         {
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string baseDir = AppContext.BaseDirectory;
             string fontPath = Path.Combine(baseDir, "Resources", "Fonts", "Geist-VariableFont_wght.ttf");
             if (File.Exists(fontPath))
             {

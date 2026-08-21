@@ -269,7 +269,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// matrix pins which keys force a rebuild).</summary>
     internal WeatherRenderModel? _renderModel;
 
-    private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "weather_cache");
+    private static readonly string CacheDir = Path.Combine(AppContext.BaseDirectory, "weather_cache");
     private PollLoop? _refreshPoll;
     /// <summary>The fetch-cancellation CTS (internal test seam: direct-drive
     /// tests inject a cancelled token to pin the silent-teardown path).</summary>
