@@ -167,18 +167,25 @@ references, no version drift. P2 is the single line-delete below.
 
 ## Task P3 — modern (from P0 evidence)
 
-- [ ] Package upgrades to latest stable: **no action** — all 16 CPM pins
+- [x] Package upgrades to latest stable: **no action** — all 16 CPM pins
   verified at latest stable 2026-08-21 (see the packages sub-report; do NOT
   "upgrade" NAudio.Wasapi to the unlisted 22.0.0).
-- [ ] C# 14 modernization per the P0 scan (primary constructors, `field`,
-  collection expressions, `scoped` on hot paths) — separate verifiable
-  commits, tests green each.
-- [ ] Extend `.editorconfig` with a curated `csharp_style_*`/`dotnet_style_*`
-  set at **suggestion** severity (house pattern: style = nudge, not gate).
-  **Validate on a scratch branch first** that `dotnet format
-  --verify-no-changes` is unaffected; revert if it fights the gate.
-- [ ] (Only if a perf regression surfaces) BenchmarkDotNet on the RGB565
-  encode path.
+- [x] C# 14 modernization per the P0 scan: 2 of the 4 collection literals
+  converted (the two `var x = List<T> { … }` shapes were reverted — the
+  .NET 10 Roslyn formatter mangles that shape, dropping the semicolon; the
+  limitation is recorded in the .editorconfig note). `scoped` and bulk
+  `field` conversions: no-op per P0 (documented rationale). Primary
+  constructors: house rule already covers new code; the 4 existing
+  primary-constructor sites show the codebase is at its natural adoption
+  point — a bulk retrofit is churn, not slimming (recorded, not executed).
+  Commit: `57597f0`.
+- [x] `.editorconfig` curated style set at suggestion severity, verified
+  against the format gate before committing (5 pins; the
+  primary-constructor nudge deliberately excluded — it would wall the tree in
+  suggestions). Commit: `f2b242a`.
+- [x] BenchmarkDotNet: **no action** — no perf regression surfaced (the P0
+  baseline has the measured memory footprint; nothing in this program touched
+  hot paths).
 
 ## Task P4 — encode & drift check
 
