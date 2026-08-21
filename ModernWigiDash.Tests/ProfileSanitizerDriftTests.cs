@@ -1,7 +1,4 @@
 using System.Reflection;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
 
 namespace ModernWigiDash.Tests;

@@ -1,10 +1,8 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
-using ModernWigiDash.App;
 using ModernWigiDash.App.Inspector;
 using ModernWigiDash.App.Theming;
-using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Tests;
 

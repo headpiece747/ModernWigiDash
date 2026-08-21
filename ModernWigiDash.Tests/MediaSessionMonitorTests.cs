@@ -1,6 +1,5 @@
 using Windows.Media;
 using Windows.Media.Control;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

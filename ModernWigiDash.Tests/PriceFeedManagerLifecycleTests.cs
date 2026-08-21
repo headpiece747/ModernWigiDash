@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net.Http;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

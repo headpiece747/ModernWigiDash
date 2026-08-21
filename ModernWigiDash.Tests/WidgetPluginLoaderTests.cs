@@ -1,8 +1,5 @@
 using ModernWigiDash.Core.Plugins;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

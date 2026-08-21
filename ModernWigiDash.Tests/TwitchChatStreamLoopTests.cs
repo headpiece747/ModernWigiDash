@@ -1,5 +1,4 @@
 using System.IO;
-using ModernWigiDash.Widgets;
 using ModernWigiDash.Widgets.Twitch;
 
 namespace ModernWigiDash.Tests;

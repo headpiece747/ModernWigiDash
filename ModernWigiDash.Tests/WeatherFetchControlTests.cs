@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

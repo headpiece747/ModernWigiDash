@@ -1,7 +1,4 @@
 using System.IO;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

@@ -1,7 +1,5 @@
 using System.IO;
 using System.Net.Http;
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

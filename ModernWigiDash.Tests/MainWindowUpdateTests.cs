@@ -1,5 +1,4 @@
 using System.Windows;
-using ModernWigiDash.App;
 using ModernWigiDash.App.Update;
 
 namespace ModernWigiDash.Tests;

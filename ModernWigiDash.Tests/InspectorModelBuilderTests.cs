@@ -1,7 +1,4 @@
 using ModernWigiDash.App.Inspector;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

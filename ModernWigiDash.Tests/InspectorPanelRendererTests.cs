@@ -7,8 +7,6 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using ModernWigiDash.App.Inspector;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

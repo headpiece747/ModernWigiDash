@@ -1,5 +1,4 @@
 using ModernWigiDash.Hardware.Transport;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

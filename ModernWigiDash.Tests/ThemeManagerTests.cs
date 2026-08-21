@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Media;
-using ModernWigiDash.App;
 using ModernWigiDash.Core.Theming;
 using AppClass = ModernWigiDash.App.App;
 

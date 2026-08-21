@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Input;
-using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
 

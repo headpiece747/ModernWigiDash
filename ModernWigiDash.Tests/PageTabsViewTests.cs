@@ -3,8 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
-using ModernWigiDash.App;
-using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Tests;
 

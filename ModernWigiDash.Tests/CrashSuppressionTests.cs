@@ -1,4 +1,3 @@
-using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
 

@@ -1,6 +1,3 @@
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

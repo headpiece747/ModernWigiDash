@@ -1,5 +1,3 @@
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

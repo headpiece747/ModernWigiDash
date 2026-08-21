@@ -1,9 +1,5 @@
 using System.IO;
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.App;
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

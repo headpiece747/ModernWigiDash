@@ -1,5 +1,4 @@
 using ModernWigiDash.Hardware.Transport;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

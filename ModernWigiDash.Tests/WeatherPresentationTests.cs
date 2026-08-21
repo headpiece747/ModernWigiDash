@@ -1,5 +1,4 @@
 using System.Globalization;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

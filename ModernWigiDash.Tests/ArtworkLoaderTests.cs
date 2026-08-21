@@ -1,7 +1,5 @@
 using Windows.Foundation;
 using Windows.Storage.Streams;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

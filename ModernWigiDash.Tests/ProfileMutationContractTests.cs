@@ -1,6 +1,4 @@
 using System.IO;
-using ModernWigiDash.App;
-using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Tests;
 

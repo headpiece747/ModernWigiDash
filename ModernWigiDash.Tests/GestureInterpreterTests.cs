@@ -1,5 +1,4 @@
 using ModernWigiDash.App.Gestures;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

@@ -1,5 +1,4 @@
 using ModernWigiDash.App.Inspector;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

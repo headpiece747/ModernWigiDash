@@ -1,8 +1,5 @@
 using Windows.Media;
 using Windows.Media.Control;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

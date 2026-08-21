@@ -7,6 +7,17 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
+  <!-- Project global usings (P1 2026-08-21): namespaces every file in this
+       assembly already needs; per-file restatements removed in the same pass. -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Time.Testing" />
+    <Using Include="ModernWigiDash.App" />
+    <Using Include="ModernWigiDash.Core.Models" />
+    <Using Include="ModernWigiDash.Sdk" />
+    <Using Include="ModernWigiDash.Widgets" />
+    <Using Include="SkiaSharp" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="coverlet.collector">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

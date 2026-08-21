@@ -1,7 +1,4 @@
-using ModernWigiDash.App;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Hardware.Transport;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

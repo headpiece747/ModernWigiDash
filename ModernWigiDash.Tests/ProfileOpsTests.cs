@@ -1,10 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

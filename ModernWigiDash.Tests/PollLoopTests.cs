@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

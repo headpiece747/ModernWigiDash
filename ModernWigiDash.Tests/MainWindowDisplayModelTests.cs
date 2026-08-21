@@ -1,8 +1,5 @@
-using ModernWigiDash.App;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Hardware.Transport;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

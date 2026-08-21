@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Http;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

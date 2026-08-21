@@ -10,11 +10,7 @@ using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Hardware.Transport;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 using AppClass = ModernWigiDash.App.App;
 
 namespace ModernWigiDash.Tests;

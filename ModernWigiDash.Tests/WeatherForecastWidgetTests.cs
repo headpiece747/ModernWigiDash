@@ -1,11 +1,6 @@
 using System.IO;
 using System.Net.Http;
 using System.Reflection;
-using Microsoft.Extensions.Time.Testing;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Widgets;
-using ModernWigiDash.Sdk;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

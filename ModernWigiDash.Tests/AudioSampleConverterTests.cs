@@ -1,4 +1,3 @@
-using ModernWigiDash.Widgets;
 using NAudio.Wave;
 
 namespace ModernWigiDash.Tests;

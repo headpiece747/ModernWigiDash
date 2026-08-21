@@ -1,5 +1,4 @@
 using ModernWigiDash.App.PresentMon;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

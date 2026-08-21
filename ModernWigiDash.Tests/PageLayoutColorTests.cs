@@ -1,4 +1,3 @@
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Plugins;
 
 namespace ModernWigiDash.Tests;

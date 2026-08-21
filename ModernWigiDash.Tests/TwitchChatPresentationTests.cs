@@ -1,5 +1,4 @@
 using ModernWigiDash.Widgets.Twitch;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

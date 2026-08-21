@@ -2,10 +2,6 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using ModernWigiDash.App.Inspector;
-using ModernWigiDash.Core.Models;
-using ModernWigiDash.Sdk;
-using ModernWigiDash.Widgets;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 

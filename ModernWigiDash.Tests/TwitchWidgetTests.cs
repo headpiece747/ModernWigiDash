@@ -1,7 +1,5 @@
 using System.IO;
-using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Twitch;
-using SkiaSharp;
 
 namespace ModernWigiDash.Tests;
 
