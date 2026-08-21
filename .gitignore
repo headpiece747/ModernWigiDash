@@ -366,7 +366,18 @@ FodyWeavers.xsd
 /.agents/
 /.codegraph/
 /.desloppify/
-/.opencode/
+# .opencode: track the curated agent-tooling set (AGENTS.md, rules, skills,
+# agents, plugins) so the encoded conventions travel with the repo; keep the
+# local install junk out. The contents glob (not a directory exclusion) is
+# what lets the negations re-include; the inner .opencode/.gitignore stays
+# untracked, so the **/node_modules/ line below is the fresh-clone backstop.
+/.opencode/*
+!/.opencode/AGENTS.md
+!/.opencode/rules/
+!/.opencode/skills/
+!/.opencode/agents/
+!/.opencode/plugins/
+/.opencode/**/node_modules/
 /.opencodeignore
 /.superpowers/
 /data/

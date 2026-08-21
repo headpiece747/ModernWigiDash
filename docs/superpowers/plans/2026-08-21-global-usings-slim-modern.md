@@ -197,11 +197,16 @@ references, no version drift. P2 is the single line-delete below.
   one factual drift found and fixed (CONTEXT.md test count 1614 → 1621);
   the rest of the rules set verified still true. Commit: `35fd28f`.
 - [ ] Optional: `ablate-ai-layer` — **not run** (explicitly optional; the
-  rules the program touched were re-verified instead of ablated). Left open
-  for a future session.
+  rules the program touched were re-verified instead of ablated). Open for a
+  future session — see the "Next session" section below for the designed
+  trap task and the now-satisfied gitignore prerequisite.
 - [x] Final gate: `ocr_review` over the range **timed out at 3600 s** on the
   ~340-file mechanical diff (budget spent on using-removals the compiler
-  already proved); the `code-reviewer` agent covered the same scope
+  already proved); a second, narrowly-scoped attempt (9 non-`.cs` files:
+  the 6 csproj, `.editorconfig`, 2 ps1 levers — mechanical diff excluded)
+  also timed out at 3600 s, with an invalid-JSON preview failure pointing
+  at a tool-side range-mode bug — recorded as OCR-unavailable-for-range-mode
+  per the one-attempt rule; the `code-reviewer` agent covered the same scope
   semantically — all 240 removal files checked against their project global
   sets, zero cross-namespace simple-type collisions, csproj `<Using>` sets
   exact, editorconfig pins suggestion-only with no line-ending pin, test
@@ -213,12 +218,15 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
 
 ## Persistence caveats (stated, not hidden)
 
-- **`.opencode/` is gitignored** (`.gitignore` line 369) — the
-  `dotnet-rules.md` §1 usings rule and the `project-structure` skill
-  correction from `a444839` persist **only on this machine**; a fresh clone
-  loses them. The durable record is this doc + the decision log + the
-  committed `.editorconfig` pins. A session on a new machine re-applies the
-  `.opencode` edits from this doc's P1/P3 sections.
+- **`.opencode/` is partially gitignored** (policy changed 2026-08-21 on
+  explicit user approval; commit recorded in the decision log): the curated
+  set — `AGENTS.md`, `rules/`, `skills/`, `agents/`, `plugins/` — is now
+  **tracked**, so the usings rule and skill corrections travel with the
+  repo. `node_modules` (54 MB), `package*.json`, and the inner
+  `.opencode/.gitignore` stay ignored; the root `.gitignore` carries a
+  `/.opencode/**/node_modules/` backstop for fresh clones (the inner ignore
+  file itself is untracked). History before that commit: the `.opencode`
+  edits were local-only — the old caveat applies to pre-policy state only.
 - **Sweep levers are committed** to `scripts/` (`sweep-global-usings.ps1`,
   `strip-leading-blank-lines.ps1`); the `Temp\opencode\` copies are the
   working originals and may vanish.
@@ -229,6 +237,20 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
   datarow-driven methods carry 15 rows; 1610 − 4 + 15 = **1621** executable
   cases (authoritative `--list-tests` count). The old `1614` was a stale
   historical figure. See the final-review report.
+
+## Next session: ablate-ai-layer (prerequisite now met)
+
+- [ ] `ablate-ai-layer` over the always-loaded layer (CONTEXT.md +
+  `.opencode/AGENTS.md` + `.opencode/rules/dotnet-rules.md`). The gitignore
+  prerequisite is satisfied as of the `.gitignore` policy commit (the
+  curated set is tracked, so throwaway worktrees carry the layer).
+- Primary task (designed trap): *"Promote `ModernWigiDash.Sdk` to a project
+  global using in the App project and sweep the redundant usings."* The
+  layer encodes exactly this lesson (the WPF temp-project rule, discovered
+  the expensive way in P1). Interpretation: a stripped arm that fails the
+  build with CS0246 in the wpftmp XAML pass proves the WPF rule
+  load-bearing; a surviving arm is a trim candidate. Budget: standalone
+  session (multiple agent runs per arm).
 
 ## Suggested skills (next session)
 
