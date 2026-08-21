@@ -130,8 +130,8 @@ Order: **Sdk → Core → Hardware → Widgets → App → Tests.** Per project:
   (nothing else; per-project TFM stays).
 - [x] `glider_reload`; `dotnet build` — no CS0104 fired anywhere (the
   Tests six-way global set was pre-checked by the pre-sweep build).
-- [x] Run the sweep script (`C:\Users\tobia\AppData\Local\Temp\opencode\wmd-sweep-usings.ps1`,
-  re-runnable; reads the global set from the csproj itself).
+- [x] Run the sweep script (`scripts/sweep-global-usings.ps1`, re-runnable;
+  reads the global set from the csproj itself).
 - [x] Delete the Hardware `<AssemblyName>` line (folded into its commit).
 - [x] Full `dotnet test` (fresh artifacts — no `--no-build` with the temp
   BaseOutputPath) + `dotnet format --verify-no-changes` per project.
@@ -156,10 +156,10 @@ no mode flag exists to get wrong.
 P0 evidence: no deletable repo symbols, no zero-usage package/project
 references, no version drift. P2 is the single line-delete below.
 
-- [ ] Dead-code removal per P0 findings: **no action** (0 candidates).
-- [ ] Delete unused `PackageReference`/`ProjectReference` entries: **no
+- [x] Dead-code removal per P0 findings: **no action** (0 candidates).
+- [x] Delete unused `PackageReference`/`ProjectReference` entries: **no
   action** (0 candidates).
-- [ ] Fix version drift: **no action** (0 conflicts).
+- [x] Fix version drift: **no action** (0 conflicts).
 - [ ] Delete the redundant `<AssemblyName>` line from
   `ModernWigiDash.Hardware.csproj` — **done in `86650bd`** (the 1621-test
   gate, which references the assembly by name, proved the output identity
@@ -189,15 +189,46 @@ references, no version drift. P2 is the single line-delete below.
 
 ## Task P4 — encode & drift check
 
-- [ ] `convention-learner` over what P1–P3 established → update
-  `dotnet-rules.md`/`CONTEXT.md` where facts moved.
-- [ ] `rules-check-drift` over the full commit range (AGENTS.md + CONTEXT.md +
-  rules stay true).
-- [ ] Optional: `ablate-ai-layer` — measure whether the always-loaded rules
-  still earn their place (the user's "rules = don't-repeat-mistakes" thesis,
-  tested).
-- [ ] Final gate: `ocr_review` + `code-reviewer` agent over the program's
-  whole diff; build + full tests + format.
+- [x] Convention encoding: done inline during P1 (`dotnet-rules.md` §1
+  usings rule + the `project-structure` skill correction, `a444839`) and P3
+  (the 5 editorconfig style pins, `f2b242a`) — a separate convention-learner
+  pass found nothing further to encode.
+- [x] `rules-check-drift` over the full commit range (`50745c8..HEAD`):
+  one factual drift found and fixed (CONTEXT.md test count 1614 → 1621);
+  the rest of the rules set verified still true. Commit: `35fd28f`.
+- [ ] Optional: `ablate-ai-layer` — **not run** (explicitly optional; the
+  rules the program touched were re-verified instead of ablated). Left open
+  for a future session.
+- [x] Final gate: `ocr_review` over the range **timed out at 3600 s** on the
+  ~340-file mechanical diff (budget spent on using-removals the compiler
+  already proved); the `code-reviewer` agent covered the same scope
+  semantically — all 240 removal files checked against their project global
+  sets, zero cross-namespace simple-type collisions, csproj `<Using>` sets
+  exact, editorconfig pins suggestion-only with no line-ending pin, test
+conversions proven equivalent, no scope creep. Its one MINOR (103 leading
+   blank lines at file heads) was fixed in `690e1f2`. Build + full test suite
+   (1621) + format gate green at the final state. Full report:
+   `docs/reports/slim-final-review-20260821.md` (also carries the
+   test-count reconciliation and the gate-evidence caveat).
+
+## Persistence caveats (stated, not hidden)
+
+- **`.opencode/` is gitignored** (`.gitignore` line 369) — the
+  `dotnet-rules.md` §1 usings rule and the `project-structure` skill
+  correction from `a444839` persist **only on this machine**; a fresh clone
+  loses them. The durable record is this doc + the decision log + the
+  committed `.editorconfig` pins. A session on a new machine re-applies the
+  `.opencode` edits from this doc's P1/P3 sections.
+- **Sweep levers are committed** to `scripts/` (`sweep-global-usings.ps1`,
+  `strip-leading-blank-lines.ps1`); the `Temp\opencode\` copies are the
+  working originals and may vanish.
+- **Per-project gate outputs were not committed** (house pattern: tests run
+  into `Temp\opencode\wmd-build\`; commit messages record the result). The
+  final-state gate is green at `690e1f2` and re-runnable.
+- **Test-count story:** 1610 Roslyn-verified `[TestMethod]` methods; 4
+  datarow-driven methods carry 15 rows; 1610 − 4 + 15 = **1621** executable
+  cases (authoritative `--list-tests` count). The old `1614` was a stale
+  historical figure. See the final-review report.
 
 ## Suggested skills (next session)
 
@@ -213,7 +244,9 @@ references, no version drift. P2 is the single line-delete below.
 
 ## Resume
 
-Fresh session: open this doc, run P0, write the report file, then P1 with the
-table above. All durable state after P0 lives in
-`docs/reports/slim-baseline-*.md` + the decision log — nothing re-derived from
-chat.
+**Completed 2026-08-21** (all P0–P4 checkboxes closed except the optional
+`ablate-ai-layer`, deliberately left open). The program's durable state:
+`docs/reports/slim-baseline-*.md` (P0 evidence),
+`docs/reports/slim-final-review-20260821.md` (final gate + reconciliation),
+`.audit/slim-modern.tsv` (decision log), and the 12 commits
+`126c22a..690e1f2`. A future session re-derives nothing from chat.
