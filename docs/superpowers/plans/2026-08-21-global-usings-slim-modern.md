@@ -126,24 +126,30 @@ Output: `docs/reports/slim-baseline-<YYYYMMDD>.md` (house precedent:
 
 Order: **Sdk → Core → Hardware → Widgets → App → Tests.** Per project:
 
-- [ ] Add that project's `<Using>` items from the table to its csproj
+- [x] Add that project's `<Using>` items from the table to its csproj
   (nothing else; per-project TFM stays).
-- [ ] `glider_reload`; `dotnet build` — if CS0104 fires, drop the offending
-  namespace from the globals (it stays per-file) and log the decision.
-- [ ] Run the sweep script: per project, delete exact full-line
-  `using <Ns>;` for `<Ns>` ∈ project globals ∪ ImplicitUsings baseline. Skip
-  `obj/`/`bin/`. Exact-line match only. The script is a re-runnable lever —
-  keep it in temp/decision log, not the repo.
-- [ ] Delete the Hardware `<AssemblyName>` line.
-- [ ] Full `dotnet test` (temp output) + `dotnet format --verify-no-changes`;
-  commit `refactor(<project>): promote common namespaces to project global
-  usings`.
-- [ ] After Tests: encode the convention — one line in
-  `.opencode/rules/dotnet-rules.md` §1 (project globals + implicit baseline are
-  assumed; only add usings for namespaces not already global in that project)
-  and fix the `project-structure` skill's "global usings in Directory.Build.props"
-  line to the per-csproj reality. Commit
-  `docs: encode per-project global-usings convention`.
+- [x] `glider_reload`; `dotnet build` — no CS0104 fired anywhere (the
+  Tests six-way global set was pre-checked by the pre-sweep build).
+- [x] Run the sweep script (`C:\Users\tobia\AppData\Local\Temp\opencode\wmd-sweep-usings.ps1`,
+  re-runnable; reads the global set from the csproj itself).
+- [x] Delete the Hardware `<AssemblyName>` line (folded into its commit).
+- [x] Full `dotnet test` (fresh artifacts — no `--no-build` with the temp
+  BaseOutputPath) + `dotnet format --verify-no-changes` per project.
+- [x] Commits: `3c11365` (Sdk, -5), `ec2fa6e` (Core, -15), `86650bd`
+  (Hardware, -8), `e331ead` (Widgets, -79), `436b81a` (App, -75),
+  `ece5992` (Tests, -232). Total: **414 using lines removed** (1217 → 803,
+  avg/file 3.0 → 1.98).
+- [x] Convention encoded: `.opencode/rules/dotnet-rules.md` §1 + the
+  `project-structure` skill's decision-guide row corrected to the per-csproj
+  reality.
+
+**WPF rule (discovered in App, first sweep attempt failed the build):** the
+WPF XAML markup pass compiles a generated `wpftmp` temp project that does not
+reliably apply ImplicitUsings — stripping the SDK implicit-baseline usings
+from a `UseWPF=true` project breaks the build (observed: CS0246 `HttpClient`
+in UpdateService.cs). App and Tests therefore keep their explicit baseline
+usings; the sweep script derives this rule from the csproj (`<UseWPF>`), so
+no mode flag exists to get wrong.
 
 ## Task P2 — slim (from P0 evidence)
 
@@ -155,7 +161,9 @@ references, no version drift. P2 is the single line-delete below.
   action** (0 candidates).
 - [ ] Fix version drift: **no action** (0 conflicts).
 - [ ] Delete the redundant `<AssemblyName>` line from
-  `ModernWigiDash.Hardware.csproj` (fold into the P1 Hardware commit).
+  `ModernWigiDash.Hardware.csproj` — **done in `86650bd`** (the 1621-test
+  gate, which references the assembly by name, proved the output identity
+  is unchanged).
 
 ## Task P3 — modern (from P0 evidence)
 
