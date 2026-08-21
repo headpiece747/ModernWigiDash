@@ -7,10 +7,11 @@ namespace ModernWigiDash.Widgets;
 /// write-back, and the two invalidation rules that mirror the client's
 /// InvalidateCoordinates / InvalidateLocation. Both drops route the identity
 /// value through the single rule (<see cref="WeatherInvalidation.Drop"/>);
-/// the widget keeps only its unique field (the pending write-back) and the
-/// gate discipline (every mutation runs under its <c>_forecastGate</c>) and
-/// the UI-thread flush of the write-back. The state transitions live here,
-/// where the widget tests and this module's own tests pin them directly.
+/// the display-state module keeps only its unique field (the pending
+/// write-back) and the gate discipline (every mutation runs under the
+/// module's one gate) and the UI-thread flush of the write-back. The state
+/// transitions live here, where the widget tests and this module's own tests
+/// pin them directly.
 /// </summary>
 internal sealed class WeatherResolvedIdentity
 {
@@ -48,8 +49,6 @@ internal sealed class WeatherResolvedIdentity
     /// </summary>
     public void Apply(IReadOnlyList<GeocodeCandidate>? candidates = null, double? population = null, string? resolvedName = null)
         => _state = _state.With(resolvedName, population, candidates);
-
-    public void DropPendingWriteback() => PendingWriteback = null;
 
     public void SetPendingWriteback(string value) => PendingWriteback = value;
 

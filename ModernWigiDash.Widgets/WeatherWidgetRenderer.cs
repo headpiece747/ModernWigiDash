@@ -88,6 +88,13 @@ internal sealed class WeatherWidgetRenderer : IDisposable
         canvas.DrawTextWithFallback(desc.Text, rightX, descBaseline, desc.Font, desc.Paint);
     }
 
+    /// <summary>The header title's font — ONE spelling shared by the factory's
+    /// truncation measure and the widget's draw, so a typography change cannot
+    /// clip or overrun the badge on one side only (the pill pair's precedent,
+    /// <see cref="MeasurePillWidths"/>).</summary>
+    internal static SKFont GetTitleFont(float size)
+        => FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, size);
+
     /// <summary>
     /// Measures pill widths (text + padding) in the pill font the draw path
     /// derives from the same WeatherLayout formulas — ONE spelling shared by
@@ -113,7 +120,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
         float w = bounds.Width;
         float h = bounds.Height;
 
-        bool hasForecast = model.ShowForecast && model.Daily.Length > 0 && h >= WeatherLayout.StripsMinHeight;
+        bool hasForecast = model.Key!.ShowForecast && model.Daily.Length > 0 && h >= WeatherLayout.StripsMinHeight;
         float forecastH = hasForecast ? WeatherLayout.ForecastStripHeight(sy) : 0f;
 
         bool hasMetrics = model.Display.Metrics.Count > 0 && h >= WeatherLayout.StripsMinHeight;

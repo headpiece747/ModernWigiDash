@@ -208,4 +208,69 @@ internal static class WeatherPresentation
 
         return new WeatherDisplay(mainTemp, metrics, ranges, highLows, temps);
     }
+
+    /// <summary>The neutral resolved-name label when no resolution exists —
+    /// the display's unknown-location fact: the header shows it until a
+    /// resolution, and the subtitle's unresolved verdict recognizes it.</summary>
+    internal const string UnknownLocationLabel = "Unknown location";
+
+    /// <summary>
+    /// The subtitle guidance line below the header: the ONE spelling of the
+    /// guidance or confirmation text. The priority order ensures the most
+    /// actionable message wins — a tie always beats "set a location", a
+    /// custom label always shows the resolved city for confirmation. The
+    /// unresolved verdict (blank or the neutral unknown-location label) is a
+    /// display fact owned HERE, so the build module and the widget no longer
+    /// reach into fetch-control state for it. Null: no guidance applies.
+    /// </summary>
+    public static string? BuildSubtitle(string? resolvedCity, string customLabel, string? locationText, int candidateCount, int dailyCount)
+    {
+        bool isUnresolved = string.IsNullOrWhiteSpace(resolvedCity)
+            || string.Equals(resolvedCity, UnknownLocationLabel, StringComparison.Ordinal);
+        if (candidateCount > 0 && dailyCount == 0)
+        {
+            // Ambiguous tie: candidates exist but no weather data — the
+            // Location Match dropdown is the documented escape route.
+            return "Multiple cities found \u2014 pick one in Settings";
+        }
+        if (isUnresolved && string.IsNullOrWhiteSpace(locationText))
+        {
+            // No location set yet.
+            return "Set a location in Settings";
+        }
+        if (isUnresolved && !string.IsNullOrWhiteSpace(locationText))
+        {
+            // Location was set but failed to resolve.
+            return "Check spelling \u2014 try 'City, State' or 'City, Country'";
+        }
+        if (!isUnresolved && !string.IsNullOrWhiteSpace(customLabel)
+            && !string.Equals(customLabel, resolvedCity, StringComparison.Ordinal))
+        {
+            // Custom label set: show the resolved city for confirmation.
+            return resolvedCity;
+        }
+        return null;
+    }
+
+    /// <summary>The header staleness line: "Updating…" while a fetch is in
+    /// flight, the time-ago of the last successful fetch otherwise, null when
+    /// there is nothing to report (no fetch ever succeeded).</summary>
+    public static string? BuildStalenessText(bool isFetching, DateTime lastSuccessFetchTime, DateTime now)
+    {
+        if (isFetching) return "Updating\u2026";
+        if (lastSuccessFetchTime <= DateTime.MinValue) return null;
+        return FormatTimeAgo(now - lastSuccessFetchTime);
+    }
+
+    /// <summary>
+    /// Formats a time-ago span into a human-readable staleness string.
+    /// Pinned by the weather widget's staleness tests.
+    /// </summary>
+    public static string FormatTimeAgo(TimeSpan elapsed)
+    {
+        if (elapsed.TotalMinutes < 1) return "Updated just now";
+        if (elapsed.TotalMinutes < 60) return $"Updated {(int)elapsed.TotalMinutes}m ago";
+        if (elapsed.TotalHours < 24) return $"Updated {(int)elapsed.TotalHours}h ago";
+        return $"Updated {(int)elapsed.TotalDays}d ago";
+    }
 }

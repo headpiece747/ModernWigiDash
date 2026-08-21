@@ -106,7 +106,7 @@ public sealed class WeatherInvalidationTests
         control.SetResolved(40.0, -74.0, "New York", 8_000_000);
         control.SetCandidates(sharedCandidates);
         Assert.IsTrue(control.Stamp("key"), "the seed must stamp the throttle");
-        var identity = new WeatherResolvedIdentity(WeatherFetchControl.UnknownLocationLabel);
+        var identity = new WeatherResolvedIdentity(WeatherPresentation.UnknownLocationLabel);
         identity.Apply(candidates: sharedCandidates, population: 8_000_000.0, resolvedName: "New York");
         identity.SetPendingWriteback("New York");
         return (control, identity, control.ResolutionState);

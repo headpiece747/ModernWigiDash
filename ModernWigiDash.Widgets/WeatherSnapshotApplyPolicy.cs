@@ -4,10 +4,10 @@ namespace ModernWigiDash.Widgets;
 /// The widget's snapshot-apply policy: the version-then-identity gate and the
 /// null-keeps / per-list-version-bump merge that turn a fetched or cached
 /// <see cref="WeatherSnapshot"/> into the widget's display state. Pure — no
-/// lock, no fields — so the atomicity stays the widget's gate and the rules
-/// are directly assertable. The widget's ApplySnapshot is a thin adapter:
-/// under its gate it asks <see cref="GuardsPass"/> first, then swaps in
-/// <see cref="Merge"/>'s result.
+/// lock, no fields — so the atomicity stays the display-state module's gate
+/// and the rules are directly assertable. The module's TryApply is a thin
+/// adapter: under its gate it asks <see cref="GuardsPass"/> first, then swaps
+/// in <see cref="Merge"/>'s result.
 /// </summary>
 internal static class WeatherSnapshotApplyPolicy
 {

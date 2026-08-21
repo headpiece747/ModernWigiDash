@@ -12,10 +12,10 @@ namespace ModernWigiDash.Tests;
 /// re-check vs. post-await), the forced re-fetch routing, the write-back
 /// gating, the cadence gate, and the boot-load rollback — asserted through
 /// <see cref="WeatherFetchFlow"/> without a widget instance, a render tick,
-/// or the widget's gate. The host harness mirrors the widget's real seam
-/// wiring (the same apply policy, the same identity module, the same
-/// gate discipline), so a rule the flow gets wrong fails here and in the
-/// widget identically.
+/// or the host's gate. The host harness wraps the SAME
+/// <see cref="WeatherDisplayState"/> module the widget uses (the same apply
+/// policy under the same gate, the same identity module), so a rule the flow
+/// gets wrong fails here and in the widget identically.
 /// </summary>
 [TestClass]
 public class WeatherFetchFlowTests
@@ -72,7 +72,7 @@ public class WeatherFetchFlowTests
     {
         var host = new FlowHost { LocationSeam = locationSeam };
         host.Client = new WeatherClient(NewCacheDir(), "weather_flow.json", timeProvider: clock, http: new HttpClient(stub));
-        host.Flow = new WeatherFetchFlow(host.Client, host.Identity, host);
+        host.Flow = new WeatherFetchFlow(host.Client, host);
         return host;
     }
 
@@ -90,7 +90,7 @@ public class WeatherFetchFlowTests
         Assert.AreEqual(11.1, host.State.CurrentTempC);
         Assert.AreEqual(1, host.State.DataVersion);
         Assert.AreEqual(1, host.RenderRequests);
-        Assert.AreEqual("40.71, -74.00", host.Identity.CityName);
+        Assert.AreEqual("40.71, -74.00", host.Identity.ResolvedName);
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
             "A coordinate-pair location must skip the geocode leg.");
     }
@@ -104,11 +104,11 @@ public class WeatherFetchFlowTests
         var outcome = await host.Flow.RunFetchAsync();
 
         Assert.AreEqual(WeatherFetchFlowOutcome.Applied, outcome);
-        Assert.IsFalse(string.IsNullOrEmpty(host.Identity.PendingWriteback),
+        Assert.IsFalse(string.IsNullOrEmpty(host.PendingLabelWriteback),
             "A resolved label that differs from the raw query must queue the write-back.");
-        Assert.AreEqual(host.Identity.CityName, host.Identity.PendingWriteback,
+        Assert.AreEqual(host.Identity.ResolvedName, host.PendingLabelWriteback,
             "The write-back must carry the SAME label the header shows — one label source.");
-        Assert.AreNotEqual("Berlin", host.Identity.PendingWriteback);
+        Assert.AreNotEqual("Berlin", host.PendingLabelWriteback);
     }
 
     [TestMethod]
@@ -120,7 +120,7 @@ public class WeatherFetchFlowTests
         var outcome = await host.Flow.RunFetchAsync();
 
         Assert.AreEqual(WeatherFetchFlowOutcome.Applied, outcome);
-        Assert.IsNull(host.Identity.PendingWriteback,
+        Assert.IsNull(host.PendingLabelWriteback,
             "A CustomLabel is display-only: writing the resolved label into Location would destroy the query.");
     }
 
@@ -152,7 +152,7 @@ public class WeatherFetchFlowTests
         // to land, and pin that the drop triggered a second forecast leg.
         await TestWait.WaitUntilAsync(() => Math.Abs(host.State.CurrentTempC - 22.2) < 1e-9, TimeSpan.FromSeconds(5));
         Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
-        StringAssert.StartsWith(host.Identity.CityName, "Berlin");
+        StringAssert.StartsWith(host.Identity.ResolvedName, "Berlin");
     }
 
     [TestMethod]
@@ -244,9 +244,9 @@ public class WeatherFetchFlowTests
 
         Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, outcome);
         Assert.AreEqual(4, host.Identity.Candidates.Count, "the four exact-name candidates must reach the widget's identity");
-        Assert.AreEqual("Berlin", host.Identity.CityName, "the header is the queried name — there is no winner to name");
+        Assert.AreEqual("Berlin", host.Identity.ResolvedName, "the header is the queried name — there is no winner to name");
         Assert.AreEqual(0, host.Identity.Population);
-        Assert.IsNull(host.Identity.PendingWriteback, "a tie has no resolved label to write back");
+        Assert.IsNull(host.PendingLabelWriteback, "a tie has no resolved label to write back");
         Assert.AreEqual(1, host.State.DataVersion, "the placeholder reset must bump the version so the render model rebuilds");
         Assert.AreEqual(25.0, host.State.CurrentTempC, "the placeholder scalars — never a previous city's data");
         Assert.AreEqual(1, host.RenderRequests);
@@ -274,7 +274,7 @@ public class WeatherFetchFlowTests
         Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, outcome);
         Assert.AreEqual(25.0, host.State.CurrentTempC, "the previous city's scalars must be reset to the placeholder");
         Assert.AreEqual(2, host.State.DataVersion);
-        Assert.AreEqual("Berlin", host.Identity.CityName);
+        Assert.AreEqual("Berlin", host.Identity.ResolvedName);
         Assert.AreEqual(4, host.Identity.Candidates.Count);
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
             "only the NYC fetch fetched weather; the tie fetched none");
@@ -322,7 +322,7 @@ public class WeatherFetchFlowTests
 
         Assert.AreEqual(WeatherFetchFlowOutcome.DroppedStale, outcome);
         Assert.AreEqual(0, host.State.DataVersion, "the dropped tie must never reach the display state");
-        Assert.AreEqual("Default Location", host.Identity.CityName);
+        Assert.AreEqual("Default Location", host.Identity.ResolvedName);
         Assert.AreEqual(0, host.Identity.Candidates.Count, "the old identity's tie candidates must not populate the new identity's dropdown");
         // The forced re-fetch resolves the NEW identity (the London pair):
         // wait for it to land and pin that the drop triggered the fetch.
@@ -373,10 +373,10 @@ public class WeatherFetchFlowTests
         // then pin the drop and the re-fetch against it — the re-fetch runs
         // concurrently with the dropped run's return, so no right-after-drop
         // version snapshot is asserted.
-        await TestWait.WaitUntilAsync(() => host.State.DataVersion == 1 && host.Identity.CityName == "Springfield", TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => host.State.DataVersion == 1 && host.Identity.ResolvedName == "Springfield", TimeSpan.FromSeconds(5));
         Assert.AreEqual(2, host.Identity.Candidates.Count,
             "the applied candidates are the LIVE identity's tie (2 Springfields) — the dropped Berlin tie's 4 never reached the state");
-        Assert.AreEqual("Springfield", host.Identity.CityName);
+        Assert.AreEqual("Springfield", host.Identity.ResolvedName);
         Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
             "the drop triggered a re-geocode of the live identity");
         Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
@@ -395,7 +395,7 @@ public class WeatherFetchFlowTests
         Assert.AreEqual(WeatherFetchFlowOutcome.Applied, outcome);
         Assert.AreEqual(0, host.Identity.Candidates.Count);
         Assert.AreEqual(0, host.InspectorRefreshes,
-            "Coordinates produce no candidates: the empty stamp matches the empty baseline.");
+            "Coordinates produce no candidates: a null payload leaves the stamp untouched.");
     }
 
     [TestMethod]
@@ -463,7 +463,7 @@ public class WeatherFetchFlowTests
 
         Assert.AreEqual(33.3, host.State.CurrentTempC);
         Assert.AreEqual(1, host.State.DataVersion);
-        Assert.AreEqual("Paris", host.Identity.CityName);
+        Assert.AreEqual("Paris", host.Identity.ResolvedName);
         Assert.AreEqual(0, host.RenderRequests, "The boot load requests no render.");
     }
 
@@ -513,7 +513,7 @@ public class WeatherFetchFlowTests
             "A default-stamped cache must not surface under the hydrated location.");
         Assert.IsTrue(host.Client.IsFetchWindowElapsed(),
             "A discarded load must roll back the client's committed resolution state (the load's interface contract).");
-        Assert.AreNotEqual("Paris", host.Identity.CityName);
+        Assert.AreNotEqual("Paris", host.Identity.ResolvedName);
     }
 
     [TestMethod]
@@ -526,7 +526,7 @@ public class WeatherFetchFlowTests
 
         Assert.AreEqual(0, host.State.DataVersion);
         Assert.AreEqual(25.0, host.State.CurrentTempC);
-        Assert.IsNull(host.Identity.PendingWriteback);
+        Assert.IsNull(host.PendingLabelWriteback);
         Assert.AreEqual(0, stub.Calls, "An empty cache directory makes no requests.");
     }
 
@@ -544,18 +544,30 @@ public class WeatherFetchFlowTests
     }
 
     /// <summary>
-    /// The test host: an adapter over the flow's host seam mirroring the
-    /// widget's real seam wiring — the same apply policy under a gate, the
-    /// same identity module, the same version-read and write-back discipline
-    /// — so the flow sees exactly what the production host hands it. The
-    /// mirror's fidelity is this adapter's discipline, not a copy of the
-    /// wiring.
+    /// The test host: an adapter over the flow's host seam built on the SAME
+    /// <see cref="WeatherDisplayState"/> module the widget uses — the flow's
+    /// guarantees are pinned against the production gate shape, not a mirror
+    /// of it. The host adds only the host concerns: the location read (with
+    /// the seam override the outcome-key mismatch test needs — one read per
+    /// flow step, mirroring the widget's property coercion), the static-
+    /// snapshot flag, the run token, and the context-request counters.
     /// </summary>
     private sealed class FlowHost : IWeatherFetchHost
     {
-        public readonly Lock Gate = new();
-        public WeatherSnapshotState State = new();
-        public WeatherResolvedIdentity Identity = new("Default Location");
+        private readonly WeatherDisplayState _displayState = new("Default Location", () => DateTime.UtcNow);
+
+        /// <summary>The module's one gate (test lock: stamp pre-await state
+        /// under it).</summary>
+        public object Gate => _displayState.Gate;
+
+        public WeatherSnapshotState State
+        {
+            get => _displayState.State;
+            set => _displayState.ReplaceState(value);
+        }
+
+        public WeatherResolutionState Identity => _displayState.Identity;
+        public string? PendingLabelWriteback => _displayState.PendingLabelWriteback;
         public WeatherLocation Location = NycCoords;
 
         /// <summary>Optional override of the location read (the outcome-key
@@ -577,73 +589,19 @@ public class WeatherFetchFlowTests
         /// <see cref="Location"/> field.</summary>
         WeatherLocation IWeatherFetchHost.CurrentLocation => LocationSeam?.Invoke() ?? Location;
 
-        /// <summary>The version read under the gate — mirrors the widget's
-        /// gated read.</summary>
-        int IWeatherFetchHost.DataVersion
-        {
-            get { lock (Gate) { return State.DataVersion; } }
-        }
+        int IWeatherFetchHost.DataVersion => _displayState.DataVersion;
 
         bool IWeatherFetchHost.IsStaticSnapshot => StaticSnapshotFlag;
         CancellationToken IWeatherFetchHost.RunToken => RunCts?.Token ?? CancellationToken.None;
         void IWeatherFetchHost.RequestRender() => RenderRequests++;
         void IWeatherFetchHost.RequestInspectorRefresh() => InspectorRefreshes++;
 
-        /// <summary>The gated apply — mirrors the widget's TryApply seam.</summary>
-        bool IWeatherFetchHost.TryApply(WeatherApplyRequest request)
-            => ApplySnapshot(request.Snapshot, request.ExpectedVersion, request.IdentityGuard,
-                request.Candidates, request.Population, request.ResolvedName);
+        bool IWeatherFetchHost.TryApply(WeatherApplyRequest request) => _displayState.TryApply(request);
 
-        /// <summary>The gated tie apply — mirrors the widget's TryApplyTie
-        /// seam: the identity guard first (an edit that changed the resolution
-        /// inputs since the fetch wins), then the placeholder reset with the
-        /// data version bumped and the identity copies (the tied candidates —
-        /// the dropdown — the queried name as the header, a cleared
-        /// population) under ONE lock.</summary>
         bool IWeatherFetchHost.TryApplyTie(IReadOnlyList<GeocodeCandidate> candidates, Func<bool> identityGuard)
-        {
-            lock (Gate)
-            {
-                if (!identityGuard()) return false;
-                State = new WeatherSnapshotState { DataVersion = State.DataVersion + 1 };
-                WeatherLocation current = LocationSeam?.Invoke() ?? Location;
-                string headerText = string.IsNullOrWhiteSpace(current.Location)
-                    ? WeatherFetchControl.UnknownLocationLabel
-                    : current.Location;
-                Identity.Apply(candidates, 0, headerText);
-                return true;
-            }
-        }
+            => _displayState.TryApplyTie(candidates, identityGuard, () => (LocationSeam?.Invoke() ?? Location).Location);
 
-        /// <summary>The gated write-back queue: check + set under ONE lock —
-        /// one critical section, mirroring the widget's seam.</summary>
         void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-        {
-            lock (Gate)
-            {
-                if (identityGuard())
-                {
-                    Identity.SetPendingWriteback(value);
-                }
-            }
-        }
-
-        /// <summary>
-        /// The gated apply: the policy's version-then-identity guard first,
-        /// then the merge and the identity copies under ONE lock — the exact
-        /// discipline the widget's TryApply seam spells (so the flow's
-        /// guarantees are tested against the real gate shape).
-        /// </summary>
-        public bool ApplySnapshot(WeatherSnapshot snapshot, int? expectedVersion = null, Func<bool>? identityGuard = null,
-            IReadOnlyList<GeocodeCandidate>? candidates = null, double? population = null, string? resolvedName = null)
-        {
-            lock (Gate)
-            {
-                if (!WeatherSnapshotApplyPolicy.GuardsPass(expectedVersion, State.DataVersion, identityGuard)) return false;
-                State = WeatherSnapshotApplyPolicy.Merge(snapshot, State);
-                Identity.Apply(candidates, population, resolvedName);
-                return true;
-            }
-        }
+            => _displayState.QueueLabelWriteback(identityGuard, value);
     }
 }

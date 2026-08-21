@@ -234,4 +234,49 @@ public class WeatherForecastParserTests
         Assert.IsNotNull(hourly);
         Assert.AreEqual("0:00", hourly[0].TimeLabel, "a time string too short for [11..16] slices to an index label");
     }
+
+    [TestMethod]
+    public void ParseHourlyForecast_RaggedCodeArray_CapsAtShortestColumn()
+    {
+        // Per-column tolerance at the trust boundary: a remote response whose
+        // weather_code array is shorter than time/temperature must cap the
+        // strip at the shortest present column — one degraded column, not
+        // the whole fetch (an unguarded index would throw and the caller's
+        // catch would fail the entire fetch).
+        string json = """{"hourly":{"time":["2026-08-20T00:00","2026-08-20T01:00","2026-08-20T02:00"],"temperature_2m":[10.0,11.0,12.0],"weather_code":[2]}}""";
+
+        var (_, hourly) = WeatherForecastParser.ParseHourlyForecast(RootOf(json));
+
+        Assert.IsNotNull(hourly);
+        Assert.AreEqual(1, hourly.Count, "the hourly strip caps at the shortest present column");
+        Assert.AreEqual(2, hourly[0].WeatherCode, "the surviving row is row 0 built from the capped columns — pins which row survives");
+    }
+
+    [TestMethod]
+    public void ParseDailyForecast_RaggedMinAndCodeArrays_CapAtShortestColumn()
+    {
+        string json = """{"daily":{"time":["2026-08-20","2026-08-21","2026-08-22"],"weather_code":[2,3],"temperature_2m_max":[18.0,20.0,22.0],"temperature_2m_min":[9.0]}}""";
+
+        var (_, low, daily) = WeatherForecastParser.ParseDailyForecast(RootOf(json));
+
+        Assert.AreEqual(9.0, low, "the low-temp scalar read is independent of the strip cap and must survive the ragged columns");
+        Assert.AreEqual(1, daily!.Count, "the daily strip caps at the shortest present column");
+    }
+
+    [TestMethod]
+    public void ParseDailyForecast_MissingMinColumn_DegradesInsteadOfThrowing()
+    {
+        // The "response omitted this section — keep the previous value" posture
+        // at the trust boundary: a daily block without temperature_2m_min must
+        // degrade the strip to empty (and the low scalar to null), not throw
+        // out of bounds — one absent column is not a failed fetch.
+        string json = """{"daily":{"time":["2026-08-20","2026-08-21"],"weather_code":[2,3],"temperature_2m_max":[18.0,20.0]}}""";
+
+        var (high, low, daily) = WeatherForecastParser.ParseDailyForecast(RootOf(json));
+
+        Assert.AreEqual(18.0, high);
+        Assert.IsNull(low, "a missing min column degrades the scalar, not the fetch");
+        Assert.IsNotNull(daily);
+        Assert.AreEqual(0, daily.Count, "a missing min column degrades the strip to empty, not a throw");
+    }
 }

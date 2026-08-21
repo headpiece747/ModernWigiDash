@@ -6,8 +6,8 @@ namespace ModernWigiDash.Tests;
 /// Pins the widget's snapshot-apply policy: the version-then-identity gate
 /// and the null-keeps / per-list-version-bump merge that turn a fetched or
 /// cached snapshot into the widget's display state. Pure — the module holds
-/// no lock and no fields, so the rules are assertable directly; the widget's
-/// ApplySnapshot keeps only the gate discipline.
+/// no lock and no fields, so the rules are assertable directly; the
+/// display-state module's TryApply keeps only the gate discipline.
 /// </summary>
 [TestClass]
 public class WeatherSnapshotApplyPolicyTests

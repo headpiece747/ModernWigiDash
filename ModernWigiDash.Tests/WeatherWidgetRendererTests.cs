@@ -42,12 +42,15 @@ public class WeatherWidgetRendererTests
 
         return new WeatherRenderModel
         {
-            DataVersion = 1,
+            // The key is the model's single identity — the renderer reads the
+            // property snapshot (ShowForecast) from it.
+            Key = new WeatherRenderModelKey(
+                1, new SKRect(), "Detailed", "Fahrenheit (°F, mph)", "", "",
+                true, true, true, true, dailyCount > 0, 0),
             WeatherCode = weatherCode,
             Daily = Enumerable.Range(0, dailyCount).Select(i => new DailyForecastItem($"Day{i}", 20 + i, 10 + i, 1)).ToArray(),
             Hourly = Enumerable.Range(0, hourlyCount).Select(i => new HourlyForecastItem($"{i}:00", 15 + i, 1)).ToArray(),
             Display = new WeatherDisplay(mainTemp, metricList, ranges, highLows, hourlyTemps),
-            ShowForecast = dailyCount > 0,
         };
     }
 
@@ -220,7 +223,7 @@ public class WeatherWidgetRendererTests
         using var surface = SKSurface.Create(new SKImageInfo(406, 90));
         surface.Canvas.Clear(Background);
         var model = CreateModel();
-        model.ShowForecast = false;
+        model.Key = model.Key! with { ShowForecast = false };
 
         // The branch's inputs at the 35px hero-height floor: tempSize and
         // descSize are the renderer's clamps, spacing is 2x sy.

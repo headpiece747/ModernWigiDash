@@ -77,30 +77,23 @@ internal abstract record WeatherResolutionOutcome
 /// </summary>
 internal sealed class WeatherGeocoder
 {
-    private HttpClient _http;
+    private readonly Func<HttpClient> _http;
     private readonly Action<string, Exception?>? _logError;
 
-    /// <param name="http">The transport for geocoding requests. The owning
-    /// <see cref="WeatherClient"/> passes its live client here and syncs its
-    /// test seam via <see cref="Http"/>, so every leg of the cluster rides the
-    /// same transport (and the same 30s timeout / bounded read).</param>
+    /// <param name="http">A LIVE transport provider for geocoding requests.
+    /// The owning <see cref="WeatherClient"/> passes its own seam resolver
+    /// here, so every leg of the cluster always rides the same transport (and
+    /// the same 30s timeout / bounded read) — resolved at request time, there
+    /// is no sync step to keep in agreement, and a test's transport swap is
+    /// observed on the next request.</param>
     /// <param name="logError">Optional error sink; when omitted, failures are silent.</param>
     /// <param name="httpTimeoutOverride">Test seam: a per-instance override of
     /// the per-leg body-read deadline (defaults to <see cref="HttpTimeout"/>).</param>
-    public WeatherGeocoder(HttpClient http, Action<string, Exception?>? logError = null, TimeSpan? httpTimeoutOverride = null)
+    public WeatherGeocoder(Func<HttpClient> http, Action<string, Exception?>? logError = null, TimeSpan? httpTimeoutOverride = null)
     {
         _http = http;
         _logError = logError;
         HttpTimeoutOverride = httpTimeoutOverride;
-    }
-
-    /// <summary>The live transport. The client syncs this whenever its own
-    /// <c>TestHttpClient</c> changes, so the geocoder always fetches through
-    /// the same seam the forecast fetch uses.</summary>
-    internal HttpClient Http
-    {
-        get => _http;
-        set => _http = value;
     }
 
     /// <summary>The bounded-read cap for every HTTP leg (geocoding + forecast):
@@ -142,7 +135,7 @@ internal sealed class WeatherGeocoder
         timeoutCts.CancelAfter(HttpTimeoutOverride ?? HttpTimeout);
         try
         {
-            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
+            using var response = await _http().GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             long? declared = response.Content.Headers.ContentLength;
             if (declared > MaxResponseBytes)

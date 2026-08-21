@@ -25,7 +25,8 @@ public class WeatherGeocoderResolveTests
     private static (WeatherGeocoder Geocoder, StubHttpHandler Handler) Geocode(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var handler = new StubHttpHandler(respond);
-        return (new WeatherGeocoder(new HttpClient(handler)), handler);
+        var client = new HttpClient(handler);
+        return (new WeatherGeocoder(() => client), handler);
     }
 
     private static GeocodeCandidate BerlinCandidate =>
@@ -324,6 +325,42 @@ public class WeatherGeocoderResolveTests
         {
             Assert.IsTrue(candidate.Label.StartsWith("Springfield", StringComparison.Ordinal), $"fuzzy row offered: {candidate.Label}");
         }
+    }
+
+    [TestMethod]
+    public async Task Resolve_CityBareWashington_LiveCapitalRowNamedDc_GatesAndExcludesItFromPickList()
+    {
+        // The live "Washington" search (probed 2026-08): row 1 is the
+        // capital, named "Washington D.C." — NOT an exact-name match for
+        // "Washington", so it scores zero and never enters the pick list.
+        // The state cities named Washington tie at the bare name score, all
+        // in one country, with no suffix to match: the same-country
+        // tiebreak requires the suffix to have matched the tie, so the gate
+        // holds — a bare "Washington" must never population-pick a state
+        // city over the capital, and the dropdown offers only the exact-name
+        // rows (the escape route to the capital is typing "Washington D.C."
+        // or a ZIP — never a silent wrong-city guess).
+        const string fixture = """
+        {
+          "results": [
+            { "name": "Washington D.C.", "admin1": "District of Columbia", "country": "United States", "country_code": "US", "population": 689545, "latitude": 38.89511, "longitude": -77.03637 },
+            { "name": "Washington", "admin1": "Pennsylvania", "country": "United States", "country_code": "US", "population": 13497, "latitude": 40.17396, "longitude": -80.24617 },
+            { "name": "Washington", "admin1": "Indiana", "country": "United States", "country_code": "US", "population": 12078, "latitude": 38.65922, "longitude": -87.17279 },
+            { "name": "Washington", "admin1": "North Carolina", "country": "United States", "country_code": "US", "population": 9788, "latitude": 35.54655, "longitude": -77.05217 },
+            { "name": "Washington", "admin1": "Iowa", "country": "United States", "country_code": "US", "population": 7408, "latitude": 41.29918, "longitude": -91.69294 }
+          ]
+        }
+        """;
+        var (geocoder, handler) = Geocode(_ => StubHttpHandler.Ok(fixture));
+        var location = new WeatherLocation("City", "Washington", null, null, null);
+
+        var result = await geocoder.ResolveAsync(location, null, CancellationToken.None);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherResolutionOutcome.Ambiguous));
+        var ambiguous = (WeatherResolutionOutcome.Ambiguous)result;
+        Assert.AreEqual(4, ambiguous.Candidates.Count, "the pick list is the exact-name rows only — the D.C. row (a name the query did not type) is not offered");
+        Assert.IsFalse(ambiguous.Candidates.Any(c => c.Label.Contains("D.C.", StringComparison.Ordinal)), "the capital's row must not be pickable under a query that did not name it");
+        Assert.AreEqual(1, handler.Calls);
     }
 
     [TestMethod]

@@ -77,23 +77,6 @@ public class WeatherRenderModelTests
     }
 
     [TestMethod]
-    public void Key_EveryKeyFieldIsAModelComponent()
-    {
-        // A key field the model does not carry would turn the identity on a
-        // ghost component — a perpetual rebuild. The key may only name
-        // components the model actually caches (the model's payload-only
-        // fields — WeatherCode, Daily, Hourly, Display, TruncatedHeader,
-        // MetricWidths — are covered by the data version, not by the key).
-        var keyFields = typeof(WeatherRenderModelKey).GetProperties().Select(p => p.Name).ToArray();
-        var modelFields = typeof(WeatherRenderModel).GetFields().Select(f => f.Name).ToArray();
-
-        foreach (var field in keyFields)
-        {
-            Assert.IsTrue(modelFields.Contains(field), $"key field {field} must be a component the model caches");
-        }
-    }
-
-    [TestMethod]
     public void IsCacheHit_NeverBuiltModel_NeverHits()
     {
         var model = new WeatherRenderModel(); // Key is null — never went through the build

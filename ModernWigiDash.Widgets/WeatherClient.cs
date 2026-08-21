@@ -41,15 +41,13 @@ internal sealed class WeatherClient
     private HttpClient? _testHttpClient;
 
     /// <summary>Test seam: substitute HTTP transport for fetch tests (defaults to <see cref="SharedHttpClient"/>).
-    /// The geocoder follows the same seam, so both fetch legs are drivable from one property.</summary>
+    /// The geocoder is constructed with THIS seam's live provider, so both
+    /// fetch legs are drivable from one property — no sync step to keep in
+    /// agreement.</summary>
     internal HttpClient? TestHttpClient
     {
         get => _testHttpClient;
-        set
-        {
-            _testHttpClient = value;
-            _geocoder.Http = Http;
-        }
+        set => _testHttpClient = value;
     }
 
     private HttpClient Http => TestHttpClient ?? SharedHttpClient;
@@ -94,7 +92,7 @@ internal sealed class WeatherClient
         _cache = new WeatherCacheStore(cacheDirectory, cacheFileNameProvider, logError);
         _fetchControl = new WeatherFetchControl(timeProvider ?? TimeProvider.System);
         _logError = logError;
-        _geocoder = new WeatherGeocoder(SharedHttpClient, _logError);
+        _geocoder = new WeatherGeocoder(() => Http, _logError);
         TestHttpClient = http;
         Directory.CreateDirectory(cacheDirectory);
     }

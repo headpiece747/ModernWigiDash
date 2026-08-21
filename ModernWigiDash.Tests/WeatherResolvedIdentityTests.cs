@@ -6,8 +6,8 @@ namespace ModernWigiDash.Tests;
 /// Pins the widget's resolved-identity module: the dropdown candidates, the
 /// resolved population, the header city name, and the pending label
 /// write-back, plus the two invalidation rules that mirror the client's
-/// InvalidateCoordinates / InvalidateLocation. The widget keeps only the gate
-/// discipline (every mutation runs under its <c>_forecastGate</c>) and the
+/// InvalidateCoordinates / InvalidateLocation. The display-state module keeps
+/// only the gate discipline (every mutation runs under its one gate) and the
 /// UI-thread write-back flush; the state transitions themselves live here.
 /// </summary>
 [TestClass]

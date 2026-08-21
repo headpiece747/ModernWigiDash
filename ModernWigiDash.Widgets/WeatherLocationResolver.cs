@@ -542,7 +542,13 @@ internal static class WeatherLocationResolver
                      || InitialsMatch(candidate.Country, component)) score += SuffixWeakBonus;
             else return 0;
         }
-        return score;
+        // The total is capped at one exact tier: the tier spacing promises an
+        // exact name match dominates EVERY suffix/hint combination, and a
+        // three-component suffix would otherwise let a non-exact-name row
+        // (500 × 3) beat an exact-name row that failed the all-or-nothing
+        // suffix — ungated, because the ambiguity gate only saves a tie, not
+        // a beat.
+        return Math.Min(score, SuffixExactBonus);
     }
 
     private static bool EqualsAny(string admin1, string country, string code, string component)

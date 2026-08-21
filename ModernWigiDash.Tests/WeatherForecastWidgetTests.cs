@@ -430,7 +430,7 @@ public class WeatherForecastWidgetTests
         widget.Render(surface.Canvas, bounds);
 
         Assert.AreNotSame(before, widget._renderModel, "a fetch (data version + resolved city) must force a rebuild");
-        Assert.AreEqual("New York, US", widget._renderModel!.ResolvedCity);
+        Assert.AreEqual("New York, US", widget._renderModel!.Key!.ResolvedCity);
     }
 
     [TestMethod]
@@ -1203,43 +1203,43 @@ public class WeatherForecastWidgetTests
     [TestMethod]
     public void FormatTimeAgo_SubMinute_ReturnsUpdatedJustNow()
     {
-        Assert.AreEqual("Updated just now", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromSeconds(45)));
+        Assert.AreEqual("Updated just now", WeatherPresentation.FormatTimeAgo(TimeSpan.FromSeconds(45)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_ExactMinute_Returns1mAgo()
     {
-        Assert.AreEqual("Updated 1m ago", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromMinutes(1)));
+        Assert.AreEqual("Updated 1m ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromMinutes(1)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_FewMinutes_ReturnsMinuteCount()
     {
-        Assert.AreEqual("Updated 5m ago", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromMinutes(5)));
+        Assert.AreEqual("Updated 5m ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromMinutes(5)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_ExactHour_Returns1hAgo()
     {
-        Assert.AreEqual("Updated 1h ago", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromHours(1)));
+        Assert.AreEqual("Updated 1h ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromHours(1)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_FewHours_ReturnsHourCount()
     {
-        Assert.AreEqual("Updated 3h ago", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromHours(3)));
+        Assert.AreEqual("Updated 3h ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromHours(3)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_Days_ReturnsDayCount()
     {
-        Assert.AreEqual("Updated 2d ago", WeatherForecastWidget.FormatTimeAgo(TimeSpan.FromDays(2)));
+        Assert.AreEqual("Updated 2d ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromDays(2)));
     }
 
     [TestMethod]
     public void FormatTimeAgo_ZeroTime_ReturnsUpdatedJustNow()
     {
-        Assert.AreEqual("Updated just now", WeatherForecastWidget.FormatTimeAgo(TimeSpan.Zero));
+        Assert.AreEqual("Updated just now", WeatherPresentation.FormatTimeAgo(TimeSpan.Zero));
     }
 
     [TestMethod]

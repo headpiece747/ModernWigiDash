@@ -108,7 +108,11 @@ internal static class WeatherForecastParser
         bool modernCodes = hourly.TryGetProperty("weather_code", out var codes);
         bool legacyCodes = !modernCodes && hourly.TryGetProperty("weathercode", out codes);
 
+        // Ragged remote arrays degrade per column: the loop bound must cover
+        // EVERY indexed array — a shorter weather_code caps the strip, it
+        // does not throw out of bounds (one degraded column, not the fetch).
         int hLen = Math.Min(times.GetArrayLength(), tempsInner.GetArrayLength());
+        if (modernCodes || legacyCodes) hLen = Math.Min(hLen, codes.GetArrayLength());
         List<HourlyForecastItem> items = [];
         for (int i = 0; i < Math.Min(hLen, WeatherForecastLimits.MaxFetchHours); i++)
         {
@@ -151,7 +155,15 @@ internal static class WeatherForecastParser
 
     private static List<DailyForecastItem> BuildDailyItems(JsonElement dTimes, JsonElement maxes, JsonElement mins, JsonElement codes)
     {
+        // The same per-column posture as the hourly strip: the bound covers
+        // every indexed array, so a ragged min/code column degrades the strip.
+        // A MISSING min column reads as a non-array token (the scalar read
+        // above keeps the "omitted section" rule) — length 0, not a throw:
+        // one absent column degrades the strip to empty, it does not fail
+        // the fetch.
         int dLen = Math.Min(dTimes.GetArrayLength(), maxes.GetArrayLength());
+        dLen = Math.Min(dLen, mins.ValueKind == JsonValueKind.Array ? mins.GetArrayLength() : 0);
+        dLen = Math.Min(dLen, codes.GetArrayLength());
         List<DailyForecastItem> items = [];
         for (int i = 0; i < Math.Min(dLen, WeatherForecastLimits.MaxFetchDays); i++)
         {

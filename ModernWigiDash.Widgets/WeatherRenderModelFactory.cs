@@ -1,5 +1,4 @@
 using SkiaSharp;
-using ModernWigiDash.Core.Rendering;
 
 namespace ModernWigiDash.Widgets;
 
@@ -27,7 +26,8 @@ internal sealed record WeatherRenderModelInputs(
     WeatherHeaderLayout Header,
     float Scale,
     string LocationText,
-    int CandidateCount);
+    int CandidateCount,
+    string NeutralLabel);
 
 /// <summary>
 /// The render-model build module: the ONE place the weather render model is
@@ -71,19 +71,10 @@ internal static class WeatherRenderModelFactory
 
         var model = new WeatherRenderModel
         {
+            // The key rides by reference: it is the model's single identity, and the
+            // property snapshot the draw paths read comes from it — a
+            // field-by-field copy could drift by a forgotten line here.
             Key = inputs.Key,
-            DataVersion = inputs.Key.DataVersion,
-            Bounds = inputs.Key.Bounds,
-            LayoutMode = inputs.Key.LayoutMode,
-            UnitSystem = inputs.Key.UnitSystem,
-            CustomLabel = inputs.Key.CustomLabel,
-            ResolvedCity = inputs.Key.ResolvedCity,
-            ShowFeelsLike = inputs.Key.ShowFeelsLike,
-            ShowHumidity = inputs.Key.ShowHumidity,
-            ShowWind = inputs.Key.ShowWind,
-            ShowHighLow = inputs.Key.ShowHighLow,
-            ShowForecast = inputs.Key.ShowForecast,
-            CandidateCount = inputs.Key.CandidateCount,
             WeatherCode = inputs.WeatherCode,
             IsDay = inputs.IsDay,
             Daily = inputs.Daily.ToArray(),
@@ -94,8 +85,25 @@ internal static class WeatherRenderModelFactory
         // Auto-truncated header: the city name (or the custom label) uppercased
         // once per model, then truncated to the same max width the draw path
         // uses — measured with the handed-in header geometry, never recomputed.
-        string cityRaw = string.IsNullOrWhiteSpace(inputs.Key.CustomLabel) ? inputs.Key.ResolvedCity : inputs.Key.CustomLabel;
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, inputs.Header.TitleFontSize);
+        // A blank resolved city (no resolution yet, e.g. after a location
+        // edit's drop) falls back to the injected neutral label, so the header
+        // matches the fresh-widget seed instead of rendering blank: the same
+        // logical state ("no resolution") shows the neutral label whether or
+        // not a drop has run. The subtitle already treats blank as unresolved.
+        string cityRaw;
+        if (!string.IsNullOrWhiteSpace(inputs.Key.CustomLabel))
+        {
+            cityRaw = inputs.Key.CustomLabel;
+        }
+        else if (!string.IsNullOrWhiteSpace(inputs.Key.ResolvedCity))
+        {
+            cityRaw = inputs.Key.ResolvedCity;
+        }
+        else
+        {
+            cityRaw = inputs.NeutralLabel;
+        }
+        var titleFont = WeatherWidgetRenderer.GetTitleFont(inputs.Header.TitleFontSize);
         float maxTitleW = WeatherLayout.TitleMaxWidth(inputs.Key.Bounds.Width, inputs.Header.Pad, inputs.Header.BadgeRect.Width);
         model.TruncatedHeader = TextRenderHelper.TruncateText(cityRaw.ToUpperInvariant(), titleFont, maxTitleW);
 
@@ -107,34 +115,13 @@ internal static class WeatherRenderModelFactory
             WeatherLayout.PillFontSize(inputs.Scale),
             WeatherLayout.PillPadX(inputs.Scale));
 
-        // Subtitle line below the header: the ONE spelling of guidance or
-        // confirmation text. The priority order ensures the most actionable
-        // message wins — a tie always beats "set a location", a custom label
-        // always shows the resolved city for confirmation.
-        bool isUnresolved = string.IsNullOrWhiteSpace(inputs.Key.ResolvedCity)
-            || string.Equals(inputs.Key.ResolvedCity, WeatherFetchControl.UnknownLocationLabel, StringComparison.Ordinal);
-        if (inputs.CandidateCount > 0 && inputs.Daily.Count == 0)
-        {
-            // Ambiguous tie: candidates exist but no weather data — the
-            // Location Match dropdown is the documented escape route.
-            model.SubtitleText = "Multiple cities found \u2014 pick one in Settings";
-        }
-        else if (isUnresolved && string.IsNullOrWhiteSpace(inputs.LocationText))
-        {
-            // No location set yet.
-            model.SubtitleText = "Set a location in Settings";
-        }
-        else if (isUnresolved && !string.IsNullOrWhiteSpace(inputs.LocationText))
-        {
-            // Location was set but failed to resolve.
-            model.SubtitleText = "Check spelling \u2014 try 'City, State' or 'City, Country'";
-        }
-        else if (!isUnresolved && !string.IsNullOrWhiteSpace(inputs.Key.CustomLabel)
-                 && !string.Equals(inputs.Key.CustomLabel, inputs.Key.ResolvedCity, StringComparison.Ordinal))
-        {
-            // Custom label set: show the resolved city for confirmation.
-            model.SubtitleText = inputs.Key.ResolvedCity;
-        }
+        // Subtitle line below the header: the guidance or confirmation text and its
+        // priority rule live in the presentation module (the unresolved
+        // verdict included — the build module no longer reaches into
+        // fetch-control state for a display fact).
+        model.SubtitleText = WeatherPresentation.BuildSubtitle(
+            inputs.Key.ResolvedCity, inputs.Key.CustomLabel, inputs.LocationText,
+            inputs.CandidateCount, inputs.Daily.Count);
 
         return model;
     }

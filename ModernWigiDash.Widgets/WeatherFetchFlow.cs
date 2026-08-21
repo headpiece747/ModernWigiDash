@@ -24,16 +24,13 @@ namespace ModernWigiDash.Widgets;
 /// </para>
 /// <param name="client">The cluster's data module: the resolve/fetch/cache
 /// legs, the throttle truth, and the discarded-load rollback.</param>
-/// <param name="identity">The widget-side resolved-identity twin (the
-/// dropdown candidates, the resolved population and name, the pending
-/// write-back).</param>
 /// <param name="host">The host seam: the property coercion, the gate around
 /// the display state (a named <c>TryApply</c> <c>WeatherApplyRequest</c>
 /// seam), the write-back guard, and the context requests. The widget is the
 /// production adapter; the flow's tests carry an adapter over the same
 /// seam.</param>
 /// </summary>
-internal sealed class WeatherFetchFlow(WeatherClient client, WeatherResolvedIdentity identity, IWeatherFetchHost host)
+internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost host)
 {
     private string _lastInspectorCandidatesStamp = "";
 
@@ -189,12 +186,30 @@ internal sealed class WeatherFetchFlow(WeatherClient client, WeatherResolvedIden
         // a fresh resolution's candidate list or a tie's tied options: refresh
         // the inspector so an already-open panel shows the dropdown (the
         // Twitch pattern — the inspector only builds the editor when options
-        // exist). Only when the option set changed — see the stamp below.
-        string stamp = string.Join('\n', identity.Candidates.Select(c => c.Query));
-        if (!string.Equals(stamp, _lastInspectorCandidatesStamp, StringComparison.Ordinal))
+        // exist). The stamp is built from the APPLIED payload (the flow's own
+        // candidates — a null payload null-keeps the previous candidates and
+        // leaves the stamp untouched), never from a re-read of the host's
+        // gated identity state: the flow's only view of the host is the seam.
+        // Its compare-then-set is deliberately ungated — the single-flight
+        // claim is released before this continuation, so a concurrent forced
+        // refetch can interleave only into the stamp write: at worst one
+        // redundant inspector refresh (the stamp writes converge).
+        IReadOnlyList<GeocodeCandidate>? appliedCandidates = result switch
         {
-            _lastInspectorCandidatesStamp = stamp;
-            host.RequestInspectorRefresh();
+            WeatherFetchResult.Fetched fetchedStamp => fetchedStamp.Candidates,
+            WeatherFetchResult.Tie tiedStamp => tiedStamp.Candidates,
+            // Every other outcome returns above — a new outcome kind that
+            // forgets to return must fail loud, not silently skip the stamp.
+            _ => throw new InvalidOperationException("only Fetched and Tie reach the inspector stamp"),
+        };
+        if (appliedCandidates is not null)
+        {
+            string stamp = string.Join('\n', appliedCandidates.Select(c => c.Query));
+            if (!string.Equals(stamp, _lastInspectorCandidatesStamp, StringComparison.Ordinal))
+            {
+                _lastInspectorCandidatesStamp = stamp;
+                host.RequestInspectorRefresh();
+            }
         }
 
         host.RequestRender();

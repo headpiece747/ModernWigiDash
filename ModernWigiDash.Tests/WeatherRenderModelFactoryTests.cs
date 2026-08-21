@@ -22,13 +22,14 @@ public class WeatherRenderModelFactoryTests
     }
 
     private static WeatherRenderModelKey Key(
-        int dataVersion = 1,
-        string? customLabel = null,
-        string resolvedCity = "Berlin, Berlin, Germany",
-        int candidateCount = 0)
+            int dataVersion = 1,
+            string? customLabel = null,
+            string resolvedCity = "Berlin, Berlin, Germany",
+            int candidateCount = 0,
+            bool locationSet = false)
         => new(dataVersion, DesignBounds, WeatherLayout.DefaultLayoutMode,
             WeatherPresentation.DefaultUnitSystem, customLabel ?? "", resolvedCity,
-            true, true, true, true, true, candidateCount);
+            true, true, true, true, true, candidateCount, locationSet);
 
     private static WeatherRenderModelInputs Inputs(
         WeatherRenderModelKey key,
@@ -43,7 +44,8 @@ public class WeatherRenderModelFactoryTests
         string locationText = "Miami, Florida",
         int candidateCount = 0,
         IReadOnlyList<DailyForecastItem>? daily = null,
-        IReadOnlyList<HourlyForecastItem>? hourly = null)
+        IReadOnlyList<HourlyForecastItem>? hourly = null,
+        string neutralLabel = "Default Location")
     {
         var (header, s) = Geometry();
         return new WeatherRenderModelInputs(
@@ -54,7 +56,28 @@ public class WeatherRenderModelFactoryTests
             daily ?? [new DailyForecastItem("Mon", 25.0, 15.0, 61)],
             hourly ?? [new HourlyForecastItem("13:00", 21.5, 61)],
             header, s,
-            locationText, candidateCount);
+            locationText, candidateCount, neutralLabel);
+    }
+
+    [TestMethod]
+    public void Resolve_LocationEmptinessDrift_RebuildsAndFlipsTheSubtitleGuidance()
+    {
+        // No data yet (the unresolved verdict): the guidance line is chosen by the
+        // location's emptiness — a composed string, so the key must cover it.
+        var unset = Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, locationSet: false), locationText: "");
+        var model1 = WeatherRenderModelFactory.Resolve(null, unset);
+        Assert.AreEqual("Set a location in Settings", model1.SubtitleText);
+
+        // The user types a location (the fetch is pending or failed — nothing
+        // applied, so the data version never bumped): the guidance must flip
+        // to the spelling hint, not stay frozen on the cache hit.
+        var typed = Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, locationSet: true), locationText: "New Yrok");
+        var model2 = WeatherRenderModelFactory.Resolve(model1, typed);
+
+        Assert.AreNotSame(model1, model2,
+            "a key hit must not reuse a model built for a different location emptiness");
+        Assert.AreEqual("Check spelling \u2014 try 'City, State' or 'City, Country'", model2.SubtitleText,
+            "the location's emptiness changes the composed subtitle — the key covers it");
     }
 
     [TestMethod]
@@ -140,18 +163,9 @@ public class WeatherRenderModelFactoryTests
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
-        Assert.AreEqual(key, model.Key);
-        Assert.AreEqual(key.DataVersion, model.DataVersion);
-        Assert.AreEqual(key.Bounds, model.Bounds);
-        Assert.AreEqual(key.LayoutMode, model.LayoutMode);
-        Assert.AreEqual(key.UnitSystem, model.UnitSystem);
-        Assert.AreEqual(key.CustomLabel, model.CustomLabel);
-        Assert.AreEqual(key.ResolvedCity, model.ResolvedCity);
-        Assert.AreEqual(key.ShowFeelsLike, model.ShowFeelsLike);
-        Assert.AreEqual(key.ShowHumidity, model.ShowHumidity);
-        Assert.AreEqual(key.ShowWind, model.ShowWind);
-        Assert.AreEqual(key.ShowHighLow, model.ShowHighLow);
-        Assert.AreEqual(key.ShowForecast, model.ShowForecast);
+        // The key rides by reference — the model's single identity; the
+        // property snapshot the draw paths read comes from the key itself.
+        Assert.AreSame(key, model.Key);
         Assert.AreEqual(80, model.WeatherCode);
         Assert.IsFalse(model.IsDay, "the day/night flag rides the data view into the model");
         Assert.AreEqual(1, model.Daily.Length);
@@ -278,7 +292,7 @@ public class WeatherRenderModelFactoryTests
     public void Resolve_EmptyLocation_Unresolved_DrawsSetLocationHint()
     {
         // No location set yet — the widget tells the user where to go.
-        var inputs = Inputs(Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel),
+        var inputs = Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel),
             locationText: "", candidateCount: 0, daily: [], hourly: []);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
@@ -291,13 +305,29 @@ public class WeatherRenderModelFactoryTests
     public void Resolve_LocationSet_FailedResolution_DrawsCheckSpellingHint()
     {
         // User typed something but resolution failed — suggest the format.
-        var inputs = Inputs(Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel),
+        var inputs = Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, locationSet: true),
             locationText: "xyz123", candidateCount: 0, daily: [], hourly: []);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
         Assert.AreEqual("Check spelling \u2014 try 'City, State' or 'City, Country'", model.SubtitleText,
             "A failed resolution with a non-empty location must show the spelling hint.");
+    }
+
+    [TestMethod]
+    public void Resolve_BlankResolvedCityNoCustomLabel_HeaderFallsBackToInjectedNeutralLabel()
+    {
+        // A location edit drops the resolved name to blank (no resolution
+        // yet) — the header must show the injected neutral label, not a blank
+        // title, matching the fresh-widget seed: the same logical state
+        // renders the same. A distinct label proves the factory reads the
+        // injected value, not a hardcoded const.
+        var inputs = Inputs(Key(resolvedCity: ""), neutralLabel: "Neutral Label");
+
+        var model = WeatherRenderModelFactory.Resolve(null, inputs);
+
+        Assert.AreEqual("NEUTRAL LABEL", model.TruncatedHeader,
+            "a blank resolved city with no custom label shows the injected neutral label — not a blank header");
     }
 
     [TestMethod]
@@ -365,7 +395,7 @@ public class WeatherRenderModelFactoryTests
         // Priority: a failed resolution with a custom label still
         // shows the spelling guidance (the user typed something that didn't work).
         var inputs = Inputs(
-            Key(resolvedCity: WeatherFetchControl.UnknownLocationLabel, customLabel: "My Place"),
+            Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, customLabel: "My Place"),
             locationText: "asdf", candidateCount: 0, daily: [], hourly: []);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
@@ -377,13 +407,13 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_TieState_CandidateCountIsSetOnModel()
     {
-        // The CandidateCount must be surfaced on the model for the widget's
-        // tie-state check.
+        // The CandidateCount must ride the model's key — the key is the model's
+        // single identity, and the widget's tie-state check reads it there.
         var inputs = Inputs(Key(candidateCount: 7), candidateCount: 7, daily: [], hourly: []);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
-        Assert.AreEqual(7, model.CandidateCount,
-            "The model must carry the candidate count from the key.");
+        Assert.AreEqual(7, model.Key!.CandidateCount,
+            "The key must carry the candidate count into the model.");
     }
 }

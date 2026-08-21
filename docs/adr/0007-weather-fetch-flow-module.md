@@ -54,10 +54,14 @@ that same mass.
   ONE predicate); ADR-0006's second inline spelling is absorbed here.
 - The host concerns stay with the widget: the property coercion
   (`BuildLocation`), the gate discipline around the display state (the apply
-  and version-read seams run under the widget's `_forecastGate`), the
-  UI-thread write-back flush, and the context requests — handed to the module
-  as ten seams (the client and the `WeatherResolvedIdentity` are the
-  cluster's real modules, not seams).
+  and version-read seams run under the display-state module's gate — the later
+  `WeatherDisplayState` extraction moved that discipline out of the widget
+  into its own module), the UI-thread write-back flush, and the context
+  requests — handed to the module as seams (the client is the cluster's real
+  module, not a seam; the resolved-identity twin crossed as a constructor
+  parameter originally, and a later extraction removed it — the inspector
+  stamp is built from the applied payload, so the flow's only view of the
+  host is the seam).
 - The widget's `FetchLiveWeatherAsync` / `LoadCachedWeatherAsync` are
   forwards; `FetchLiveWeatherAsync` returns the flow's verdict
   (`WeatherFetchFlowOutcome`: `Applied` / `DroppedStale` / `Skipped` /
@@ -65,10 +69,11 @@ that same mass.
 - The test surface is the module interface: `WeatherFetchFlowTests` pins the
   applied path, both drop gates (each with the forced re-fetch landing on the
   NEW identity), the write-back gating, the cadence gate, and the boot-load
-  guards (version, identity, rollback, missing/cancelled) — without a widget
-  instance, a render tick, or the widget's gate. The test host mirrors the
-  widget's real seam wiring (same apply policy under a gate, same identity
-  module), so the flow is tested against the production gate shape.
+guards (version, identity, rollback, missing/cancelled) — without a widget
+   instance, a render tick, or the host's gate. The test host wraps the SAME
+   `WeatherDisplayState` module the widget uses (the later extraction that
+   moved the gate discipline into the display-state module), so the flow is
+   tested against the production gate shape, not a mirror of it.
 
 ## Consequences
 

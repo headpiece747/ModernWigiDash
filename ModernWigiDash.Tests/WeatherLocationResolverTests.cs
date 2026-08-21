@@ -574,4 +574,49 @@ public class WeatherLocationResolverTests
         Assert.AreEqual("Austin", WeatherLocationResolver.ComposeZipLabel("Austin", ""));
         Assert.AreEqual("Austin, Texas", WeatherLocationResolver.ComposeZipLabel("  Austin  ", "  Texas  "), "parts are trimmed before composing");
     }
+
+    // ── suffix tier cap ───────────────────────────────
+
+    [TestMethod]
+    public void Resolve_ThreeComponentSuffix_NameExactStillDominates()
+    {
+        // The tier spacing claims an exact name match dominates EVERY
+        // suffix/hint combination: the per-component sum must be capped at
+        // one exact tier. Unguarded, a three-component suffix ("City, State,
+        // Country, Alias") gives a non-exact-name row 1125 (the alias
+        // component scores the weak tier, not the exact) and lets it beat —
+        // UNGATED — an exact-name row that failed the all-or-nothing suffix
+        // (1000). The gate saves a tie, not a beat.
+        var result = WeatherLocationResolver.Resolve(
+            [C("Connecticut", "United States", "US", 1000, "Alpha"),
+             C("Massachusetts", "United States", "US", 500, "Alpha Gardens")],
+            "Alpha", "Massachusetts, United States, USA", null, null);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual(1000.0, resolved.Population, "the exact-name row must dominate the capped suffix sum");
+        Assert.AreEqual("Alpha, Connecticut, United States", resolved.Label, "the winner is the exact-name row — not a same-population coincidence");
+    }
+
+    [TestMethod]
+    public void Resolve_CappedSuffixTie_SameCountryPopulationCarveOutDecides()
+    {
+        // The suffix cap's known tradeoff, pinned: two non-exact-name rows that
+        // PRE-CAP were separated by tier granularity (exact-state 500 +
+        // country-exact 500 = 1000 vs exact-state 500 + country-prefix 250 = 750)
+        // TIE after the cap (500 vs 500). With no exact-name row, the
+        // same-country carve-out takes over — population decides, and the
+        // loser stays inside the country the suffix pinned. This freezes the
+        // post-cap behavior so a future re-tuning of the tiers or the cap
+        // flips a pinned test instead of silently re-ranking real queries.
+        var result = WeatherLocationResolver.Resolve(
+            [C("Massachusetts", "United States", "US", 100, "Alpha City"),
+             C("Massachusetts", "United States of America", "US", 9000, "Alpha Gardens")],
+            "Alpha", "Massachusetts, United States", "US", null);
+
+        Assert.IsInstanceOfType(result, typeof(WeatherLocationResolver.ResolveResult.Resolved));
+        var resolved = (WeatherLocationResolver.ResolveResult.Resolved)result;
+        Assert.AreEqual(9000.0, resolved.Population, "the same-country carve-out (population) decides the capped tie — the 100-pop row loses its pre-cap tier lead");
+        Assert.AreEqual("Alpha Gardens, Massachusetts, United States of America", resolved.Label);
+    }
 }

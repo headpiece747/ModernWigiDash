@@ -68,7 +68,10 @@ internal sealed class ImmediateOceStream : Stream
 public class WeatherGeocoderTests
 {
     private static WeatherGeocoder Geocoder(HttpMessageHandler handler, List<string>? logs = null, TimeSpan? timeout = null)
-        => new(new HttpClient(handler), logs is null ? null : (message, ex) => logs.Add(message), timeout);
+    {
+        var client = new HttpClient(handler);
+        return new(() => client, logs is null ? null : (message, ex) => logs.Add(message), timeout);
+    }
 
     [TestMethod]
     public void HttpTimeoutOverride_IsPerInstance_NotLeakedAcrossGeocoders()

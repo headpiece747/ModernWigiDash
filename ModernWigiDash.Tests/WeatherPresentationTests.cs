@@ -272,4 +272,90 @@ public class WeatherPresentationTests
         Assert.AreEqual(1, display.ForecastRanges.Count);
         Assert.AreEqual(1, display.HourlyTemps.Count);
     }
+
+    // --- BuildSubtitle: the subtitle guidance line ---------------------------
+
+    [TestMethod]
+    public void BuildSubtitle_TieWithNoData_PromptToPick()
+    {
+        Assert.AreEqual("Multiple cities found \u2014 pick one in Settings",
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "Victoria", 2, 0));
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_Priority_TieWinsOverCustomLabelConfirmation()
+    {
+        Assert.AreEqual("Multiple cities found \u2014 pick one in Settings",
+            WeatherPresentation.BuildSubtitle("Victoria", "Home", "Victoria", 3, 0),
+            "the most actionable message wins — a tie beats every other prompt");
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_NoLocation_NoLocationPrompt()
+    {
+        Assert.AreEqual("Set a location in Settings",
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "", 0, 0));
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_LocationSetButUnresolved_SpellingPrompt()
+    {
+        Assert.AreEqual("Check spelling \u2014 try 'City, State' or 'City, Country'",
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "Xyzzyville", 0, 0));
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_ResolvedCityWithDifferentCustomLabel_ConfirmationShowsResolvedCity()
+    {
+        Assert.AreEqual("Berlin, Germany",
+            WeatherPresentation.BuildSubtitle("Berlin, Germany", "Home", "Berlin, Germany", 0, 5));
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_ResolvedCityMatchingCustomLabel_NoSubtitle()
+    {
+        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "Berlin, Germany", "Berlin, Germany", 0, 5));
+    }
+
+    [TestMethod]
+    public void BuildSubtitle_ResolvedEverything_NoSubtitle()
+    {
+        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "", "Berlin, Germany", 1, 5));
+    }
+
+    // --- BuildStalenessText: the header staleness line ------------------------
+
+    [TestMethod]
+    public void BuildStalenessText_FetchingInProgress_Updating()
+    {
+        var now = new DateTime(2026, 3, 4, 12, 0, 0, DateTimeKind.Utc);
+        Assert.AreEqual("Updating\u2026", WeatherPresentation.BuildStalenessText(true, now.AddHours(-1), now));
+    }
+
+    [TestMethod]
+    public void BuildStalenessText_NeverFetched_NoText()
+    {
+        Assert.IsNull(WeatherPresentation.BuildStalenessText(false, DateTime.MinValue, DateTime.UtcNow));
+    }
+
+    [TestMethod]
+    public void BuildStalenessText_SinceLastFetch_TimeAgo()
+    {
+        var now = new DateTime(2026, 3, 4, 12, 0, 0, DateTimeKind.Utc);
+        Assert.AreEqual("Updated 30m ago", WeatherPresentation.BuildStalenessText(false, now.AddMinutes(-30), now));
+    }
+
+    [TestMethod]
+    public void FormatTimeAgo_AllBranches_FormatsTheBuckets()
+    {
+        // Each threshold and unit suffix is a distinct display fact — pin all
+        // four buckets so a regression in any threshold or suffix is caught.
+        Assert.AreEqual("Updated just now", WeatherPresentation.FormatTimeAgo(TimeSpan.FromSeconds(30)));
+        Assert.AreEqual("Updated 1m ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromMinutes(1)));
+        Assert.AreEqual("Updated 59m ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromMinutes(59)));
+        Assert.AreEqual("Updated 2h ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromHours(2)));
+        Assert.AreEqual("Updated 23h ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromHours(23)));
+        Assert.AreEqual("Updated 1d ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromDays(1)));
+        Assert.AreEqual("Updated 5d ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromDays(5)));
+    }
 }

@@ -6,8 +6,12 @@ namespace ModernWigiDash.Widgets;
 /// The render-model cache key: the data version, the bounds
 /// (layout-derived font sizes), and the property snapshot that changes any
 /// formatted string — every model component that can change the strings in
-/// one value-semantics record (strings ordinal, bounds componentwise).
-/// Built once per build; the cache hit test is a single record comparison.
+/// one value-semantics record (strings ordinal, bounds componentwise). The
+/// location's emptiness rides here, not in the data version: it changes the
+/// subtitle's guidance line while no fetch applies (a failed or pending
+/// fetch never bumps the version), so a location edit with no data must
+/// still rebuild. Built once per build; the cache hit test is a single
+/// record comparison.
 /// </summary>
 internal sealed record WeatherRenderModelKey(
     int DataVersion,
@@ -21,7 +25,8 @@ internal sealed record WeatherRenderModelKey(
     bool ShowWind,
     bool ShowHighLow,
     bool ShowForecast,
-    int CandidateCount);
+    int CandidateCount,
+    bool LocationSet = false);
 
 /// <summary>
 /// The cached render model: every formatted string the five layout modes
@@ -29,26 +34,17 @@ internal sealed record WeatherRenderModelKey(
 /// key components change. The <see cref="Key"/> covers everything that can
 /// change the strings — the data version, the bounds (layout-derived font
 /// sizes), and the property snapshot (mode, unit system, custom label,
-/// visibility toggles).
+/// visibility toggles, the location's emptiness).
 /// </summary>
 internal sealed class WeatherRenderModel
 {
     /// <summary>The cache identity the model was built under; null on a
     /// model that never went through the widget's build (so it can never be
-    /// a cache hit).</summary>
+    /// a cache hit). The key is the model's SINGLE identity — the property
+    /// snapshot the draw paths read (e.g. ShowForecast) comes from here,
+    /// never from a copy: a copy could drift by a forgotten factory line,
+    /// the record cannot.</summary>
     public WeatherRenderModelKey? Key;
-    public int DataVersion = int.MinValue;
-    public SKRect Bounds;
-    public string LayoutMode = "";
-    public string UnitSystem = "";
-    public string CustomLabel = "";
-    public string ResolvedCity = "";
-    public bool ShowFeelsLike;
-    public bool ShowHumidity;
-    public bool ShowWind;
-    public bool ShowHighLow;
-    public bool ShowForecast;
-    public int CandidateCount;
 
     public int WeatherCode;
     public bool IsDay = true;

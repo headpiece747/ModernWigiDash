@@ -48,19 +48,25 @@ cluster's remaining shallow seam.
 - The widget's EXPLICIT implementation is the production host adapter:
   `WeatherForecastWidget` implements `IWeatherFetchHost`, and the gate
   discipline is spelled once in the implementations (the `TryApply` and the
-  `DataVersion` read run under `_forecastGate`; the write-back's check + set
-  is one critical section). The flow's construction shrank to
-  `new WeatherFetchFlow(_client, _identity, this)` — the ctor is a primary
-  constructor over (the client, the identity, the host), and the wiring bag
-  is gone.
+  `DataVersion` read run under the widget's `_forecastGate` — the later
+  `WeatherDisplayState` extraction moved that gate into the display-state
+  module the seam bodies now forward to; the write-back's check + set is one
+  critical section). The flow's construction shrank to
+  `new WeatherFetchFlow(_client, this)` — the later extraction removed the
+  identity parameter (the inspector stamp is built from the applied payload,
+  so the flow's only view of the host is the seam), leaving a primary
+  constructor over (the client, the host), and the wiring bag is gone.
 - The test host (`WeatherFetchFlowTests.FlowHost`) is an adapter over the SAME
   seam: the flow is constructed against the interface, so the test host and
   the production widget are two implementations of one named type — "what a
   fetch-flow host is" now has a single spelling, and a host concern added
-  later is caught at both implementations at once.
+  later is caught at both implementations at once. (The later
+  `WeatherDisplayState` extraction made the mirror exact: the test host wraps
+  the same display-state module the widget uses.)
 - The ADR-0007 "discipline, not a type" consequence is closed for the
   structural half: the gate requirement is now the shape of an interface
-  implementation the widget owns (and the test host mirrors), not an unnamed
+  implementation the widget owns (and the test host wraps the same
+  display-state module the widget uses), not an unnamed
   delegate's implicit contract. (The gate DISCIPLINE itself — that the
   implementation takes the gate — remains a host-side invariant the widget's
   live pins exercise, as before.)
@@ -71,9 +77,10 @@ cluster's remaining shallow seam.
 - The host contract has a name, a type, and a test-double surface; the
   flow/ host boundary is assertable by reading one interface, not a ctor.
 - The apply payload is extensible without an arity change on either side.
-- The flow's constructor is a primary constructor over its three real
-  collaborators (client, identity, host) — the widget's ctor wiring is one
-  line.
+- The flow's constructor is a primary constructor over its real
+  collaborators (client, identity, host — the later extraction reduced this
+  to (client, host): the identity stamp moved to the applied payload) — the
+  widget's ctor wiring is one line.
 
 **Negative:**
 - One more interface in the cluster — it is the seam ADR-0007 already had,

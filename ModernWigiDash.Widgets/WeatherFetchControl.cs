@@ -22,11 +22,6 @@ internal sealed class WeatherFetchControl
     /// one value).</summary>
     internal static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
 
-    /// <summary>The neutral resolved-name label when no resolution exists
-    /// (one spelling shared by the client's cache apply and the widget's
-    /// identity default).</summary>
-    internal const string UnknownLocationLabel = "Unknown location";
-
     /// <summary>Test seam: injectable clock for throttling.</summary>
     internal TimeProvider Clock { get; set; }
 
@@ -109,7 +104,7 @@ internal sealed class WeatherFetchControl
     {
         lock (_gate)
         {
-            if (!string.Equals(_lastLocationQuery, queryKey, StringComparison.Ordinal)) return false;
+            if (!WeatherQueryKey.SameKey(_lastLocationQuery, queryKey)) return false;
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
             return true;
         }
@@ -127,7 +122,7 @@ internal sealed class WeatherFetchControl
     {
         lock (_gate)
         {
-            if (!string.Equals(_lastLocationQuery, queryKey, StringComparison.Ordinal))
+            if (!WeatherQueryKey.SameKey(_lastLocationQuery, queryKey))
             {
                 candidates = [];
                 population = 0;
@@ -144,7 +139,7 @@ internal sealed class WeatherFetchControl
     /// Stale check and the fetch's re-resolve condition).</summary>
     internal bool MatchesCurrent(string queryKey)
     {
-        lock (_gate) { return string.Equals(_lastLocationQuery, queryKey, StringComparison.Ordinal); }
+        lock (_gate) { return WeatherQueryKey.SameKey(_lastLocationQuery, queryKey); }
     }
 
     /// <summary>
@@ -162,7 +157,7 @@ internal sealed class WeatherFetchControl
     {
         lock (_gate)
         {
-            bool identityChanged = !string.Equals(_lastLocationQuery, queryKey, StringComparison.Ordinal);
+            bool identityChanged = !WeatherQueryKey.SameKey(_lastLocationQuery, queryKey);
             _lastLocationQuery = queryKey;
             if (identityChanged)
             {
@@ -225,7 +220,7 @@ internal sealed class WeatherFetchControl
         lock (_gate)
         {
             if (!string.IsNullOrEmpty(_lastLocationQuery)
-                && !string.Equals(_lastLocationQuery, queryKey, StringComparison.Ordinal))
+                && !WeatherQueryKey.SameKey(_lastLocationQuery, queryKey))
             {
                 appliedName = "";
                 return false;
@@ -240,7 +235,7 @@ internal sealed class WeatherFetchControl
             }
             else
             {
-                appliedName = UnknownLocationLabel;
+                appliedName = WeatherPresentation.UnknownLocationLabel;
             }
             _resolution = _resolution.With(resolvedName: appliedName);
             _lat = lat;
