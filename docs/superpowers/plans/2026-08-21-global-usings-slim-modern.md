@@ -202,8 +202,19 @@ references, no version drift. P2 is the single line-delete below.
   this HEAD, green build); stripped removed all 9 baseline usings both
   times, hit the exact P1 failure (`CS0246 HttpClient` in the `wpftmp` XAML
   pass) and self-repaired. Verdict: the WPF temp-project rule is
-  load-bearing — kept; every other always-loaded claim is untested by this
-  task. Results: `docs/reports/slim-ablation-wpf-trap-20260821.md`.
+load-bearing — kept; every other always-loaded claim is untested by this
+   task. Results: `docs/reports/slim-ablation-wpf-trap-20260821.md`.
+- [x] Second probe (ADR-0001 sync-transport trap) — **run 2026-08-22**
+  (base `5f531b1`, 2 control + 2 stripped, detached via a scheduled task):
+  0 of 5 completed runs introduced fake-async, so on its face "both arms
+  follow." But the probe is **confounded** and the verdict is *untested*,
+  not "expired": (1) the task named the mechanism ("follow the existing
+  PollLoop shape"), pre-empting the sync/async decision the rule governs,
+  and (2) CONTEXT.md — auto-loaded into both arms, never stripped — carries
+  the ADR-0001 decision three times, so the stripped arm still had the
+  knowledge. control-1 timed out at the 7200 s per-run limit (7715 s actual).
+  Rule kept. Results: `docs/reports/slim-ablation-sync-trap-20260822.md`
+  (records the two confounds + the process lessons for a clean re-run).
 - [x] Final gate: `ocr_review` over the range **timed out at 3600 s** on the
   ~340-file mechanical diff (budget spent on using-removals the compiler
   already proved); a second, narrowly-scoped attempt (9 non-`.cs` files:
