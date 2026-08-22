@@ -145,6 +145,9 @@ session death is survivable.
   (line endings are deliberately unpinned — ADR-0010; do NOT re-add
   `end_of_line` to `.editorconfig`, it recreates a ~45,000-error wall on
   Windows checkouts)
+- Full gate run (build → test → format, stops at first failure, appends one
+  trail row per run to `.audit/gates.tsv`): `scripts\run-gates.ps1` — use it
+  for full gate runs instead of the three commands above
 - Live-stack run requires elevation. **User preference: no per-call UAC prompts** —
   use the no-consent runner:
   `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "<cmd>"`
