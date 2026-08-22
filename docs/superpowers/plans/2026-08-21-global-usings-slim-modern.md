@@ -196,10 +196,14 @@ references, no version drift. P2 is the single line-delete below.
 - [x] `rules-check-drift` over the full commit range (`50745c8..HEAD`):
   one factual drift found and fixed (CONTEXT.md test count 1614 → 1621);
   the rest of the rules set verified still true. Commit: `35fd28f`.
-- [ ] Optional: `ablate-ai-layer` — **not run** (explicitly optional; the
-  rules the program touched were re-verified instead of ablated). Open for a
-  future session — see the "Next session" section below for the designed
-  trap task and the now-satisfied gitignore prerequisite.
+- [x] Optional: `ablate-ai-layer` — **run 2026-08-21** on the designed
+  trap task (2 control + 2 stripped, `local-ninfer/qwen3.8-27b`, base
+  `f16cf36`): control followed the WPF rule both times (a correct no-op at
+  this HEAD, green build); stripped removed all 9 baseline usings both
+  times, hit the exact P1 failure (`CS0246 HttpClient` in the `wpftmp` XAML
+  pass) and self-repaired. Verdict: the WPF temp-project rule is
+  load-bearing — kept; every other always-loaded claim is untested by this
+  task. Results: `docs/reports/slim-ablation-wpf-trap-20260821.md`.
 - [x] Final gate: `ocr_review` over the range **timed out at 3600 s** on the
   ~340-file mechanical diff (budget spent on using-removals the compiler
   already proved); a second, narrowly-scoped attempt (9 non-`.cs` files:
@@ -238,19 +242,27 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
   cases (authoritative `--list-tests` count). The old `1614` was a stale
   historical figure. See the final-review report.
 
-## Next session: ablate-ai-layer (prerequisite now met)
+## Next session: ablate-ai-layer (run 2026-08-21 — done)
 
-- [ ] `ablate-ai-layer` over the always-loaded layer (CONTEXT.md +
-  `.opencode/AGENTS.md` + `.opencode/rules/dotnet-rules.md`). The gitignore
-  prerequisite is satisfied as of `2fbcb5b` (the curated set is tracked, so
-  throwaway worktrees carry the layer).
+- [x] `ablate-ai-layer` over the always-loaded layer — **run 2026-08-21** on
+  the designed trap task below. The gitignore prerequisite was satisfied as
+  of `2fbcb5b` (the curated set is tracked, so throwaway worktrees carry the
+  layer). One more gap found in pre-flight: the repo's `opencode.json` is
+  itself gitignored, so a worktree has no project config and the layer does
+  NOT load by default (probe: the model answered `NOT LOADED`) — the runner
+  wrapper writes a minimal `opencode.json` (instructions only, no MCP) into
+  the worktree when the layer files exist; the stripped arm (files gone)
+  starts with no project config, proven clean by a separate probe. The
+  script strips the two `.opencode/` files; `CONTEXT.md` (also always-loaded
+  interactively) stayed in both arms and does not state the WPF fact.
 - Primary task (designed trap): *"Promote `ModernWigiDash.Sdk` to a project
   global using in the App project and sweep the redundant usings."* The
   layer encodes exactly this lesson (the WPF temp-project rule, discovered
   the expensive way in P1). Interpretation: a stripped arm that fails the
   build with CS0246 in the wpftmp XAML pass proves the WPF rule
   load-bearing; a surviving arm is a trim candidate. Budget: standalone
-  session (multiple agent runs per arm).
+  session (multiple agent runs per arm). — **Outcome: 2/2 stripped runs hit
+  the trap and self-repaired; control 2/2 no-op. Load-bearing, kept.**
 
 ## Suggested skills (next session)
 
@@ -266,9 +278,11 @@ conversions proven equivalent, no scope creep. Its one MINOR (103 leading
 
 ## Resume
 
-**Completed 2026-08-21** (all P0–P4 checkboxes closed except the optional
-`ablate-ai-layer`, deliberately left open). The program's durable state:
-`docs/reports/slim-baseline-*.md` (P0 evidence),
+**Completed 2026-08-21** (all P0–P4 checkboxes closed; the optional
+`ablate-ai-layer` followed the same night — the WPF trap proved
+load-bearing, see `docs/reports/slim-ablation-wpf-trap-20260821.md`). The
+program's durable state: `docs/reports/slim-baseline-*.md` (P0 evidence),
 `docs/reports/slim-final-review-20260821.md` (final gate + reconciliation),
+`docs/reports/slim-ablation-wpf-trap-20260821.md` (ablation),
 `.audit/slim-modern.tsv` (decision log), and the 12 commits
 `126c22a..690e1f2`. A future session re-derives nothing from chat.

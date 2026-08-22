@@ -415,3 +415,6 @@ ModernWigiDash-app-only-win-x64.zip
 # (stray redirect, 7/25-8/4) made `git add -A` abort with "invalid path 'nul'".
 # Keep it out of the index if it reappears.
 /nul
+
+# ablate-ai-layer experiment artifacts
+.ablation/
