@@ -119,26 +119,16 @@ internal sealed class WeatherClient
     internal bool IsFetchWindowElapsed() => _fetchControl.IsWindowElapsed();
 
     /// <summary>
-    /// Resets resolved coordinates and the throttle so the next fetch
-    /// re-resolves the location and runs immediately (location property change).
-    /// Also drops the geocode candidates: a pick made against a previous
-    /// location must never resolve against a changed Location/CountryCode/coords.
+    /// The single edit-path invalidation, per drop kind: resets the resolved
+    /// coordinates and the throttle so the next fetch re-resolves and runs
+    /// immediately, and drops the shared identity through the single rule —
+    /// the Location Match pick (Coordinates kind) keeps the geocode candidates
+    /// the pick resolves against; every other resolution input (Location kind)
+    /// voids the whole identity, candidates included, so a stale pick can
+    /// never win. The widget's edit path and the boot-load's discarded-load
+    /// rollback both ride this one entry.
     /// </summary>
-    internal void InvalidateLocation()
-    {
-        InvalidateCoordinates();
-        _fetchControl.ClearCandidates();
-    }
-
-    /// <summary>
-    /// Resets only the resolved coordinates and throttle — the geocode
-    /// candidates stay. Used when the Location Match pick itself changes, so
-    /// the pick can resolve against the candidates it was offered from. The
-    /// resolved NAME is dropped too: it describes the previous resolution and
-    /// must not render under a changed identity (a discarded cache load that
-    /// applied state here rolls back through this same path).
-    /// </summary>
-    internal void InvalidateCoordinates() => _fetchControl.Invalidate();
+    internal void Invalidate(WeatherInvalidationKind kind) => _fetchControl.Invalidate(kind);
 
     /// <summary>
     /// Resolves the location (geocode or explicit coordinates), fetches current
@@ -281,7 +271,8 @@ internal sealed class WeatherClient
     /// BEFORE the caller can decide what to do with the snapshot, so a caller
     /// that DISCARDS the result (a location change landing while the load was
     /// in flight) must roll the commitment back with
-    /// <see cref="InvalidateCoordinates"/> — the interface says what the load
+    /// <see cref="Invalidate(WeatherInvalidationKind)"/> (the Coordinates kind)
+    /// — the interface says what the load
     /// did, so the rejection is the caller's job, never a silent side effect.
     /// </para>
     /// The token aborts the read on teardown, like every other fetch leg.

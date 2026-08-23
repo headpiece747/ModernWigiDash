@@ -320,11 +320,11 @@ public class WeatherClientTests
 
         // Changing Location must drop the candidates, so the stale pick cannot
         // win: "Berlin" must geocode to Berlin.
-        client.InvalidateLocation();
+        client.Invalidate(WeatherInvalidationKind.Location);
         var snapshot = await SnapshotOf(client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Berlin", null, null, null) { LocationMatch = picked }, force: true));
 
         Assert.IsNotNull(snapshot);
-        Assert.AreEqual(52.52, snapshot.Lat, "After InvalidateLocation the stale pick must not override the new Location");
+        Assert.AreEqual(52.52, snapshot.Lat, "After a Location invalidation the stale pick must not override the new Location");
         Assert.AreEqual(13.405, snapshot.Lon);
     }
 
@@ -992,8 +992,8 @@ public class WeatherClientTests
     public async Task FetchCurrentAsync_IdentityInvalidatedMidFlight_ReturnsStaleWithoutThrottleStamp()
     {
         // The stale contract: when the resolution identity is invalidated
-        // while a fetch is in flight (the widget's OnPropertyChanged calls
-        // InvalidateLocation/InvalidateCoordinates, clearing the client's
+        // while a fetch is in flight (the widget's OnPropertyChanged routes the
+        // edit through Invalidate(kind), clearing the client's
         // query identity), the completed fetch reports Stale with no snapshot
         // - and, critically, without stamping the throttle, so the new
         // identity's fetch does not cool down.
@@ -1009,7 +1009,7 @@ public class WeatherClientTests
         var fetching = client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Victoria", null, null, null), force: true);
         await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
 
-        client.InvalidateLocation(); // the widget's edit-time invalidation
+        client.Invalidate(WeatherInvalidationKind.Location); // the widget's edit-time invalidation
         gate.SetResult();
         var result = await fetching;
 
@@ -1049,7 +1049,7 @@ public class WeatherClientTests
         // the save window under test.
         await TestWait.WaitUntilAsync(() => client.HasFetched, TimeSpan.FromSeconds(5));
 
-        client.InvalidateLocation(); // the widget's edit-time invalidation lands in the save window
+        client.Invalidate(WeatherInvalidationKind.Location); // the widget's edit-time invalidation lands in the save window
         gate.SetResult();
         var result = await fetching;
 
@@ -1083,7 +1083,7 @@ public class WeatherClientTests
         var fetching = client.FetchCurrentAsync(new WeatherLocation("Fixed Location", "Atlantis", null, null, null));
         await TestWait.WaitUntilAsync(() => stub.Calls >= 1, TimeSpan.FromSeconds(5));
 
-        client.InvalidateLocation(); // the widget's edit-time invalidation while the geocode is in flight
+        client.Invalidate(WeatherInvalidationKind.Location); // the widget's edit-time invalidation while the geocode is in flight
         gate.SetResult();
         var result = await fetching;
 
@@ -1123,7 +1123,7 @@ public class WeatherClientTests
     }
 
     [TestMethod]
-    public async Task InvalidateLocation_ResetsThrottle_SoNextFetchRuns()
+    public async Task Invalidate_Location_ResetsThrottle_SoNextFetchRuns()
     {
         var stub = new StubHttpHandler(Respond);
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
@@ -1132,7 +1132,7 @@ public class WeatherClientTests
         await client.FetchCurrentAsync(CoordinateLocation, force: true);
         Assert.AreEqual(1, stub.Calls);
 
-        client.InvalidateLocation();
+        client.Invalidate(WeatherInvalidationKind.Location);
         var refreshed = await SnapshotOf(client.FetchCurrentAsync(CoordinateLocation));
         Assert.IsNotNull(refreshed, "Invalidation must clear the throttle so a non-forced fetch runs");
         Assert.AreEqual(2, stub.Calls);

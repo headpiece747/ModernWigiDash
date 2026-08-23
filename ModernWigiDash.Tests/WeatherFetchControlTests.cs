@@ -232,16 +232,19 @@ public class WeatherFetchControlTests
     }
 
     [TestMethod]
-    public void ClearCandidates_DropsCandidatesAndPopulation()
+    public void Invalidate_Location_DropsTheWholeIdentity()
     {
         var control = CreateControl(out _);
 
+        control.AdvanceResolution("Paris");
         control.SetCandidates([Candidate("Paris, FR", population: 5000)]);
         control.SetResolved(48.85, 2.35, "Paris", population: 2161000);
-        control.ClearCandidates();
+        control.Invalidate(WeatherInvalidationKind.Location);
 
         Assert.AreEqual(0, control.Candidates.Count, "a changed location must not pick against old candidates");
         Assert.AreEqual(0.0, control.ResolvedPopulation);
+        Assert.IsNull(control.Lat, "the whole identity voids — coordinates included");
+        Assert.AreEqual("", control.ResolvedCityName);
     }
 
     // ── TryApplyCacheIdentity ────────────────────────────────────────────
@@ -313,7 +316,7 @@ public class WeatherFetchControlTests
     // ── Invalidate ───────────────────────────────────────────────────────
 
     [TestMethod]
-    public void Invalidate_ResetsCoordinatesNameQueryAndThrottleButKeepsCandidates()
+    public void Invalidate_Coordinates_ResetsCoordinatesNameQueryAndThrottleButKeepsCandidates()
     {
         var control = CreateControl(out var clock);
 
@@ -323,7 +326,7 @@ public class WeatherFetchControlTests
         Assert.IsTrue(control.Stamp("Paris"));
         clock.Advance(TimeSpan.FromMinutes(6));
 
-        control.Invalidate();
+        control.Invalidate(WeatherInvalidationKind.Coordinates);
 
         Assert.IsNull(control.Lat, "a location change must re-resolve from scratch");
         Assert.IsNull(control.Lon);

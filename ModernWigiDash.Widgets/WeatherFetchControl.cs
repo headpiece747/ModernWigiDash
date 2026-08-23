@@ -3,7 +3,7 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The client-side fetch-control state machine: the 5-minute throttle window,
 /// the single-flight claim, and the resolved-identity stamp — the mutable twin
-/// of the widget's pure <see cref="WeatherResolvedIdentity"/>. The resolved
+/// of the widget's gated <see cref="WeatherDisplayState"/>. The resolved
 /// identity itself is the shared <see cref="WeatherResolutionState"/> value
 /// (candidates, name, population) — the widget's twin holds the same type,
 /// and both route their drops through
@@ -152,7 +152,7 @@ internal sealed class WeatherFetchControl
     /// against THIS new key) would otherwise pass — fetching and caching the
     /// wrong city under the new identity. The geocode candidates SURVIVE the
     /// key change — they are cleared explicitly by the edit path's
-    /// invalidation (InvalidateLocation / ClearCandidates), because the
+    /// invalidation (the Location kind's whole-identity drop), because the
     /// LocationMatch edit's own drop resets the query to empty while KEEPING
     /// the candidates the pick resolves against: the pick's fetch then
     /// advances from empty and must still find its row (the geocoder's
@@ -252,39 +252,29 @@ internal sealed class WeatherFetchControl
     }
 
     /// <summary>
-    /// Resets the resolved coordinates, name, population, query, and throttle
-    /// so the next fetch re-resolves and runs immediately (an edit-flow
-    /// location change, or a discarded cache load's rollback). The resolved
-    /// population drops with the resolution result (this drop voids the old
-    /// winner — the widget twin's <c>InvalidateCoordinates</c> makes the same
-    /// clear); it rides back only with the new winner via <see
-    /// cref="SetResolved"/>. Contrast <see cref="ClearCoordinates"/>, which
-    /// SERVES an ambiguous tie where the old resolution stays the current
-    /// best and keeps its population. The geocode candidates survive — the
-    /// "Location Match" pick can still resolve against the candidates it was
-    /// offered from; <see cref="ClearCandidates"/> drops them for the full
-    /// invalidation.
+    /// The single edit-path invalidation, per drop kind (the boot-load's
+    /// discarded-load rollback rides the Coordinates kind too): the resolved
+    /// coordinates clear, the identity query + throttle reset (the next fetch
+    /// re-resolves and runs immediately), and the shared identity value drops
+    /// through the single rule (<see cref="WeatherInvalidation.Drop"/>) —
+    /// Coordinates keeps the offered candidates (a pick resolves against
+    /// them), Location voids the whole identity into the one empty state.
+    /// The widget twin's <see cref="WeatherDisplayState.Invalidate"/> applies
+    /// the same kind under its own gate plus its own unique field (the
+    /// pending label write-back), so the twins can never disagree on what a
+    /// kind drops. Contrast <see cref="ClearCoordinates"/>, which serves an
+    /// ambiguous tie where the old resolution stays the current best and
+    /// keeps its population.
     /// </summary>
-    internal void Invalidate()
+    internal void Invalidate(WeatherInvalidationKind kind)
     {
         lock (_gate)
         {
             _lat = null;
             _lon = null;
-            _resolution = WeatherInvalidation.Drop(WeatherInvalidationKind.Coordinates, _resolution);
+            _resolution = WeatherInvalidation.Drop(kind, _resolution);
             _lastFetchTime = DateTime.MinValue;
             _lastLocationQuery = "";
-        }
-    }
-
-    /// <summary>Drops the geocode candidates and population: a pick made
-    /// against a previous location must never resolve against a changed
-    /// Location/CountryCode/coords.</summary>
-    internal void ClearCandidates()
-    {
-        lock (_gate)
-        {
-            _resolution = _resolution.With(population: 0, candidates: []);
         }
     }
 }

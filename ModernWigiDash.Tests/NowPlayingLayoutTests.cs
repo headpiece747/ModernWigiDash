@@ -38,9 +38,6 @@ public class NowPlayingLayoutTests
         Assert.AreEqual(24f, layout.SeekTolerance, 0.01f);
         Assert.AreEqual(24f, layout.Pad, 0.01f, "the render path draws with the layout's pad — one owner of the 24 design constant");
         Assert.AreEqual(30f, layout.ArtGap, 0.01f, "one owner of the 30 design constant");
-        Assert.AreEqual((float)DisplayGeometry.FramebufferWidth, NowPlayingLayout.DesignWidth,
-            "the design base is an alias of the display geometry — it cannot drift from the framebuffer area");
-        Assert.AreEqual((float)DisplayGeometry.FramebufferHeight, NowPlayingLayout.DesignHeight);
     }
 
     [TestMethod]

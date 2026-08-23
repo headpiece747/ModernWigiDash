@@ -356,17 +356,16 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // a Location Match pick keeps the candidates it was offered from,
         // every other resolution input voids the whole identity (a stale pick
         // can never win). The two twins (the client's fetch control and the
-        // widget's resolved identity) are paired PER KIND — the identity
-        // transitions run under the SAME gate the display-state module's
-        // guarded apply takes, so the clear is atomic against an in-flight
-        // fetch's assignment (either the assignment lands before the clear
-        // and is erased, or the guard re-reads the new location and the
-        // assignment never happens; the edit can never be resurrected over).
-        // Each
-        // Invalidate* also drops a PENDING resolved-label write-back (the
-        // race a completed-but-unflushed fetch leaves) — strictly stronger
-        // under the gate, safe because the identity re-check is also under
-        // the gate.
+        // widget's display state) take the SAME kind through their own gated
+        // entry — the display-state transitions run under the SAME gate the
+        // module's guarded apply takes, so the clear is atomic against an
+        // in-flight fetch's assignment (either the assignment lands before
+        // the clear and is erased, or the guard re-reads the new location and
+        // the assignment never happens; the edit can never be resurrected
+        // over). Both Invalidate entries also drop a PENDING resolved-label
+        // write-back (the race a completed-but-unflushed fetch leaves) —
+        // strictly stronger under the gate, safe because the identity
+        // re-check is also under the gate.
         WeatherInvalidationKind kind = WeatherInvalidation.KindForProperty(propertyName);
         if (kind == WeatherInvalidationKind.Location && _suppressLocationWriteback)
         {
@@ -377,18 +376,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             kind = WeatherInvalidationKind.None;
         }
 
-        switch (kind)
+        if (kind != WeatherInvalidationKind.None)
         {
-            case WeatherInvalidationKind.Coordinates:
-                _displayState.InvalidateCoordinates();
-                _client.InvalidateCoordinates();
-                RequestRefresh(force: true);
-                break;
-            case WeatherInvalidationKind.Location:
-                _displayState.InvalidateLocation();
-                _client.InvalidateLocation();
-                RequestRefresh(force: true);
-                break;
+            _displayState.Invalidate(kind);
+            _client.Invalidate(kind);
+            RequestRefresh(force: true);
         }
 
         base.OnPropertyChanged(propertyName, newValue);

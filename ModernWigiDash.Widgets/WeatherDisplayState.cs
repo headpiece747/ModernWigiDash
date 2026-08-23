@@ -2,10 +2,12 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// The weather widget's gated display state as ONE module: the single gate,
-/// the snapshot state, the resolved-identity twin, the pending resolved-label
-/// write-back, the last-success stamp, and the forecast render copies — every
-/// read and mutation runs under the same lock, so the "one consistent view"
-/// is a type, not a discipline repeated at every call site. The widget's
+/// the snapshot state, the resolved-identity value (the shared
+/// <see cref="WeatherResolutionState"/> — the dropdown candidates, the header
+/// city name, the population), the pending resolved-label write-back, the
+/// last-success stamp, and the forecast render copies — every read and
+/// mutation runs under the same lock, so the "one consistent view" is a type,
+/// not a discipline repeated at every call site. The widget's
 /// <see cref="IWeatherFetchHost"/> seam bodies and the render tick's lock
 /// region are forwards over this module, and the flow's test host wraps the
 /// same module — the flow's guarantees are pinned against the production gate
@@ -13,18 +15,34 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal sealed class WeatherDisplayState
 {
+    /// <summary>
+    /// The resolution inputs that force a re-fetch on change — an alias of
+    /// <see cref="WeatherQueryKey.InvalidationProperties"/> (the owner of the
+    /// set, ADR-0006: every key field except LocationMatch, which has its own
+    /// branch in OnPropertyChanged). The drift test pins this set to the
+    /// WeatherLocation record, so a new resolution input can never change
+    /// the identity without a re-fetch.
+    /// </summary>
+    internal static readonly string[] ResolutionInvalidationProperties = WeatherQueryKey.InvalidationProperties;
+
     private readonly object _gate = new();
-    private readonly WeatherResolvedIdentity _identity;
     private readonly string _neutralLabel;
     private readonly Func<DateTime> _now;
     private WeatherSnapshotState _state = new();
+    // The widget twin's share of the invalidation rule: the shared
+    // resolved-identity value (the client's fetch-control twin holds the same
+    // type) plus the widget twin's unique field — the pending label
+    // write-back. Both drop the shared value through
+    // WeatherInvalidation.Drop, so the twins can never drift.
+    private WeatherResolutionState _identity;
+    private string? _pendingWriteback;
     private DateTime _lastSuccessFetchTime = DateTime.MinValue;
     private int _renderedForecastVersion = -1;
     private DailyForecastItem[] _dailySnapshot = [];
     private HourlyForecastItem[] _hourlySnapshot = [];
 
     /// <summary>
-    /// <paramref name="neutralLocationLabel"/> is the identity twin's
+    /// <paramref name="neutralLocationLabel"/> is the identity's
     /// pre-resolution header and the post-drop header fallback (the widget
     /// passes the presentation's neutral-location label; the flow's test host
     /// passes its own). <paramref name="now"/> is the live UTC-time source,
@@ -33,7 +51,7 @@ internal sealed class WeatherDisplayState
     /// </summary>
     public WeatherDisplayState(string neutralLocationLabel, Func<DateTime> now)
     {
-        _identity = new WeatherResolvedIdentity(neutralLocationLabel);
+        _identity = new WeatherResolutionState(neutralLocationLabel, 0, []);
         _neutralLabel = neutralLocationLabel;
         _now = now;
     }
@@ -51,12 +69,11 @@ internal sealed class WeatherDisplayState
 
     /// <summary>The shared resolved-identity value (the candidates, the
     /// header city name, the population) — read under the gate. The module
-    /// hands out the immutable record, never the twin: the twin's mutators
-    /// exist so the module's gated members can drive the transitions, and
-    /// handing out the twin would expose a gate-bypassing surface.</summary>
+    /// hands out the immutable record, never a gate-bypassing mutator: the
+    /// identity's transitions run only inside the module's gated members.</summary>
     internal WeatherResolutionState Identity
     {
-        get { lock (_gate) { return _identity.ResolutionState; } }
+        get { lock (_gate) { return _identity; } }
     }
 
     /// <summary>The pending resolved-label write-back awaiting the
@@ -64,7 +81,7 @@ internal sealed class WeatherDisplayState
     /// under it, so a read in between is consistent).</summary>
     internal string? PendingLabelWriteback
     {
-        get { lock (_gate) { return _identity.PendingWriteback; } }
+        get { lock (_gate) { return _pendingWriteback; } }
     }
 
     /// <summary>The last successful fetch's timestamp (the staleness
@@ -95,7 +112,11 @@ internal sealed class WeatherDisplayState
         {
             if (!WeatherSnapshotApplyPolicy.GuardsPass(request.ExpectedVersion, _state.DataVersion, request.IdentityGuard)) return false;
             _state = WeatherSnapshotApplyPolicy.Merge(request.Snapshot, _state);
-            _identity.Apply(request.Candidates, request.Population, request.ResolvedName);
+            // The null-keeps replacement — the "response omitted this
+            // section — keep the previous value" rule shared with the
+            // snapshot merge (a provided population of 0 is the client's
+            // no-data sentinel: it clears, it does not keep).
+            _identity = _identity.With(request.ResolvedName, request.Population, request.Candidates);
             _lastSuccessFetchTime = _now();
             return true;
         }
@@ -132,7 +153,7 @@ internal sealed class WeatherDisplayState
                 ForecastVersion = _state.ForecastVersion + 1,
             };
             string? location = queriedLocation();
-            _identity.Apply(candidates, 0, string.IsNullOrWhiteSpace(location) ? _neutralLabel : location);
+            _identity = _identity.With(string.IsNullOrWhiteSpace(location) ? _neutralLabel : location, 0, candidates);
             return true;
         }
     }
@@ -150,7 +171,7 @@ internal sealed class WeatherDisplayState
         {
             if (identityGuard())
             {
-                _identity.SetPendingWriteback(value);
+                _pendingWriteback = value;
             }
         }
     }
@@ -164,36 +185,29 @@ internal sealed class WeatherDisplayState
     {
         lock (_gate)
         {
-            return _identity.TakePendingWriteback();
+            string? pending = _pendingWriteback;
+            _pendingWriteback = null;
+            return pending;
         }
     }
 
     /// <summary>
-    /// The Location Match edit's invalidation: the shared identity value
-    /// drops through the single rule (name + population drop; the candidates
-    /// stay — a pick resolves against the candidates it was offered from) and
-    /// the pending write-back is dropped — under the gate, so the clear is
-    /// atomic against an in-flight fetch's apply.
+    /// The single edit-path invalidation, per drop kind, under the gate (so
+    /// the clear is atomic against an in-flight fetch's apply): the pending
+    /// write-back drops (an edit landing after a completed fetch must not be
+    /// overwritten by the old identity's label on the next render), and the
+    /// shared identity value drops through the single rule — the Location
+    /// Match pick (Coordinates kind) keeps the candidates it was offered from
+    /// while the old winner's name + population void; every other resolution
+    /// input (Location kind) voids the whole identity so the render-model
+    /// cache key turns and the header drops the old city immediately.
     /// </summary>
-    internal void InvalidateCoordinates()
+    internal void Invalidate(WeatherInvalidationKind kind)
     {
         lock (_gate)
         {
-            _identity.InvalidateCoordinates();
-        }
-    }
-
-    /// <summary>
-    /// The other-location-input edit's invalidation: the shared identity
-    /// value drops to the empty state through the single rule (candidates,
-    /// name, population all void until the next fetch) and the pending
-    /// write-back is dropped — under the gate (same atomicity).
-    /// </summary>
-    internal void InvalidateLocation()
-    {
-        lock (_gate)
-        {
-            _identity.InvalidateLocation();
+            _pendingWriteback = null;
+            _identity = WeatherInvalidation.Drop(kind, _identity);
         }
     }
 
@@ -236,7 +250,7 @@ internal sealed class WeatherDisplayState
             WeatherRenderModelInputs inputs = new(
 new WeatherRenderModelKey(
                     state.DataVersion, bounds,
-                    layoutMode, unitSystem, customLabel, _identity.CityName,
+                    layoutMode, unitSystem, customLabel, _identity.ResolvedName,
                     showFeelsLike, showHumidity, showWind, showHighLow, showForecast,
                     _identity.Candidates.Count,
                     LocationSet: !string.IsNullOrWhiteSpace(location)),

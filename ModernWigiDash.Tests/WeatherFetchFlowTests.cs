@@ -358,7 +358,7 @@ public class WeatherFetchFlowTests
         // The candidates are NOT asserted: this host's seam edit bypasses the
         // widget's invalidation routing, so the client twin carries its
         // surviving candidates (the geocoder's zero-HTTP pick path) into the
-        // re-fetch's apply by design — only the edit path's InvalidateLocation
+        // re-fetch's apply by design — only the edit path's Location invalidation
         // clears them. The apply-count probe is folded into the wait itself
         // (the apply and its single RequestRender are adjacent on the
         // re-fetch's continuation — a temp-only wait could observe the

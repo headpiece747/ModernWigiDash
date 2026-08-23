@@ -3,12 +3,13 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The resolved-identity invalidation rule: which property edit drops which
 /// granularity of resolved state, spelled ONCE so the client's fetch-control
-/// twin and the widget's resolved-identity twin can never drift. Every
+/// twin and the widget's display-state twin can never drift. Every
 /// resolution-input edit routes through <see cref="KindForProperty"/>; each
 /// twin keeps its own field set (the state differs — the client owns the
 /// throttle and the identity query, the widget owns the pending label
 /// write-back) but both implement the SAME declared
-/// <see cref="WeatherInvalidationKind"/>. The twin-equivalence pin
+/// <see cref="WeatherInvalidationKind"/> through their own single gated
+/// <c>Invalidate(kind)</c> entry. The twin-equivalence pin
 /// (WeatherInvalidationTests) drives both twins through every kind, so a new
 /// resolved field or pending state added to one twin is caught the moment the
 /// other drifts.

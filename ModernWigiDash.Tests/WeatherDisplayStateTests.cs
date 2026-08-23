@@ -4,9 +4,10 @@ namespace ModernWigiDash.Tests;
 /// Pins the weather widget's gated display-state module: the apply and the
 /// tie apply under the one gate (guard → merge → identity copies → stamp as
 /// one critical section), the write-back queue/take serialization (a queued
-/// value can never be lost to a take), the invalidation routing, and the
-/// render tick's version-gated consistent view — drivable without a widget
-/// instance, a fetch, or an HTTP stub.
+/// value can never be lost to a take), the folded resolved-identity value's
+/// apply rules (the null-keeps and the population's no-data sentinel), the
+/// invalidation routing, and the render tick's version-gated consistent view
+/// — drivable without a widget instance, a fetch, or an HTTP stub.
 /// </summary>
 [TestClass]
 public class WeatherDisplayStateTests
@@ -167,14 +168,14 @@ public class WeatherDisplayStateTests
     // -- Invalidation routing ---------------------------------------------------
 
     [TestMethod]
-    public void InvalidateCoordinates_DropsNamePopulationAndWriteback_KeepsCandidates()
+    public void Invalidate_Coordinates_DropsNamePopulationAndWriteback_KeepsCandidates()
     {
         var state = NewState();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
         state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        state.InvalidateCoordinates();
+        state.Invalidate(WeatherInvalidationKind.Coordinates);
 
         Assert.AreEqual("", state.Identity.ResolvedName);
         Assert.AreEqual(0, state.Identity.Population);
@@ -184,19 +185,68 @@ public class WeatherDisplayStateTests
     }
 
     [TestMethod]
-    public void InvalidateLocation_DropsWholeIdentityIncludingCandidates()
+    public void Invalidate_Location_DropsWholeIdentityIncludingCandidates()
     {
         var state = NewState();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
         state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        state.InvalidateLocation();
+        state.Invalidate(WeatherInvalidationKind.Location);
 
         Assert.AreEqual(0, state.Identity.Candidates.Count);
         Assert.AreEqual(0, state.Identity.Population);
         Assert.AreEqual("", state.Identity.ResolvedName);
         Assert.IsNull(state.PendingLabelWriteback);
+    }
+
+    // -- The folded resolved identity (value + null-keeps + sentinel) -------
+    // These pins moved here when the WeatherResolvedIdentity module was
+    // folded into the display state: the identity value's transitions now run
+    // only through the gated members, so the pins ride TryApply.
+
+    [TestMethod]
+    public void Ctor_NeutralLabel_IsTheInitialHeader()
+    {
+        var state = NewState();
+
+        Assert.AreEqual("Default Location", state.Identity.ResolvedName,
+            "the header must show the neutral label until a resolution sets a real identity");
+        Assert.AreEqual(0, state.Identity.Candidates.Count);
+        Assert.AreEqual(0, state.Identity.Population);
+        Assert.IsNull(state.PendingLabelWriteback);
+    }
+
+    [TestMethod]
+    public void Apply_NullArguments_KeepPreviousValues()
+    {
+        var state = NewState();
+        state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
+            resolvedName: "Miami, Florida, United States of America"));
+
+        // The fetch reported none of the three identity sections: nothing may
+        // change (the "response omitted this section — keep the previous
+        // value" rule).
+        state.TryApply(ApplyRequest(FullSnapshot, expectedVersion: 1));
+
+        Assert.AreEqual("Miami, Florida, United States of America", state.Identity.ResolvedName);
+        Assert.AreEqual(444_000.0, state.Identity.Population);
+        Assert.AreEqual(2, state.Identity.Candidates.Count);
+    }
+
+    [TestMethod]
+    public void Apply_ZeroPopulation_ClearsTheResolvedPopulation()
+    {
+        var state = NewState();
+        state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
+            resolvedName: "Miami, Florida, United States of America"));
+
+        // The client's no-data sentinel: 0 clears, null keeps.
+        state.TryApply(ApplyRequest(FullSnapshot, expectedVersion: 1, population: 0));
+
+        Assert.AreEqual(0, state.Identity.Population);
+        Assert.AreEqual("Miami, Florida, United States of America", state.Identity.ResolvedName,
+            "only the population clears; the name and candidates are untouched");
     }
 
     // -- The render tick's consistent view --------------------------------------

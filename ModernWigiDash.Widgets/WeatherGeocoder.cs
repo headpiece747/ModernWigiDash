@@ -235,7 +235,7 @@ internal sealed class WeatherGeocoder
         // that candidate's exact coordinates — no re-geocode. The pick is only
         // honored on this non-ZIP path (after the override and ZIP paths); the
         // caller passes the CURRENT dropdown (cleared by the client's
-        // InvalidateLocation on any location/coords change), so a stale pick
+        // Invalidate(Location) on any location/coords change), so a stale pick
         // cannot win.
         if (candidates is { Count: > 0 } && !string.IsNullOrWhiteSpace(location.LocationMatch))
         {

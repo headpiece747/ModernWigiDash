@@ -257,7 +257,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
                 // roll that back so the next resolution starts clean. A
                 // version-only skip means a fresh fetch already landed: the
                 // identity still matches, so there is nothing to undo.
-                client.InvalidateCoordinates();
+                client.Invalidate(WeatherInvalidationKind.Coordinates);
             }
         }
         catch (OperationCanceledException)

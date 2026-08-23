@@ -12,7 +12,7 @@ internal static class WeatherQueryKey
 {
     /// <summary>The one field whose change invalidates the resolved
     /// name/population through its own branch (the widget's
-    /// InvalidateCoordinates) instead of the full re-fetch set — while
+    /// Coordinates-kind invalidation) instead of the full re-fetch set — while
     /// still turning the key.</summary>
     internal const string LocationMatchProperty = nameof(WeatherLocation.LocationMatch);
 
@@ -32,7 +32,7 @@ internal static class WeatherQueryKey
     /// <summary>The five resolution inputs that force a re-fetch on change
     /// — every key field except <see cref="LocationMatchProperty"/>, which
     /// has its own invalidation branch.
-    /// <see cref="WeatherResolvedIdentity.ResolutionInvalidationProperties"/>
+    /// <see cref="WeatherDisplayState.ResolutionInvalidationProperties"/>
     /// aliases this set, so the widget's drift test pins it to the record.</summary>
     internal static readonly string[] InvalidationProperties =
     [

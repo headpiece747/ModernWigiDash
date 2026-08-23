@@ -836,7 +836,7 @@ public class WeatherForecastWidgetTests
         // location's key, then the profile silently reassigns Location (no
         // OnPropertyChanged). The default-stamped cache must not apply under
         // the new identity, and the client's resolution state must roll back
-        // (InvalidateCoordinates) so the new identity starts clean: the
+        // (the Coordinates invalidation) so the new identity starts clean: the
         // rollback resets the throttle, which is observable: a NON-forced
         // follow-up fetch runs immediately instead of cooling down.
         var stub = new StubHttpHandler(request =>
@@ -989,14 +989,14 @@ public class WeatherForecastWidgetTests
         // CustomLabel — a label change must not re-fetch): a new resolution
         // field added to the record fails this test until it is wired into
         // the invalidation set. LocationMatch has its own branch in
-        // OnPropertyChanged (which clears the same client identity via
-        // InvalidateCoordinates), so it is appended to the guarded side.
+        // OnPropertyChanged (which clears the same client identity via the
+        // Coordinates kind), so it is appended to the guarded side.
         var expected = typeof(WeatherLocation).GetProperties()
             .Select(p => p.Name)
             .Where(n => !string.Equals(n, nameof(WeatherLocation.CustomLabel), StringComparison.Ordinal))
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
-        var guarded = WeatherResolvedIdentity.ResolutionInvalidationProperties
+        var guarded = WeatherDisplayState.ResolutionInvalidationProperties
             .Append(nameof(WeatherForecastWidget.LocationMatch))
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToArray();
