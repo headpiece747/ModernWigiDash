@@ -32,7 +32,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     private readonly ILogger<DisplayHidTransport> _logger;
 
     private ITransferBackend? _backend;
-    private static readonly Lazy<UsbContext> SharedContext = new(() => new UsbContext());
 
     private volatile bool _isConnected;
     private int _isDisposed;
@@ -240,140 +239,13 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// </summary>
     private ITransferBackend? TryCreateLibUsbBackend()
     {
+        // The leg's own file-log vocabulary (USB-FIND/OPEN/CONFIG/CLAIM/
+        // ENDPOINT/DESC + the USB-LIBUSB attempt line) is owned by the adapter
+        // — the same tags WinUsbBulkDevice binds for its Open (one vocabulary
+        // across the seam). The transport keeps only the attempt's start line
+        // and hands the device-lookup seam across.
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
-
-        // One bound log per connect step (Cadence 1 — each fires when it
-        // happens); the step tags bind once here, at the leg's top.
-        DiagLog findLog = new("USB-FIND", 1);
-        DiagLog openLog = new("USB-OPEN", 1);
-        DiagLog configLog = new("USB-CONFIG", 1);
-        DiagLog claimLog = new("USB-CLAIM", 1);
-        DiagLog endpointLog = new("USB-ENDPOINT", 1);
-        DiagLog legLog = new("USB-LIBUSB", 1);
-
-        IUsbDevice? device = null;
-        try
-        {
-            device = LibUsbDeviceProvider is not null ? LibUsbDeviceProvider() : FindLibUsbDevice();
-
-            if (device is null)
-            {
-                _logger.LogWarning("No WigiDash device found (VID=0x{VID:X4}, PID=0x{PID:X4})",
-                    DisplayProtocolConstants.VendorId, DisplayProtocolConstants.ProductId);
-                return null;
-            }
-
-            findLog.Write($"Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
-
-            try
-            {
-                var openSw = System.Diagnostics.Stopwatch.StartNew();
-                device.Open();
-                openSw.Stop();
-                openLog.Write($"device.Open() succeeded ({openSw.ElapsedMilliseconds} ms)");
-            }
-            catch (Exception ex)
-            {
-                openLog.Write($"device.Open() THREW: {ex.GetType().FullName}: {ex.Message}");
-                throw;
-            }
-
-            try
-            {
-                device.SetConfiguration(1);
-                configLog.Write("SetConfiguration(1) succeeded");
-            }
-            catch (Exception ex)
-            {
-                configLog.Write($"SetConfiguration(1) failed: {ex.Message} (continuing)");
-            }
-
-            bool claimed = device.ClaimInterface(0);
-            if (!claimed)
-            {
-                _logger.LogError("Failed to claim USB interface 0");
-                device.Close();
-                return null;
-            }
-
-            claimLog.Write("ClaimInterface(0) succeeded");
-
-            WriteEndpointID endpointId = DiscoverBulkOutEndpoint(device);
-            endpointLog.Write($"Using bulk OUT endpoint: {endpointId}");
-
-            var backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
-            legLog.Write($"Connected: endpoint={endpointId}");
-            return backend;
-        }
-        catch (Exception ex)
-        {
-            legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
-            _logger.LogError(ex, "Failed to connect to WigiDash");
-            // Terminal teardown of the LOCAL device: an opened (and possibly
-            // configured + claimed) device must be released — under _usbLock,
-            // the same never-free-while-in-flight rule as Cleanup. If the
-            // backend was already constructed, its dispose path closes the
-            // device; here the construction never completed.
-            if (device is not null)
-            {
-                lock (_usbLock)
-                {
-                    device.Close();
-                }
-            }
-            return null;
-        }
-    }
-
-    /// <summary>Finds the WigiDash device via the shared LibUsbDotNet context
-    /// (the production default behind <see cref="LibUsbDeviceProvider"/>).</summary>
-    private static IUsbDevice? FindLibUsbDevice()
-    {
-        var context = SharedContext.Value;
-        var finder = new UsbDeviceFinder
-        {
-            Vid = DisplayProtocolConstants.VendorId,
-            Pid = DisplayProtocolConstants.ProductId
-        };
-        return context.Find(finder);
-    }
-
-    /// <summary>
-    /// Discovers the bulk OUT endpoint from the device descriptor.
-    /// Falls back to endpoint 1 (BulkOutPipeId) if discovery fails.
-    /// </summary>
-    private static WriteEndpointID DiscoverBulkOutEndpoint(IUsbDevice device)
-    {
-        DiagLog descLog = new("USB-DESC", 1);
-        try
-        {
-            var info = device.Info;
-            if (info.Configurations.Count > 0)
-            {
-                var config = info.Configurations[0];
-                if (config.Interfaces.Count > 0)
-                {
-                    var iface = config.Interfaces[0];
-                    foreach (byte addr in iface.Endpoints.Select(ep => ep.EndpointAddress))
-                    {
-                        // OUT endpoints have direction bit (bit 7) = 0
-                        if ((addr & 0x80) == 0)
-                        {
-                            byte epNum = (byte)(addr & 0x0F);
-                            descLog.Write($"Found OUT endpoint: 0x{addr:X2} (ep{epNum})");
-                            return (WriteEndpointID)epNum;
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            descLog.Write($"Descriptor scan failed: {ex.Message}");
-        }
-
-        descLog.Write($"Using fallback endpoint: {DisplayProtocolConstants.BulkOutPipeId}");
-        return (WriteEndpointID)DisplayProtocolConstants.BulkOutPipeId;
+        return LibUsbTransferBackend.TryOpen(LibUsbDeviceProvider);
     }
 
     /// <summary>
