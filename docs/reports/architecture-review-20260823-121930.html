@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review for ModernWigiDash</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+  .arrow { display:flex; flex-direction:column; align-items:center; line-height:1.2; }
+  .arrow .glyph { font-size:18px; }
+  .arrow .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .box { border:1px solid #e2e8f0; background:#fff; }
+  .fact { background:#fffbeb; color:#92400e; }
+  .leakbox { border:1px solid #fecaca; background:#fef2f2; }
+  .deleak { color:#dc2626; font-weight:600; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+  <!-- ============ HEADER ============ -->
+  <header class="space-y-4">
+    <h1 class="font-serif text-4xl">Architecture review: ModernWigiDash</h1>
+    <p class="text-sm text-slate-500">2026-08-23 &middot; deepening candidates from a three-cluster walk (App, Widgets, Hardware/Core/Sdk) &middot; hot spots weighted by 45 days of git history</p>
+    <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 border border-slate-200 bg-white rounded-lg px-4 py-3">
+      <span><span class="inline-block w-3 h-3 border border-slate-400 bg-white align-middle mr-1"></span>module</span>
+      <span><span class="inline-block w-5 border-t border-dashed border-slate-400 align-middle mr-1"></span>seam / comment-only link</span>
+      <span><span class="inline-block w-5 border-t-2 border-red-600 align-middle mr-1"></span>leak / untested / discarded</span>
+      <span><span class="inline-block w-3 h-3 deep align-middle mr-1"></span>deep module</span>
+      <span><span class="inline-block w-3 h-3 fact align-middle mr-1"></span>comment-only fact</span>
+    </div>
+    <p class="text-xs text-slate-500">Scope note: the weather cluster (ADR-0006 to 0009), the transport connect machine, and the log-line <em>rules</em> (LogLine/LogCadence) are already deep and are not re-suggested. The candidates below are the residual friction: facts held by comments, verdicts composed at several sites, and rules that live in the widget where no module owns them.</p>
+  </header>
+
+  <section id="candidates" class="space-y-10">
+
+    <!-- ============ 1. STRONG: startup order ============ -->
+    <article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Make the startup order a named artifact</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-emerald-100 text-emerald-800">Strong</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">ModernWigiDash.App/MainWindow.xaml.cs (ctor 124&ndash;315, <span class="mono">_wired</span>, guarded handlers) &middot; MainWindow.Context.cs &middot; 3 test hosts (DeviceTouchDrainTests, ProfileMutationContractTests, TeardownPlanTests)</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: order held by four comments</p>
+          <div class="space-y-1">
+            <div class="box rounded px-3 py-1.5 text-xs">1 &middot; <span class="mono">_usbDevice.Start()</span> <span class="fact inline-block px-1 text-[10px]">must precede InitializeComponent</span></div>
+            <div class="box rounded px-3 py-1.5 text-xs">2 &middot; FrameDelivery, telemetry, catalog</div>
+            <div class="box rounded px-3 py-1.5 text-xs">3 &middot; host modules (input, inspector, dialog) <span class="fact inline-block px-1 text-[10px]">must precede the starter profile</span></div>
+            <div class="box rounded px-3 py-1.5 text-xs">4 &middot; <span class="mono">_profilePersistence.Load</span> / starter <span class="mono">Create()</span></div>
+            <div class="leakbox rounded px-3 py-1.5 text-xs deleak">&#8593; widget <span class="mono">InitializeAsync</span> runs synchronously here and calls back into the context (Twitch: <span class="mono">RequestInspectorRefresh</span>, <span class="mono">ShowDeviceAuthorization</span>)</div>
+            <div class="box rounded px-3 py-1.5 text-xs">5 &middot; snap-to-grid resync <span class="fact inline-block px-1 text-[10px]">must not arm a save: _wired still off</span></div>
+            <div class="box rounded px-3 py-1.5 text-xs">6 &middot; pump, power, teardown hook</div>
+            <div class="box rounded px-3 py-1.5 text-xs">7 &middot; re-assert <span class="mono">IsEditMode</span> <span class="fact inline-block px-1 text-[10px]">Checkbox.Checked fired inside InitializeComponent</span></div>
+            <div class="box rounded px-3 py-1.5 text-xs">8 &middot; <span class="mono">_wired = true</span> <span class="fact inline-block px-1 text-[10px]">must be the last statement; 4 XAML handlers guard on it</span></div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">The startup NRE this order prevents is documented at lines 167&ndash;172. No test pins any of the four facts; the three test hosts only exercise the happy path.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the wiring is the artifact</p>
+          <div class="space-y-2">
+            <div class="box rounded px-3 py-1.5 text-xs">ctor: <span class="mono">var plan = BuildStartupWiring()</span></div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span></div>
+            <div class="deep rounded px-3 py-3 text-white">
+              <p class="text-xs uppercase tracking-wider mb-2">StartupWiring (one named artifact, the TeardownPlan image)</p>
+              <ul class="text-[11px] space-y-1 text-slate-300">
+                <li>ordered steps: modules <em>before</em> profile load</li>
+                <li>null-safe context facade: pre-module callbacks are benign, not NREs</li>
+                <li>edit-mode + snap resyncs are typed steps, not trailing re-asserts</li>
+                <li><span class="mono">_wired</span> guard set once, at the end, by the artifact</li>
+              </ul>
+            </div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span><span class="lbl text-slate-400">apply in order</span></div>
+            <div class="box rounded px-3 py-1.5 text-xs">test hosts assert the same plan (4 construction sites, one artifact)</div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">Precedent already in the house: <span class="mono">BuildTeardownPlan</span> made shutdown &ldquo;a named, testable artifact&rdquo; (commit b3ef614), pinned by TeardownPlanTests.</p>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The window's constructor holds four ordering facts that exist only in comments; the host modules are callback-safe only because of a construction order nothing enforces, and the historical bug class (startup NRE) is pinned by no test.</p>
+      <p><strong class="text-slate-700">Solution.</strong> Make the startup sequence a named artifact the way teardown already is: an ordered, assertable wiring list over a null-safe context facade, so pre-module callbacks are benign instead of fatal.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; Ordering enforced, not commented</li>
+        <li>&bull; The NRE class becomes unrepresentable</li>
+        <li>&bull; Four construction sites assert one artifact</li>
+        <li>&bull; Locality: startup knowledge in one module</li>
+      </ul>
+    </article>
+
+    <!-- ============ 2. STRONG: log line policy ============ -->
+    <article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Give the log line a single policy owner</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-emerald-100 text-emerald-800">Strong</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Sdk/FileLog.cs &middot; Sdk/DiagLog.cs &middot; Sdk/LogLine.cs &middot; App/CrashLog.cs &middot; App/MainWindow.Context.cs &middot; Core/Models/ProfileOps.cs (316, 347)</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: four line shapes, one file</p>
+          <pre class="mermaid">
+flowchart TB
+  D1[DiagLog: transport, engine, delivery]
+  D2[host sink: MainWindow LogInfo / LogError]
+  D3[ProfileOps: two direct writes]
+  D4[CrashLog]
+  F[FileLog.Write]
+  D1 -->|"[tag] raw: no flatten, no bound, no redact"| F
+  D2 -->|"baked [Display INFO] prefix + LogLine.Sanitize"| F
+  D3 -->|"hand-baked [PROFILE] prefix"| F
+  D4 -->|"own timestamp, AppendAllText"| F
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+  class D1,D3 leak
+          </pre>
+          <p class="text-[11px] text-slate-400 mt-2">The documented invariant &ldquo;a multi-line <span class="mono">ex.ToString()</span> can no longer corrupt the line-oriented log&rdquo; holds on the red paths only: a DiagLog line carrying a multi-line or credential-bearing message reaches the file unbounded and unredacted. Two ProfileOps sites hand-bake the exact prefix DiagLog exists to remove.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the writer owns the policy</p>
+          <pre class="mermaid">
+flowchart TB
+  P1[DiagLog: message only] --> W
+  P2[host sink: message only] --> W
+  P3[ProfileOps via DiagLog] --> W
+  P4[CrashLog] --> W
+  W[FileLog.Write: the line-policy owner<br/>flatten + bound + redact, once]
+  W --> F1[display_device.log]
+  W --> F2[crash log]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#fff;
+  class W deep
+          </pre>
+          <p class="text-[11px] text-slate-400 mt-2">Every producer emits a message; the tag is baked once at the DiagLog construction; the shape rules have one enforcement point and one test surface.</p>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> &ldquo;How does a log line get written&rdquo; has four answers across seven modules, and the flatten/bound/redact invariant is enforced on only two of the four paths.</p>
+      <p><strong class="text-slate-700">Solution.</strong> Make <span class="mono">FileLog.Write</span> the one line-policy owner: apply <span class="mono">LogLine.Sanitize</span> at the writer, drop the host-sink pre-sanitization and the two hand-baked prefixes, and route the ProfileOps sites through a bound DiagLog.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; The invariant holds on every path</li>
+        <li>&bull; Tag vocabulary has one home</li>
+        <li>&bull; Line policy tested at one interface</li>
+        <li>&bull; Delete the duplicated prefix spellings</li>
+      </ul>
+    </article>
+
+    <!-- ============ 3. WORTH: weather capture window ============ -->
+    <article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Name the weather capture window</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Widgets/WeatherClient.cs (FetchCurrentAsync) &middot; Widgets/WeatherFetchFlow.cs (RunFetchAsync) &middot; Widgets/WeatherQueryKey &middot; Widgets/WeatherFetchControl &middot; Widgets/WeatherDisplayState</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: one predicate, five composed verdicts</p>
+          <pre class="mermaid">
+flowchart TB
+  K[WeatherQueryKey captured] --> A1[client await: geocode]
+  A1 --> S1[verdict: MatchesCurrent]
+  S1 --> A2[client await: forecast]
+  A2 --> S2[verdict: ConfirmAndStamp]
+  S2 --> A3[await: cache save]
+  A3 --> S3[verdict: post-save re-validate]
+  S3 --> F[flow: post-await live re-check]
+  F --> S4[verdict: StillCurrent]
+  S4 --> S5[verdict: apply / tie identity guard]
+  classDef site fill:#fef2f2,stroke:#dc2626,color:#991b1b;
+  class S1,S2,S3,S4,S5 site
+          </pre>
+          <p class="text-[11px] text-slate-400 mt-2">Every site routes through the ADR-0006 predicate (correct), but the window has no name: &ldquo;where do I re-check&rdquo; is re-derived per site, and &ldquo;user edits the location&rdquo; spans 11 modules end to end.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: one guard, N re-checks at awaits</p>
+          <pre class="mermaid">
+flowchart TB
+  C[guard: Capture(key)] --> A1[client awaits]
+  A1 --> R1[StillCurrent re-check]
+  R1 --> F[flow return gate]
+  F --> R2[StillCurrent re-check]
+  R2 --> G[the capture-window guard:<br/>start key, re-check, Drop verdict]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#fff;
+  class G deep
+          </pre>
+          <p class="text-[11px] text-slate-400 mt-2">Both the client's window and the flow's re-check drive the same named guard; the five verdict sites become derivations of one rule.</p>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The stale-identity verdict is composed at five sites across two modules, and the capture window itself has no name, so the re-check location is knowledge every new site must re-derive.</p>
+      <p><strong class="text-slate-700">Solution.</strong> One named guard holds the start key and spells the <span class="mono">StillCurrent</span> re-check and the <span class="mono">Drop</span> verdict once; the client's awaits and the flow's return gate call it at each boundary.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; One rule, N await-boundary re-checks</li>
+        <li>&bull; The window finally has a name</li>
+        <li>&bull; &ldquo;User edits location&rdquo; hops shrink</li>
+        <li>&bull; The verdict is assertable at one interface</li>
+      </ul>
+      <div class="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+        Does not re-litigate ADR-0006 or ADR-0007: both windows (the client's awaits, the flow's return-to-apply) survive, and every site still routes through the ADR-0006 predicate. This candidate names the window those ADRs split but did not name.
+      </div>
+    </article>
+
+    <!-- ============ 4. WORTH: media decoder ============ -->
+    <article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Extract the decode module behind the Picture widget</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Widgets/PictureAndGifWidget.cs (DecodeAnimated 220&ndash;285, bomb caps 46&ndash;49, PublishMedia) &middot; Widgets/PictureSourcePolicy &middot; Tests/PictureAndGifWidgetTests</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: mass of the widget, no decode boundary</p>
+          <div class="border border-slate-300 bg-white rounded p-2 space-y-1.5">
+            <p class="text-xs uppercase tracking-wider text-slate-500 px-1">PictureAndGifWidget</p>
+            <div class="h-3 bg-slate-200 rounded"></div>
+            <div class="h-3 bg-slate-200 rounded"></div>
+            <div class="h-9 border border-red-300 bg-red-50 rounded flex items-center px-2 text-[10px] deleak">GIF delta compositing, RGBA8888 force, the GetPixels-after-CopyTo heap-corruption guard, re-seeding &middot; no module boundary, tested only via live widget + real files</div>
+            <div class="h-3 bg-slate-200 rounded"></div>
+            <div class="h-3 bg-slate-200 rounded"></div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">The most complex code in the widget (Skia codec mechanics around a documented 0xc0000374 trap) has no seam; <span class="mono">PictureSourcePolicy</span> owns only the source-resolution verdict.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the decode sits behind its own interface</p>
+          <div class="space-y-2">
+            <div class="border border-slate-300 bg-white rounded p-2">
+              <p class="text-xs uppercase tracking-wider text-slate-500 px-1 mb-1.5">PictureAndGifWidget (thin: scheduling + publish + retirement)</p>
+              <div class="h-2.5 bg-slate-200 rounded"></div>
+            </div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span><span class="lbl text-slate-400">bytes + caps &rarr; frames</span></div>
+            <div class="deep rounded p-2">
+              <p class="text-xs uppercase tracking-wider text-white px-1 mb-1.5">MediaDecoder (deep: delta compositing, the heap guard, the caps)</p>
+              <div class="h-6 bg-slate-700/60 rounded flex items-center px-2 text-[10px] text-slate-300">never throws for malformed media: a result type, asserted without a widget</div>
+            </div>
+            <div class="text-[11px] text-slate-400">&#8594; tests hit the decode directly; the widget test keeps the publish/retirement pins</div>
+          </div>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> A ~180-line decode-and-publish pipeline with a documented heap-corruption trap is testable only through a live widget reading real files.</p>
+      <p><strong class="text-slate-700">Solution.</strong> A <span class="mono">MediaDecoder</span> module: bytes + caps in, frames/durations or a still out, never throwing for malformed media; the widget keeps load scheduling, the version-token publish, and retirement.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; Decode assertable without a widget</li>
+        <li>&bull; The heap trap pinned at a seam</li>
+        <li>&bull; Malformed media becomes a result</li>
+        <li>&bull; The widget keeps orchestration only</li>
+      </ul>
+    </article>
+
+    <!-- ============ 5. WORTH: close budget ============ -->
+    <article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Derive the close budgets from CloseBound</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Hardware/Transport/DisplayHidTransport.cs (CloseBound 63) &middot; Hardware/Transport/DisplayDeviceEngine.cs (budgets 60&ndash;61) &middot; ChunkedBulkWrite.WorstCaseWrite &middot; WinUsbNative &middot; DisplayHidTransportTests &middot; DisplayDeviceEngineTests</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: the relation lives in comments and two test files</p>
+          <div class="flex items-start gap-3">
+            <div class="box rounded p-3 flex-1">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">DisplayHidTransport</p>
+              <p class="mono text-sm">CloseBound = max(30000, 5&times;10000) ms</p>
+              <p class="text-[10px] text-slate-400 mt-1">derived from the pipe timeouts + chunk worst case</p>
+            </div>
+            <div class="arrow self-center"><span class="glyph text-slate-400" style="font-size:26px">&#8596;</span><span class="lbl text-amber-600">budgets &lt; CloseBound<br/>(5 comment blocks)</span></div>
+            <div class="box rounded p-3 flex-1">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">DisplayDeviceEngine</p>
+              <p class="mono text-sm">StandbyCloseBudget = 2 s</p>
+              <p class="mono text-sm">DisposeAbandonBudget = 3 s</p>
+              <p class="text-[10px] text-slate-400 mt-1">hardcoded; nothing in code relates them to CloseBound</p>
+            </div>
+          </div>
+          <div class="mt-3 flex gap-2">
+            <div class="leakbox rounded px-2 py-1 text-[10px] deleak">pin 1: DisplayHidTransportTests</div>
+            <div class="leakbox rounded px-2 py-1 text-[10px] deleak">pin 2: DisplayDeviceEngineTests</div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">Lowering the bulk pipe timeout to detect wedged pipes faster silently breaks the invariant until both cross-file pins are noticed. The &ldquo;STANDBY&rdquo; verdict tag is also spelled in two modules, kept by comment.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the relation holds by derivation</p>
+          <div class="space-y-2">
+            <div class="deep rounded p-3">
+              <p class="text-xs uppercase tracking-wider text-white mb-2">CloseBudgetPolicy (one value, in the transport)</p>
+              <p class="mono text-sm text-slate-300">CloseBound = max(pipe timeouts, chunk worst case)</p>
+              <p class="mono text-sm text-slate-300">StandbyBudget = min(2 s, CloseBound / k)</p>
+              <p class="mono text-sm text-slate-300">DisposeBudget = min(3 s, CloseBound / j)</p>
+            </div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span><span class="lbl text-slate-400">received by the engine's factory</span></div>
+            <div class="box rounded p-3">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">DisplayDeviceEngine</p>
+              <p class="text-[11px] text-slate-500">budgets read the policy; the relation is a construction fact, and one pin replaces the two</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The never-stall-on-close invariant (budgets strictly shorter than the transport's worst-case teardown) is held by five comment blocks and two cross-file test pins, with no code link between the constants.</p>
+      <p><strong class="text-slate-700">Solution.</strong> The transport owns one <span class="mono">CloseBudgetPolicy</span> value derived from <span class="mono">CloseBound</span>; the engine's factory receives it, so the relation holds by derivation and the five comments collapse into the derivation.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; The invariant holds by derivation</li>
+        <li>&bull; Five comments collapse into one</li>
+        <li>&bull; Two cross-file pins become one</li>
+        <li>&bull; Timeout changes cannot silently break close</li>
+      </ul>
+    </article>
+
+    <!-- ============ 6. WORTH: input seam ============ -->
+    <article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Shrink the input seam: suppression is derived, not passed</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">App/Input/InputController.cs (Press 146, Move 172, Release 198, three internal manipulation methods) &middot; App/MainWindow.xaml.cs (mouse handlers 518&ndash;557, device drain 404&ndash;412)</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: the parameter the implementation discards</p>
+          <div class="mono text-xs space-y-1 mb-3">
+            <div class="box rounded px-2 py-1.5">Press(x, y, source, <span class="deleak">editMode</span>)</div>
+            <div class="box rounded px-2 py-1.5">Move(x, y, source, <span class="deleak">editMode</span>, out changed)</div>
+            <div class="box rounded px-2 py-1.5">Release(x, y, source, <span class="deleak">editMode</span>, out iconMoved)</div>
+          </div>
+          <div class="space-y-1.5">
+            <div class="box rounded px-2 py-1 text-[11px]">mouse &times; 3: pass <span class="mono">_compositor.IsEditMode</span> (live read)</div>
+            <div class="leakbox rounded px-2 py-1 text-[11px] deleak">device drain &times; 3: hardcode <span class="mono">editMode: false</span></div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">For <span class="mono">InputSource.Device</span> the parameter is a no-op (the controller's device branch never suppresses), so &ldquo;device input is runtime input, never suppressed&rdquo; is spelled in the controller's branch <em>and</em> at six call sites.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the source owns the veto</p>
+          <div class="mono text-xs space-y-1 mb-3">
+            <div class="deep rounded px-2 py-1.5 text-white">Press(x, y, source)</div>
+            <div class="deep rounded px-2 py-1.5 text-white">Move(x, y, source, out changed)</div>
+            <div class="deep rounded px-2 py-1.5 text-white">Release(x, y, source, out iconMoved)</div>
+          </div>
+          <div class="space-y-1.5">
+            <div class="box rounded px-2 py-1 text-[11px]">mouse &times; 3: unchanged call shape, flag read inside the controller</div>
+            <div class="box rounded px-2 py-1 text-[11px]">device drain &times; 3: coordinates and the source only</div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">Suppression is derived from the source inside the controller: the fact is owned once, and a third input source cannot re-derive it.</p>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The <span class="mono">editMode</span> parameter is a no-op for one of the two sources, and the fact &ldquo;device input is never suppressed&rdquo; is spelled at six call sites on top of the controller's own branch.</p>
+      <p><strong class="text-slate-700">Solution.</strong> The controller derives suppression from the source; the device drain passes coordinates, and the desktop path keeps its live edit-mode read inside the module.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; The interface sheds one parameter</li>
+        <li>&bull; The veto is owned once</li>
+        <li>&bull; Drain call sites drop to coordinates</li>
+        <li>&bull; Locality: one module, not seven</li>
+      </ul>
+    </article>
+
+    <!-- ============ 7. WORTH: NowPlaying rules ============ -->
+    <article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Move NowPlaying's unowned display rules into the presentation</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Widgets/NowPlayingWidget.cs (CycleRepeat 727&ndash;736, progress extrapolation 341&ndash;344, Build* icon paths 571&ndash;670) &middot; Widgets/NowPlayingPresentation.cs</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: display rules with no module owner</p>
+          <div class="border border-slate-300 bg-white rounded p-2 space-y-1.5">
+            <p class="text-xs uppercase tracking-wider text-slate-500 px-1">NowPlayingWidget</p>
+            <div class="h-2.5 bg-slate-200 rounded"></div>
+            <div class="h-7 border border-red-300 bg-red-50 rounded flex items-center px-2 text-[10px] deleak">repeat cycle None&rarr;List&rarr;Track&rarr;None &middot; pinned only by a live-widget test through the monitor</div>
+            <div class="h-7 border border-red-300 bg-red-50 rounded flex items-center px-2 text-[10px] deleak">progress extrapolation (position += time since LastUpdated) &middot; no individual pin at all</div>
+            <div class="h-7 border border-red-300 bg-red-50 rounded flex items-center px-2 text-[10px] deleak">seven icon geometry fractions (0.32/0.08/0.20/...) &middot; design constants in the draw path</div>
+            <div class="h-2.5 bg-slate-200 rounded"></div>
+          </div>
+          <div class="box rounded px-2 py-1 text-[11px] mt-2">NowPlayingPresentation: meta line, time format, ratios &mdash; the natural home that does not hold these</div>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the presentation owns the display facts</p>
+          <div class="space-y-2">
+            <div class="deep rounded p-2">
+              <p class="text-xs uppercase tracking-wider text-white px-1 mb-1.5">NowPlayingPresentation (owns the display facts)</p>
+              <ul class="text-[11px] text-slate-300 space-y-1">
+                <li><span class="mono">NextRepeatMode(mode)</span> &mdash; cycle order, pinned without a widget</li>
+                <li><span class="mono">ExtrapolatedPosition(snapshot, now)</span> &mdash; the extrapolation, pinned directly</li>
+                <li>icon fraction table &mdash; the design constants, one place</li>
+              </ul>
+            </div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span><span class="lbl text-slate-400">widget: geometry + paint only</span></div>
+            <div class="box rounded p-2">
+              <p class="text-xs uppercase tracking-wider text-slate-500 px-1 mb-1">NowPlayingWidget</p>
+              <div class="h-2.5 bg-slate-200 rounded"></div>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">The capability gates (<span class="mono">CanShuffle</span>, <span class="mono">CanSeek</span>, ...) stay widget policy, as NowPlayingLayout's documented boundary says.</p>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The repeat-mode cycle order, the live progress extrapolation, and the icon geometry fractions are display rules that no module owns; the extrapolation has no individual pin.</p>
+      <p><strong class="text-slate-700">Solution.</strong> Move <span class="mono">NextRepeatMode</span>, <span class="mono">ExtrapolatedPosition</span>, and the fraction table into <span class="mono">NowPlayingPresentation</span>; pin the cycle and the extrapolation there, without a widget instance.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; Display rules get an owner</li>
+        <li>&bull; The extrapolation finally has a pin</li>
+        <li>&bull; Cycle order assertable without the monitor</li>
+        <li>&bull; The widget keeps geometry + paint</li>
+      </ul>
+    </article>
+
+    <!-- ============ 8. SPECULATIVE: Push void ============ -->
+    <article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">Push's return is a test-only vocabulary</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-slate-200 text-slate-600">Speculative</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Sdk/FrameDelivery.cs (Push 196) &middot; Sdk/FrameDeliveryResult.cs &middot; App/MainWindow.xaml.cs (271) &middot; Tests/FrameDeliveryTests.cs</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: a verdict nobody reads</p>
+          <div class="space-y-2">
+            <div class="box rounded p-2 text-center"><span class="mono text-sm">FrameDeliveryResult Push(SKBitmap)</span></div>
+            <div class="arrow"><span class="glyph deleak">&#8595;</span><span class="lbl deleak">Queued / Dropped</span></div>
+            <div class="leakbox rounded p-2 text-center text-sm">MainWindow: <span class="mono">_delivery.Push(buffer);</span> <span class="deleak text-xs">result discarded (the only production caller)</span></div>
+            <div class="box rounded p-2 text-[11px] text-slate-500 text-center">the same verdict is already observable: internal drop counters (pool / coalesced / encode) + the injected log seam</div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: the verdict rides the seams it already uses</p>
+          <div class="space-y-2">
+            <div class="deep rounded p-2 text-center"><span class="mono text-sm text-white">void Push(SKBitmap)</span></div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span></div>
+            <div class="flex gap-2">
+              <div class="box rounded p-2 flex-1 text-[11px] text-center">counters: the drop accounting</div>
+              <div class="box rounded p-2 flex-1 text-[11px] text-center">log seam: the drop verdict lines</div>
+            </div>
+            <div class="box rounded p-2 text-[11px] text-slate-500 text-center">tests re-assert on the counters they already drive; a production reader (e.g. compose-skip on Dropped) is a named addition of the result, not a pre-existing orphan</div>
+          </div>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The one production call site discards <span class="mono">Push</span>'s result, and the Queued/Dropped verdict it encodes is already observable through the internal counters and the log seam.</p>
+      <p><strong class="text-slate-700">Solution.</strong> Make <span class="mono">Push</span> void; the verdict rides the counters and the log seam, and the enum returns only if a production reader is actually added.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; The interface sheds one enum</li>
+        <li>&bull; The verdict has one home</li>
+        <li>&bull; Deletion test: complexity vanishes</li>
+        <li>&bull; Small, contained, reversible</li>
+      </ul>
+    </article>
+
+    <!-- ============ 9. SPECULATIVE: hotkey catalog ============ -->
+    <article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4">
+        <h2 class="font-serif text-2xl">The hotkey action table: a catalog + the house lockstep pin</h2>
+        <div class="flex gap-2 shrink-0">
+          <span class="text-xs font-semibold uppercase tracking-wider px-2 py-1 rounded bg-slate-200 text-slate-600">Speculative</span>
+          <span class="text-xs uppercase tracking-wider px-2 py-1 rounded bg-slate-100 text-slate-600">in-process</span>
+        </div>
+      </div>
+      <p class="mono text-sm text-slate-500">Widgets/HotkeyButtonWidget.cs (attribute choices 15&ndash;16, CreateAction switch 281&ndash;293, IsLaunchOrUrlAction 300&ndash;301) &middot; Tests/HotkeyButtonWidgetTests &middot; precedent: WeatherLayout.Modes + the attribute-match pin</p>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before: one fact, two spellings, no link</p>
+          <div class="flex items-start gap-3">
+            <div class="box rounded p-3 flex-1">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">[WidgetProperty] choices</p>
+              <p class="mono text-[11px]">Launch &middot; SendInput &middot; Open URL &middot; Stop/Play/Pause/Prev/Next &middot; ...</p>
+            </div>
+            <div class="arrow self-center"><span class="glyph deleak" style="font-size:20px">&#8596;</span><span class="lbl deleak">no pin</span></div>
+            <div class="box rounded p-3 flex-1">
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">CreateAction switch</p>
+              <p class="mono text-[11px]">same nine names, re-typed; unmatched &rarr; silent <span class="deleak">_ =&gt; Launch</span> default</p>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-2">A renamed or added choice falls to the default with no test failing. The house already solved this exact shape in the weather cluster: the <span class="mono">WeatherLayout.Modes</span> catalog + the <span class="mono">LayoutModeAttribute_Options_MatchTheModeCatalog</span> pin.</p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After: one catalog, one pin</p>
+          <div class="space-y-2">
+            <div class="deep rounded p-3">
+              <p class="text-xs uppercase tracking-wider text-white mb-1">HotkeyActionCatalog (name, kind, needs-command)</p>
+              <p class="text-[11px] text-slate-300">the one table the attribute choices, CreateAction, and IsLaunchOrUrlAction all read</p>
+            </div>
+            <div class="arrow"><span class="glyph text-slate-400">&#8595;</span></div>
+            <div class="box rounded p-2 text-center text-[11px]">house pin: <span class="mono">Attribute_Options_MatchTheActionCatalog</span> &mdash; a rename or hand-edit fails a test instead of sailing to the default</div>
+          </div>
+        </div>
+      </div>
+
+      <p><strong class="text-slate-700">Problem.</strong> The nine action-type names are spelled in the attribute choices and the switch independently, with a silent default and no lockstep pin.</p>
+      <p><strong class="text-slate-700">Solution.</strong> One action-type catalog read by the attribute options, <span class="mono">CreateAction</span>, and <span class="mono">IsLaunchOrUrlAction</span>, plus the house's lockstep pin &mdash; the weather pattern applied at its last remaining site.</p>
+      <ul class="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <li>&bull; The fact is spelled once</li>
+        <li>&bull; A rename fails a pin</li>
+        <li>&bull; The silent default unrepresentable</li>
+        <li>&bull; Proven house pattern, small change</li>
+      </ul>
+    </article>
+
+  </section>
+
+  <!-- ============ TOP RECOMMENDATION ============ -->
+  <section id="top-recommendation">
+    <div class="deep rounded-xl p-8 space-y-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400">Top recommendation</p>
+      <h2 class="font-serif text-3xl text-white">Make the startup order a named artifact &middot; <a href="#c1" class="text-sm text-slate-300 no-underline hover:underline">candidate 1 &uarr;</a></h2>
+      <p class="text-slate-300 text-sm max-w-3xl">It sits on the hottest file in the repo (80 touches in 45 days), its historical bug class (the startup NRE) is pinned by no test, and the house already proved the shape: <span class="mono">BuildTeardownPlan</span> made shutdown "a named, testable artifact" and TeardownPlanTests assert the real list. Startup wiring gets the same treatment, and the four comment-only ordering facts become construction facts.</p>
+      <p class="text-slate-400 text-xs">Runner-up: the log line's single policy owner (candidate 2) &mdash; same in-process category, smaller blast radius, and it repairs a documented invariant that currently holds on half the paths.</p>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
