@@ -58,6 +58,29 @@ public class FramePumpTests
     }
 
     [TestMethod]
+    public void Tick_OrdersComposeBeforeRepaint_BeforeOnTick()
+    {
+        // The buffer the window draws is the buffer that was sent: a repaint
+        // that ran before the compose would draw the previous buffer, so the
+        // tick's internal order (compose → repaint → badge) is a display
+        // invariant, not an implementation detail.
+        var order = StaRunner.Run(() =>
+        {
+            var log = new List<string>();
+            var pump = new FramePump(
+                composeAndSend: () => log.Add("compose"),
+                requestRepaint: () => log.Add("repaint"),
+                onTick: () => log.Add("badge"));
+
+            pump.Tick();
+            return log;
+        });
+
+        Assert.AreEqual("compose, repaint, badge", string.Join(", ", order),
+            "compose must precede the repaint (the window draws the buffer it sent), and the badge rides last");
+    }
+
+    [TestMethod]
     public void Start_ComposesSendsAndRepaints_OnCadence()
     {
         var ticks = StaRunner.Run(() =>

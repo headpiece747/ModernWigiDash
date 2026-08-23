@@ -4,11 +4,11 @@ namespace ModernWigiDash.App;
 
 /// <summary>
 /// Owns the 30 FPS presentation cadence: a dispatcher timer that composes the
-/// active page, hands the freshly composed frame to the presenter, and
-/// requests a repaint so the window draws the same buffer it sent. The window
-/// keeps only the WPF draw; compose, send, and timing live here. The
-/// compose/send step is injected so tests can drive the cadence with recording
-/// delegates instead of a compositor and USB engine.
+/// active page, pushes the freshly composed frame into the window's
+/// FrameDelivery, and requests a repaint so the window draws the same buffer
+/// it sent. The window keeps only the WPF draw; compose, send, and timing
+/// live here. The compose/send step is injected so tests can drive the
+/// cadence with recording delegates instead of a compositor and USB engine.
 /// </summary>
 internal sealed class FramePump : IDisposable
 {
@@ -19,10 +19,10 @@ internal sealed class FramePump : IDisposable
     private readonly Func<bool>? _composeGate;
     private int _disposed;
 
-    /// <param name="composeAndSend">Composes the active page and queues the
-    /// frame to the presenter. Runs once per tick (unless the compose gate
-    /// vetoes), before the repaint, so the buffer the window draws is the same
-    /// one that was sent.</param>
+    /// <param name="composeAndSend">Composes the active page and pushes the
+    /// frame into the window's FrameDelivery. Runs once per tick (unless the
+    /// compose gate vetoes), before the repaint, so the buffer the window
+    /// draws is the same one that was sent.</param>
     /// <param name="requestRepaint">Asks the window to redraw the composed
     /// buffer (e.g. <c>InvalidateVisual</c>).</param>
     /// <param name="onTick">Optional per-tick callback (e.g. badge updates).</param>
