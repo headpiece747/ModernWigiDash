@@ -7,11 +7,36 @@ namespace ModernWigiDash.Tests;
 /// host sink (MainWindow.LogInfo/LogError) and the crash log route through
 /// it, so the rule is pinned once instead of mirrored per module. The
 /// redaction pins moved here from the retired AppCrashLogTests with the rule
-/// they covered.
+/// they covered. The flatten primitive (LogLine.Flatten) is pinned directly
+/// here too — it is the shared pass under both named caps (this one and the
+/// Widgets' LogSanitizer), so its boundary contract needs its own surface.
 /// </summary>
 [TestClass]
 public class LogLineTests
 {
+    [TestMethod]
+    public void Flatten_NullReadsAsEmpty_AndTheLimitBoundsTheOutput()
+    {
+        Assert.AreEqual(string.Empty, LogLine.Flatten(null, 200), "a null value never throws — it reads as the empty string");
+        Assert.AreEqual(string.Empty, LogLine.Flatten("", 200));
+        Assert.AreEqual(200, LogLine.Flatten(new string('x', 500), 200).Length,
+            "the limit caps the output — an oversized value cannot grow the line");
+    }
+
+    [TestMethod]
+    public void Flatten_BothAllocationPaths_MatchTheReplaceSemantics()
+    {
+        // The span pass branches at 256 (stackalloc vs heap char[]). Both
+        // sides must produce exactly the reference semantics: the first N
+        // characters with newlines flattened to spaces.
+        string input = "ab\r\ncd" + new string('z', 260);
+        foreach (int limit in new[] { 4, 255, 256, 257, 1000 })
+        {
+            string expected = input[..Math.Min(limit, input.Length)].Replace('\r', ' ').Replace('\n', ' ');
+            Assert.AreEqual(expected, LogLine.Flatten(input, limit), $"limit {limit} ({(limit <= 256 ? "stackalloc" : "heap")} path)");
+        }
+    }
+
     [TestMethod]
     public void Sanitize_NullOrEmpty_ReturnsEmpty()
     {

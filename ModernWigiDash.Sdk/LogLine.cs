@@ -34,25 +34,38 @@ public static class LogLine
     private static readonly Regex UrlQueryStripper =
         new(@"(?<url>https?://[^\s""'<>]+)\?[^\s""'<>]*", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
-    /// <summary>
-    /// Flattens and BOUNDS the value in one span pass (so an oversized value
-    /// never allocates the full-size intermediates of chained Replace calls
-    /// before being cut down), then redacts: query-strip first, then token
-    /// redaction — the redaction marker must not sit inside a URL (its angle
-    /// brackets would break the URL pattern).
+/// <summary>
+    /// The flatten-and-bound span pass: embedded newlines become spaces and
+    /// the result is cut to <paramref name="limit"/> characters in one scan,
+    /// so an oversized value never allocates the full-size intermediates of
+    /// chained Replace calls before being cut down. The single owner of the
+    /// flatten semantics, shared by the two named caps — <see cref="Sanitize"/>
+    /// (the per-line cap <see cref="MaxLineLength"/>) and the Widgets'
+    /// <c>LogSanitizer</c> (the per-user-value cap). A null value reads as
+    /// the empty string (never throws — it runs on error-handling paths).
     /// </summary>
-    public static string Sanitize(string? value)
+    public static string Flatten(string? value, int limit)
     {
         if (value is null) return string.Empty;
 
-        int limit = Math.Min(value.Length, MaxLineLength);
-        Span<char> chars = limit <= 256 ? stackalloc char[limit] : new char[limit];
+        int count = Math.Min(value.Length, limit);
+        Span<char> chars = count <= 256 ? stackalloc char[count] : new char[count];
         int written = 0;
-        foreach (char c in value.AsSpan(0, limit))
+        foreach (char c in value.AsSpan(0, count))
         {
             chars[written++] = c is '\r' or '\n' ? ' ' : c;
         }
-        string flattened = new string(chars[..written]);
+        return new string(chars[..written]);
+    }
+
+    /// <summary>
+    /// Flattens and BOUNDS the value, then redacts: query-strip first, then
+    /// token redaction — the redaction marker must not sit inside a URL (its
+    /// angle brackets would break the URL pattern).
+    /// </summary>
+    public static string Sanitize(string? value)
+    {
+        string flattened = Flatten(value, MaxLineLength);
         return TokenParamRedactor.Replace(UrlQueryStripper.Replace(flattened, "${url}"), "token=<redacted>");
     }
 }
