@@ -51,6 +51,27 @@ public class CloseBudgetPolicyTests
     }
 
     [TestMethod]
+    public void Create_NonPositiveBound_ClampsToZeroBudgets()
+    {
+        // A non-positive worst-case bound is a degenerate input (the
+        // transport's derivation is a max of positive pipe timeouts): it
+        // clamps to a zero bound with zero budgets, so the engine's close
+        // waits are immediate and observable, never a negative TimeSpan
+        // that Task.Wait would throw on.
+        foreach (var bound in new[] { TimeSpan.Zero, TimeSpan.FromSeconds(-5) })
+        {
+            var policy = CloseBudgetPolicy.Create(bound);
+
+            Assert.AreEqual(TimeSpan.Zero, policy.CloseBound,
+                "a non-positive bound must clamp to a zero bound");
+            Assert.AreEqual(TimeSpan.Zero, policy.StandbyCloseBudget,
+                "a clamped bound must derive a zero standby budget");
+            Assert.AreEqual(TimeSpan.Zero, policy.DisposeAbandonBudget,
+                "a clamped bound must derive a zero dispose budget");
+        }
+    }
+
+    [TestMethod]
     public void EngineAndTransport_ReadTheSamePolicyValues()
     {
         // The engine's close waits are the transport's policy values, not a

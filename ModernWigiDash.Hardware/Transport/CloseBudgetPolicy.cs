@@ -32,12 +32,19 @@ internal readonly record struct CloseBudgetPolicy(
     /// <summary>
     /// Derives the policy from the transport's worst-case teardown bound:
     /// each budget is the smaller of its designed cap and half the bound, so
-    /// the budget is strictly shorter than the bound on every input.
+    /// the budget is strictly shorter than the bound on every positive input.
+    /// A non-positive bound (degenerate: the transport's derivation is a max
+    /// of positive pipe timeouts) clamps to a zero bound with zero budgets,
+    /// so the engine's close waits are immediate and observable, never a
+    /// negative TimeSpan that Task.Wait would throw on.
     /// </summary>
     public static CloseBudgetPolicy Create(TimeSpan closeBound)
-        => new(closeBound,
-            Budget(StandbyCapSeconds, closeBound),
-            Budget(DisposeCapSeconds, closeBound));
+    {
+        TimeSpan bound = TimeSpan.FromTicks(Math.Max(closeBound.Ticks, 0));
+        return new(bound,
+            Budget(StandbyCapSeconds, bound),
+            Budget(DisposeCapSeconds, bound));
+    }
 
     private static TimeSpan Budget(double capSeconds, TimeSpan closeBound)
         => TimeSpan.FromSeconds(Math.Min(capSeconds, closeBound.TotalSeconds / BoundFraction));
