@@ -1,22 +1,24 @@
 ---
 name: security-scan
 description: >
-  Deep security scanning for .NET applications across 6 layers: vulnerable packages,
-  secrets detection, OWASP code patterns, auth configuration, CORS policy, and
-  data protection. Produces severity-rated findings with specific remediation steps.
+  Deep security scanning for .NET applications across 7 layers: vulnerable packages,
+  secrets detection, OWASP code patterns, auth configuration, CORS policy,
+  data protection, and the skill supply chain (SkillSpector scan of the agent
+  skill trees). Produces severity-rated findings with specific remediation steps.
   Load this skill when: "security scan", "security audit", "check for vulnerabilities",
   "find secrets", "OWASP", "auth review", "CORS check", "security review",
   "penetration test prep", "CVE check", "vulnerability scan", "hardcoded password",
-  "data protection", "security posture".
+  "data protection", "security posture", "scan a skill", "skill supply chain".
 ---
 
-# /security-scan: 6-Layer Security Pipeline
+# /security-scan: 7-Layer Security Pipeline
 
 ## What
 
-Runs a defense-in-depth static scan across 6 layers. A project with zero CVEs
-can still have hardcoded secrets, SQL injection, and missing auth. Each layer
-catches a different vulnerability class. Findings map to the **OWASP Top
+Runs a defense-in-depth static scan across 7 layers. A project with zero CVEs
+can still have hardcoded secrets, SQL injection, and missing auth, and a clean
+solution can still install a skill that harvests environment variables. Each
+layer catches a different vulnerability class. Findings map to the **OWASP Top
 10:2025** taxonomy and are rated Critical/High/Medium/Low by exploitability,
 impact, and exposure. A Critical SQL injection on a public endpoint outranks a
 Low info-disclosure on an admin page.
@@ -43,7 +45,7 @@ and runtime-only vulnerabilities. Every report states this.
 
 | Scenario | Layers |
 |----------|--------|
-| Pre-release gate / pentest prep / incident / quarterly | All 6 |
+| Pre-release gate / pentest prep / incident / quarterly | All 7 |
 | After dependency update | 1 |
 | New endpoint added | 3, 4, 5 |
 | Auth system changes | 4 |
@@ -51,6 +53,7 @@ and runtime-only vulnerabilities. Every report states this.
 | Logging changes | 6 |
 | Public API exposure | 3, 4, 5 |
 | Internal-only service | 1, 2, 3 |
+| A skill installed, ported, or upstream-synced | 7 |
 
 ### Step 2: Execute the Layers
 
@@ -66,6 +69,7 @@ the `authentication` and `configuration` skills.
 | 4 | Auth configuration | A07 Authentication, A01 Access Control | `get_endpoint_map`, every route's auth posture in one call; flag `unmarked` endpoints; then JWT validation settings |
 | 5 | CORS policy | A02 Misconfiguration | Wildcard origins, credentials combos, method/header breadth |
 | 6 | Data protection | A04 Crypto, A09 Logging & Alerting | PII in logs, over-broad responses, plaintext sensitive storage |
+| 7 | Skill supply chain | A03 Supply Chain (agent skill trees) | `skillspector scan` (static, `--no-llm`) over `.opencode/skills` and the global skills dir; findings triaged against the house verdict table in `references/scan-layers.md` |
 
 ### Step 3: Rate with Context
 
@@ -90,7 +94,7 @@ static-analysis disclaimer.
 ```
 User: /security-scan before we ship
 
-Claude: Running all 6 layers...
+Claude: Running all 7 layers...
 
 | Layer | Status | Findings |
 |-------|--------|----------|
@@ -100,6 +104,7 @@ Claude: Running all 6 layers...
 | 4. Auth Config | WARN | 2 endpoints missing explicit auth attributes |
 | 5. CORS | PASS | Explicit origins from configuration |
 | 6. Data Protection | WARN | Customer email logged at Information level |
+| 7. Skill Supply Chain | PASS | 2 skill trees scanned, all findings triaged intentional |
 
 [HIGH] SearchOrders.cs:34 — SQL Injection (A05:2025)
   FromSqlRaw($"...LIKE '%{search}%'") → attacker controls the query.

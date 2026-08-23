@@ -105,12 +105,9 @@ Five entries are real candidates.
 
 ## Next step
 
-Nothing is installed. If the user signs off on one or more of the three
-recommended entries, the adoption shape per entry is: install the CLI,
-run it once over the repo trees (`.opencode/`, `CONTEXT.md`, the
-AGENTS.md files, the global skills dir), record the findings in `docs/`,
-and wire the repeat into the existing surface (security-scan skill gains
-a skill-supply-chain layer; rules-check-drift gains a deterministic
-pre-pass; the skill-authoring playbook gains the format check). No
-gate-stage changes in this pass: the four-stage gate is freshly green
-and the gate guard polices it.
+Resolved the same day: the user signed off on all three recommended entries.
+Adopted and verified in the companion findings record
+`docs/reports/2026-08-23-agent-hygiene-scan.md` (SkillSpector 2.9.6, agnix
+0.49.0, ctxlint 1.1.3; both skill trees scanned, all findings triaged; the
+stale-reference rule landed as the house script `scripts/ref-check.ps1`
+because ctxlint's reference base-path model does not fit this repo's layout).

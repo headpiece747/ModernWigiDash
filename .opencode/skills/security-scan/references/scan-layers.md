@@ -179,6 +179,52 @@ logger.LogInformation("Order {OrderId} placed by customer {CustomerId}",
     order.Id, order.CustomerId);
 ```
 
+## Layer 7: Skill Supply Chain, A03:2025 Software Supply Chain Failures
+
+Scans the agent skill trees (project `.opencode/skills/` and the global
+`~/.config/opencode/skills/`) with SkillSpector (NVIDIA), static analysis only
+so skill content never leaves the machine:
+
+```powershell
+& "C:\Users\tobia\.local\bin\skillspector.exe" scan .opencode/skills --no-llm --format json
+& "C:\Users\tobia\.local\bin\skillspector.exe" scan C:\Users\tobia\.config\opencode\skills --no-llm --format json
+```
+
+(Installed via `uv tool install git+https://github.com/NVIDIA/SkillSpector.git`;
+reinstall with the same command if the binary is missing.) Run it when a skill
+is installed, ported, or upstream-synced, and at pre-release gates. The
+static score is a triage input, not a verdict: 70 patterns over 17 categories
+(prompt injection, data exfiltration, privilege escalation, supply chain,
+behavioral AST, taint tracking, YARA, MCP least-privilege) run high-recall and
+the house skills' deliberate features are expected hits.
+
+House verdict table (from the 2026-08-23 baseline scan, see
+`docs/reports/2026-08-23-agent-hygiene-scan.md`):
+
+```
+BLOCK (fix before install/ship):
+- Taint chains that move environment secrets to network sinks (TT3/TT4/TT5)
+- YARA malware/webshell matches (YR1/YR2), obfuscated execution with a
+  network or encoded source (AST8/SC3), shipped bytecode (SC8: delete the
+  __pycache__ and re-scan; the .gitignore covers it but the disk is scanned)
+- New credentials/keys in skill content (PE3/E2)
+EXPECTED / INTENTIONAL (document in the run's findings, do not fix):
+- Skills that maintain the skill layer (reflect, convention-learner,
+  maintain-verification-skill): RA1/RA2/MP3 hits on "edit skill" / "clear
+  state" prose, including negative-form constraints ("the parent agent applies
+  edits", "never edit or delete history")
+- The desloppify machine-managed version marker (P2 on the
+  <!-- desloppify-begin --> block) and its uvx-git prerequisite (RP1)
+- Quoted command examples in docs (TM1 on "rm -rf /tmp/...")
+- Example endpoints in httpclient-factory (E1 on api.example.com / api.test)
+- git subprocess in ablate-ai-layer scripts (AST4, its stated job)
+- The never-block-on-the-human principle (EA2 "without asking")
+```
+
+Remediation for a real hit: remove the pattern from the skill, or pin the
+upstream (name the repo + commit in the findings) and record the acceptance
+here so the next scan compares against a known baseline.
+
 ## Finding Format and Report Template
 
 Each finding: `#### [SEVERITY] File:Line — Title` with OWASP category,
@@ -222,4 +268,5 @@ Fix: db.Orders.Where(o => EF.Functions.Like(o.Name, $"%{search}%"))
 | 4. Auth Configuration | WARN | 2 endpoints missing explicit auth |
 | 5. CORS Configuration | PASS | Origins properly restricted |
 | 6. Data Protection | WARN | PII found in 2 log statements |
+| 7. Skill Supply Chain | PASS | 2 skill trees scanned, all findings triaged intentional |
 ```

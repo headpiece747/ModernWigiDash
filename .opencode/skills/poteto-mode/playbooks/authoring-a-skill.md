@@ -3,7 +3,7 @@
 **You own the skill's voice.** Agent-facing prose has a higher bar than human prose; unhelpful sentences become instructions.
 
 1. Follow the house skill shape and the global `writing-for-agents` skill: YAML frontmatter with `name` (matching the directory name) and a `description` that names when to reach for it; an imperative body; reference files under `references/` that the body points at by path. The existing `.opencode/skills/*` are the reference shapes.
-2. Validate the skill: frontmatter has `name` and `description`, referenced files exist, cross-skill links resolve to installed skills (pstack skills not installed here are named so, not linked).
+2. Validate the skill: frontmatter has `name` and `description`, referenced files exist, cross-skill links resolve to installed skills (pstack skills not installed here are named so, not linked). Run `agnix .opencode/skills/<name>` (the house skill-format check, 448 rules over SKILL.md/AGENTS.md/frontmatter shape) and fix its errors. Known house warnings to triage, not fix: `disable-model-invocation` is a client-specific field OpenCode ignores (kept for portability; the user-only gate is the description text), and unclosed-XML-tag hits on `<placeholder>` prose are false positives.
 3. Test cases if structural; skip if subjective.
 4. Prove it changes behavior on a live task: run the kind of task that should trigger the skill (or route to it from poteto-mode) and confirm the skill altered what the agent did. A skill nobody's next task can feel is not finished.
 

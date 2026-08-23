@@ -28,6 +28,19 @@ rules file against what just changed and proposes the **smallest** edit that kee
 
 ## Process
 
+### 0. Run the deterministic pre-pass
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ref-check.ps1`
+(from the repo root). It checks the backtick-quoted path references in
+CONTEXT.md, .opencode/AGENTS.md, .opencode/rules/dotnet-rules.md, and
+docs/agents/*.md against the tree and exits 1 on any stale reference. It is
+the cheap half of the map-drift check: a missing file is a now-false map entry
+by definition, so every hit it prints goes straight into the Fix table below
+with the minimal fix (point the reference at the file's new path, or move the
+file back). It is also the house pre-pass because ctxlint's stale-file-ref
+rule resolves against the context file's own directory and misreports every
+root-relative reference in `.opencode/AGENTS.md` (the base-path model does not
+fit this layout; see the script header).
+
 ### 1. See what changed
 `git diff <range>` + `git status`. Note: moved/renamed/removed files, new modules, changed conventions,
 and any new invariant the change establishes.

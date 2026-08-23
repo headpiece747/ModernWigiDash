@@ -48,7 +48,7 @@ with `dotnet list package` and `Directory.Packages.props`.
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
 - **opportunity-scan**: scans agentmemory sessions (reactive: one run's artifacts; proactive: window of logs) and recommends what to encode next (rules/skill/hook/subagent/MCP). Outputs a self-contained HTML report in `docs/`.
-- **ablate-ai-layer**: measures whether the always-loaded AI instructions still earn their place by running the same task with the layer intact vs stripped, in throwaway git worktrees. `scripts/map_layer.py` is adapted for `.opencode/`; `--runner` wraps `opencode run`.
+- **ablate-ai-layer**: measures whether the always-loaded AI instructions still earn their place by running the same task with the layer intact vs stripped, in throwaway git worktrees. The skill's own `map_layer.py` (`.opencode/skills/ablate-ai-layer/scripts/`) is adapted for `.opencode/`; `--runner` wraps `opencode run`.
 - **second-brain-audit**: audits CONTEXT.md / AGENTS.md for state-shaped claims that stopped being true (memory rot), against the codebase + agentmemory. Phase 3 script skipped (no monetary values here); Phase 2 does the work.
 
 ### Ported (poteto pstack, MIT)
@@ -62,7 +62,7 @@ digest). `deslop` → `desloppify`, control-skills → the verify pair, `interro
 
 - **poteto-mode**: poteto's agent style, trimmed; ships 15 playbooks under `playbooks/` (investigation, bug-fix, perf-issue, hillclimb, runtime-forensics, trace-forensics, feature, refactoring, prototype, visual-parity, authoring-a-skill, eval, autonomous-run, session-pickup, pause-safely). Routes to the `poteto-agent` subagent.
 - **principle-\*** (21): poteto's principles pack, one skill each: boundary-discipline, build-the-lever, encode-lessons-in-structure, exhaust-the-design-space, experience-first, fix-root-causes, foundational-thinking, guard-the-context-window, laziness-protocol, make-operations-idempotent, migrate-callers-then-delete-legacy-apis, minimize-reader-load, model-the-domain, never-block-on-the-human, outcome-oriented-execution, prove-it-works, redesign-from-first-principles, separate-before-serializing-shared-state, sequence-verifiable-units, subtract-before-you-add, type-system-discipline.
-- **verify-modernwigidash**: drive the WPF app the way a user does and prove behavior with UIA evidence (`scripts/wmd-verify.ps1` harness: launch/doctor/dump/find/list/click/click-nth/value/set/click-at/shot/wait/profile backup+restore/stop/clean).
+- **verify-modernwigidash**: drive the WPF app the way a user does and prove behavior with UIA evidence (the skill's own `wmd-verify.ps1` harness, `.opencode/skills/verify-modernwigidash/scripts/`: launch/doctor/dump/find/list/click/click-nth/value/set/click-at/shot/wait/profile backup+restore/stop/clean).
 - **maintain-verification-skill**: periodic pass keeping the verify skill and its feature map honest (parallel source readers, one live session, one small correction batch).
 - **create-verification-skill**: generate a project-local UIA/CLI driving skill for a new repo.
 - **how**: subsystem walkthroughs before changing something; placement/ownership/critique questions.
@@ -162,6 +162,22 @@ session death is survivable.
   `scripts/hooks/pre-commit` is committed; the activation is local config).
   Logic lives in `scripts/gate-guard.ps1` (testable via `-GatesFile`). Escape
   per invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'`.
+- Agent hygiene scanners (the 2026-08-23 awesome-claude-code adoption pass;
+  the findings record is `docs/reports/2026-08-23-agent-hygiene-scan.md`):
+  `skillspector` (NVIDIA SkillSpector, installed via
+  `uv tool install git+https://github.com/NVIDIA/SkillSpector.git`, binary
+  `C:\Users\tobia\.local\bin\skillspector.exe`) scans the skill trees for
+  supply-chain and prompt-injection patterns, static only (`--no-llm`) so
+  skill content never leaves the machine:
+  `skillspector scan .opencode/skills --no-llm` and the same over
+  `C:\Users\tobia\.config\opencode\skills`. The security-scan skill's layer 7
+  wraps it with the house verdict table. `agnix` (npm global, `agnix .`)
+  validates SKILL.md / AGENTS.md / agent-frontmatter shape (448 rules); run
+  it after authoring or porting a skill (authoring-a-skill step 2,
+  create-verification-skill step 4). `ctxlint` (npm global) lints root-level
+  context files; its reference base-path (the context file's own directory)
+  does not fit `.opencode/AGENTS.md`, so the deterministic stale-reference
+  pre-pass is `scripts\ref-check.ps1` (the rules-check-drift step 0).
 - Live-stack run requires elevation. **User preference: no per-call UAC prompts**:
   use the no-consent runner:
   `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "<cmd>"`

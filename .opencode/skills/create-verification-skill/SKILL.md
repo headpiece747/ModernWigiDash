@@ -37,7 +37,7 @@ Create `.opencode/skills/verify-<app>/features/README.md` plus one file per user
 
 ## 4. Prove the generated skill before handing it over
 
-Run its own instructions end to end once: launch, doctor, drive ONE mapped feature (one is enough; the map exists so later runs cover the rest), capture evidence, clean up. After cleanup, confirm the evidence still exists at the named location, a cleanup that eats the proof fails this step. Fix what fails, and run the generated cleanup after every failed iteration too, so broken attempts don't strand processes and ports. A generated skill that was never executed is a draft, not a deliverable.
+Run `agnix .opencode/skills/verify-<app>` and fix its errors (the frontmatter shape is what registers the skill in OpenCode; known house warnings to triage, not fix: `disable-model-invocation` client-specific field, unclosed-XML-tag hits on `<placeholder>` prose). Then run its own instructions end to end once: launch, doctor, drive ONE mapped feature (one is enough; the map exists so later runs cover the rest), capture evidence, clean up. After cleanup, confirm the evidence still exists at the named location, a cleanup that eats the proof fails this step. Fix what fails, and run the generated cleanup after every failed iteration too, so broken attempts don't strand processes and ports. A generated skill that was never executed is a draft, not a deliverable.
 
 ## 5. Offer the maintenance loop
 
