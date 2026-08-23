@@ -33,7 +33,10 @@ public enum NowPlayingHitAction
 /// placement bounds, the uniform scale, the source-badge visibility, and the
 /// measured badge label width — the same inputs the render path uses, so the
 /// drawn controls and the touch targets can never drift apart. Render draws
-/// from this record and OnTouch hit-tests the same record.
+/// from this record and OnTouch hit-tests the same record. The record also
+/// carries the scaled <see cref="Pad"/> and <see cref="ArtGap"/> the render
+/// path draws with — the 24/30 design constants live only in
+/// <see cref="Compute"/>, never re-derived at a draw site.
 /// </summary>
 public readonly record struct NowPlayingGeometry(
     SKRect ShuffleButton,
@@ -47,7 +50,9 @@ public readonly record struct NowPlayingGeometry(
     float ProgressWidth,
     float ProgressY,
     float SeekTolerance,
-    float ArtSide);
+    float ArtSide,
+    float Pad,
+    float ArtGap);
 
 /// <summary>
 /// Pure layout rules for the Now Playing widget: the design-space scale base,
@@ -58,11 +63,17 @@ public readonly record struct NowPlayingGeometry(
 /// </summary>
 public static class NowPlayingLayout
 {
-    /// <summary>The widget's design-space width — the scale base for both render and touch.</summary>
-    public const float DesignWidth = 1016f;
+    /// <summary>The widget's design-space width — the scale base for both render and touch.
+    /// Aliased from <see cref="DisplayGeometry"/> — the shared single source for
+    /// the framebuffer geometry, so the design base can never drift from the
+    /// display's pixel area.</summary>
+    public const float DesignWidth = DisplayGeometry.FramebufferWidth;
 
-    /// <summary>The widget's design-space height — the scale base for both render and touch.</summary>
-    public const float DesignHeight = 592f;
+    /// <summary>The widget's design-space height — the scale base for both render and touch.
+    /// Aliased from <see cref="DisplayGeometry"/> — the shared single source for
+    /// the framebuffer geometry, so the design base can never drift from the
+    /// display's pixel area.</summary>
+    public const float DesignHeight = DisplayGeometry.FramebufferHeight;
 
     /// <summary>The vertical distance from the progress bar line a seek tap may land.</summary>
     public const float SeekTolerance = 24f;
@@ -71,9 +82,10 @@ public static class NowPlayingLayout
     /// The frame's geometry for a placement: the five control buttons, the
     /// source badge (computed unconditionally so the drawn and hit-tested
     /// rects never drift; <see cref="NowPlayingGeometry.SourceBadgeVisible"/>
-    /// gates the hit test), the progress band with its seek tolerance, and the
-    /// art-side split. <paramref name="badgeTextWidth"/> is the measured badge
-    /// label width — the one font-dependent input, supplied by the render path.
+    /// gates the hit test), the progress band with its seek tolerance, the
+    /// art-side split, and the scaled pad / art-gap the render path draws
+    /// with. <paramref name="badgeTextWidth"/> is the measured badge label
+    /// width — the one font-dependent input, supplied by the render path.
     /// </summary>
     public static NowPlayingGeometry Compute(SKRect bounds, float scale, bool showSourceBadge, float badgeTextWidth)
     {
@@ -116,7 +128,8 @@ public static class NowPlayingLayout
         return new NowPlayingGeometry(
             shuffle, prev, pp, next, repeat,
             badge, showSourceBadge,
-            left, barW, barY, SeekTolerance, artSide);
+            left, barW, barY, SeekTolerance, artSide,
+            pad, artGap);
     }
 
     /// <summary>

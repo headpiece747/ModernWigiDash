@@ -153,7 +153,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         DrawAlbumArt(canvas, bounds, scale);
         DrawSourceBadge(canvas, snap, scale);
         DrawTextInfo(canvas, bounds, snap, scale);
-        DrawProgress(canvas, bounds, snap, scale);
+        DrawProgress(canvas, snap, scale);
         DrawControls(canvas, snap, scale);
     }
 
@@ -211,7 +211,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void DrawAlbumArt(SKCanvas canvas, SKRect bounds, float scale)
     {
-        float pad = 24f * scale;
+        float pad = _layout.Pad;
         // Equal spacing pad from top, left, and bottom
         float artSide = _layout.ArtSide;
         float artTop = bounds.Top + pad + Math.Max(0f, (bounds.Height - pad * 2f - artSide) / 2f);
@@ -276,9 +276,11 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void DrawTextInfo(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
     {
-        float pad = 24f * scale;
+        float pad = _layout.Pad;
         float artSide = _layout.ArtSide;
-        float textX = bounds.Left + pad + artSide + 30f * scale;
+        // The text column shares the progress band's left edge — one column,
+        // one X, from the layout record (the layout's barW is right - left).
+        float textX = _layout.ProgressLeft;
         float textW = bounds.Right - pad - textX;
         if (textW <= 0) return;
 
@@ -325,15 +327,16 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
     }
 
-    private void DrawProgress(SKCanvas canvas, SKRect bounds, MediaSnapshot snap, float scale)
+    private void DrawProgress(SKCanvas canvas, MediaSnapshot snap, float scale)
     {
-        float pad = 24f * scale;
         float left = _layout.ProgressLeft;
-        float right = bounds.Right - pad;
         float barY = _layout.ProgressY;
         float timeY = barY - 18f * scale;
         float barW = _layout.ProgressWidth;
         if (barW <= 0) return;
+        // The column's right edge is one fact: the band spans exactly
+        // left..left+barW (the layout computed barW as right - left).
+        float right = left + barW;
 
         double durSec = snap.Duration.TotalSeconds;
         double posSec = snap.Position.TotalSeconds;
