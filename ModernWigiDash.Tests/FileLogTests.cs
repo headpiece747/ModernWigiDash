@@ -88,6 +88,29 @@ public class FileLogTests
         Assert.IsFalse(rotated.Contains("post-rotation line 100"), "Post-rotation lines must not land in the .1 backup");
     }
 
+    [TestMethod]
+    public void RotateIfOverCap_TheSharedRotationStep_BeholdsItsContract()
+    {
+        // The primitive is the one owner of the rotation step (cap check +
+        // delete-backup + move) — both display_device.log and crash.log
+        // rotate through it. Its contract is pinned directly, without the
+        // FileLog writer lifecycle.
+        string path = Path.Combine(_tempDir, "crash.log");
+
+        Assert.IsFalse(FileLog.RotateIfOverCap(path), "an absent file never rotates");
+
+        File.WriteAllBytes(path, new byte[1024]);
+        Assert.IsFalse(FileLog.RotateIfOverCap(path), "an under-cap file never rotates");
+        Assert.IsTrue(File.Exists(path));
+
+        File.WriteAllBytes(path + ".1", new byte[10]);
+        File.WriteAllBytes(path, new byte[FileLog.RotationCapBytes + 1]);
+        Assert.IsTrue(FileLog.RotateIfOverCap(path), "an over-cap file rotates");
+        Assert.IsFalse(File.Exists(path), "the active file is gone after the move");
+        Assert.AreEqual(FileLog.RotationCapBytes + 1, new FileInfo(path + ".1").Length,
+            "an existing backup is replaced, not appended to");
+    }
+
     private static string ReadLog(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

@@ -152,6 +152,29 @@ public static class FileLog
     }
 
     /// <summary>
+    /// The shared rotation step: when the file at <paramref name="path"/>
+    /// exists and exceeds <see cref="RotationCapBytes"/>, it is moved to
+    /// <c>path + ".1"</c>, replacing an existing backup. Returns true when it
+    /// rotated, false when the file was absent or under the cap. One rule for
+    /// the shared bound — the display log and the App's crash log both
+    /// rotate through it. A locked file throws <see cref="IOException"/> (or
+    /// <see cref="UnauthorizedAccessException"/>) — the caller owns the
+    /// best-effort policy (this class swallows and reports once; the crash
+    /// log lets its append path swallow).
+    /// </summary>
+    public static bool RotateIfOverCap(string path)
+    {
+        var current = new FileInfo(path);
+        if (!current.Exists || current.Length < RotationCapBytes) return false;
+
+        string rotatedPath = path + ".1";
+        if (File.Exists(rotatedPath))
+            File.Delete(rotatedPath);
+        File.Move(path, rotatedPath);
+        return true;
+    }
+
+    /// <summary>
     /// If the current log file exceeds the rotation cap, closes the writer
     /// (flushing any buffered lines), moves the file to <c>.1</c>, and leaves
     /// the writer closed so the next write opens a fresh file. Best-effort:
@@ -164,15 +187,15 @@ public static class FileLog
 
         try
         {
+            // The writer closes before the move — a file with an open handle
+            // cannot be moved on Windows. If the move fails, the next write
+            // reopens the same file and keeps appending.
             _writer?.Flush();
             _writer?.Dispose();
             _writer = null;
             _bufferedBytes = 0;
 
-            string rotatedPath = _logPath + ".1";
-            if (File.Exists(rotatedPath))
-                File.Delete(rotatedPath);
-            File.Move(_logPath, rotatedPath);
+            RotateIfOverCap(_logPath);
         }
         catch (IOException)
         {

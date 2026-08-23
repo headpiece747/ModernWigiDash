@@ -4,9 +4,10 @@ namespace ModernWigiDash.App;
 
 /// <summary>
 /// The crash-log writer: appends a sanitized exception line — type name +
-/// message, and rotates the file past the shared rotation cap
-/// (<see cref="FileLog.RotationCapBytes"/>) to crash.log.1 (the same rule as
-/// <see cref="FileLog"/> — spelled once in its type doc). The message
+/// message — and rotates the file past the shared rotation cap
+/// (<see cref="FileLog.RotationCapBytes"/>) to crash.log.1 through the
+/// shared rotation primitive (<see cref="FileLog.RotateIfOverCap"/> — the
+/// same cap, the same delete-backup-and-move step, one owner). The message
 /// is sanitized before it lands through
 /// <see cref="ModernWigiDash.Sdk.LogLine"/> (the shared log-line rule):
 /// exception text may embed a URL carrying a token, and crash.log is
@@ -29,7 +30,7 @@ internal static class CrashLog
         string msg = $"[{TimeProvider.System.GetUtcNow().UtcDateTime:yyyy-MM-dd HH:mm:ss}] {kind}: {typeName}: {message}{Environment.NewLine}";
         try
         {
-            RotateIfNeeded();
+            FileLog.RotateIfOverCap(LogPath);
             File.AppendAllText(LogPath, msg);
         }
         catch (IOException)
@@ -41,18 +42,5 @@ internal static class CrashLog
         {
             System.Diagnostics.Debug.WriteLine("Crash log write failed (access denied)");
         }
-    }
-
-    /// <summary>Rotates an oversized crash.log to crash.log.1 (replacing an
-    /// existing backup). Best-effort: a locked file just keeps appending past
-    /// the cap.</summary>
-    private static void RotateIfNeeded()
-    {
-        var current = new FileInfo(LogPath);
-        if (!current.Exists || current.Length < FileLog.RotationCapBytes) return;
-
-        string rotatedPath = LogPath + ".1";
-        if (File.Exists(rotatedPath)) File.Delete(rotatedPath);
-        File.Move(LogPath, rotatedPath);
     }
 }
