@@ -197,6 +197,23 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
+    public void SendFrameBytes_WhenConnected_ForwardsTheSizeVerdictToTheTransport()
+    {
+        // The engine owns liveness; the transport owns the size contract
+        // (FrameBufferSize — pinned in DisplayHidTransportTests' too-small
+        // refusal). A live engine must forward even an undersized buffer and
+        // relay the transport's verdict — filtering by size here would
+        // re-derive the protocol constant in a second module.
+        var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true };
+        using var engine = new DisplayDeviceEngine(() => fake);
+        Assert.IsTrue(engine.TryConnect());
+
+        Assert.AreEqual(FrameSendResult.Sent, engine.SendFrameBytes([]),
+            "a live engine relays the transport's verdict, even for a buffer the device would refuse");
+        Assert.AreEqual(0, fake.LastFrameLength, "the engine must not swallow the buffer — the transport sees exactly what was handed in");
+    }
+
+    [TestMethod]
     public void Dispose_Twice_IsSafe()
     {
         var engine = new DisplayDeviceEngine();
@@ -310,7 +327,15 @@ public class DisplayDeviceEngineTests
             OnConnect?.Invoke();
             return ConnectResult;
         }
-        public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer) => IsConnected ? FrameSendResult.Sent : FrameSendResult.Refused;
+        /// <summary>What the last <see cref="SendFrame"/> call actually
+        /// received — pins that the engine forwards buffers untouched (the
+        /// size contract is the transport's to enforce).</summary>
+        public int LastFrameLength { get; private set; } = -1;
+        public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer)
+        {
+            LastFrameLength = frameBuffer.Length;
+            return IsConnected ? FrameSendResult.Sent : FrameSendResult.Refused;
+        }
         public TouchReport? ReadTouch() => NextReport;
         /// <summary>Simulates a standby that wedges past the engine's
         /// StandbyCloseBudget (the wedged bulk-pipe scenario).</summary>

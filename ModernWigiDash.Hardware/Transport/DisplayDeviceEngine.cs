@@ -353,11 +353,14 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// this is the engine's plain transport seam.
     /// </summary>
     /// <returns>The transport's truthful send result — <see cref="Sdk.FrameSendResult.Refused"/>
-    /// when the engine cannot carry the frame (disposed, no live connection, or an empty
-    /// buffer), otherwise whatever the transport reported.</returns>
+    /// when the engine cannot carry the frame (disposed, no live connection, no
+    /// adopted transport, or a null buffer). The SIZE contract belongs to the
+    /// transport, which alone knows <c>DisplayProtocolConstants.FrameBufferSize</c>
+    /// — the engine forwards what it is handed and relays the transport's
+    /// verdict, so the size rule has one owner.</returns>
     public FrameSendResult SendFrameBytes(byte[] rgb565)
     {
-        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || rgb565 == null || rgb565.Length == 0)
+        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || rgb565 == null)
             return FrameSendResult.Refused;
 
         IDisplayTransport? transport;
