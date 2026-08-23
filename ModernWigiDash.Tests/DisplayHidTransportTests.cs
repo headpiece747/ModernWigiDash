@@ -162,7 +162,7 @@ public class DisplayHidTransportTests
         // The fallback backend was adopted and received the init sequence: the
         // PING control-in is the first call.
         Assert.AreEqual("in", libUsb.ControlCalls[0].Direction);
-        Assert.AreEqual(0x00, libUsb.ControlCalls[0].Request);
+        Assert.AreEqual(DisplayProtocolConstants.CmdPing, libUsb.ControlCalls[0].Request);
     }
 
     [TestMethod]
@@ -309,7 +309,7 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         // PING control-in, then the explicit wake, then per page: ClearPage (0x90),
         // AddWidget (0x91)
         Assert.AreEqual("in", backend.ControlCalls[0].Direction);
-        Assert.AreEqual(0x00, backend.ControlCalls[0].Request);
+        Assert.AreEqual(DisplayProtocolConstants.CmdPing, backend.ControlCalls[0].Request);
         Assert.IsTrue(backend.ControlCalls.Any(c => c is { Direction: "out", Request: DisplayProtocolConstants.CmdWakeDevice, WValue: 0 }),
             "a display left asleep by the previous session's standby must be explicitly woken before the brightness/page/frame work");
         for (int page = 0; page < 3; page++)

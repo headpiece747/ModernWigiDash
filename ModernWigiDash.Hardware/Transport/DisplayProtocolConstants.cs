@@ -63,10 +63,27 @@ internal static class DisplayProtocolConstants
 
     // Vendor Command Opcodes
     /// <summary>
+    /// Vendor Command: PING (0x00 = CMD_PING). Control IN with a 4-byte buffer,
+    /// wValue=0 — the init sequence's first wire step and its liveness probe:
+    /// the answer distinguishes "the device is alive" from "the driver opened
+    /// but the pipe is dead" on a reconnect. Logged, not folded into the init
+    /// verdict — a dead PING with working page writes is exactly the pipe
+    /// split the verdict's blank-frame gate exists to catch.
+    /// </summary>
+    public const byte CmdPing = 0x00;
+
+    /// <summary>
     /// Vendor Command: Set Brightness (0x51, wValue=0, data=[level byte]).
     /// Verified via vendor decompilation: brightness level is sent in data buffer, not wValue.
     /// </summary>
     public const byte CmdSetBrightness = 0x51;
+
+    /// <summary>
+    /// Brightness level (0..100) the init sequence restores to full. The
+    /// vendor Manager has its own brightness slider, so the level can change
+    /// while the app is closed — the init resets it before the frame work.
+    /// </summary>
+    public const int InitBrightnessLevel = 100;
 
     /// <summary>
     /// Vendor Command: Clear Screen Config (0x90 = CMD_SCREENCFG_CLEAR).

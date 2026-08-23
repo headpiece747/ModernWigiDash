@@ -392,9 +392,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         _logger.LogInformation("Sending device initialization commands...");
         DiagLog initLog = new("USB-INIT", 1);
 
-        // PING command (CMD_PING = 0x00, Control IN)
+        // PING (CMD_PING, Control IN) — the liveness probe, logged not gated.
         byte[] pingBuf = new byte[4];
-        bool pingOk = ControlIn(0x00, 0, 0, pingBuf, out _);
+        bool pingOk = ControlIn(DisplayProtocolConstants.CmdPing, 0, 0, pingBuf, out _);
         initLog.Write($"PING: ok={pingOk}");
 
         // Explicit wake: a display left asleep by the previous session's standby
@@ -404,7 +404,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         initLog.Write($"Wake: ok={wakeOk}");
 
         // Set brightness to 100%
-        ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [100]);
+        ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [DisplayProtocolConstants.InitBrightnessLevel]);
 
         // Initialize all 3 pages (3-page double-buffering)
         // Each page gets: ClearPage → AddWidget(full-screen) → blank framebuffer
