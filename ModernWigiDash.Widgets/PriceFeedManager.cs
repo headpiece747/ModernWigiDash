@@ -146,75 +146,114 @@ public sealed class PriceFeedManager : IDisposable
         FxRestLeg = FrankfurterRestLeg.Create(httpClient, () => Clock.GetUtcNow());
         YahooRestLeg = YahooChartRestLeg.Create(httpClient);
         CoinGeckoLeg = new CoinGeckoRestLeg(httpClient);
+
+        // The per-kind feed table: each row owns the kind's validation guard,
+        // ref-counted map, first-claim startup (the kind's own loop/REST order,
+        // incl. its gates), and WS subscribe payload — Subscribe/Unsubscribe
+        // run the shared sequence over it.
+        _cryptoWiring = new(
+            SymbolCatalog.IsValidSymbol,
+            _subscribedCrypto,
+            () =>
+            {
+                _binanceLoop ??= CreateBinanceLoop();
+                _binanceLoop.Start();
+                _cryptoRestTask ??= RestPollLoop.RunAsync(
+                    RestInterval, () => !_disposed, _cts.Token,
+                    _subscribedCrypto.Keys,
+                    PollCryptoAsync,
+                    _delay, _failLog,
+                    FallbackCoinGeckoAsync);
+            },
+            key => _ = SendWsSubscribeAsync(FeedKind.Binance, $"{key.ToLowerInvariant()}usdt@ticker"));
+        _stockWiring = new(
+            SymbolCatalog.IsValidSymbol,
+            _subscribedStocks,
+            () =>
+            {
+                // A missing Finnhub key disables the stock feeds entirely; the
+                // claim still counts (so Unsubscribe stays balanced) and the
+                // Yahoo seed in SeedFallbackAsync keeps working as the fallback.
+                if (string.IsNullOrEmpty(_finnhubKey)) return;
+                _finnhubLoop ??= CreateFinnhubLoop();
+                _finnhubLoop.Start();
+                _stockRestTask ??= RestPollLoop.RunAsync(
+                    RestInterval, () => !_disposed, _cts.Token,
+                    _subscribedStocks.Keys,
+                    PollStockAsync,
+                    _delay, _failLog);
+            },
+            key => _ = SendWsSubscribeAsync(FeedKind.Finnhub, key));
+        _fxWiring = new(
+            symbol => SymbolCatalog.IsValidFxInput(symbol, out _),
+            _subscribedFx,
+            () =>
+            {
+                _fxRestTask ??= RestPollLoop.RunAsync(
+                    RestInterval, () => !_disposed, _cts.Token,
+                    _subscribedFx.Keys,
+                    PollFxAsync,
+                    _delay, _failLog);
+            },
+            WsSubscribe: null);
     }
 
+    /// <summary>
+    /// One asset kind's feed wiring — the per-kind half that
+    /// <see cref="Subscribe"/> and <see cref="Unsubscribe"/> differ on: the
+    /// validation guard, the ref-counted subscription map, what the first
+    /// claim starts (WS loop and/or REST cycle, in the kind's own order), and
+    /// the WS subscribe payload (null when the kind has no socket). The
+    /// shared routine owns the sequence (validate → claim → start →
+    /// subscribe), so a fourth asset kind is one table row, not a fourth
+    /// copy of the steps.
+    /// </summary>
+    private sealed record FeedKindWiring(
+        Func<string, bool> IsValid,
+        ConcurrentDictionary<string, int> Subscriptions,
+        Action OnFirstClaim,
+        Action<string>? WsSubscribe);
+
+    private readonly FeedKindWiring _cryptoWiring;
+    private readonly FeedKindWiring _stockWiring;
+    private readonly FeedKindWiring _fxWiring;
+
+    /// <summary>
+    /// The kind's feed wiring — the one table <see cref="Subscribe"/> and
+    /// <see cref="Unsubscribe"/> both route through, so the kind→(validation,
+    /// map, startup, subscribe) mapping is spelled exactly once.
+    /// </summary>
+    private FeedKindWiring WiringFor(AssetKind kind) => kind switch
+    {
+        AssetKind.Crypto => _cryptoWiring,
+        AssetKind.Fx => _fxWiring,
+        _ => _stockWiring,
+    };
+
+    /// <summary>
+    /// Validates the symbol for the asset kind, ref-counts the claim, and on
+    /// the FIRST claim for a key starts the kind's feeds and pushes the
+    /// incremental WS subscribe. N widgets on one symbol hold N claims — one
+    /// widget's symbol change must not kill another's live feed.
+    /// </summary>
     public void Subscribe(string symbol, AssetKind kind)
     {
         EnsureActive();
-        switch (kind)
+        FeedKindWiring wiring = WiringFor(kind);
+        if (!wiring.IsValid(symbol))
         {
-            case AssetKind.Crypto:
-                if (!SymbolCatalog.IsValidSymbol(symbol))
-                {
-                    SymbolCatalog.LogInvalidSymbol(symbol);
-                    return;
-                }
-                var baseCoin = SymbolCatalog.ToFeedKey(symbol, kind);
-                // Ref-counted: the shared manager keys subscriptions by symbol,
-                // so N widgets on one symbol hold N claims — one widget's
-                // symbol change must not kill another's live feed.
-                if (_subscribedCrypto.AddOrUpdate(baseCoin, 1, (_, count) => count + 1) == 1)
-                {
-                    _binanceLoop ??= CreateBinanceLoop();
-                    _binanceLoop.Start();
-                    _cryptoRestTask ??= RestPollLoop.RunAsync(
-                        RestInterval, () => !_disposed, _cts.Token,
-                        _subscribedCrypto.Keys,
-                        PollCryptoAsync,
-                        _delay, _failLog,
-                        FallbackCoinGeckoAsync);
-                    // Push an incremental subscribe so symbols added after the
-                    // socket connected still receive real-time ticks.
-                    _ = SendWsSubscribeAsync(FeedKind.Binance, $"{baseCoin.ToLowerInvariant()}usdt@ticker");
-                }
-                break;
-            case AssetKind.Fx:
-                if (!SymbolCatalog.IsValidFxInput(symbol, out string fxKey))
-                {
-                    SymbolCatalog.LogInvalidSymbol(symbol);
-                    return;
-                }
-                if (_subscribedFx.AddOrUpdate(fxKey, 1, (_, count) => count + 1) == 1)
-                {
-                    _fxRestTask ??= RestPollLoop.RunAsync(
-                        RestInterval, () => !_disposed, _cts.Token,
-                        _subscribedFx.Keys,
-                        PollFxAsync,
-                        _delay, _failLog);
-                }
-                break;
-            default:
-                if (!SymbolCatalog.IsValidSymbol(symbol))
-                {
-                    SymbolCatalog.LogInvalidSymbol(symbol);
-                    return;
-                }
-                string stockSym = symbol.ToUpperInvariant();
-                // Without a Finnhub key the WS/REST stock feeds cannot work; the
-                // Yahoo Finance seed in SeedFallbackAsync still does.
-                if (_subscribedStocks.AddOrUpdate(stockSym, 1, (_, count) => count + 1) == 1
-                    && !string.IsNullOrEmpty(_finnhubKey))
-                {
-                    _finnhubLoop ??= CreateFinnhubLoop();
-                    _finnhubLoop.Start();
-                    _stockRestTask ??= RestPollLoop.RunAsync(
-                        RestInterval, () => !_disposed, _cts.Token,
-                        _subscribedStocks.Keys,
-                        PollStockAsync,
-                        _delay, _failLog);
-                    _ = SendWsSubscribeAsync(FeedKind.Finnhub, stockSym);
-                }
-                break;
+            SymbolCatalog.LogInvalidSymbol(symbol);
+            return;
+        }
+        // The branch keys (alias-resolved base coin, upper-cased ticker,
+        // normalized FX key) are all the catalog's ToFeedKey for the kind.
+        string key = SymbolCatalog.ToFeedKey(symbol, kind);
+        if (wiring.Subscriptions.AddOrUpdate(key, 1, (_, count) => count + 1) == 1)
+        {
+            wiring.OnFirstClaim();
+            // Push an incremental subscribe so symbols added after the socket
+            // connected still receive real-time ticks (kinds with a socket).
+            wiring.WsSubscribe?.Invoke(key);
         }
     }
 
@@ -251,12 +290,7 @@ public sealed class PriceFeedManager : IDisposable
     public void Unsubscribe(string symbol, AssetKind kind)
     {
         string key = SymbolCatalog.ToFeedKey(symbol, kind);
-        bool fullyReleased = kind switch
-        {
-            AssetKind.Crypto => ReleaseSubscription(_subscribedCrypto, key),
-            AssetKind.Fx => ReleaseSubscription(_subscribedFx, key),
-            _ => ReleaseSubscription(_subscribedStocks, key),
-        };
+        bool fullyReleased = ReleaseSubscription(WiringFor(kind).Subscriptions, key);
 
         // Prices for a fully-released symbol are stale by construction; a
         // symbol with remaining subscribers keeps its cached price.
