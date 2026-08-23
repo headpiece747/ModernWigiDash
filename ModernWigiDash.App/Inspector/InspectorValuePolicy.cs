@@ -8,10 +8,9 @@ namespace ModernWigiDash.App.Inspector;
 
 /// <summary>
 /// Pure inspector value policy: string→typed conversion, transform parsing
-/// (min-size guard, rotation normalization), opacity clamping, and value
-/// formatting. No WPF or control references — every rule is testable without
-/// a window. The controller binds its controls to this policy and stays a
-/// thin binder.
+/// (min-size guard), opacity clamping, and value formatting. No WPF or control
+/// references — every rule is testable without a window. The controller binds
+/// its controls to this policy and stays a thin binder.
 /// </summary>
 internal sealed class InspectorValuePolicy
 {
@@ -67,16 +66,13 @@ internal sealed class InspectorValuePolicy
     public bool TryParseZIndex(string text, out int value) => int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
 
     /// <summary>
-    /// Parses a rotation field in degrees, normalized to its 360° remainder
-    /// (negative input keeps a negative remainder, matching the display's
-    /// rotation model).
+    /// Parses a rotation field in degrees. Pure parse — no normalization:
+    /// <see cref="PlacedWidgetInstance.Rotation"/> normalizes to [0, 360) on
+    /// write, so the policy and the model can never disagree about the
+    /// canonical rotation a profile stores.
     /// </summary>
     public bool TryParseRotation(string text, out float value)
-    {
-        if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return false;
-        value %= 360;
-        return true;
-    }
+        => float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
     /// <summary>Clamps an opacity to the displayable 0..1 range.</summary>
     public float ClampOpacity(float opacity) => Math.Clamp(opacity, 0f, 1f);

@@ -861,4 +861,14 @@ public class ProfileOpsTests
         Assert.IsTrue(deserialized.PropertyValues.ContainsKey("TextColorHex"));
         Assert.AreEqual(JsonValueKind.Number, ((JsonElement)deserialized.PropertyValues["CornerRadius"]!).ValueKind, "Imported numbers should arrive as JsonElement");
     }
+
+    [TestMethod]
+    public void PlacedWidgetInstance_Rotation_NormalizesToPositiveModulo360()
+    {
+        var placed = new PlacedWidgetInstance();
+        placed.Rotation = 450f;
+        Assert.AreEqual(90f, placed.Rotation, "a multi-turn profile renders and hit-tests identically to its remainder");
+        placed.Rotation = -30f;
+        Assert.AreEqual(330f, placed.Rotation, "negative degrees fold to their positive equivalent");
+    }
 }

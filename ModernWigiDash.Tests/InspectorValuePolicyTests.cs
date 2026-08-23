@@ -104,14 +104,17 @@ public class InspectorValuePolicyTests
         Assert.IsFalse(Policy.TryParseSize("wide", out _));
 
     [TestMethod]
-    public void TryParseRotation_ValidNumber_NormalizesToModulo360()
+    public void TryParseRotation_ValidNumber_ParsesWithoutNormalizing()
     {
+        // Normalization is the model's setter's job (PlacedWidgetInstance
+        // .Rotation folds to [0, 360) on write) — the policy must not apply a
+        // different rule on the way in.
         Assert.IsTrue(Policy.TryParseRotation("450", out float r));
-        Assert.AreEqual(90f, r);
+        Assert.AreEqual(450f, r);
     }
 
     [TestMethod]
-    public void TryParseRotation_NegativeNumber_KeepsNegativeRemainder()
+    public void TryParseRotation_NegativeNumber_ParsesVerbatim()
     {
         Assert.IsTrue(Policy.TryParseRotation("-30", out float r));
         Assert.AreEqual(-30f, r);
