@@ -36,6 +36,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private ProfileLayout _profile;
     private PlacedWidgetInstance? _selectedWidget;
 
+    /// <summary>Test seam: the live active page index — the device-touch
+    /// drain's navigation outcome is observable without a UI assertion.</summary>
+    internal int ActivePageIndex => _profile?.ActivePageIndex ?? 0;
+
     // XAML-fired events can arrive during InitializeComponent, before the ctor
     // assigns the modules they forward to (e.g. the opacity slider's initial
     // ValueChanged). Guarded handlers no-op until this is set, as the last
@@ -344,8 +348,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// dispatcher): the struct is enqueued under the lock, and a drain callback
     /// is scheduled only when none is pending — so a burst of N touch events
     /// allocates one DispatcherOperation instead of N closures + N operations.
+    /// Internal so the test host can enqueue the engine's event shape and pin
+    /// the queue's ordering contract without hardware.
     /// </summary>
-    private void EnqueueDeviceTouch(SKPoint point, TouchEventType touchType)
+    internal void EnqueueDeviceTouch(SKPoint point, TouchEventType touchType)
     {
         bool schedule;
         lock (_deviceTouchLock)
@@ -382,8 +388,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// trade: the engine's 16 ms poll thread blocks on the lock during input
     /// handling instead of the UI thread marshalling N closures — bursts are
     /// bounded by one gesture, so the worst case stays a few milliseconds).
+    /// Internal so the test host can drive one deterministic drain on the UI
+    /// thread and pin the in-order feed against the gesture machine.
     /// </summary>
-    private void DrainDeviceTouchQueue()
+    internal void DrainDeviceTouchQueue()
     {
         lock (_deviceTouchLock)
         {
