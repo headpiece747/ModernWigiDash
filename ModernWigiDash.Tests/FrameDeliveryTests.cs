@@ -69,6 +69,28 @@ public class FrameDeliveryTests
         Assert.IsFalse(delivery.IsSendInFlight, "The flag must clear after the send completes");
     }
 
+    [TestMethod]
+    public void Dispose_StopsDeliveryAndIsSafeToRepeat()
+    {
+        int sent = 0;
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            send: bytes =>
+            {
+                sent++;
+                return FrameSendResult.Sent;
+            },
+            isReady: () => true);
+
+        delivery.Dispose();
+        delivery.Dispose(); // idempotent — must not throw
+
+        using var frame = CreateFrameBitmap();
+        delivery.Push(frame); // dead pipeline — must drop before encoding/queuing
+
+        Assert.AreEqual(0, sent, "Nothing may reach the transport after dispose");
+    }
+
     // ── Push (SKBitmap): encode → pooled buffer → deliver ──
 
     [TestMethod]
@@ -409,6 +431,24 @@ public class FrameDeliveryTests
         Assert.IsTrue(logs.Count > 0 && logs[0].Contains("dropped"),
             "the first pool-exhaustion drop must surface through the log seam — a wedged pipe that drops frames is visible, not silent");
         release.Set();
+    }
+
+    [TestMethod]
+    public async Task SendRefusal_LogsFirstRefusalThroughTheLogSeam()
+    {
+        List<string> logs = [];
+        using var delivery = new FrameDelivery(
+            encoder: new SkiaRgb565Encoder(),
+            send: _ => FrameSendResult.Refused,
+            isReady: () => true,
+            log: logs.Add);
+        using var frame = CreateFrameBitmap();
+
+        delivery.Push(frame);
+
+        await TestWait.WaitUntilAsync(() => logs.Count > 0, TimeSpan.FromSeconds(5));
+        Assert.IsTrue(logs[0].Contains("refused"),
+            "the refusal verdict must surface through the log seam — the verdict is observable end-to-end");
     }
 
     [TestMethod]

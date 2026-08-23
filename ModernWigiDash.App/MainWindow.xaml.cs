@@ -62,10 +62,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly Action _deviceTouchDrain;
 
     // Frame presentation — decouple the UI render timer from transport
-    // round-trips: one DisplayPresenter (a FrameDelivery with the single
-    // encode→pool→coalesce→pace policy and the 33ms pacing the engine's USB
-    // writes used) bound to the direct-USB engine (ADR-0005).
-    private readonly DisplayPresenter _presenter;
+    // round-trips: one FrameDelivery bound to the direct-USB engine (ADR-0005)
+    // with the single encode→pool→coalesce→pace policy and the 33ms pacing the
+    // engine's USB writes used; the production encoder (SkiaRgb565Encoder)
+    // binds at this one Create site.
+    private readonly FrameDelivery _delivery;
 
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
@@ -121,10 +122,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SourceInitialized += OnUpdateCheckAtStartup;
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
-        _presenter = new DisplayPresenter(
-            _usbDevice.SendFrameBytes,
-            () => _usbDevice.State == ConnectionState.Connected,
-            msg => FileLog.Write("[HW] " + msg));
+        _delivery = FrameDelivery.Create(
+            encoder: new SkiaRgb565Encoder(),
+            send: _usbDevice.SendFrameBytes,
+            isReady: () => _usbDevice.State == ConnectionState.Connected,
+            log: msg => FileLog.Write("[HW] " + msg));
 
         // One poll loop per direct producer, owned by the telemetry module:
         // SENSOR (LHS shared memory, ADR-0004) and FRAMETIME (PresentMon,
@@ -256,11 +258,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
             composeAndSend: () =>
             {
                 _compositor.Compose(_profile.ActivePage);
-                _presenter.Send(_compositor.FrameBuffer);
+                _delivery.Push(_compositor.FrameBuffer);
             },
             requestRepaint: () => SkiaCanvas.InvalidateVisual(),
             onTick: UpdateUsbBadge,
-            composeGate: () => _presenter.ShouldCompose);
+            composeGate: () => !_delivery.IsSendInFlight);
         _framePump.Start();
 
         // Power lifecycle: SystemEvents fires on a system thread, so both
@@ -293,7 +295,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _framePump.Dispose,
                 _powerLifecycle.Dispose,
                 _telemetry.Dispose,
-                _presenter.Dispose,
+                _delivery.Dispose,
                 () => ProfileOps.DisposeProfile(_profile),
                 _dialogHost.CloseDeviceAuthorization,
                 _compositor.Dispose
