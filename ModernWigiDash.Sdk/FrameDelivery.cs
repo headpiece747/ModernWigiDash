@@ -6,13 +6,13 @@ namespace ModernWigiDash.Sdk;
 /// The single frame-delivery policy module. The App binds one instance to the
 /// direct-USB engine, so a backlog behaves identically in every mode:
 ///
-/// bounded DropOldest channel → drain-to-latest (stale frames dropped, never
-/// replayed) → paced send (default 33ms) → pooled buffers released.
+/// bounded DropOldest channel â†’ drain-to-latest (stale frames dropped, never
+/// replayed) â†’ paced send (default 33ms) â†’ pooled buffers released.
 ///
 /// One entry point feeds the policy: <see cref="Push"/> (composited bitmap;
 /// encodes into a pooled exact-size buffer via the injected encoder). Verdict
 /// accounting is visible through <see cref="DroppedCount"/> (split into pool
-/// exhaustion vs. coalescer drops) and <see cref="SendFailedCount"/> — a dead
+/// exhaustion vs. coalescer drops) and <see cref="SendFailedCount"/> â€” a dead
 /// pipe shows as send failures, never as silent success or drops.
 /// </summary>
 public sealed class FrameDelivery : IDisposable
@@ -58,15 +58,15 @@ public sealed class FrameDelivery : IDisposable
     /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
     /// is built from its <see cref="IRgb565Encoder.OutputBufferSize"/>.</param>
     /// <param name="send">Send seam to the transport, bound once at
-    /// construction. Returns the truthful <see cref="FrameSendResult"/> — the
+    /// construction. Returns the truthful <see cref="FrameSendResult"/> â€” the
     /// accounting splits a device refusal (Refused) from a broken pipe (Failed).</param>
     /// <param name="isReady">Optional readiness predicate. Defaults to "a send
     /// seam is attached".</param>
     /// <param name="minInterval">Minimum interval between transport sends
-    /// (default 33ms ≈ 30 FPS, the device capability).</param>
+    /// (default 33ms â‰ˆ 30 FPS, the device capability).</param>
     /// <param name="timeProvider">Clock for pacing; tests substitute a fake.</param>
     /// <param name="capacity">Bounded channel capacity (DropOldest). The buffer
-    /// pool pre-allocates capacity + 1 — the in-flight maximum is the channel
+    /// pool pre-allocates capacity + 1 â€” the in-flight maximum is the channel
     /// (capacity) plus the sender's held slot (1), so the pool must cover both
     /// or backlog pressure would exhaust it before the coalescer drops.</param>
     /// <param name="log">Optional log sink for send/drop lines.</param>
@@ -81,7 +81,7 @@ public sealed class FrameDelivery : IDisposable
     {
         if (encoder is not null)
         {
-            // The pool is sized from the encoder's output — an exact-size pool
+            // The pool is sized from the encoder's output â€” an exact-size pool
             // that disagrees with the encoder (whose releases would be
             // silently discarded) is unrepresentable by construction. The +1
             // margin covers the sender's in-flight slot: while the transport
@@ -99,7 +99,7 @@ public sealed class FrameDelivery : IDisposable
         _timeProvider = timeProvider ?? TimeProvider.System;
         _send = send;
         // The DiagLog write seam is the injected log callback with a
-        // null-tolerant no-op — deliberately NOT DiagLog's FileLog fallback, so
+        // null-tolerant no-op â€” deliberately NOT DiagLog's FileLog fallback, so
         // a delivery without a log sink stays silent.
         _sentLog = new DiagLog("FrameDelivery", 60, write: log ?? (static _ => { }));
         _sendFailLog = new DiagLog("FrameDelivery", 60, logFirst: true, write: log ?? (static _ => { }));
@@ -118,7 +118,7 @@ public sealed class FrameDelivery : IDisposable
 
     /// <summary>
     /// Creates a fully configured delivery with the policy's required seams.
-    /// Prefer this over the constructor at production bind sites — the encode
+    /// Prefer this over the constructor at production bind sites â€” the encode
     /// and send seams are required, so an unconfigured delivery (which would
     /// silently drop every frame) is unrepresentable. The internal constructor
     /// remains for tests that intentionally exercise unconfigured readiness
@@ -138,7 +138,7 @@ public sealed class FrameDelivery : IDisposable
     /// <summary>
     /// True while the sender loop is inside the transport write. A compose
     /// caller (the FramePump gate) skips composing a new frame during the
-    /// write — the display can't take it anyway, so the encode is dead CPU.
+    /// write â€” the display can't take it anyway, so the encode is dead CPU.
     /// </summary>
     public bool IsSendInFlight => Volatile.Read(ref _sendInFlight) != 0;
 
@@ -151,46 +151,46 @@ public sealed class FrameDelivery : IDisposable
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
     /// of frame accounting. The transport keeps only a bulk-layer diagnostic
-    /// counter for its own failure log — never a second delivery accounting.</summary>
-    public long FramesSent => Interlocked.Read(ref _sent);
+    /// counter for its own failure log â€” never a second delivery accounting.</summary>
+    internal long FramesSent => Interlocked.Read(ref _sent);
 
     /// <summary>
     /// Frames dropped inside the pipeline: pool exhaustion at push time,
     /// channel rejects (a push after disposal), plus stale buffered frames
     /// dropped by the coalescer during a backlog. Push-time rejections that
-    /// return before the pipeline is reached — no encoder/pool/send seam
-    /// attached, a null frame, or the readiness predicate false — are NOT
+    /// return before the pipeline is reached â€” no encoder/pool/send seam
+    /// attached, a null frame, or the readiness predicate false â€” are NOT
     /// counted here. The two in-pipeline drop sources are also visible
     /// separately via <see cref="DroppedPoolCount"/> and
     /// <see cref="DroppedCoalescedCount"/>.
     /// </summary>
-    public long DroppedCount => Interlocked.Read(ref _dropped);
+    internal long DroppedCount => Interlocked.Read(ref _dropped);
 
     /// <summary>Frames dropped at push time because the buffer pool was
-    /// exhausted — backlog pressure, the producer outran the sender.</summary>
-    public long DroppedPoolCount => Interlocked.Read(ref _droppedPool);
+    /// exhausted â€” backlog pressure, the producer outran the sender.</summary>
+    internal long DroppedPoolCount => Interlocked.Read(ref _droppedPool);
 
     /// <summary>Stale buffered frames the coalescer discarded while draining a
     /// backlog (drain-to-latest replays only the newest frame).</summary>
-    public long DroppedCoalescedCount => Interlocked.Read(ref _droppedCoalesced);
+    internal long DroppedCoalescedCount => Interlocked.Read(ref _droppedCoalesced);
 
-    /// <summary>Frames dropped because the encoder threw while encoding — the
+    /// <summary>Frames dropped because the encoder threw while encoding â€” the
     /// third in-pipeline drop source (a transient encode failure must drop the
     /// frame, never the 30 FPS tick that feeds it).</summary>
-    public long DroppedEncodeCount => Interlocked.Read(ref _droppedEncode);
+    internal long DroppedEncodeCount => Interlocked.Read(ref _droppedEncode);
 
     /// <summary>Frames handed to the transport seam that failed to send (the
     /// seam reported <see cref="FrameSendResult.Failed"/> or threw). A broken
     /// pipe accumulates here, not in <see cref="FramesSent"/> and not in the
-    /// drop counters — device refusals are a separate metric
+    /// drop counters â€” device refusals are a separate metric
     /// (<see cref="SendRefusedCount"/>).</summary>
-    public long SendFailedCount => Interlocked.Read(ref _sendFailed);
+    internal long SendFailedCount => Interlocked.Read(ref _sendFailed);
 
-    /// <summary>Frames handed to the transport seam that were refused — the device is
+    /// <summary>Frames handed to the transport seam that were refused â€” the device is
     /// not connected, or the frame fails the transport's size contract. A dead pipe
     /// is provably distinguished from a broken one, and from a send that reached the
     /// device; it is not a drop either (the frame was drained from the channel).</summary>
-    public long SendRefusedCount => Interlocked.Read(ref _sendRefused);
+    internal long SendRefusedCount => Interlocked.Read(ref _sendRefused);
 
     /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
     public FrameDeliveryResult Push(SKBitmap frame)
@@ -264,7 +264,7 @@ public sealed class FrameDelivery : IDisposable
                 {
                     // The in-flight flag lets a compose-only caller (the
                     // FramePump gate) skip work while the display is still
-                    // writing — the bulk write (~55ms) outruns the 33ms tick,
+                    // writing â€” the bulk write (~55ms) outruns the 33ms tick,
                     // so composing during it is dead CPU.
                     Volatile.Write(ref _sendInFlight, 1);
                     FrameSendResult result = _send is not null
@@ -359,11 +359,11 @@ public sealed class FrameDelivery : IDisposable
         }
 
         // Join the sender loop with a bounded wait: a send is a synchronous
-        // USB write with up to a 30s timeout, so never block close on it —
+        // USB write with up to a 30s timeout, so never block close on it â€”
         // but do give a clean loop exit the chance to release its in-flight
         // slot before the transport is disposed underneath it. The token is
         // already cancelled above, so passing it would abort the join
-        // immediately — the bounded wait is the whole point.
+        // immediately â€” the bounded wait is the whole point.
         try
         {
             _senderTask.Wait(TimeSpan.FromSeconds(1), CancellationToken.None);
@@ -377,7 +377,7 @@ public sealed class FrameDelivery : IDisposable
             // The loop faulted after cancellation; nothing left to join.
         }
 
-        // Dispose the token source only once the sender loop has exited — a
+        // Dispose the token source only once the sender loop has exited â€” a
         // send still in flight (up to 30s USB timeout) may hold the token, and
         // disposing a source a running task still references can fault its
         // cancellation registration. When the bounded join above timed out,
