@@ -19,7 +19,7 @@ description: >
 The kit's autonomous iteration-loop skill. It drives a broken `dotnet build`
 (or failing `dotnet test`) to green by looping: run, parse failures,
 categorize by root cause, apply targeted fixes, re-run. It repeats until
-green or a guard fires — the same way an experienced developer works through
+green or a guard fires, the same way an experienced developer works through
 a wall of red, but with hard limits that stop it from thrashing.
 
 This is not a single-pass fix. It handles cascading errors where fixing one
@@ -40,26 +40,26 @@ issue reveals the next.
 
 ### Loop Discipline (applies to every loop)
 
-1. **Bounded iteration, always** — Default max 5 iterations, hard cap 10
+1. **Bounded iteration, always.** Default max 5 iterations, hard cap 10
    (user "keep going" extends by 3, never past 10). If 5 iterations cannot
    solve it, the problem needs human judgment, not a 6th identical attempt.
-2. **Progress or exit** — Each iteration must reduce the error/failure count.
+2. **Progress or exit.** Each iteration must reduce the error/failure count.
    Same errors after a fix attempt = STUCK: stop, report, and re-plan with a
    different approach. Never retry the same fix that already failed.
-3. **Categorize before fixing** — Group errors by root cause and fix the
+3. **Categorize before fixing.** Group errors by root cause and fix the
    highest-leverage first (one missing `using` can erase a dozen downstream
    errors).
-4. **Transparency per iteration** — Report what changed and why:
+4. **Transparency per iteration.** Report what changed and why:
    `Iteration 3/5: fixed CS0246 by adding using System.Text.Json, 2 remain`.
    Never modify files silently.
-5. **Atomicity** — Each iteration leaves the codebase no worse than before.
+5. **Atomicity.** Each iteration leaves the codebase no worse than before.
    If iteration 3 fails, the code stays in iteration 2's state.
 
 ### Primary Flow: Build-Fix Loop (max 5 iterations)
 
-1. **Build** — Run `dotnet build`, capture full error output
-2. **Parse** — Extract every `error CS####` with file, line, and message
-3. **Categorize** — Group by root cause:
+1. **Build.** Run `dotnet build`, capture full error output
+2. **Parse.** Extract every `error CS####` with file, line, and message
+3. **Categorize.** Group by root cause:
 
    | Category | Codes | Fix strategy |
    |---|---|---|
@@ -72,19 +72,19 @@ issue reveals the next.
    | Missing implementation | CS0535 | Implement interface/abstract members |
    | Obsolete API | CS0618 | Replace with recommended alternative |
 
-4. **Fix** — Apply targeted fixes, root-cause/highest-leverage errors first
-5. **Rebuild** — Run `dotnet build` again, compare error count
-6. **Evaluate** — Zero errors: run `dotnet test` as a sanity check, report
-   success. Fewer errors: continue. Same errors: STUCK — exit and re-plan.
+4. **Fix.** Apply targeted fixes, root-cause/highest-leverage errors first
+5. **Rebuild.** Run `dotnet build` again, compare error count
+6. **Evaluate.** Zero errors: run `dotnet test` as a sanity check, report
+   success. Fewer errors: continue. Same errors: STUCK, exit and re-plan.
    More errors: revert the iteration, report REGRESSION.
 
 ### Variant: Test-Fix Loop (max 5; 3 if it follows a build-fix pass)
 
 Same loop, same guards, with `dotnet test --no-build` as the runner and one
-critical extra step — **diagnose before fixing**:
+critical extra step, **diagnose before fixing**:
 
-1. Read the test — understand the assertion and setup
-2. Read the production code — understand the actual behavior
+1. Read the test, understand the assertion and setup
+2. Read the production code, understand the actual behavior
 3. Decide where the bug lives: wrong expectation → fix the test; production
    bug → fix the code; incomplete setup → fix the setup; contract changed →
    update the test to match
@@ -94,21 +94,21 @@ critical extra step — **diagnose before fixing**:
 
 ### Fail-Safe Guards (immediate exit)
 
-- **STUCK** — same errors/failures after a fix, or count oscillates
+- **STUCK.** Same errors/failures after a fix, or count oscillates
   (3 → 2 → 3): report what could not be fixed and what a human should check
-- **REGRESSION** — an iteration introduced more errors than it fixed: revert
+- **REGRESSION.** An iteration introduced more errors than it fixed: revert
   its changes, report
-- **Cascading failures** — fixing one error spawns 3+ new ones twice in a
+- **Cascading failures.** Fixing one error spawns 3+ new ones twice in a
   row: the approach is wrong, stop
-- **Critical error** — wrong SDK, missing project file, corrupted solution,
+- **Critical error.** Wrong SDK, missing project file, corrupted solution,
   or the test runner itself fails: human intervention needed, stop
-- **User interruption** — finish the current iteration, report progress, ask
+- **User interruption.** Finish the current iteration, report progress, ask
   how to proceed
 
 ### Other Loops
 
-The same discipline — bounded iterations, progress detection, fail-safe
-guards — governs refactor passes (`/de-sloppify`: verify build + tests after
+The same discipline, bounded iterations, progress detection, fail-safe
+guards, governs refactor passes (`/de-sloppify`: verify build + tests after
 each target, revert on failure) and scaffolding (`/scaffold`: generate, then
 run nested build-fix and test-fix loops). Nested loops get a smaller budget
 (parent 5 → nested 3), max nesting depth 2, total budget 15.
@@ -122,10 +122,10 @@ run nested build-fix and test-fix loops). Nested loops get a smaller budget
 
 ### MCP Tools Used
 
-- `get_diagnostics` — Compiler errors/warnings scoped to file or project
-- `find_symbol` — Locate moved or renamed types
-- `find_references` — Assess blast radius of a broken API change
-- `get_project_graph` — Dependency order for fixing reference errors
+- `get_diagnostics`: Compiler errors/warnings scoped to file or project
+- `find_symbol`: Locate moved or renamed types
+- `find_references`: Assess blast radius of a broken API change
+- `get_project_graph`: Dependency order for fixing reference errors
 
 > **Tool mapping (this project):** the above map to Glider as
 > glider_get_diagnostics, glider_search_symbols / glider_resolve_symbol,
@@ -160,6 +160,6 @@ Claude: Running dotnet build...
 
 ## Related
 
-- `/verify` — Full verification pass (build + test + format + diagnostics)
-- `/tdd` — Red-green-refactor when building new features test-first
-- `/de-sloppify` — Clean up code quality issues after the build is green
+- `/verify`: Full verification pass (build + test + format + diagnostics)
+- `/tdd`: Red-green-refactor when building new features test-first
+- `/de-sloppify`: Clean up code quality issues after the build is green

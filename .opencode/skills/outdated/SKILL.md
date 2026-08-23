@@ -3,13 +3,13 @@ name: outdated
 description: >
   Dependency health report for .NET solutions: outdated NuGet packages,
   vulnerable versions, and commercial-license traps (MediatR, MassTransit,
-  FluentAssertions, AutoMapper) — powered by the get_nuget_packages MCP tool.
+  FluentAssertions, AutoMapper), powered by the get_nuget_packages MCP tool.
   Invoke when: "outdated packages", "check dependencies", "stale packages",
   "package audit", "dependency health", "are my packages up to date",
   "license check", "vulnerable packages", "nuget audit".
 ---
 
-> **Tool mapping (this project):** `get_nuget_packages` has no Glider equivalent —
+> **Tool mapping (this project):** `get_nuget_packages` has no Glider equivalent,
 > inventory packages with `dotnet list package` (CLI) and the central
 > `Directory.Packages.props`. glider_find_package_consolidation_candidates and
 > glider_find_package_usages are available for CPM drift and usage mapping.
@@ -20,17 +20,17 @@ description: >
 
 A three-layer dependency health report:
 
-1. **Inventory** — every `PackageReference` per project, with TFMs and central
+1. **Inventory.** Every `PackageReference` per project, with TFMs and central
    package management awareness, via the `get_nuget_packages` MCP tool (no
    network, token-cheap).
-2. **Staleness + vulnerabilities** — current vs latest stable, and known CVEs,
+2. **Staleness + vulnerabilities.** Current vs latest stable, and known CVEs,
    via the `dotnet` CLI.
-3. **License screen** — flags packages that moved to commercial licenses so an
+3. **License screen.** Flags packages that moved to commercial licenses so an
    innocent `dotnet outdated --upgrade` doesn't silently change your legal
    position.
 
-The output is a single prioritized table — vulnerabilities first, license traps
-second, staleness last — with a recommended action per row.
+The output is a single prioritized table, vulnerabilities first, license traps
+second, staleness last, with a recommended action per row.
 
 ## When
 
@@ -38,7 +38,7 @@ second, staleness last — with a recommended action per row.
 - Before a .NET version upgrade (pairs with `/migrate` Flow B)
 - After inheriting an unfamiliar codebase
 - Dependabot/NuGet audit warnings appeared and you want the full picture
-- Periodically on long-lived projects — quarterly is a good cadence
+- Periodically on long-lived projects. Quarterly is a good cadence
 
 ## How
 
@@ -50,7 +50,7 @@ get_nuget_packages(projectFilter: "Api")      -- or one project
 ```
 
 Returns per-project `{Name, TargetFramework, Cpm, Packages: [{Id, Version}]}`.
-Note `Cpm: true` — updates then belong in `Directory.Packages.props`, not the
+Note `Cpm: true`. Updates then belong in `Directory.Packages.props`, not the
 csproj. Flag mixed TFMs across projects while you're here.
 
 **Step 2: Staleness and vulnerabilities (CLI)**
@@ -61,7 +61,7 @@ dotnet list package --vulnerable --include-transitive
 ```
 
 Both need a successful restore first. If restore fails, fix that before
-auditing — a broken lock state makes version output unreliable.
+auditing. A broken lock state makes version output unreliable.
 
 **Step 3: License screen**
 
@@ -70,13 +70,13 @@ Check the inventory against the known commercial moves (full rationale in
 
 | Package | Commercial from | Free alternative |
 |---|---|---|
-| MediatR | 13+ (Lucky Penny, RPL) | `Mediator` (martinothamar) — source-generated, MIT |
+| MediatR | 13+ (Lucky Penny, RPL) | `Mediator` (martinothamar), source-generated, MIT |
 | MassTransit | 9+ (v8 Apache, patches end 2026 then EOL) | Wolverine 6.x, or stay on v8 short-term |
 | FluentAssertions | 8+ (v7 stays Apache, frozen) | xUnit built-in `Assert` (kit default), Shouldly, AwesomeAssertions |
 | AutoMapper | 15+ (Lucky Penny) | Manual mapping (kit default) or Mapperly (MIT) |
 
 A license flag fires when the project is on the free major and a naive
-"update all" would cross the boundary — that is the trap this step exists for.
+"update all" would cross the boundary. That is the trap this step exists for.
 
 **Step 4: Report**
 
@@ -91,14 +91,14 @@ One table, priority-ordered:
 
 **Step 5: Act (optional)**
 
-Offer to execute updates via `/migrate` Flow C — one package at a time,
+Offer to execute updates via `/migrate` Flow C, one package at a time,
 `dotnet build && dotnet test` between each. Never batch major updates:
 batched failures are unattributable.
 
 ### MCP Tools Used
 
-- `get_nuget_packages` — inventory, CPM detection, TFM audit
-- `get_diagnostics` — verify the solution still compiles clean after updates
+- `get_nuget_packages`: inventory, CPM detection, TFM audit
+- `get_diagnostics`: verify the solution still compiles clean after updates
 
 ## Example
 
@@ -124,7 +124,7 @@ Claude: Inventorying packages (get_nuget_packages)...
 
 ## Related
 
-- `/migrate` — Flow C executes the updates this report recommends
-- `knowledge/package-recommendations.md` — vetted packages + licensing detail
-- `knowledge/mediatr-to-mediator-migration.md` — step-by-step MediatR exit
-- `/verify` — full pipeline after applying updates
+- `/migrate`. Flow C executes the updates this report recommends
+- `knowledge/package-recommendations.md`: vetted packages + licensing detail
+- `knowledge/mediatr-to-mediator-migration.md`: step-by-step MediatR exit
+- `/verify`: full pipeline after applying updates

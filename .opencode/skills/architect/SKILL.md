@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Design before implementing. Sketch types, function signatures, class shapes, and module boundaries with `not implemented` bodies and pseudocode. Synthesize across multiple independent design attempts, then fill in code against the chosen sketch. If implementation proves the sketch wrong, throw it out and redesign.
 
-For this repo: the layer contract is Sdk → Core/Widgets → Hardware → App (inward only), widgets are reflection-instantiated (parameterless ctor, static stores), and the transport is deliberately synchronous per ADR-0001. A sketch that fights those is usually wrong about the sketch, not the rules — unless the work is genuinely revisiting one of them.
+For this repo: the layer contract is Sdk → Core/Widgets → Hardware → App (inward only), widgets are reflection-instantiated (parameterless ctor, static stores), and the transport is deliberately synchronous per ADR-0001. A sketch that fights those is usually wrong about the sketch, not the rules, unless the work is genuinely revisiting one of them.
 
 ## Start
 

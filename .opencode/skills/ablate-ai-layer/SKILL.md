@@ -8,7 +8,7 @@ description: Measure whether a repository's AI instructions still earn their pla
 > **Project adaptation (ModernWigiDash/OpenCode):** `scripts/map_layer.py` has been
 > extended with this repo's `.opencode/` entries (AGENTS.md, rules/, skills/,
 > agents/). This repo's always-loaded set additionally includes `CONTEXT.md`
-> (project instructions load it) and the global `~/.config/opencode/AGENTS.md` —
+> (project instructions load it) and the global `~/.config/opencode/AGENTS.md`,
 > map_layer.py lists the repo layer; count those two by hand. Runner: OpenCode
 > reads the prompt via `--runner` wrapping `opencode run` (verify the stdin
 > plumbing with `opencode run --help` first; the script pipes the task file to

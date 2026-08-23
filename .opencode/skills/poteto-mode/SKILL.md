@@ -23,7 +23,7 @@ Remaining triggers:
 - Any code → name the data shape first, and choose its organizing structure per **principle-model-the-domain**.
 - Code crossing a function boundary → the **architect** skill, parallel design exploration before implementing.
 - Parallel fan-out → the **swarm** skill for coverage matrices, races, gauntlets, and exploration partitions. Use **arena** for design or code bakeoffs with base selection and grafting.
-- Contested design → an adversarial pass before shipping: `ocr_review` on the diff plus the `code-reviewer` subagent, each with a skeptical stance. One local model, so the "independent reviewers" are fresh contexts — the skepticism discipline still holds.
+- Contested design → an adversarial pass before shipping: `ocr_review` on the diff plus the `code-reviewer` subagent, each with a skeptical stance. One local model, so the "independent reviewers" are fresh contexts. The skepticism discipline still holds.
 - Nontrivial multi-step → write the throughput checkpoint (Feature step 3).
 - Any prose surface → the **unslop** skill. Your reply is a prose surface; write it per **Writing the reply**. Agent-facing prose also follows the `authoring-a-skill` playbook.
 - Docs, RFCs, readmes, or commit messages → the **technical-writing** skill.
@@ -86,7 +86,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 **Use `subagent_type: "poteto-agent"` for any code-writing subagent you spawn inside a playbook step.** `/poteto-mode` and `poteto-agent` share the same grounding read. Review-pass subagents (`how` critique, `reflect` reviewers) follow the subagent their skill prescribes.
 
-**Defaults for every subagent call.** File pointers, not inlined context. Explicit scope: which paths, what the behavior must hold, and how to verify. Fresh context beats a chained resume: interrupt-chained resumes silently drop directives, so for a scope that drifted, fire a fresh subagent with the consolidated scope rather than trusting a "done" summary. One local model here (the session model); tier by difficulty instead of by model — the hardest changes (cross-cutting design, gnarly concurrency, subtle algorithms) get the fullest grounding artifacts and the tightest review, trivial mechanical edits get a narrow scope and a fast check.
+**Defaults for every subagent call.** File pointers, not inlined context. Explicit scope: which paths, what the behavior must hold, and how to verify. Fresh context beats a chained resume: interrupt-chained resumes silently drop directives, so for a scope that drifted, fire a fresh subagent with the consolidated scope rather than trusting a "done" summary. One local model here (the session model); tier by difficulty instead of by model. The hardest changes (cross-cutting design, gnarly concurrency, subtle algorithms) get the fullest grounding artifacts and the tightest review, trivial mechanical edits get a narrow scope and a fast check.
 
 You own every subagent's work. Review the diff and write your own summary; don't pass through what it said. A second opinion is the same prompt in a fresh subagent context. Agreement across two independent reads is high-signal.
 
@@ -118,7 +118,7 @@ A large or cross-cutting effort (a migration across many call sites, an ambitiou
 - **Perf issue.** A measured slowness to trace and improve against a baseline. `playbooks/perf-issue.md`.
 - **Hillclimb.** Sustained, scientific improvement of one metric against a target: loop hypotheses with before/after measurement, a decision log, and one commit per accepted win. Distinct from Perf issue, which is a one-off fix. `playbooks/hillclimb.md`.
 - **Runtime forensics.** Diagnose a runtime symptom (leak, idle-CPU spin, glitch) from live instrumentation (GliderTrace: `trace_start`/`trace_attach`, counters, nettrace). The deliverable is a diagnosis, not a fix. `playbooks/runtime-forensics.md`.
-- **Trace forensics.** Diagnose a captured profiling artifact (nettrace, gcdump, binlog, counters CSV — the GliderTrace session artifacts) handed to you after the fact. The deliverable is a diagnosis, not a fix. `playbooks/trace-forensics.md`.
+- **Trace forensics.** Diagnose a captured profiling artifact (nettrace, gcdump, binlog, counters CSV, the GliderTrace session artifacts) handed to you after the fact. The deliverable is a diagnosis, not a fix. `playbooks/trace-forensics.md`.
 - **Feature.** New or changed behavior, built from a named data shape. `playbooks/feature.md`.
 - **Refactoring.** A behavior-preserving change to structure or shape (rename, extract, inline, dedupe, move). `playbooks/refactoring.md`.
 - **Prototype.** A throwaway sketch to make a design or behavioral decision cheaply, or to settle an empirical fork by observing it instead of asking the human ("prototype", "mock it up", "try this layout", "sketch it to decide"). `playbooks/prototype.md`.

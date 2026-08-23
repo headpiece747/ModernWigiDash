@@ -14,22 +14,21 @@ description: >
 > `get_diagnostics` → glider_get_diagnostics; `detect_antipatterns` →
 > glider_semantic_query; `find_dead_code` → glider_find_unused_symbols /
 > glider_find_unused_parameters; `get_test_coverage_map` → no Glider
-> equivalent — approximate with test-class name matching against
+> equivalent, approximate with test-class name matching against
 > ModernWigiDash.Tests. `get_project_graph` → glider_get_project_graph.
 
-# /health-check — 8-Dimension Project Assessment
+# /health-check: 8-Dimension Project Assessment
 
 ## What
 
 Runs a data-driven health assessment across 8 dimensions, each graded A-F with
 the specific data points that produced the grade, and rolls them into a GPA.
 Gut feeling is not a grade: every dimension uses MCP tools or CLI commands, and
-every grade below A comes with specific, prioritized, effort-estimated fixes —
-"add test classes for OrderService, PaymentProcessor, ShippingCalculator" is
+every grade below A comes with specific, prioritized, effort-estimated fixes. "Add test classes for OrderService, PaymentProcessor, ShippingCalculator" is
 actionable; "improve test coverage" is not.
 
 This skill owns the **canonical grading system** for the kit. The full rubrics,
-GPA scale, and report template live in `references/grading-rubric.md` — load
+GPA scale, and report template live in `references/grading-rubric.md`, load
 that file when running an assessment.
 
 Tone is diagnostic, not punitive: a C grade is an improvement path, not a
@@ -37,11 +36,11 @@ failure.
 
 ## When
 
-- Onboarding to an unfamiliar or new project — set the baseline
+- Onboarding to an unfamiliar or new project, set the baseline
 - "How healthy is this?", "grade this project", "codebase review", "report card"
 - Pre-release quality gate, or monthly/quarterly maintenance review
-- After a cleanup sprint (`/de-sloppify`) — re-grade to show progress
-- Tech-debt prioritization — lowest grades get the next sprint's attention
+- After a cleanup sprint (`/de-sloppify`), re-grade to show progress
+- Tech-debt prioritization. Lowest grades get the next sprint's attention
 
 ## How
 
@@ -63,19 +62,19 @@ per dimension. For deep code-quality dimensions, delegate to the
 
 | # | Dimension | Data source |
 |---|-----------|-------------|
-| 1 | Build Health | `dotnet build --no-restore` — errors + warnings |
-| 2 | Code Quality | MCP `detect_antipatterns` — read `summary`, grade high-confidence only |
+| 1 | Build Health | `dotnet build --no-restore`, errors + warnings |
+| 2 | Code Quality | MCP `detect_antipatterns`, read `summary`, grade high-confidence only |
 | 3 | Architecture | MCP `get_project_graph` + `detect_circular_dependencies` (projects AND types) |
-| 4 | Test Coverage | MCP `get_test_coverage_map` — **check `applicable` first** (structural, not line coverage) |
-| 5 | Dead Code | MCP `find_dead_code(scope: "solution")` — grade high-confidence; ignore `conventionFiltered` |
-| 6 | API Surface | MCP `get_public_api` + `find_references` — overexposure, return-type consistency |
+| 4 | Test Coverage | MCP `get_test_coverage_map`, **check `applicable` first** (structural, not line coverage) |
+| 5 | Dead Code | MCP `find_dead_code(scope: "solution")`, grade high-confidence; ignore `conventionFiltered` |
+| 6 | API Surface | MCP `get_public_api` + `find_references`, overexposure, return-type consistency |
 | 7 | Security Posture | `dotnet list package --vulnerable --include-transitive` + secrets/auth spot check (deep dive: `/security-scan`) |
 | 8 | Documentation | XML doc coverage on public APIs + README currency |
 
 ### Step 2.5: Triage Gate (before any grade is assigned)
 
 Detector output is evidence, not a grade. Pass every finding through this gate
-first — it is what stops a noisy count becoming a wrong letter.
+first. It is what stops a noisy count becoming a wrong letter.
 
 1. **Read `summary`, not the violation list.** `summary.byId` is complete even
    when the list is truncated. Never sample a truncated list and extrapolate.
@@ -85,7 +84,7 @@ first — it is what stops a noisy count becoming a wrong letter.
    them by category; do not fix or count them.
 4. **Grade `high` only.** These are wrong regardless of context.
 5. **Check invariants.** If a signal contradicts something the target repo's
-   CLAUDE.md documents as deliberate, the invariant wins — verify before grading.
+   CLAUDE.md documents as deliberate, the invariant wins, verify before grading.
 6. **Read before asserting.** Never describe a finding you have not opened. If
    you cannot open all of them, report the ones you did and say so.
 
@@ -94,16 +93,16 @@ table cannot be filled, the dimension is not ready to grade.
 
 ### Step 3: Grade and Aggregate
 
-Apply the rubric thresholds exactly — never grade on a curve ("pretty good for
+Apply the rubric thresholds exactly, never grade on a curve ("pretty good for
 a project this size" is how standards erode; 15 warnings is a C regardless of
 project size). Convert to GPA (A=4.0 … F=0.0), averaging only the dimensions
-actually graded — a dimension marked "Not assessed" is excluded from the GPA,
+actually graded. A dimension marked "Not assessed" is excluded from the GPA,
 never scored as an F.
 
 ### Step 4: Report
 
 Produce the report card from the template in `references/grading-rubric.md`:
-grades table with key findings, overall GPA, and priority recommendations —
+grades table with key findings, overall GPA, and priority recommendations,
 each with named types/files, priority order, and effort estimates. If a
 previous report exists, append the trend comparison table.
 
@@ -135,8 +134,8 @@ endpoint classes, ~1 day; (3) review the 44 catch blocks or suppress by path.
 
 ## Related
 
-- `references/grading-rubric.md` — canonical rubrics, GPA scale, report template
-- `/de-sloppify` — cleanup pipeline for the issues a health check surfaces
-- `/security-scan` — deep 6-layer scan behind Dimension 7
-- `/code-review` — per-change review (this skill grades the whole project)
-- `/verify` — pass/fail pipeline for a change set, not a graded assessment
+- `references/grading-rubric.md`: canonical rubrics, GPA scale, report template
+- `/de-sloppify`: cleanup pipeline for the issues a health check surfaces
+- `/security-scan`: deep 6-layer scan behind Dimension 7
+- `/code-review`: per-change review (this skill grades the whole project)
+- `/verify`: pass/fail pipeline for a change set, not a graded assessment

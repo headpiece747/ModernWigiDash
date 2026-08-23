@@ -55,7 +55,7 @@ Backlog items land in the repo's own record: `CONTEXT.md` (a glossary entry or a
 For each approved Accepted item, follow the Routing field exactly:
 
 - Trivial existing-skill edit (a one-line bullet, a tightened sentence, a stale fact corrected): parent does directly.
-- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): route through the `authoring-a-skill` playbook (poteto-mode) — draft, validate, prove it changes behavior.
+- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): route through the `authoring-a-skill` playbook (poteto-mode), draft, validate, prove it changes behavior.
 - `tune description: <skill path>` (the skill exists but didn't trigger when it should have): tighten the skill's `description` frontmatter so it fires next time.
 - `new skill: <kebab-name>`: create it under `.opencode/skills/<kebab-name>/` via the `authoring-a-skill` playbook. Do not invent the shape ad hoc.
 

@@ -12,7 +12,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 ## Driving conventions
 
 - Start every recipe from the baseline state unless its preconditions say otherwise.
-- Prefer AutomationId/Name handles from the skill's handle table over coordinates; the canvas is the exception (`click-screen` with absolute screen pixels — the preview has no UIA peer).
+- Prefer AutomationId/Name handles from the skill's handle table over coordinates; the canvas is the exception (`click-screen` with absolute screen pixels. The preview has no UIA peer).
 - Treat every command as literal. Keep quoted names and flags unchanged.
 - Run every action through `scripts/wmd-verify.ps1` (one invocation per action).
 - Wait for observable results (re-read `value` until it changes), not fixed sleeps.

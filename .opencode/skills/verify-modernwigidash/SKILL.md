@@ -13,7 +13,7 @@ Harness: `scripts/wmd-verify.ps1`, one PowerShell 5.1 invocation per action, rep
 powershell <root>\.opencode\skills\verify-modernwigidash\scripts\wmd-verify.ps1 <command> [args]
 ```
 
-> **Why the harness is a hand-rolled `ComImport` bridge (not `New-Object -ComObject`):** it drives **UIA v4 core** (`UIAutomationCore`), not the legacy v3 managed client. Two independent reasons it can't be a plain COM call: v4 objects are **vtable-dispatched (no `IDispatch`)** — inherent to the v4 API, so PowerShell can never late-bind them — and this Windows build registers the coclass as a **bare CLSID (no ProgID/typelib)**, so it can't be auto-instantiated or have a generated interop either. The typed-vtable interop is compiled via `Add-Type`; the full three-constraint rationale is the comment block at the top of `wmd-verify.ps1`.
+> **Why the harness is a hand-rolled `ComImport` bridge (not `New-Object -ComObject`):** it drives **UIA v4 core** (`UIAutomationCore`), not the legacy v3 managed client. Two independent reasons it can't be a plain COM call: v4 objects are **vtable-dispatched (no `IDispatch`)**, inherent to the v4 API, so PowerShell can never late-bind them, and this Windows build registers the coclass as a **bare CLSID (no ProgID/typelib)**, so it can't be auto-instantiated or have a generated interop either. The typed-vtable interop is compiled via `Add-Type`; the full three-constraint rationale is the comment block at the top of `wmd-verify.ps1`.
 
 ## Preconditions (baseline state)
 
@@ -48,7 +48,7 @@ Exit 0 means: the launched pid is alive, no second instance exists, the window i
 
 ## Drive
 
-The feature recipes in `features/` pair every user action with one `wmd-verify.ps1` command and the observable result that proves it. Stable handles (case-insensitive contains match on Name **or** AutomationId; WPF maps `x:Name` to AutomationId, and string button content to Name — so the glyph icons below are findable by their glyph):
+The feature recipes in `features/` pair every user action with one `wmd-verify.ps1` command and the observable result that proves it. Stable handles (case-insensitive contains match on Name **or** AutomationId; WPF maps `x:Name` to AutomationId, and string button content to Name, so the glyph icons below are findable by their glyph):
 
 | Handle | Surface |
 |---|---|
@@ -56,31 +56,31 @@ The feature recipes in `features/` pair every user action with one `wmd-verify.p
 | `Theme Customization` (window title `🎨 Theme Customization`) | theme dialog |
 | `AddPage` (id `BtnAddPage`, name `+ Add Page`) | add page |
 | `📄 <PageName>` (tab button name) | page tab |
-| `✏️` (tab rename button, name = glyph) | rename (repeated — `list` + `click-nth`) |
-| `✕` (tab close button, name = glyph) | delete page (repeated — `list` + `click-nth`) |
-| `Rename Page` (window title, fixed) | rename prompt — input is a nameless `[Edit]` → `set-in "Rename Page" "<value>"` |
+| `✏️` (tab rename button, name = glyph) | rename (repeated, `list` + `click-nth`) |
+| `✕` (tab close button, name = glyph) | delete page (repeated, `list` + `click-nth`) |
+| `Rename Page` (window title, fixed) | rename prompt, input is a nameless `[Edit]` → `set-in "Rename Page" "<value>"` |
 | `Delete Page` (window title) | page-delete confirm dialog (body names the page + widget count) |
 | `ExportProfile` (`💾 Export Profile`), `ImportProfile`, `ClearCanvas` | status bar actions |
 | `ActiveCount` (id `TxtActiveCount`, value `Active Widgets: N`) | status bar count |
 | `SearchCatalog` (id `TxtSearchCatalog`) | catalog filter box |
-| `<pluginId>` (catalog row `ListItem`, Name = `PluginInfo { ... }` ToString — e.g. `weather_forecast`) | catalog row identity node — read-only (`find`/`list` for filter/count/proof) |
-| `BtnPlace_<pluginId>` (catalog place button, unique AutomationId, name `+ Place on Canvas`) | place on the active page — Invoke, realized off-screen, headless-safe. Never use a display-name needle: it collides with the `📄 <PageName>` tab button |
-| `Remove Widget from Canvas` | inspector delete (Invoke — visibility-independent; reported bounds may sit off-window when scrolled) |
-| (canvas — no UIA peer: `SkiaCanvas`/`PreviewFrame` match nothing) | the 1016×592 composited preview → canvas pointing via `click-screen <x> <y>` (absolute screen coords) |
+| `<pluginId>` (catalog row `ListItem`, Name = `PluginInfo { ... }` ToString, e.g. `weather_forecast`) | catalog row identity node, read-only (`find`/`list` for filter/count/proof) |
+| `BtnPlace_<pluginId>` (catalog place button, unique AutomationId, name `+ Place on Canvas`) | place on the active page, Invoke, realized off-screen, headless-safe. Never use a display-name needle: it collides with the `📄 <PageName>` tab button |
+| `Remove Widget from Canvas` | inspector delete (Invoke, visibility-independent; reported bounds may sit off-window when scrolled) |
+| (canvas, no UIA peer: `SkiaCanvas`/`PreviewFrame` match nothing) | the 1016×592 composited preview → canvas pointing via `click-screen <x> <y>` (absolute screen coords) |
 | `SnapToGrid`, `EditMode` | top-bar checkboxes |
 | `UsbStatus` (id `TxtUsbStatus`) | USB badge text |
 
-Repeated handles (the per-tab `✕`/`✏️`) need the lookup trio instead of a bare `click`: `list <needle> [buttons]` (read-only — numbered matches in tree order, left-to-right within each container, with type + position; scoped to the launched app's pid so foreign windows, e.g. the shell, can never pollute the numbering), then `click <needle>` (first match, Invoke) or `click-nth <needle> <n>` (Nth **button** match, Invoke). `list` first, click second — never guess N. Dialog windows with a nameless input (the themed prompts) take `set-in <windowTitle> <value>`: it writes the window's first writable text control and prints the read-back — **commit the dialog (`click OK`) only after the read-back matches the intended value**; otherwise `click Cancel`.
+Repeated handles (the per-tab `✕`/`✏️`) need the lookup trio instead of a bare `click`: `list <needle> [buttons]` (read-only, numbered matches in tree order, left-to-right within each container, with type + position; scoped to the launched app's pid so foreign windows, e.g. the shell, can never pollute the numbering), then `click <needle>` (first match, Invoke) or `click-nth <needle> <n>` (Nth **button** match, Invoke). `list` first, click second, never guess N. Dialog windows with a nameless input (the themed prompts) take `set-in <windowTitle> <value>`: it writes the window's first writable text control and prints the read-back, **commit the dialog (`click OK`) only after the read-back matches the intended value**; otherwise `click Cancel`.
 
 Driving conventions:
 
 - Start every recipe from the baseline state unless its preconditions say otherwise.
-- Prefer the AutomationId handles above over coordinates. The only mouse-backed step is canvas pointing (`click-screen <x> <y>`, absolute screen coords — the preview canvas has no UIA peer).
-- Canvas pointing (`click-screen <x> <y>`) needs the synthetic mouse. In headless/agent sessions the cursor cannot be placed, so the harness's mouse fallback refuses with a clear error instead of clicking the physical cursor position — that step is precondition-blocked there: mark it unreachable (with the precondition named), do not improvise. Everything else runs through Invoke — including the catalog place step (`click "BtnPlace_<pluginId>"`).
+- Prefer the AutomationId handles above over coordinates. The only mouse-backed step is canvas pointing (`click-screen <x> <y>`, absolute screen coords. The preview canvas has no UIA peer).
+- Canvas pointing (`click-screen <x> <y>`) needs the synthetic mouse. In headless/agent sessions the cursor cannot be placed, so the harness's mouse fallback refuses with a clear error instead of clicking the physical cursor position. That step is precondition-blocked there: mark it unreachable (with the precondition named), do not improvise. Everything else runs through Invoke, including the catalog place step (`click "BtnPlace_<pluginId>"`).
 - Treat every command as literal; keep quoted names unchanged.
-- Modal dialogs: drive them before returning to the main window; `doctor -Window <part>` and `wait <part>` are the health/wait pair. Stacked dialogs of the same kind share coordinates — probe (`find <title>`) to count them and cancel top-down.
+- Modal dialogs: drive them before returning to the main window; `doctor -Window <part>` and `wait <part>` are the health/wait pair. Stacked dialogs of the same kind share coordinates, probe (`find <title>`) to count them and cancel top-down.
 - Wait for observable results, not fixed sleeps (a `value` read until it changes beats a `Start-Sleep`).
-- The WPF preview canvas is Skia-drawn and exposes NO UIA peer at all (neither `SkiaCanvas` nor `PreviewFrame` matches in the tree — not even the bounds). Canvas pointing goes through `click-screen <x> <y>` (absolute screen coords), and what was drawn is proven by `shot`.
+- The WPF preview canvas is Skia-drawn and exposes NO UIA peer at all (neither `SkiaCanvas` nor `PreviewFrame` matches in the tree, not even the bounds). Canvas pointing goes through `click-screen <x> <y>` (absolute screen coords), and what was drawn is proven by `shot`.
 - **Empty-string args drop in transit**: PowerShell 5.1 drops empty-string args when marshaling to native commands, so `set <box> ""` reaches the harness with one arg and fails with `usage: set <needle> <value>`. Route through cmd to preserve the empty value: `cmd /c 'powershell -NoProfile -File <harness> set <needle> ""'` (verified 2026-08-21 on the catalog filter reset: 12→1→12). The same trap hits any empty-string arg (`set-in` included).
 
 ## Evidence

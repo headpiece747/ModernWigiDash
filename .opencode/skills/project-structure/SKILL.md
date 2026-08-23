@@ -14,10 +14,10 @@ description: >
 
 ## Core Principles
 
-1. **Central package management** — Use `Directory.Packages.props` to manage NuGet package versions in one place. No version numbers in individual `.csproj` files.
-2. **Shared build properties** — Use `Directory.Build.props` for common settings (target framework, nullable, implicit usings). Don't repeat in every project.
-3. **.slnx for solutions** — The new XML-based solution format is cleaner and more merge-friendly than the legacy `.sln` format.
-4. **src/tests separation** — Source projects in `src/`, test projects in `tests/`. Clear boundary.
+1. **Central package management.** Use `Directory.Packages.props` to manage NuGet package versions in one place. No version numbers in individual `.csproj` files.
+2. **Shared build properties.** Use `Directory.Build.props` for common settings (target framework, nullable, implicit usings). Don't repeat in every project.
+3. **.slnx for solutions.** The new XML-based solution format is cleaner and more merge-friendly than the legacy `.sln` format.
+4. **src/tests separation.** Source projects in `src/`, test projects in `tests/`. Clear boundary.
 
 ## Patterns
 
@@ -201,7 +201,7 @@ tests/
 | Package version management | `Directory.Packages.props` (central) |
 | Shared build settings | `Directory.Build.props` |
 | SDK version pinning | `global.json` |
-| Common using directives | Per-project `<Using>` items in each `.csproj` (NOT `Directory.Build.props` — that would force cross-project namespaces onto assemblies that don't use them) |
+| Common using directives | Per-project `<Using>` items in each `.csproj` (NOT `Directory.Build.props`, that would force cross-project namespaces onto assemblies that don't use them) |
 | Small API (1-2 devs) | Single project (`MyApp.Api`) |
 | Medium API (3-5 devs) | 2-3 projects (`Api`, `Domain`, `Infrastructure`) |
 | Large / modular app | Module-per-project with shared `Contracts` |

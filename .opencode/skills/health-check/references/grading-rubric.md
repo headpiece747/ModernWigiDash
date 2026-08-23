@@ -1,7 +1,7 @@
-# Health Check — Grading Rubric Reference
+# Health Check: Grading Rubric Reference
 
 Loaded by `/health-check` Step 2. This is the **canonical** grading system for
-the kit — no other skill defines its own.
+the kit. No other skill defines its own.
 
 ## The Cardinal Rule: Never Grade a Raw Count
 
@@ -10,12 +10,12 @@ A detector count is evidence, not a grade. Every tool in this kit returns a
 
 - **Grade on `high` confidence findings only.** These are wrong regardless of context.
 - **`medium` findings are review items, never grade inputs.** The pattern is
-  suspicious but has legitimate uses the detector cannot rule out — a catch block
+  suspicious but has legitimate uses the detector cannot rule out, a catch block
   that logs and rethrows, an EF query in a command handler that may edit downstream.
 - **`suppressed` findings count for nothing**, but the report must state the count
   and the config path. Suppression must be visible, or it becomes a way to game
   the grade silently.
-- Read `summary.byId` — it is complete even when the violation list is truncated.
+- Read `summary.byId`. It is complete even when the violation list is truncated.
   Never sample a truncated list and extrapolate.
 
 If a raw signal contradicts an invariant documented in the target repo's
@@ -25,7 +25,7 @@ CLAUDE.md, **the invariant wins pending verification**. Verify, then grade.
 
 ### Dimension 1: Build Health
 
-Tool: `dotnet build --no-restore` — metric: error count, warning count.
+Tool: `dotnet build --no-restore`, metric: error count, warning count.
 
 | Grade | Criteria |
 |-------|----------|
@@ -37,7 +37,7 @@ Tool: `dotnet build --no-restore` — metric: error count, warning count.
 
 ### Dimension 2: Code Quality
 
-Tool: MCP `detect_antipatterns` — metric: **high-confidence** findings per 1K
+Tool: MCP `detect_antipatterns`, metric: **high-confidence** findings per 1K
 production lines. The tool defaults to production scope; generated code is never
 reported and test/migration code is excluded.
 
@@ -52,7 +52,7 @@ reported and test/migration code is excluded.
 **Unreviewed-medium cap:** a project cannot be graded A while more than 25
 medium-confidence findings remain untriaged. Cap at B and name the categories in
 the report. A clean high-confidence count with hundreds of unexamined mediums is
-not an A — it is an unexamined codebase.
+not an A. It is an unexamined codebase.
 
 These thresholds are far tighter than raw-count grading because the detectors are
 precise now. A well-maintained 100K-line codebase should produce single-digit
@@ -76,7 +76,7 @@ at both `scope: "projects"` and `scope: "types"`.
 
 ### Dimension 4: Test Coverage
 
-Tool: MCP `get_test_coverage_map(projectFilter: each production project)` —
+Tool: MCP `get_test_coverage_map(projectFilter: each production project)`,
 metric: % of production types with corresponding test classes.
 
 **Check `applicable` first.** When the tool returns `applicable: false`, the
@@ -92,11 +92,11 @@ dimensions actually graded). A structurally invalid metric must never become an 
 | C | 50-74% |
 | D | 25-49% |
 | F | < 25% |
-| Not assessed | `applicable: false` — excluded from GPA |
+| Not assessed | `applicable: false`, excluded from GPA |
 
 This is structural coverage (test class exists), not runtime line coverage. It
 only works for suites written one test class per production type. Integration-
-and feature-driven suites test by behaviour, and name matching cannot see that —
+and feature-driven suites test by behaviour, and name matching cannot see that,
 which is what `applicable: false` reports. To grade those, run a runtime coverage
 tool (`dotnet test --collect:"XPlat Code Coverage"`) or cite an existing coverage
 audit; do not substitute the structural number.
@@ -107,7 +107,7 @@ Tool: MCP `find_dead_code(scope: "solution", kind: "all", maxResults: 50)`.
 
 Grade on `high`-confidence symbols. `conventionFiltered` reports symbols the tool
 excluded because a reference search cannot see how they are bound (EF entity
-configurations, hosted services, migrations, extension-method hosts) — these are
+configurations, hosted services, migrations, extension-method hosts). These are
 **not** debt and are never penalised. `medium` symbols carry a `note` explaining
 which convention their name matches; verify before removing.
 
@@ -149,7 +149,7 @@ missing auth attributes.
 | D | High-severity vuln, or missing auth on sensitive endpoints |
 | F | Critical vuln, hardcoded secrets, or systemic auth gaps |
 
-For a deep dive, run `/security-scan` — this dimension is a spot check.
+For a deep dive, run `/security-scan`. This dimension is a spot check.
 
 ### Dimension 8: Documentation
 
@@ -171,11 +171,11 @@ GPA = average across the dimensions **actually graded**. Dimensions marked
 
 | GPA Range | Overall Assessment |
 |-----------|--------------------|
-| 3.5 - 4.0 | Excellent — production-ready, well-maintained |
-| 3.0 - 3.4 | Good — solid foundation, minor improvements needed |
-| 2.5 - 2.9 | Fair — functional but accumulating tech debt |
-| 2.0 - 2.4 | Needs Work — significant improvements required |
-| < 2.0 | Critical — major structural issues to address |
+| 3.5 - 4.0 | Excellent: production-ready, well-maintained |
+| 3.0 - 3.4 | Good: solid foundation, minor improvements needed |
+| 2.5 - 2.9 | Fair: functional but accumulating tech debt |
+| 2.0 - 2.4 | Needs Work: significant improvements required |
+| < 2.0 | Critical: major structural issues to address |
 
 ## Report Card Template
 
@@ -230,7 +230,7 @@ Suppression config: `.cwm-navigator.json` (none / path). State it either way.
 ```
 
 Every recommendation must be specific (named types, file:line), prioritized,
-and effort-estimated — "improve test coverage" is not actionable.
+and effort-estimated. "Improve test coverage" is not actionable.
 
 ## Trend Tracking
 

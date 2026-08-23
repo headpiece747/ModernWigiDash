@@ -14,10 +14,10 @@ description: >
 
 ## Core Principles
 
-1. **Integration tests are the highest-value tests** — A single `WebApplicationFactory` test covers routing, binding, validation, business logic, and persistence in one shot. Start here before writing unit tests.
-2. **Real databases in tests** — Use Testcontainers to spin up real PostgreSQL/SQL Server instances. In-memory providers hide real bugs (transactions, constraints, SQL generation).
-3. **AAA pattern is mandatory** — Every test has three clearly separated sections: Arrange, Act, Assert. No mixing.
-4. **Test behavior, not implementation** — Tests should survive refactoring. Test what the system does, not how it does it.
+1. **Integration tests are the highest-value tests.** A single `WebApplicationFactory` test covers routing, binding, validation, business logic, and persistence in one shot. Start here before writing unit tests.
+2. **Real databases in tests.** Use Testcontainers to spin up real PostgreSQL/SQL Server instances. In-memory providers hide real bugs (transactions, constraints, SQL generation).
+3. **AAA pattern is mandatory.** Every test has three clearly separated sections: Arrange, Act, Assert. No mixing.
+4. **Test behavior, not implementation.** Tests should survive refactoring. Test what the system does, not how it does it.
 
 ## Patterns
 

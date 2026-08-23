@@ -14,10 +14,10 @@ description: >
 
 ## Core Principles
 
-1. **Use the newest stable features** — C# 14 is the target. Prefer language-level constructs over library workarounds.
-2. **Readability over cleverness** — Pattern matching and expression-bodied members improve readability when used appropriately; deeply nested patterns do not.
-3. **Value types where possible** — Prefer `record struct`, `Span<T>`, and stack allocation to reduce GC pressure.
-4. **Immutability by default** — Use `record`, `readonly`, `init`, and `required` to make illegal states unrepresentable.
+1. **Use the newest stable features.** C# 14 is the target. Prefer language-level constructs over library workarounds.
+2. **Readability over cleverness.** Pattern matching and expression-bodied members improve readability when used appropriately; deeply nested patterns do not.
+3. **Value types where possible.** Prefer `record struct`, `Span<T>`, and stack allocation to reduce GC pressure.
+4. **Immutability by default.** Use `record`, `readonly`, `init`, and `required` to make illegal states unrepresentable.
 
 ## Patterns
 
@@ -107,7 +107,7 @@ public class OrderViewModel : INotifyPropertyChanged
 
 ### Extension Members (C# 14)
 
-C# 14 adds `extension` blocks inside static classes. Unlike classic extension methods, they support extension **properties** and **static** extension members — the receiver is declared once for the whole block.
+C# 14 adds `extension` blocks inside static classes. Unlike classic extension methods, they support extension **properties** and **static** extension members. The receiver is declared once for the whole block.
 
 ```csharp
 // GOOD — extension block (shipped C# 14 syntax)
@@ -134,7 +134,7 @@ public static class OrderExtensions
 if (order.IsHighValue) { /* ... */ }
 ```
 
-Classic `this`-parameter extension methods still work and coexist — use extension blocks when you need properties or several members on the same receiver.
+Classic `this`-parameter extension methods still work and coexist, use extension blocks when you need properties or several members on the same receiver.
 
 ## Anti-patterns
 

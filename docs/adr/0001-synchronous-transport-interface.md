@@ -7,9 +7,9 @@
 ## Context
 
 The transport layer (`IDisplayTransport`) was originally designed with an async interface wrapping synchronous USB I/O. Every transport method was `ValueTask<T>`, implemented as `ValueTask.FromResult(syncBody())`, forcing callers to bridge with `.GetAwaiter().GetResult()` or `await`. This "fake async" pattern affected:
-- `ModernWigiDashDisplayService` (WCF service) — 12 sync-over-async bridges
-- `DisplayHardwareWorkerService` — awaited every transport call
-- `DisplayDeviceEngine` — mixed sync/async with additional timeout logic
+- `ModernWigiDashDisplayService` (WCF service): 12 sync-over-async bridges
+- `DisplayHardwareWorkerService`: awaited every transport call
+- `DisplayDeviceEngine`: mixed sync/async with additional timeout logic
 
 The async interface was a half-migration: the USB operations (WinUSB/LibUsbDotNet control transfers, bulk writes) are inherently blocking with no I/O completion port support.
 
@@ -31,13 +31,13 @@ The async interface was a half-migration: the USB operations (WinUSB/LibUsbDotNe
 - Callers that want async behavior must wrap in `Task.Run` (already done in the worker)
 - Breaks any external consumer that may depend on the async signatures (none exist in this codebase)
 
-**Rationale:** The transport layer's blocking nature is inherent to USB HID/WinUSB — there's no I/O completion port model for these APIs. Wrapping synchronous I/O in `ValueTask.FromResult` adds cognitive overhead, prevents the C# compiler from detecting sync-over-async, and forces every caller to reason about async semantics that don't exist.
+**Rationale:** The transport layer's blocking nature is inherent to USB HID/WinUSB, there's no I/O completion port model for these APIs. Wrapping synchronous I/O in `ValueTask.FromResult` adds cognitive overhead, prevents the C# compiler from detecting sync-over-async, and forces every caller to reason about async semantics that don't exist.
 
 ## Alternatives considered
 
-1. **Keep fake async + suppress `S6966` warnings** — maintained the illusion but carried debt everywhere. Rejected because the debt is real and growing.
-2. **Migrate USB I/O to truly async** — WinUSB has no async bulk write API; LibUsbDotNet's overlapped write is documented as "problematic" (the WinUsbNative.cs comment). Not feasible without a major transport rewrite.
-3. **Provide both sync and async overloads** — doubles the API surface with no practical benefit since the async version is always fake. Rejected for the same reason as (1).
+1. **Keep fake async + suppress `S6966` warnings.** Maintained the illusion but carried debt everywhere. Rejected because the debt is real and growing.
+2. **Migrate USB I/O to truly async.** WinUSB has no async bulk write API; LibUsbDotNet's overlapped write is documented as "problematic" (the WinUsbNative.cs comment). Not feasible without a major transport rewrite.
+3. **Provide both sync and async overloads.** Doubles the API surface with no practical benefit since the async version is always fake. Rejected for the same reason as (1).
 
 ## Date
 

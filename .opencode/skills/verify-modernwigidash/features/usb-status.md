@@ -28,5 +28,5 @@ Preconditions:
 
 - Right after launch the badge can read `Connecting` or the initial `WigiDash` label before the first connect verdict; read `value UsbStatus` again after one or two 5 s cycles before calling the state wrong.
 - Elevation changes the outcome: an elevated launch on a machine with the display attached can reach `Connected`, which invalidates this feature's Simulated expectation. The pre-condition (no display, unelevated) is part of the proof.
-- The engine's standby/teardown only happens at app close; a stopped app is not a `Disconnected` state — the feature is about a live app, so prove it before any `stop`.
+- The engine's standby/teardown only happens at app close; a stopped app is not a `Disconnected` state. The feature is about a live app, so prove it before any `stop`.
 - The badge text is the presenter's gate source of truth (the same value the touch-routing policy gates on); a wrong label here is load-bearing, not cosmetic.

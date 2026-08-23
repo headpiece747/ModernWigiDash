@@ -10,19 +10,19 @@ description: >
   "data protection", "security posture".
 ---
 
-# /security-scan — 6-Layer Security Pipeline
+# /security-scan: 6-Layer Security Pipeline
 
 ## What
 
 Runs a defense-in-depth static scan across 6 layers. A project with zero CVEs
-can still have hardcoded secrets, SQL injection, and missing auth — each layer
+can still have hardcoded secrets, SQL injection, and missing auth. Each layer
 catches a different vulnerability class. Findings map to the **OWASP Top
 10:2025** taxonomy and are rated Critical/High/Medium/Low by exploitability,
-impact, and exposure — a Critical SQL injection on a public endpoint outranks a
+impact, and exposure. A Critical SQL injection on a public endpoint outranks a
 Low info-disclosure on an admin page.
 
 Detection patterns, OWASP mappings, remediation code, and the report template
-live in `references/scan-layers.md` — read it before executing.
+live in `references/scan-layers.md`, read it before executing.
 
 **Honesty rule:** this is static analysis, not a penetration test. It catches
 known patterns but misses business-logic flaws, complex authorization bypasses,
@@ -30,11 +30,11 @@ and runtime-only vulnerabilities. Every report states this.
 
 ## When
 
-- Pre-release security gate — full scan, non-negotiable before production
+- Pre-release security gate, full scan, non-negotiable before production
 - "Security scan", "security audit", "find secrets", "CVE check", "OWASP"
 - After a dependency update (Layer 1), auth changes (Layer 4), config changes
   (Layer 2), or logging changes (Layer 6)
-- Pre-pentest preparation — fix static issues before paying for a pentest
+- Pre-pentest preparation, fix static issues before paying for a pentest
 - Incident response and quarterly reviews
 
 ## How
@@ -63,16 +63,16 @@ the `authentication` and `configuration` skills.
 | 1 | Package vulnerabilities | A03 Supply Chain | `dotnet list package --vulnerable --include-transitive` |
 | 2 | Secrets detection | — | Pattern scan over .cs/.json/.yml/.xml/.config |
 | 3 | OWASP code patterns | A05 Injection, A08 Integrity, A04 Crypto, A01 Access Control | Source scan: raw SQL, `Html.Raw`, `BinaryFormatter`, MD5/SHA1, IDOR |
-| 4 | Auth configuration | A07 Authentication, A01 Access Control | `get_endpoint_map` — every route's auth posture in one call; flag `unmarked` endpoints; then JWT validation settings |
+| 4 | Auth configuration | A07 Authentication, A01 Access Control | `get_endpoint_map`, every route's auth posture in one call; flag `unmarked` endpoints; then JWT validation settings |
 | 5 | CORS policy | A02 Misconfiguration | Wildcard origins, credentials combos, method/header breadth |
 | 6 | Data protection | A04 Crypto, A09 Logging & Alerting | PII in logs, over-broad responses, plaintext sensitive storage |
 
 ### Step 3: Rate with Context
 
-Severity must match actual risk — over-classification causes alert fatigue and
+Severity must match actual risk. Over-classification causes alert fatigue and
 buries the real Critical:
 
-- Test-fixture "secrets" and appsettings.Development.json values are expected —
+- Test-fixture "secrets" and appsettings.Development.json values are expected,
   skip or mark INFO, don't flag as HIGH
 - A missing XML comment is never a security finding
 - Reserve Critical for exploitable-now issues: injection on public endpoints,
@@ -115,7 +115,7 @@ Note: static analysis only — this does not replace a penetration test.
 
 ## Related
 
-- `references/scan-layers.md` — detection patterns, OWASP 2025 mappings, report template
-- `/verify` — Phase 5 runs a lightweight version of this scan per change set
-- `/health-check` — Dimension 7 (Security Posture) is the spot-check version
-- `authentication` / `configuration` — remediation patterns for Layers 4 and 2
+- `references/scan-layers.md`: detection patterns, OWASP 2025 mappings, report template
+- `/verify`. Phase 5 runs a lightweight version of this scan per change set
+- `/health-check`. Dimension 7 (Security Posture) is the spot-check version
+- `authentication` / `configuration`: remediation patterns for Layers 4 and 2

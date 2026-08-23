@@ -6,12 +6,12 @@ description: Audit any second brain, notes folder, or agent memory for facts tha
 # Second Brain Audit
 
 > **Project adaptation (ModernWigiDash/OpenCode):** the "second brain" here is
-> agentmemory (MCP) plus the always-loaded steering docs — `CONTEXT.md` (domain
+> agentmemory (MCP) plus the always-loaded steering docs, `CONTEXT.md` (domain
 > glossary: state-shaped entries such as "837 unit tests", project lists, ADR
 > tables) and `.opencode/AGENTS.md`. Phase 2's always-loaded surface = CONTEXT.md
 > + `.opencode/AGENTS.md` + `.opencode/rules/dotnet-rules.md`; verify claims
 > against the codebase (grep/codegraph) and agentmemory observations
-> (`agentmemory_memory_recall`). Phase 3's script targets monetary values — skip
+> (`agentmemory_memory_recall`). Phase 3's script targets monetary values, skip
 > it here (no money facts), Phase 2 does the work.
 
 Notes rot in a specific way. Nothing is corrupted and nothing goes missing: a fact

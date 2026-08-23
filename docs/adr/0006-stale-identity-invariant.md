@@ -6,8 +6,8 @@
 
 ## Context
 
-The weather cluster's load-bearing rule — "never apply weather resolved for a
-different place than the UI shows" — was spelled in four-plus ways and held
+The weather cluster's load-bearing rule, "never apply weather resolved for a
+different place than the UI shows", was spelled in four-plus ways and held
 together by comments alone, with no test surface (the 2026-08-18 architecture
 review, `docs/reports/architecture-review-20260818-114407.html`, Card 1):
 
@@ -23,7 +23,7 @@ review, `docs/reports/architecture-review-20260818-114407.html`, Card 1):
    `EscapeKeyField`): a private spelling of "which place is this identity"
    that the widget also called through the client.
 
-The `Fetched`/`Stale` outcome records already carry the `QueryKey` — the rule
+The `Fetched`/`Stale` outcome records already carry the `QueryKey`. The rule
 had its data but no single predicate or owner.
 
 ## Decision
@@ -32,12 +32,12 @@ had its data but no single predicate or owner.
 
 - `Build(WeatherLocation)` is the ONLY query-key construction: six identity
   fields (`LocationType|Location|Latitude|Longitude|CountryCode|LocationMatch`),
-  backslash-escaped, `|`-joined — a separator inside a field can never forge a
+  backslash-escaped, `|`-joined. A separator inside a field can never forge a
   colliding key. `CustomLabel` is deliberately absent: a label edit must not
   re-fetch.
 - `SameKey(left, right)` is the ONLY identity predicate: ordinal, null-safe
-  (case is identity — a case change is a new place).
-- `KeyPropertyNames` (6), `InvalidationProperties` (5 — every key field except
+  (case is identity, a case change is a new place).
+- `KeyPropertyNames` (6), `InvalidationProperties` (5, every key field except
   `LocationMatch`), and `LocationMatchProperty` declare the identity field
   sets exactly once. `WeatherResolvedIdentity.ResolutionInvalidationProperties`
   is an alias of `InvalidationProperties`, so the widget's derived drift test
@@ -48,7 +48,7 @@ had its data but no single predicate or owner.
   builds geocoding-identity strings.
 - The test surface is the module itself: `WeatherQueryKeyTests` pins the key
   format, the escaping rule, the field-coverage rule derived from the record,
-  the re-fetch-set + LocationMatch coverage, and the ordinal predicate — no
+  the re-fetch-set + LocationMatch coverage, and the ordinal predicate, no
   pixels, no fetch mocks.
 
 ## Consequences
@@ -59,7 +59,7 @@ had its data but no single predicate or owner.
 - A new resolution input fails two derived tests (record-derived field
   coverage in `WeatherQueryKeyTests` + the widget's drift pin) until it is
   wired into the key AND the invalidation set.
-- The client's surface shrinks (no key builders) — the surface the geocoder
+- The client's surface shrinks (no key builders). The surface the geocoder
   single-door work (review Card 2) then targets.
 
 **Negative:**
@@ -70,14 +70,14 @@ had its data but no single predicate or owner.
 
 ## Alternatives considered
 
-1. **Better comments at the existing guard sites** — comments already failed
+1. **Better comments at the existing guard sites.** Comments already failed
    to keep the spellings in sync (the review found four-plus), and comments
    provide no test surface.
-2. **Move the key into `WeatherFetchControl`** — the key is also the cache
+2. **Move the key into `WeatherFetchControl`.** The key is also the cache
    stamp's identity and the widget's guard input; the fetch control would
    gain a cross-module concern. The review keeps fetch control deep: it owns
    the stamp machinery, not the identity rule.
-3. **A struct identity record instead of an escaped string** — the stamp is
+3. **A struct identity record instead of an escaped string.** The stamp is
    persisted in the cache file as a string, so a struct would need its own
    stamp serialization; the escaped string is uniform across all three guard
    sites and forgery-proof.

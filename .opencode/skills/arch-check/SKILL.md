@@ -2,8 +2,8 @@
 name: arch-check
 description: >
   Architecture conformance check: verifies an existing codebase against its
-  declared architecture (VSA, Clean Architecture, DDD, Modular Monolith) —
-  dependency direction, layer violations, module boundary leaks, and cycles —
+  declared architecture (VSA, Clean Architecture, DDD, Modular Monolith),
+  dependency direction, layer violations, module boundary leaks, and cycles,
   using token-cheap Roslyn MCP analysis. Invoke when: "check architecture",
   "architecture violations", "layer violations", "dependency direction",
   "module boundaries", "arch check", "is my architecture clean", "enforce
@@ -26,13 +26,13 @@ description: >
 ## What
 
 Verifies that the code still matches the architecture it claims to have.
-Architectures rot through small, individually-reasonable changes — a Domain
+Architectures rot through small, individually-reasonable changes, a Domain
 project that gains an EF Core reference, a module that reaches into a sibling's
 internals, an endpoint defined outside the host. This workflow catches the rot
 using project-graph and dependency analysis, not file-by-file reading.
 
 Output: a violation report with severity, file:line evidence, and the concrete
-fix — or a clean conformance pass.
+fix, or a clean conformance pass.
 
 ## When
 
@@ -40,14 +40,14 @@ fix — or a clean conformance pass.
 - Before a release or after a large feature lands
 - After onboarding to an unfamiliar codebase that claims an architecture
 - Recurring on teams where multiple people merge to shared modules
-- NOT for choosing an architecture — that is `architecture-advisor`
+- NOT for choosing an architecture. That is `architecture-advisor`
 
 ## How
 
 **Step 1: Establish the declared architecture**
 
 In order of authority: the project's CLAUDE.md, an ADR in `docs/decisions/`,
-or ask the user. Never infer silently — a wrong baseline produces a wrong
+or ask the user. Never infer silently. A wrong baseline produces a wrong
 report. The four supported baselines and their rules:
 
 | Architecture | Rules checked |
@@ -64,7 +64,7 @@ get_project_graph()
 ```
 
 Map every project reference against the baseline's allowed arrows. A single
-wrong reference here (Domain → Infrastructure) is a CRITICAL finding — it
+wrong reference here (Domain → Infrastructure) is a CRITICAL finding. It
 makes every downstream violation possible.
 
 **Step 3: Cycles**
@@ -118,11 +118,11 @@ an integration event). Offer to fix CRITICAL items immediately.
 
 ### MCP Tools Used
 
-- `get_project_graph` — reference-direction audit (the backbone)
-- `detect_circular_dependencies` — cycle detection
-- `get_dependency_graph` / `find_references` — namespace-level leak probes
-- `get_endpoint_map` — presentation boundary + auth posture
-- `detect_antipatterns` — supporting structural evidence
+- `get_project_graph`: reference-direction audit (the backbone)
+- `detect_circular_dependencies`: cycle detection
+- `get_dependency_graph` / `find_references`: namespace-level leak probes
+- `get_endpoint_map`: presentation boundary + auth posture
+- `detect_antipatterns`: supporting structural evidence
 
 ## Example
 
@@ -150,7 +150,7 @@ Claude: Baseline from CLAUDE.md: Clean Architecture (4 projects).
 
 ## Related
 
-- `architecture-advisor` — choosing a baseline (before this skill is useful)
-- `clean-architecture`, `vertical-slice`, `ddd`, `modular-monolith` template — the rules being enforced
-- `/security-scan` — depth on the auth side-findings
-- `/health-check` — broader report card; arch-check is its architecture dimension in depth
+- `architecture-advisor`: choosing a baseline (before this skill is useful)
+- `clean-architecture`, `vertical-slice`, `ddd`, `modular-monolith` template: the rules being enforced
+- `/security-scan`: depth on the auth side-findings
+- `/health-check`: broader report card; arch-check is its architecture dimension in depth

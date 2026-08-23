@@ -1,9 +1,9 @@
-# Security Scan — Layer Reference
+# Security Scan: Layer Reference
 
 Loaded by `/security-scan` during execution. Detection patterns, OWASP Top
 10:2025 mappings, and remediation examples per layer.
 
-## Layer 1: Package Vulnerabilities — A03:2025 Software Supply Chain Failures
+## Layer 1: Package Vulnerabilities, A03:2025 Software Supply Chain Failures
 
 ```bash
 dotnet list package --vulnerable --include-transitive
@@ -85,7 +85,7 @@ A01:2025 — Broken Access Control (IDOR)
   Fix: ownership check — where o.Id == id && o.CustomerId == currentUser.Id
 ```
 
-## Layer 4: Auth Configuration — A07:2025 Authentication Failures / A01:2025 Broken Access Control
+## Layer 4: Auth Configuration, A07:2025 Authentication Failures / A01:2025 Broken Access Control
 
 ```
 CHECKLIST:
@@ -134,7 +134,7 @@ options.TokenValidationParameters = new()
 };
 ```
 
-## Layer 5: CORS Configuration — A02:2025 Security Misconfiguration
+## Layer 5: CORS Configuration, A02:2025 Security Misconfiguration
 
 ```csharp
 // CRITICAL — wildcard origin with credentials (browsers block the combo,
@@ -155,7 +155,7 @@ policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<s
 Also check: exposed headers leaking internals, overly broad methods, and
 dev-vs-prod policy separation.
 
-## Layer 6: Data Protection — A04:2025 Cryptographic Failures / A09:2025 Logging & Alerting Failures
+## Layer 6: Data Protection, A04:2025 Cryptographic Failures / A09:2025 Logging & Alerting Failures
 
 ```
 CHECKS:
@@ -182,7 +182,7 @@ logger.LogInformation("Order {OrderId} placed by customer {CustomerId}",
 ## Finding Format and Report Template
 
 Each finding: `#### [SEVERITY] File:Line — Title` with OWASP category,
-description, impact, and remediation (code before/after). Never "fix this" —
+description, impact, and remediation (code before/after). Never "fix this",
 always the specific change.
 
 ```markdown

@@ -4,8 +4,8 @@ description: >
   MCP-powered multi-dimensional code review for .NET projects. Uses Roslyn
   analysis tools for antipatterns, diagnostics, references, and dependency
   graphs combined with structured manual review. Prioritizes effort with
-  blast-radius scoring — data access, security, concurrency, and integration
-  boundaries before style — and produces severity-categorized findings with
+  blast-radius scoring, data access, security, concurrency, and integration
+  boundaries before style, and produces severity-categorized findings with
   actionable fixes. Use when: "review", "code review", "PR review", "review
   this", "review my code", "check code quality", "review changes", "what
   should I review", "review priorities", "blast radius", "critical path".
@@ -17,10 +17,10 @@ description: >
 > glider_get_project_graph, `detect_antipatterns` → glider_semantic_query,
 > `find_callers` → glider_find_callers, `get_cascade_impact` →
 > glider_get_cascade_impact, `find_unused_symbols` → glider_find_unused_symbols.
-> `get_test_coverage_map` has no Glider equivalent — use test project structure
+> `get_test_coverage_map` has no Glider equivalent, use test project structure
 > (ModernWigiDash.Tests namespaces) by convention instead.
 
-# /code-review — MCP-Powered Code Review
+# /code-review: MCP-Powered Code Review
 
 ## What
 
@@ -39,7 +39,7 @@ types).
 
 - "Review this", "code review", "PR review", before merging a pull request
 - After a major refactor to verify no regressions or design drift
-- "What should I review?" — deciding where review effort goes on a large change
+- "What should I review?", deciding where review effort goes on a large change
 - Onboarding to unfamiliar code and wanting a quality assessment
 
 ## How
@@ -47,15 +47,15 @@ types).
 ### Step 1: Scope and Score Blast Radius
 
 Identify changed files (`git diff main...HEAD`, specified files, or module).
-Score each change to set review depth — blast radius determines depth, not
+Score each change to set review depth. Blast radius determines depth, not
 line count. A one-line middleware change outranks a 300-line rename.
 
 | Blast Radius | Examples | Depth |
 |---|---|---|
-| Critical | Middleware, auth, DB migrations, shared kernel, CI/CD | Thorough — every code path |
-| High | Public API changes, message consumers, EF configuration, new module | Focused — consumers + behavior |
-| Medium | New feature following existing patterns, bug fix, new endpoint | Standard — checklist pass |
-| Low | Docs, formatting, renames, logging statements | Glance — build + tests pass |
+| Critical | Middleware, auth, DB migrations, shared kernel, CI/CD | Thorough: every code path |
+| High | Public API changes, message consumers, EF configuration, new module | Focused: consumers + behavior |
+| Medium | New feature following existing patterns, bug fix, new endpoint | Standard: checklist pass |
+| Low | Docs, formatting, renames, logging statements | Glance: build + tests pass |
 
 ### Step 2: MCP Analysis (before reading any file)
 
@@ -64,7 +64,7 @@ detect_antipatterns(projectFilter: "affected-project")   → async void, DateTim
 get_diagnostics(scope: "project", path: "affected-project") → new warnings, nullability issues
 ```
 
-Distinguish newly introduced findings from pre-existing ones — focus on new.
+Distinguish newly introduced findings from pre-existing ones, focus on new.
 
 ### Step 3: Blast Radius Verification
 
@@ -83,10 +83,10 @@ Verify dependency direction (Domain → nothing; Infrastructure → Application 
 Domain) via `get_project_graph` and `detect_circular_dependencies`. Per
 architecture: VSA features don't cross-reference; Clean Architecture domain has
 zero project references; Modular Monolith modules communicate only via
-integration events — `find_references` on a module's DbContext should resolve
+integration events. `find_references` on a module's DbContext should resolve
 only inside that module.
 
-### Step 5: Manual Review — Priority Order
+### Step 5: Manual Review: Priority Order
 
 Review what tools can't catch, highest-risk areas first:
 
@@ -174,6 +174,6 @@ Happy path covered. Add tests for validation failure and not-found.
 
 ## Related
 
-- `/de-sloppify` — Cleanup pass for the style/formatting issues review skips
-- `/verify` — Automated verification pipeline (complements manual review)
-- `/health-check` — Broader project health assessment beyond a single PR
+- `/de-sloppify`: Cleanup pass for the style/formatting issues review skips
+- `/verify`: Automated verification pipeline (complements manual review)
+- `/health-check`: Broader project health assessment beyond a single PR

@@ -15,10 +15,10 @@ description: >
 
 ## Core Principles
 
-1. **Never `new HttpClient()` per request** — Raw `HttpClient` creation causes socket exhaustion under load and ignores DNS changes. Use `IHttpClientFactory` to manage handler lifetimes.
-2. **Keyed clients over typed clients** — Keyed DI (`.AddAsKeyed()`) is the recommended pattern in .NET 10. Typed clients captured in singletons silently break handler rotation.
-3. **Resilience is not optional** — Every external HTTP call needs retry, circuit breaker, and timeout. `AddStandardResilienceHandler()` provides sensible defaults in one line.
-4. **DelegatingHandlers for cross-cutting concerns** — Auth tokens, correlation IDs, and logging belong in the handler pipeline, not scattered across service methods.
+1. **Never `new HttpClient()` per request.** Raw `HttpClient` creation causes socket exhaustion under load and ignores DNS changes. Use `IHttpClientFactory` to manage handler lifetimes.
+2. **Keyed clients over typed clients.** Keyed DI (`.AddAsKeyed()`) is the recommended pattern in .NET 10. Typed clients captured in singletons silently break handler rotation.
+3. **Resilience is not optional.** Every external HTTP call needs retry, circuit breaker, and timeout. `AddStandardResilienceHandler()` provides sensible defaults in one line.
+4. **DelegatingHandlers for cross-cutting concerns.** Auth tokens, correlation IDs, and logging belong in the handler pipeline, not scattered across service methods.
 
 ## Patterns
 
