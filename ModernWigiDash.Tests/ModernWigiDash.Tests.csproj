@@ -39,4 +39,11 @@
     <ProjectReference Include="..\ModernWigiDash.App\ModernWigiDash.App.csproj" />
   </ItemGroup>
 
+  <!-- Media-decode fixtures (MediaDecoderTests): a partial-delta GIF (the
+       CopyTo/GetPixels composite path), a full-frame GIF, and a 300-frame
+       GIF that exceeds the frame-count cap. -->
+  <ItemGroup>
+    <None Update="media-fixtures\**\*.gif" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

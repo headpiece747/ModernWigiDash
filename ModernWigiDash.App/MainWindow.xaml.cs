@@ -22,18 +22,26 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DisplayDeviceEngine _usbDevice = new();
 
     /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
-    private readonly FramePump _framePump;
+    private FramePump _framePump = null!;
 
     /// <summary>Windows sleep/resume lifecycle: pauses the pump on suspend and
     /// restarts it (plus a forced USB reconnect) on resume.</summary>
-    private readonly Power.PowerLifecycle _powerLifecycle;
+    private Power.PowerLifecycle _powerLifecycle = null!;
 
     /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
     /// The PresentMon interop is injected as a ctor parameter so the window
     /// can be constructed with a fake in tests (no real DLL load).</summary>
-    private readonly TelemetryProducers _telemetry;
+    private TelemetryProducers _telemetry = null!;
 
-    private ProfileLayout _profile;
+    // The wiring-assigned fields (_framePump, _powerLifecycle, _telemetry,
+    // _profile, _inputController, _deviceTouchDrain, _delivery, _inspector,
+    // _dialogHost, _pageTabs, _profilePersistence) are null!-typed: they hold
+    // null in the startup artifact's pre-module window, which the context's
+    // null-tolerant facade (MainWindow.Context.cs) treats as a benign no-op.
+    // BuildStartupWiring assigns them in its step order; the ordering facts
+    // are pinned by StartupWiringTests.
+
+    private ProfileLayout _profile = null!;
     private PlacedWidgetInstance? _selectedWidget;
 
     /// <summary>Test seam: the live active page index — the device-touch
@@ -52,7 +60,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // MainWindow only tracks button state and drives UI refresh.
 #pragma warning restore S125
     private bool _isMouseDown = false;
-    private readonly Input.InputController _inputController;
+    private Input.InputController _inputController = null!;
 
     // Device touch events arrive on the engine's 16 ms poll thread and must
     // reach the gesture machine on the UI thread IN ORDER (the Down/Move/Up
@@ -63,14 +71,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly Queue<(float X, float Y, TouchEventType Type)> _deviceTouchQueue = new();
     private readonly Lock _deviceTouchLock = new();
     private bool _deviceTouchDrainScheduled;
-    private readonly Action _deviceTouchDrain;
+    private Action _deviceTouchDrain = null!;
 
     // Frame presentation — decouple the UI render timer from transport
     // round-trips: one FrameDelivery bound to the direct-USB engine (ADR-0005)
     // with the single encode→pool→coalesce→pace policy and the 33ms pacing the
     // engine's USB writes used; the production encoder (SkiaRgb565Encoder)
     // binds at this one Create site.
-    private readonly FrameDelivery _delivery;
+    private FrameDelivery _delivery = null!;
 
     // The App's file-log vocabulary: one bound DiagLog per log area — the tag
     // binds once at construction (the DiagLog module) instead of being
@@ -80,15 +88,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
-    // keeps wiring.
-    private readonly Inspector.InspectorController _inspector;
-    private readonly DialogHost _dialogHost;
-    private readonly PageTabsView _pageTabs;
+    // keeps wiring (the startup artifact's HostModules step).
+    private Inspector.InspectorController _inspector = null!;
+    private DialogHost _dialogHost = null!;
+    private PageTabsView _pageTabs = null!;
 
     // Profile persistence: loads the saved profile at startup and owns the
-    // debounced save of the current profile (assigned in the ctor before the
-    // profile is loaded).
-    private ProfilePersistence _profilePersistence;
+    // debounced save of the current profile (wired by the startup artifact
+    // before the profile load step).
+    private ProfilePersistence _profilePersistence = null!;
 
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
@@ -125,194 +133,293 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
-        // connect + touch poll explicitly.
+        // connect + touch poll explicitly. Start precedes InitializeComponent:
+        // the engine's events hop to the dispatcher (Hop), and the initial
+        // connect is in flight before the XAML tree exists, so the first paint
+        // reflects the real connection state.
         _usbDevice.Start();
         InitializeComponent();
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
         SourceInitialized += OnUpdateCheckAtStartup;
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
-        _delivery = FrameDelivery.Create(
+        // The startup wiring is one named artifact (BuildStartupWiring),
+        // applied in order — the TeardownPlan image for startup. The sequence
+        // is the load-bearing knowledge (the host modules before the profile
+        // load, the resyncs before the wired arm, the wired arm last), pinned
+        // by StartupWiringTests; a reorder fails a pin instead of sailing
+        // into the historical startup NRE (and the context's null-tolerant
+        // module derefs keep even a missed reorder a benign no-op, not a
+        // crash).
+        foreach (WiringStep step in BuildStartupWiring(presentMonNative, profilePath, powerModeSource).OrderedSteps)
+        {
+            step.Run();
+        }
+    }
+
+    /// <summary>
+    /// The window's startup wiring as one named artifact: the ordered
+    /// construction steps. The sequence is the load-bearing knowledge (the
+    /// host modules before the profile load — a widget's InitializeAsync runs
+    /// synchronously inside the load and calls back into the context; the
+    /// state resyncs before the wired arm so their XAML events stay guarded;
+    /// the wired arm last so the guarded handlers arm only after every module
+    /// exists) — pinned against this real list by <c>StartupWiringTests</c>,
+    /// the way <c>TeardownPlanTests</c> pins <see cref="BuildTeardownPlan"/>.
+    /// </summary>
+    internal StartupWiring BuildStartupWiring(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource) => new(
+    [
+        new WiringStep("FrameDelivery", () => _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
             send: _usbDevice.SendFrameBytes,
             isReady: () => _usbDevice.State == ConnectionState.Connected,
-            log: _hwLog.Write);
+            log: _hwLog.Write)),
 
-        // One poll loop per direct producer, owned by the telemetry module:
-        // SENSOR (LHS shared memory, ADR-0004) and FRAMETIME (PresentMon,
-        // ADR-0003) start immediately and stop on close.
-        _telemetry = new TelemetryProducers(presentMonNative, Log);
-        _telemetry.Start();
+        new WiringStep("Telemetry", () =>
+        {
+            // One poll loop per direct producer, owned by the telemetry
+            // module: SENSOR (LHS shared memory, ADR-0004) and FRAMETIME
+            // (PresentMon, ADR-0003) start immediately and stop on close.
+            _telemetry = new TelemetryProducers(presentMonNative, Log);
+            _telemetry.Start();
 
-        // The engine's Start() above fires the initial connect.
-        // Do NOT block the UI thread waiting for USB — the render timer will
-        // start sending frames as soon as the connection succeeds.
+            // The engine's Start() above fires the initial connect. Do NOT
+            // block the UI thread waiting for USB — the render timer will
+            // start sending frames as soon as the connection succeeds.
+        }),
 
-        // Attribute-driven catalog: adding a widget to the Widgets assembly
-        // needs no registration here.
-        _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
+        new WiringStep("WidgetCatalog", () =>
+        {
+            // Attribute-driven catalog: adding a widget to the Widgets
+            // assembly needs no registration here.
+            _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
+            // Populate the catalog UI (sorted alphabetically by display name).
+            RefreshCatalog();
+        }),
 
-        // Populate the catalog UI (sorted alphabetically by display name).
-        RefreshCatalog();
+        new WiringStep("ProfilePersistence", () =>
+        {
+            // Profile persistence: owns the LocalAppData path and the
+            // debounced save. Wired before the host modules so the
+            // inspector's onProfileChanged hook can reference it; the
+            // provider lambda only dereferences _profile at save time
+            // (import swaps the reference).
+            _profilePersistence = new ProfilePersistence(
+                profilePath,
+                () => _profile,
+                log: _profileLog.Write);
+        }),
 
-        // Profile persistence: owns the LocalAppData path and the debounced
-        // save. Constructed before the host modules so the inspector's
-        // onProfileChanged hook can reference it; the provider lambda only
-        // dereferences _profile at save time (import swaps the reference).
-        _profilePersistence = new ProfilePersistence(
-            profilePath,
-            () => _profile!,
-            log: _profileLog.Write);
+        new WiringStep("HostModules", () =>
+        {
+            // Build the host modules (input, inspector, dialog host) BEFORE
+            // the profile load. Widget InitializeAsync runs synchronously
+            // inside the load and may call back into the context (e.g.
+            // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
+            // ShowDeviceAuthorization). This step's position removes the
+            // startup NRE when those callbacks arrive before the modules
+            // exist; the context's null-tolerant module derefs are the
+            // backstop.
+            //
+            // Single input module: gesture machine + outcome application +
+            // edit-mode manipulation + the press orchestration. All input
+            // sources cross its source-aware surface; page-switch UI work
+            // stays here.
+            _inputController = new Input.InputController(
+                // _profile is assigned by the ProfileLoad step below, before
+                // any input event can run — the lambda only dereferences it
+                // at invoke time.
+                () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
+                // The desktop's live edit-mode read: the controller derives
+                // the manipulation/routing veto from the source, so the call
+                // sites pass coordinates and the source only.
+                () => _compositor.IsEditMode,
+                navigateTo: SwitchToPage,
+                requestRender: () => SkiaCanvas.InvalidateVisual(),
+                select: SelectWidget,
+                onManipulation: HandleManipulationChange);
 
-        // 3. Build the host modules (input, inspector, dialog host) BEFORE the
-        // starter profile. Widget InitializeAsync runs synchronously inside
-        // starterProfile.Create() and may call back into the context (e.g.
-        // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
-        // ShowDeviceAuthorization). Constructing the modules first removes the
-        // startup NRE when those callbacks arrive before the modules exist.
-        // Single input module: gesture machine + outcome application + edit-mode
-        // manipulation + the press orchestration. All input sources cross its
-        // source-aware surface; page-switch UI work stays here.
-        _inputController = new Input.InputController(
-            // _profile is assigned below (starter profile) before any input
-            // event can run — the lambda only dereferences it at invoke time.
-            () => new Input.InputState(_profile!.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
-            navigateTo: SwitchToPage,
-            requestRender: () => SkiaCanvas.InvalidateVisual(),
-            select: SelectWidget,
-            onManipulation: HandleManipulationChange);
+            // The drain callback is a cached delegate (a method group would be
+            // converted on every enqueue; the field holds one instance).
+            _deviceTouchDrain = DrainDeviceTouchQueue;
 
-        // The drain callback is a cached delegate (a method group would be
-        // converted on every enqueue; the field holds one instance).
-        _deviceTouchDrain = DrainDeviceTouchQueue;
+            // One stateful DialogHost for the whole window: the inspector
+            // receives this instance (it must never build its own — a second
+            // instance could never show the device-authorization window it
+            // owns).
+            _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
 
-        // One stateful DialogHost for the whole window: the inspector receives
-        // this instance (it must never build its own — a second instance could
-        // never show the device-authorization window it owns).
-        _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
-
-        _inspector = new Inspector.InspectorController(
-            new Inspector.TransformFieldBindings(
-                PosX: TxtPosX,
-                PosY: TxtPosY,
-                WidthText: TxtWidth,
-                HeightText: TxtHeight,
-                ZIndexText: TxtZIndex,
-                RotationText: TxtRotation,
-                OpacitySlider: SliderOpacity,
-                OpacityValueText: TxtOpacityVal,
-                RequestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
-            new Inspector.CustomPropertyPanel(
-                emptyPanel: PanelEmptyInspector,
-                activePanel: PanelActiveInspector,
-                nameText: TxtInspName,
-                customProperties: PanelCustomProperties,
-                tryFindResource: TryFindResource),
-            () => _selectedWidget,
-            _dialogHost,
-            onProfileChanged: () => _profilePersistence.MarkDirty(),
-            commitLocationPick: candidate =>
-            {
-                if (_selectedWidget?.ActiveInstance is IWidgetLocationSearch search)
+            _inspector = new Inspector.InspectorController(
+                new Inspector.TransformFieldBindings(
+                    PosX: TxtPosX,
+                    PosY: TxtPosY,
+                    WidthText: TxtWidth,
+                    HeightText: TxtHeight,
+                    ZIndexText: TxtZIndex,
+                    RotationText: TxtRotation,
+                    OpacitySlider: SliderOpacity,
+                    OpacityValueText: TxtOpacityVal,
+                    RequestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
+                new Inspector.CustomPropertyPanel(
+                    emptyPanel: PanelEmptyInspector,
+                    activePanel: PanelActiveInspector,
+                    nameText: TxtInspName,
+                    customProperties: PanelCustomProperties,
+                    tryFindResource: TryFindResource),
+                () => _selectedWidget,
+                _dialogHost,
+                onProfileChanged: () => _profilePersistence.MarkDirty(),
+                commitLocationPick: candidate =>
                 {
-                    search.CommitPick(candidate);
-                }
-            });
+                    if (_selectedWidget?.ActiveInstance is IWidgetLocationSearch search)
+                    {
+                        search.CommitPick(candidate);
+                    }
+                });
 
-        // Page-tabs strip module: owns tab construction, the wheel scroll, and
-        // scroll-into-view; the window keeps only the page-action seams.
-        _pageTabs = new PageTabsView(
-            PanelPageTabs,
-            ScrollerPageTabs,
-            key => FindResource(key),
-            SwitchToPage,
-            RenamePage,
-            DeletePage);
+            // Page-tabs strip module: owns tab construction, the wheel scroll,
+            // and scroll-into-view; the window keeps only the page-action
+            // seams.
+            _pageTabs = new PageTabsView(
+                PanelPageTabs,
+                ScrollerPageTabs,
+                key => FindResource(key),
+                SwitchToPage,
+                RenamePage,
+                DeletePage);
 
-        // Page-background picker: the swatch commits the active page's color.
-        // Its Hex is kept in sync by ApplyProfileMutation (the mutation funnel).
-        PageBgPicker.Applied += OnPageBackgroundApplied;
+            // Page-background picker: the swatch commits the active page's
+            // color. Its Hex is kept in sync by ApplyProfileMutation (the
+            // mutation funnel).
+            PageBgPicker.Applied += OnPageBackgroundApplied;
+        }),
 
-        // 4. Load the persisted profile, or build the starter profile on first
-        //    launch. A first launch persists the starter immediately so the
-        //    file exists before any mutation.
-        var loaded = _profilePersistence.Load(_loader, this);
-        _profile = loaded ?? new StarterProfile(_loader, this).Create();
-        if (loaded is null)
+        new WiringStep("ProfileLoad", () =>
         {
-            _profilePersistence.Save();
-        }
-        _pageTabs.Rebuild(_profile);
-        PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
-        // Resync the page-level toggle from the loaded profile the same way the
-        // mutation funnel does after an import (the XAML default is true; a
-        // persisted page may differ). _wired is still off, so the checkbox
-        // event this resync fires is guarded: a startup state resync is not a
-        // mutation and must not arm a save.
-        ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-
-        // 5. Route device touch input through the single input module. Display
-        // touches are runtime input: Press/Move/Release cross the controller's
-        // source-aware surface with the edit-mode flag off, so hotkeys fire on
-        // the device even while the desktop is in edit mode — only the mouse
-        // path carries the desktop edit-mode veto.
-        _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
-
-        // 6. Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The pump
-        // composes + sends once per tick, then repaints so the window draws
-        // the same buffer it sent; the badge refresh rides the tick. The
-        // compose gate skips the tick while the delivery is still writing the
-        // previous frame (~55ms bulk write vs 33ms tick) — the display can't
-        // take another frame anyway, so composing during the write is dead CPU.
-        _framePump = new FramePump(
-            composeAndSend: () =>
+            // Load the persisted profile, or build the starter profile on
+            // first launch. A first launch persists the starter immediately
+            // so the file exists before any mutation. Runs AFTER HostModules:
+            // the rehydrated/starter widgets' InitializeAsync runs
+            // synchronously here and may call back into the context — the
+            // modules must exist (the ordering fact this step's position
+            // pins).
+            var loaded = _profilePersistence.Load(_loader, this);
+            _profile = loaded ?? new StarterProfile(_loader, this).Create();
+            if (loaded is null)
             {
-                _compositor.Compose(_profile.ActivePage);
-                _delivery.Push(_compositor.FrameBuffer);
-            },
-            requestRepaint: () => SkiaCanvas.InvalidateVisual(),
-            onTick: UpdateUsbBadge,
-            composeGate: () => !_delivery.IsSendInFlight);
-        _framePump.Start();
+                _profilePersistence.Save();
+            }
+            _pageTabs.Rebuild(_profile);
+            PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
+        }),
 
-        // Power lifecycle: SystemEvents fires on a system thread, so both
-        // actions hop to the dispatcher via the single Hop helper. Suspend
-        // stops the pump (no dead compose ticks while the display is powered
-        // down); resume restarts it and forces the USB engine to reconnect —
-        // Start() is guarded, so the extra call is harmless when the transport
-        // never dropped.
-        _powerLifecycle = new Power.PowerLifecycle(
-            powerModeSource,
-            onSuspend: () => Hop(() => _framePump.Stop()),
-            onResume: () => Hop(() =>
-            {
-                _framePump.Start();
-                _usbDevice.Start();
-            }));
-
-        // 7. Clean lifecycle shutdown on window close / debugging stop. The
-        //    plan is a named artifact (BuildTeardownPlan) the orchestrator
-        //    runs — the sequence is assertable against the real list.
-        Closed += (s, e) =>
+        new WiringStep("SnapToGridResync", () =>
         {
-            // The teardown sequence begins: OCEs raised by the disposes below
-            // are expected and benign (see App.DispatcherUnhandledException).
-            App.IsClosing = true;
-            new ShutdownOrchestrator(BuildTeardownPlan()).Run();
-        };
+            // Resync the page-level toggle from the loaded profile the same
+            // way the mutation funnel does after an import (the XAML default
+            // is true; a persisted page may differ). _wired is still off, so
+            // the checkbox event this resync fires is guarded: a startup
+            // state resync is not a mutation and must not arm a save.
+            ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
+        }),
 
-        UpdateUsbBadge();
-        UpdateActiveCount();
-        _inspector.Refresh();
+        new WiringStep("DeviceTouchRoute", () =>
+        {
+            // Route device touch input through the single input module.
+            // Display touches are runtime input: Press/Move/Release cross the
+            // controller's source-aware surface, so hotkeys fire on the device
+            // even while the desktop is in edit mode — only the mouse path
+            // carries the desktop edit-mode veto.
+            _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
+        }),
 
-        // The compositor defaults to runtime mode (no edit chrome); the Edit
-        // Mode checkbox defaults to checked, and its Checked event fires
-        // during InitializeComponent while the _wired guard is still off — so
-        // re-assert the checkbox state onto the compositor here explicitly.
-        _compositor.IsEditMode = ChkEditMode.IsChecked == true;
+        new WiringStep("FramePump", () =>
+        {
+            // Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The
+            // pump composes + sends once per tick, then repaints so the
+            // window draws the same buffer it sent; the badge refresh rides
+            // the tick. The compose gate skips the tick while the delivery is
+            // still writing the previous frame (~55ms bulk write vs 33ms
+            // tick) — the display can't take another frame anyway, so
+            // composing during the write is dead CPU. AFTER ProfileLoad: the
+            // compose reads _profile; AFTER FrameDelivery: it pushes into
+            // _delivery.
+            _framePump = new FramePump(
+                composeAndSend: () =>
+                {
+                    _compositor.Compose(_profile.ActivePage);
+                    _delivery.Push(_compositor.FrameBuffer);
+                },
+                requestRepaint: () => SkiaCanvas.InvalidateVisual(),
+                onTick: UpdateUsbBadge,
+                composeGate: () => !_delivery.IsSendInFlight);
+            _framePump.Start();
+        }),
 
-        _wired = true;
-    }
+        new WiringStep("PowerLifecycle", () =>
+        {
+            // Power lifecycle: SystemEvents fires on a system thread, so both
+            // actions hop to the dispatcher via the single Hop helper.
+            // Suspend stops the pump (no dead compose ticks while the display
+            // is powered down); resume restarts it and forces the USB engine
+            // to reconnect — Start() is guarded, so the extra call is
+            // harmless when the transport never dropped.
+            _powerLifecycle = new Power.PowerLifecycle(
+                powerModeSource,
+                onSuspend: () => Hop(() => _framePump.Stop()),
+                onResume: () => Hop(() =>
+                {
+                    _framePump.Start();
+                    _usbDevice.Start();
+                }));
+        }),
+
+        new WiringStep("TeardownHook", () =>
+        {
+            // Clean lifecycle shutdown on window close / debugging stop. The
+            // plan is a named artifact (BuildTeardownPlan) the orchestrator
+            // runs — the sequence is assertable against the real list.
+            Closed += (s, e) =>
+            {
+                // The teardown sequence begins: OCEs raised by the disposes
+                // below are expected and benign (see
+                // App.DispatcherUnhandledException).
+                App.IsClosing = true;
+                new ShutdownOrchestrator(BuildTeardownPlan()).Run();
+            };
+        }),
+
+        new WiringStep("InitialRefresh", () =>
+        {
+            UpdateUsbBadge();
+            UpdateActiveCount();
+            // The final inspector refresh re-establishes the panel after the
+            // profile load — and it is the repair that makes a pre-module
+            // RequestInspectorRefresh a benign no-op (the context's
+            // null-tolerant facade): whatever a callback lost before the
+            // modules existed, this step re-requests.
+            _inspector.Refresh();
+        }),
+
+        new WiringStep("EditModeResync", () =>
+        {
+            // The compositor defaults to runtime mode (no edit chrome); the
+            // Edit Mode checkbox defaults to checked, and its Checked event
+            // fires during InitializeComponent while the _wired guard is still
+            // off — so re-assert the checkbox state onto the compositor here
+            // explicitly, before the wired arm below.
+            _compositor.IsEditMode = ChkEditMode.IsChecked == true;
+        }),
+
+        new WiringStep("Wired", () =>
+        {
+            // The wired arm is the LAST step: the guarded XAML handlers (the
+            // edit-mode checkbox, the snap toggle, the transform boxes, the
+            // opacity slider) arm only after every module the handlers
+            // forward to exists.
+            _wired = true;
+        })
+    ]);
 
     /// <summary>
     /// The window's teardown plan as one named artifact: the ordered steps +
@@ -401,15 +508,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 var (x, y, type) = _deviceTouchQueue.Dequeue();
                 if (type == TouchEventType.TouchDown)
                 {
-                    _inputController.Press(x, y, Input.InputSource.Device, editMode: false);
+                    // Device samples are runtime input: the controller derives
+                    // "never suppressed" from the source itself.
+                    _inputController.Press(x, y, Input.InputSource.Device);
                 }
                 else if (type == TouchEventType.TouchMove)
                 {
-                    _inputController.Move(x, y, Input.InputSource.Device, editMode: false, out _);
+                    _inputController.Move(x, y, Input.InputSource.Device, out _);
                 }
                 else
                 {
-                    _inputController.Release(x, y, Input.InputSource.Device, editMode: false, out _);
+                    _inputController.Release(x, y, Input.InputSource.Device, out _);
                 }
             }
         }
@@ -525,9 +634,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         // The controller owns the press policy: hit-test → select → begin a
         // manipulation or feed the shared gesture machine (page navigation +
-        // widget touch routing). The mouse carries the edit-mode veto: authoring
-        // presses manipulate.
-        _inputController.Press((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode);
+        // widget touch routing). The edit-mode veto is derived from the
+        // source inside the controller (it reads the compositor's live edit
+        // mode itself), so the handler passes coordinates and the source only.
+        _inputController.Press((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit);
     }
 
     private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
@@ -538,7 +648,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // A manipulation consumes the sample; otherwise the controller feeds
         // the machine (page navigation + widget touch routing). The refresh
         // after a manipulation is the controller's onManipulation funnel.
-        _inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out _);
+        _inputController.Move((float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, out _);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -550,7 +660,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // release feeds the machine's TouchUp. The release funnel persists and
         // refreshes when a manipulation ended (including snap-to-grid).
         _inputController.Release(
-            (float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, _compositor.IsEditMode, out _);
+            (float)pos.X, (float)pos.Y, Input.InputSource.DesktopEdit, out _);
 
         _isMouseDown = false;
         SkiaCanvas.ReleaseMouseCapture();

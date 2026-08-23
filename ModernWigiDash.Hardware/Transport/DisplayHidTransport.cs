@@ -53,16 +53,24 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     /// <summary>
     /// The worst-case duration a hung device can hold the transport's teardown
-    /// — the named budget behind the engine's never-stall-on-close invariant.
-    /// The max of the two backend stall bounds: the WinUSB bulk pipe timeout
-    /// (an in-flight frame write holds the transport lock for up to that long)
-    /// and the LibUsb leg's chunk-timeout product over a full frame (every
-    /// chunk exhausting its timeout). The engine's close waits are deliberately
-    /// shorter than this — it abandons a slow close rather than follow it.
+    /// — the derivation root of the close-budget policy. The max of the two
+    /// backend stall bounds: the WinUSB bulk pipe timeout (an in-flight frame
+    /// write holds the transport lock for up to that long) and the LibUsb
+    /// leg's chunk-timeout product over a full frame (every chunk exhausting
+    /// its timeout).
     /// </summary>
     internal static TimeSpan CloseBound => TimeSpan.FromMilliseconds(Math.Max(
         DisplayProtocolConstants.BulkPipeTimeoutMs,
         (long)ChunkedBulkWrite.WorstCaseWrite(DisplayGeometry.FrameBufferSize).TotalMilliseconds));
+
+    /// <summary>
+    /// The close-budget policy this transport hands to the engine: the
+    /// worst-case teardown bound and the engine's two bounded close waits,
+    /// derived together, so the never-stall-on-close relation (waits strictly
+    /// shorter than the worst case) holds by construction. The engine reads
+    /// these values; it never hard-codes a second spelling.
+    /// </summary>
+    internal static CloseBudgetPolicy CloseBudgets => CloseBudgetPolicy.Create(CloseBound);
 
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {

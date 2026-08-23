@@ -339,9 +339,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         float right = left + barW;
 
         double durSec = snap.Duration.TotalSeconds;
-        double posSec = snap.Position.TotalSeconds;
-        if (snap.IsPlaying)
-            posSec += (Clock.GetUtcNow() - snap.LastUpdated).TotalSeconds;
+        double posSec = NowPlayingPresentation.ExtrapolatedPosition(snap, Clock.GetUtcNow());
 
         double ratio = NowPlayingPresentation.ProgressRatio(posSec, durSec);
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
@@ -726,13 +724,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private void CycleRepeat(MediaSnapshot snap)
     {
-        var next = snap.Repeat switch
-        {
-            MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
-            MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
-            _ => MediaPlaybackAutoRepeatMode.None
-        };
-        _mediaMonitor?.SetRepeat(next);
+        _mediaMonitor?.SetRepeat(NowPlayingPresentation.NextRepeatMode(snap.Repeat));
     }
 
     private void SeekTo(SKPoint hitPoint, MediaSnapshot snap)

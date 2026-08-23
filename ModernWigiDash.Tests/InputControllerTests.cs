@@ -41,7 +41,7 @@ public class InputControllerTests
     {
         int? navigated = null;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0), navigateTo: i => navigated = i);
+        var controller = new InputController(() => StateOf(page, 0), () => false, navigateTo: i => navigated = i);
 
         controller.Feed(TouchEventType.TouchDown, 800, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 550, 300, suppressWidgetRouting: false);
@@ -54,7 +54,7 @@ public class InputControllerTests
     {
         int? navigated = null;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 1), navigateTo: i => navigated = i);
+        var controller = new InputController(() => StateOf(page, 1), () => false, navigateTo: i => navigated = i);
 
         controller.Feed(TouchEventType.TouchDown, 550, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 800, 300, suppressWidgetRouting: false);
@@ -67,7 +67,7 @@ public class InputControllerTests
     {
         int? navigated = null;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0), navigateTo: i => navigated = i);
+        var controller = new InputController(() => StateOf(page, 0), () => false, navigateTo: i => navigated = i);
 
         controller.Feed(TouchEventType.TouchDown, 990, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 990, 300, suppressWidgetRouting: false);
@@ -80,7 +80,7 @@ public class InputControllerTests
     {
         int? navigated = null;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 1), navigateTo: i => navigated = i);
+        var controller = new InputController(() => StateOf(page, 1), () => false, navigateTo: i => navigated = i);
 
         controller.Feed(TouchEventType.TouchDown, 30, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 30, 300, suppressWidgetRouting: false);
@@ -93,7 +93,7 @@ public class InputControllerTests
     {
         int navigations = 0;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 1), navigateTo: _ => navigations++);
+        var controller = new InputController(() => StateOf(page, 1), () => false, navigateTo: _ => navigations++);
 
         controller.Feed(TouchEventType.TouchDown, 800, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 550, 300, suppressWidgetRouting: false);
@@ -108,7 +108,7 @@ public class InputControllerTests
     {
         int routed = 0;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0), routeTouch: (_, _, _, _) => routed++);
+        var controller = new InputController(() => StateOf(page, 0), () => false, routeTouch: (_, _, _, _) => routed++);
 
         controller.Feed(TouchEventType.TouchDown, 100, 100, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 100, 100, suppressWidgetRouting: false);
@@ -121,7 +121,7 @@ public class InputControllerTests
     {
         int routed = 0;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0), routeTouch: (_, _, _, _) => routed++);
+        var controller = new InputController(() => StateOf(page, 0), () => true, routeTouch: (_, _, _, _) => routed++);
 
         controller.Feed(TouchEventType.TouchDown, 100, 100, suppressWidgetRouting: true);
         controller.Feed(TouchEventType.TouchUp, 100, 100, suppressWidgetRouting: true);
@@ -130,12 +130,49 @@ public class InputControllerTests
     }
 
     [TestMethod]
+    public void DeviceSamples_NeverReadTheDesktopEditModeProbe()
+    {
+        var page = TwoPages();
+        int routed = 0;
+        var controller = new InputController(
+            () => StateOf(page, 0),
+            () => throw new InvalidOperationException("Device input must not read the desktop edit-mode probe"),
+            routeTouch: (_, _, _, _) => routed++);
+
+        controller.Press(100, 100, InputSource.Device);
+        controller.Move(120, 120, InputSource.Device, out _);
+        controller.Release(120, 120, InputSource.Device, out _);
+
+        Assert.AreEqual(3, routed, "Device Down/Move/Up all route without touching the probe");
+    }
+
+    [TestMethod]
+    public void DesktopEditMode_IsReadPerSample_NotCachedAtConstruction()
+    {
+        bool editMode = false;
+        var page = TwoPages();
+        int routed = 0;
+        var controller = new InputController(
+            () => StateOf(page, 0),
+            () => editMode,
+            routeTouch: (_, _, _, _) => routed++,
+            hitTest: (_, _, _) => null);
+
+        controller.Press(100, 100, InputSource.DesktopEdit);
+        Assert.AreEqual(1, routed, "Runtime-mode desktop input routes like device input");
+
+        editMode = true;
+        controller.Press(100, 100, InputSource.DesktopEdit);
+        Assert.AreEqual(1, routed, "Edit mode read live per sample must veto the next press");
+    }
+
+    [TestMethod]
     public void Feed_SwipeInEditMode_StillNavigates()
     {
         int? navigated = null;
         int routed = 0;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0),
+        var controller = new InputController(() => StateOf(page, 0), () => true,
             navigateTo: i => navigated = i, routeTouch: (_, _, _, _) => routed++);
 
         controller.Feed(TouchEventType.TouchDown, 800, 300, suppressWidgetRouting: true);
@@ -156,16 +193,17 @@ public class InputControllerTests
         int routed = 0;
         var controller = new InputController(
             () => StateOf(page, 0, count: 1),
+            () => true,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => widget,
             select: w => selected = w);
 
-        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
+        controller.Press(60, 60, InputSource.DesktopEdit);
 
         Assert.AreSame(widget, selected, "A desktop press must select the hit widget");
         Assert.AreEqual(0, routed, "A manipulation press must not feed the gesture machine");
         // The press began a drag: the next move sample is consumed.
-        Assert.IsTrue(controller.Move(160, 110, InputSource.DesktopEdit, editMode: true, out bool changed));
+        Assert.IsTrue(controller.Move(160, 110, InputSource.DesktopEdit, out bool changed));
         Assert.IsTrue(changed);
         Assert.AreEqual(100f, widget.X, 0.01f);
     }
@@ -178,11 +216,12 @@ public class InputControllerTests
         int routed = 0;
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => true,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => null,
             select: w => selected = w);
 
-        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
+        controller.Press(60, 60, InputSource.DesktopEdit);
 
         Assert.IsNull(selected, "A press on empty canvas clears the selection");
         Assert.AreEqual(0, routed, "Edit mode must veto routing of the Down sample");
@@ -196,10 +235,11 @@ public class InputControllerTests
         int routed = 0;
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => false,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => widget);
 
-        controller.Press(100, 100, InputSource.DesktopEdit, editMode: false);
+        controller.Press(100, 100, InputSource.DesktopEdit);
 
         Assert.AreEqual(1, routed, "Runtime-mode desktop input routes like device input");
     }
@@ -212,11 +252,12 @@ public class InputControllerTests
         PlacedWidgetInstance? selected = null;
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => true,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => null,
             select: w => selected = w);
 
-        controller.Press(100, 100, InputSource.Device, editMode: true);
+        controller.Press(100, 100, InputSource.Device);
 
         Assert.AreEqual(1, routed, "Device touches are runtime input and must reach widgets");
         Assert.IsNull(selected, "A device press must never drive desktop selection");
@@ -229,11 +270,12 @@ public class InputControllerTests
         var page = TwoPages();
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => false,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => null);
 
-        controller.Press(100, 100, InputSource.Device, editMode: false);
-        bool wasManipulating = controller.Release(100, 100, InputSource.Device, editMode: false, out _);
+        controller.Press(100, 100, InputSource.Device);
+        bool wasManipulating = controller.Release(100, 100, InputSource.Device, out _);
 
         Assert.IsFalse(wasManipulating);
         Assert.AreEqual(2, routed, "A plain tap routes Down and Up");
@@ -246,11 +288,12 @@ public class InputControllerTests
         var page = TwoPages();
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => false,
             routeTouch: (_, _, _, _) => routed++,
             hitTest: (_, _, _) => null);
 
-        controller.Press(100, 100, InputSource.Device, editMode: false);
-        bool consumed = controller.Move(120, 120, InputSource.Device, editMode: false, out bool changed);
+        controller.Press(100, 100, InputSource.Device);
+        bool consumed = controller.Move(120, 120, InputSource.Device, out bool changed);
 
         Assert.IsFalse(consumed, "No manipulation in progress — the sample feeds the machine");
         Assert.IsFalse(changed);
@@ -263,7 +306,7 @@ public class InputControllerTests
     public void Begin_OnWidgetInEditMode_StartsDrag()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(widget, 60, 60, editMode: true);
 
@@ -274,7 +317,7 @@ public class InputControllerTests
     public void Begin_OnResizeHandle_StartsResize()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(widget, 400, 140, editMode: true);
 
@@ -285,7 +328,7 @@ public class InputControllerTests
     public void Begin_WhenEditModeOff_ReturnsNone()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(widget, 60, 60, editMode: false);
 
@@ -295,7 +338,7 @@ public class InputControllerTests
     [TestMethod]
     public void Begin_OnEmptyCanvas_ReturnsNone()
     {
-        var controller = new InputController(() => StateOf(new PageLayout(), 0, count: 1));
+        var controller = new InputController(() => StateOf(new PageLayout(), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(null, 60, 60, editMode: true);
 
@@ -308,7 +351,7 @@ public class InputControllerTests
     public void Move_Drag_UpdatesWidgetPosition()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
         controller.BeginManipulation(widget, 60, 60, editMode: true);
 
         bool consumed = controller.MoveManipulation(widget, 160, 110, editMode: true, out bool changed);
@@ -323,7 +366,7 @@ public class InputControllerTests
     public void Move_WithoutManipulation_ReturnsFalse()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         bool consumed = controller.MoveManipulation(widget, 160, 110, editMode: true, out bool changed);
 
@@ -335,7 +378,7 @@ public class InputControllerTests
     public void Move_Resize_UpdatesSizeWithMinimums()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
         controller.BeginManipulation(widget, 400, 140, editMode: true);
 
         controller.MoveManipulation(widget, 20, 20, editMode: true, out _);
@@ -348,7 +391,7 @@ public class InputControllerTests
     public void End_DragWithSnapToGrid_SnapsWidget()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget, snapToGrid: true), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget, snapToGrid: true), 0, count: 1), () => true);
         controller.BeginManipulation(widget, 60, 60, editMode: true);
         controller.MoveManipulation(widget, 250, 160, editMode: true, out _);
 
@@ -367,7 +410,7 @@ public class InputControllerTests
     public void End_DragWithoutSnap_KeepsRawPosition()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
         controller.BeginManipulation(widget, 60, 60, editMode: true);
         controller.MoveManipulation(widget, 250, 160, editMode: true, out _);
 
@@ -381,7 +424,7 @@ public class InputControllerTests
     public void End_WithoutManipulation_ReturnsFalse()
     {
         var widget = PlaceWidget(0, 0, 406, 148, new TestWidget());
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         bool wasManipulating = controller.EndManipulation(widget, editMode: true, out _);
 
@@ -396,7 +439,7 @@ public class InputControllerTests
         string iconName = GriddyIcons.Names.First();
         var hotkey = new HotkeyButtonWidget { Icon = iconName };
         var widget = PlaceWidget(0, 0, 406, 148, hotkey);
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(widget, 203, 46, editMode: true);
 
@@ -410,7 +453,7 @@ public class InputControllerTests
         // capability — no widget-type branch in the App layer.
         var grab = new FakeIconGrabWidget();
         var widget = PlaceWidget(0, 0, 406, 148, grab);
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
 
         var kind = controller.BeginManipulation(widget, 203, 46, editMode: true);
 
@@ -448,7 +491,7 @@ public class InputControllerTests
         string iconName = GriddyIcons.Names.First();
         var hotkey = new HotkeyButtonWidget { Icon = iconName };
         var widget = PlaceWidget(0, 0, 406, 148, hotkey);
-        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1));
+        var controller = new InputController(() => StateOf(PageWith(widget), 0, count: 1), () => true);
         // ApplyGrabMove persists through SetProperty → context, so the widget
         // needs a context that resolves the owning placed instance.
         var profile = new ProfileLayout();
@@ -473,7 +516,7 @@ public class InputControllerTests
     {
         int renders = 0;
         var page = TwoPages();
-        var controller = new InputController(() => StateOf(page, 0), requestRender: () => renders++);
+        var controller = new InputController(() => StateOf(page, 0), () => false, requestRender: () => renders++);
 
         controller.Feed(TouchEventType.TouchDown, 100, 100, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 100, 100, suppressWidgetRouting: false);
@@ -491,11 +534,12 @@ public class InputControllerTests
         var changes = new List<ManipulationChange>();
         var controller = new InputController(
             () => StateOf(page, 0, count: 1),
+            () => true,
             hitTest: (_, _, _) => widget,
             onManipulation: changes.Add);
 
-        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
-        controller.Move(160, 110, InputSource.DesktopEdit, editMode: true, out _);
+        controller.Press(60, 60, InputSource.DesktopEdit);
+        controller.Move(160, 110, InputSource.DesktopEdit, out _);
 
         Assert.AreEqual(1, changes.Count);
         Assert.IsTrue(changes[0].Changed, "A drag move must report Changed");
@@ -510,12 +554,13 @@ public class InputControllerTests
         var changes = new List<ManipulationChange>();
         var controller = new InputController(
             () => StateOf(page, 0, count: 1),
+            () => true,
             hitTest: (_, _, _) => widget,
             onManipulation: changes.Add);
 
-        controller.Press(60, 60, InputSource.DesktopEdit, editMode: true);
-        controller.Move(160, 110, InputSource.DesktopEdit, editMode: true, out _);
-        controller.Release(160, 110, InputSource.DesktopEdit, editMode: true, out _);
+        controller.Press(60, 60, InputSource.DesktopEdit);
+        controller.Move(160, 110, InputSource.DesktopEdit, out _);
+        controller.Release(160, 110, InputSource.DesktopEdit, out _);
 
         Assert.AreEqual(2, changes.Count, "Move and release each report through the funnel");
         Assert.IsTrue(changes[1].Changed, "The release ends the manipulation and must persist/refresh");
@@ -535,12 +580,13 @@ public class InputControllerTests
         var changes = new List<ManipulationChange>();
         var controller = new InputController(
             () => StateOf(PageWith(widget), 0, count: 1),
+            () => true,
             hitTest: (_, _, _) => widget,
             onManipulation: changes.Add);
 
-        controller.Press(203, 46, InputSource.DesktopEdit, editMode: true);
-        controller.Move(253, 76, InputSource.DesktopEdit, editMode: true, out _);
-        controller.Release(253, 76, InputSource.DesktopEdit, editMode: true, out _);
+        controller.Press(203, 46, InputSource.DesktopEdit);
+        controller.Move(253, 76, InputSource.DesktopEdit, out _);
+        controller.Release(253, 76, InputSource.DesktopEdit, out _);
 
         Assert.IsTrue(changes[^1].IconMoved, "An icon grab that moved must report IconMoved on release");
         Assert.IsTrue(changes[^1].Changed);
@@ -553,13 +599,14 @@ public class InputControllerTests
         int funnelCalls = 0;
         var controller = new InputController(
             () => StateOf(page, 0),
+            () => false,
             routeTouch: (_, _, _, _) => { },
             hitTest: (_, _, _) => null,
             onManipulation: _ => funnelCalls++);
 
-        controller.Press(100, 100, InputSource.Device, editMode: false);
-        controller.Move(120, 120, InputSource.Device, editMode: false, out _);
-        controller.Release(120, 120, InputSource.Device, editMode: false, out _);
+        controller.Press(100, 100, InputSource.Device);
+        controller.Move(120, 120, InputSource.Device, out _);
+        controller.Release(120, 120, InputSource.Device, out _);
 
         Assert.AreEqual(0, funnelCalls, "Device touches never manipulate, so the funnel never fires");
     }

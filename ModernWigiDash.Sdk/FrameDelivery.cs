@@ -10,10 +10,12 @@ namespace ModernWigiDash.Sdk;
 /// replayed) â†’ paced send (default 33ms) â†’ pooled buffers released.
 ///
 /// One entry point feeds the policy: <see cref="Push"/> (composited bitmap;
-/// encodes into a pooled exact-size buffer via the injected encoder). Verdict
-/// accounting is visible through <see cref="DroppedCount"/> (split into pool
-/// exhaustion vs. coalescer drops) and <see cref="SendFailedCount"/> â€” a dead
-/// pipe shows as send failures, never as silent success or drops.
+/// encodes into a pooled exact-size buffer via the injected encoder). The
+/// per-call verdict is void: accounting is visible through
+/// <see cref="DroppedCount"/> (total, split by reason) and
+/// <see cref="SendFailedCount"/> / <see cref="SendRefusedCount"/>. A dead pipe
+/// shows as send failures, never as silent success or drops, and a frame the
+/// pipeline never accepted is a counted drop, never a silent one.
 /// </summary>
 public sealed class FrameDelivery : IDisposable
 {
@@ -44,6 +46,8 @@ public sealed class FrameDelivery : IDisposable
     private long _droppedPool;
     private long _droppedCoalesced;
     private long _droppedEncode;
+    private long _droppedNotReady;
+    private long _droppedUnconfigured;
     private long _sendFailed;
     private long _sendRefused;
     private int _disposed;
@@ -155,16 +159,27 @@ public sealed class FrameDelivery : IDisposable
     internal long FramesSent => Interlocked.Read(ref _sent);
 
     /// <summary>
-    /// Frames dropped inside the pipeline: pool exhaustion at push time,
-    /// channel rejects (a push after disposal), plus stale buffered frames
-    /// dropped by the coalescer during a backlog. Push-time rejections that
-    /// return before the pipeline is reached â€” no encoder/pool/send seam
-    /// attached, a null frame, or the readiness predicate false â€” are NOT
-    /// counted here. The two in-pipeline drop sources are also visible
-    /// separately via <see cref="DroppedPoolCount"/> and
-    /// <see cref="DroppedCoalescedCount"/>.
+    /// Every frame the pipeline did not hand to the transport: push-time
+    /// rejections (no encoder/pool/send seam attached, a null frame, or the
+    /// readiness predicate false), pool exhaustion, and stale buffered frames
+    /// dropped by the coalescer during a backlog. The drop reason is visible
+    /// separately via <see cref="DroppedUnconfiguredCount"/>,
+    /// <see cref="DroppedNotReadyCount"/>, <see cref="DroppedPoolCount"/>, and
+    /// <see cref="DroppedCoalescedCount"/> — a frame is either sent, refused,
+    /// failed, or dropped, so nothing is silently discarded.
     /// </summary>
     internal long DroppedCount => Interlocked.Read(ref _dropped);
+
+    /// <summary>Frames rejected at push time because the pipeline is
+    /// unconfigured (no encoder/pool/send seam, or a null frame) — test-only
+    /// in production, where <see cref="Create"/> makes this unrepresentable.
+    /// Counted, not logged: a missing seam is a bind-site fact, not a fault.</summary>
+    internal long DroppedUnconfiguredCount => Interlocked.Read(ref _droppedUnconfigured);
+
+    /// <summary>Frames rejected at push time because the readiness predicate
+    /// was false (the display is not connected). Counted, not logged: this is
+    /// the expected no-display state, not a pipeline fault.</summary>
+    internal long DroppedNotReadyCount => Interlocked.Read(ref _droppedNotReady);
 
     /// <summary>Frames dropped at push time because the buffer pool was
     /// exhausted â€” backlog pressure, the producer outran the sender.</summary>
@@ -192,13 +207,27 @@ public sealed class FrameDelivery : IDisposable
     /// device; it is not a drop either (the frame was drained from the channel).</summary>
     internal long SendRefusedCount => Interlocked.Read(ref _sendRefused);
 
-    /// <summary>Encodes a composited frame directly into a pooled buffer and queues it.</summary>
-    public FrameDeliveryResult Push(SKBitmap frame)
+    /// <summary>
+    /// Encodes a composited frame directly into a pooled buffer and queues it.
+    /// Void by design: the verdict rides the drop counters (the reason split)
+    /// and the log seam, so the interface carries no per-call result; a
+    /// production reader of the verdict is a named addition, not a silent
+    /// discard.
+    /// </summary>
+    public void Push(SKBitmap frame)
     {
         if (_encoder is null || _pool is null || _send is null || frame is null)
-            return FrameDeliveryResult.Dropped;
+        {
+            Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _droppedUnconfigured);
+            return;
+        }
         if (_isReady?.Invoke() == false)
-            return FrameDeliveryResult.Dropped;
+        {
+            Interlocked.Increment(ref _dropped);
+            Interlocked.Increment(ref _droppedNotReady);
+            return;
+        }
 
         byte[]? buffer = _pool.Acquire();
         if (buffer is null)
@@ -206,7 +235,7 @@ public sealed class FrameDelivery : IDisposable
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedPool);
             _dropLog.Write(() => $"pool exhausted, frame dropped; total dropped: {Interlocked.Read(ref _dropped)}");
-            return FrameDeliveryResult.Dropped;
+            return;
         }
 
         try
@@ -219,10 +248,10 @@ public sealed class FrameDelivery : IDisposable
             Interlocked.Increment(ref _dropped);
             Interlocked.Increment(ref _droppedEncode);
             _encodeFailLog.Write(() => $"encode failed, frame dropped: {ex.Message}");
-            return FrameDeliveryResult.Dropped;
+            return;
         }
 
-        return Queue(new FrameSlot(buffer));
+        Queue(new FrameSlot(buffer));
     }
 
     /// <summary>
@@ -325,17 +354,16 @@ public sealed class FrameDelivery : IDisposable
         }
     }
 
-    private FrameDeliveryResult Queue(FrameSlot slot)
+    private void Queue(FrameSlot slot)
     {
         // A DropOldest channel only rejects writes once it is completed;
         // stale-frame dropping is the coalescer's job while it is open.
         if (_channel.Writer.TryWrite(slot))
         {
-            return FrameDeliveryResult.Queued;
+            return;
         }
 
         ReleaseSlot(slot, dropped: true);
-        return FrameDeliveryResult.Dropped;
     }
 
     /// <summary>

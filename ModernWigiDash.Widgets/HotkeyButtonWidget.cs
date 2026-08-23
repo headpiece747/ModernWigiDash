@@ -12,8 +12,8 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     [WidgetProperty("Description", WidgetPropertyType.Text, "Optional secondary text displayed below the button label", "Tap to run")]
     public string Description { get; set; } = "Tap to run";
 
-    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", "Launch App", "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute")]
-    public string ActionType { get; set; } = "Launch App";
+    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute")]
+    public string ActionType { get; set; } = HotkeyActionCatalog.DefaultName;
 
     [WidgetProperty("Action Path/Command", WidgetPropertyType.Path, "Executable, file, folder, or URL. You can type a URL or select a local path.", "")]
     public string ActionCommand { get; set; } = "";
@@ -252,8 +252,8 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         _actionCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {
-            var action = CreateAction(ActionType, ActionCommand);
-            if (string.IsNullOrWhiteSpace(action.Value) && IsLaunchOrUrlAction(ActionType))
+            var action = HotkeyActionCatalog.Create(ActionType, ActionCommand);
+            if (string.IsNullOrWhiteSpace(action.Value) && HotkeyActionCatalog.NeedsCommand(ActionType))
             {
                 Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
                 return;
@@ -278,28 +278,6 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         }
     }
 
-    internal static HotkeyAction CreateAction(string actionType, string actionCommand)
-        => actionType switch
-        {
-            "Open URL" => new HotkeyAction { Kind = HotkeyActionKind.OpenUrl, Value = actionCommand },
-            "Media Play / Pause" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.PlayPause },
-            "Media Next" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Next },
-            "Media Previous" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Previous },
-            "Media Stop" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Stop },
-            "Volume Up" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.VolumeUp },
-            "Volume Down" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.VolumeDown },
-            "Mute" => new HotkeyAction { Kind = HotkeyActionKind.MediaKey, Value = MediaKeyCatalog.Mute },
-            _ => new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = actionCommand }
-        };
-
-    /// <summary>
-    /// Single source of truth for 'action needs a command value' (Launch/URL).
-    /// The inspector panel and the executor both consult this instead of
-    /// re-listing action-type strings.
-    /// </summary>
-    public static bool IsLaunchOrUrlAction(string actionType)
-        => actionType is "Launch App" or "Open URL";
-
     // The inspector renderer discovers these through the interface instead of
     // branching on the widget type (no concrete-widget typeof checks).
 
@@ -318,7 +296,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     public string? ActionCommandVisibilityChoicePropertyName => nameof(ActionType);
 
     public bool IsActionCommandVisible(string? actionTypeValue)
-        => actionTypeValue != null && IsLaunchOrUrlAction(actionTypeValue);
+        => actionTypeValue != null && HotkeyActionCatalog.NeedsCommand(actionTypeValue);
 
 
     public override async ValueTask DisposeAsync()

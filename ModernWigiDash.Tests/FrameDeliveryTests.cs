@@ -16,12 +16,15 @@ public class FrameDeliveryTests
     }
 
     [TestMethod]
-    public void Push_WhenNoSendAttached_ReturnsDropped()
+    public void Push_WhenNoSendAttached_CountsUnconfiguredDrop()
     {
         using var delivery = new FrameDelivery();
         using var bitmap = CreateFrameBitmap();
 
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+
+        Assert.AreEqual(1L, delivery.DroppedUnconfiguredCount, "a missing seam must count a drop, not vanish");
+        Assert.AreEqual(1L, delivery.DroppedCount, "the unconfigured drop must count in the total");
     }
 
     [TestMethod]
@@ -60,7 +63,8 @@ public class FrameDeliveryTests
         using var bitmap = CreateFrameBitmap();
 
         Assert.IsFalse(delivery.IsSendInFlight, "Idle delivery must not report an in-flight send");
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+        Assert.AreEqual(0L, delivery.DroppedCount, "the ready push must not drop the frame");
 
         Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(5)), "The sender must reach the send callback");
         Assert.IsTrue(observed.Count == 1 && observed[0], "The flag must read true inside the send callback");
@@ -94,12 +98,15 @@ public class FrameDeliveryTests
     // ── Push (SKBitmap): encode → pooled buffer → deliver ──
 
     [TestMethod]
-    public void Push_WithoutEncoder_ReturnsDropped()
+    public void Push_WithoutEncoder_CountsUnconfiguredDrop()
     {
         using var delivery = new FrameDelivery(send: _ => FrameSendResult.Sent);
         using var bitmap = CreateFrameBitmap();
 
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+
+        Assert.AreEqual(1L, delivery.DroppedUnconfiguredCount, "a missing encoder must count a drop, not vanish");
+        Assert.AreEqual(1L, delivery.DroppedCount, "the unconfigured drop must count in the total");
     }
 
     [TestMethod]
@@ -112,8 +119,9 @@ public class FrameDeliveryTests
         using var delivery = new FrameDelivery(encoder: encoder, send: _ => { delivered.Set(); return FrameSendResult.Sent; }, log: logs.Add);
         using var bitmap = CreateFrameBitmap();
 
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "An encode failure must drop the frame, not escape the tick");
-        Assert.AreEqual(1L, delivery.DroppedEncodeCount);
+        delivery.Push(bitmap);
+        Assert.AreEqual(1L, delivery.DroppedEncodeCount, "an encode failure must drop the frame, not escape the tick");
+        Assert.AreEqual(1L, delivery.DroppedCount, "the encode drop must count in the total");
         Assert.IsTrue(logs.Any(line => line.Contains("encode failed")), "The encode failure must surface through the log seam");
 
         // The pipeline must survive: the SAME delivery that dropped the frame
@@ -121,7 +129,7 @@ public class FrameDeliveryTests
         // Push guarantees survival — a fresh pipeline would prove nothing).
         encoder.SetThrowOnEncode(false);
         delivered.Reset();
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+        delivery.Push(bitmap);
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "The delivery must recover after a failed encode");
     }
 
@@ -140,9 +148,9 @@ public class FrameDeliveryTests
             });
         using var bitmap = CreateFrameBitmap();
 
-        FrameDeliveryResult result = delivery.Push(bitmap);
+        delivery.Push(bitmap);
 
-        Assert.AreEqual(FrameDeliveryResult.Queued, result, "Ready delivery must accept the frame");
+        Assert.AreEqual(0L, delivery.DroppedCount, "Ready delivery must accept the frame");
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
         Assert.IsNotNull(received);
         Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, received.Length);
@@ -169,12 +177,20 @@ public class FrameDeliveryTests
         // in the pool. The release lands right after the send, so keep pushing
         // until one queues — a drop is the "buffer still in flight" signal.
         delivered.Reset();
-        await TestWait.WaitUntilAsync(() => delivery.Push(bitmap) == FrameDeliveryResult.Queued, TimeSpan.FromSeconds(2));
+        // Pool is finite: a push queues only once an in-flight buffer is back.
+        // Probe with a drop-count delta — an unchanged total means this push
+        // was accepted; a pool-exhaustion drop would have raised it.
+        await TestWait.WaitUntilAsync(() =>
+        {
+            long before = delivery.DroppedCount;
+            delivery.Push(bitmap);
+            return delivery.DroppedCount == before;
+        }, TimeSpan.FromSeconds(2));
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "The released buffer must deliver a second frame");
     }
 
     [TestMethod]
-    public void Push_WhenPoolExhausted_ReturnsDroppedAndCounts()
+    public void Push_WhenPoolExhausted_CountsPoolDrop()
     {
         using var delivery = new FrameDelivery(
             encoder: new SkiaRgb565Encoder(),
@@ -206,10 +222,12 @@ public class FrameDeliveryTests
         Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
 
         // The pooled buffer is in flight; the margin buffer fills the channel.
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery2.Push(bitmap), "The in-flight-margin buffer must queue (channel has room)");
+        delivery2.Push(bitmap);
+        Assert.AreEqual(0L, delivery2.DroppedCount, "The in-flight-margin buffer must queue (channel has room)");
         // Both buffers are now in flight — a third push has nothing to acquire.
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery2.Push(bitmap));
-        Assert.AreEqual(1, delivery2.DroppedCount);
+        delivery2.Push(bitmap);
+        Assert.AreEqual(1, delivery2.DroppedPoolCount, "the exhausted pool must count a pool drop");
+        Assert.AreEqual(1L, delivery2.DroppedCount, "the pool drop must count in the total");
         release.Set();
     }
 
@@ -320,12 +338,15 @@ public class FrameDeliveryTests
         using var bitmap = CreateFrameBitmap();
 
         Assert.IsTrue(delivery.IsReady);
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "Ready delivery must accept the frame");
+        delivery.Push(bitmap);
+        Assert.AreEqual(0L, delivery.DroppedCount, "Ready delivery must accept the frame");
         Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the ready frame");
 
         ready = false;
         Assert.IsFalse(delivery.IsReady);
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap), "Not-ready delivery must drop the frame before encoding/queuing");
+        delivery.Push(bitmap);
+        Assert.AreEqual(1L, delivery.DroppedNotReadyCount, "Not-ready delivery must drop the frame before encoding/queuing");
+        Assert.AreEqual(1L, delivery.DroppedCount, "the not-ready drop must count in the total");
         release.Set();
         Assert.AreEqual(1, sent, "The dropped frame must never reach the transport seam");
     }
@@ -425,8 +446,10 @@ public class FrameDeliveryTests
 
         delivery.Push(bitmap);
         Assert.IsTrue(blocker.Wait(TimeSpan.FromSeconds(5)), "Sender loop must pin the pooled buffer");
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "The in-flight-margin buffer must queue");
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+        Assert.AreEqual(0L, delivery.DroppedCount, "The in-flight-margin buffer must queue");
+        delivery.Push(bitmap);
+        Assert.AreEqual(1L, delivery.DroppedPoolCount, "the third push must be a pool-exhaustion drop");
 
         Assert.IsTrue(logs.Count > 0 && logs[0].Contains("dropped"),
             "the first pool-exhaustion drop must surface through the log seam — a wedged pipe that drops frames is visible, not silent");
@@ -472,8 +495,9 @@ public class FrameDeliveryTests
 
         // Pool of 2 (capacity 1 + the sender's in-flight margin): the first
         // push after the pin fills the channel, the second exhausts the pool.
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap), "The in-flight-margin buffer must queue (channel has room)");
-        Assert.AreEqual(FrameDeliveryResult.Dropped, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+        Assert.AreEqual(0L, delivery.DroppedCount, "The in-flight-margin buffer must queue (channel has room)");
+        delivery.Push(bitmap);
         release.Set();
 
         Assert.AreEqual(1, delivery.DroppedPoolCount);
@@ -500,7 +524,8 @@ public class FrameDeliveryTests
             });
         using var bitmap = CreateFrameBitmap();
 
-        Assert.AreEqual(FrameDeliveryResult.Queued, delivery.Push(bitmap));
+        delivery.Push(bitmap);
+        Assert.AreEqual(0L, delivery.DroppedCount, "the ready push must queue, not drop");
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
         Assert.IsNotNull(received);
         Assert.AreEqual(4096, received.Length, "The pool must be sized from the encoder's OutputBufferSize, not a fixed constant");

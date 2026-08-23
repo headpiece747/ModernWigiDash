@@ -1,3 +1,5 @@
+using Windows.Media;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -86,4 +88,32 @@ public static class NowPlayingPresentation
     /// <summary>"1.5×" when the playback rate deviates from 1.0, else null (nothing to show).</summary>
     public static string? PlaybackRateText(double rate)
         => Math.Abs(rate - 1.0) > 0.001 ? $"{DisplayFormat.Value(rate, "0.0")}×" : null;
+
+    /// <summary>
+    /// The repeat-mode cycle the tap handler walks: None → List → Track →
+    /// None. Any mode outside the named two degrades to None, so a
+    /// hand-edited or unknown state lands on the cycle's start. Assertable
+    /// here without a widget or an SMTC session.
+    /// </summary>
+    public static MediaPlaybackAutoRepeatMode NextRepeatMode(MediaPlaybackAutoRepeatMode current)
+        => current switch
+        {
+            MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
+            MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
+            _ => MediaPlaybackAutoRepeatMode.None
+        };
+
+    /// <summary>
+    /// The live progress position in seconds: the snapshot's position, advanced
+    /// by the time elapsed since the snapshot while playback is active (the
+    /// render clock keeps the bar moving between SMTC refreshes). A paused or
+    /// stopped snapshot reads its raw position.
+    /// </summary>
+    public static double ExtrapolatedPosition(MediaSnapshot snap, DateTimeOffset now)
+    {
+        double posSec = snap.Position.TotalSeconds;
+        if (snap.IsPlaying)
+            posSec += (now - snap.LastUpdated).TotalSeconds;
+        return posSec;
+    }
 }

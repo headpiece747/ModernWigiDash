@@ -13,6 +13,11 @@ namespace ModernWigiDash.Core.Models;
 /// </summary>
 public static class ProfileOps
 {
+    // One bound spelling of the PROFILE tag (cadence 1: the rare disposal-yield
+    // event always logs); the line policy (flatten + bound + redact) is owned
+    // by FileLog.Write, so the sites emit message only.
+    private static readonly DiagLog _log = new("PROFILE", 1);
+
     /// <summary>
     /// Finds the placed instance wrapping a live widget instance (by
     /// reference) — the single identity scan the window's PersistProperty and
@@ -313,7 +318,7 @@ public static class ProfileOps
                 }
                 else
                 {
-                    FileLog.Write($"[PROFILE] Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}) — teardown detached to a background task.");
+                    _log.Write(() => $"Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}); teardown detached to a background task.");
                     _ = DetachDisposeAsync(dispose);
                 }
             }
@@ -344,7 +349,7 @@ public static class ProfileOps
             // The instance is already detached from the profile (nulled below),
             // so its in-flight teardown cannot outlive a rendered frame — it
             // just cannot be awaited on this thread.
-            FileLog.Write($"[PROFILE] Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}) — teardown detached to a background task.");
+            _log.Write(() => $"Widget disposal yielded from DisposeAsync (instance {placed.InstanceId}); teardown detached to a background task.");
             _ = DetachDisposeAsync(dispose);
         }
         placed.ActiveInstance = null;

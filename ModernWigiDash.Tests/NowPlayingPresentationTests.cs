@@ -1,3 +1,6 @@
+using Windows.Media;
+using Windows.Media.Control;
+
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -91,5 +94,56 @@ public class NowPlayingPresentationTests
         Assert.IsNull(NowPlayingPresentation.PlaybackRateText(1.0));
         Assert.AreEqual("1.5×", NowPlayingPresentation.PlaybackRateText(1.5));
         Assert.AreEqual("0.5×", NowPlayingPresentation.PlaybackRateText(0.5));
+    }
+
+    [TestMethod]
+    public void NextRepeatMode_CyclesNoneListTrackAndWraps()
+    {
+        // The tap handler walks None -> List -> Track -> None; the cycle is a
+        // display decision, assertable here without a widget or SMTC session.
+        Assert.AreEqual(MediaPlaybackAutoRepeatMode.List, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.None));
+        Assert.AreEqual(MediaPlaybackAutoRepeatMode.Track, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.List));
+        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.Track));
+        // The cycle must close: three steps from None land back on None.
+        MediaPlaybackAutoRepeatMode current = MediaPlaybackAutoRepeatMode.None;
+        for (int i = 0; i < 3; i++)
+        {
+            current = NowPlayingPresentation.NextRepeatMode(current);
+        }
+        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None, current, "the cycle must wrap to its start");
+    }
+
+    [TestMethod]
+    public void ExtrapolatedPosition_PlayingAdvancesByElapsedSinceLastUpdated()
+    {
+        DateTimeOffset lastUpdated = new(2026, 8, 23, 12, 0, 0, TimeSpan.Zero);
+        var snap = new MediaSnapshot
+        {
+            Position = TimeSpan.FromSeconds(30),
+            Duration = TimeSpan.FromSeconds(60),
+            LastUpdated = lastUpdated,
+            Status = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+        };
+
+        double pos = NowPlayingPresentation.ExtrapolatedPosition(snap, lastUpdated.AddSeconds(5));
+
+        Assert.AreEqual(35.0, pos, 0.001, "a playing snapshot advances by the elapsed render time");
+    }
+
+    [TestMethod]
+    public void ExtrapolatedPosition_PausedReadsRawPosition()
+    {
+        DateTimeOffset lastUpdated = new(2026, 8, 23, 12, 0, 0, TimeSpan.Zero);
+        var snap = new MediaSnapshot
+        {
+            Position = TimeSpan.FromSeconds(30),
+            Duration = TimeSpan.FromSeconds(60),
+            LastUpdated = lastUpdated,
+            Status = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
+        };
+
+        double pos = NowPlayingPresentation.ExtrapolatedPosition(snap, lastUpdated.AddSeconds(5));
+
+        Assert.AreEqual(30.0, pos, 0.001, "a paused snapshot must not advance between refreshes");
     }
 }

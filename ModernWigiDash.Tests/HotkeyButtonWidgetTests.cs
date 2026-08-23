@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 
 namespace ModernWigiDash.Tests;
 
@@ -181,30 +182,69 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyWidget_MediaActionTypes_MapToMediaKeys()
+    public void HotkeyWidget_MediaActionTypes_MapToCatalogMediaKeys()
     {
-        var map = new Dictionary<string, string>
+        // Derived from the catalog: a new media entry extends this pin.
+        foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.Kind == HotkeyActionKind.MediaKey))
         {
-            ["Media Play / Pause"] = "PLAYPAUSE",
-            ["Media Next"] = "NEXT",
-            ["Media Previous"] = "PREVIOUS",
-            ["Media Stop"] = "STOP",
-            ["Volume Up"] = "VOLUMEUP",
-            ["Volume Down"] = "VOLUMEDOWN",
-            ["Mute"] = "MUTE"
-        };
-        foreach (var (actionType, expectedValue) in map)
+            var action = HotkeyActionCatalog.Create(entry.Name, "ignored");
+            Assert.AreEqual(HotkeyActionKind.MediaKey, action.Kind, entry.Name);
+            Assert.AreEqual(entry.MediaKey, action.Value, entry.Name);
+        }
+    }
+
+    [TestMethod]
+    public void HotkeyActionAttribute_Options_MatchTheActionCatalog()
+    {
+        // The inspector's choice list is the compile-time LITERAL copy of the
+        // action catalog (attributes cannot bind a runtime value): a renamed
+        // or hand-edited action name must fail HERE, not surface at runtime
+        // as the catalog's Launch default.
+        var attribute = typeof(HotkeyButtonWidget)
+            .GetProperty(nameof(HotkeyButtonWidget.ActionType))!
+            .GetCustomAttribute<WidgetPropertyAttribute>()!;
+
+        Assert.AreEqual(HotkeyActionCatalog.DefaultName, attribute.DefaultValue,
+            "the attribute default must match the catalog's default name");
+        Assert.AreEqual(HotkeyActionCatalog.Entries.Count, attribute.Options.Length,
+            "every catalog action must be an option, and every option a catalog action");
+        for (int i = 0; i < attribute.Options.Length; i++)
         {
-            var action = HotkeyButtonWidget.CreateAction(actionType, "");
-            Assert.AreEqual(HotkeyActionKind.MediaKey, action.Kind, actionType);
-            Assert.AreEqual(expectedValue, action.Value, actionType);
+            string option = attribute.Options[i];
+            Assert.AreEqual(HotkeyActionCatalog.Entries[i].Name, option,
+                "choice order must match the catalog order");
+            Assert.AreEqual(HotkeyActionCatalog.Entries[i].Kind, HotkeyActionCatalog.Create(option, "").Kind,
+                "every option must parse back to its catalog kind");
+        }
+    }
+
+    [TestMethod]
+    public void HotkeyActionCatalog_UnknownName_DegradesToLaunch()
+    {
+        // A hand-edited profile value that is not a catalog name must land on
+        // the Launch kind with the raw command: the one unknown-name rule.
+        var action = HotkeyActionCatalog.Create("Nonsense", "notepad.exe");
+        Assert.AreEqual(HotkeyActionKind.Launch, action.Kind);
+        Assert.AreEqual("notepad.exe", action.Value);
+        Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Nonsense"),
+            "an unknown name must not force the empty-command skip");
+    }
+
+    [TestMethod]
+    public void HotkeyActionCatalog_NeedsCommand_OnlyLaunchAndUrl()
+    {
+        Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Launch App"));
+        Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Open URL"));
+        foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.MediaKey is not null))
+        {
+            Assert.IsFalse(HotkeyActionCatalog.NeedsCommand(entry.Name), entry.Name);
         }
     }
 
     [TestMethod]
     public void HotkeyWidget_OpenUrlActionType_MapsToOpenUrl()
     {
-        var action = HotkeyButtonWidget.CreateAction("Open URL", "https://example.com");
+        var action = HotkeyActionCatalog.Create("Open URL", "https://example.com");
         Assert.AreEqual(HotkeyActionKind.OpenUrl, action.Kind);
         Assert.AreEqual("https://example.com", action.Value);
     }
@@ -212,13 +252,13 @@ public class HotkeyButtonWidgetTests
     [TestMethod]
     public void HotkeyWidget_SingleAction_ExecutesOneAction()
     {
-        var launch = HotkeyButtonWidget.CreateAction("Launch App", "notepad.exe");
+        var launch = HotkeyActionCatalog.Create("Launch App", "notepad.exe");
         Assert.AreEqual(HotkeyActionKind.Launch, launch.Kind);
         Assert.AreEqual("notepad.exe", launch.Value);
-        var openUrl = HotkeyButtonWidget.CreateAction("Open URL", "https://example.com");
+        var openUrl = HotkeyActionCatalog.Create("Open URL", "https://example.com");
         Assert.AreEqual(HotkeyActionKind.OpenUrl, openUrl.Kind);
         Assert.AreEqual("https://example.com", openUrl.Value);
-        var mute = HotkeyButtonWidget.CreateAction("Mute", "");
+        var mute = HotkeyActionCatalog.Create("Mute", "");
         Assert.AreEqual(HotkeyActionKind.MediaKey, mute.Kind);
         Assert.AreEqual("MUTE", mute.Value);
     }

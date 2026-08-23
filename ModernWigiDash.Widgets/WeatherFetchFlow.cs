@@ -4,8 +4,8 @@ namespace ModernWigiDash.Widgets;
 /// The weather fetch-flow module: the SEQUENCE around one fetch — the location
 /// snapshot captured before the await (the key and the fetch resolve from the
 /// SAME record), the post-await re-validation against the live location
-/// (through <see cref="WeatherQueryKey.SameKey"/>, the ADR-0006 predicate,
-/// never a second spelling), the drop-and-refetch routing, the write-back
+/// (through the <see cref="CaptureWindowGuard"/>, which routes through the
+/// ADR-0006 predicate, never a second spelling), the drop-and-refetch routing, the write-back
 /// gating, the cadence gate, and the boot-load
 /// rollback. The host keeps only the host concerns — the property coercion
 /// (BuildLocation), the gate discipline around the display state (the apply
@@ -72,6 +72,14 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
         // post-await live re-check is its gate.
         WeatherLocation location = host.CurrentLocation;
         string fetchKey = WeatherQueryKey.Build(location);
+        // The capture window (ADR-0006), named: this run's start key against
+        // the live location. The client's Stale verdict covers the client's
+        // own window; this guard is the drop gate for an identity change the
+        // client's state does not see (a silent reassignment, the
+        // post-InitializeAsync profile hydration). Every await boundary of
+        // this run re-validates through the guard — one rule, the ADR-0006
+        // predicate.
+        var window = new CaptureWindowGuard(fetchKey, () => WeatherQueryKey.Build(host.CurrentLocation));
         WeatherFetchResult result;
         try
         {
@@ -103,7 +111,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
         // silent reassignment, the post-InitializeAsync profile hydration)
         // still comes back as Fetched/Tie here: the live location re-read is
         // the gate for that window. Drop the result — weather AND label.
-        if (!StillCurrent(fetchKey))
+        if (window.Dropped)
         {
             _ = RunFetchAsync(force: true);
             return WeatherFetchFlowOutcome.DroppedStale;
@@ -122,7 +130,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // (the dropdown) plus the queried header. No label write-back:
             // there is no resolved city to persist, and writing the raw query
             // back into Location would be a no-op at best.
-            if (!host.TryApplyTie(tie.Candidates, () => StillCurrent(fetchKey)))
+            if (!host.TryApplyTie(tie.Candidates, window.StillCurrent))
             {
                 _ = RunFetchAsync(force: true);
                 return WeatherFetchFlowOutcome.DroppedStale;
@@ -131,7 +139,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
         }
         else if (result is WeatherFetchResult.Fetched fetched)
         {
-            if (!host.TryApply(new WeatherApplyRequest(fetched.Snapshot, null, () => StillCurrent(fetchKey),
+            if (!host.TryApply(new WeatherApplyRequest(fetched.Snapshot, null, window.StillCurrent,
                     fetched.Candidates, fetched.Population, fetched.Snapshot.ResolvedCityName)))
             {
                 _ = RunFetchAsync(force: true);
@@ -154,7 +162,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // re-reads the new location and the set never happens).
             if (WeatherDisplayState.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
             {
-                host.QueueLabelWriteback(() => StillCurrent(fetchKey), snapshot.ResolvedCityName);
+                host.QueueLabelWriteback(window.StillCurrent, snapshot.ResolvedCityName);
             }
         }
         else
@@ -216,9 +224,11 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // The location at START, captured ONCE (the same one-read rule as
             // RunFetchAsync): the key and the load resolve from the same
             // record, so the boot load cannot drift from its own key between
-            // the two reads.
+            // the two reads. The capture window (ADR-0006) named: the
+            // post-await identity guard below re-validates through the guard.
             WeatherLocation location = host.CurrentLocation;
             string locationKeyBefore = WeatherQueryKey.Build(location);
+            var window = new CaptureWindowGuard(locationKeyBefore, () => WeatherQueryKey.Build(host.CurrentLocation));
 
             // The cache is identity-checked against the CURRENT location by
             // the client itself (a cache saved for a different resolution
@@ -234,9 +244,9 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // cannot carry candidates or population (they stay null — the
             // policy's keep-previous rule — exactly like the client's own
             // load state).
-            bool applied = host.TryApply(new WeatherApplyRequest(cached, versionBefore, () => StillCurrent(locationKeyBefore),
+            bool applied = host.TryApply(new WeatherApplyRequest(cached, versionBefore, window.StillCurrent,
                 null, null, cached.ResolvedCityName));
-            if (!applied && !StillCurrent(locationKeyBefore))
+            if (!applied && window.Dropped)
             {
                 // The load already committed its resolution state (name/lat/
                 // lon/throttle) — an identity change means the discard must
@@ -252,13 +262,4 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // cache load is not a failure, so nothing is logged or applied.
         }
     }
-
-    /// <summary>
-    /// The single spelling of "the resolution identity still matches the key
-    /// captured at fetch start": re-derives the LIVE key from the current
-    /// location through the ADR-0006 predicate. Every await boundary of this
-    /// module re-validates through this — one comparison shape.
-    /// </summary>
-    private bool StillCurrent(string key)
-        => WeatherQueryKey.SameKey(key, WeatherQueryKey.Build(host.CurrentLocation));
 }

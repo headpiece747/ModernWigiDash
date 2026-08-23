@@ -145,6 +145,14 @@ internal sealed class WeatherClient
         // location that actually resolved.
         string fetchQueryKey = WeatherQueryKey.Build(location);
 
+        // The capture window (ADR-0006), named: this fetch's start key
+        // against the fetch-control's live identity state. The re-check sites
+        // below (the re-resolve condition, the no-coordinates stale check,
+        // the post-save re-validation) all route through the guard — one
+        // rule; the atomic stamp transitions (ConfirmAndStamp, Stamp) keep
+        // their gate atomicity.
+        var window = new CaptureWindowGuard(fetchQueryKey, () => _fetchControl.LastLocationQuery);
+
         // The claim + throttle rules live in the fetch-control module: the
         // in-flight guard is Interlocked — the render tick, the refresh
         // timer, and OnTouch can race, and a check-then-set would let two of
@@ -157,7 +165,7 @@ internal sealed class WeatherClient
         try
         {
             WeatherResolutionOutcome? resolution = null;
-            if (!_fetchControl.Lat.HasValue || !_fetchControl.MatchesCurrent(fetchQueryKey) || force)
+            if (!_fetchControl.Lat.HasValue || window.Dropped || force)
                 resolution = await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
 
             if (!_fetchControl.Lat.HasValue || !_fetchControl.Lon.HasValue)
@@ -168,7 +176,7 @@ internal sealed class WeatherClient
                 // (the stale success path's verdict) — the widget must
                 // re-fetch the new identity immediately, not treat it as a
                 // plain failed attempt.
-                if (!_fetchControl.MatchesCurrent(fetchQueryKey))
+                if (window.Dropped)
                 {
                     return new WeatherFetchResult.Stale(fetchQueryKey);
                 }
@@ -229,7 +237,7 @@ internal sealed class WeatherClient
             {
                 await saveSeam(cancellationToken).ConfigureAwait(false);
             }
-            if (!_fetchControl.MatchesCurrent(fetchQueryKey))
+            if (window.Dropped)
             {
                 return new WeatherFetchResult.Stale(fetchQueryKey);
             }

@@ -51,14 +51,14 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// </summary>
     internal TimeSpan ReconnectPeriod { get; set; } = TimeSpan.FromSeconds(5);
 
-    // The never-stall-on-close budgets: each is deliberately shorter than the
-    // transport's DisplayHidTransport.CloseBound (the worst-case time a hung
-    // device can hold the teardown) — close abandons a slow teardown rather
-    // than follow it, because a leaked handle at exit beats a frozen window.
-    // A healthy close completes in well under a second, so these bounds only
-    // ever bite for a hung device.
-    internal static readonly TimeSpan StandbyCloseBudget = TimeSpan.FromSeconds(2);
-    internal static readonly TimeSpan DisposeAbandonBudget = TimeSpan.FromSeconds(3);
+    // The never-stall-on-close budgets: read from the transport's close-budget
+    // policy (DisplayHidTransport.CloseBudgets), where they are derived
+    // strictly shorter than the worst-case teardown, so the relation holds by
+    // construction instead of by a cross-file pin. A healthy close completes
+    // in well under a second, so the bounds only ever bite for a hung device
+    // (a leaked handle at exit beats a frozen window).
+    internal static TimeSpan StandbyCloseBudget => DisplayHidTransport.CloseBudgets.StandbyCloseBudget;
+    internal static TimeSpan DisposeAbandonBudget => DisplayHidTransport.CloseBudgets.DisposeAbandonBudget;
 
     // Direct-USB touch polling: the engine owns the transport, reads the touch
     // report at a 16ms cadence, and normalizes it once via
@@ -405,7 +405,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // the backend's worst-case stall budget) on a hung device, and close
         // must never stall on that (the standby pattern — a leaked handle at
         // exit beats a frozen window); DisposeAbandonBudget is the abandon
-        // point, deliberately shorter than CloseBound. The timer thread may
+        // point, derived shorter than CloseBound. The timer thread may
         // also reach this via the reconnect path, where an abandoned dispose
         // is equally fine.
         if (oldTransport != null)
@@ -452,7 +452,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         // transport's CloseBound). Standby itself is a pair of fast control
         // transfers (the Welcome screen and the sleep command, bounded by
         // the control pipe timeout) once the lock frees; StandbyCloseBudget
-        // is the abandon point, deliberately shorter than CloseBound, so
+        // is the abandon point, derived shorter than CloseBound, so
         // close can never stall on the write.
         bool standbyConfirmed = false;
         bool standbySettled = false;

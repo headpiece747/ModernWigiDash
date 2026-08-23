@@ -16,11 +16,11 @@ internal enum ManipulationKind
 }
 
 /// <summary>
-/// Where an input sample came from. The suppression rule is a property of the
-/// <em>source</em>: desktop input passes the edit-mode flag (authoring input —
-/// presses start manipulations and route only in runtime mode), while the
-/// physical display always routes (hotkeys fire on the device even while the
-/// desktop is in edit mode).
+/// Where an input sample came from. The veto is a property of the
+/// <em>source</em>: the desktop's authoring input manipulates and vetoes
+/// widget routing while the desktop is in edit mode (the controller reads it
+/// live through its injected probe), while the physical display always routes
+/// (hotkeys fire on the device even while the desktop is in edit mode).
 /// </summary>
 internal enum InputSource
 {
@@ -48,16 +48,18 @@ internal readonly record struct InputState(PageLayout ActivePage, int PageCount,
 ///    crosses the same tested policy.
 ///
 /// Callers feed the source-aware <see cref="Press"/>/<see cref="Move"/>/
-/// <see cref="Release"/> surface with coordinates and the edit-mode flag; the
-/// controller derives the page state from the injected provider and does the
-/// rest. All page-switch UI work (tab rebuild, selection, canvas refresh)
-/// stays in MainWindow behind the <paramref name="navigateTo"/> and
-/// <paramref name="select"/> seams.
+/// <see cref="Release"/> surface with coordinates and the source only; the
+/// controller reads the desktop's live edit mode itself (the injected
+/// <paramref name="desktopEditMode"/> probe) and derives the veto from the
+/// source, so the call sites never spell it. All page-switch UI work
+/// (tab rebuild, selection, canvas refresh) stays in MainWindow behind the
+/// <paramref name="navigateTo"/> and <paramref name="select"/> seams.
 /// </summary>
 internal sealed class InputController
 {
     private readonly GestureInterpreter _machine = new();
     private readonly Func<InputState> _state;
+    private readonly Func<bool> _desktopEditMode;
     private readonly Action<int>? _navigateTo;
     private readonly Action? _requestRender;
     private readonly Action<PageLayout, float, float, TouchEventType> _routeTouch;
@@ -73,6 +75,12 @@ internal sealed class InputController
 
     /// <param name="stateProvider">The page-state snapshot (active page, page
     /// count, active index) — MainWindow binds it to the profile once.</param>
+    /// <param name="desktopEditMode">The live edit-mode read for the desktop.
+    /// The veto is a property of the source: the desktop's authoring input
+    /// manipulates and vetoes widget routing while this read is true, and the
+    /// device is runtime input that always routes, so the probe is only ever
+    /// read for desktop samples. The read lives inside the controller, not at
+    /// the call sites, so a sample's edit mode is decided once per sample.</param>
     /// <param name="navigateTo">Page-switch seam. Called with the target page
     /// index when a swipe/arrow-tap navigates; MainWindow performs the UI work.</param>
     /// <param name="requestRender">Canvas refresh seam, invoked when a touch
@@ -91,6 +99,7 @@ internal sealed class InputController
     /// manipulates, so it never fires this.</param>
     public InputController(
         Func<InputState> stateProvider,
+        Func<bool> desktopEditMode,
         Action<int>? navigateTo = null,
         Action? requestRender = null,
         Action<PageLayout, float, float, TouchEventType>? routeTouch = null,
@@ -99,6 +108,7 @@ internal sealed class InputController
         Action<ManipulationChange>? onManipulation = null)
     {
         _state = stateProvider;
+        _desktopEditMode = desktopEditMode;
         _navigateTo = navigateTo;
         _requestRender = requestRender;
         _routeTouch = routeTouch ?? WidgetRouting.RouteTouch;
@@ -143,7 +153,7 @@ internal sealed class InputController
     /// manipulation or feed the gesture machine — the orchestration that used
     /// to be duplicated across the window's mouse handlers.
     /// </summary>
-    public void Press(float x, float y, InputSource source, bool editMode)
+    public void Press(float x, float y, InputSource source)
     {
         if (source == InputSource.Device)
         {
@@ -151,6 +161,7 @@ internal sealed class InputController
             return;
         }
 
+        bool editMode = EditModeFor(source);
         InputState state = _state();
         var hit = _hitTest(state.ActivePage, x, y);
         _select?.Invoke(hit);
@@ -169,9 +180,10 @@ internal sealed class InputController
     /// <returns>True when the sample was consumed by a manipulation (the caller
     /// should refresh the inspector and canvas when <paramref name="changed"/>);
     /// false when it fed the gesture machine instead.</returns>
-    public bool Move(float x, float y, InputSource source, bool editMode, out bool changed)
+    public bool Move(float x, float y, InputSource source, out bool changed)
     {
         changed = false;
+        bool editMode = EditModeFor(source);
         if (MoveManipulation(_manipulationTarget, x, y, editMode, out changed))
         {
             if (changed)
@@ -184,7 +196,7 @@ internal sealed class InputController
             return true;
         }
 
-        Feed(TouchEventType.TouchMove, x, y, suppressWidgetRouting: source == InputSource.DesktopEdit && editMode);
+        Feed(TouchEventType.TouchMove, x, y, suppressWidgetRouting: editMode);
         return false;
     }
 
@@ -195,8 +207,9 @@ internal sealed class InputController
     /// <returns>True when a manipulation was in progress (the caller skips
     /// gesture handling and refreshes); <paramref name="iconMoved"/> reports
     /// whether an icon grab changed the widget's icon offsets.</returns>
-    public bool Release(float x, float y, InputSource source, bool editMode, out bool iconMoved)
+    public bool Release(float x, float y, InputSource source, out bool iconMoved)
     {
+        bool editMode = EditModeFor(source);
         bool wasManipulating = EndManipulation(_manipulationTarget, editMode, out iconMoved);
         _manipulationTarget = null;
 
@@ -208,7 +221,7 @@ internal sealed class InputController
         }
         else
         {
-            Feed(TouchEventType.TouchUp, x, y, suppressWidgetRouting: source == InputSource.DesktopEdit && editMode);
+            Feed(TouchEventType.TouchUp, x, y, suppressWidgetRouting: editMode);
         }
 
         return wasManipulating;
@@ -336,6 +349,16 @@ internal sealed class InputController
         _iconGrabMoved = false;
         return wasManipulating;
     }
+
+    /// <summary>
+    /// The edit-mode veto for one sample, derived from the source: the
+    /// desktop reads its live probe (authoring input — manipulations active,
+    /// widget routing vetoed while on), and the device is runtime input that
+    /// never reads the probe, so the "the device always routes" fact lives
+    /// here and nowhere else.
+    /// </summary>
+    private bool EditModeFor(InputSource source)
+        => source == InputSource.DesktopEdit && _desktopEditMode();
 
     private bool ApplyIconGrabMove(IWidgetIconGrab grab, PlacedWidgetInstance widget, float x, float y)
     {

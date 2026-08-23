@@ -6,13 +6,14 @@ namespace ModernWigiDash.Sdk;
 /// The log-line rule: the single owner of the shape a log value must have
 /// before it reaches a line-oriented log file — embedded newlines flattened
 /// to spaces, credential-shaped query params and URL query strings redacted,
-/// and the result bounded to <see cref="MaxLineLength"/>. The widget host
-/// sink (MainWindow's <c>LogInfo</c>/<c>LogError</c>) and <c>CrashLog</c>
-/// route through it, so a multi-line <c>ex.ToString()</c> can no longer
-/// corrupt the line-oriented log and the redaction rule has one home. The
-/// sanitizer never throws — it runs on error-handling paths where the input
-/// may be user-supplied, so a null value reads as the empty string rather
-/// than replacing the original failure with a secondary exception.
+/// and the result bounded to <see cref="MaxLineLength"/>. <c>FileLog.Write</c>
+/// (the display_device.log adapter) applies it to every line, and
+/// <c>CrashLog</c> (the crash.log adapter) applies it to the exception
+/// message, so a multi-line <c>ex.ToString()</c> can no longer corrupt the
+/// line-oriented log and the redaction rule has one home. The sanitizer never
+/// throws — it runs on error-handling paths where the input may be
+/// user-supplied, so a null value reads as the empty string rather than
+/// replacing the original failure with a secondary exception.
 /// </summary>
 public static class LogLine
 {
@@ -34,7 +35,7 @@ public static class LogLine
     private static readonly Regex UrlQueryStripper =
         new(@"(?<url>https?://[^\s""'<>]+)\?[^\s""'<>]*", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
-    /// <summary>`r`n    /// The flatten-and-bound span pass: embedded newlines become spaces and
+    /// <summary>The flatten-and-bound span pass: embedded newlines become spaces and
     /// the result is cut to <paramref name="limit"/> characters in one scan,
     /// so an oversized value never allocates the full-size intermediates of
     /// chained Replace calls before being cut down. The single owner of the

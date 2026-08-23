@@ -500,20 +500,4 @@ public class DisplayDeviceEngineTests
             $"engine Dispose must not stall behind a hung transport (took {sw.Elapsed.TotalSeconds:F1}s)");
         Assert.IsFalse(fake.Disposed, "the abandoned dispose may still be running off-thread");
     }
-
-    [TestMethod]
-    public void CloseBudgets_AbandonBeforeWorstCaseTeardown()
-    {
-        // The engine's close waits are abandon points: each is deliberately
-        // shorter than the transport's CloseBound (the worst-case time a hung
-        // device can hold the teardown lock) — a leaked handle at exit beats a
-        // frozen window. If a budget ever reached CloseBound, close would
-        // follow a hung device to the very end and stall on it. The invariant
-        // is pinned on both sides of the seam (CloseBound itself is pinned in
-        // DisplayHidTransportTests) so it can never drift silently.
-        Assert.IsTrue(DisplayDeviceEngine.StandbyCloseBudget < DisplayHidTransport.CloseBound,
-            "the standby close must abandon before a worst-case teardown");
-        Assert.IsTrue(DisplayDeviceEngine.DisposeAbandonBudget < DisplayHidTransport.CloseBound,
-            "the transport dispose must abandon before a worst-case teardown");
-    }
 }

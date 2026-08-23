@@ -55,6 +55,24 @@ public class FileLogTests
     }
 
     [TestMethod]
+    public void Write_MultiLineTokenValue_FlattenAndRedactLandInTheFile()
+    {
+        // FileLog.Write is the line-policy owner: the sanitize pass (flatten
+        // + bound + redact) runs at the seam, so a multi-line, token-bearing
+        // value lands as one flattened, redacted line. If the Sanitize call
+        // were ever removed from the seam, this pin fails.
+        FileLog.Write("line one\nline two token=secret123");
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("line one line two token=<redacted>"),
+            "the flattened, redacted line must land intact");
+        Assert.IsFalse(content.Contains("secret123"), "the token value must never reach the file");
+        Assert.AreEqual(1, content.TrimEnd('\r', '\n').Split('\n').Length,
+            "embedded newlines must flatten to spaces - one value, one line");
+    }
+
+    [TestMethod]
     public void Write_FileOverRotationCap_RotatesToDotOneAndContinuesFresh()
     {
         // Seed an oversized file directly; the size check runs on a write

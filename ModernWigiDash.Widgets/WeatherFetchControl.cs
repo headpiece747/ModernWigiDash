@@ -49,6 +49,13 @@ internal sealed class WeatherFetchControl
     /// compare the raw timestamp against <see cref="DateTime.MinValue"/>).</summary>
     internal bool HasFetched => _lastFetchTime != DateTime.MinValue;
     internal bool IsClaimHeld => _claim != 0;
+
+    /// <summary>The current identity query key (the client-side live key of
+    /// the <see cref="CaptureWindowGuard"/>: the client's guard re-checks the
+    /// fetch's start key against this value). Read without the gate — a
+    /// string is an immutable reference, so the read cannot tear; the verdict
+    /// is a pure function of the value observed. Test seams also read it to
+    /// observe the state after a transition.</summary>
     internal string LastLocationQuery => _lastLocationQuery;
 
     /// <summary>The shared resolved-identity value (the same type the
@@ -96,9 +103,14 @@ internal sealed class WeatherFetchControl
     /// compares under the gate and, when it matches, stamps the throttle (an
     /// attempt cools down like a success). Returns whether the stamp was
     /// written — false means the identity changed mid-flight and the NEW
-    /// identity's fetch must not be cooled down. Used by the failure path and
-    /// the geocode leg; the success path uses <see cref="ConfirmAndStamp"/>,
-    /// which also carries the resolved payload out under the same lock.
+    /// identity's fetch must not be cooled down. The compare-and-stamp must
+    /// be one gate section (an invalidation interleaved between a plain
+    /// re-check and the stamp would write the OLD identity's throttle), so
+    /// the transition keeps the ADR-0006 predicate under its own gate
+    /// instead of routing through the capture window's plain re-check.
+    /// Used by the failure path and the geocode leg; the success path uses
+    /// <see cref="ConfirmAndStamp"/>, which also carries the resolved payload
+    /// out under the same lock.
     /// </summary>
     internal bool Stamp(string queryKey)
     {
@@ -133,13 +145,6 @@ internal sealed class WeatherFetchControl
             population = _resolution.Population;
             return true;
         }
-    }
-
-    /// <summary>Compares the identity key under the gate (the no-coordinates
-    /// Stale check and the fetch's re-resolve condition).</summary>
-    internal bool MatchesCurrent(string queryKey)
-    {
-        lock (_gate) { return WeatherQueryKey.SameKey(_lastLocationQuery, queryKey); }
     }
 
     /// <summary>

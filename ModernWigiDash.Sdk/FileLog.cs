@@ -69,11 +69,16 @@ public static class FileLog
     /// <summary>
     /// Writes one line to the shared display log. Never throws: logging is
     /// best-effort and failures (locked/unavailable file) are swallowed.
-    /// Callers bake their component tag into the message (e.g. "[HW] ...").
+    /// The single owner of the line policy for this file: the message is run
+    /// through <see cref="LogLine.Sanitize"/> (flatten + bound + redact) once,
+    /// here, so every producer (the DiagLog paths, the raw <c>Log</c>
+    /// passthroughs, the direct writers) lands a well-formed line without
+    /// spelling the rule itself. Callers bake their component tag into the
+    /// message (e.g. "[HW] ...") or route through a bound <see cref="DiagLog"/>.
     /// </summary>
     public static void Write(string message)
     {
-        string line = $"[{Clock.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {message}";
+        string line = $"[{Clock.GetUtcNow().UtcDateTime:HH:mm:ss.fff}] {LogLine.Sanitize(message)}";
         lock (Gate)
         {
             try
