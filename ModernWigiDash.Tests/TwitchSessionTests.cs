@@ -13,6 +13,9 @@ public class TwitchSessionTests
         public TwitchTokenValidation? ValidationResult;
         public bool ValidationUnauthorized;
         public bool RefreshRejected;
+        // When set, ValidateAsync parks on this task — the "hung network" the
+        // validation-gate tests drive (the tick's network call holds no gate).
+        public TaskCompletionSource? ValidatePark;
         public TwitchTokenSet? RefreshedToken;
         public TwitchTokenSet? PollToken;
         public TwitchDeviceAuthorization? Device;
@@ -28,12 +31,13 @@ public class TwitchSessionTests
         public override Task<TwitchTokenSet> PollDeviceTokenAsync(TwitchDeviceAuthorization deviceAuthorization, CancellationToken cancellationToken)
             => Task.FromResult(PollToken!);
 
-        public override Task<TwitchTokenValidation> ValidateAsync(string accessToken, CancellationToken cancellationToken)
+        public override async Task<TwitchTokenValidation> ValidateAsync(string accessToken, CancellationToken cancellationToken)
         {
             ValidateCalls++;
+            if (ValidatePark is { } park) await park.Task.ConfigureAwait(false);
             // Only the STALE token is unauthorized — the refreshed token validates.
             if (ValidationUnauthorized && accessToken == "access-token") throw new TwitchApiException(401, "unauthorized");
-            return Task.FromResult(ValidationResult!);
+            return ValidationResult!;
         }
 
         public override Task<TwitchTokenSet> RefreshAsync(string refreshToken, CancellationToken cancellationToken)
@@ -52,9 +56,27 @@ public class TwitchSessionTests
         }
     }
 
-    private static TwitchTokenSet Token(string clientId = TestClientId, string accessToken = "access-token") => new(clientId, accessToken, "refresh-token", DateTimeOffset.UtcNow.AddHours(1), []);
+    private static TwitchTokenSet Token(
+        string clientId = TestClientId,
+        string accessToken = "access-token",
+        DateTimeOffset? expiresAt = null)
+        => new(clientId, accessToken, "refresh-token", expiresAt ?? DateTimeOffset.UtcNow.AddHours(1), []);
 
     private static TwitchTokenValidation Validation(string clientId = TestClientId) => new(clientId, "user-1", "viewer", 3600, []);
+
+    /// <summary>
+    /// The client id the tick's resolver would pick on this machine: the tick
+    /// (like the production loop) resolves with a null configured id, so the
+    /// environment variable wins when set — the test token must carry that
+    /// id, or the mismatch verdict clears the session before the verdict
+    /// under test. Mirrors the resolver's trim/whitespace rule.
+    /// </summary>
+    private static string MachineClientId()
+    {
+        string? env = Environment.GetEnvironmentVariable("MODERNWIGIDASH_TWITCH_CLIENT_ID");
+        if (string.IsNullOrWhiteSpace(env)) return TestClientId;
+        return env.Trim();
+    }
 
     private static (TwitchSession Session, FakeClient Client, TwitchTokenStore Store, string StorePath) CreateSession()
     {
@@ -182,5 +204,64 @@ public class TwitchSessionTests
 
         Assert.IsFalse(ok, "A token bound to a different client id must not be restored");
         Assert.IsFalse(session.IsAuthenticated);
+    }
+
+    [TestMethod]
+    public async Task ValidateTick_ValidToken_RestampsAndSaves()
+    {
+        var (session, client, store, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId(), expiresAt: DateTimeOffset.UtcNow.AddSeconds(10)));
+
+        bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
+
+        Assert.IsTrue(kept, "A valid token keeps the monitor running");
+        Assert.IsTrue(session.IsAuthenticated);
+        Assert.IsTrue(client.ValidateCalls == 1);
+        Assert.IsTrue(store.Load()!.ExpiresAt > DateTimeOffset.UtcNow.AddSeconds(60),
+            "The tick re-stamps the expiry from the validation response");
+    }
+
+    [TestMethod]
+    public async Task ValidateTick_RefreshRejected_ClearsStateAndEndsTheMonitor()
+    {
+        var (session, client, store, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId()));
+        client.ValidationUnauthorized = true;
+        client.RefreshRejected = true;
+
+        bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
+
+        Assert.IsFalse(kept, "A rejected refresh ends the monitor");
+        Assert.IsFalse(session.IsAuthenticated);
+        Assert.IsNull(store.Load(), "A rejected refresh must delete the stored token");
+    }
+
+    [TestMethod]
+    public async Task ValidateTick_HungValidation_DoesNotHoldTheUserGate()
+    {
+        var (session, client, store, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId()));
+        client.ValidatePark = new TaskCompletionSource();
+
+        // The tick runs to its first await synchronously — by the time the
+        // Task is returned it is parked inside the validation network call.
+        Task tick = session.ValidateTickAsync(context, CancellationToken.None);
+        Assert.IsFalse(tick.IsCompleted, "The tick must be parked in the network call");
+
+        // The user's logout must not queue behind a gate a hung validation
+        // would be holding — it completes while the tick is still parked.
+        Task logout = session.LogoutAsync(CancellationToken.None);
+        var winner = await Task.WhenAny(logout, Task.Delay(2000));
+        Assert.AreSame(logout, winner, "A hung validation must not hold the user gate");
+        Assert.IsFalse(tick.IsCompleted, "The tick is still parked in the validation");
+
+        client.ValidatePark.SetResult();
+        await tick;
+
+        Assert.IsNull(store.Load(), "A stale verdict must not resurrect a logged-out token");
+        Assert.IsFalse(session.IsAuthenticated, "The logout's clear must win over the late verdict");
     }
 }

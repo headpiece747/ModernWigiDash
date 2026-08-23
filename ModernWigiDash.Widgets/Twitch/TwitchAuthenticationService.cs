@@ -7,6 +7,14 @@ internal sealed class TwitchSession
     private readonly TwitchTokenStore _tokenStore;
     private readonly Func<string, TwitchApiClient> _clientFactory;
     private readonly TimeProvider _timeProvider;
+    /// <summary>
+    /// The session-mutation write gate. The user paths (restore/login/
+    /// refresh-channels/logout) hold it across their whole operation; the
+    /// validation tick's verdicts take it only at apply/clear, after their
+    /// network calls — so a hung validation never holds it across the
+    /// network while the user waits on login. The still-current snapshot
+    /// re-check inside the verdicts is what makes that split safe.
+    /// </summary>
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _stateGate = new();
 
@@ -316,19 +324,11 @@ internal sealed class TwitchSession
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
+                if (!await ValidateTickAsync(context, cancellationToken).ConfigureAwait(false))
                 {
-                    if (!await EnsureAuthenticatedCoreAsync(null, context, forceValidate: true, cancellationToken).ConfigureAwait(false))
-                    {
-                        ClearState(deleteStoredToken: true);
-                        context.RequestInspectorRefresh();
-                        return;
-                    }
-                }
-                finally
-                {
-                    _gate.Release();
+                    // A failed verdict ends the monitor — ClearState has already
+                    // cancelled its CTS; the loop exits without one more tick.
+                    return;
                 }
             }
         }
@@ -342,6 +342,180 @@ internal sealed class TwitchSession
             // A transient network/API failure must not kill the hourly monitor
             // silently: log it and let the next tick retry.
             System.Diagnostics.Debug.WriteLine($"Twitch validation loop failed; will retry next hour: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The validation monitor's hourly tick, split by the gate's contract: the
+    /// read side (the detached token snapshot) and the network calls run
+    /// OUTSIDE the user gate — a hung or slow validation must not hold the
+    /// lock the user's login/logout/refresh waits on — and the gate is taken
+    /// only at the verdict (apply or clear), where the still-current re-check
+    /// makes a stale verdict a no-op. The single-token-owner invariant is
+    /// untouched: a verdict only lands on the token it was computed from.
+    /// False when the verdict ends the monitor (the session was cleared).
+    /// </summary>
+    internal async Task<bool> ValidateTickAsync(IModernWigiDashContext context, CancellationToken cancellationToken)
+    {
+        TwitchTokenSet? snapshot = ReadStoredToken();
+        if (snapshot == null)
+        {
+            await ClearIfStillTokenlessAsync(context, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        string clientId = ResolveClientId(null, snapshot.ClientId);
+        if (clientId.Length == 0 || !string.Equals(clientId, snapshot.ClientId, StringComparison.Ordinal))
+        {
+            await ClearStaleTokenAsync(snapshot, context, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        lock (_stateGate) _tokens ??= snapshot;
+
+        var api = _clientFactory(clientId);
+        TwitchTokenValidation validation;
+        try
+        {
+            validation = await api.ValidateAsync(snapshot.AccessToken, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TwitchApiException ex) when (ex.IsUnauthorized)
+        {
+            // Refresh verdict — the snapshot must still own the state before a
+            // refresh token is spent (Twitch rotates refresh tokens; spending
+            // a stale one would void a newer login's).
+            if (!TokenSnapshotIsCurrent(snapshot)) return true;
+
+            TwitchTokenSet refreshed;
+            try
+            {
+                refreshed = await api.RefreshAsync(snapshot.RefreshToken, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TwitchApiException refreshEx) when (refreshEx.StatusCode is 400 or 401)
+            {
+                System.Diagnostics.Debug.WriteLine($"Twitch token refresh rejected (HTTP {refreshEx.StatusCode}): {refreshEx.Message}");
+                await ClearStaleTokenAsync(snapshot, context, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
+            validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
+            refreshed = refreshed with
+            {
+                ClientId = snapshot.ClientId,
+                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
+                Scopes = validation.Scopes
+            };
+            await ApplyIfStillCurrentAsync(snapshot, refreshed, validation, context, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        TwitchTokenSet stamped = snapshot with
+        {
+            ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
+            Scopes = validation.Scopes
+        };
+        await ApplyIfStillCurrentAsync(snapshot, stamped, validation, context, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// The tick's read side: the detached token snapshot the verdict is
+    /// computed from — the state token when present, else the store's, the
+    /// same load rule the user path uses (<c>_tokens ?? _tokenStore.Load()</c>).
+    /// </summary>
+    private TwitchTokenSet? ReadStoredToken()
+    {
+        lock (_stateGate)
+        {
+            if (_tokens != null) return _tokens;
+        }
+        return _tokenStore.Load();
+    }
+
+    /// <summary>
+    /// The still-current re-check the verdicts take under the write gate:
+    /// false when a different token took the state since the snapshot (a
+    /// login, or a newer apply — an apply always re-stamps the expiry, so a
+    /// stale snapshot can never value-equal the live token), or when the
+    /// store the snapshot came from has been emptied (a logout clears state
+    /// AND store — a stale apply must not resurrect a logged-out token).
+    /// </summary>
+    private bool TokenSnapshotIsCurrent(TwitchTokenSet snapshot)
+    {
+        lock (_stateGate)
+        {
+            if (_tokens is { } current) return Equals(current, snapshot);
+            return Equals(_tokenStore.Load(), snapshot);
+        }
+    }
+
+    /// <summary>
+    /// The apply verdict under the write gate: the snapshot re-check first,
+    /// so a session operation that landed during the network calls turns the
+    /// apply into a no-op instead of overwriting the newer state.
+    /// </summary>
+    private async Task ApplyIfStillCurrentAsync(
+        TwitchTokenSet snapshot,
+        TwitchTokenSet token,
+        TwitchTokenValidation validation,
+        IModernWigiDashContext context,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!TokenSnapshotIsCurrent(snapshot)) return;
+            ApplyValidatedState(token, validation);
+            _tokenStore.Save(token);
+            StartValidationMonitor(context);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The clear verdict under the write gate: a stale snapshot (a session
+    /// operation already cleared the state) makes the clear a no-op.
+    /// </summary>
+    private async Task ClearStaleTokenAsync(
+        TwitchTokenSet snapshot,
+        IModernWigiDashContext context,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!TokenSnapshotIsCurrent(snapshot)) return;
+            ClearState(deleteStoredToken: true);
+            context.RequestInspectorRefresh();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The no-token clear verdict under the write gate: a login that landed
+    /// after the tick's read (state no longer null) makes the clear a no-op.
+    /// </summary>
+    private async Task ClearIfStillTokenlessAsync(IModernWigiDashContext context, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_stateGate)
+            {
+                if (_tokens != null) return;
+            }
+            ClearState(deleteStoredToken: true);
+            context.RequestInspectorRefresh();
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
