@@ -39,6 +39,11 @@ public sealed class DisplayDeviceEngine : IDisposable
     private readonly DiagLog _connectLog = new("Connect", 1);
     private readonly DiagLog _reconnectLog = new("Reconnect", 1);
     private readonly DiagLog _disposeLog = new("Dispose", 1);
+    // The standby verdict joins the area vocabulary: the 2026-08-21 on-device
+    // incident made the NOT-confirmed lines load-bearing, and the tag must
+    // match the transport's own STANDBY lines (its GoToStandby writes through
+    // a bound DiagLog of the same tag) — one spelling of the verdict tag.
+    private readonly DiagLog _standbyLog = new("STANDBY", 1);
 
     /// <summary>
     /// Test seam: the reconnect timer period (see <see cref="Start"/>).
@@ -466,7 +471,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         catch (Exception ex)
         {
             standbyThrew = true;
-            Log($"[STANDBY] Standby failed during dispose: {ex.Message}");
+            _standbyLog.Write($"Standby failed during dispose: {ex.Message}");
         }
         // The standby verdict is observable: a standby that did not confirm
         // (no live connection, the control writes failed, or the bounded
@@ -474,9 +479,9 @@ public sealed class DisplayDeviceEngine : IDisposable
         // the Welcome screen, and that is a fact the log must carry.
         if (transport is not null && !standbyConfirmed && !standbyThrew)
         {
-            Log(standbySettled
-                ? "[STANDBY] Standby NOT confirmed during dispose: the standby control writes did not succeed — the display may stay lit"
-                : "[STANDBY] Standby NOT confirmed during dispose: the bounded close wait expired — a hung standby was abandoned at exit, and the display may stay lit");
+            _standbyLog.Write(standbySettled
+                ? "Standby NOT confirmed during dispose: the standby control writes did not succeed — the display may stay lit"
+                : "Standby NOT confirmed during dispose: the bounded close wait expired — a hung standby was abandoned at exit, and the display may stay lit");
         }
 
         DisconnectInternal();

@@ -68,6 +68,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // binds at this one Create site.
     private readonly FrameDelivery _delivery;
 
+    // The App's file-log vocabulary: one bound DiagLog per log area — the tag
+    // binds once at construction (the DiagLog module) instead of being
+    // concatenated into every line, so the vocabulary cannot drift.
+    private readonly DiagLog _hwLog = new("HW", 1);
+    private readonly DiagLog _profileLog = new("PROFILE", 1);
+
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
     // keeps wiring.
@@ -126,7 +132,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             encoder: new SkiaRgb565Encoder(),
             send: _usbDevice.SendFrameBytes,
             isReady: () => _usbDevice.State == ConnectionState.Connected,
-            log: msg => FileLog.Write("[HW] " + msg));
+            log: _hwLog.Write);
 
         // One poll loop per direct producer, owned by the telemetry module:
         // SENSOR (LHS shared memory, ADR-0004) and FRAMETIME (PresentMon,
@@ -152,7 +158,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _profilePersistence = new ProfilePersistence(
             profilePath,
             () => _profile!,
-            log: msg => FileLog.Write($"[PROFILE] {msg}"));
+            log: _profileLog.Write);
 
         // 3. Build the host modules (input, inspector, dialog host) BEFORE the
         // starter profile. Widget InitializeAsync runs synchronously inside

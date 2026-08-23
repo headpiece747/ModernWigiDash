@@ -223,7 +223,8 @@ public class DisplayDeviceEngineTests
         FileLog.Flush();
 
         string content = ReadLog(_logPath);
-        Assert.IsTrue(content.Contains("Standby NOT confirmed"), "an unconfirmed standby must leave a verdict line in the log");
+        Assert.IsTrue(content.Contains("[STANDBY] Standby NOT confirmed"),
+            "an unconfirmed standby must leave its tagged verdict line in the log — the tag is the area's bound spelling, asserted with the text");
     }
 
     [TestMethod]
@@ -244,7 +245,10 @@ public class DisplayDeviceEngineTests
         Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(4),
             $"dispose must stay inside the bounded budgets (2 s standby + the fast fake dispose), took {stopwatch.Elapsed.TotalSeconds:0.0} s");
         string content = ReadLog(_logPath);
-        Assert.IsTrue(content.Contains("bounded close wait expired"), "an abandoned standby must leave its verdict line in the log");
+        Assert.IsTrue(content.Contains("[STANDBY] Standby NOT confirmed"),
+            "an abandoned standby must leave its tagged verdict line in the log");
+        Assert.IsTrue(content.Contains("bounded close wait expired"),
+            "the verdict must name the abandon path (the budget expired, not a failed write)");
     }
 
     [TestMethod]
