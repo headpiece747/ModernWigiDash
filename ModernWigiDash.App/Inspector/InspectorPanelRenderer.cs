@@ -14,8 +14,9 @@ namespace ModernWigiDash.App.Inspector;
 /// Callbacks the inspector renderer needs from its host window. Every value
 /// write-back funnels through <see cref="ApplyInspectorPropertyValue"/> — the
 /// renderer never touches the widget model directly. Dialogs are host-side
-/// (the renderer is dialog-free); <c>isUpdatingInspector</c> is a live guard
-/// that suppresses change events while the panel is rebuilt.
+/// (the renderer is dialog-free); the re-entrancy guard (suppression of
+/// programmatic sets during a panel rebuild) is enforced at that funnel, so
+/// no editor builder carries its own suppression check.
 /// </summary>
 internal sealed class InspectorCallbacks
 {
@@ -62,7 +63,6 @@ internal static class InspectorPanelRenderer
         PlacedWidgetInstance widget,
         IReadOnlyList<EditorDescription> descriptions,
         UIElementCollection target,
-        Func<bool> isUpdatingInspector,
         InspectorCallbacks callbacks)
     {
         ComboBox? actionTypeCombo = null;
@@ -89,7 +89,7 @@ internal static class InspectorPanelRenderer
             switch (desc.PropertyType)
             {
                 case WidgetPropertyType.Choice when desc.Options.Count > 0:
-                    var combo = BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
+                    var combo = BuildOptionCombo(desc.Options, desc, callbacks);
                     if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) actionTypeCombo = combo;
                     propPanel.Children.Add(combo);
                     break;
@@ -97,32 +97,32 @@ internal static class InspectorPanelRenderer
                     IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
                     ? desc.Options
                     : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray();
-                    propPanel.Children.Add(BuildOptionCombo(fontOptions, desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildOptionCombo(fontOptions, desc, callbacks));
                     break;
                 case WidgetPropertyType.Icon:
-                    propPanel.Children.Add(BuildIconEditor(widget, desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildIconEditor(widget, desc, callbacks));
                     break;
                 case WidgetPropertyType.Boolean:
                     propPanel.Children.Add(BuildBooleanEditor(desc, callbacks));
                     break;
                 case WidgetPropertyType.Color:
-                    propPanel.Children.Add(BuildColorEditor(desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildColorEditor(desc, callbacks));
                     break;
                 case WidgetPropertyType.Path:
                     if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
                     {
-                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks,
+                        propPanel.Children.Add(BuildPathEditor(desc, callbacks,
                             "Select action folder", "Select action file or executable", "Programs and files (*.*)|*.*"));
                         actionCommandPanel = propPanel;
                     }
                     else
                     {
-                        propPanel.Children.Add(BuildPathEditor(desc, isUpdatingInspector, callbacks,
+                        propPanel.Children.Add(BuildPathEditor(desc, callbacks,
                             "Select image folder", "Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*"));
                     }
                     break;
                 case WidgetPropertyType.SensorSelector:
-                    propPanel.Children.Add(BuildSensorSelector(desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildSensorSelector(desc, callbacks));
                     break;
                 case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.LocationSearch:
                     if (widget.ActiveInstance is IWidgetLocationSearch search)
@@ -133,11 +133,11 @@ internal static class InspectorPanelRenderer
                     // The widget advertises the location-search editor without
                     // implementing the contract: degrade to the plain text
                     // editor.
-                    propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildTextEditor(desc, callbacks));
                     break;
                 default:
                     // Text or Number
-                    propPanel.Children.Add(BuildTextEditor(desc, isUpdatingInspector, callbacks));
+                    propPanel.Children.Add(BuildTextEditor(desc, callbacks));
                     break;
             }
 
@@ -194,10 +194,10 @@ internal static class InspectorPanelRenderer
     /// <summary>
     /// One option-combo builder for every choice-style editor: the choice,
     /// font, and sensor selectors all share this shape (ItemsSource /
-    /// DisplayMemberPath / SelectedValuePath / guarded write-back / dropdown
-    /// clamp). The three call sites only differ in the option source.
+    /// DisplayMemberPath / SelectedValuePath / funnel-routed write-back /
+    /// dropdown clamp). The three call sites only differ in the option source.
     /// </summary>
-    private static ComboBox BuildOptionCombo(IReadOnlyList<WidgetPropertyOption> options, EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    private static ComboBox BuildOptionCombo(IReadOnlyList<WidgetPropertyOption> options, EditorDescription desc, InspectorCallbacks callbacks)
     {
         var combo = new ComboBox
         {
@@ -209,7 +209,6 @@ internal static class InspectorPanelRenderer
         };
         combo.SelectionChanged += (_, _) =>
         {
-            if (isUpdatingInspector()) return;
             string? selectedValue = combo.SelectedValue?.ToString();
             // Empty values are valid selections (e.g. the weather widget's
             // "Automatic (by ranking)" Location Match entry) — only a null
@@ -226,7 +225,7 @@ internal static class InspectorPanelRenderer
     /// the companion file-path property (cleared whenever the named icon changes)
     /// and the popup host; a widget without a provider gets a plain text editor.
     /// </summary>
-    private static UIElement BuildIconEditor(PlacedWidgetInstance widget, EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    private static UIElement BuildIconEditor(PlacedWidgetInstance widget, EditorDescription desc, InspectorCallbacks callbacks)
     {
         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         var provider = widget.ActiveInstance as IWidgetEditorProvider;
@@ -250,7 +249,6 @@ internal static class InspectorPanelRenderer
         };
         box.TextChanged += (_, _) =>
         {
-            if (isUpdatingInspector()) return;
             if (iconFileProp != null) callbacks.ApplyInspectorPropertyValue(iconFileProp, "");
             callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
         };
@@ -275,15 +273,11 @@ internal static class InspectorPanelRenderer
     /// <summary>Path editor: text box with Folder/File pickers. The action
     /// command and image-path editors differ only in the dialog title and file
     /// filter — one parameterized builder instead of two ~40-line copies.</summary>
-    private static UIElement BuildPathEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks, string folderTitle, string fileTitle, string fileFilter)
+    private static UIElement BuildPathEditor(EditorDescription desc, InspectorCallbacks callbacks, string folderTitle, string fileTitle, string fileFilter)
     {
         var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
-        txt.TextChanged += (_, _) =>
-        {
-            if (isUpdatingInspector()) return;
-            callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
-        };
+        txt.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
 
         var btnFolder = new Button
         {
@@ -317,7 +311,7 @@ internal static class InspectorPanelRenderer
         return row;
     }
 
-    private static UIElement BuildSensorSelector(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    private static UIElement BuildSensorSelector(EditorDescription desc, InspectorCallbacks callbacks)
     {
         if (desc.Options.Count == 0)
         {
@@ -330,31 +324,23 @@ internal static class InspectorPanelRenderer
             };
         }
 
-        return BuildOptionCombo(desc.Options, desc, isUpdatingInspector, callbacks);
+        return BuildOptionCombo(desc.Options, desc, callbacks);
     }
 
-    private static UIElement BuildColorEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    private static UIElement BuildColorEditor(EditorDescription desc, InspectorCallbacks callbacks)
     {
         var editor = new ColorPickerEditor
         {
             Hex = desc.CurrentValue?.ToString() ?? ""
         };
-        editor.Applied += hex =>
-        {
-            if (isUpdatingInspector()) return;
-            callbacks.ApplyInspectorPropertyValue(desc.Property, hex);
-        };
+        editor.Applied += hex => callbacks.ApplyInspectorPropertyValue(desc.Property, hex);
         return editor;
     }
 
-    private static TextBox BuildTextEditor(EditorDescription desc, Func<bool> isUpdatingInspector, InspectorCallbacks callbacks)
+    private static TextBox BuildTextEditor(EditorDescription desc, InspectorCallbacks callbacks)
     {
         var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
-        txt.TextChanged += (_, _) =>
-        {
-            if (isUpdatingInspector()) return;
-            callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
-        };
+        txt.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
         return txt;
     }
 

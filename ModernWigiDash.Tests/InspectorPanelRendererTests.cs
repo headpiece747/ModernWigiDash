@@ -34,7 +34,7 @@ public class InspectorPanelRendererTests
                 CommitLocationPick = c => committed = c,
             };
 
-            InspectorPanelRenderer.Render(placed, descriptions, target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, descriptions, target.Children, callbacks);
 
             // The Location row hosts the search editor: its results ListBox lives
             // in the popup's Child, which is not in the visual tree while the
@@ -71,7 +71,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
             var popup = FindVisualChildren<Popup>(target).First();
             var results = FindVisualChildren<ListBox>((DependencyObject)popup.Child!).First();
@@ -113,7 +113,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
             var popup = FindVisualChildren<Popup>(target).First();
             var box = FindVisualChildren<TextBox>(target).First();
@@ -176,7 +176,7 @@ public class InspectorPanelRendererTests
                 CommitLocationPick = _ => { },
             };
 
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
             var box = FindVisualChildren<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains("Berlin, New Hampshire, United States"), "the box must seed from the Location label");
@@ -219,7 +219,7 @@ public class InspectorPanelRendererTests
                 BrowseFolder = _ => null,
             };
 
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
             var box = FindVisualChildren<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains(" · 9.4k"), "precondition: the box must seed with the population suffix");
@@ -271,7 +271,7 @@ public class InspectorPanelRendererTests
             };
 
             var target = new StackPanel();
-            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, () => false, callbacks);
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
             // The Location row's editor: its TextBox is the row's only TextBox
             // (the results ListBox lives in the closed popup's Child).
@@ -309,6 +309,50 @@ public class InspectorPanelRendererTests
         public void CommitPick(GeocodeCandidate candidate) { }
 
         public double? CurrentPopulation { get; set; }
+    }
+
+    [TestMethod]
+    public void Render_BooleanProperty_ToggleRoutesThroughTheWriteBackFunnel()
+    {
+        // The boolean editor is guarded like every other editor: its write-back
+        // routes through the single ApplyInspectorPropertyValue funnel (where
+        // the re-entrancy guard is enforced), so a CheckBox toggle lands in the
+        // model exactly like a combo pick or a text edit.
+        StaRunner.Run(() =>
+        {
+            var widget = new BooleanWidget();
+            var placed = new PlacedWidgetInstance { PluginId = "bool", DisplayName = "Bool", ActiveInstance = widget };
+            var target = new StackPanel();
+            PropertyInfo? writtenProp = null;
+            object? writtenValue = null;
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (prop, value) => { writtenProp = prop; writtenValue = value; },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+            var chk = FindVisualChildren<CheckBox>(target).Single();
+            Assert.IsTrue(chk.IsChecked == true, "precondition: the editor seeds from the property's current value");
+            chk.IsChecked = false;
+
+            Assert.IsNotNull(writtenProp, "a CheckBox toggle must reach the write-back funnel");
+            Assert.AreEqual(nameof(BooleanWidget.Flag), writtenProp.Name);
+            Assert.IsFalse((bool)writtenValue!);
+        });
+    }
+
+    private sealed class BooleanWidget : ModernWidgetBase
+    {
+        [WidgetProperty("Flag", WidgetPropertyType.Boolean, defaultValue: true)]
+        public bool Flag { get; set; } = true;
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject

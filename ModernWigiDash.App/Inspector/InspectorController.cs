@@ -9,8 +9,10 @@ namespace ModernWigiDash.App.Inspector;
 /// <summary>
 /// The right-side property inspector: panel refresh, transform write-backs,
 /// property-value application (the single write-back seam the renderer uses),
-/// and the dropdown-clamp hack. Owns the <c>isUpdatingInspector</c> guard that
-/// suppresses change events while the panel is rebuilt. Value rules (parsing,
+/// and the dropdown-clamp hack. Owns the <c>isUpdatingInspector</c> guard:
+/// enforced at the <see cref="ApplyPropertyValue"/> funnel (every editor
+/// write-back) and in the transform/opacity handlers, so a programmatic set
+/// during a panel rebuild never reaches the model. Value rules (parsing,
 /// clamping, conversion, formatting) live in <see cref="InspectorValuePolicy"/>;
 /// the icon picker dialog lives in <see cref="DialogHost"/>. The window keeps
 /// selection and wiring only.
@@ -108,7 +110,6 @@ internal sealed class InspectorController
                     selected,
                     InspectorModelBuilder.Describe(selected, sensorOptions),
                     _panel.CustomProperties.Children,
-                    () => _isUpdatingInspector,
                     new InspectorCallbacks
                     {
                         TryFindResource = name => _panel.TryFindResource(name),
@@ -162,10 +163,16 @@ internal sealed class InspectorController
     /// <summary>
     /// Single write-back seam: converts a raw value (TextBox strings arrive as
     /// text) to the property's CLR type and writes it into the widget instance
-    /// and the profile. The renderer never writes the model directly.
+    /// and the profile. The renderer never writes the model directly. The
+    /// re-entrancy guard is enforced HERE, at the funnel: every editor
+    /// write-back routes through this seam, so a programmatic set during a
+    /// panel rebuild is suppressed for every editor type — an unguarded
+    /// builder is unrepresentable.
     /// </summary>
     public void ApplyPropertyValue(PropertyInfo? prop, object value)
     {
+        if (_isUpdatingInspector) return;
+
         var selected = _getSelectedWidget();
         if (selected?.ActiveInstance is null || prop is null) return;
 
@@ -185,21 +192,36 @@ internal sealed class InspectorController
         _onProfileChanged?.Invoke();
     }
 
-    /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation/opacity write-backs.</summary>
+    /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation write-backs.</summary>
     public void TransformChanged(object sender, TextChangedEventArgs e)
     {
         var selected = _getSelectedWidget();
         if (_isUpdatingInspector || selected is null) return;
+        if (sender is not TextBox box) return;
 
-        if (_policy.TryParsePosition(_transform.PosX.Text, out float x)) selected.X = x;
-        if (_policy.TryParsePosition(_transform.PosY.Text, out float y)) selected.Y = y;
-        if (_policy.TryParseSize(_transform.WidthText.Text, out float w)) selected.Width = w;
-        if (_policy.TryParseSize(_transform.HeightText.Text, out float h)) selected.Height = h;
-        if (_policy.TryParseZIndex(_transform.ZIndexText.Text, out int z)) selected.ZIndex = z;
-        if (_policy.TryParseRotation(_transform.RotationText.Text, out float r)) selected.Rotation = r;
+        // Parse only the box that fired (the old code re-parsed and re-wrote
+        // all six on any change), and arm the save mark only when a value
+        // actually landed — unparseable input must not dirty the profile or
+        // repaint the canvas.
+        if (!ApplyTransformBox(box, selected)) return;
 
         _onProfileChanged?.Invoke();
         _transform.RequestCanvasRender();
+    }
+
+    /// <summary>
+    /// Parses and applies the single transform box that changed; true when a
+    /// value landed (the caller arms the save mark and repaints).
+    /// </summary>
+    private bool ApplyTransformBox(TextBox box, PlacedWidgetInstance selected)
+    {
+        if (ReferenceEquals(box, _transform.PosX) && _policy.TryParsePosition(box.Text, out float x)) { selected.X = x; return true; }
+        if (ReferenceEquals(box, _transform.PosY) && _policy.TryParsePosition(box.Text, out float y)) { selected.Y = y; return true; }
+        if (ReferenceEquals(box, _transform.WidthText) && _policy.TryParseSize(box.Text, out float w)) { selected.Width = w; return true; }
+        if (ReferenceEquals(box, _transform.HeightText) && _policy.TryParseSize(box.Text, out float h)) { selected.Height = h; return true; }
+        if (ReferenceEquals(box, _transform.ZIndexText) && _policy.TryParseZIndex(box.Text, out int z)) { selected.ZIndex = z; return true; }
+        if (ReferenceEquals(box, _transform.RotationText) && _policy.TryParseRotation(box.Text, out float r)) { selected.Rotation = r; return true; }
+        return false;
     }
 
     /// <summary>XAML <c>SliderOpacity_ValueChanged</c> handler.</summary>

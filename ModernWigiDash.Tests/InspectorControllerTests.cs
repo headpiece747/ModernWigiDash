@@ -139,6 +139,34 @@ public class InspectorControllerTests
     }
 
     [TestMethod]
+    public void TransformChanged_UnparseableInput_FiresNoMarkAndNoRender()
+    {
+        // The save mark is armed only when a value actually landed: an
+        // unparseable keystroke (a mid-edit "-") must not dirty the profile or
+        // repaint — the old code re-parsed all six boxes and armed the
+        // debounce on every box change, parsed or not.
+        StaRunner.Run(() =>
+        {
+            var owner = new Window();
+            int renders = 0;
+            var (transform, panel, select, _, _) = BuildHost();
+            transform = new TransformFieldBindings(
+                transform.PosX, transform.PosY, transform.WidthText, transform.HeightText,
+                transform.ZIndexText, transform.RotationText, transform.OpacitySlider,
+                transform.OpacityValueText, () => renders++);
+            int marks = 0;
+            var controller = BuildController(owner, transform, panel, select, onProfileChanged: () => marks++);
+
+            transform.PosX.Text = "not a number";
+
+            controller.TransformChanged(transform.PosX, TextChangedEvent());
+
+            Assert.AreEqual(0, marks, "unparseable input must not arm persistence");
+            Assert.AreEqual(0, renders, "unparseable input must not request a canvas repaint");
+        });
+    }
+
+    [TestMethod]
     public void Refresh_WithFocusedPropertyEditor_PreservesFocusAndCaretAcrossRebuild()
     {
         // The weather widget's inspector refresh fires while the user is still

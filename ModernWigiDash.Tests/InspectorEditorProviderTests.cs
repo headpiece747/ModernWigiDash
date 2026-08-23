@@ -142,7 +142,6 @@ public class InspectorEditorProviderTests
                 placed,
                 InspectorModelBuilder.Describe(placed, []),
                 panel.Children,
-                () => false,
                 new InspectorCallbacks
                 {
                     TryFindResource = _ => null,
@@ -192,7 +191,6 @@ public class InspectorEditorProviderTests
                 placed,
                 InspectorModelBuilder.Describe(placed, []),
                 panel.Children,
-                () => false,
                 new InspectorCallbacks
                 {
                     TryFindResource = _ => null,
