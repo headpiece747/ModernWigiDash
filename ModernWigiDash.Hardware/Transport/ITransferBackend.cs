@@ -19,13 +19,23 @@ internal interface ITransferBackend : IDisposable
     bool ControlOut(byte request, ushort wValue, byte[]? data);
 
     /// <summary>
-    /// Vendor IN control transfer. Returns true when the transfer succeeded
-    /// and reports the transferred byte count — a short transfer still
-    /// succeeds (the device sent fewer bytes than the buffer), so callers
+    /// Vendor IN control transfer. Success contract: a SHORT transfer still
+    /// succeeds (the device sent fewer bytes than the buffer) — so callers
     /// that need a full report must check <paramref name="transferred"/>
-    /// against the expected size.
+    /// against the expected size — but a ZERO-byte transfer is a FAILURE:
+    /// every adapter returns success only when <c>transferred &gt; 0</c>
+    /// (a zero-byte result with a success flag would be a broken pipe). The
+    /// init PING verdict depends on both real backends agreeing on this.
     /// </summary>
     bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0);
 
+    /// <summary>
+    /// Bulk OUT transfer. Success contract: a SHORT write is a FAILED write —
+    /// the adapter returns true only when the FULL payload transferred
+    /// (<paramref name="transferred"/> == <c>data.Length</c>). The WinUSB
+    /// adapter enforces this on the pipe result; the LibUsb adapter through
+    /// <see cref="ChunkedBulkWrite"/>. Callers route a failed full frame to
+    /// the frame-abort command.
+    /// </summary>
     bool BulkWrite(byte pipeId, byte[] data, out int transferred);
 }
