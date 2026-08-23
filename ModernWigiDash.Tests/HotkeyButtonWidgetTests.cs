@@ -182,7 +182,7 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyWidget_MediaActionTypes_MapToCatalogMediaKeys()
+    public void HotkeyActionCatalog_MediaActionTypes_MapToCatalogMediaKeys()
     {
         // Derived from the catalog: a new media entry extends this pin.
         foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.Kind == HotkeyActionKind.MediaKey))
@@ -191,6 +191,14 @@ public class HotkeyButtonWidgetTests
             Assert.AreEqual(HotkeyActionKind.MediaKey, action.Kind, entry.Name);
             Assert.AreEqual(entry.MediaKey, action.Value, entry.Name);
         }
+
+        // The derived loop above is self-referential (both sides read the
+        // same entry): these literal pins close the cross-wiring gap, e.g.
+        // a "Media Next" entry carrying the Previous token would pass the
+        // loop but fail here.
+        Assert.AreEqual("NEXT", HotkeyActionCatalog.Create("Media Next", "").Value);
+        Assert.AreEqual("PREVIOUS", HotkeyActionCatalog.Create("Media Previous", "").Value);
+        Assert.AreEqual("VOLUMEUP", HotkeyActionCatalog.Create("Volume Up", "").Value);
     }
 
     [TestMethod]
@@ -200,9 +208,13 @@ public class HotkeyButtonWidgetTests
         // action catalog (attributes cannot bind a runtime value): a renamed
         // or hand-edited action name must fail HERE, not surface at runtime
         // as the catalog's Launch default.
-        var attribute = typeof(HotkeyButtonWidget)
-            .GetProperty(nameof(HotkeyButtonWidget.ActionType))!
-            .GetCustomAttribute<WidgetPropertyAttribute>()!;
+        // Explicit nulls: a missing property or attribute is a pin failure
+        // with a message, not an opaque NullReferenceException from a
+        // null-forgiving operator.
+        var property = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.ActionType));
+        Assert.IsNotNull(property, "the ActionType property must exist on the widget");
+        var attribute = property.GetCustomAttribute<WidgetPropertyAttribute>();
+        Assert.IsNotNull(attribute, "ActionType must carry [WidgetProperty]");
 
         Assert.AreEqual(HotkeyActionCatalog.DefaultName, attribute.DefaultValue,
             "the attribute default must match the catalog's default name");
@@ -228,6 +240,16 @@ public class HotkeyButtonWidgetTests
         Assert.AreEqual("notepad.exe", action.Value);
         Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Nonsense"),
             "an unknown name must not force the empty-command skip");
+
+        // The empty-command boundary: an unknown name degrades to Launch
+        // with the empty value verbatim; the executor's path validation
+        // then rejects it (the pinned unknown-name rule), never a silent
+        // no-op.
+        var empty = HotkeyActionCatalog.Create("Nonsense", "");
+        Assert.AreEqual(HotkeyActionKind.Launch, empty.Kind,
+            "an unknown name with an empty command must still degrade to Launch");
+        Assert.AreEqual("", empty.Value,
+            "the empty command must land verbatim for the path validation to reject");
     }
 
     [TestMethod]
@@ -242,7 +264,7 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyWidget_OpenUrlActionType_MapsToOpenUrl()
+    public void HotkeyActionCatalog_OpenUrlActionType_MapsToOpenUrl()
     {
         var action = HotkeyActionCatalog.Create("Open URL", "https://example.com");
         Assert.AreEqual(HotkeyActionKind.OpenUrl, action.Kind);
@@ -250,7 +272,7 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyWidget_SingleAction_ExecutesOneAction()
+    public void HotkeyActionCatalog_SingleAction_ExecutesOneAction()
     {
         var launch = HotkeyActionCatalog.Create("Launch App", "notepad.exe");
         Assert.AreEqual(HotkeyActionKind.Launch, launch.Kind);

@@ -115,6 +115,59 @@ public class PictureAndGifWidgetTests
     }
 
     [TestMethod]
+    public async Task PictureAndGifWidget_OverCapFile_RetiresOldMediaAndDropsToPlaceholder()
+    {
+        // A None decode (an over-cap file) retires the installed media and
+        // drops to the placeholder: the previous file's pixels are not held
+        // on screen as stale content that no longer matches the source.
+        string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string goodPath = Path.Combine(tempDir, "good.png");
+            CreateTestPng(goodPath, SKColors.CornflowerBlue);
+            string hugePath = Path.Combine(tempDir, "huge.bin");
+            await File.WriteAllBytesAsync(hugePath, new byte[MediaDecoder.MaxFileBytes + 1]);
+
+            var widget = new PictureAndGifWidget { ImagePath = goodPath, SourceMode = "Single Image" };
+            using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+            var canvas = surface.Canvas;
+            var bounds = new SKRect(0, 0, 406, 296);
+
+            widget.Render(canvas, bounds);
+            await AwaitDecodeTask(widget);
+            Assert.IsTrue(widget.InstalledMediaForTest.Still is not null,
+                "the good file must install before the refusal is asserted");
+
+            // The property change resets the media (version bump); the new
+            // render starts the over-cap decode, which resolves to None.
+            widget.ImagePath = hugePath;
+            widget.Render(canvas, bounds);
+            await AwaitDecodeTask(widget);
+
+            var (frames, still) = widget.InstalledMediaForTest;
+            Assert.IsNull(frames, "a None decode must not install frames");
+            Assert.IsNull(still, "a None decode must retire the previous still");
+
+            widget.Render(canvas, bounds); // the placeholder path, unexceptioned
+            Assert.IsNotNull(surface);
+        }
+        finally
+        {
+            DeleteTempDirWithRetry(tempDir);
+        }
+    }
+
+    private static async Task AwaitDecodeTask(PictureAndGifWidget widget)
+    {
+        Task? task = widget.PendingDecodeTaskForTest;
+        if (task is not null)
+        {
+            await task.ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public void PictureAndGifWidget_FolderCycle_RescansForNewFilesAfterThrottle()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));

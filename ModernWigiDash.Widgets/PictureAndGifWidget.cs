@@ -93,6 +93,24 @@ public class PictureAndGifWidget : ModernWidgetBase
     private readonly Lock _mediaLock = new();
     private readonly RetiredBitmapSet _mediaRetirement = new();
 
+    // Test seams: the most recently started decode task (tests await it to
+    // make the async decode deterministic) and the installed media state
+    // under the media lock (null when nothing is installed - the placeholder
+    // state).
+    private Task? _pendingDecodeTask;
+    internal Task? PendingDecodeTaskForTest => _pendingDecodeTask;
+
+    internal (SKBitmap[]? Frames, SKBitmap? Still) InstalledMediaForTest
+    {
+        get
+        {
+            lock (_mediaLock)
+            {
+                return (_gifFrames, _staticBitmap);
+            }
+        }
+    }
+
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
         if (propertyName is nameof(ImagePath) or nameof(SourceMode))
@@ -155,7 +173,7 @@ public class PictureAndGifWidget : ModernWidgetBase
     private void StartMediaLoad(string path)
     {
         int version = ++_loadVersion;
-        _ = Task.Run(() => DecodeMediaAsync(path, version));
+        _pendingDecodeTask = Task.Run(() => DecodeMediaAsync(path, version));
     }
 
     private async Task DecodeMediaAsync(string path, int version)

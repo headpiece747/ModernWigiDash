@@ -111,6 +111,13 @@ public class NowPlayingPresentationTests
             current = NowPlayingPresentation.NextRepeatMode(current);
         }
         Assert.AreEqual(MediaPlaybackAutoRepeatMode.None, current, "the cycle must wrap to its start");
+
+        // A value outside the projection's declared set (None=0, Track=1,
+        // List=2; the OS can report values the compile-time projection
+        // does not name) degrades to None via the catch-all arm.
+        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None,
+            NowPlayingPresentation.NextRepeatMode((MediaPlaybackAutoRepeatMode)3),
+            "an out-of-cycle mode must degrade to the cycle's start");
     }
 
     [TestMethod]

@@ -51,9 +51,10 @@ public class CaptureWindowGuardTests
     public void StillCurrent_ClearedIdentity_DropsAnyStartedWindow()
     {
         // The edit path's invalidation clears the client's identity query to
-        // empty; SameKey is null-safe, so a cleared live key is a change for
-        // any started fetch (the ADR-0006 predicate's null side).
-        var guard = new CaptureWindowGuard(KeyFor("Berlin"), () => (string)null!);
+        // empty (never null in production: the live source is the fetch
+        // control's LastLocationQuery, "" or a built key). A cleared live
+        // key is a change for any started fetch.
+        var guard = new CaptureWindowGuard(KeyFor("Berlin"), () => "");
 
         Assert.IsTrue(guard.Dropped, "an invalidated identity must drop the in-flight result");
     }

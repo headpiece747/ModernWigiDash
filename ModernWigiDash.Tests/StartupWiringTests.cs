@@ -98,6 +98,15 @@ public class StartupWiringTests
         });
     }
 
-    private static int IndexOf(StartupWiring plan, string name) =>
-        plan.OrderedSteps.ToList().FindIndex(step => step.Name == name);
+    private static int IndexOf(StartupWiring plan, string name)
+    {
+        // A removed step must fail loudly: FindIndex's -1 would make a
+        // strict < ordering pin on a missing step silently go green.
+        int index = plan.OrderedSteps.ToList().FindIndex(step => step.Name == name);
+        if (index < 0)
+        {
+            Assert.Fail($"step '{name}' is missing from the startup plan - the ordering pins would read a silent -1");
+        }
+        return index;
+    }
 }
