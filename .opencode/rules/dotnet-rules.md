@@ -13,7 +13,7 @@
 ## 1. C# Coding Style
 
 - File-scoped namespaces always. One type per file. File name matches the type name.
-- **Usings:** assume the ImplicitUsings baseline (`System`, `System.Collections.Generic`, `System.IO`, `System.Linq`, `System.Net.Http`, `System.Threading`, `System.Threading.Tasks`) and the project's `<Using>` globals (declared per-csproj, Sdk: SkiaSharp; Core: +Sdk; Hardware: +Sdk; Widgets: +Core.Rendering, System.Globalization; App: +WPF trio, Core.Models; Tests: +App, Widgets, Time.Testing). Only write a `using` for a namespace not already global in that project. In WPF projects (App, Tests) keep the baseline usings explicit. The WPF XAML markup pass compiles a temp project that does not apply ImplicitUsings.
+- **Usings:** assume the ImplicitUsings baseline (`System`, `System.Collections.Generic`, `System.IO`, `System.Linq`, `System.Net.Http`, `System.Threading`, `System.Threading.Tasks`) and the project's `<Using>` globals (declared per-csproj, own namespaces shown without the `ModernWigiDash.` prefix: Sdk: SkiaSharp; Core: SkiaSharp, Sdk; Hardware: Sdk; Widgets: SkiaSharp, Sdk, Core.Rendering, System.Globalization; App: Sdk, WPF trio, Core.Models; Tests: SkiaSharp, Sdk, App, Core.Models, Widgets, Time.Testing). Only write a `using` for a namespace not already global in that project. In WPF projects (App, Tests) keep the baseline usings explicit. The WPF XAML markup pass compiles a temp project that does not apply ImplicitUsings.
 - Order members: constants, fields, constructors, properties, public methods, private methods.
 - Primary constructors for DI/reference injection. Eliminates boilerplate field assignments.
 - Records for DTOs and immutable value objects.
