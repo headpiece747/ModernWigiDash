@@ -18,6 +18,14 @@
     <Using Include="SkiaSharp" />
   </ItemGroup>
 
+  <!-- The architecture tests (ArchitectureTests) need the repo root at run
+       time: the house test command runs from a temp BaseOutputPath, so the
+       test assembly location is not the repo. Embedded from the source path
+       at build time. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="ModernWigiDashRepoRoot" Value="$(MSBuildProjectDirectory)/.." />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="coverlet.collector">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

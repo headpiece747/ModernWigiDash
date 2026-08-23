@@ -127,8 +127,10 @@ session death is survivable.
 ## Not Installed (deliberately)
 
 - `cwm-roslyn-navigator` MCP server: redundant with Glider
-- bash hooks (`hooks/`), not Windows-native; the repo's build/test workflow is
-  covered by the build-fix/verify skills and the temp-output test command
+- bash workflow hooks (`hooks/`), not Windows-native; the repo's build/test
+  workflow is covered by the build-fix/verify skills and the temp-output test
+  command. (The gate-guard pre-commit hook under `scripts/hooks/` is a thin
+  sh shim over PowerShell, git-hook shaped, not a bash workflow hook.)
 - Web/API/EF/Docker/Aspire skills (api-versioning, ef-core, ddd, clean-architecture,
   vertical-slice, docker, container-publish, aspire, serilog, opentelemetry,
   messaging, minimal-api, openapi, scalar, authentication), no such surface here
@@ -145,9 +147,21 @@ session death is survivable.
   (line endings are deliberately unpinned, ADR-0010; do NOT re-add
   `end_of_line` to `.editorconfig`, it recreates a ~45,000-error wall on
   Windows checkouts)
-- Full gate run (build → test → format, stops at first failure, appends one
-  trail row per run to `.audit/gates.tsv`): `scripts\run-gates.ps1`, use it
-  for full gate runs instead of the three commands above
+- Full gate run (build → test → format → prose, stops at first failure,
+  appends one trail row per run to `.audit/gates.tsv`):
+  `scripts\run-gates.ps1`, use it for full gate runs instead of the three
+  commands above. The prose stage is the 2026-08-23 em-dash sweep's scope,
+  kept honest by the gate: no em dash (U+2014) in living prose (tracked `.md`
+  outside `.desloppify/`, `.superpowers/`, `docs/(superpowers|archive|reports)/`,
+  `.opencode/(skills|agents|node_modules)/`, `.git/`, `bin/`, `obj/`; the one
+  exempt line is the ADR-0009 quoted hint example).
+- Commit guard: a pre-commit hook blocks a commit unless the last gate row in
+  `.audit/gates.tsv` is green in all four stages, its sha equals current HEAD,
+  and the run is at most 60 min old (`-MaxAgeMinutes` on the guard). Install
+  once per clone with `git config core.hooksPath scripts/hooks` (the hook file
+  `scripts/hooks/pre-commit` is committed; the activation is local config).
+  Logic lives in `scripts/gate-guard.ps1` (testable via `-GatesFile`). Escape
+  per invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'`.
 - Live-stack run requires elevation. **User preference: no per-call UAC prompts**:
   use the no-consent runner:
   `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "<cmd>"`

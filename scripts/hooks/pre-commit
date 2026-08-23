@@ -1,0 +1,8 @@
+#!/bin/sh
+# Gate guard: refuse the commit unless the last gate run (scripts/run-gates.ps1)
+# is green and current. Activated once per clone with:
+#   git config core.hooksPath scripts/hooks
+# The guard logic lives in scripts/gate-guard.ps1 (testable, ASCII-only).
+git_root=$(git rev-parse --show-toplevel)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/gate-guard.ps1"
+exit $?
