@@ -159,11 +159,29 @@ internal sealed class WeatherDisplayState
     }
 
     /// <summary>
+    /// The one spelling of "the resolved label may still be written into
+    /// Location": the name is non-empty, no CustomLabel claims the title (a
+    /// label is display-only — writing the resolved name into Location would
+    /// destroy the query), and the name is not already the Location (a
+    /// no-op write would only churn a persistence + property event). The
+    /// flow's queue and this take evaluate the SAME policy, and the take
+    /// evaluates it under the gate — so an edit (a CustomLabel or a Location
+    /// change) landing between the queue and the flush takes the same gate
+    /// and is seen at the take, never sailed through an ungated flush check.
+    /// </summary>
+    internal static bool WritebackEligible(string? name, WeatherLocation currentLocation)
+        => !string.IsNullOrWhiteSpace(name)
+            && string.IsNullOrWhiteSpace(currentLocation.CustomLabel)
+            && !string.Equals(name, currentLocation.Location, StringComparison.Ordinal);
+
+    /// <summary>
     /// Queues a resolved-label write-back for the UI thread, only when the
     /// identity guard still passes — the check + set under the gate is one
     /// critical section (the edit-side clears and the UI-thread take take the
     /// same gate, so an edit either erases the queued value or is seen by the
-    /// guard, and the take can never drop a concurrent queue).
+    /// guard, and the take can never drop a concurrent queue). The queue
+    /// carries only the name — the write-back eligibility decision is
+    /// <see cref="WritebackEligible"/>, re-evaluated under the gate at take.
     /// </summary>
     internal void QueueLabelWriteback(Func<bool> identityGuard, string value)
     {
@@ -179,12 +197,20 @@ internal sealed class WeatherDisplayState
     /// <summary>
     /// Returns and clears the pending write-back (the UI-thread flush) —
     /// under the gate, so a queue landing between the read and the clear can
-    /// never be lost: the queue and the take serialize on the same lock.
+    /// never be lost: the queue and the take serialize on the same lock. The
+    /// take also decides whether the write may happen at all
+    /// (<see cref="WritebackEligible"/> + the host's suppression flag): a
+    /// vetoed take refuses AND KEEPS the value queued (a veto is a "not
+    /// yet", never a "never" — a no-op write or a CustomLabel set between
+    /// the queue and the flush must not silently lose the resolved label),
+    /// so the next frame re-decides against the current host facts.
     /// </summary>
-    internal string? TakePendingWriteback()
+    internal string? TakePendingWriteback(WeatherLocation currentLocation, Func<bool> suppressed)
     {
         lock (_gate)
         {
+            if (suppressed()) return null;
+            if (!WritebackEligible(_pendingWriteback, currentLocation)) return null;
             string? pending = _pendingWriteback;
             _pendingWriteback = null;
             return pending;

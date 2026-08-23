@@ -137,6 +137,9 @@ public class WeatherDisplayStateTests
 
     // -- Write-back queue / take ----------------------------------------------
 
+    private static WeatherLocation BareLocation(string location = "")
+        => new("Fixed Location", location, null, null, null);
+
     [TestMethod]
     public void QueueLabelWriteback_GuardFails_LeavesQueueEmpty()
     {
@@ -145,7 +148,8 @@ public class WeatherDisplayStateTests
         state.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
 
         Assert.IsNull(state.PendingLabelWriteback);
-        Assert.IsNull(state.TakePendingWriteback(), "a never-queued write-back takes back null — not an empty string");
+        Assert.IsNull(state.TakePendingWriteback(BareLocation(), () => false),
+            "a never-queued write-back takes back null — not an empty string");
     }
 
     [TestMethod]
@@ -154,15 +158,76 @@ public class WeatherDisplayStateTests
         var state = NewState();
         state.QueueLabelWriteback(() => true, "First");
 
-        string? first = state.TakePendingWriteback();
+        string? first = state.TakePendingWriteback(BareLocation(), () => false);
         state.QueueLabelWriteback(() => true, "Second");
 
-        string? second = state.TakePendingWriteback();
+        string? second = state.TakePendingWriteback(BareLocation(), () => false);
 
         Assert.AreEqual("First", first);
         Assert.AreEqual("Second", second,
             "the queue and the take serialize on the one gate — a queued value can never be lost to a take");
         Assert.IsNull(state.PendingLabelWriteback);
+    }
+
+    [TestMethod]
+    public void TakePendingWriteback_CustomLabelSetAfterTheQueue_RefusesAndKeepsQueued()
+    {
+        // The gap the old ungated flush check sailed through: a CustomLabel
+        // landing between the queue and the flush must veto the write at the
+        // take — and a veto is a "not yet", never a "never" (the value stays
+        // queued; removing the label lets the next take through).
+        var state = NewState();
+        state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+
+        string? taken = state.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
+
+        Assert.IsNull(taken, "a CustomLabel set after the queue must veto the write at the take");
+        Assert.AreEqual("Miami, Florida, United States of America", state.PendingLabelWriteback,
+            "the vetoed write-back stays queued — a veto must never silently lose the resolved label");
+        Assert.AreEqual("Miami, Florida, United States of America",
+            state.TakePendingWriteback(BareLocation(), () => false),
+            "removing the label re-opens the take on the next frame");
+        Assert.IsNull(state.PendingLabelWriteback);
+    }
+
+    [TestMethod]
+    public void TakePendingWriteback_NameEqualsLocation_RefusesAndKeepsQueued()
+    {
+        var state = NewState();
+        state.QueueLabelWriteback(() => true, "Berlin");
+
+        string? taken = state.TakePendingWriteback(BareLocation("Berlin"), () => false);
+
+        Assert.IsNull(taken, "writing the location onto itself is a no-op churn — the take refuses");
+        Assert.AreEqual("Berlin", state.PendingLabelWriteback, "the refused write-back stays queued");
+    }
+
+    [TestMethod]
+    public void TakePendingWriteback_Suppressed_RefusesAndKeepsQueued()
+    {
+        var state = NewState();
+        state.QueueLabelWriteback(() => true, "Berlin");
+
+        string? taken = state.TakePendingWriteback(BareLocation(), () => true);
+
+        Assert.IsNull(taken, "the suppression flag's veto runs at the take, under the gate");
+        Assert.AreEqual("Berlin", state.PendingLabelWriteback);
+    }
+
+    [TestMethod]
+    public void WritebackEligible_SpellsTheThreeConditionsOnce()
+    {
+        var bare = BareLocation("New York");
+
+        Assert.IsTrue(WeatherDisplayState.WritebackEligible("New York, New York, United States", bare),
+            "a non-empty name with no CustomLabel and a differing Location is eligible");
+        Assert.IsFalse(WeatherDisplayState.WritebackEligible("", bare), "a blank name has nothing to write");
+        Assert.IsFalse(WeatherDisplayState.WritebackEligible("   ", bare), "whitespace-only is blank");
+        Assert.IsFalse(WeatherDisplayState.WritebackEligible("New York, New York, United States",
+                BareLocation("New York") with { CustomLabel = "Home" }),
+            "a CustomLabel claims the title — the label is display-only");
+        Assert.IsFalse(WeatherDisplayState.WritebackEligible("New York", bare),
+            "a name that equals the Location is a no-op write");
     }
 
     // -- Invalidation routing ---------------------------------------------------

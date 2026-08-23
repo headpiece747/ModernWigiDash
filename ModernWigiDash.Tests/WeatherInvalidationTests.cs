@@ -140,7 +140,7 @@ public sealed class WeatherInvalidationTests
             "the pick's candidates must survive the coordinates drop");
         // The widget twin's unique field: the pending write-back drops with
         // the resolution.
-        Assert.IsNull(state.TakePendingWriteback(),
+        Assert.IsNull(state.TakePendingWriteback(new WeatherLocation("Fixed Location", "", null, null, null), () => false),
             "a pending label must not survive the pick that voids it");
         // The client twin's unique fields: the coordinates clear, and the
         // identity query + throttle reset so the pick re-resolves immediately.
@@ -176,7 +176,7 @@ public sealed class WeatherInvalidationTests
         Assert.AreEqual(0, state.Identity.Candidates.Count,
             "a stale pick must never win against a new input");
         // The widget twin's unique field.
-        Assert.IsNull(state.TakePendingWriteback());
+        Assert.IsNull(state.TakePendingWriteback(new WeatherLocation("Fixed Location", "", null, null, null), () => false));
         // The client twin's unique fields.
         Assert.IsNull(control.Lat);
         Assert.IsNull(control.Lon);
@@ -201,7 +201,8 @@ public sealed class WeatherInvalidationTests
         // The unique fields are untouched, too.
         Assert.AreEqual(40.0, control.Lat);
         Assert.AreEqual("New York", state.Identity.ResolvedName);
-        Assert.AreEqual("New York", state.TakePendingWriteback(),
-            "the pending write-back must survive a non-resolution edit");
+        Assert.AreEqual("New York", state.TakePendingWriteback(
+                    new WeatherLocation("Fixed Location", "", null, null, null), () => false),
+                    "the pending write-back must survive a non-resolution edit");
     }
 }

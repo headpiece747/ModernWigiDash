@@ -545,16 +545,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>
     /// Performs the deferred resolved-label write-back on the UI thread (called
     /// by <see cref="Render"/> at 30 FPS; also an internal test seam for
-    /// direct-drive tests). The take runs under the display-state gate (so a
-    /// write-back queued concurrently can never be lost to it) and is cleared
-    /// before the write so a re-entrant render cannot double-write; the
-    /// suppression flag keeps the write's OnPropertyChanged from re-firing a
-    /// fetch.
+    /// direct-drive tests). The take — and with it the whole eligibility
+    /// decision (the CustomLabel veto, the no-op write, the suppression flag) —
+    /// runs under the display-state gate, so a host edit landing between the
+    /// queue and this flush is seen at the take (a veto refuses and keeps the
+    /// value queued for the next frame, never lost); the take clears before the
+    /// write, so a re-entrant render cannot double-write; and the suppression
+    /// flag keeps the write's own OnPropertyChanged from re-firing a fetch.
     /// </summary>
     internal void ApplyPendingLocationWriteback()
     {
-        if (_displayState.TakePendingWriteback() is not { } pending) return;
-        if (string.IsNullOrWhiteSpace(pending) || string.Equals(pending, Location, StringComparison.Ordinal) || _suppressLocationWriteback) return;
+        if (_displayState.TakePendingWriteback(BuildLocation(), () => _suppressLocationWriteback) is not { } pending) return;
 
         _suppressLocationWriteback = true;
         try
@@ -629,4 +630,3 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     internal Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
         => _flow.RunBootLoadAsync(cancellationToken);
 }
-

@@ -140,20 +140,19 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
 
             WeatherSnapshot snapshot = fetched.Snapshot;
 
-            // The resolved label's write-back is deferred to the UI thread (the
-            // host's render flushes the pending field, so the host's persistence
-            // stays on the UI thread). It is skipped entirely when a CustomLabel
-            // supplies the title: the label is display-only, and writing it into
-            // Location would destroy the query (explicit-coords/pick + CustomLabel
-            // would overwrite "New York" with "Home" in the profile). The identity
-            // is re-validated at the set, under the same gate the edit-side clears
-            // use: either the gated set lands before the edit's gated clear (the
-            // clear erases it) or after (the guard re-reads the new location and
-            // the set never happens).
-            bool writebackEligible = !string.IsNullOrWhiteSpace(snapshot.ResolvedCityName)
-                && string.IsNullOrWhiteSpace(host.CurrentLocation.CustomLabel)
-                && !string.Equals(snapshot.ResolvedCityName, host.CurrentLocation.Location, StringComparison.Ordinal);
-            if (writebackEligible)
+            // The resolved label's write-back is deferred to the UI thread
+            // (the host's render flushes the pending field, so the host's
+            // persistence stays on the UI thread). Eligibility — the
+            // non-empty name, the CustomLabel veto, the no-op write — is the
+            // display state's ONE policy (WritebackEligible): the queue and
+            // the take evaluate the same spelling, and the take re-evaluates
+            // it under its gate, so a CustomLabel or Location edit landing
+            // after this queue is seen at the take, never sailed through.
+            // The identity is re-validated at the set, under the same gate
+            // the edit-side clears use: either the gated set lands before the
+            // edit's gated clear (the clear erases it) or after (the guard
+            // re-reads the new location and the set never happens).
+            if (WeatherDisplayState.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
             {
                 host.QueueLabelWriteback(() => StillCurrent(fetchKey), snapshot.ResolvedCityName);
             }
