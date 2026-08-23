@@ -9,12 +9,12 @@ public class ShutdownOrchestratorTests
     public void Run_OrderedSteps_RunInOrderThenLastResort()
     {
         var order = new List<string>();
-        var orchestrator = new ShutdownOrchestrator(
+        var orchestrator = new ShutdownOrchestrator(new TeardownPlan(
         [
-            () => order.Add("persist"),
-            () => order.Add("pump"),
-            () => order.Add("engine")
-        ], lastResort: () => order.Add("standby"));
+            new TeardownStep("persist", () => order.Add("persist")),
+            new TeardownStep("pump", () => order.Add("pump")),
+            new TeardownStep("engine", () => order.Add("engine"))
+        ], new TeardownStep("standby", () => order.Add("standby"))));
 
         orchestrator.Run();
 
@@ -25,12 +25,12 @@ public class ShutdownOrchestratorTests
     public void Run_MiddleStepThrows_LastResortStillRuns()
     {
         var order = new List<string>();
-        var orchestrator = new ShutdownOrchestrator(
+        var orchestrator = new ShutdownOrchestrator(new TeardownPlan(
         [
-            () => order.Add("persist"),
-            () => throw new InvalidOperationException("a teardown step failed"),
-            () => order.Add("pump")
-        ], lastResort: () => order.Add("standby"));
+            new TeardownStep("persist", () => order.Add("persist")),
+            new TeardownStep("boom", () => throw new InvalidOperationException("a teardown step failed")),
+            new TeardownStep("pump", () => order.Add("pump"))
+        ], new TeardownStep("standby", () => order.Add("standby"))));
 
         Assert.ThrowsExactly<InvalidOperationException>(() => orchestrator.Run());
         CollectionAssert.AreEqual(new[] { "persist", "standby" }, order,
@@ -42,7 +42,7 @@ public class ShutdownOrchestratorTests
     {
         bool standbyRan = false;
 
-        new ShutdownOrchestrator([], lastResort: () => standbyRan = true).Run();
+        new ShutdownOrchestrator(new TeardownPlan([], new TeardownStep("standby", () => standbyRan = true))).Run();
 
         Assert.IsTrue(standbyRan);
     }

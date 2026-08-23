@@ -62,11 +62,20 @@ public partial class App : Application
         // flushes may leave the last lines — including the shutdown standby
         // verdict — buffered when the process exits. The exit marker doubles
         // as the "the app reached a clean exit" line for log analysis.
-        Exit += (_, _) =>
-        {
-            FileLog.Write("[App] === Application exiting ===");
-            FileLog.Flush();
-        };
+        Exit += (_, _) => WriteExitMarker();
+    }
+
+    /// <summary>
+    /// The exit ritual: the "[App] === Application exiting ===" marker plus
+    /// the one final <see cref="FileLog.Flush"/> — the cadence flushes
+    /// (8 KB / 250 ms) alone can leave the last lines buffered at process
+    /// exit, so the flush is what lands them. Named so the marker + flush
+    /// guarantee is assertable against a temp <c>FileLog.LogPath</c>.
+    /// </summary>
+    internal static void WriteExitMarker()
+    {
+        FileLog.Write("[App] === Application exiting ===");
+        FileLog.Flush();
     }
 
     protected override void OnStartup(StartupEventArgs e)

@@ -286,30 +286,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _usbDevice.Start();
             }));
 
-        // 7. Clean lifecycle shutdown on window close / debugging stop
+        // 7. Clean lifecycle shutdown on window close / debugging stop. The
+        //    plan is a named artifact (BuildTeardownPlan) the orchestrator
+        //    runs — the sequence is assertable against the real list.
         Closed += (s, e) =>
         {
             // The teardown sequence begins: OCEs raised by the disposes below
             // are expected and benign (see App.DispatcherUnhandledException).
             App.IsClosing = true;
-            new ShutdownOrchestrator(
-            [
-                // Persist before teardown: a clean exit always lands the final
-                // profile state (including the last active page index).
-                _profilePersistence.Flush,
-                _profilePersistence.Dispose,
-                _framePump.Dispose,
-                _powerLifecycle.Dispose,
-                _telemetry.Dispose,
-                _delivery.Dispose,
-                () => ProfileOps.DisposeProfile(_profile),
-                _dialogHost.CloseDeviceAuthorization,
-                _compositor.Dispose
-            ],
-            // The engine dispose is the one step that must never be skipped:
-            // the display must reach standby on every exit, even when an
-            // earlier teardown step throws (the orchestrator's last resort).
-            lastResort: _usbDevice.Dispose).Run();
+            new ShutdownOrchestrator(BuildTeardownPlan()).Run();
         };
 
         UpdateUsbBadge();
@@ -324,6 +309,35 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
         _wired = true;
     }
+
+    /// <summary>
+    /// The window's teardown plan as one named artifact: the ordered steps +
+    /// the never-skip last resort. The sequence is the load-bearing knowledge
+    /// (persist before teardown, the pump disposes before the delivery it
+    /// pushes into, the engine strictly last) — pinned against this real list
+    /// by <c>TeardownPlanTests</c>; the orchestrator's synthetic steps pin the
+    /// run policy, not the sequence.
+    /// </summary>
+    internal TeardownPlan BuildTeardownPlan() => new(
+    [
+        // Persist before teardown: a clean exit always lands the final
+        // profile state (including the last active page index).
+        new TeardownStep("ProfilePersist", _profilePersistence.Flush),
+        new TeardownStep("ProfilePersistence", _profilePersistence.Dispose),
+        // The pump stops before the delivery it pushes into: a compose tick
+        // must never land on a disposed delivery.
+        new TeardownStep("FramePump", _framePump.Dispose),
+        new TeardownStep("PowerLifecycle", _powerLifecycle.Dispose),
+        new TeardownStep("Telemetry", _telemetry.Dispose),
+        new TeardownStep("FrameDelivery", _delivery.Dispose),
+        new TeardownStep("Profile", () => ProfileOps.DisposeProfile(_profile)),
+        new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
+        new TeardownStep("Compositor", _compositor.Dispose)
+    ],
+    // The engine dispose is the one step that must never be skipped:
+    // the display must reach standby on every exit, even when an
+    // earlier teardown step throws (the orchestrator's last resort).
+    new TeardownStep("UsbEngineStandby", _usbDevice.Dispose));
 
     /// <summary>
     /// The device-touch hop to the UI thread (engine 16 ms poll thread →
