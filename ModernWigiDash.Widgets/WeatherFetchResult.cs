@@ -14,9 +14,9 @@ internal abstract record WeatherFetchResult
     /// in that window converts the outcome to <see cref="Stale"/> instead.
     /// Carries the resolved identity the snapshot was fetched for: the geocode
     /// candidates (the widget's "Location Match" dropdown), the winner's
-    /// population, and the resolution query key the fetch started for — so the
-    /// widget can verify a result belongs to the identity it requested instead
-    /// of re-deriving the key itself. The resolved display name rides the
+    /// population, and the resolution query key the fetch started for (the
+    /// ADR-0006 carried key — the identity the outcome was resolved for,
+    /// pinned at the client's boundary). The resolved display name rides the
     /// snapshot itself (one label source).</summary>
     public sealed record Fetched(
         WeatherSnapshot Snapshot,
@@ -27,10 +27,10 @@ internal abstract record WeatherFetchResult
     /// <summary>A genuine same-name tie: the geocoder found multiple places
     /// bearing the query's name and the rules refuse to guess coordinates. No
     /// snapshot exists, but the tied candidates are carried (they are the
-    /// widget's "Location Match" dropdown) with the resolution query key, so
-    /// the caller can OFFER the user a pick instead of collapsing the outcome
-    /// into a bare <see cref="Failed"/> dead end, and can verify the result
-    /// belongs to the identity it requested. A pick then rides the normal pick
+    /// widget's "Location Match" dropdown) with the resolution query key (the
+    /// identity the tied candidates belong to), so the caller can OFFER the
+    /// user a pick instead of collapsing the outcome
+    /// into a bare <see cref="Failed"/> dead end. A pick then rides the normal pick
     /// path (Location Match → the geocoder's zero-HTTP fast path). The
     /// distinction matters: a <see cref="Failed"/> for a typo'd city has no
     /// candidates to offer, but a tie does — the dropdown is the escape hatch.</summary>
@@ -54,7 +54,7 @@ internal abstract record WeatherFetchResult
     /// <summary>The resolution identity was invalidated while the fetch was in
     /// flight; the snapshot is stale and must not be applied, and no throttle
     /// stamp was written (the caller re-fetches the new identity immediately).
-    /// Carries the resolution query key the fetch started for, so the caller
-    /// can tell WHICH identity went stale without re-deriving the key.</summary>
+    /// Carries the resolution query key the fetch started for (the identity
+    /// that went stale, pinned at the client's boundary).</summary>
     public sealed record Stale(string QueryKey) : WeatherFetchResult;
 }

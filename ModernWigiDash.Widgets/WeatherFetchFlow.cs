@@ -1,11 +1,12 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// The weather fetch-flow module: the SEQUENCE around one fetch — the identity
-/// key captured before the await, the outcome verification (through
-/// <see cref="WeatherQueryKey.SameKey"/>, the ADR-0006 predicate, never a
-/// second spelling), the post-await re-validation, the drop-and-refetch
-/// routing, the write-back gating, the cadence gate, and the boot-load
+/// The weather fetch-flow module: the SEQUENCE around one fetch — the location
+/// snapshot captured before the await (the key and the fetch resolve from the
+/// SAME record), the post-await re-validation against the live location
+/// (through <see cref="WeatherQueryKey.SameKey"/>, the ADR-0006 predicate,
+/// never a second spelling), the drop-and-refetch routing, the write-back
+/// gating, the cadence gate, and the boot-load
 /// rollback. The host keeps only the host concerns — the property coercion
 /// (BuildLocation), the gate discipline around the display state (the apply
 /// and the version read run under the host's gate), the UI-thread write-back
@@ -18,9 +19,9 @@ namespace ModernWigiDash.Widgets;
 /// interface without a widget instance, an HTTP stub, or a render tick.
 /// <para>
 /// The caller's obligation is one line: ask <see cref="CanFetch"/>, run
-/// <see cref="RunFetchAsync"/>. The capture-window order (key captured before
-/// the await, re-validated after — twice: against the outcome key and against
-/// the live location) is enforced here, not in comments at a call site.
+/// <see cref="RunFetchAsync"/>. The capture-window order (the location
+/// captured ONCE before the await, the live location re-read after) is
+/// enforced here, not in comments at a call site.
 /// </para>
 /// <param name="client">The cluster's data module: the resolve/fetch/cache
 /// legs, the throttle truth, and the discarded-load rollback.</param>
@@ -56,24 +57,25 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
     }
 
     /// <summary>
-    /// One run of the fetch flow: capture the identity key, fetch through the
-    /// <see cref="WeatherClient"/>, verify the outcome against the captured
-    /// key and the live location, and only then apply the snapshot under the
-    /// host's gate. The <see cref="WeatherFetchFlowOutcome"/> reports what
+    /// One run of the fetch flow: capture the location snapshot, fetch through
+    /// the <see cref="WeatherClient"/>, re-validate against the live location,
+    /// and only then apply the snapshot under the host's gate. The
+    /// <see cref="WeatherFetchFlowOutcome"/> reports what
     /// happened to this fetch's outcome.
     /// </summary>
     internal async Task<WeatherFetchFlowOutcome> RunFetchAsync(bool force = false)
     {
-        // The query key at START: the client's Stale verdict covers its whole
-        // capture window (through the cache-save await), but this key still
-        // guards the outcome-key comparison below (a resolution-input change
-        // landing between this capture and the client's own capture resolves
-        // a DIFFERENT identity) and the post-await gap re-check.
-        string fetchKey = WeatherQueryKey.Build(host.CurrentLocation);
+        // The location at START, captured ONCE: the key and the fetch
+        // resolve from the same record, so no seam read can drift
+        // between the key and the fetch leg — an edit landing between
+        // this read and the apply is the one window left open, and the
+        // post-await live re-check is its gate.
+        WeatherLocation location = host.CurrentLocation;
+        string fetchKey = WeatherQueryKey.Build(location);
         WeatherFetchResult result;
         try
         {
-            result = await client.FetchCurrentAsync(host.CurrentLocation, force, host.RunToken).ConfigureAwait(false);
+            result = await client.FetchCurrentAsync(location, force, host.RunToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -94,33 +96,13 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             return WeatherFetchFlowOutcome.DroppedStale;
         }
 
-        // The outcome carries the key the client actually resolved for (both
-        // Fetched and Tie — a tie's candidates belong to the identity that
-        // produced them, exactly like a snapshot). It must match the key
-        // captured here: a resolution-input change landing between this
-        // capture and the client's own capture resolves a DIFFERENT identity,
-        // and if that identity was then changed back before this continuation
-        // runs the live check below cannot see it — the outcome key can.
-        // Dropped through the ADR-0006 predicate (the ONE spelling — never an
-        // inline ordinal compare). Drop the result — weather, label, AND
-        // candidates — when the comparison fails.
-        string? carriedKey = result switch
-        {
-            WeatherFetchResult.Fetched fetchedKeyCheck => fetchedKeyCheck.QueryKey,
-            WeatherFetchResult.Tie tiedKeyCheck => tiedKeyCheck.QueryKey,
-            _ => null,
-        };
-        if (carriedKey is not null && !WeatherQueryKey.SameKey(carriedKey, fetchKey))
-        {
-            _ = RunFetchAsync(force: true);
-            return WeatherFetchFlowOutcome.DroppedStale;
-        }
-
-        // Post-await re-validation: the client's Stale verdict closes its own
-        // capture window (through the cache-save await); an identity change
-        // landing in the return-to-apply gap the client's window cannot see
-        // (including the post-InitializeAsync profile hydration) still comes
-        // back as Fetched here. Drop the result — weather AND label.
+        // Post-await re-validation: the client's Stale verdict covers its
+        // own capture window (through the cache-save await) — an edit that
+        // invalidates the client mid-fetch is the Stale verdict's to catch.
+        // An identity change that does NOT touch the client's state (a
+        // silent reassignment, the post-InitializeAsync profile hydration)
+        // still comes back as Fetched/Tie here: the live location re-read is
+        // the gate for that window. Drop the result — weather AND label.
         if (!StillCurrent(fetchKey))
         {
             _ = RunFetchAsync(force: true);
@@ -232,13 +214,18 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
         try
         {
             int versionBefore = host.DataVersion;
-            string locationKeyBefore = WeatherQueryKey.Build(host.CurrentLocation);
+            // The location at START, captured ONCE (the same one-read rule as
+            // RunFetchAsync): the key and the load resolve from the same
+            // record, so the boot load cannot drift from its own key between
+            // the two reads.
+            WeatherLocation location = host.CurrentLocation;
+            string locationKeyBefore = WeatherQueryKey.Build(location);
 
             // The cache is identity-checked against the CURRENT location by
             // the client itself (a cache saved for a different resolution
             // must not surface as fresh weather).
             var load = CacheLoadOverride ?? client.LoadCacheAsync;
-            var cached = await load(host.CurrentLocation, cancellationToken).ConfigureAwait(false);
+            var cached = await load(location, cancellationToken).ConfigureAwait(false);
             if (cached is null) return;
 
             // The version + identity guards run inside the apply seam's lock:
