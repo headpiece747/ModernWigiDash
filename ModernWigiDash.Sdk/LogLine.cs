@@ -34,8 +34,7 @@ public static class LogLine
     private static readonly Regex UrlQueryStripper =
         new(@"(?<url>https?://[^\s""'<>]+)\?[^\s""'<>]*", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
-/// <summary>
-    /// The flatten-and-bound span pass: embedded newlines become spaces and
+    /// <summary>`r`n    /// The flatten-and-bound span pass: embedded newlines become spaces and
     /// the result is cut to <paramref name="limit"/> characters in one scan,
     /// so an oversized value never allocates the full-size intermediates of
     /// chained Replace calls before being cut down. The single owner of the
