@@ -8,13 +8,35 @@ namespace ModernWigiDash.Core.Rendering;
 /// </summary>
 public static class FontHelper
 {
-    private static readonly ConcurrentDictionary<(int Codepoint, SKFontStyle Style), Lazy<SKTypeface>> _fallbackCache = new();
+    /// <summary>
+    /// The value identity of an <see cref="SKFontStyle"/>: weight, width, slant.
+    /// SkiaSharp exposes a style as a fresh managed wrapper on every property
+    /// read (<c>SKFontStyle.GetObject</c> allocates; there is no value equality),
+    /// so every FontHelper cache keys a style by these three values, never by
+    /// wrapper reference — a reference key would miss on every draw for the same
+    /// logical style. Reading the components is allocation-free (three P/Invoke
+    /// int/enum getters).
+    /// </summary>
+    private static (int Weight, int Width, int Slant) StyleValue(SKFontStyle style)
+        => (style.Weight, style.Width, (int)style.Slant);
 
-    // One native typeface per (family, style): serves direct family resolution (GetTypeface)
-    // and dedupes MatchCharacter results so duplicate native typefaces for the same key are
-    // disposed. The Lazy wrapper makes a concurrent GetOrAdd double-run benign — only the
-    // stored Lazy is ever evaluated, so at most one native typeface per key is materialized.
-    private static readonly ConcurrentDictionary<(string Family, SKFontStyle Style), Lazy<SKTypeface>> _typefaceCache = new();
+    /// <summary>
+    /// Memoized fallback typeface per (codepoint, style VALUE). The style is
+    /// keyed by its weight/width/slant value, not by the interop wrapper
+    /// reference, so equal styles (even on different wrapper instances) share
+    /// one entry. Bounded by the shared clear-on-overflow rule
+    /// (<see cref="FontCacheEviction"/>).
+    /// </summary>
+    private static readonly ConcurrentDictionary<(int Codepoint, int Weight, int Width, int Slant), Lazy<SKTypeface>> _fallbackCache = new();
+
+    // One native typeface per (family, style VALUE): serves direct family resolution
+    // (GetTypeface) and dedupes MatchCharacter results so duplicate native typefaces
+    // for the same key are disposed. The style is keyed by its weight/width/slant
+    // value (the interop wrapper is a fresh object per read, with no value equality).
+    // Values are stored eagerly (the former Lazy wrapper was an eager
+    // Lazy(value) - pure ceremony): a race loser's typeface is disposed
+    // immediately instead of by finalizer.
+    private static readonly ConcurrentDictionary<(string Family, int Weight, int Width, int Slant), SKTypeface> _typefaceCache = new();
 
     private static readonly Lock _fontManagerLock = new();
 
@@ -30,17 +52,19 @@ public static class FontHelper
     private static readonly ConcurrentDictionary<(long TypefaceHandle, int Codepoint), bool> _glyphPresenceCache = new();
 
     /// <summary>
-    /// Memoized run splits per (text, style, preferred typeface): the per-glyph
-    /// fallback decision depends only on that tuple — not on font size or target
-    /// width — so the expensive split is computed once per distinct input and
-    /// the per-call measure/draw loops iterate the cached runs. The typeface is
-    /// keyed by reference identity; every typeface that flows through
-    /// <see cref="GetTextRuns"/> is a process-lifetime cached singleton, so
-    /// identity is stable. The cached lists are shared — callers must treat
-    /// them as read-only. Bounded by the shared clear-on-overflow rule
+    /// Memoized run splits per (text, style VALUE, preferred typeface HANDLE):
+    /// the per-glyph fallback decision depends only on that tuple — not on font
+    /// size or target width — so the expensive split is computed once per
+    /// distinct input and the per-call measure/draw loops iterate the cached
+    /// runs. Both identities are value/handle, never wrapper reference: the
+    /// interop <c>SKFontStyle</c> wrapper is a fresh managed object on every
+    /// <c>.FontStyle</c> read (and carries no value equality), and a reference
+    /// key would miss on every draw while the underlying style and typeface
+    /// are unchanged. The cached lists are shared — callers must treat them as
+    /// read-only. Bounded by the shared clear-on-overflow rule
     /// (<see cref="FontCacheEviction"/>).
     /// </summary>
-    private static readonly ConcurrentDictionary<(string Text, SKFontStyle Style, SKTypeface? Preferred), List<(string Text, SKTypeface Typeface)>> _textRunsCache = new();
+    private static readonly ConcurrentDictionary<(string Text, int Weight, int Width, int Slant, long TypefaceHandle), List<(string Text, SKTypeface Typeface)>> _textRunsCache = new();
 
     private static readonly Lazy<SKTypeface?> _geistTypeface = new(() =>
     {
@@ -157,9 +181,10 @@ public static class FontHelper
             return geist;
         }
 
-        var key = (codepoint, style);
+        var styleValue = StyleValue(style);
+        var key = (codepoint, styleValue.Weight, styleValue.Width, styleValue.Slant);
         FontCacheEviction.EvictIfFull(_fallbackCache, FontCacheEviction.FallbackTypefaceLimit);
-        return _fallbackCache.GetOrAdd(key, k => new Lazy<SKTypeface>(() => ResolveFallback(k))).Value;
+        return _fallbackCache.GetOrAdd(key, static k => new Lazy<SKTypeface>(() => ResolveFallback(k))).Value;
     }
 
     /// <summary>
@@ -170,7 +195,7 @@ public static class FontHelper
     /// evaluated (a discarded Lazy never materializes a typeface), and any duplicate native
     /// typeface produced by MatchCharacter is disposed by <see cref="DedupeByFamily"/>.
     /// </summary>
-    private static SKTypeface ResolveFallback((int Codepoint, SKFontStyle Style) key)
+    private static SKTypeface ResolveFallback((int Codepoint, int Weight, int Width, int Slant) key)
     {
         var emoji = _segoeEmojiTypeface.Value;
         if (emoji is { Handle: not 0 } && ContainsGlyphSafe(emoji, key.Codepoint))
@@ -199,7 +224,7 @@ public static class FontHelper
             }
             if (matched is { Handle: not 0 })
             {
-                return DedupeByFamily(matched, key.Style);
+                return DedupeByFamily(matched, (key.Weight, key.Width, key.Slant));
             }
         }
         catch
@@ -215,23 +240,25 @@ public static class FontHelper
     /// Returns a single cached typeface per (family, style), disposing any duplicate native
     /// typeface from MatchCharacter (safe: the loser is never used or stored).
     /// </summary>
-    private static SKTypeface DedupeByFamily(SKTypeface typeface, SKFontStyle style)
+    private static SKTypeface DedupeByFamily(SKTypeface typeface, (int Weight, int Width, int Slant) styleValue)
     {
-        var lazy = _typefaceCache.GetOrAdd((typeface.FamilyName, style), _ => new Lazy<SKTypeface>(typeface));
-        var cached = lazy.Value;
-        if (!ReferenceEquals(cached, typeface))
+        var key = (typeface.FamilyName, styleValue.Weight, styleValue.Width, styleValue.Slant);
+        var winner = _typefaceCache.GetOrAdd(key, typeface);
+        if (!ReferenceEquals(winner, typeface))
         {
             typeface.Dispose();
-            return cached;
+            return winner;
         }
-        return cached;
+
+        return winner;
     }
 
     /// <summary>
     /// Splits text into runs of contiguous characters sharing the same SKTypeface for rendering.
     /// The preferred typeface is honored first for every codepoint it covers.
-    /// The split is memoized per (text, style, preferred typeface) — it is independent of
-    /// font size and target width — and the returned list is shared: callers must not mutate it.
+    /// The split is memoized per (text, style, preferred typeface handle) — it is
+    /// independent of font size and target width — and the returned list is shared:
+    /// callers must not mutate it.
     /// </summary>
     public static IReadOnlyList<(string Text, SKTypeface Typeface)> GetTextRuns(string text, SKFontStyle style, SKTypeface? preferred = null)
     {
@@ -240,9 +267,25 @@ public static class FontHelper
             return [];
         }
 
-        FontCacheEviction.EvictIfFull(_textRunsCache, FontCacheEviction.TextRunsLimit);
+        return GetTextRuns(text, StyleValue(style), preferred?.Handle.ToInt64() ?? 0, style, preferred);
+    }
 
-        return _textRunsCache.GetOrAdd((text, style, preferred), static key => ComputeTextRuns(key.Text, key.Style, key.Preferred));
+    private static IReadOnlyList<(string Text, SKTypeface Typeface)> GetTextRuns(string text, (int Weight, int Width, int Slant) styleValue, long preferredHandle, SKFontStyle style, SKTypeface? preferred)
+    {
+        // Value/handle-keyed fast path: the widget draw path hands in fresh
+        // interop wrappers on every call, and the per-call TryGetValue is
+        // allocation-free, while a per-call GetOrAdd closure is not.
+        var key = (text, styleValue.Weight, styleValue.Width, styleValue.Slant, preferredHandle);
+        if (_textRunsCache.TryGetValue(key, out List<(string Text, SKTypeface Typeface)>? existing))
+        {
+            return existing;
+        }
+
+        FontCacheEviction.EvictIfFull(_textRunsCache, FontCacheEviction.TextRunsLimit);
+        // Value overload, no factory: the per-call closure would allocate its
+        // display class on the entry path of every measure/draw call.
+        var computed = ComputeTextRuns(text, style, preferred);
+        return _textRunsCache.GetOrAdd(key, computed);
     }
 
     private static List<(string Text, SKTypeface Typeface)> ComputeTextRuns(string text, SKFontStyle style, SKTypeface? preferred)
@@ -294,13 +337,14 @@ public static class FontHelper
             return 0f;
         }
 
-        var style = baseFont.Typeface?.FontStyle ?? SKFontStyle.Normal;
-        var runs = GetTextRuns(text, style, baseFont.Typeface);
+        var (typefaceHandle, styleValue, style, typeface) = GetFontMeta(baseFont);
+        var runs = GetTextRuns(text, styleValue, typefaceHandle, style, typeface);
+        float size = baseFont.Size;
         float totalWidth = 0f;
 
         foreach (var run in runs)
         {
-            var font = GetCachedFont(run.Typeface, baseFont.Size);
+            var font = GetCachedFont(run.Typeface, size);
             totalWidth += font.MeasureText(run.Text);
         }
 
@@ -318,8 +362,9 @@ public static class FontHelper
             return;
         }
 
-        var style = baseFont.Typeface?.FontStyle ?? SKFontStyle.Normal;
-        var runs = GetTextRuns(text, style, baseFont.Typeface);
+        var (typefaceHandle, styleValue, style, typeface) = GetFontMeta(baseFont);
+        var runs = GetTextRuns(text, styleValue, typefaceHandle, style, typeface);
+        float size = baseFont.Size;
 
         if (align != SKTextAlign.Left)
         {
@@ -327,7 +372,7 @@ public static class FontHelper
             float totalW = 0f;
             foreach (var run in runs)
             {
-                totalW += GetCachedFont(run.Typeface, baseFont.Size).MeasureText(run.Text);
+                totalW += GetCachedFont(run.Typeface, size).MeasureText(run.Text);
             }
             x -= align == SKTextAlign.Right ? totalW : totalW * 0.5f;
         }
@@ -335,7 +380,7 @@ public static class FontHelper
         float currentX = x;
         foreach (var run in runs)
         {
-            var font = GetCachedFont(run.Typeface, baseFont.Size);
+            var font = GetCachedFont(run.Typeface, size);
             canvas.DrawText(run.Text, currentX, y, SKTextAlign.Left, font, paint);
             currentX += font.MeasureText(run.Text);
         }
@@ -354,7 +399,25 @@ public static class FontHelper
             return GeistTypeface;
         }
 
-        return _typefaceCache.GetOrAdd((familyName, style), key => new Lazy<SKTypeface>(() => ResolveDirectTypeface(key))).Value;
+        var styleValue = StyleValue(style);
+        var key = (familyName, styleValue.Weight, styleValue.Width, styleValue.Slant);
+        if (_typefaceCache.TryGetValue(key, out SKTypeface? existing))
+        {
+            return existing;
+        }
+
+        // Eager resolve on the miss path, no closure: a per-call factory
+        // closure allocates its display class on the method's entry path even
+        // though the miss branch runs once per (family, style). A race loser's
+        // typeface is disposed immediately (the finalizer is no owner).
+        var resolved = ResolveDirectTypeface((familyName, style));
+        var winner = _typefaceCache.GetOrAdd(key, resolved);
+        if (!ReferenceEquals(winner, resolved))
+        {
+            resolved.Dispose();
+        }
+
+        return winner;
     }
 
     /// <summary>
@@ -391,7 +454,9 @@ public static class FontHelper
     /// Returns a CACHED high-quality SKFont for (typeface, size). Widget renders
     /// run at 30 FPS and sizes change only on resize, so per-render font
     /// allocation is pure native churn (~10-20 SKFont objects per widget per
-    /// frame). Callers must NOT dispose the returned font.
+    /// frame). The TryGetValue fast path keeps the 30 FPS hit allocation-free:
+    /// a per-call GetOrAdd closure allocates its display class even when the
+    /// entry is already present. Callers must NOT dispose the returned font.
     /// </summary>
     public static SKFont GetCachedFont(SKTypeface typeface, float size)
     {
@@ -401,10 +466,23 @@ public static class FontHelper
         // Regular from Bold. Bounded by the shared clear-on-overflow rule
         // (<see cref="FontCacheEviction"/>), so a long session with many
         // distinct sizes cannot grow the native-font cache without bound.
+        var key = (typeface.Handle.ToInt64(), sizeKey);
+        if (CachedFonts.TryGetValue(key, out SKFont? existing))
+        {
+            return existing;
+        }
+
         FontCacheEviction.EvictIfFull(CachedFonts, FontCacheEviction.CachedFontLimit);
-        return CachedFonts.GetOrAdd(
-            (typeface.Handle.ToInt64(), sizeKey),
-            _ => CreateFont(typeface, size));
+        // Value overload, no factory: a per-call closure allocates its display
+        // class on the method's entry path even when the miss branch never runs.
+        var created = CreateFont(typeface, size);
+        var winner = CachedFonts.GetOrAdd(key, created);
+        if (!ReferenceEquals(winner, created))
+        {
+            created.Dispose();
+        }
+
+        return winner;
     }
 
     /// <summary>
@@ -415,6 +493,34 @@ public static class FontHelper
         => GetCachedFont(GetTypeface(familyName, style), size);
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(long TypefaceHandle, int SizeKey), SKFont> CachedFonts = new();
+
+    /// <summary>
+    /// The per-font resolution of (typeface handle, style value + wrapper),
+    /// keyed by the font's native handle: the interop <c>SKFont.Typeface</c> /
+    /// <c>SKTypeface.FontStyle</c> properties each do interop work on every
+    /// read, so the draw/measure path resolves them ONCE per font instance
+    /// (fonts are cached singletons, so the one-time cost amortizes to zero)
+    /// and never pays it per call. The stored wrapper pins the native typeface
+    /// for the cache's lifetime (bounded by the shared clear-on-overflow rule,
+    /// <see cref="FontCacheEviction"/>); the typefaces themselves are
+    /// process-lifetime singletons.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, (long TypefaceHandle, (int Weight, int Width, int Slant) StyleValue, SKFontStyle Style, SKTypeface? Wrapper)> FontMeta = new();
+
+    private static (long TypefaceHandle, (int Weight, int Width, int Slant) StyleValue, SKFontStyle Style, SKTypeface? Wrapper) GetFontMeta(SKFont font)
+    {
+        long key = font.Handle.ToInt64();
+        if (FontMeta.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+
+        var typeface = font.Typeface;
+        var style = typeface?.FontStyle ?? SKFontStyle.Normal;
+        var meta = (typeface?.Handle.ToInt64() ?? 0, StyleValue(style), style, typeface);
+        FontCacheEviction.EvictIfFull(FontMeta, FontCacheEviction.FontMetaLimit);
+        return FontMeta.GetOrAdd(key, meta);
+    }
 
     /// <summary>
     /// Configures high-quality anti-aliasing, subpixel text positioning, and ClearType rendering flags on an SKFont instance.

@@ -38,7 +38,7 @@ public sealed class FrameDelivery : IDisposable
     private readonly CancellationTokenSource _cts;
     private readonly Task _senderTask;
 
-    private readonly Func<byte[], FrameSendResult>? _send;
+    private readonly Func<ReadOnlyMemory<byte>, FrameSendResult>? _send;
 
     // Hoisted drain-release delegate: the sender loop drains the channel on
     // every read (~30/s), so a per-drain closure would be a per-frame
@@ -68,7 +68,9 @@ public sealed class FrameDelivery : IDisposable
     /// reusable work buffer. Required for <see cref="Push"/>; the buffer pool
     /// is built from its <see cref="IRgb565Encoder.OutputBufferSize"/>.</param>
     /// <param name="send">Send seam to the transport, bound once at
-    /// construction. Returns the truthful <see cref="FrameSendResult"/> â€” the
+    /// construction (a <see cref="ReadOnlyMemory{T}"/> so the send chain shares
+    /// one buffer type with the engine and transport seams). Returns the
+    /// truthful <see cref="FrameSendResult"/> â€” the
     /// accounting splits a device refusal (Refused) from a broken pipe (Failed).</param>
     /// <param name="isReady">Optional readiness predicate. Defaults to "a send
     /// seam is attached".</param>
@@ -82,7 +84,7 @@ public sealed class FrameDelivery : IDisposable
     /// <param name="log">Optional log sink for send/drop lines.</param>
     internal FrameDelivery(
         IRgb565Encoder? encoder = null,
-        Func<byte[], FrameSendResult>? send = null,
+        Func<ReadOnlyMemory<byte>, FrameSendResult>? send = null,
         Func<bool>? isReady = null,
         TimeSpan? minInterval = null,
         TimeProvider? timeProvider = null,
@@ -137,7 +139,7 @@ public sealed class FrameDelivery : IDisposable
     /// </summary>
     public static FrameDelivery Create(
         IRgb565Encoder encoder,
-        Func<byte[], FrameSendResult> send,
+        Func<ReadOnlyMemory<byte>, FrameSendResult> send,
         Func<bool>? isReady = null,
         Action<string>? log = null)
     {
@@ -156,8 +158,11 @@ public sealed class FrameDelivery : IDisposable
     /// <summary>
     /// True when this delivery can currently route frames: the readiness
     /// predicate (when provided) or simply that a send seam is attached.
+    /// Internal: the only readers are the tests — the App's pump gate reads
+    /// <see cref="IsSendInFlight"/>, and push-time readiness is enforced
+    /// inside <see cref="Push"/> (the DroppedNotReadyCount split).
     /// </summary>
-    public bool IsReady => _isReady?.Invoke() ?? _send is not null;
+    internal bool IsReady => _isReady?.Invoke() ?? _send is not null;
 
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
@@ -304,7 +309,7 @@ public sealed class FrameDelivery : IDisposable
                     // so composing during it is dead CPU.
                     Volatile.Write(ref _sendInFlight, 1);
                     FrameSendResult result = _send is not null
-                        ? _send(latest.Buffer)
+                        ? _send(latest.Buffer.AsMemory())
                         : FrameSendResult.Refused;
 #pragma warning disable S125 // log-cadence documentation, not commented-out code
                     // Per-frame success log would grow unbounded at ~30/s;

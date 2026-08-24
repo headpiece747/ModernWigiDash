@@ -247,9 +247,10 @@ internal sealed class InputController
             return _manipulation;
 
         // Click in the resize handle (bottom-right corner) resizes. The handle
-        // size is owned by the compositor that draws it — one source of truth.
-        if (x >= hit.X + hit.Width - SkiaFrameCompositor.ResizeHandleSize &&
-            y >= hit.Y + hit.Height - SkiaFrameCompositor.ResizeHandleSize)
+        // size is owned by the routing module that shapes the hit test —
+        // one source of truth.
+        if (x >= hit.X + hit.Width - WidgetRouting.ResizeHandleSize &&
+            y >= hit.Y + hit.Height - WidgetRouting.ResizeHandleSize)
         {
             _manipulation = ManipulationKind.Resize;
         }

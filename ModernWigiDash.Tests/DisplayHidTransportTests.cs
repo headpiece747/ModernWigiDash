@@ -382,6 +382,49 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
     }
 
     [TestMethod]
+    public void ReadTouch_DoesNotWaitForAnInFlightBulkWrite()
+    {
+        // The hot paths share the backend, not a lock: a frame write in
+        // flight (the delivery's one sender thread) must not hold up a 16 ms
+        // touch poll (the engine's 16 ms loop). The write is parked inside
+        // the backend (the gate holds it), so an in-flight transfer is
+        // provable — with the old coarse transport lock this ReadTouch would
+        // block on the lock the parked write held; with the in-flight
+        // transfer count it must return the report.
+        var writeEntered = new ManualResetEventSlim(false);
+        var releaseWrite = new ManualResetEventSlim(false);
+        var backend = new RecordingBackend
+        {
+            BulkWriteEntered = () => writeEntered.Set(),
+            HoldBulkWriteUntil = releaseWrite,
+            // type=Down(1), x=470, y=322, screenState=0, sleepState=0
+            TouchResponse = [1, 0, 0xD6, 0x01, 0x42, 0x01, 0, 0]
+        };
+        using var transport = new DisplayHidTransport(backend);
+        byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
+
+        Task<FrameSendResult> sendTask = Task.Run(() => transport.SendFrame(frame));
+        Assert.IsTrue(writeEntered.Wait(5000), "the sender thread must enter the bulk write");
+        // The write is parked inside the backend — now measure the touch read.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        TouchReport? report = transport.ReadTouch();
+        sw.Stop();
+        releaseWrite.Set();
+
+        // The bounded wait reports only completion inside the budget; the send
+        // verdict rides the task's RESULT (the engine's standby rule).
+        bool sendCompleted = sendTask.Wait(5000);
+        Assert.IsTrue(sendCompleted, "the parked frame write must complete once released");
+        Assert.AreEqual(FrameSendResult.Sent, sendTask.Result);
+        Assert.IsNotNull(report, "the touch report must arrive while the frame write is in flight");
+        Assert.AreEqual(DisplayProtocolConstants.TouchTypeDown, report.Value.Type);
+        Assert.AreEqual(470, report.Value.X);
+        Assert.AreEqual(322, report.Value.Y);
+        Assert.IsTrue(sw.ElapsedMilliseconds < 1000,
+            $"ReadTouch took {sw.ElapsedMilliseconds} ms against a parked bulk write — the hot paths must not serialize");
+    }
+
+    [TestMethod]
     public void GoToStandby_SendsWelcomeScreenCommand()
     {
         var backend = new RecordingBackend();

@@ -24,7 +24,12 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
     private const string CtrlDiagCategory = "USB-CTRL";
     private const string BulkErrorDiagCategory = "USB-BULK-ERR";
     private const string DisposeDiagCategory = "USB-DISPOSE";
-    private readonly DiagLog _bulkDiagLog = new(BulkDiagCategory, BackendDiag.BulkWriteCadence);
+    // The tag composer for the chunked-write timing line (Cadence 1 — it fires
+    // when the raw cadence below says to), so the tag stays baked in one place
+    // and the skipped calls on the 30 FPS bulk path allocate nothing (the lazy
+    // DiagLog form still paid for the per-call closure).
+    private static readonly DiagLog _bulkTagLog = new(BulkDiagCategory, 1);
+    private readonly LogCadence _bulkTimingCadence = new(BackendDiag.BulkWriteCadence);
     // The other vocabulary categories bind once at construction (Cadence 1 —
     // each is a failure path whose lines must always fire), so a tag can't
     // drift between this backend's call sites.
@@ -238,7 +243,8 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
         transferred = 0;
 
         int numChunks = (data.Length + ChunkedBulkWrite.ChunkSize - 1) / ChunkedBulkWrite.ChunkSize;
-        _bulkDiagLog.Write(() => $"Chunked write: {data.Length} bytes in {numChunks} chunks");
+        if (_bulkTimingCadence.Due())
+            _bulkTagLog.Write($"Chunked write: {data.Length} bytes in {numChunks} chunks");
 
         try
         {

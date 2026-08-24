@@ -114,6 +114,38 @@ public class FontAndTextTests
     }
 
     [TestMethod]
+    public void FontHelper_GetTextRuns_FreshStyleWrapperPerCall_ReturnsSameListInstance()
+    {
+        // The pre-2026-08-24 draw path read SKFont.Typeface?.FontStyle on every
+        // call, and the interop layer hands back a fresh SKFontStyle wrapper on
+        // every read (it is a value without value equality). The run memo must
+        // key the style by value (weight/width/slant) and the typeface by
+        // handle, so a fresh wrapper for the same logical style hits the memo
+        // instead of recomputing the split every frame.
+        var font = FontHelper.CreateFont(FontHelper.GeistTypeface, 32f);
+        var styleOne = font.Typeface!.FontStyle!;
+        var styleTwo = font.Typeface!.FontStyle!;
+        Assert.AreNotSame(styleOne, styleTwo,
+            "the interop style-wrapper churn this pin depends on must be real - a stable wrapper makes the pin tautological");
+
+        var first = FontHelper.GetTextRuns("Hello", styleOne, font.Typeface);
+        var second = FontHelper.GetTextRuns("Hello", styleTwo, font.Typeface);
+
+        Assert.AreSame(first, second, "a fresh wrapper for the same style value + typeface handle must hit the memoized run list");
+    }
+
+    [TestMethod]
+    public void FontHelper_GetCachedFont_SameTypefaceAndSize_ReturnsSameInstance()
+    {
+        var font = FontHelper.CreateFont(FontHelper.GeistTypeface, 32f);
+
+        var viaOne = FontHelper.GetCachedFont(font.Typeface!, 32f);
+        var viaTwo = FontHelper.GetCachedFont(font.Typeface!, 32f);
+
+        Assert.AreSame(viaOne, viaTwo, "the same typeface handle + size must hit the font cache");
+    }
+
+    [TestMethod]
     public void FontHelper_MeasureTextWithFallback_CachedRunsMeasureCorrectlyAtAnySize()
     {
         var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);

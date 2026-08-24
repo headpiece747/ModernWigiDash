@@ -108,8 +108,10 @@ public sealed class ArchitectureTests
     {
         // ADR-0001 (docs/adr/0001-synchronous-transport-interface.md): the USB
         // transfer seam is synchronous. Blocking I/O wrapped in async is fake
-        // async and forces sync-over-async bridges at the callers. The one
-        // legal Task/ValueTask member is the lifetime DisposeAsync.
+        // async and forces sync-over-async bridges at the callers. The seam
+        // carries no Task/ValueTask member at all — not even a lifetime
+        // DisposeAsync (an async lifetime over a sync teardown is a bridge
+        // with nothing behind it).
         var seamTypes = new[]
         {
             typeof(IDisplayTransport),
@@ -131,7 +133,7 @@ public sealed class ArchitectureTests
                 // Task-like return (the ADR-0001 rule's target) or the
                 // compiler's AsyncMethodBuilderAttribute (the async void
                 // shape).
-                if (method.Name != "DisposeAsync" && IsTaskLike(method.ReturnType))
+                if (IsTaskLike(method.ReturnType))
                     violations.Add($"{type.Name}.{method.Name}() returns {method.ReturnType.Name}");
                 else if (HasAsyncMethodBuilder(method))
                     violations.Add($"{type.Name}.{method.Name}() is async void");
@@ -141,14 +143,14 @@ public sealed class ArchitectureTests
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
             foreach (var property in properties)
             {
-                if (property.Name != "DisposeAsync" && IsTaskLike(property.PropertyType))
+                if (IsTaskLike(property.PropertyType))
                     violations.Add($"{type.Name}.{property.Name} returns {property.PropertyType.Name}");
             }
         }
 
         Assert.AreEqual(0, violations.Count,
             "fake async on the synchronous transport seam (ADR-0001): " + string.Join("; ", violations)
-            + ". Make the member blocking - it wraps blocking USB I/O. The lifetime DisposeAsync returning a completed task is the one exception.");
+            + ". Make the member blocking - it wraps blocking USB I/O. The seam carries no Task/ValueTask member at all, lifetime included.");
     }
 
     [TestMethod]

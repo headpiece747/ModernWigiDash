@@ -4,6 +4,7 @@
 // </copyright>
 
 using SkiaSharp;
+using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Hardware.Transport;
 
@@ -69,6 +70,14 @@ public sealed class DisplayDeviceEngine : IDisposable
     // -- Public State --
     /// <summary>The single connection truth — see <see cref="ConnectionState"/>.</summary>
     public ConnectionState State { get => _state; private set => _state = value; }
+
+    /// <summary>
+    /// The frame-readiness policy: delivery may push only while the engine is
+    /// Connected. The predicate lives here — with the connection truth it
+    /// describes — not at the app's bind site, so a readiness change (e.g.
+    /// buffering during Connecting) edits one owner.
+    /// </summary>
+    public bool CanSendFrames => State == ConnectionState.Connected;
 
     // -- Events --
     /// <summary>
@@ -231,8 +240,11 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// Attempts to connect to the physical device. Deliberately synchronous
     /// (ADR-0001) — callers run it off the UI thread (see <see cref="Start"/>).
     /// Guards against concurrent connection attempts to prevent connection churn.
+    /// Internal: the only production driver is the engine's own connect state
+    /// machine (Start, the reconnect timer, the power-resume hop) — no app
+    /// call site pokes it directly.
     /// </summary>
-    public bool TryConnect()
+    internal bool TryConnect()
     {
         // Fast-path: already connected
         if (State == ConnectionState.Connected)
@@ -342,25 +354,31 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// would never reach standby and its handle would leak. Safe on null.</summary>
     private static void DisposeTransport(IDisplayTransport? transport)
     {
-#pragma warning disable S6966 // Sync dispose of an orphan transport; async not needed here
         transport?.Dispose();
-#pragma warning restore S6966
     }
 
     /// <summary>
     /// Sends an already-encoded RGB565 frame to the device. The frame delivery
     /// policy (pooling, coalescing, pacing) lives in <see cref="FrameDelivery"/>;
-    /// this is the engine's plain transport seam.
+    /// this is the engine's plain transport seam. Takes a
+    /// <see cref="ReadOnlyMemory{T}"/> so the send chain (delivery seam,
+    /// engine, transport) shares one buffer type with zero copies at the
+    /// boundaries.
     /// </summary>
     /// <returns>The transport's truthful send result — <see cref="Sdk.FrameSendResult.Refused"/>
     /// when the engine cannot carry the frame (disposed, no live connection, no
-    /// adopted transport, or a null buffer). The SIZE contract belongs to the
+    /// adopted transport, or an unbacked buffer — the null shape of the
+    /// ReadOnlyMemory seam is a <see cref="ReadOnlyMemory{T}"/> with no backing
+    /// array). The SIZE contract belongs to the
     /// transport, which alone knows <c>DisplayProtocolConstants.FrameBufferSize</c>
     /// — the engine forwards what it is handed and relays the transport's
     /// verdict, so the size rule has one owner.</returns>
-    public FrameSendResult SendFrameBytes(byte[] rgb565)
+    public FrameSendResult SendFrameBytes(ReadOnlyMemory<byte> rgb565)
     {
-        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || rgb565 == null)
+        // An unbacked memory (the default/null shape) has no array; a backed
+        // but empty buffer is still a frame the transport's size contract
+        // adjudicates — the engine filters only "no buffer at all".
+        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || !MemoryMarshal.TryGetArray(rgb565, out _))
             return FrameSendResult.Refused;
 
         IDisplayTransport? transport;
@@ -372,9 +390,7 @@ public sealed class DisplayDeviceEngine : IDisposable
         if (transport == null)
             return FrameSendResult.Refused;
 
-#pragma warning disable S6966 // Transport SendFrame is synchronous by design (ADR-0001)
         return transport.SendFrame(rgb565);
-#pragma warning restore S6966
     }
 
     /// <summary>
@@ -446,14 +462,16 @@ public sealed class DisplayDeviceEngine : IDisposable
             transport = _transport;
         }
 
-        // Off-thread with a bounded wait: close must not hang behind an
-        // in-flight frame write holding the transport lock (the LibUsb
-        // chunked write can block on its chunk timeouts — worst case the
-        // transport's CloseBound). Standby itself is a pair of fast control
-        // transfers (the Welcome screen and the sleep command, bounded by
-        // the control pipe timeout) once the lock frees; StandbyCloseBudget
-        // is the abandon point, derived shorter than CloseBound, so
-        // close can never stall on the write.
+        // Off-thread with a bounded wait: a hung device can hold a control
+        // transfer out to its pipe timeout (worst case the transport's
+        // CloseBound), and standby is exactly such a control transfer.
+        // StandbyCloseBudget is the abandon point, derived strictly shorter
+        // than CloseBound, so close can never stall on a hung pipe — a
+        // leaked handle at exit beats a frozen window. (The old rationale
+        // — waiting out an in-flight frame write behind the transport's
+        // coarse lock — retired with that lock: the hot paths no longer
+        // serialize, and the transport's teardown drains in-flight
+        // transfers before freeing the backend.)
         bool standbyConfirmed = false;
         bool standbySettled = false;
         bool standbyThrew = false;

@@ -13,6 +13,14 @@ namespace ModernWigiDash.Core.Rendering;
 public static class WidgetRouting
 {
     /// <summary>
+    /// Size of the edit-mode resize handle, in canvas pixels. The single
+    /// source of truth for the affordance: drawn by <see cref="EditOverlay"/>,
+    /// hit-tested by the App's <c>InputController</c> manipulation decision —
+    /// one owner, no forwarding constant.
+    /// </summary>
+    public const float ResizeHandleSize = 14f;
+
+    /// <summary>
     /// Top-most widget (highest ZIndex) whose drawn footprint contains the
     /// point — the rotation-aware hit shape, not the unrotated bounding box.
     /// A ZIndex tie goes to the LAST widget in list order, matching the

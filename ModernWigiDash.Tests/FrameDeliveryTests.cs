@@ -52,7 +52,7 @@ public class FrameDeliveryTests
         var release = new ManualResetEventSlim(false);
         FrameDelivery? delivery = null;
         delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 observed.Add(delivery!.IsSendInFlight);
@@ -78,7 +78,7 @@ public class FrameDeliveryTests
     {
         int sent = 0;
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: bytes =>
             {
                 sent++;
@@ -137,12 +137,12 @@ public class FrameDeliveryTests
     public void Push_WithEncoderAndSend_DeliversEncodedRgb565Frame()
     {
         using var delivered = new ManualResetEventSlim(false);
-        byte[]? received = null;
+        int receivedLength = -1;
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: bytes =>
             {
-                received = bytes;
+                receivedLength = bytes.Length;
                 delivered.Set();
                 return FrameSendResult.Sent;
             });
@@ -152,8 +152,7 @@ public class FrameDeliveryTests
 
         Assert.AreEqual(0L, delivery.DroppedCount, "Ready delivery must accept the frame");
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
-        Assert.IsNotNull(received);
-        Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, received.Length);
+        Assert.AreEqual(DisplayProtocolConstants.FrameBufferSize, receivedLength);
     }
 
     [TestMethod]
@@ -161,7 +160,7 @@ public class FrameDeliveryTests
     {
         using var delivered = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 delivered.Set();
@@ -193,7 +192,7 @@ public class FrameDeliveryTests
     public void Push_WhenPoolExhausted_CountsPoolDrop()
     {
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => FrameSendResult.Failed,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -210,7 +209,7 @@ public class FrameDeliveryTests
         using var blocker = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         using var delivery2 = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 blocker.Set();
@@ -239,14 +238,18 @@ public class FrameDeliveryTests
         using var firstEntered = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         int callCount = 0;
-        byte[]? lastDelivered = null;
+        int firstTag = -1;
+        int lastTag = -1;
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new TaggedEncoder(),
             send: bytes =>
             {
-                lastDelivered = bytes;
+                lastTag = bytes.Span[0];
                 if (Interlocked.Increment(ref callCount) == 1)
+                {
+                    firstTag = bytes.Span[0];
                     firstEntered.Set();
+                }
                 release.Wait();
                 return FrameSendResult.Sent;
             },
@@ -272,10 +275,14 @@ public class FrameDeliveryTests
         // only the latest (white). Wait for the second delivery.
         await TestWait.WaitUntilAsync(() => callCount >= 2, TimeSpan.FromSeconds(5));
 
+        // The encoder stamped a monotonically increasing tag (1..4) into the
+        // first bytes of each encode — four pushes, four tags. The first
+        // delivery carries tag 1 (the pinned first frame), the coalesced
+        // delivery tag 4 (the latest) — a stale frame (tag 2 or 3) replaying
+        // would fail the pin.
         Assert.AreEqual(2, callCount, "First frame + one coalesced delivery, no replays of stale frames");
-        Assert.IsNotNull(lastDelivered);
-        Assert.AreEqual(0xFF, lastDelivered[0], "Coalesced frame must be the latest (white) — byte 0");
-        Assert.AreEqual(0xFF, lastDelivered[1], "Coalesced frame must be the latest (white) — byte 1");
+        Assert.AreEqual(1, firstTag, "the first delivery is the first frame (tag 1)");
+        Assert.AreEqual(4, lastTag, "the coalesced delivery is the latest frame (tag 4), not a stale one");
         Assert.IsTrue(delivery.DroppedCount > 0, "Stale buffered frames must count as dropped");
         Assert.IsTrue(delivery.DroppedCoalescedCount > 0, "Stale frames are coalescer drops");
         Assert.AreEqual(0, delivery.DroppedPoolCount, "The pool held buffers — none of these drops were pool exhaustion");
@@ -288,7 +295,7 @@ public class FrameDeliveryTests
     {
         List<DateTime> timestamps = [];
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 lock (timestamps) { timestamps.Add(DateTime.UtcNow); }
@@ -297,11 +304,16 @@ public class FrameDeliveryTests
             minInterval: TimeSpan.FromMilliseconds(120));
         using var frame = CreateFrame(SKColors.White);
 
-        delivery.Push(frame);
-        delivery.Push(frame);
-        delivery.Push(frame);
-
-        await TestWait.WaitUntilAsync(() => timestamps.Count >= 3, TimeSpan.FromSeconds(5));
+        // One push per drain cycle: each push waits for its own delivery
+        // before the next lands, so the three pushes produce three separate
+        // sends. A rapid burst would coalesce to one delivery (the
+        // coalescing test's job, not pacing's), and encoder latency must not
+        // be the thing that serializes the pushes.
+        for (int delivered = 0; delivered < 3; delivered++)
+        {
+            delivery.Push(frame);
+            await TestWait.WaitUntilAsync(() => timestamps.Count > delivered, TimeSpan.FromSeconds(5));
+        }
 
         Assert.AreEqual(3, timestamps.Count, "All three frames must eventually be delivered");
         lock (timestamps)
@@ -325,7 +337,7 @@ public class FrameDeliveryTests
         using var entered = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 sent++;
@@ -357,7 +369,7 @@ public class FrameDeliveryTests
     public async Task SendFailure_CountsFailedAndNotSent()
     {
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => FrameSendResult.Failed,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -378,7 +390,7 @@ public class FrameDeliveryTests
         // is provably distinct from a broken pipe (Failed) and from a drop —
         // the old bool seam folded all three into false.
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => FrameSendResult.Refused,
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -396,7 +408,7 @@ public class FrameDeliveryTests
     public async Task SendException_CountsAsSendFailed()
     {
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => throw new InvalidOperationException("boom"),
             capacity: 1);
         using var bitmap = CreateFrameBitmap();
@@ -413,7 +425,7 @@ public class FrameDeliveryTests
     {
         List<string> logs = [];
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => FrameSendResult.Failed,
             log: logs.Add,
             capacity: 1);
@@ -433,7 +445,7 @@ public class FrameDeliveryTests
         using var blocker = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 blocker.Set();
@@ -461,7 +473,7 @@ public class FrameDeliveryTests
     {
         List<string> logs = [];
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ => FrameSendResult.Refused,
             isReady: () => true,
             log: logs.Add);
@@ -480,7 +492,7 @@ public class FrameDeliveryTests
         using var blocker = new ManualResetEventSlim(false);
         using var release = new ManualResetEventSlim(false);
         using var delivery = new FrameDelivery(
-            encoder: new SkiaRgb565Encoder(),
+            encoder: new FixedSizeEncoder(DisplayProtocolConstants.FrameBufferSize),
             send: _ =>
             {
                 blocker.Set();
@@ -513,12 +525,12 @@ public class FrameDeliveryTests
         // that encoder's output size — the pool self-sizes from the seam, so
         // a "wrong-size" (relative to the display constant) send still flows.
         using var delivered = new ManualResetEventSlim(false);
-        byte[]? received = null;
+        int receivedLength = -1;
         using var delivery = FrameDelivery.Create(
             encoder: new FixedSizeEncoder(4096),
             send: bytes =>
             {
-                received = bytes;
+                receivedLength = bytes.Length;
                 delivered.Set();
                 return FrameSendResult.Sent;
             });
@@ -527,8 +539,7 @@ public class FrameDeliveryTests
         delivery.Push(bitmap);
         Assert.AreEqual(0L, delivery.DroppedCount, "the ready push must queue, not drop");
         Assert.IsTrue(delivered.Wait(TimeSpan.FromSeconds(5)), "Sender loop must deliver the frame");
-        Assert.IsNotNull(received);
-        Assert.AreEqual(4096, received.Length, "The pool must be sized from the encoder's OutputBufferSize, not a fixed constant");
+        Assert.AreEqual(4096, receivedLength, "The pool must be sized from the encoder's OutputBufferSize, not a fixed constant");
     }
 
     /// <summary>
@@ -551,6 +562,26 @@ public class FrameDeliveryTests
             if (_throwOnEncode) throw new InvalidOperationException("boom");
             destination[0] = 0xAB;
             destination[1] = 0xCD;
+        }
+    }
+
+    /// <summary>
+    /// Test-only encoder that stamps a monotonically increasing per-encode
+    /// tag (little-endian, first two bytes) into the destination. Identifies
+    /// WHICH encode produced a delivered buffer, so a coalesce test can assert
+    /// the exact frame delivered instead of a color-byte coincidence.
+    /// </summary>
+    private sealed class TaggedEncoder : IRgb565Encoder
+    {
+        private int _tag;
+
+        public int OutputBufferSize => DisplayProtocolConstants.FrameBufferSize;
+
+        public void Encode(SKBitmap bitmap, byte[] destination)
+        {
+            int tag = Interlocked.Increment(ref _tag);
+            destination[0] = (byte)(tag & 0xFF);
+            destination[1] = (byte)((tag >> 8) & 0xFF);
         }
     }
 

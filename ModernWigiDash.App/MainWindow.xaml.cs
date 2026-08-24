@@ -172,7 +172,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         new WiringStep("FrameDelivery", () => _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
             send: _usbDevice.SendFrameBytes,
-            isReady: () => _usbDevice.State == ConnectionState.Connected,
+            isReady: () => _usbDevice.CanSendFrames,
             log: _hwLog.Write)),
 
         new WiringStep("Telemetry", () =>
@@ -489,37 +489,44 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>
     /// Drains the queued device-touch events on the UI thread, in order, into
     /// the input controller (the gesture machine's Down/Move/Up vocabulary).
-    /// Runs to empty so a burst drained together still feeds every event —
-    /// the gesture machine needs the full sequence, not just the last point.
-    /// The drain holds the queue lock for the whole input pass (the deliberate
-    /// trade: the engine's 16 ms poll thread blocks on the lock during input
-    /// handling instead of the UI thread marshalling N closures — bursts are
-    /// bounded by one gesture, so the worst case stays a few milliseconds).
-    /// Internal so the test host can drive one deterministic drain on the UI
-    /// thread and pin the in-order feed against the gesture machine.
+    /// The whole burst is dequeued under the queue lock, then fed to the
+    /// controller OUTSIDE it: the engine's 16 ms poll thread (the enqueue
+    /// side) contends on the queue only, never on the input pass itself.
+    /// Ordering survives the split: the batch is fed in dequeue order, and
+    /// the dispatcher serializes drains (one at a time via the scheduled
+    /// flag), so a later burst's events can never land ahead of an earlier
+    /// one's. Internal so the test host can drive one deterministic drain on
+    /// the UI thread and pin the in-order feed against the gesture machine.
     /// </summary>
     internal void DrainDeviceTouchQueue()
     {
+        // Snapshot the burst under the lock, release, then feed: an input
+        // pass that held the lock would make the poll thread's next Enqueue
+        // wait out the whole gesture feed (the old deliberate trade, retired).
+        List<(float, float, TouchEventType)> batch;
         lock (_deviceTouchLock)
         {
             _deviceTouchDrainScheduled = false;
+            batch = new List<(float, float, TouchEventType)>(_deviceTouchQueue.Count);
             while (_deviceTouchQueue.Count > 0)
+                batch.Add(_deviceTouchQueue.Dequeue());
+        }
+
+        foreach (var (x, y, type) in batch)
+        {
+            if (type == TouchEventType.TouchDown)
             {
-                var (x, y, type) = _deviceTouchQueue.Dequeue();
-                if (type == TouchEventType.TouchDown)
-                {
-                    // Device samples are runtime input: the controller derives
-                    // "never suppressed" from the source itself.
-                    _inputController.Press(x, y, Input.InputSource.Device);
-                }
-                else if (type == TouchEventType.TouchMove)
-                {
-                    _inputController.Move(x, y, Input.InputSource.Device, out _);
-                }
-                else
-                {
-                    _inputController.Release(x, y, Input.InputSource.Device, out _);
-                }
+                // Device samples are runtime input: the controller derives
+                // "never suppressed" from the source itself.
+                _inputController.Press(x, y, Input.InputSource.Device);
+            }
+            else if (type == TouchEventType.TouchMove)
+            {
+                _inputController.Move(x, y, Input.InputSource.Device, out _);
+            }
+            else
+            {
+                _inputController.Release(x, y, Input.InputSource.Device, out _);
             }
         }
     }
@@ -908,13 +915,21 @@ public partial class MainWindow : Window, IModernWigiDashContext
     #endregion
 
 
-    private readonly LogOnChange _usbBadgeChanged = new();
+    // The badge's last applied state (null until the first tick): the per-tick
+    // work (the label/brush pair + the resource lookup) runs only when the
+    // engine's state actually changes, not 30 times a second per identical
+    // state. State compare is equivalent to the old (label + brushKey)
+    // string compare — the mapping is injective (Connecting and Disconnected
+    // share a brush, but not a label).
+    private ConnectionState? _lastBadgeState;
 
     private void UpdateUsbBadge()
     {
-        var (label, brushKey) = UsbBadgeModel.From(_usbDevice.State);
-        if (!_usbBadgeChanged.Changed(brushKey + label)) return; // state unchanged — skip the per-tick resource lookup
+        var state = _usbDevice.State;
+        if (state == _lastBadgeState) return; // state unchanged — skip the per-tick resource lookup
+        _lastBadgeState = state;
 
+        var (label, brushKey) = UsbBadgeModel.From(state);
         var resources = Application.Current.Resources;
         UsbStatusDot.Fill = (Brush)resources[brushKey];
         TxtUsbStatus.Text = label;

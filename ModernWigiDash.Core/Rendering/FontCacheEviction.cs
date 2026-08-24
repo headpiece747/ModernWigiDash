@@ -25,6 +25,9 @@ public static class FontCacheEviction
     /// <summary>The (typeface handle, size) → SKFont cache cap.</summary>
     public const int CachedFontLimit = 2048;
 
+    /// <summary>The font-handle → (typeface handle, style) resolution cache cap.</summary>
+    public const int FontMetaLimit = 2048;
+
     /// <summary>
     /// Bounds the cache with the rule: if its live entry count has exceeded
     /// the limit, clear the whole cache (the reset; entries refill on

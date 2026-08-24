@@ -207,7 +207,10 @@ internal class WinUsbBulkDevice : ITransferBackend
 
     private static void Log(string msg) => _diagnosticLog.Write(msg);
 
-    private readonly DiagLog _bulkDiagLog = new(LogCategory, BackendDiag.BulkWriteCadence);
+    // Raw LogCadence (not a DiagLog) so the skipped calls on the 30 FPS bulk
+    // path allocate nothing: Due() is an Interlocked, the string is composed
+    // only when the line is due.
+    private readonly LogCadence _bulkTimingCadence = new(BackendDiag.BulkWriteCadence);
 
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.
@@ -371,13 +374,20 @@ internal class WinUsbBulkDevice : ITransferBackend
         catch (Exception ex)
         {
             Log($"Exception during Open: {ex.Message}");
+            // Self-contained partial-state cleanup: an exception after
+            // CreateFile or WinUsb_Initialize would otherwise leave live
+            // handles open. Idempotent with the leg's Dispose on the false
+            // return — the handles are zeroed, so the second call is a no-op.
+            Dispose();
             return false;
         }
     }
 
     /// <summary>
-    /// Performs a synchronous bulk OUT transfer using pinned memory.
-    /// Sends the entire buffer in a single WinUsb_WritePipe call.
+    /// Performs a synchronous bulk OUT transfer. Sends the entire buffer in a
+    /// single WinUsb_WritePipe call. The buffer is pinned with fixed (no
+    /// GCHandle alloc/free on the per-frame path); AllowUnsafeBlocks is
+    /// solution-wide.
     /// </summary>
     public virtual bool BulkWrite(byte pipeId, byte[] data, out int transferred)
     {
@@ -385,42 +395,47 @@ internal class WinUsbBulkDevice : ITransferBackend
         if (!IsOpen)
             return false;
 
-        GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
-        long elapsedMs = 0;
         try
         {
-            // Zero-alloc timing: GetTimestamp/GetElapsedTime avoid the
-            // Stopwatch.StartNew allocation on the per-frame bulk write path.
-            long start = System.Diagnostics.Stopwatch.GetTimestamp();
-            bool ok = _api.WritePipe(
-                _interfaceHandle, pipeId,
-                handle.AddrOfPinnedObject(),
-                (uint)data.Length,
-                out uint bytesTransferred,
-                IntPtr.Zero); // Synchronous (no OVERLAPPED)
-            elapsedMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            // The fixed pin replaces the old GCHandle alloc/free: one
+            // per-frame allocation pair on the 30 FPS path, retired.
+#pragma warning disable S6640 // zero-alloc bulk write fast path (the FrameEncoder precedent)
+            unsafe
+            {
+                fixed (byte* pinned = data)
+                {
+                    // Zero-alloc timing: GetTimestamp/GetElapsedTime avoid the
+                    // Stopwatch.StartNew allocation on the per-frame bulk write path.
+                    long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    bool ok = _api.WritePipe(
+                        _interfaceHandle, pipeId,
+                        (IntPtr)pinned,
+                        (uint)data.Length,
+                        out uint bytesTransferred,
+                        IntPtr.Zero); // Synchronous (no OVERLAPPED)
+                    long elapsedMs = (long)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
 
-            _bulkDiagLog.Write(() => $"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
+                    if (_bulkTimingCadence.Due())
+                        Log($"BulkWrite {data.Length} bytes took {elapsedMs} ms (ok={ok})");
 
-            if (!ok)
-                Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
-            else if (bytesTransferred != data.Length)
-                Log($"BulkWrite short write: transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
+                    if (!ok)
+                        Log($"BulkWrite failed: ok=false transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
+                    else if (bytesTransferred != data.Length)
+                        Log($"BulkWrite short write: transferred={bytesTransferred}/{data.Length}, error={Marshal.GetLastWin32Error()}");
 
-            // A short write is a failed write — the caller (SendFrame) routes
-            // the failure to CmdFrameAbort, mirroring the LibUsb backend's
-            // full-transfer requirement.
-            transferred = (int)bytesTransferred;
-            return ok && bytesTransferred == data.Length;
+                    // A short write is a failed write — the caller (SendFrame) routes
+                    // the failure to CmdFrameAbort, mirroring the LibUsb backend's
+                    // full-transfer requirement.
+                    transferred = (int)bytesTransferred;
+                    return ok && bytesTransferred == data.Length;
+                }
+            }
+#pragma warning restore S6640
         }
         catch (Exception ex)
         {
             Log($"BulkWrite exception: {ex.Message}");
             return false;
-        }
-        finally
-        {
-            handle.Free();
         }
     }
 

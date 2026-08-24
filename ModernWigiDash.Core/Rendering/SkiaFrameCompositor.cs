@@ -4,14 +4,6 @@ namespace ModernWigiDash.Core.Rendering;
 
 public class SkiaFrameCompositor : IDisposable
 {
-    /// <summary>
-    /// Size of the edit-mode resize handle, in canvas pixels. Single source of
-    /// truth for the affordance: drawn by <see cref="EditOverlay"/>, hit-tested
-    /// by the App's <c>InputController</c> against this constant. Forwarded so
-    /// the value lives only in the overlay module.
-    /// </summary>
-    public const float ResizeHandleSize = EditOverlay.ResizeHandleSize;
-
     private readonly SKBitmap _frameBuffer = new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
     private readonly SKCanvas _canvas;
     private readonly EditOverlay _editOverlay = new();

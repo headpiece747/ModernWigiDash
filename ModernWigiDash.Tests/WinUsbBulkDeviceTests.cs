@@ -33,6 +33,7 @@ public class WinUsbBulkDeviceTests
         public string DevicePath { get; set; } = """\\\\.\\GLOBALROOT\\Device\\WigiDash""";
         public bool CreateFileResult { get; set; } = true;
         public bool InitializeResult { get; set; } = true;
+        public bool SetPipePolicyThrows { get; set; }
         public uint? WritePipeTransferred { get; set; }
         public bool WritePipeResult { get; set; } = true;
         public uint? ControlTransferBytes { get; set; }
@@ -45,6 +46,7 @@ public class WinUsbBulkDeviceTests
         public int DestroyListCalls { get; private set; }
         public int CreateFileCalls { get; private set; }
         public int InitializeCalls { get; private set; }
+        public int FreeCalls { get; private set; }
         public int CloseHandleCalls { get; private set; }
         public int CbSizeWritten { get; private set; } = -1;
         public uint CreateFileFlags { get; private set; }
@@ -57,9 +59,15 @@ public class WinUsbBulkDeviceTests
                 interfaceHandle = InitializeResult ? InterfaceHandle : IntPtr.Zero;
                 return InitializeResult;
             },
-            free: _ => true,
+            free: _ =>
+            {
+                FreeCalls++;
+                return true;
+            },
             setPipePolicy: (IntPtr interfaceHandle, byte pipeId, uint id, uint length, IntPtr value) =>
             {
+                if (SetPipePolicyThrows)
+                    throw new InvalidOperationException("scripted SetPipePolicy failure");
                 PipePolicies.Add((pipeId, Marshal.ReadInt32(value)));
                 return true;
             },
@@ -230,6 +238,24 @@ public class WinUsbBulkDeviceTests
         Assert.IsFalse(ok);
         Assert.AreEqual(0, script.InitializeCalls);
         Assert.AreEqual(0, script.CloseHandleCalls, "the invalid handle must not be closed");
+    }
+
+    [TestMethod]
+    public void Open_SetPipePolicyThrows_ReleasesPartialHandles()
+    {
+        // An exception after WinUsb_Initialize leaves both handles live.
+        // Open's own catch must release them, so it never returns false with
+        // the device still open — idempotent with the leg's Dispose on the
+        // false return (the handles are zeroed, so the using-dispose is a
+        // no-op and the counts stay at one each).
+        var script = new ApiScript { SetPipePolicyThrows = true };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, script.FreeCalls, "the WinUSB interface handle must be freed on the exception path");
+        Assert.AreEqual(1, script.CloseHandleCalls, "the device handle must be closed on the exception path");
     }
 
     // ── transfer wiring through the delegate bag ─────────────────────

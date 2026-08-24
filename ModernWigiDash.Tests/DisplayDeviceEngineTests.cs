@@ -192,8 +192,10 @@ public class DisplayDeviceEngineTests
 
         // Must not throw and must report refusal when the engine has no live connection.
         Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(new byte[8]));
-        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes([]));
-        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(null!));
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(Array.Empty<byte>()));
+        // The unbacked buffer (the null shape for the ReadOnlyMemory seam —
+        // the engine's guard refuses a memory with no backing array):
+        Assert.AreEqual(FrameSendResult.Refused, engine.SendFrameBytes(default));
     }
 
     [TestMethod]
@@ -208,7 +210,7 @@ public class DisplayDeviceEngineTests
         using var engine = new DisplayDeviceEngine(() => fake);
         Assert.IsTrue(engine.TryConnect());
 
-        Assert.AreEqual(FrameSendResult.Sent, engine.SendFrameBytes([]),
+        Assert.AreEqual(FrameSendResult.Sent, engine.SendFrameBytes(Array.Empty<byte>()),
             "a live engine relays the transport's verdict, even for a buffer the device would refuse");
         Assert.AreEqual(0, fake.LastFrameLength, "the engine must not swallow the buffer — the transport sees exactly what was handed in");
     }
@@ -353,14 +355,23 @@ public class DisplayDeviceEngineTests
             if (DisposeBlockMs > 0) Thread.Sleep(DisposeBlockMs);
             Disposed = true;
         }
-        public ValueTask DisposeAsync()
-        {
-            Disposed = true;
-            return ValueTask.CompletedTask;
-        }
     }
 
     // ── the connect state machine, driven through the factory seam ──
+
+    [TestMethod]
+    [DataRow(ConnectionState.Disconnected, false)]
+    [DataRow(ConnectionState.Connecting, false)]
+    [DataRow(ConnectionState.Connected, true)]
+    [DataRow(ConnectionState.Simulated, false)]
+    public void CanSendFrames_TracksTheConnectionState(ConnectionState state, bool expected)
+    {
+        // The readiness policy the delivery bind site reads: true only for
+        // Connected, pinned per state so the engine and the bind site cannot
+        // drift on what "ready" means.
+        using var engine = new DisplayDeviceEngine(new FakeTransport(), state);
+        Assert.AreEqual(expected, engine.CanSendFrames);
+    }
 
     [TestMethod]
     public void TryConnect_ConnectSucceeds_AdoptsTransportAndConnects()

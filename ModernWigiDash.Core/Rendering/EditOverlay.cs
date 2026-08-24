@@ -8,15 +8,23 @@ namespace ModernWigiDash.Core.Rendering;
 /// </summary>
 internal sealed class EditOverlay
 {
-    /// <summary>
-    /// Size of the edit-mode resize handle, in canvas pixels. Single source of
-    /// truth for the affordance: drawn here, hit-tested by the App's
-    /// <c>InputController</c> against the compositor's forwarding constant.
-    /// </summary>
-    public const float ResizeHandleSize = 14f;
+    // The resize handle size is owned by the routing module (the hit-test
+    // semantics it shapes) — this draw site reads it from there, so the
+    // affordance has one source of truth.
 
-    // Borrowed process-lifetime typeface — never disposed here.
-    private readonly SKTypeface _uiTypeface = FontHelper.GeistTypeface;
+    // Cache-owned 12px badge font (the house cache behind FontCacheEviction,
+    // must-never-dispose): the old per-compose CreateFont was the one native
+    // allocation left behind after the paints were hoisted, and the badge is
+    // exactly what draws while the user is authoring — the selected-widget
+    // case the compositor composes 30 times a second.
+    private readonly SKFont _badgeFont = FontHelper.GetCachedFont(FontHelper.GeistTypeface, 12f);
+
+    // Single-slot memo for the badge text: it depends only on
+    // (DisplayName, ZIndex), and both change only through the inspector — a
+    // run of composes with the same selected widget skips the interpolation.
+    // One slot is enough: DrawSelection draws exactly one badge per compose.
+    private (string Name, int ZIndex)? _badgeTextKey;
+    private string? _badgeText;
 
     // Fixed-color paints are created once and reused across composes instead
     // of allocated per draw (~10 SKPaints per frame in edit mode). The overlay
@@ -92,20 +100,25 @@ internal sealed class EditOverlay
         var bounds = new SKRect(0, 0, widget.Width, widget.Height);
         canvas.DrawRect(bounds, _selectionPaint);
 
-        // Draw ZIndex / Name badge at top left. A per-render font is correct
-        // here: GetCachedFont returns a cache-owned SKFont that callers must
-        // NOT dispose, and this badge is edit-mode-only (not the 30 FPS path).
-        using var font = FontHelper.CreateFont(_uiTypeface, 12f);
-        string badgeText = $"{widget.DisplayName} (Z: {widget.ZIndex})";
+        // Badge text memoized per (DisplayName, ZIndex); the font is the
+        // cache-owned field above (never disposed — the old using-CreatedFont
+        // paid a native SKFont per compose of the selected widget).
+        (string Name, int ZIndex) badgeKey = (widget.DisplayName, widget.ZIndex);
+        if (badgeKey != _badgeTextKey)
+        {
+            _badgeText = $"{badgeKey.Name} (Z: {badgeKey.ZIndex})";
+            _badgeTextKey = badgeKey;
+        }
+        string badgeText = _badgeText!;
         var textBounds = new SKRect();
-        font.MeasureText(badgeText, out textBounds, _badgeTextPaint);
+        _badgeFont.MeasureText(badgeText, out textBounds, _badgeTextPaint);
         canvas.DrawRect(0, -20, textBounds.Width + 10, 20, _badgeBackgroundPaint);
-        canvas.DrawTextWithFallback(badgeText, 5, -5, font, _badgeTextPaint);
+        canvas.DrawTextWithFallback(badgeText, 5, -5, _badgeFont, _badgeTextPaint);
 
-        // Draw resize handle at bottom-right corner. The size is the
-        // single source of truth for the edit-mode resize affordance —
-        // the App's InputController hit-tests against this constant.
-        float hs = ResizeHandleSize;
+        // Draw resize handle at bottom-right corner. The size is owned by the
+        // routing module — the App's InputController hit-tests against the
+        // same constant.
+        float hs = WidgetRouting.ResizeHandleSize;
         canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, _handlePaint);
         canvas.DrawRect(bounds.Width - hs - 2, bounds.Height - hs - 2, hs, hs, _handleStrokePaint);
     }

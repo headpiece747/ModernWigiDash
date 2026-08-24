@@ -319,8 +319,20 @@ internal sealed class RecordingBackend : ITransferBackend
     /// the real backends' full-transfer contract, a short write fails.</summary>
     public int? BulkWriteTransferred { get; set; }
 
+    /// <summary>Called on the writing thread when a bulk write begins (before
+    /// the gate below parks it) — the contention pin's "the write is in
+    /// flight" signal.</summary>
+    public Action? BulkWriteEntered { get; set; }
+
+    /// <summary>When set, the write thread parks here until the test releases
+    /// it (the slow-device seam, no sleeps in test code): the test holds a
+    /// frame write in flight while driving the other hot paths.</summary>
+    public ManualResetEventSlim? HoldBulkWriteUntil { get; set; }
+
     public bool BulkWrite(byte pipeId, byte[] data, out int transferred)
     {
+        BulkWriteEntered?.Invoke();
+        HoldBulkWriteUntil?.Wait();
         BulkWrites.Add(data);
         transferred = BulkWriteTransferred ?? data.Length;
         return BulkWriteResult && transferred == data.Length;

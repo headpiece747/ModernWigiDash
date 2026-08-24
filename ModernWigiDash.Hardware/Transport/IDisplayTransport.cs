@@ -16,9 +16,11 @@ namespace ModernWigiDash.Hardware.Transport;
 /// The underlying USB I/O (WinUSB/LibUsbDotNet control transfers and bulk
 /// writes) is synchronous and blocking, so the contract is synchronous: async
 /// wrappers over blocking I/O would be fake async and force sync-over-async
-/// bridges at the callers.
+/// bridges at the callers. The lifetime seam is the same: Dispose only — an
+/// async lifetime over a sync teardown would be a bridge with nothing behind
+/// it (ADR-0001).
 /// </summary>
-internal interface IDisplayTransport : IAsyncDisposable, IDisposable
+internal interface IDisplayTransport : IDisposable
 {
     /// <summary>
     /// Connects to the USB display hardware (WinUSB first, LibUsbDotNet
