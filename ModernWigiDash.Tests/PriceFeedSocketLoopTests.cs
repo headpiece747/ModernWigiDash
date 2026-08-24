@@ -33,6 +33,77 @@ public class PriceFeedSocketLoopTests
     }
 
     [TestMethod]
+    public async Task BinanceLoop_ConnectTimeSubscribe_SendsTheExactWireFrame()
+    {
+        const string expectedFrame = """{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}""";
+        var feed = new FakeFeed();
+        using var manager = new PriceFeedManager(
+            new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
+            feedFactory: _ => feed,
+            reconnectDelay: TimeSpan.FromMilliseconds(20));
+
+        manager.Subscribe("BTC", AssetKind.Crypto);
+
+        // The connect-time payload is the wire frame the PriceFeedMessages
+        // builder spells for every subscribed coin at connect time.
+        await TestWait.WaitUntilAsync(
+            () => feed.Sent.Count > 0 && feed.Sent[0] == expectedFrame,
+            TimeSpan.FromSeconds(3));
+    }
+
+    [TestMethod]
+    public async Task BinanceLoop_SecondSymbol_SendsTheExactIncrementalWireFrame()
+    {
+        const string expectedBtcFrame = """{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}""";
+        const string expectedEthFrame = """{"method":"SUBSCRIBE","params":["ethusdt@ticker"],"id":1}""";
+        var feed = new FakeFeed();
+        using var manager = new PriceFeedManager(
+            new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
+            feedFactory: _ => feed,
+            reconnectDelay: TimeSpan.FromMilliseconds(20));
+
+        // A parked connect keeps the feed observed live (Current set, IsOpen)
+        // without the reconnect churn an empty message queue would cause, so
+        // the incremental send is the only frame that can cross the seam.
+        feed.ParkConnect = true;
+        manager.Subscribe("BTC", AssetKind.Crypto);
+        await TestWait.WaitUntilAsync(() => feed.ConnectCount >= 1, TimeSpan.FromSeconds(3));
+
+        // A symbol added after the socket connected gets its own subscribe
+        // frame, the same builder spelling as the connect-time payload.
+        manager.Subscribe("ETH", AssetKind.Crypto);
+
+        await TestWait.WaitUntilAsync(
+            () => feed.Sent.Count > 0 && feed.Sent[^1] == expectedEthFrame,
+            TimeSpan.FromSeconds(3));
+        foreach (var frame in feed.Sent)
+        {
+            Assert.IsTrue(frame is expectedBtcFrame or expectedEthFrame,
+                $"every frame that crossed the seam is the builder's output, got: {frame}");
+        }
+    }
+
+    [TestMethod]
+    public async Task FinnhubLoop_ConnectTimeSubscribe_SendsOneExactWireFramePerSymbol()
+    {
+        const string expectedFrame = """{"type":"subscribe","symbol":"AAPL"}""";
+        var feed = new FakeFeed();
+        using var manager = new PriceFeedManager(
+            new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
+            finnhubApiKey: "test-key",
+            feedFactory: _ => feed,
+            reconnectDelay: TimeSpan.FromMilliseconds(20));
+
+        manager.Subscribe("AAPL", AssetKind.Stock);
+
+        // The Finnhub protocol is one frame per symbol; the builder is the
+        // one spelling the connect-time payload uses.
+        await TestWait.WaitUntilAsync(
+            () => feed.Sent.Count > 0 && feed.Sent[0] == expectedFrame,
+            TimeSpan.FromSeconds(3));
+    }
+
+    [TestMethod]
     public async Task BinanceLoop_AfterConnectFault_Reconnects()
     {
         var feed = new FakeFeed();

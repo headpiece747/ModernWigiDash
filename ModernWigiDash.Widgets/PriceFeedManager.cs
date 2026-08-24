@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
 
@@ -165,7 +164,7 @@ public sealed class PriceFeedManager : IDisposable
                     _delay, _failLog,
                     FallbackCoinGeckoAsync);
             },
-            key => _ = SendWsSubscribeAsync(FeedKind.Binance, $"{key.ToLowerInvariant()}usdt@ticker"));
+            key => _ = SendWsSubscribeAsync(FeedKind.Binance, key));
         _stockWiring = new(
             SymbolCatalog.IsValidSymbol,
             _subscribedStocks,
@@ -260,23 +259,25 @@ public sealed class PriceFeedManager : IDisposable
     /// <summary>
     /// Sends an incremental WebSocket subscription for a symbol added after the
     /// feed socket was already connected. No-op when the socket is not open.
+    /// The wire shape is the <see cref="PriceFeedMessages"/> builder for the
+    /// feed's kind, the same spelling the connect-time payload uses.
     /// </summary>
-    private async Task SendWsSubscribeAsync(FeedKind feed, string payload)
+    private async Task SendWsSubscribeAsync(FeedKind feed, string symbol)
     {
         try
         {
             IWebSocketFeed? ws = feed == FeedKind.Finnhub ? _finnhubLoop?.Current : _binanceLoop?.Current;
             if (ws == null || !ws.IsOpen) return;
-            object message = feed == FeedKind.Finnhub
-                ? new { type = "subscribe", symbol = payload }
-                : new { method = "SUBSCRIBE", @params = new[] { payload }, id = 1 };
-            await ws.SendTextAsync(JsonSerializer.Serialize(message), _cts.Token).ConfigureAwait(false);
+            string message = feed == FeedKind.Finnhub
+                ? PriceFeedMessages.BuildFinnhubSubscribe(symbol)
+                : PriceFeedMessages.BuildBinanceSubscribe([symbol]);
+            await ws.SendTextAsync(message, _cts.Token).ConfigureAwait(false);
         }
         catch
         {
             // Incremental subscribe is best-effort; the connect-time payload
             // covers the symbols known at that point.
-            FileLog.Write($"[PRICE-FEED] Incremental feed subscribe failed for {payload}");
+            FileLog.Write($"[PRICE-FEED] Incremental feed subscribe failed for {symbol}");
         }
     }
 
@@ -443,7 +444,7 @@ public sealed class PriceFeedManager : IDisposable
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),
         () => _feedFactory(FeedKind.Binance),
-        (feed, ct) => feed.SendTextAsync(JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = _subscribedCrypto.Keys.Select(c => $"{c.ToLowerInvariant()}usdt@ticker").ToArray(), id = 1 }), ct),
+        (feed, ct) => feed.SendTextAsync(PriceFeedMessages.BuildBinanceSubscribe(_subscribedCrypto.Keys), ct),
         ParseBinanceTicker,
         new FixedReconnectPolicy(_reconnectDelay));
 
@@ -453,7 +454,7 @@ public sealed class PriceFeedManager : IDisposable
         async (feed, ct) =>
         {
             foreach (var sym in _subscribedStocks.Keys)
-                await feed.SendTextAsync(JsonSerializer.Serialize(new { type = "subscribe", symbol = sym }), ct).ConfigureAwait(false);
+                await feed.SendTextAsync(PriceFeedMessages.BuildFinnhubSubscribe(sym), ct).ConfigureAwait(false);
         },
         ParseFinnhubMessage,
         new FixedReconnectPolicy(_reconnectDelay));

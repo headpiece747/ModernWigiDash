@@ -1,13 +1,45 @@
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The price-feed wire formats — previously private parse logic inside
-/// PriceFeedManager's message handlers and poll bodies, now pure and
-/// assertable.
+/// The price-feed wire formats, both sides: the WebSocket subscribe frames
+/// (request) and the payload parsers (response). Previously private logic
+/// inside PriceFeedManager's message handlers, poll bodies, and subscribe
+/// payloads, now pure and assertable.
 /// </summary>
 [TestClass]
 public class PriceFeedMessagesTests
 {
+    [TestMethod]
+    public void BinanceStreamKey_BaseCoin_LowerCasedUsdtTickerStream()
+    {
+        Assert.AreEqual("btcusdt@ticker", PriceFeedMessages.BinanceStreamKey("BTC"));
+        Assert.AreEqual("ethusdt@ticker", PriceFeedMessages.BinanceStreamKey("ETH"));
+    }
+
+    [TestMethod]
+    public void BuildBinanceSubscribe_MultipleCoins_OneFrameWithEveryStreamKeyInOrder()
+    {
+        const string expected = """{"method":"SUBSCRIBE","params":["btcusdt@ticker","ethusdt@ticker"],"id":1}""";
+
+        Assert.AreEqual(expected, PriceFeedMessages.BuildBinanceSubscribe(["BTC", "ETH"]));
+    }
+
+    [TestMethod]
+    public void BuildBinanceSubscribe_SingleCoin_SameFrameShapeAsTheBulkSend()
+    {
+        const string expected = """{"method":"SUBSCRIBE","params":["btcusdt@ticker"],"id":1}""";
+
+        Assert.AreEqual(expected, PriceFeedMessages.BuildBinanceSubscribe(["BTC"]));
+    }
+
+    [TestMethod]
+    public void BuildFinnhubSubscribe_Symbol_OneFramePerSymbol()
+    {
+        const string expected = """{"type":"subscribe","symbol":"AAPL"}""";
+
+        Assert.AreEqual(expected, PriceFeedMessages.BuildFinnhubSubscribe("AAPL"));
+    }
+
     [TestMethod]
     public void TryParseBinanceTicker_NestedDataPayload_ParsesCoinAndPrice()
     {

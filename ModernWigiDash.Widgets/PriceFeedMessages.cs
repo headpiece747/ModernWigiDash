@@ -6,14 +6,39 @@ namespace ModernWigiDash.Widgets;
 public sealed record PriceFeedTrade(string Symbol, decimal Price);
 
 /// <summary>
-/// Pure parsers for the price-feed payloads (Binance WS/REST, Finnhub
-/// WS/REST, CoinGecko, Frankfurter, Yahoo chart). Extracted from
-/// PriceFeedManager's private message handlers and poll bodies so the wire
-/// formats are directly testable; the manager keeps the writes, the clocks,
-/// and the subscription state.
+/// Pure wire-format rules for the price feeds: the WebSocket subscribe
+/// frames (the request side) and the payload parsers (the response side:
+/// Binance WS/REST, Finnhub WS/REST, CoinGecko, Frankfurter, Yahoo chart).
+/// Extracted from PriceFeedManager's private message handlers, poll bodies,
+/// and subscribe payloads so the wire formats are directly testable; the
+/// manager keeps the writes, the clocks, and the subscription state.
 /// </summary>
 public static class PriceFeedMessages
 {
+    /// <summary>
+    /// The Binance US stream key for a base coin: the lower-cased base coin
+    /// plus the usdt ticker stream (e.g. "BTC" to "btcusdt@ticker"). One
+    /// spelling, shared by the connect-time bulk send and the incremental
+    /// per-symbol send.
+    /// </summary>
+    public static string BinanceStreamKey(string baseCoin) => $"{baseCoin.ToLowerInvariant()}usdt@ticker";
+
+    /// <summary>
+    /// One Binance US subscribe frame: a single SUBSCRIBE carrying every
+    /// stream key with the fixed request id. One spelling for the
+    /// connect-time bulk send and the incremental per-symbol send, so the
+    /// two can never drift.
+    /// </summary>
+    public static string BuildBinanceSubscribe(IEnumerable<string> baseCoins) =>
+        JsonSerializer.Serialize(new { method = "SUBSCRIBE", @params = baseCoins.Select(BinanceStreamKey).ToArray(), id = 1 });
+
+    /// <summary>
+    /// One Finnhub subscribe frame: the protocol is one frame per symbol.
+    /// One spelling for the connect-time bulk send and the incremental
+    /// per-symbol send.
+    /// </summary>
+    public static string BuildFinnhubSubscribe(string symbol) =>
+        JsonSerializer.Serialize(new { type = "subscribe", symbol });
     /// <summary>
     /// Binance WS ticker: accepts both the nested <c>data</c> payload and the
     /// flat <c>e</c> shape; only USDT pairs parse. The coin is the symbol
