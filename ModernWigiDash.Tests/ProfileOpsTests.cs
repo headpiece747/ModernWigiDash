@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using ModernWigiDash.Core.Plugins;
@@ -786,6 +787,109 @@ public class ProfileOpsTests
         var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
 
         Assert.AreEqual("icons/my-icon.svg", loaded!.Pages[1].Widgets[0].PropertyValues["IconFile"]);
+    }
+
+    // ── file import boundary (ImportProfileFile) ───────────────
+
+    private static string NewImportTempDir()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "wmd-import-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static ProfileLayout RequireLoaded(ProfileImportOutcome outcome)
+        => outcome switch
+        {
+            ProfileImportOutcome.Loaded(var profile) => profile,
+            _ => throw new AssertFailedException($"expected Loaded, got {outcome.GetType().Name}")
+        };
+
+    [TestMethod]
+    public void ImportProfileFile_ValidUntrustedFile_LoadsAndSanitizes()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ImagePath"] = @"..\..\secret.png";
+        File.WriteAllText(path, ProfileOps.ExportJson(profile));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, loader, new TestContext());
+
+        var loaded = RequireLoaded(outcome);
+        Assert.AreEqual("", loaded.Pages[1].Widgets[0].PropertyValues["ImagePath"],
+            "the untrusted default must run the sanitizer at the file boundary too");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_TrustedFile_KeepsUserConfiguredValues()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["ImagePath"] = @"C:\Pictures\Wallpapers";
+        File.WriteAllText(path, ProfileOps.ExportJson(profile));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, loader, new TestContext(), trusted: true);
+
+        var loaded = RequireLoaded(outcome);
+        // PropertyValues deserialize as JsonElement; ToString() unwraps the
+        // string (the C1 point is that the value SURVIVES untrimmed).
+        Assert.AreEqual(@"C:\Pictures\Wallpapers", loaded.Pages[1].Widgets[0].PropertyValues["ImagePath"]?.ToString(),
+            "the app's own file loads trusted: the untrusted-import sanitizer must not run");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_AbsentPath_ReturnsAbsent()
+    {
+        string path = Path.Combine(NewImportTempDir(), "missing.json");
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        Assert.IsTrue(outcome is ProfileImportOutcome.Absent, $"expected Absent, got {outcome}");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_OversizedFile_ReturnsTooLargeWithTheFileBytes()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        long oversized = ProfileImportSanitizer.MaxImportFileBytes + 1;
+        File.WriteAllText(path, new string('x', (int)oversized));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        Assert.IsTrue(outcome is ProfileImportOutcome.TooLarge(var bytes) && bytes == oversized,
+            $"the guard rejects before any read and carries the measured size, got {outcome}");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_ExactCapFile_IsRead_ThenRejectedByTheParse()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        File.WriteAllText(path, new string('x', (int)ProfileImportSanitizer.MaxImportFileBytes));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        // Exactly at the cap the guard ALLOWS (the exclusive greater-than
+        // boundary, pinned on the rule itself) — so the file is read and the
+        // junk content fails the parse instead.
+        Assert.IsTrue(outcome is ProfileImportOutcome.Failed, $"expected Failed (unparseable), got {outcome}");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_UnparseableJson_ReturnsFailed()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        File.WriteAllText(path, "{ not valid json");
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        Assert.IsTrue(outcome is ProfileImportOutcome.Failed(var detail) && detail is not null,
+            $"expected Failed with a caller-facing reason, got {outcome}");
     }
 
     [TestMethod]

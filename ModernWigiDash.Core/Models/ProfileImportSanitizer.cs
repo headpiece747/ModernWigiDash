@@ -9,8 +9,10 @@ namespace ModernWigiDash.Core.Models;
 /// (the IRC JOIN target) sanitized, and the InstanceId (the widgets' cache
 /// file names) regenerated or deduplicated. The import file-size guard lives
 /// here too, so the pre-parse rejection boundary sits with the rules it
-/// protects. <see cref="ProfileOps.ImportJson"/> delegates here; the app's
-/// own persisted profile (sanitize: false) never passes through.
+/// protects, enforced at exactly one site: <see
+/// cref="ProfileOps.ImportProfileFile"/>, the one file-import boundary the
+/// window and the boot load both route through. The app's own persisted
+/// profile passes the boundary as trusted input.
 /// </summary>
 public static class ProfileImportSanitizer
 {
@@ -44,8 +46,9 @@ public static class ProfileImportSanitizer
         ["ActionCommand", "IconFile", "ImagePath"];
 
     /// <summary>True when an import file exceeds <see cref="MaxImportFileBytes"/> —
-    /// the window's pre-read reject rule, so the guard's boundary lives in one
-    /// place with the cap it enforces.</summary>
+    /// the pre-read reject rule the single file-import boundary
+    /// (<see cref="ProfileOps.ImportProfileFile"/>) applies, so the guard's
+    /// boundary lives in one place with the cap it enforces.</summary>
     public static bool IsImportFileTooLarge(long fileLength) => fileLength > MaxImportFileBytes;
 
     /// <summary>InstanceId safety rule: a short ASCII token (letters, digits,

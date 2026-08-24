@@ -47,31 +47,32 @@ internal sealed class ProfilePersistence : IDisposable
             DirectoryName, FileName);
 
     /// <summary>
-    /// Reads and sanitizes the persisted profile through the existing import
-    /// pipeline (caps + rehydration). Returns null when absent, oversized,
-    /// corrupt, or unparseable — the caller falls back to the starter profile.
-    /// The app's own file loads as TRUSTED input (sanitize: false): the
+    /// Reads the persisted profile through the one import boundary
+    /// (<see cref="ProfileOps.ImportProfileFile"/>). Returns null when absent,
+    /// oversized, corrupt, or unparseable — the caller falls back to the
+    /// starter profile. The app's own file loads as TRUSTED input: the
     /// untrusted-import rules would wipe the user's configured ActionCommand,
     /// absolute ImagePath, and BackgroundImagePath on every restart.
     /// </summary>
     public ProfileLayout? Load(WidgetPluginLoader loader, IModernWigiDashContext context)
     {
-        try
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(_profilePath, loader, context, trusted: true);
+        if (outcome is ProfileImportOutcome.Loaded(var profile))
         {
-            if (!File.Exists(_profilePath)) return null;
-            var info = new FileInfo(_profilePath);
-            if (ProfileImportSanitizer.IsImportFileTooLarge(info.Length))
-            {
-                _log?.Invoke($"Profile file too large ({info.Length} bytes); ignoring");
-                return null;
-            }
-            return ProfileOps.ImportJson(File.ReadAllText(_profilePath), loader, context, sanitize: false);
+            return profile;
         }
-        catch (Exception ex)
+        if (outcome is ProfileImportOutcome.TooLarge(var bytes))
         {
-            _log?.Invoke($"Profile load failed, falling back to starter: {ex.Message}");
+            _log?.Invoke($"Profile file too large ({bytes} bytes); ignoring");
             return null;
         }
+        if (outcome is ProfileImportOutcome.Failed(var detail))
+        {
+            _log?.Invoke($"Profile load failed, falling back to starter: {detail}");
+            return null;
+        }
+        // Absent: the first-boot case, nothing to fall back from.
+        return null;
     }
 
     /// <summary>

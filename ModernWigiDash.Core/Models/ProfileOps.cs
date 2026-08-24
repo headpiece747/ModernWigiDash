@@ -466,4 +466,46 @@ public static class ProfileOps
         }
     }
 
+    /// <summary>
+    /// The one profile-file import boundary: exists → the sanitizer's size
+    /// guard (BEFORE any read: oversized untrusted junk is rejected before it
+    /// can become a string) → read → <see cref="ImportJson"/>. The guard's
+    /// single production call site; the window and the boot load map the
+    /// named <see cref="ProfileImportOutcome"/> verdicts to their own surface
+    /// instead of re-spelling the read-and-reject sequence.
+    /// </summary>
+    /// <param name="trusted">The app's own persisted profile: the untrusted-import
+    /// sanitizer would wipe the user's configured ActionCommand / ImagePath /
+    /// BackgroundImagePath values on every restart, so it is skipped. Every
+    /// foreign file is untrusted (the default).</param>
+    public static ProfileImportOutcome ImportProfileFile(
+        string path,
+        WidgetPluginLoader loader,
+        IModernWigiDashContext context,
+        bool trusted = false)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists) return new ProfileImportOutcome.Absent();
+        if (ProfileImportSanitizer.IsImportFileTooLarge(info.Length))
+        {
+            return new ProfileImportOutcome.TooLarge(info.Length);
+        }
+        try
+        {
+            string json = File.ReadAllText(path);
+            ProfileLayout? loaded = ImportJson(json, loader, context, sanitize: !trusted);
+            return loaded is null
+                ? new ProfileImportOutcome.Failed("Unparseable profile JSON")
+                : new ProfileImportOutcome.Loaded(loaded);
+        }
+        catch (Exception ex)
+        {
+            // The file boundary is where foreign-file exceptions die: the
+            // read can fail (permissions, a delete between the existence
+            // check and the read), and the caller maps the verdict to its
+            // own surface.
+            return new ProfileImportOutcome.Failed(ex.Message);
+        }
+    }
+
 }

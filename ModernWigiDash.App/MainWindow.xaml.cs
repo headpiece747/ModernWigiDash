@@ -871,34 +871,38 @@ public partial class MainWindow : Window, IModernWigiDashContext
         var dlg = new OpenFileDialog { Filter = "Display Profile (*.json)|*.json" };
         if (dlg.ShowDialog() == true)
         {
-            try
+            // The import boundary is ProfileOps' one funnel: the size guard
+            // (before any read) and the parse are owned there; the window
+            // maps the named verdicts to its own surface.
+            switch (ProfileOps.ImportProfileFile(dlg.FileName, _loader, this))
             {
-                // Untrusted input: cap the file read before any parsing — the
-                // same reject-oversized-input spirit as the import sanitizer
-                // caps in ProfileImportSanitizer.
-                if (ProfileImportSanitizer.IsImportFileTooLarge(new FileInfo(dlg.FileName).Length))
-                {
+                case ProfileImportOutcome.Loaded(var loaded):
+                    try
+                    {
+                        // One swap site: ReplaceProfile disposes the old profile's
+                        // widget instances and returns the imported profile active.
+                        _profile = ProfileOps.ReplaceProfile(_profile, loaded);
+
+                        // The funnel owns everything after the swap — tab strip,
+                        // picker, and the snap-to-grid resync (a RawWrite): the
+                        // old force-write of the checkbox is gone.
+                        ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
+                    }
+                    break;
+                case ProfileImportOutcome.TooLarge:
                     _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
-                    return;
-                }
-
-                string json = File.ReadAllText(dlg.FileName);
-                var loaded = ProfileOps.ImportJson(json, _loader, this);
-                if (loaded != null)
-                {
-                    // One swap site: ReplaceProfile disposes the old profile's
-                    // widget instances and returns the imported profile active.
-                    _profile = ProfileOps.ReplaceProfile(_profile, loaded);
-
-                    // The funnel owns everything after the swap — tab strip,
-                    // picker, and the snap-to-grid resync (a RawWrite): the
-                    // old force-write of the checkbox is gone.
-                    ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
+                    break;
+                case ProfileImportOutcome.Failed(var detail):
+                    _dialogHost.Error("Import Error", $"Error importing profile: {detail}");
+                    break;
+                // Absent: a delete between the dialog and the read is a
+                // benign no-op, the file the dialog handed back is gone.
+                case ProfileImportOutcome.Absent:
+                    break;
             }
         }
     }
