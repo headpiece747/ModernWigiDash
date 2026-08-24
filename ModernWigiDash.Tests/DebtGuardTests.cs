@@ -225,6 +225,20 @@ public sealed class DebtGuardTests
         var privateMethod = new Regex(
             @"private\s+(?:(?:static|async|unsafe|new|ref)\s+)*(?<ret>[\w.]+(?:<[^;{}()]*>)?(?:\[\])?)\s+(?<name>[A-Za-z_]\w*)\s*(?:<[^;{}()]*>)?\s*\(");
         var typeKeywords = new HashSet<string> { "class", "interface", "record", "struct", "enum", "delegate" };
+        // A C# keyword cannot be a method name. The modifier slot of the
+        // privateMethod regex misreads a tuple-array field declaration
+        // (private static readonly (T A, int B)[] Name) as a method called
+        // "readonly" (ret "static", name "readonly", the tuple type read as
+        // the parameter list). That fake candidate has no call site by
+        // construction, so a keyword name is skipped, like a type ret.
+        var methodKeywordNames = new HashSet<string>
+        {
+            "readonly", "static", "const", "volatile", "new", "ref", "out", "in",
+            "partial", "async", "unsafe", "fixed", "managed", "unmanaged", "where",
+            "this", "base", "var", "event", "operator", "yield", "await", "get",
+            "set", "value", "stackalloc", "sizeof", "typeof", "throw", "null",
+            "true", "false", "default", "is", "as", "not",
+        };
 
         // Group files by the top-level types they declare: a private member's
         // reference scope is the type's files (its partials), not the project.
@@ -282,6 +296,8 @@ public sealed class DebtGuardTests
             {
                 if (typeKeywords.Contains(m.Groups["ret"].Value))
                     continue; // a type declaration, not a method
+                if (methodKeywordNames.Contains(m.Groups["name"].Value))
+                    continue; // a keyword name (a misread field), not a method
 
                 var enclosing = topTypes.LastOrDefault(t => t.Index < m.Index).Name;
                 if (enclosing is null)
