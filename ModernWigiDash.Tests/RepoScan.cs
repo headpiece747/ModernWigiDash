@@ -1,0 +1,213 @@
+using System.IO;
+using System.Reflection;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace ModernWigiDash.Tests;
+
+/// <summary>
+/// The shared raw-scan mechanics behind the house-rule pins (ArchitectureTests,
+/// DebtGuardTests): the repo root embedded at build time, the src-project list,
+/// and the comment/string stripping that keeps a scan matching real code tokens
+/// only. One owner of the strip, so the pins police the same text they claim to.
+/// </summary>
+internal static class RepoScan
+{
+    internal const string RepoRootKey = "ModernWigiDashRepoRoot";
+
+    /// <summary>The shipping projects (the Tests project is excluded: its
+    /// fakes and fixtures legitimately use what src may not).</summary>
+    internal static readonly string[] SrcProjects =
+    [
+        "ModernWigiDash.Sdk",
+        "ModernWigiDash.Core",
+        "ModernWigiDash.Hardware",
+        "ModernWigiDash.Widgets",
+        "ModernWigiDash.App",
+    ];
+
+    /// <summary>
+    /// The repo root, embedded at build time (Tests csproj AssemblyMetadata)
+    /// because the house test command runs from a temp BaseOutputPath, so the
+    /// test assembly location is not the repo.
+    /// </summary>
+    internal static string GetRepoRoot()
+    {
+        var meta = typeof(RepoScan).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(m => m.Key == RepoRootKey);
+
+        if (meta is null)
+            Assert.Fail(
+                "the ModernWigiDashRepoRoot AssemblyMetadata is missing - the Tests csproj must embed the repo root (the house-rule pins run from a temp output path).");
+
+        return Path.GetFullPath(meta.Value!);
+    }
+
+    /// <summary>
+    /// Scans every src project's .cs files and returns "file:line: match"
+    /// entries per pattern hit. Stripped mode blanks comments and string/char
+    /// literals first (a comment that names DateTime.UtcNow is documentation,
+    /// not a use); raw mode scans the text as-is (the empty-catch pin uses it,
+    /// because a documented catch comment must keep the body non-empty).
+    /// </summary>
+    internal static List<string> ScanSrc(Regex pattern, bool raw = false)
+    {
+        var root = GetRepoRoot();
+        var violations = new List<string>();
+        foreach (var project in SrcProjects)
+        {
+            var dir = Path.Combine(root, project);
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                var code = raw ? File.ReadAllText(file) : StripCode(File.ReadAllText(file));
+                foreach (Match match in pattern.Matches(code))
+                {
+                    var lineNo = 1;
+                    for (var k = 0; k < match.Index; k++)
+                        if (code[k] == '\n')
+                            lineNo++;
+                    violations.Add($"{Path.GetRelativePath(root, file)}:{lineNo}: {match.Value}");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>
+    /// Strips comments and string/char literals down to blanks while preserving
+    /// line structure, so a house-rule scan sees real code tokens only (a
+    /// comment that names DateTime.UtcNow is documentation, not a use). With
+    /// <paramref name="stripStrings"/> off, only comments are blanked: the
+    /// dead-helper pin scans occurrences this way because interpolated-string
+    /// holes are code (a call inside $"...{Call()}..." is a real use), while a
+    /// name inside a plain string literal only ever makes the pin conservative.
+    /// Every variant blanks in place, so indices and line numbers agree with
+    /// the original text and with each other.
+    /// </summary>
+    internal static string StripCode(string source, bool stripStrings = true)
+    {
+        var sb = new StringBuilder(source.Length);
+        var i = 0;
+        var len = source.Length;
+
+        while (i < len)
+        {
+            var c = source[i];
+
+            if (c == '/' && i + 1 < len && source[i + 1] == '/')
+            {
+                var start = i;
+                while (i < len && source[i] != '\n')
+                    i++;
+                sb.Append(Blank(source, start, i));
+                continue;
+            }
+
+            if (c == '/' && i + 1 < len && source[i + 1] == '*')
+            {
+                var start = i;
+                i += 2;
+                while (i + 1 < len && !(source[i] == '*' && source[i + 1] == '/'))
+                    i++;
+                i = Math.Min(len, i + 2);
+                sb.Append(Blank(source, start, i));
+                continue;
+            }
+
+            if (stripStrings && c == '"')
+            {
+                var start = i;
+                var j = i - 1;
+                var verbatim = false;
+                while (j >= 0 && (source[j] == '@' || source[j] == '$'))
+                {
+                    if (source[j] == '@')
+                        verbatim = true;
+                    j--;
+                }
+
+                i++;
+                while (i < len)
+                {
+                    if (verbatim)
+                    {
+                        if (source[i] == '"')
+                        {
+                            if (i + 1 < len && source[i + 1] == '"')
+                            {
+                                i += 2;
+                                continue;
+                            }
+
+                            i++;
+                            break;
+                        }
+
+                        i++;
+                    }
+                    else
+                    {
+                        if (source[i] == '\\')
+                            i++;
+                        else if (source[i] == '"')
+                        {
+                            i++;
+                            break;
+                        }
+
+                        i++;
+                    }
+                }
+
+                sb.Append(Blank(source, start, i));
+                continue;
+            }
+
+            if (stripStrings && c == '\'')
+            {
+                var start = i;
+                i++;
+                while (i < len && source[i] != '\'')
+                {
+                    if (source[i] == '\\')
+                        i++;
+                    i++;
+                }
+                i = Math.Min(len, i + 1);
+                sb.Append(Blank(source, start, i));
+                continue;
+            }
+
+            sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The 1-based line number of a character index in stripped code (line
+    /// structure survives the strip, so indices map to the original lines).
+    /// </summary>
+    internal static int LineAt(string code, int index)
+    {
+        var lineNo = 1;
+        for (var k = 0; k < index && k < code.Length; k++)
+            if (code[k] == '\n')
+                lineNo++;
+        return lineNo;
+    }
+
+    /// <summary>
+    /// Blanks a source region, keeping newlines so line numbers survive.
+    /// </summary>
+    private static string Blank(string source, int start, int end)
+    {
+        var sb = new StringBuilder(end - start);
+        for (var k = start; k < end; k++)
+            sb.Append(source[k] == '\n' ? '\n' : ' ');
+        return sb.ToString();
+    }
+}

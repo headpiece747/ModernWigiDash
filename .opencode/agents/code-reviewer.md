@@ -95,6 +95,41 @@ get_type_hierarchy(typeName) → verify inheritance changes are correct
 5. **Testing.** Are there tests? Do they test behavior, not implementation?
 6. **Conventions.** Does it follow the project's established patterns?
 
+## Debt Dimensions (this project)
+
+The mechanical debt layer is machine-pinned by `DebtGuardTests` (runs in the
+gate's test stage, so a violation blocks the commit before a review ever
+happens): sync-over-async only at the documented budgeted sites, `async void`
+only on event handlers, handle-acquiring files carrying their disposal
+evidence, the frame pipeline's single encode/pool entry (FrameDelivery +
+FrameBufferPool), and no dead private helpers. On a branch review, check the
+JUDGMENT layer the pins cannot see, in the three areas the house rules call
+out by name:
+
+1. **Async/await without thread starvation.** The pin catches the shape
+   (`.Wait()`/`.Result`/`GetAwaiter().GetResult()`, `async void`); you verify
+   the allow-list entry's reason is true: is the wait actually bounded by an
+   explicit budget (CloseBudgets, a stop wait), or genuinely off the
+   dispatcher? Does the new code await all the way, or bridge sync-over-async
+   through a third shape the pin's patterns don't name yet?
+2. **Allocation handling and object pooling.** The render tick must stay
+   allocation-clean at 30 FPS: does the diff introduce per-tick allocations
+   (buffer rent outside FrameDelivery's pool, per-frame `new byte[]`, format
+   strings rebuilt per tick)? `FramePipelineAllocationTests` is the canary for
+   the composed path; new hot-path modules need their own allocation argument.
+3. **Disposal of unmanaged handles.** The pin verifies per-file evidence
+   (IDisposable / dispose member / using / release API); you verify the claim:
+   does the Dispose path actually release every handle the type can hold
+   (WinUsbBulkDevice's SetupAPI + WinUSB handles, the MemoryMappedLhmMapSource
+   family's map + mutex, the LibUsb backend's device + writer)? Are handles
+   released on every failure leg, not just the happy path?
+
+Also flag, in every review: a new private helper that nothing calls (the pin
+catches it at commit; the review catches the intent early), a new abstraction
+that duplicates an existing module's rule (the house rule is one spelling, one
+owner), and a new allow-list entry in any pin whose reason is weaker than
+"deliberate and documented".
+
 ## Boundaries
 
 ### I Handle

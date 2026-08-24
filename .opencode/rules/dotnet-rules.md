@@ -25,6 +25,7 @@
 - Async suffix on all async methods (`GetPriceAsync`, not `GetPrice`).
 - PascalCase for public members/types/namespaces/methods. camelCase for locals/parameters.
 - No `_` prefix on private fields when using primary constructors.
+- No dead private helpers (the `DebtGuardTests` pin): a private method with no call site in its type's files (its partials) or the project's XAML (event handlers are wired by name) is debt, and the gate refuses the commit until it is wired up or deleted. A reflection-sensitive name goes in the pin's allow-list with its reason.
 
 ## 2. Architecture
 
@@ -60,6 +61,8 @@
 - Propagate `CancellationToken` through the call chain where async work exists. Dropped tokens mean cancelled work continues.
 - Async all the way for real async work, but remember the transport is deliberately synchronous (ADR-0001); no fake async bridges.
 - `Task.Wait(timeout)` returns a **bool** (did the task complete), NOT the task's result, read `.Result` only after it returns true (and only on the completion path; a timed-out task has no readable result). The 2026-08-21 standby-verdict bug was exactly this: `standbyOk = Task.Run(...).Wait(budget)` swallowed the device's verdict and made the "Standby NOT confirmed" line dead code, which a probe test (log writes bracketing the suspect) exposed.
+- Sync-over-async only at the documented, budgeted sites (the `DebtGuardTests` pin): a `.Wait()` / `.Result` / `GetAwaiter().GetResult()` in src must be bounded by an explicit budget (the transport `CloseBudgets`, a stop/shutdown wait) or run off the dispatcher, and sits in the pin's allow-list with its reason. A new site is a deliberate allow-list edit, never an accident. `async void` is the event-handler shape only (an `EventArgs` parameter); everything else returns `Task` and is awaited.
+- The frame pipeline has one encode and one buffer entry (the `DebtGuardTests` pin): the render tick pushes through `FrameDelivery.Push`; the delivery owns the `IRgb565Encoder` encode and the `FrameBufferPool`. A second encode or buffer site re-creates the per-frame ~1.2 MB LOH churn the pool exists to kill.
 - `TimeProvider` over `DateTime.Now` / `DateTime.UtcNow` where testability matters.
 - `IHttpClientFactory` / typed clients over `new HttpClient()` for the price-feed HTTP paths (`PriceFeedManager`).
 - `ArrayPool<T>` / `MemoryPool<T>` for buffer-heavy operations. The RGB565 frame pipeline is a hot path at 30 FPS.
@@ -73,6 +76,7 @@
 - No catch-and-rethrow without adding context. Either handle it or let it propagate.
 - Validate at system boundaries only. Internal code trusts validated data.
 - Transport failures should surface diagnostics through the existing logging; USB reconnect/dispose paths must be safe (see `DisplayDeviceEngine` dispose safety).
+- Unmanaged handles are closed in the file that acquires them (the `DebtGuardTests` pin): a file with a P/Invoke extern, `MemoryMappedFile`, `UsbContext`, named mutex, or loaded native library carries its disposal evidence in the same file (`IDisposable`, a dispose member, a `using`-scoped release, a release-API call) or a documented exception in the pin's allow-list. A process-lifetime handle (the PresentMon service DLL) is a deliberate entry with a reason, never an omission.
 
 ## 7. Git Workflow
 
@@ -110,3 +114,4 @@
 - **Blast radius: prove by running, not by compiling.** The compiler proves shape; execution proves behavior. Any change with callers across modules (seam moves, renames, shared-policy edits) ends with the affected tests run, and, when a user-facing seam moved, the `verify-modernwigidash` recipe for that surface run once. "It builds" is not the closing claim.
 - **Shape before code on non-trivial work.** Before the first edit on a new module/seam: three lines of shape, which type owns the rule, which seam the tests will drive, which state becomes unrepresentable. If you find yourself mid-edit asking "where should this live?", stop and sketch the shape first; the architect skill exists for exactly that pause.
 - **Every prose surface runs the unslop pass.** Docs, ADRs, CONTEXT.md, commit messages, and agent replies are written per the `unslop` skill (plain words, concrete facts, no puffery, no AI vocabulary, straight quotes). No em dash in prose. Periods, commas, or colons only; arrows (→), word-internal hyphens, and en dashes in numeric ranges are not dashes and stay. Quoted example strings that cite a pattern (like the ADR-0009 hint string) are exempt. The 2026-08-23 repo-wide pass removed ~880 em dashes from the living prose; do not reintroduce the style. The scope is prose: `.cs` comments and the dated records under `docs/archive`, `docs/superpowers`, and `docs/reports` are out of scope by 2026-08-23 decision. Do not run the pass over them.
+- **Debt is prevented by structure, not by review.** The mechanical anti-patterns (sync-over-async outside the budgeted sites, `async void` outside event handlers, unowned handles, frame-pipeline encode/pool bypass, dead private helpers) are machine-pinned in `DebtGuardTests` and run in the gate's test stage; the gate guard blocks a commit without a green gate, so these rules execute before every commit instead of waiting for a review finding. The code-reviewer agent covers the judgment layer the pins cannot see: is an allow-list reason true, is a new abstraction earning its place, does a Dispose path release every handle on every failure leg.

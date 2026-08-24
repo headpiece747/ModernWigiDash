@@ -162,6 +162,38 @@ session death is survivable.
   `scripts/hooks/pre-commit` is committed; the activation is local config).
   Logic lives in `scripts/gate-guard.ps1` (testable via `-GatesFile`). Escape
   per invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'`.
+- Debt guardrails (`DebtGuardTests`, runs in the gate's test stage, so the
+  commit guard enforces them before every commit): the mechanical debt layer
+  is machine-pinned against the src tree (raw scan, the `ArchitectureTests`
+  house-rule shape; shared mechanics in `RepoScan`):
+  - sync-over-async (`.Wait()` / `.Result` / `GetAwaiter().GetResult()`) only
+    at the documented, budgeted sites (an allow-list with a reason per file,
+    drift-checked both directions),
+  - `async void` only on event handlers (the `EventArgs` signature),
+  - every handle-acquiring file (P/Invoke extern, MemoryMappedFile, UsbContext,
+    named mutex, loaded native library) carries its disposal evidence in the
+    same file or a documented exception,
+  - the frame pipeline's encode + buffer pool have one entry (the
+    `IRgb565Encoder.Encode` call and every `FrameBufferPool` reference sit in
+    `FrameDelivery` + the pool's own file),
+  - no dead private helpers (a private method with no call site in its type's
+    files or the project XAML, transitive chains included).
+  A violation fails the gate and the failure message spells the fix; a new
+  legitimate site is a deliberate allow-list edit with a reason.
+- Branch review: incoming PRs and feature branches are reviewed with the
+  `code-reviewer` agent backed by `.opencode/rules/dotnet-rules.md` (its
+  "Debt Dimensions" section names the three review areas: async/await without
+  thread starvation, allocation handling and object pooling, disposal of
+  unmanaged handles). The agent covers the judgment layer the pins cannot
+  see: is an allow-list reason true, is an abstraction earning its place,
+  does a Dispose path release every handle on every failure leg.
+- Hygiene sweeps: `desloppify` (the CLI-driven health workflow, state under
+  `.desloppify/`) is the periodic deep sweep for redundant abstractions and
+  boilerplate; its mechanical residue (dead helpers, the anti-patterns above)
+  stays pinned in `DebtGuardTests` so it cannot regress between sweeps.
+  `unslop` is the prose pass (already gated by the prose stage), not a code
+  sweep. Run a desloppify pass before a release or after a large refactor;
+  record findings under `docs/reports/` and pin what is mechanical.
 - Agent hygiene scanners (the 2026-08-23 awesome-claude-code adoption pass;
   the findings record is `docs/reports/2026-08-23-agent-hygiene-scan.md`):
   `skillspector` (NVIDIA SkillSpector, installed via

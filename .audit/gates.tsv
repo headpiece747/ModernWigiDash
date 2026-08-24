@@ -14,3 +14,7 @@
 2026-08-24T02:31:58Z	55f214f	Roslynator 5.0.0 bump and updater digest hardening: pre-commit gate	ok	0	0	ok	1685	0	ok	ok
 2026-08-24T02:33:04Z	6c95fcd	Roslynator 5.0.0 bump and updater digest hardening: post-bump re-pin	ok	0	0	ok	1685	0	ok	ok
 2026-08-24T05:44:55Z	4e1b9eb	manual	ok	0	0	ok	1697	0	ok	ok
+2026-08-24T12:28:50Z	b73e89b	debt-guardrails: DebtGuardTests + RepoScan + docs	FAIL	0	1	SKIP	n/a	n/a	SKIP	SKIP
+2026-08-24T12:31:20Z	b73e89b	debt-guardrails: DebtGuardTests + RepoScan + docs	ok	0	0	ok	1702	0	ok	ok
+2026-08-24T12:36:57Z	b73e89b	debt-guardrails: DebtGuardTests + RepoScan + docs	ok	0	0	ok	1702	0	ok	ok
+2026-08-24T19:19:33Z	b73e89b	debt-guardrails commit gate re-run	ok	0	0	ok	1702	0	ok	ok

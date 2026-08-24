@@ -1,6 +1,5 @@
 using System.IO;
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using ModernWigiDash.Hardware.Transport;
@@ -13,22 +12,12 @@ namespace ModernWigiDash.Tests;
 /// ADRs, and .opencode/rules/dotnet-rules.md. This class turns them into tests
 /// so a violation fails the gate (run-gates.ps1) instead of waiting for a
 /// manual arch-check pass. Each failure message spells the rule, the
-/// violation, and the fix.
+/// violation, and the fix. The raw-scan mechanics live in RepoScan, shared
+/// with the debt guardrails (DebtGuardTests).
 /// </summary>
 [TestClass]
 public sealed class ArchitectureTests
 {
-    private const string RepoRootKey = "ModernWigiDashRepoRoot";
-
-    private static readonly string[] SrcProjects =
-    [
-        "ModernWigiDash.Sdk",
-        "ModernWigiDash.Core",
-        "ModernWigiDash.Hardware",
-        "ModernWigiDash.Widgets",
-        "ModernWigiDash.App",
-    ];
-
     private static readonly string[] AllProjects =
     [
         "ModernWigiDash.Sdk",
@@ -44,7 +33,7 @@ public sealed class ArchitectureTests
     {
         // CONTEXT.md "Architecture Overview": dependency direction is inward,
         // Sdk is the lowest layer, App the top. This allowlist is that rule.
-        var root = GetRepoRoot();
+        var root = RepoScan.GetRepoRoot();
         var expected = new Dictionary<string, SortedSet<string>>
         {
             ["ModernWigiDash.Sdk"] = [],
@@ -159,7 +148,7 @@ public sealed class ArchitectureTests
         // CONTEXT.md "Key Design Decisions": widget-per-file convention. Each
         // widget class lives in its own .cs with [WidgetMetadata]; the catalog
         // is discovered by reflection.
-        var root = GetRepoRoot();
+        var root = RepoScan.GetRepoRoot();
         var assembly = typeof(DisplayFormat).Assembly;
 
         // The reflection truth: every widget class carries [WidgetMetadata]
@@ -203,7 +192,7 @@ public sealed class ArchitectureTests
         // CONTEXT.md "Key Design Decisions": one type per file holds for the Sdk
         // contracts (split out of the former single IModernWidget.cs); a new
         // contract must keep that shape.
-        var sdkDir = Path.Combine(GetRepoRoot(), "ModernWigiDash.Sdk");
+        var sdkDir = Path.Combine(RepoScan.GetRepoRoot(), "ModernWigiDash.Sdk");
         var contractFiles = new[]
         {
             "IModernWidget.cs",
@@ -241,7 +230,7 @@ public sealed class ArchitectureTests
     [TestMethod]
     public void HouseRules_NoAmbientClockInSrc()
     {
-        var violations = ScanSrc(new Regex(@"\bDateTime\.(?:Now|UtcNow)\b"));
+        var violations = RepoScan.ScanSrc(new Regex(@"\bDateTime\.(?:Now|UtcNow)\b"));
         Assert.AreEqual(0, violations.Count,
             "ambient clock in src: " + string.Join("; ", violations)
             + ". dotnet-rules 5: TimeProvider over DateTime.Now/UtcNow where testability matters; inject the clock through the existing seam (the producer's timestamp, the widget's Clock property). Tests may use the ambient clock for fixtures.");
@@ -265,8 +254,8 @@ public sealed class ArchitectureTests
             "ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs",
             "ModernWigiDash.Widgets/WeatherClient.cs",
         };
-        var hits = ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
-            .Concat(ScanSrc(new Regex(@"\bHttpClient\b[^;=\n]*=\s*new\s*\(")))
+        var hits = RepoScan.ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
+            .Concat(RepoScan.ScanSrc(new Regex(@"\bHttpClient\b[^;=\n]*=\s*new\s*\(")))
             .Select(v => v.Split(':', 2)[0].Replace('\\', '/'))
             .ToList();
         var disallowed = hits.Where(f => !allowed.Contains(f)).Distinct().ToList();
@@ -282,7 +271,7 @@ public sealed class ArchitectureTests
     [TestMethod]
     public void HouseRules_NoEmptyCatchInSrc()
     {
-        var violations = ScanSrc(new Regex(@"catch\s*(?:\([^)]*\))?\s*(?:when\s*\([^)]*\))?\s*\{\s*\}"), raw: true);
+        var violations = RepoScan.ScanSrc(new Regex(@"catch\s*(?:\([^)]*\))?\s*(?:when\s*\([^)]*\))?\s*\{\s*\}"), raw: true);
         Assert.AreEqual(0, violations.Count,
             "empty catch block: " + string.Join("; ", violations)
             + ". dotnet-rules 6: expected failures should be explicit and an empty catch swallows the verdict; log through the injected log seam (or state in a comment why the skip is safe - a comment makes the catch non-empty to this pin) - never a silent block.");
@@ -323,24 +312,6 @@ public sealed class ArchitectureTests
 
     // --- shared helpers ---
 
-    /// <summary>
-    /// The repo root, embedded at build time (Tests csproj AssemblyMetadata)
-    /// because the house test command runs from a temp BaseOutputPath, so the
-    /// test assembly location is not the repo.
-    /// </summary>
-    private static string GetRepoRoot()
-    {
-        var meta = typeof(ArchitectureTests).Assembly
-            .GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(m => m.Key == RepoRootKey);
-
-        if (meta is null)
-            Assert.Fail(
-                "the ModernWigiDashRepoRoot AssemblyMetadata is missing - the Tests csproj must embed the repo root (the architecture tests run from a temp output path).");
-
-        return Path.GetFullPath(meta.Value!);
-    }
-
     private static bool IsTaskLike(Type type) =>
         type == typeof(Task)
         || type == typeof(ValueTask)
@@ -355,152 +326,4 @@ public sealed class ArchitectureTests
     private static bool HasAsyncMethodBuilder(MethodInfo method) =>
         method.GetCustomAttributesData()
             .Any(attr => attr.AttributeType.Name == "AsyncMethodBuilderAttribute");
-
-    /// <summary>
-    /// Scans every src project's .cs files and returns "file:line: match"
-    /// entries per pattern hit. Stripped mode blanks comments and string/char
-    /// literals first (a comment that names DateTime.UtcNow is documentation,
-    /// not a use); raw mode scans the text as-is (the empty-catch pin uses it,
-    /// because a documented catch comment must keep the body non-empty).
-    /// </summary>
-    private static List<string> ScanSrc(Regex pattern, bool raw = false)
-    {
-        var root = GetRepoRoot();
-        var violations = new List<string>();
-        foreach (var project in SrcProjects)
-        {
-            var dir = Path.Combine(root, project);
-            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
-            {
-                var code = raw ? File.ReadAllText(file) : StripCode(File.ReadAllText(file));
-                foreach (Match match in pattern.Matches(code))
-                {
-                    var lineNo = 1;
-                    for (var k = 0; k < match.Index; k++)
-                        if (code[k] == '\n')
-                            lineNo++;
-                    violations.Add($"{Path.GetRelativePath(root, file)}:{lineNo}: {match.Value}");
-                }
-            }
-        }
-
-        return violations;
-    }
-
-    /// <summary>
-    /// Strips comments and string/char literals down to blanks while preserving
-    /// line structure, so a house-rule scan sees real code tokens only (a
-    /// comment that names DateTime.UtcNow is documentation, not a use).
-    /// </summary>
-    private static string StripCode(string source)
-    {
-        var sb = new StringBuilder(source.Length);
-        var i = 0;
-        var len = source.Length;
-
-        while (i < len)
-        {
-            var c = source[i];
-
-            if (c == '/' && i + 1 < len && source[i + 1] == '/')
-            {
-                var start = i;
-                while (i < len && source[i] != '\n')
-                    i++;
-                sb.Append(Blank(source, start, i));
-                continue;
-            }
-
-            if (c == '/' && i + 1 < len && source[i + 1] == '*')
-            {
-                var start = i;
-                i += 2;
-                while (i + 1 < len && !(source[i] == '*' && source[i + 1] == '/'))
-                    i++;
-                i = Math.Min(len, i + 2);
-                sb.Append(Blank(source, start, i));
-                continue;
-            }
-
-            if (c == '"')
-            {
-                var start = i;
-                var j = i - 1;
-                var verbatim = false;
-                while (j >= 0 && (source[j] == '@' || source[j] == '$'))
-                {
-                    if (source[j] == '@')
-                        verbatim = true;
-                    j--;
-                }
-
-                i++;
-                while (i < len)
-                {
-                    if (verbatim)
-                    {
-                        if (source[i] == '"')
-                        {
-                            if (i + 1 < len && source[i + 1] == '"')
-                            {
-                                i += 2;
-                                continue;
-                            }
-
-                            i++;
-                            break;
-                        }
-
-                        i++;
-                    }
-                    else
-                    {
-                        if (source[i] == '\\')
-                            i++;
-                        else if (source[i] == '"')
-                        {
-                            i++;
-                            break;
-                        }
-
-                        i++;
-                    }
-                }
-
-                sb.Append(Blank(source, start, i));
-                continue;
-            }
-
-            if (c == '\'')
-            {
-                var start = i;
-                i++;
-                while (i < len && source[i] != '\'')
-                {
-                    if (source[i] == '\\')
-                        i++;
-                    i++;
-                }
-                i = Math.Min(len, i + 1);
-                sb.Append(Blank(source, start, i));
-                continue;
-            }
-
-            sb.Append(c);
-            i++;
-        }
-
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Blanks a source region, keeping newlines so line numbers survive.
-    /// </summary>
-    private static string Blank(string source, int start, int end)
-    {
-        var sb = new StringBuilder(end - start);
-        for (var k = start; k < end; k++)
-            sb.Append(source[k] == '\n' ? '\n' : ' ');
-        return sb.ToString();
-    }
 }
