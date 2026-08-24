@@ -91,8 +91,6 @@ internal sealed class TrackedTargetResolver
         return candidates;
     }
 
-    /// <summary>True when the pid is this process — never a tracking target.</summary>
-
     /// <summary>Children of <paramref name="pid"/>: from the resolution-wide
     /// parent map when walking the real tree, else from the injected provider.</summary>
     private IReadOnlyList<int> ChildrenOf(int pid, Dictionary<int, List<int>>? parentMap)
