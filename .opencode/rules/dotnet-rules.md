@@ -87,6 +87,7 @@
 - Never force-push to main or master.
 - Run verification before committing: build + tests green.
 - Keep PRs focused on a single concern.
+- Commit messages from the agent shell: double quotes inside an inline `-m "..."` string close the string at the first inner quote, and the leftover fragments reach git as pathspecs (`fatal: Invalid path ...`; no commit is created). Backtick escapes are unreliable in this tool (the transport layer can strip them before PowerShell sees them; observed 2026-08-24). Use the verbatim shapes instead: single-quoted `-m '...'` (apostrophes doubled to `''`) for simple messages, and the here-string `@'...'@ | git commit -F -` (or a temp file with `git commit -F <file>`) when the message contains quotes or multiple paragraphs.
 
 ## 8. Agent & Tool Usage
 
