@@ -140,8 +140,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         canvas.DrawRoundRect(bounds, 18f * scale, 18f * scale, _bgPaint);
 
         var snap = _mediaMonitor?.CurrentSnapshot;
-        if (snap is null || snap.Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed ||
-            snap.Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)
+        if (NowPlayingPresentation.IsIdle(snap))
         {
             DrawIdle(canvas, bounds, scale);
             return;
@@ -708,7 +707,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
             case NowPlayingHitAction.SourceBadge:
                 _mediaMonitor?.CycleSession();
                 break;
-            case NowPlayingHitAction.Seek when snap.CanSeek && snap.Duration.TotalSeconds > 0:
+            case NowPlayingHitAction.Seek when NowPlayingPresentation.CanSeekNow(snap):
                 SeekTo(hitPoint, snap);
                 break;
         }

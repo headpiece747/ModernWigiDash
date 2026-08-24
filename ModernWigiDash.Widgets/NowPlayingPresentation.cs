@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using Windows.Media;
+using Windows.Media.Control;
 
 namespace ModernWigiDash.Widgets;
 
@@ -107,6 +109,20 @@ public static class NowPlayingPresentation
         return string.Join(" · ", parts);
     }
 
+    /// <summary>
+    /// The idle verdict: no snapshot, or a session that has Closed or
+    /// Stopped (the states where the widget draws its idle panel instead of
+    /// the media view). One spelling for the render gate; assertable here
+    /// without a canvas. <c>false</c> carries the null fact forward (a
+    /// non-idle render always has a live snapshot), so the widget's
+    /// flow analysis keeps its null-proofing when the predicate replaces
+    /// the inline check.
+    /// </summary>
+    public static bool IsIdle([NotNullWhen(false)] MediaSnapshot? snap)
+        => snap is null
+            || snap.Status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed
+            or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped;
+
     /// <summary>Clamped position/duration ratio; zero when the duration is unknown.</summary>
     public static double ProgressRatio(double positionSeconds, double durationSeconds)
         => durationSeconds > 0 ? Math.Clamp(positionSeconds / durationSeconds, 0.0, 1.0) : 0.0;
@@ -114,6 +130,14 @@ public static class NowPlayingPresentation
     /// <summary>Clamped tap-point → seek ratio along the progress bar; zero when the bar is empty.</summary>
     public static double SeekRatio(double tapX, double barLeft, double barWidth)
         => barWidth > 0 ? Math.Clamp((tapX - barLeft) / barWidth, 0.0, 1.0) : 0.0;
+
+    /// <summary>
+    /// The seek tap's enablement rule: the session reports seekable AND
+    /// carries a positive duration (a zero-duration track would seek to a
+    /// single point). One spelling for the touch handler's gate.
+    /// </summary>
+    public static bool CanSeekNow(MediaSnapshot snap)
+        => snap.CanSeek && snap.Duration.TotalSeconds > 0;
 
     /// <summary>"1.5×" when the playback rate deviates from 1.0, else null (nothing to show).</summary>
     public static string? PlaybackRateText(double rate)

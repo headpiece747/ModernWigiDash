@@ -126,6 +126,47 @@ public class NowPlayingPresentationTests
     }
 
     [TestMethod]
+    public void IsIdle_NoSnapshotOrClosedOrStoppedSession_ReadsIdle()
+    {
+        Assert.IsTrue(NowPlayingPresentation.IsIdle(null), "no session at all is the idle panel");
+        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed)));
+        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)));
+    }
+
+    [TestMethod]
+    public void IsIdle_EveryLiveSessionState_ReadsLive()
+    {
+        // The idle rule excludes exactly Closed and Stopped; every other
+        // session state draws the media view.
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Opened)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Changing)));
+    }
+
+    [TestMethod]
+    public void CanSeekNow_SeekableWithPositiveDuration_AllowsTheSeekTap()
+    {
+        var snap = SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+        snap.CanSeek = true;
+
+        Assert.IsTrue(NowPlayingPresentation.CanSeekNow(snap));
+    }
+
+    [TestMethod]
+    public void CanSeekNow_NotSeekableOrZeroDuration_VetoesTheSeekTap()
+    {
+        var snap = SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+        snap.CanSeek = true;
+        snap.Duration = TimeSpan.Zero;
+        Assert.IsFalse(NowPlayingPresentation.CanSeekNow(snap), "a zero-duration track must not seek to a single point");
+
+        snap.Duration = TimeSpan.FromSeconds(120);
+        snap.CanSeek = false;
+        Assert.IsFalse(NowPlayingPresentation.CanSeekNow(snap), "a non-seekable session must not seek");
+    }
+
+    [TestMethod]
     public void PlaybackRateText_OnlyDeviationsFromOneShow()
     {
         Assert.IsNull(NowPlayingPresentation.PlaybackRateText(1.0));
@@ -190,4 +231,11 @@ public class NowPlayingPresentationTests
 
         Assert.AreEqual(30.0, pos, 0.001, "a paused snapshot must not advance between refreshes");
     }
+
+    private static MediaSnapshot SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus status)
+        => new()
+        {
+            Status = status,
+            Duration = TimeSpan.FromSeconds(120)
+        };
 }
