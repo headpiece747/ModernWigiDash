@@ -241,8 +241,9 @@ internal sealed class InspectorController
     /// Reads the current icon/file values from the provider (the provider IS
     /// the widget instance — no concrete widget type needed), shows the picker
     /// via <see cref="DialogHost.ShowIconPicker"/>, and writes the chosen value
-    /// back through <see cref="ApplyPropertyValue"/>, keeping the companion
-    /// file property and the named icon mutually exclusive.
+    /// back through <see cref="ApplyPropertyValue"/>; the named-vs-custom
+    /// verdict, the read precedence, and the companion mutual exclusion are
+    /// the <see cref="IconValuePolicy"/> decisions.
     /// </summary>
     public void ShowIconSelectorPopup(PropertyInfo iconProp, IWidgetEditorProvider provider, TextBox box)
     {
@@ -250,20 +251,13 @@ internal sealed class InspectorController
         string? currentIconFile = iconFileProp?.GetValue(provider) as string;
         string? currentIcon = iconProp.GetValue(provider) as string;
 
-        string current = !string.IsNullOrWhiteSpace(currentIconFile) ? currentIconFile : currentIcon ?? "";
+        string current = IconValuePolicy.ResolveCurrent(currentIcon, currentIconFile);
         string? chosen = _dialogHost.ShowIconPicker("Select Icon", current);
         if (string.IsNullOrWhiteSpace(chosen)) return;
 
-        if (GriddyIcons.Contains(chosen))
-        {
-            ApplyPropertyValue(iconFileProp, "");
-            ApplyPropertyValue(iconProp, chosen);
-        }
-        else
-        {
-            ApplyPropertyValue(iconFileProp, chosen);
-            ApplyPropertyValue(iconProp, "");
-        }
+        (string named, string iconFile) = IconValuePolicy.SplitWriteback(chosen);
+        ApplyPropertyValue(iconFileProp, iconFile);
+        ApplyPropertyValue(iconProp, named);
 
         _isUpdatingInspector = true;
         try

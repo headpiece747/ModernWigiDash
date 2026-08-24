@@ -360,7 +360,7 @@ internal sealed class DialogHost
             dialog.DialogResult = true;
         };
 
-        if (!string.IsNullOrWhiteSpace(currentValue) && !GriddyIcons.Contains(currentValue))
+        if (IconValuePolicy.IsCustom(currentValue))
             chip.Text = $"Custom: {currentValue}";
         selectedName.Text = currentValue ?? "";
         RenderGrid();
