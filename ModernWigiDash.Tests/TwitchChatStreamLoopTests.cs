@@ -105,4 +105,24 @@ public class TwitchChatStreamLoopTests
 
         await widget.DisposeAsync();
     }
+
+    [TestMethod]
+    public async Task IrcLoop_PingFromServer_EchoesPongWithTheSamePayload()
+    {
+        var feed = new FakeFeed();
+        feed.QueueMessage("PING :tmi.twitch.tv\r\n");
+        var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
+        widget.FeedFactory = () => feed;
+        widget.Session = EmptySession();
+        await widget.InitializeAsync(new TestContext(), CancellationToken.None);
+
+        // The PONG is the fire-and-forget task that holds the PONG token (the
+        // token RetirePongToken's deferral protects), so wait for it through
+        // the seam instead of assuming the dispatch is synchronous.
+        await TestWait.WaitUntilAsync(
+            () => feed.Sent.Contains("PONG :tmi.twitch.tv\r\n"),
+            TimeSpan.FromSeconds(3));
+
+        await widget.DisposeAsync();
+    }
 }

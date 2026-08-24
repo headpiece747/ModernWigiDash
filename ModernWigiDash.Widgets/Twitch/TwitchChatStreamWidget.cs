@@ -202,8 +202,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
 
     private void StartConnection()
     {
-        _pongCts?.Cancel();
-        _pongCts?.Dispose();
+        RetirePongToken();
         _pongCts = new CancellationTokenSource();
         lock (_messagesLock)
         {
@@ -237,14 +236,25 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     {
         _feedLoop?.Dispose();
         _feedLoop = null;
-        // Cancel and drop the PONG token rather than disposing it: an
-        // in-flight PONG task may still hold it (same deferral the Sdk's
-        // PollLoop/FrameDelivery apply). The replaced source is dropped with
-        // the object; StartConnection creates a fresh one.
-        _pongCts?.Cancel();
-        _pongCts = null;
+        RetirePongToken();
         _chatState = TwitchChatPresentation.ChatState.Disconnected();
         Context.RequestRender();
+    }
+
+    /// <summary>
+    /// The alive-phase PONG-token retirement: cancel and drop the reference,
+    /// do NOT dispose. An in-flight PONG task may still hold the token (the
+    /// fire-and-forget task at the Ping dispatch passes it to the socket
+    /// send), and disposing a source with live holders is what the deferral
+    /// the Sdk's PollLoop/FrameDelivery and the feed manager apply avoids;
+    /// the dropped source is GC'd when its last holder unwinds. The terminal
+    /// variant (DisposeAsync) is the only site that disposes: by then the
+    /// feed loop, the only PONG launcher, has unwound, so no holder remains.
+    /// </summary>
+    private void RetirePongToken()
+    {
+        _pongCts?.Cancel();
+        _pongCts = null;
     }
 
     /// <summary>Runs after the feed connected: the anonymous IRC handshake and
@@ -490,6 +500,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _msgPaint.Dispose();
         _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
         _feedLoop = null;
+        // The terminal PONG-token retirement: the feed loop (the only PONG
+        // launcher) unwound above, so no in-flight holder remains and the
+        // graceful cancel + dispose is safe here, unlike RetirePongToken's
+        // alive-phase deferral.
         if (_pongCts is { } cts) await cts.CancelAsync().ConfigureAwait(false);
         _pongCts?.Dispose();
         await base.DisposeAsync().ConfigureAwait(false);
