@@ -160,7 +160,7 @@ public class InspectorPanelRendererTests
             // InitializeAsync kicks the startup fetch; wait for the boot apply
             // (the resolved population) before seeding from it.
             TestWait.WaitForApplied(() => widget.CurrentPopulation is > 0).GetAwaiter().GetResult();
-            widget._suppressLocationWriteback = true;
+            widget.SuppressLocationWriteback();
             widget.FetchLiveWeatherAsync().GetAwaiter().GetResult();
             Assert.AreEqual(9367, widget.CurrentPopulation, "precondition: the resolution must expose the population");
 
@@ -203,7 +203,7 @@ public class InspectorPanelRendererTests
             var context = new PersistingContext(profile);
             widget.InitializeAsync(context).AsTask().GetAwaiter().GetResult();
             TestWait.WaitUntilAsync(() => widget.FetchCompletedCount >= 1, TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-            widget._suppressLocationWriteback = true;
+            widget.SuppressLocationWriteback();
             widget.FetchLiveWeatherAsync().GetAwaiter().GetResult();
             Assert.AreEqual(9367, widget.CurrentPopulation, "precondition: the resolution must expose the population");
 

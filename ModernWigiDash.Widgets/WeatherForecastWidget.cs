@@ -99,6 +99,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // site. The UI-thread flush of the write-back stays here (it persists).
     private readonly WeatherDisplayState _displayState;
 
+    // The non-invalidating write-back mode flag (the rule is spelled at the
+    // named seam, SuppressLocationWriteback): private because the mode has
+    // exactly two readers (the display-state take's live source, the edit
+    // path's veto) and one seam; reaching the flag directly re-spells the
+    // rule at the call site.
+    private bool _locationWritebackSuppressed;
+
     // -- IWidgetLocationSearch ------------------------------------------------
 
     public Task<IReadOnlyList<GeocodeCandidate>> SearchAsync(string query, CancellationToken ct)
@@ -367,7 +374,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // strictly stronger under the gate, safe because the identity
         // re-check is also under the gate.
         WeatherInvalidationKind kind = WeatherInvalidation.KindForProperty(propertyName);
-        if (kind == WeatherInvalidationKind.Location && _suppressLocationWriteback)
+        if (kind == WeatherInvalidationKind.Location && _locationWritebackSuppressed)
         {
             // The resolved-label write-back skips the forced re-fetch: the
             // label was just resolved by the fetch that wrote it, so fetching
@@ -526,10 +533,18 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // changed, never on every fetch) moved with the sequence into the flow
     // module — the host keeps only the refresh request itself.
 
-    /// <summary>Suppresses the OnPropertyChanged fetch while the resolved label
-    /// is written back after a successful resolution (the write-back must not
-    /// re-fire a fetch).</summary>
-    internal bool _suppressLocationWriteback;
+    /// <summary>
+    /// The non-invalidating write-back mode (the named test-drive seam): while
+    /// on, the display-state take refuses the resolved-label write-back (the
+    /// value stays queued: a "not yet" that never lands while the mode holds,
+    /// so the mode cannot be cleared by the write-back's own finally) and any
+    /// Location write carries no forced refetch. The write-back path's scoped
+    /// write and a directly driven test fetch route through the one flag, so
+    /// a test observes its fetch without the fetch's own write-back
+    /// re-entering the fetch path (write -> OnPropertyChanged -> forced
+    /// refetch).
+    /// </summary>
+    internal void SuppressLocationWriteback() => _locationWritebackSuppressed = true;
 
     /// <summary>
     /// The widget's fetch entry (the direct-drive seam the tests and the edit
@@ -546,25 +561,26 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// Performs the deferred resolved-label write-back on the UI thread (called
     /// by <see cref="Render"/> at 30 FPS; also an internal test seam for
     /// direct-drive tests). The take — and with it the whole eligibility
-    /// decision (the CustomLabel veto, the no-op write, the suppression flag) —
-    /// runs under the display-state gate, so a host edit landing between the
-    /// queue and this flush is seen at the take (a veto refuses and keeps the
-    /// value queued for the next frame, never lost); the take clears before the
-    /// write, so a re-entrant render cannot double-write; and the suppression
-    /// flag keeps the write's own OnPropertyChanged from re-firing a fetch.
+    /// decision (the CustomLabel veto, the no-op write, the non-invalidating
+    /// write-back mode) — runs under the display-state gate, so a host edit
+    /// landing between the queue and this flush is seen at the take (a veto
+    /// refuses and keeps the value queued for the next frame, never lost); the
+    /// take clears before the write, so a re-entrant render cannot double-write;
+    /// and the scoped write's mode span keeps the write's own OnPropertyChanged
+    /// from re-firing a fetch.
     /// </summary>
     internal void ApplyPendingLocationWriteback()
     {
-        if (_displayState.TakePendingWriteback(BuildLocation(), () => _suppressLocationWriteback) is not { } pending) return;
+        if (_displayState.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
 
-        _suppressLocationWriteback = true;
+        _locationWritebackSuppressed = true;
         try
         {
             SetProperty(nameof(Location), pending);
         }
         finally
         {
-            _suppressLocationWriteback = false;
+            _locationWritebackSuppressed = false;
         }
     }
 

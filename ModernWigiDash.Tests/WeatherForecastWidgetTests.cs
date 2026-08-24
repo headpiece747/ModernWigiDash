@@ -505,7 +505,7 @@ public class WeatherForecastWidgetTests
         // An ambiguous resolution must be silent - no fetch, no state change,
         // no render request.
         // (Drive the fetch directly; the client's ambiguity flag suppresses it.)
-        widget._suppressLocationWriteback = true; // isolate this test from the write-back path
+        widget.SuppressLocationWriteback(); // isolate this test from the write-back path
         await widget.FetchLiveWeatherAsync();
 
         Assert.AreEqual(renders, context.Renders, "no render request for an ambiguous resolution");
