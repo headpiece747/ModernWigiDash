@@ -61,6 +61,43 @@ public class NowPlayingPresentationTests
     }
 
     [TestMethod]
+    public void FriendlyAppName_MultiTokenIds_FirstMatchingRuleWins()
+    {
+        // The rule order is load-bearing: an ID carrying several known tokens
+        // maps to the earliest rule, not to any of the others. A reorder (or
+        // a merge into an unordered set) must fail here.
+        Assert.AreEqual("iTunes", NowPlayingPresentation.FriendlyAppName("Apple.iTunes"),
+            "'itunes' must outrank the bare 'apple' token");
+        Assert.AreEqual("Spotify", NowPlayingPresentation.FriendlyAppName("spotify.music"),
+            "'spotify' must outrank the bare 'music' token");
+        Assert.AreEqual("Apple Music", NowPlayingPresentation.FriendlyAppName("Grooveshark.music"),
+            "a bare 'music' token still maps to Apple Music");
+        Assert.AreEqual("Windows Media Player", NowPlayingPresentation.FriendlyAppName("mediaplayer.wmplayer"),
+            "the two Windows Media Player tokens resolve to one display name");
+    }
+
+    [TestMethod]
+    public void FriendlyAppName_CaseInsensitive_MatchesAnyCasing()
+    {
+        Assert.AreEqual("Spotify", NowPlayingPresentation.FriendlyAppName("SPOTIFY.exe"));
+        Assert.AreEqual("Edge", NowPlayingPresentation.FriendlyAppName("MSEdge"));
+        Assert.AreEqual("Steam", NowPlayingPresentation.FriendlyAppName("SteamApps\\client.exe"));
+    }
+
+    [TestMethod]
+    public void FriendlyAppName_FallbackSegment_KeepsSixteenAndTruncatesSeventeen()
+    {
+        string exactly16 = new('a', 16);
+        string seventeen = new('b', 17);
+        Assert.AreEqual(exactly16, NowPlayingPresentation.FriendlyAppName($"pkg.{exactly16}"),
+            "a 16-character segment is the boundary: it survives whole");
+        Assert.AreEqual(new('b', 16), NowPlayingPresentation.FriendlyAppName($"pkg.{seventeen}"),
+            "a 17-character segment truncates to 16");
+        Assert.AreEqual("App", NowPlayingPresentation.FriendlyAppName("com.example.Package!App"),
+            "the AUMID '!' separator splits before the last-dot split");
+    }
+
+    [TestMethod]
     public void MetaLine_TrackNumberAndGenres_JoinWithSeparators()
     {
         Assert.AreEqual("", NowPlayingPresentation.MetaLine(0, 0, []));

@@ -11,6 +11,31 @@ namespace ModernWigiDash.Widgets;
 public static class NowPlayingPresentation
 {
     /// <summary>
+    /// The known media apps mapped to display names, in precedence order: the
+    /// first matching token wins, so "itunes" outranks the bare "apple"/"music"
+    /// tokens (an Apple iTunes AUMID must not read Apple Music) and "spotify"
+    /// outranks a bare "music". The order is load-bearing behavior, not style:
+    /// a reorder is a behavior change, and the collision pins in
+    /// NowPlayingPresentationTests fail on one.
+    /// </summary>
+    private static readonly (string Token, string Name)[] AppNameRules =
+    [
+        ("spotify", "Spotify"),
+        ("chrome", "Chrome"),
+        ("msedge", "Edge"),
+        ("firefox", "Firefox"),
+        ("vlc", "VLC"),
+        ("itunes", "iTunes"),
+        ("apple", "Apple Music"),
+        ("music", "Apple Music"),
+        ("mediaplayer", "Windows Media Player"),
+        ("wmplayer", "Windows Media Player"),
+        ("discord", "Discord"),
+        ("foobar", "foobar2000"),
+        ("steam", "Steam"),
+    ];
+
+    /// <summary>
     /// "m:ss" (or "h:mm:ss" past an hour); invalid durations read "0:00".
     /// </summary>
     public static string FormatTime(double totalSeconds)
@@ -26,8 +51,9 @@ public static class NowPlayingPresentation
     }
 
     /// <summary>
-    /// The 11 known media apps mapped to display names; anything else falls
-    /// back to the last AUMID segment, truncated to 16 characters.
+    /// The friendly name for a media app id: the first matching entry of
+    /// <see cref="AppNameRules"/> wins; anything else falls back to the last
+    /// AUMID segment, truncated to 16 characters.
     /// </summary>
     public static string FriendlyAppName(string appId)
     {
@@ -36,21 +62,25 @@ public static class NowPlayingPresentation
             return "Media";
         }
         string lower = appId.ToLowerInvariant();
+        foreach (var (token, name) in AppNameRules)
+        {
+            if (lower.Contains(token, StringComparison.Ordinal))
+            {
+                return name;
+            }
+        }
+        return FallbackSegment(appId);
+    }
 
-        if (lower.Contains("spotify", StringComparison.Ordinal)) return "Spotify";
-        if (lower.Contains("chrome", StringComparison.Ordinal)) return "Chrome";
-        if (lower.Contains("msedge", StringComparison.Ordinal)) return "Edge";
-        if (lower.Contains("firefox", StringComparison.Ordinal)) return "Firefox";
-        if (lower.Contains("vlc", StringComparison.Ordinal)) return "VLC";
-        if (lower.Contains("itunes", StringComparison.Ordinal)) return "iTunes";
-        if (lower.Contains("apple", StringComparison.Ordinal) || lower.Contains("music", StringComparison.Ordinal)) return "Apple Music";
-        if (lower.Contains("mediaplayer", StringComparison.Ordinal) || lower.Contains("wmplayer", StringComparison.Ordinal)) return "Windows Media Player";
-        if (lower.Contains("discord", StringComparison.Ordinal)) return "Discord";
-        if (lower.Contains("foobar", StringComparison.Ordinal)) return "foobar2000";
-        if (lower.Contains("steam", StringComparison.Ordinal)) return "Steam";
-
-        int slash = appId.LastIndexOf('!');
-        string name = slash >= 0 ? appId[(slash + 1)..] : appId;
+    /// <summary>
+    /// The last AUMID segment of an unknown app id: the substring after the
+    /// last '!' (the AUMID package/app separator) or the whole id, then after
+    /// the last '.' if any, truncated to 16 characters.
+    /// </summary>
+    private static string FallbackSegment(string appId)
+    {
+        int sep = appId.LastIndexOf('!');
+        string name = sep >= 0 ? appId[(sep + 1)..] : appId;
         int dot = name.LastIndexOf('.');
         if (dot >= 0)
         {
