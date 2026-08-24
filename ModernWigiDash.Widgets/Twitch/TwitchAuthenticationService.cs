@@ -102,16 +102,8 @@ internal sealed class TwitchSession
                 if (!string.Equals(validation.ClientId, clientId, StringComparison.Ordinal))
                     throw new InvalidOperationException("Twitch returned a token for a different Client ID.");
 
-                token = token with
-                {
-                    ClientId = clientId,
-                    ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
-                    Scopes = validation.Scopes
-                };
-
-                ApplyValidatedState(token, validation);
-                _tokenStore.Save(token);
-                StartValidationMonitor(context);
+                token = StampFromValidation(token, validation, clientId);
+                CommitValidatedToken(token, validation, context);
                 await RefreshFollowedChannelsCoreAsync(context, cancellationToken).ConfigureAwait(false);
             }
             finally
@@ -244,14 +236,8 @@ internal sealed class TwitchSession
         try
         {
             TwitchTokenValidation validation = await api.ValidateAsync(stored.AccessToken, cancellationToken).ConfigureAwait(false);
-            TwitchTokenSet validatedToken = stored with
-            {
-                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
-                Scopes = validation.Scopes
-            };
-            ApplyValidatedState(validatedToken, validation);
-            _tokenStore.Save(validatedToken);
-            StartValidationMonitor(context);
+            TwitchTokenSet validatedToken = StampFromValidation(stored, validation);
+            CommitValidatedToken(validatedToken, validation, context);
             return true;
         }
         catch (TwitchApiException ex) when (ex.IsUnauthorized)
@@ -273,15 +259,8 @@ internal sealed class TwitchSession
         {
             TwitchTokenSet refreshed = await api.RefreshAsync(current.RefreshToken, cancellationToken).ConfigureAwait(false);
             TwitchTokenValidation validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
-            refreshed = refreshed with
-            {
-                ClientId = current.ClientId,
-                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
-                Scopes = validation.Scopes
-            };
-            ApplyValidatedState(refreshed, validation);
-            _tokenStore.Save(refreshed);
-            StartValidationMonitor(context);
+            refreshed = StampFromValidation(refreshed, validation, current.ClientId);
+            CommitValidatedToken(refreshed, validation, context);
             return true;
         }
         catch (TwitchApiException ex) when (ex.StatusCode is 400 or 401)
@@ -301,6 +280,35 @@ internal sealed class TwitchSession
             _account = new TwitchAccount(validation.UserId);
             _lastValidatedAt = _timeProvider.GetUtcNow();
         }
+    }
+
+    /// <summary>
+    /// The validated-token stamp fact, one owner: what a validation response
+    /// turns a token into. The server's <c>ExpiresIn</c> becomes the expiry,
+    /// clamped to at least one second so a zero or negative server value
+    /// cannot stamp an already-expired token; the scopes come from the
+    /// response; <paramref name="clientId"/> (when given) re-asserts the
+    /// owner the token was minted for.
+    /// </summary>
+    private TwitchTokenSet StampFromValidation(TwitchTokenSet token, TwitchTokenValidation validation, string? clientId = null) =>
+        token with
+        {
+            ClientId = clientId ?? token.ClientId,
+            ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
+            Scopes = validation.Scopes
+        };
+
+    /// <summary>
+    /// The validated-token commit, one owner: apply the state, persist, arm
+    /// the validation monitor. The user paths call it directly; the tick's
+    /// gated apply calls it under its still-current re-check, so the commit
+    /// sequence is spelled once.
+    /// </summary>
+    private void CommitValidatedToken(TwitchTokenSet token, TwitchTokenValidation validation, IModernWigiDashContext context)
+    {
+        ApplyValidatedState(token, validation);
+        _tokenStore.Save(token);
+        StartValidationMonitor(context);
     }
 
     private void SetFollowedChannels(IReadOnlyList<TwitchFollowedChannel> channels)
@@ -399,21 +407,12 @@ internal sealed class TwitchSession
             }
 
             validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
-            refreshed = refreshed with
-            {
-                ClientId = snapshot.ClientId,
-                ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
-                Scopes = validation.Scopes
-            };
+            refreshed = StampFromValidation(refreshed, validation, snapshot.ClientId);
             await ApplyIfStillCurrentAsync(snapshot, refreshed, validation, context, cancellationToken).ConfigureAwait(false);
             return true;
         }
 
-        TwitchTokenSet stamped = snapshot with
-        {
-            ExpiresAt = _timeProvider.GetUtcNow().AddSeconds(Math.Max(1, validation.ExpiresIn)),
-            Scopes = validation.Scopes
-        };
+        TwitchTokenSet stamped = StampFromValidation(snapshot, validation);
         await ApplyIfStillCurrentAsync(snapshot, stamped, validation, context, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -465,9 +464,7 @@ internal sealed class TwitchSession
         try
         {
             if (!TokenSnapshotIsCurrent(snapshot)) return;
-            ApplyValidatedState(token, validation);
-            _tokenStore.Save(token);
-            StartValidationMonitor(context);
+            CommitValidatedToken(token, validation, context);
         }
         finally
         {

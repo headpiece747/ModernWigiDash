@@ -207,19 +207,59 @@ public class TwitchSessionTests
     }
 
     [TestMethod]
-    public async Task ValidateTick_ValidToken_RestampsAndSaves()
+    public async Task ValidateTick_ValidToken_StampIsClockPlusExpiresIn()
     {
-        var (session, client, store, _) = CreateSession();
+        string storePath = Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin");
+        var store = new TwitchTokenStore(storePath);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
+        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", 3600, ["chat:read"]) };
+        var session = new TwitchSession(store, _ => client, clock);
         var context = new TestContext();
-        store.Save(Token(clientId: MachineClientId(), expiresAt: DateTimeOffset.UtcNow.AddSeconds(10)));
+        store.Save(Token(clientId: MachineClientId(), expiresAt: clock.GetUtcNow().AddSeconds(10)));
 
         bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
 
         Assert.IsTrue(kept, "A valid token keeps the monitor running");
         Assert.IsTrue(session.IsAuthenticated);
         Assert.IsTrue(client.ValidateCalls == 1);
-        Assert.IsTrue(store.Load()!.ExpiresAt > DateTimeOffset.UtcNow.AddSeconds(60),
-            "The tick re-stamps the expiry from the validation response");
+        Assert.AreEqual(clock.GetUtcNow().AddSeconds(3600), store.Load()!.ExpiresAt,
+            "The stamp is the clock's now plus the server's ExpiresIn");
+        CollectionAssert.AreEqual(new[] { "chat:read" }, store.Load()!.Scopes,
+            "The scopes come from the validation response");
+    }
+
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(-5)]
+    public async Task ValidateTick_NonPositiveExpiresIn_ClampsToOneSecond(int expiresIn)
+    {
+        string storePath = Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin");
+        var store = new TwitchTokenStore(storePath);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
+        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", expiresIn, []) };
+        var session = new TwitchSession(store, _ => client, clock);
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId()));
+
+        bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
+
+        Assert.IsTrue(kept);
+        Assert.AreEqual(clock.GetUtcNow().AddSeconds(1), store.Load()!.ExpiresAt,
+            "A zero or negative server ExpiresIn clamps to one second");
+    }
+
+    [TestMethod]
+    public async Task Login_PollTokenWithStaleClientId_StampReassertsTheResolvedClient()
+    {
+        var (session, client, store, _) = CreateSession();
+        var context = new TestContext();
+        client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
+        client.PollToken = Token(clientId: "stale-client-id");
+
+        await session.LoginAsync(TestClientId, context, CancellationToken.None);
+
+        Assert.AreEqual(TestClientId, store.Load()!.ClientId,
+            "The stamp re-asserts the client id the token was minted for");
     }
 
     [TestMethod]
