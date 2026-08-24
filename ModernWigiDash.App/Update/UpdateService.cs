@@ -52,11 +52,26 @@ internal sealed class UpdateService
         _currentVersion = currentVersion;
     }
 
-    private static bool DigestMatches(string actual, string expected)
-        => actual.Length == expected.Length
-           && CryptographicOperations.FixedTimeEquals(
-               System.Text.Encoding.ASCII.GetBytes(actual),
-               System.Text.Encoding.ASCII.GetBytes(expected));
+    // Compares the decoded raw digest bytes: Convert.FromHexString is
+    // case-insensitive, so a digest in any case of the same value matches
+    // (GitHub's asset digest field is lowercase today; the check must survive
+    // a digest source emitting other case). Non-hex input is a mismatch,
+    // never a throw: the caller's mismatch path logs and fails closed.
+    internal static bool DigestMatches(string actual, string expected)
+    {
+        byte[] actualBytes;
+        byte[] expectedBytes;
+        try
+        {
+            actualBytes = Convert.FromHexString(actual);
+            expectedBytes = Convert.FromHexString(expected);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
+    }
 
     private static Process? StartProcess(ProcessStartInfo psi) => Process.Start(psi);
 

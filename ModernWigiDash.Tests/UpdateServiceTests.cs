@@ -73,6 +73,32 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
+    public void DigestMatches_SameValueDifferentCase_ReturnsTrue()
+    {
+        string lower = Sha256Of("hello");
+        string upper = lower.ToUpperInvariant();
+
+        Assert.IsTrue(UpdateService.DigestMatches(lower, upper));
+        Assert.IsTrue(UpdateService.DigestMatches(upper, lower));
+    }
+
+    [TestMethod]
+    public void DigestMatches_DifferentDigest_ReturnsFalse()
+    {
+        Assert.IsFalse(UpdateService.DigestMatches(Sha256Of("hello"), Sha256Of("world")));
+    }
+
+    [TestMethod]
+    public void DigestMatches_NonHexInput_ReturnsFalse()
+    {
+        // A tampered stamp file or a non-hex expected digest is a mismatch,
+        // never a throw: the caller's mismatch path logs and fails closed.
+        Assert.IsFalse(UpdateService.DigestMatches(Sha256Of("hello"), "not-a-hex-digest"));
+        Assert.IsFalse(UpdateService.DigestMatches(Sha256Of("hello"), Sha256Of("hello")[..63]));
+        Assert.IsFalse(UpdateService.DigestMatches(Sha256Of("hello") + "00", Sha256Of("hello")));
+    }
+
+    [TestMethod]
     public void ExtractSlimZip_ReturnsExePath()
     {
         string dir = NewDir();
