@@ -23,7 +23,7 @@
     <PackageVersion Include="MSTest.TestAdapter" Version="4.3.3" />
     <PackageVersion Include="MSTest.TestFramework" Version="4.3.3" />
     <PackageVersion Include="NAudio.Wasapi" Version="3.0.1" />
-    <PackageVersion Include="Roslynator.Analyzers" Version="4.16.1">
+    <PackageVersion Include="Roslynator.Analyzers" Version="5.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageVersion>
