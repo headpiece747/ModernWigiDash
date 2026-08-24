@@ -7,3 +7,5 @@
 2026-08-23T19:53:29Z	b3be6d0	manual	ok	0	0	ok	1670	0	ok	n/a
 2026-08-23T21:27:09Z	24d30f8	arch pins + prose gate + gate guard	ok	0	0	ok	1678	0	ok	ok
 2026-08-23T22:38:21Z	91b5199	agent hygiene scanners adoption	ok	0	0	ok	1678	0	ok	ok
+2026-08-23T22:47:31Z	604603a	gate trail re-pin at 604603a (post-commit refresh)	ok	0	0	ok	1678	0	ok	ok
+2026-08-24T00:27:34Z	604603a	sweep fixes: updater hardening (host pin, digest prefix, cmd integrity stamp), arch pin upgrade, using removals, gate-script fixes	ok	0	0	ok	1682	0	ok	ok

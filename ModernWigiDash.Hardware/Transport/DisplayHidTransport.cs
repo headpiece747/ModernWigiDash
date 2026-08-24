@@ -4,7 +4,6 @@
 // </copyright>
 
 using LibUsbDotNet.LibUsb;
-using LibUsbDotNet.Main;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Runtime.InteropServices;

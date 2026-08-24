@@ -5,12 +5,16 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class UpdateCheckerTests
 {
+    // The fixtures use GitHub's real payload shape: the asset URLs live on
+    // github.com (the host pin) and the digests carry the sha256: prefix
+    // (the digest pin). The example.com / prefix-less fixtures are the
+    // rejected shapes, pinned by the *_ReturnsNull tests below.
     private const string LatestJson = """
     {
       "tag_name": "v0.5.0",
       "assets": [
-        { "name": "ModernWigiDash-v0.5.0-win-x64.zip", "browser_download_url": "https://example.com/full.zip", "digest": "aaa" },
-        { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://example.com/app.zip", "digest": "bbb" }
+        { "name": "ModernWigiDash-v0.5.0-win-x64.zip", "browser_download_url": "https://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/ModernWigiDash-v0.5.0-win-x64.zip", "digest": "sha256:aaa" },
+        { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/ModernWigiDash-v0.5.0-app-only.zip", "digest": "sha256:bbb" }
       ]
     }
     """;
@@ -22,7 +26,7 @@ public class UpdateCheckerTests
 
         Assert.IsNotNull(info);
         Assert.AreEqual("0.5.0", info.Version);
-        Assert.AreEqual("https://example.com/app.zip", info.ZipUrl, "must pick the app-only zip, never the full zip");
+        Assert.AreEqual("https://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/ModernWigiDash-v0.5.0-app-only.zip", info.ZipUrl, "must pick the app-only zip, never the full zip");
         Assert.AreEqual("bbb", info.Sha256);
     }
 
@@ -34,7 +38,7 @@ public class UpdateCheckerTests
         // on-device update loop failed on exactly this until the fix).
         const string prefixed = """
         { "tag_name": "v0.5.0", "assets": [
-            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://example.com/app.zip",
+            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/app.zip",
               "digest": "sha256:05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070" } ] }
         """;
 
@@ -105,5 +109,47 @@ public class UpdateCheckerTests
     public void ParseLatestRelease_NoAssets_ReturnsNull()
     {
         Assert.IsNull(UpdateChecker.ParseLatestRelease("""{ "tag_name": "v0.5.0" }""", new Version(0, 4, 1)));
+    }
+
+    [TestMethod]
+    public void ParseLatestRelease_UntrustedAssetHost_ReturnsNull()
+    {
+        // The digest is well formed; the host is not. The digest and the
+        // bytes come from the same payload, so only the host is independent
+        // evidence against a MITM-served release.
+        const string untrusted = """
+        { "tag_name": "v0.5.0", "assets": [
+            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://example.com/app.zip",
+              "digest": "sha256:05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070" } ] }
+        """;
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(untrusted, new Version(0, 4, 1)),
+            "a release payload served from a non-GitHub host must be refused");
+    }
+
+    [TestMethod]
+    public void ParseLatestRelease_NonHttpsAssetHost_ReturnsNull()
+    {
+        const string plainHttp = """
+        { "tag_name": "v0.5.0", "assets": [
+            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "http://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/app.zip",
+              "digest": "sha256:05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070" } ] }
+        """;
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(plainHttp, new Version(0, 4, 1)),
+            "asset downloads are https only");
+    }
+
+    [TestMethod]
+    public void ParseLatestRelease_PrefixLessDigest_ReturnsNull()
+    {
+        // A digest the payload does not name an algorithm for cannot be
+        // compared: GitHub always sends "sha256:<hex>", anything else is not
+        // a trusted release digest.
+        const string prefixless = """
+        { "tag_name": "v0.5.0", "assets": [
+            { "name": "ModernWigiDash-v0.5.0-app-only.zip", "browser_download_url": "https://github.com/headpiece747/ModernWigiDash/releases/download/v0.5.0/app.zip",
+              "digest": "05236ea7b79e5b4097c7223121f72bcf5576baf7a9f0c1a9d2f2d5a778360070" } ] }
+        """;
+        Assert.IsNull(UpdateChecker.ParseLatestRelease(prefixless, new Version(0, 4, 1)),
+            "a prefix-less digest is not a trusted release digest");
     }
 }

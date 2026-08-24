@@ -49,6 +49,14 @@ public class FrameTimeWidget : ModernWidgetBase
     private SKSize _memoSize;
     private FrameTimeDisplay? _memoDisplay;
 
+    // The truncated process name rides its own copy of the same key
+    // (snapshot reference, placement size): TruncateText allocates a fresh
+    // string per frame while the tracked view is shown, but the name and the
+    // width are stable between snapshots.
+    private FrameTimeSnapshotDto? _processTextSnapshot;
+    private SKSize _processTextSize;
+    private string? _processText;
+
     private FrameTimeDisplay BuildDisplay(FrameTimeSnapshotDto snapshot, SKSize size)
     {
         if (_memoDisplay is not null && ReferenceEquals(snapshot, _memoSnapshot) && _memoSize == size)
@@ -115,7 +123,15 @@ public class FrameTimeWidget : ModernWidgetBase
             float procSize = Math.Clamp((contentBottom - contentTop) * 0.08f, 10f, 15f);
             var processFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, procSize);
             _processPaint.Color = text.WithAlpha(180);
-            string process = TextRenderHelper.TruncateText(display.ProcessName, processFont, bounds.Width - pad * 2f);
+            if (_processText is null
+                || !ReferenceEquals(snapshot, _processTextSnapshot)
+                || _processTextSize != bounds.Size)
+            {
+                _processText = TextRenderHelper.TruncateText(display.ProcessName, processFont, bounds.Width - pad * 2f);
+                _processTextSnapshot = snapshot;
+                _processTextSize = bounds.Size;
+            }
+            string process = _processText;
             canvas.DrawTextWithFallback(process, bounds.Right - pad - FontHelper.MeasureTextWithFallback(process, processFont), contentTop + procSize, processFont, _processPaint);
             heroTop = contentTop + procSize + 6f;
         }

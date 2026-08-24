@@ -53,10 +53,31 @@ internal static class UpdateChecker
                 && name.EndsWith("-app-only.zip", StringComparison.OrdinalIgnoreCase)
                 && asset.TryGetProperty("browser_download_url", out var u))
             {
-                return u.GetString();
+                // The host trust rule for asset downloads: a release payload
+                // served from any host but GitHub's own is the MITM shape
+                // that would otherwise ship a self-consistent digest for a
+                // swapped zip (the digest and the bytes come from the same
+                // payload, so only the host is independent evidence).
+                string? url = u.GetString();
+                return IsTrustedAssetUrl(url) ? url : null;
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// The host trust rule for release asset downloads: only https URLs on
+    /// GitHub's own hosts (release asset downloads live on github.com and
+    /// redirect to objects.githubusercontent.com). Anything else is refused.
+    /// </summary>
+    internal static bool IsTrustedAssetUrl(string? url)
+    {
+        if (url is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)) return false;
+        return uri.Host is "github.com" or "objects.githubusercontent.com";
     }
 
     private static string? FindDigest(JsonElement release, string? url)
@@ -71,10 +92,15 @@ internal static class UpdateChecker
                 // the SHA-256 comparison uses.
                 string? raw = d.GetString();
                 if (raw is null) return null;
+                // The algorithm must be named by the payload: a digest whose
+                // algorithm we cannot trust is not a digest we can compare
+                // (GitHub always sends "sha256:<hex>"; a prefix-less or
+                // foreign-algorithm digest means the payload is not a trusted
+                // release digest, and the release is invalid).
                 const string prefix = "sha256:";
                 return raw.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
                     ? raw[prefix.Length..]
-                    : raw;
+                    : null;
             }
         }
         return null;

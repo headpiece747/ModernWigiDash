@@ -108,8 +108,8 @@ $proseExclusions = @(
     'docs/(superpowers|archive|reports)/',
     '\.opencode/(skills|agents|node_modules)/',
     '\.git/',
-    '/bin/',
-    '/obj/'
+    '(^|/)bin/',
+    '(^|/)obj/'
 )
 $proseExempt = 'found several Berlin'
 $proseHits = @()

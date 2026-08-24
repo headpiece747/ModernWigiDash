@@ -31,7 +31,7 @@ public class UpdateServiceTests
     {
         string json = """
         { "tag_name": "v1.1.0", "assets": [
-            { "name": "ModernWigiDash-v1.1.0-app-only.zip", "browser_download_url": "https://x/app.zip", "digest": "abc" } ] }
+            { "name": "ModernWigiDash-v1.1.0-app-only.zip", "browser_download_url": "https://github.com/headpiece747/ModernWigiDash/releases/download/v1.1.0/app.zip", "digest": "sha256:abc" } ] }
         """;
         var service = new UpdateService(
             downloadText: (_, _) => Task.FromResult<string?>(json),
@@ -252,9 +252,14 @@ public class UpdateServiceTests
         Directory.CreateDirectory(stageDir);
         // Production stages the cmd with {{VERSION}} already substituted
         // (WriteUpdaterCmd); LaunchUpdater resolves only {{RELAUNCH}}.
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+        // Production stamps the staged cmd's hash at staging
+        // (WriteUpdaterCmd); LaunchUpdater refuses a launch without a
+        // matching stamp.
         File.WriteAllText(
-            Path.Combine(stageDir, "apply-update.cmd"),
-            "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+            UpdateService.StagedCmdHashPath(stagedCmd),
+            UpdateService.ComputeSha256(stagedCmd));
 
         ProcessStartInfo? started = null;
         var service = new UpdateService(
@@ -302,6 +307,37 @@ public class UpdateServiceTests
         Assert.IsFalse(ok, "a vanished stage must fail the launch, not the UI thread");
         Assert.AreEqual(0, spawns);
         Assert.IsFalse(File.Exists(Path.Combine(dir, "apply-update-live.cmd")));
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_TamperedStagedCmd_ReturnsFalse()
+    {
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+        // A stamp that does not match the staged content: a local writer
+        // swapped the file between staging and launch.
+        File.WriteAllText(
+            UpdateService.StagedCmdHashPath(stagedCmd),
+            "0000000000000000000000000000000000000000000000000000000000000000");
+        int spawns = 0;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: _ =>
+            {
+                spawns++;
+                return null;
+            });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+        bool ok = service.LaunchUpdater(info, Path.Combine(Path.GetTempPath(), "wmd-install"));
+
+        Assert.IsFalse(ok, "a tampered staged cmd must fail the launch, not the UI thread");
+        Assert.AreEqual(0, spawns);
+        Assert.IsFalse(File.Exists(Path.Combine(dir, "apply-update-live.cmd")),
+            "no live cmd may be written from a tampered stage");
     }
 
     [TestMethod]

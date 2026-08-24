@@ -10,4 +10,4 @@
 
 # Git hooks must stay LF on disk: a CRLF line ending breaks the sh shebang
 # and the command lines (the hooks run under Git's bundled sh, not cmd).
-scripts/hooks/* text eol=lf
+scripts/hooks/** text eol=lf

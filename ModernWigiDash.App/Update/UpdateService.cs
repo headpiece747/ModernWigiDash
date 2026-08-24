@@ -62,6 +62,9 @@ internal sealed class UpdateService
 
     public string StagedCmdPath(UpdateInfo info) => Path.Combine(_updatesRoot, "staged", info.Version, "apply-update.cmd");
 
+    /// <summary>The integrity stamp beside the staged cmd (the SHA-256 LaunchUpdater re-verifies at launch).</summary>
+    public static string StagedCmdHashPath(string cmdPath) => cmdPath + ".sha256";
+
     /// <summary>The LocalAppData updates root every staged/download path lives under.</summary>
     public string UpdatesRoot => _updatesRoot;
 
@@ -160,6 +163,18 @@ internal sealed class UpdateService
             string relaunch = $"start \"\" \"{Path.Combine(installDir, "ModernWigiDash.App.exe")}\"";
 
             string body = File.ReadAllText(stagedCmd);
+            // Integrity check: the staged cmd must still match the hash
+            // WriteUpdaterCmd stamped at staging. A local writer that swaps
+            // the file between staging and launch is refused with a log line;
+            // the relaunch marker check below covers content that keeps the
+            // marker, this one covers any swap, marker or not.
+            string hashPath = StagedCmdHashPath(stagedCmd);
+            if (!File.Exists(hashPath)
+                || !DigestMatches(ComputeSha256(stagedCmd), File.ReadAllText(hashPath).Trim()))
+            {
+                FileLog.Write("[UPDATE] staged cmd failed the integrity check (missing or mismatched sha256 stamp); launch refused");
+                return false;
+            }
             string substituted = body.Replace("{{RELAUNCH}}", relaunch);
             if (substituted.Length == body.Length)
                 FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
@@ -234,6 +249,10 @@ internal sealed class UpdateService
         using var reader = new StreamReader(stream);
         string body = reader.ReadToEnd().Replace("{{VERSION}}", version);
         File.WriteAllText(path, body);
+        // Integrity stamp: LaunchUpdater re-verifies the staged cmd against
+        // this hash before launching, so a swap of the staged file between
+        // staging and launch is refused with a log line.
+        File.WriteAllText(StagedCmdHashPath(path), ComputeSha256(path));
     }
 
     private static async Task<string?> DownloadTextAsync(string url, string? userAgent)

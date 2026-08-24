@@ -1,10 +1,7 @@
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using System.Xml.Linq;
 using ModernWigiDash.Hardware.Transport;
 
@@ -212,8 +209,11 @@ public sealed class ArchitectureTests
             "ModernWidgetBase.cs",
             "IWidgetActionInvoker.cs",
         };
+        // The declaration is anchored at column zero on purpose: the pin is
+        // about top-level file contracts, and a nested (indented) type inside
+        // a contract file must not count as a second declaration.
         var typeDecl = new Regex(
-            @"^\s*(?:public\s+|internal\s+|sealed\s+|static\s+|abstract\s+|readonly\s+|partial\s+)*(?:class|interface|record|struct|enum)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)",
+            @"^(?:(?:public|internal|sealed|static|abstract|readonly|partial)\s+)*(?:class|interface|record|struct|enum)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)",
             RegexOptions.Multiline | RegexOptions.ExplicitCapture);
 
         var violations = new List<string>();
@@ -248,13 +248,33 @@ public sealed class ArchitectureTests
     [TestMethod]
     public void HouseRules_NoAdHocHttpClientInSrc()
     {
-        var allowed = Path.Combine("ModernWigiDash.Widgets", "PriceFeedManager.cs").Replace('\\', '/');
-        var violations = ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
-            .Where(v => !v.Replace('\\', '/').Contains(allowed))
+        // The only allowed HttpClient constructions in src are the named
+        // static long-lived clients: the price feeds' shared process-wide
+        // client and the three singleton service clients (the updater, the
+        // weather fetcher, the Twitch API client). Ad-hoc construction
+        // (per-request, per-method) is the socket-exhaustion trap this pin
+        // catches; both the explicit form (new HttpClient()) and the
+        // target-typed form (HttpClient f = new()) must match, so a new
+        // construction cannot hide behind either style.
+        var allowed = new[]
+        {
+            "ModernWigiDash.App/Update/UpdateService.cs",
+            "ModernWigiDash.Widgets/PriceFeedManager.cs",
+            "ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs",
+            "ModernWigiDash.Widgets/WeatherClient.cs",
+        };
+        var hits = ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
+            .Concat(ScanSrc(new Regex(@"\bHttpClient\b[^;=\n]*=\s*new\s*\(")))
+            .Select(v => v.Split(':', 2)[0].Replace('\\', '/'))
             .ToList();
-        Assert.AreEqual(0, violations.Count,
-            "ad-hoc HttpClient construction: " + string.Join("; ", violations)
-            + ". dotnet-rules 5: the one process-wide HttpClient lives in PriceFeedManager; every other HTTP consumer receives it through an injected seam (tests inject a stub handler).");
+        var disallowed = hits.Where(f => !allowed.Contains(f)).Distinct().ToList();
+        Assert.AreEqual(0, disallowed.Count,
+            "ad-hoc HttpClient construction: " + string.Join("; ", disallowed)
+            + ". dotnet-rules 5: the only allowed HttpClient constructions are the named static long-lived clients in the allow-list above; every other HTTP consumer receives the client through an injected seam (tests inject a stub handler).");
+        var drift = hits.Distinct().Except(allowed).Concat(allowed.Except(hits.Distinct())).ToList();
+        Assert.AreEqual(0, drift.Count,
+            "HttpClient allow-list drift: " + string.Join("; ", drift.OrderBy(f => f))
+            + ". Each allowed site must construct exactly one long-lived client and no other file may; a new construction site or a retired one is a deliberate allow-list edit (dotnet-rules 5).");
     }
 
     [TestMethod]

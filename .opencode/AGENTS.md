@@ -151,7 +151,7 @@ session death is survivable.
   appends one trail row per run to `.audit/gates.tsv`):
   `scripts\run-gates.ps1`, use it for full gate runs instead of the three
   commands above. The prose stage is the 2026-08-23 em-dash sweep's scope,
-  kept honest by the gate: no em dash (U+2014) in living prose (tracked `.md`
+  kept honest by the gate: no em dash (U+2014) in living prose (`.md`
   outside `.desloppify/`, `.superpowers/`, `docs/(superpowers|archive|reports)/`,
   `.opencode/(skills|agents|node_modules)/`, `.git/`, `bin/`, `obj/`; the one
   exempt line is the ADR-0009 quoted hint example).

@@ -70,6 +70,16 @@ $knownExtensions = @(
     '.ttf', '.png', '.gif', '.jpg'
 )
 
+# Known bare file names: extension-less files the docs can reference (the
+# git hooks). Without this list a `scripts/hooks/pre-commit` span looks
+# like a token and escapes the staleness check.
+$knownBareFilenames = @(
+    'pre-commit', 'pre-push', 'post-commit', 'post-checkout', 'post-merge',
+    'pre-receive', 'post-receive', 'update', 'commit-msg',
+    'prepare-commit-msg', 'pre-applypatch', 'post-applypatch',
+    'pre-merge-commit', 'push-to-checkout'
+)
+
 function Test-PathLike([string]$span) {
     if ($span -match '[<>*(){}|? ]') { return $false }
     if ($span -match '^https?://') { return $false }
@@ -86,9 +96,12 @@ function Test-PathLike([string]$span) {
         $hasKnownExt = ($knownExtensions -contains $ext) -and ($base.Length -gt 0)
     }
     if ($span -match '[/\\]') {
-        # A path separator: the last segment must name a file (known
-        # extension) or the span must be a directory reference.
-        return $hasKnownExt -or $span.EndsWith('/')
+        # A path separator: the last segment must name a file (a known
+        # extension or a known bare file name like a git hook) or the
+        # span must be a directory reference.
+        return $hasKnownExt
+            -or ($knownBareFilenames -contains $lastSeg.ToLowerInvariant())
+            -or $span.EndsWith('/')
     }
     # File-only name. Manual extension split on purpose:
     # [System.IO.Path]::GetExtension throws on prose characters that are

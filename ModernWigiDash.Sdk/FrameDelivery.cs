@@ -39,6 +39,12 @@ public sealed class FrameDelivery : IDisposable
     private readonly Task _senderTask;
 
     private readonly Func<byte[], FrameSendResult>? _send;
+
+    // Hoisted drain-release delegate: the sender loop drains the channel on
+    // every read (~30/s), so a per-drain closure would be a per-frame
+    // allocation. Assigned in the ctor (a field initializer cannot reference
+    // the instance method it binds).
+    private readonly Action<FrameSlot> _releaseDroppedSlot;
     private DateTimeOffset _lastSendStart;
     private int _sendInFlight;
     private long _sent;
@@ -102,6 +108,7 @@ public sealed class FrameDelivery : IDisposable
         _isReady = isReady;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _send = send;
+        _releaseDroppedSlot = slot => ReleaseSlot(slot, dropped: true);
         // The DiagLog write seam is the injected log callback with a
         // null-tolerant no-op â€” deliberately NOT DiagLog's FileLog fallback, so
         // a delivery without a log sink stays silent.
@@ -266,7 +273,7 @@ public sealed class FrameDelivery : IDisposable
             {
                 FrameSlot latest = ChannelFrameCoalescer.DrainToLatest(
                     _channel.Reader,
-                    slot => ReleaseSlot(slot, dropped: true));
+                    _releaseDroppedSlot);
                 if (latest.Buffer is null) continue;
 
                 // Pace from the START of the previous send: the interval caps
