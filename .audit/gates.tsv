@@ -9,3 +9,4 @@
 2026-08-23T22:38:21Z	91b5199	agent hygiene scanners adoption	ok	0	0	ok	1678	0	ok	ok
 2026-08-23T22:47:31Z	604603a	gate trail re-pin at 604603a (post-commit refresh)	ok	0	0	ok	1678	0	ok	ok
 2026-08-24T00:27:34Z	604603a	sweep fixes: updater hardening (host pin, digest prefix, cmd integrity stamp), arch pin upgrade, using removals, gate-script fixes	ok	0	0	ok	1682	0	ok	ok
+2026-08-24T00:29:39Z	72cbd5d	agnix frontmatter: docs/agents agent files gain YAML frontmatter	ok	0	0	ok	1682	0	ok	ok

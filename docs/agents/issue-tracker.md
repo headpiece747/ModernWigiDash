@@ -1,3 +1,7 @@
+---
+name: issue-tracker
+description: This repo's issue tracker conventions (GitHub via the gh CLI)
+---
 # Issue tracker: GitHub
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
