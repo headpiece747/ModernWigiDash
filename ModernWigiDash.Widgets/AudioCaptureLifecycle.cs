@@ -95,10 +95,11 @@ internal sealed class AudioCaptureLifecycle : IDisposable
         }
         catch (Exception ex)
         {
-            // A half-opened source is disposed here (the _source slot is
-            // empty while !capturing, so disposing it would be a no-op that
-            // leaks the device handle); the error is logged and the next
-            // render tick retries the start.
+            // The adapter's Start releases its own half-opened capture on a failed
+            // start, so this dispose is the belt-and-braces for the source
+            // object itself (a failing source may fail to dispose; that is
+            // swallowed below); the error is logged and the next render tick
+            // retries the start.
             try
             {
                 source?.Dispose();

@@ -377,7 +377,14 @@ internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
 
     public IMediaSessionSourceSession? GetCurrentSession() => Current;
 
-    public IReadOnlyList<IMediaSessionSourceSession> GetSessions() => Sessions;
+    /// <summary>When set, GetSessions() hands back a fresh wrapper per session
+    /// per call (the production WinRT seam's shape: a new adapter, each
+    /// subscribing to the session's events). Null keeps the held instances
+    /// (the in-memory seam's shape).</summary>
+    public Func<StubMediaSession, IMediaSessionSourceSession>? FreshWrapperFor { get; set; }
+
+    public IReadOnlyList<IMediaSessionSourceSession> GetSessions()
+        => FreshWrapperFor is null ? Sessions : Sessions.Select(FreshWrapperFor).ToList();
 
     public void RaiseCurrentSessionChanged() => _currentSessionChanged?.Invoke();
 
@@ -505,6 +512,67 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
     public void RaisePlaybackInfoChanged() => _playbackInfoChanged?.Invoke();
 
     public void RaiseTimelinePropertiesChanged() => _timelinePropertiesChanged?.Invoke();
+}
+
+/// <summary>
+/// A disposable wrapper around a <see cref="StubMediaSession"/> that shares
+/// the wrapped session's identity, modeling the production WinRT seam: every
+/// GetSessions() call builds a fresh adapter per session (each subscribing to
+/// the session's events), so the held adapter and the returned wrappers are
+/// different instances for the same session. The monitor's CycleSession
+/// fresh-wrapper disposal is pinned against this shape.
+/// </summary>
+internal sealed class FreshSessionWrapper : IMediaSessionSourceSession
+{
+    private readonly StubMediaSession _inner;
+
+    public FreshSessionWrapper(StubMediaSession inner) => _inner = inner;
+
+    public object Identity => _inner.Identity;
+
+    public string SourceAppUserModelId => _inner.SourceAppUserModelId;
+
+    public int DisposalCount { get; private set; }
+
+    public void Dispose() => DisposalCount++;
+
+    public event Action? MediaPropertiesChanged
+    {
+        add => _inner.MediaPropertiesChanged += value;
+        remove => _inner.MediaPropertiesChanged -= value;
+    }
+
+    public event Action? PlaybackInfoChanged
+    {
+        add => _inner.PlaybackInfoChanged += value;
+        remove => _inner.PlaybackInfoChanged -= value;
+    }
+
+    public event Action? TimelinePropertiesChanged
+    {
+        add => _inner.TimelinePropertiesChanged += value;
+        remove => _inner.TimelinePropertiesChanged -= value;
+    }
+
+    public Task<MediaPropertiesData?> TryGetMediaPropertiesAsync() => _inner.TryGetMediaPropertiesAsync();
+
+    public PlaybackInfoData? GetPlaybackInfo() => _inner.GetPlaybackInfo();
+
+    public TimelinePropertiesData? GetTimelineProperties() => _inner.GetTimelineProperties();
+
+    public Task<bool> TryPlayAsync() => _inner.TryPlayAsync();
+
+    public Task<bool> TryPauseAsync() => _inner.TryPauseAsync();
+
+    public Task<bool> TrySkipNextAsync() => _inner.TrySkipNextAsync();
+
+    public Task<bool> TrySkipPreviousAsync() => _inner.TrySkipPreviousAsync();
+
+    public Task<bool> TryChangeShuffleActiveAsync(bool shuffle) => _inner.TryChangeShuffleActiveAsync(shuffle);
+
+    public Task<bool> TryChangeAutoRepeatModeAsync(MediaRepeatMode mode) => _inner.TryChangeAutoRepeatModeAsync(mode);
+
+    public Task<bool> TryChangePlaybackPositionAsync(long positionTicks) => _inner.TryChangePlaybackPositionAsync(positionTicks);
 }
 
 /// <summary>

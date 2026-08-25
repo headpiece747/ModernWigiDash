@@ -197,8 +197,9 @@ None of the new modules appears in the high-complexity set.
 
 ## Note
 
-The branch is 1 commit ahead of origin/master (the skills.sh registry
-commit, 8e4471a) and is not pushed.
+At the time of the sweep, the branch was 1 commit ahead of origin/master
+(the skills.sh registry commit, 8e4471a) and not pushed. The state after
+the fix wave is recorded in the Resolution and Review follow-up sections.
 
 ## Resolution (2026-08-25, all findings fixed on master)
 
@@ -250,5 +251,22 @@ payload shrink re-based the two test pins on Current plus an event
 counter, keeping the same guarantees (a key change reloads and raises; a
 late stale load is processed but never replaces the published artwork).
 
-Branch state after resolution: 13 commits ahead of origin/master
-(8e4471a), not pushed.
+Branch state: the resolution wave was pushed (15 commits through
+3e69fbf); the review follow-up below is its final commit.
+
+## Review follow-up (2026-08-25, post-push)
+
+The code-reviewer pass over the pushed range (8e4471a..3e69fbf) found
+one residual leak leg the wave's own pin could not represent: the stub
+seam hands back the same instances, so the fresh-wrapper shape was
+untestable. CycleSession excluded the departing session's fresh
+wrapper on the premise that AttachSession releases it, but the attach
+releases only the previously held adapter, so on the production WinRT
+seam (a fresh adapter per session per GetSessions() call) the
+departing wrapper, with its three live subscriptions, stayed rooted
+per badge tap. The loop now disposes every fresh wrapper that is
+neither the arriving one nor the held instance the attach releases
+(both seams dispose each wrapper exactly once), pinned by a
+FreshSessionWrapper double plus the manager's FreshWrapperFor seam
+knob; the AudioCaptureLifecycle comment that still described the
+pre-a4e501e half-opened-capture leak was updated in the same commit.

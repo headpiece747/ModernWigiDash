@@ -101,11 +101,16 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
         int nextIdx = (idx + 1) % sessions.Count;
         // GetSessions() wraps every session in a fresh subscription (the
-        // WinRT seam); release the ones that are neither the one being kept
-        // nor the one AttachSession releases, so they do not accumulate.
+        // WinRT seam builds one adapter per session per call). AttachSession
+        // releases only the PREVIOUSLY HELD adapter, so the departing
+        // session's fresh wrapper (sessions[idx]) would otherwise stay
+        // rooted with its live subscriptions: dispose every fresh wrapper
+        // that is neither the arriving one nor the held instance the
+        // attach releases.
+        var old = _session;
         for (int i = 0; i < sessions.Count; i++)
         {
-            if (i != nextIdx && i != idx) sessions[i].Dispose();
+            if (i != nextIdx && !ReferenceEquals(sessions[i], old)) sessions[i].Dispose();
         }
         AttachSession(sessions[nextIdx]);
     }

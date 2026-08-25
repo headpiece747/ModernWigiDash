@@ -65,3 +65,6 @@
 2026-08-25T13:06:48Z	8c1fb94	refactor trusted uri composite gate	ok	0	0	ok	1810	0	ok	ok
 2026-08-25T13:13:39Z	bf100e4	chore dead code sweep	ok	0	0	ok	1810	0	ok	ok
 2026-08-25T13:15:49Z	e445f87	docs sweep report resolution	ok	0	0	ok	1810	0	ok	ok
+2026-08-25T13:37:19Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	FAIL	1810	1	SKIP	SKIP
+2026-08-25T13:39:04Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	ok	1811	0	ok	ok
+2026-08-25T13:40:51Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	ok	1811	0	ok	ok

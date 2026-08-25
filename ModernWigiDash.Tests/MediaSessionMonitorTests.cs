@@ -401,6 +401,41 @@ public class MediaSessionMonitorTests
     }
 
     [TestMethod]
+    public async Task CycleSession_FreshWrapperSeam_DisposesTheDepartingWrapper()
+    {
+        var a = CreateSession("a.exe", "Track A");
+        var b = CreateSession("b.exe", "Track B");
+        var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a, b] };
+        List<FreshSessionWrapper> wrappers = [];
+        // The production WinRT seam builds a fresh adapter per session per
+        // GetSessions() call: model it so the held adapter and the returned
+        // wrappers are different instances for the same session (the shape
+        // the same-instance stub cannot represent).
+        manager.FreshWrapperFor = s =>
+        {
+            var wrapper = new FreshSessionWrapper(s);
+            wrappers.Add(wrapper);
+            return wrapper;
+        };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.AreEqual(0, wrappers.Count, "init attaches through GetCurrentSession, not the cycle's fresh wrappers");
+
+        monitor.CycleSession();
+
+        // Advancing to b: the fresh wrapper of the departing session a must
+        // be released (a cycle that only releases what AttachSession releases
+        // would leave it rooted with live subscriptions), the arriving
+        // wrapper is kept, and the held adapter is released exactly once.
+        Assert.AreEqual(2, wrappers.Count);
+        Assert.AreEqual(1, wrappers[0].DisposalCount, "the departing session's fresh wrapper is disposed by the cycle");
+        Assert.AreEqual(0, wrappers[1].DisposalCount, "the arriving session's fresh wrapper is held, not disposed");
+        Assert.AreEqual(1, a.DisposalCount, "the held adapter is released by the attach, not double-disposed");
+        Assert.AreEqual(1, b.MediaPropertiesSubscriptionCount, "the monitor attached the arriving wrapper's events");
+        Assert.AreEqual(0, a.MediaPropertiesSubscriptionCount, "the monitor detached the released adapter's events");
+    }
+
+    [TestMethod]
     public async Task SlowRefresh_CompletingAfterNewerRefresh_DoesNotOverwriteSnapshot()
     {
         var session = CreateSession("radio.exe", "Initial");
