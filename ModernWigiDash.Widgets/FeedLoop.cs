@@ -60,6 +60,12 @@ internal sealed class FeedLoop : IDisposable
     private readonly Action<Exception>? _onError;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly CancellationTokenSource _cts = new();
+    // Start and Dispose race on the same key (a balanced subscribe/unsubscribe
+    // pair on racing threads): the gate serializes the task publication
+    // against the dispose, so Start can never read _cts.Token after Dispose
+    // has disposed the source, and a Start landing after the dispose is a
+    // no-op instead of a leaked loop.
+    private readonly Lock _gate = new();
     private Task? _task;
     private int _disposed;
 
@@ -105,8 +111,11 @@ internal sealed class FeedLoop : IDisposable
     /// sockets.</summary>
     public void Start()
     {
-        if (_task != null) return;
-        _task = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
+        lock (_gate)
+        {
+            if (_disposed != 0 || _task != null) return;
+            _task = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
+        }
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -160,16 +169,21 @@ internal sealed class FeedLoop : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Task? task;
+        lock (_gate)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        _cts.Cancel();
+            _cts.Cancel();
+            task = _task;
+        }
         Current?.Abort();
         try
         {
             // Bounded wait for the loop task to unwind; the timeout is the
             // cancellation, so opt out of token-based cancellation explicitly.
             // Normally fast: Abort unblocks the in-flight receive immediately.
-            _task?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
+            task?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
         }
         catch
         {

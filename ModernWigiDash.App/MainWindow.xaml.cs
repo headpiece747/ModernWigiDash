@@ -382,11 +382,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
             // runs — the sequence is assertable against the real list.
             Closed += (s, e) =>
             {
-                // The teardown sequence begins: OCEs raised by the disposes
-                // below are expected and benign (see
-                // App.DispatcherUnhandledException).
+                // The teardown sequence begins: a throwing step is isolated
+                // (one [TEARDOWN] line, the plan continues), so a long-lived
+                // host never inherits the modules the aborted tail would
+                // have disposed, and the display-standby last resort runs
+                // no matter what.
                 App.IsClosing = true;
-                new ShutdownOrchestrator(BuildTeardownPlan()).Run();
+                new ShutdownOrchestrator(BuildTeardownPlan(), Log).Run();
             };
         }),
 

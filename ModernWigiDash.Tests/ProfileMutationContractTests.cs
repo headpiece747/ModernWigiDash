@@ -143,7 +143,11 @@ public class ProfileMutationContractTests
         }
         finally
         {
-            Host.Invoke(() => { window.Close(); return null; });
+            // A throwing Close must fail the test, not leak the window: the
+            // leaked window's live telemetry loops would keep writing the
+            // shared sensor store for the rest of the process.
+            var (_, closeError) = Host.Invoke(() => { window.Close(); return null; });
+            Assert.IsNull(closeError, closeError?.ToString());
         }
     }
 

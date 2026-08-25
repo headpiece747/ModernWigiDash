@@ -226,11 +226,16 @@ internal sealed class TwitchChatConnection : IAsyncDisposable
                     var (newStatus, changed) = TwitchChatStatusPolicy.StatusFromNotice(message.Text, _state.Status);
                     if (changed)
                     {
-                        // SetState requests the repaint every transition
-                        // (the login-failed state included, so the header
-                        // updates instead of waiting for the next tick).
-                        SetState(newStatus == ChatStatus.Connected ? TwitchChatPresentation.ChatState.Live() : TwitchChatPresentation.ChatState.LoginFailed());
+                        // The error line lands BEFORE the state publish: the
+                        // state observation is the sync point (a test or the
+                        // widget sees the transition through the changed bag
+                        // and then expects the log entry), so a loop-thread
+                        // preemption between the two would drop the log from
+                        // the observer's view. Same-thread program order +
+                        // the queue's thread safety makes log-then-state the
+                        // only order in which the observation is safe.
                         if (newStatus != ChatStatus.Connected) _logError?.Invoke("Twitch login failed: " + message.Text, null);
+                        SetState(newStatus == ChatStatus.Connected ? TwitchChatPresentation.ChatState.Live() : TwitchChatPresentation.ChatState.LoginFailed());
                     }
                     else
                     {

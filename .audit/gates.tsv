@@ -68,3 +68,4 @@
 2026-08-25T13:37:19Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	FAIL	1810	1	SKIP	SKIP
 2026-08-25T13:39:04Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	ok	1811	0	ok	ok
 2026-08-25T13:40:51Z	3e69fbf	fix cycle session fresh wrapper leak	ok	0	0	ok	1811	0	ok	ok
+2026-08-25T15:52:31Z	fe17bf5	flake-fix-ensureapp-orphan-window	ok	0	0	ok	1812	0	ok	ok

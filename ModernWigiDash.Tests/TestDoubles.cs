@@ -661,7 +661,7 @@ internal sealed class StaHost
                 _work = null;
                 try
                 {
-                    EnsureApp(); // Cleanup detaches the App between tests — recreate if needed
+                    EnsureApp(); // one fresh App per invoke (see EnsureApp)
                     _result = work();
                     _workError = null;
                 }
@@ -677,16 +677,32 @@ internal sealed class StaHost
 
     private void EnsureApp()
     {
+        // One fresh App per invoke, never a reused Application.Current. The
+        // process-wide Application instance and its Resources dictionary must
+        // not be shared across invokes or classes: a reused App's Clear +
+        // re-initialize enumerates a dictionary other threads can still
+        // mutate (WPF-internal resource work from a live window, another
+        // class's theme apply), and "Collection was modified" mid-Clear used
+        // to abort the invoke BEFORE the caller's window.Close — leaking the
+        // window with its live engine and telemetry loops. A fresh App owns
+        // an empty dictionary only its creating thread touches.
         // `new App()` does not load App.xaml — the generated Main calls
         // InitializeComponent separately. Without it, Application resources
         // (e.g. the window's PrimaryFont StaticResource) are missing.
-        var app = Application.Current as AppClass;
-        if (app is null)
-        {
-            app = new AppClass();
-        }
-        app.Resources.Clear(); // a reused App (ThemeManagerTests) only holds theme keys
+        ResetApplicationState();
+        var app = new AppClass();
         app.InitializeComponent();
+        // The Application constructor queues DoStartup as a dispatcher
+        // operation; any later pump on this thread (a nested ShowDialog, a
+        // Dispatcher.Run) runs it and would construct + show the StartupUri
+        // window — a production MainWindow with a real USB engine and
+        // telemetry loops, which no test ever closes. The StartupUri
+        // property setter rejects null, so the BAML-set value is cleared
+        // through the private backing field DoStartup reads: window-less
+        // DoStartup (OnStartup still runs — the theme apply, on this thread).
+        var startupUriField = typeof(Application).GetField("_startupUri", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException("Application._startupUri field not found (WPF internal changed; the test-host orphan-window guard is off)");
+        startupUriField.SetValue(app, null);
     }
 
     /// <summary>
