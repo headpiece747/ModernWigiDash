@@ -1,6 +1,3 @@
-using Windows.Media;
-using Windows.Media.Control;
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -129,8 +126,8 @@ public class NowPlayingPresentationTests
     public void IsIdle_NoSnapshotOrClosedOrStoppedSession_ReadsIdle()
     {
         Assert.IsTrue(NowPlayingPresentation.IsIdle(null), "no session at all is the idle panel");
-        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed)));
-        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped)));
+        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Closed)));
+        Assert.IsTrue(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Stopped)));
     }
 
     [TestMethod]
@@ -138,16 +135,16 @@ public class NowPlayingPresentationTests
     {
         // The idle rule excludes exactly Closed and Stopped; every other
         // session state draws the media view.
-        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)));
-        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused)));
-        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Opened)));
-        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Changing)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Playing)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Paused)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Opened)));
+        Assert.IsFalse(NowPlayingPresentation.IsIdle(SnapshotWith(MediaPlaybackStatus.Changing)));
     }
 
     [TestMethod]
     public void CanSeekNow_SeekableWithPositiveDuration_AllowsTheSeekTap()
     {
-        var snap = SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+        var snap = SnapshotWith(MediaPlaybackStatus.Playing);
         snap.CanSeek = true;
 
         Assert.IsTrue(NowPlayingPresentation.CanSeekNow(snap));
@@ -156,7 +153,7 @@ public class NowPlayingPresentationTests
     [TestMethod]
     public void CanSeekNow_NotSeekableOrZeroDuration_VetoesTheSeekTap()
     {
-        var snap = SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+        var snap = SnapshotWith(MediaPlaybackStatus.Playing);
         snap.CanSeek = true;
         snap.Duration = TimeSpan.Zero;
         Assert.IsFalse(NowPlayingPresentation.CanSeekNow(snap), "a zero-duration track must not seek to a single point");
@@ -177,24 +174,23 @@ public class NowPlayingPresentationTests
     [TestMethod]
     public void NextRepeatMode_CyclesNoneListTrackAndWraps()
     {
-        // The tap handler walks None -> List -> Track -> None; the cycle is a
+        // The tap policy walks None -> List -> Track -> None; the cycle is a
         // display decision, assertable here without a widget or SMTC session.
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.List, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.None));
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.Track, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.List));
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None, NowPlayingPresentation.NextRepeatMode(MediaPlaybackAutoRepeatMode.Track));
+        Assert.AreEqual(MediaRepeatMode.List, NowPlayingPresentation.NextRepeatMode(MediaRepeatMode.None));
+        Assert.AreEqual(MediaRepeatMode.Track, NowPlayingPresentation.NextRepeatMode(MediaRepeatMode.List));
+        Assert.AreEqual(MediaRepeatMode.None, NowPlayingPresentation.NextRepeatMode(MediaRepeatMode.Track));
         // The cycle must close: three steps from None land back on None.
-        MediaPlaybackAutoRepeatMode current = MediaPlaybackAutoRepeatMode.None;
+        MediaRepeatMode current = MediaRepeatMode.None;
         for (int i = 0; i < 3; i++)
         {
             current = NowPlayingPresentation.NextRepeatMode(current);
         }
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None, current, "the cycle must wrap to its start");
+        Assert.AreEqual(MediaRepeatMode.None, current, "the cycle must wrap to its start");
 
-        // A value outside the projection's declared set (None=0, Track=1,
-        // List=2; the OS can report values the compile-time projection
-        // does not name) degrades to None via the catch-all arm.
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.None,
-            NowPlayingPresentation.NextRepeatMode((MediaPlaybackAutoRepeatMode)3),
+        // An OS value the projection does not name (the seam's Unknown)
+        // degrades to None via the catch-all arm.
+        Assert.AreEqual(MediaRepeatMode.None,
+            NowPlayingPresentation.NextRepeatMode(MediaRepeatMode.Unknown),
             "an out-of-cycle mode must degrade to the cycle's start");
     }
 
@@ -207,7 +203,7 @@ public class NowPlayingPresentationTests
             Position = TimeSpan.FromSeconds(30),
             Duration = TimeSpan.FromSeconds(60),
             LastUpdated = lastUpdated,
-            Status = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+            Status = MediaPlaybackStatus.Playing
         };
 
         double pos = NowPlayingPresentation.ExtrapolatedPosition(snap, lastUpdated.AddSeconds(5));
@@ -224,7 +220,7 @@ public class NowPlayingPresentationTests
             Position = TimeSpan.FromSeconds(30),
             Duration = TimeSpan.FromSeconds(60),
             LastUpdated = lastUpdated,
-            Status = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused
+            Status = MediaPlaybackStatus.Paused
         };
 
         double pos = NowPlayingPresentation.ExtrapolatedPosition(snap, lastUpdated.AddSeconds(5));
@@ -232,7 +228,7 @@ public class NowPlayingPresentationTests
         Assert.AreEqual(30.0, pos, 0.001, "a paused snapshot must not advance between refreshes");
     }
 
-    private static MediaSnapshot SnapshotWith(GlobalSystemMediaTransportControlsSessionPlaybackStatus status)
+    private static MediaSnapshot SnapshotWith(MediaPlaybackStatus status)
         => new()
         {
             Status = status,

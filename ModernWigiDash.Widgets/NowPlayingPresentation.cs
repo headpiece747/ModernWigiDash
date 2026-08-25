@@ -1,14 +1,18 @@
 using System.Diagnostics.CodeAnalysis;
-using Windows.Media;
-using Windows.Media.Control;
 
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Pure display rules for the Now Playing widget: every string and ratio the
 /// render methods lay out — the meta line, the time format, the friendly app
-/// name, the progress and seek ratios, the playback-rate text. Assertable
-/// without WinRT or a canvas; the widget's draw methods are thin adapters.
+/// name, the progress and seek ratios, the playback-rate text. The only media
+/// state it reads is the seam's neutral vocabulary
+/// (<see cref="MediaPlaybackStatus"/> / <see cref="MediaRepeatMode"/>), so it
+/// is truly WinRT-free and assertable without a canvas; the widget's draw
+/// methods are thin adapters. Also owns the two rules the monitor's tap
+/// policy applies to its live state: the repeat cycle
+/// (<see cref="NextRepeatMode"/>) and the seek enablement
+/// (<see cref="CanSeekNow"/>).
 /// </summary>
 public static class NowPlayingPresentation
 {
@@ -120,8 +124,8 @@ public static class NowPlayingPresentation
     /// </summary>
     public static bool IsIdle([NotNullWhen(false)] MediaSnapshot? snap)
         => snap is null
-            || snap.Status is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed
-            or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped;
+            || snap.Status is MediaPlaybackStatus.Closed
+            or MediaPlaybackStatus.Stopped;
 
     /// <summary>Clamped position/duration ratio; zero when the duration is unknown.</summary>
     public static double ProgressRatio(double positionSeconds, double durationSeconds)
@@ -144,17 +148,19 @@ public static class NowPlayingPresentation
         => Math.Abs(rate - 1.0) > 0.001 ? $"{DisplayFormat.Value(rate, "0.0")}×" : null;
 
     /// <summary>
-    /// The repeat-mode cycle the tap handler walks: None → List → Track →
-    /// None. Any mode outside the named two degrades to None, so a
-    /// hand-edited or unknown state lands on the cycle's start. Assertable
-    /// here without a widget or an SMTC session.
+    /// The repeat-mode cycle the tap policy walks: None → List → Track →
+    /// None. Any mode outside the named two (including the seam's
+    /// <c>Unknown</c>) degrades to None, so an OS value the projection does
+    /// not name lands on the cycle's start. One spelling, owned here: the
+    /// monitor's tap policy applies it to its own live repeat state.
+    /// Assertable here without a widget or an SMTC session.
     /// </summary>
-    public static MediaPlaybackAutoRepeatMode NextRepeatMode(MediaPlaybackAutoRepeatMode current)
+    public static MediaRepeatMode NextRepeatMode(MediaRepeatMode current)
         => current switch
         {
-            MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
-            MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
-            _ => MediaPlaybackAutoRepeatMode.None
+            MediaRepeatMode.None => MediaRepeatMode.List,
+            MediaRepeatMode.List => MediaRepeatMode.Track,
+            _ => MediaRepeatMode.None
         };
 
     /// <summary>

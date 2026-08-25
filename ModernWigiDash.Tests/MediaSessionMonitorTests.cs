@@ -1,6 +1,3 @@
-using Windows.Media;
-using Windows.Media.Control;
-
 namespace ModernWigiDash.Tests;
 
 [TestClass]
@@ -14,9 +11,9 @@ public class MediaSessionMonitorTests
             Properties = new MediaPropertiesData { Title = title, Artist = "Artist", AlbumTitle = "Album" },
             PlaybackInfo = new PlaybackInfoData
             {
-                PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
+                PlaybackStatus = MediaPlaybackStatus.Playing,
                 IsShuffleActive = true,
-                AutoRepeatMode = MediaPlaybackAutoRepeatMode.List,
+                AutoRepeatMode = MediaRepeatMode.List,
                 Controls = new MediaControlsData { IsPauseEnabled = true, IsNextEnabled = true, IsPlaybackPositionEnabled = true }
             },
             Timeline = new TimelinePropertiesData
@@ -52,9 +49,9 @@ public class MediaSessionMonitorTests
         Assert.AreEqual("Artist", snap.Artist);
         Assert.AreEqual("Album", snap.Album);
         Assert.AreEqual("spotify.exe", snap.SourceAppId);
-        Assert.AreEqual(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing, snap.Status);
+        Assert.AreEqual(MediaPlaybackStatus.Playing, snap.Status);
         Assert.IsTrue(snap.Shuffle);
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.List, snap.Repeat);
+        Assert.AreEqual(MediaRepeatMode.List, snap.Repeat);
         Assert.AreEqual(TimeSpan.FromSeconds(30), snap.Position);
         Assert.AreEqual(TimeSpan.FromSeconds(180), snap.Duration);
         Assert.IsTrue(snap.CanPause);
@@ -170,12 +167,12 @@ public class MediaSessionMonitorTests
 
         monitor.Play();
         monitor.SetShuffle(true);
-        monitor.SetRepeat(MediaPlaybackAutoRepeatMode.Track);
+        monitor.SetRepeat(MediaRepeatMode.Track);
         monitor.Seek(TimeSpan.FromSeconds(90));
 
         Assert.AreEqual(1, a.PlayCalls);
         Assert.IsTrue(a.LastShuffle);
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.Track, a.LastRepeat);
+        Assert.AreEqual(MediaRepeatMode.Track, a.LastRepeat);
         Assert.AreEqual(TimeSpan.FromSeconds(90).Ticks, a.LastSeekTicks);
 
         monitor.CycleSession();
@@ -183,6 +180,127 @@ public class MediaSessionMonitorTests
 
         Assert.AreEqual(1, b.PauseCalls);
         Assert.AreEqual(0, a.PauseCalls);
+    }
+
+    [TestMethod]
+    public async Task ToggleShuffle_InvertsTheMonitorLiveState_NotACallerHeldOne()
+    {
+        var session = CreateSession("player.exe", "Song");
+        session.PlaybackInfo!.Controls.IsShuffleEnabled = true;
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.IsTrue(monitor.CurrentSnapshot!.Shuffle);
+
+        monitor.ToggleShuffle();
+
+        Assert.AreEqual(1, session.ShuffleCalls);
+        Assert.IsFalse(session.LastShuffle, "the first toggle inverts the live true state");
+
+        // The session's shuffle state flips under the monitor (an SMTC
+        // refresh no caller saw); the next toggle must invert the monitor's
+        // NEW state, not the one a caller held at the first tap.
+        session.PlaybackInfo.IsShuffleActive = false;
+        session.RaisePlaybackInfoChanged();
+        await TestWait.WaitUntilAsync(() => monitor.CurrentSnapshot is { Shuffle: false }, TimeSpan.FromSeconds(5));
+
+        monitor.ToggleShuffle();
+
+        Assert.AreEqual(2, session.ShuffleCalls);
+        Assert.IsTrue(session.LastShuffle, "the second toggle inverts the monitor's refreshed state");
+    }
+
+    [TestMethod]
+    public async Task ToggleShuffle_SettlesWhenTheSessionReportsNotShuffleable()
+    {
+        var session = CreateSession("player.exe", "Song");
+        session.PlaybackInfo!.Controls.IsShuffleEnabled = false;
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        monitor.ToggleShuffle();
+
+        Assert.AreEqual(0, session.ShuffleCalls, "a not-shuffleable session takes no shuffle command");
+    }
+
+    [TestMethod]
+    public async Task TogglePlayPause_PausesAPlayingSession()
+    {
+        var session = CreateSession("player.exe", "Song");
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.IsTrue(monitor.CurrentSnapshot!.IsPlaying);
+
+        monitor.TogglePlayPause();
+
+        Assert.AreEqual(1, session.PauseCalls);
+        Assert.AreEqual(0, session.PlayCalls, "a playing session pauses, not plays");
+    }
+
+    [TestMethod]
+    public async Task TogglePlayPause_PlaysAPausedSession()
+    {
+        var session = CreateSession("player.exe", "Song");
+        var info = session.PlaybackInfo!;
+        info.PlaybackStatus = MediaPlaybackStatus.Paused;
+        info.Controls = new MediaControlsData { IsPlayEnabled = true };
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        monitor.TogglePlayPause();
+
+        Assert.AreEqual(1, session.PlayCalls);
+        Assert.AreEqual(0, session.PauseCalls, "a paused session plays, not pauses");
+    }
+
+    [TestMethod]
+    public async Task CycleRepeat_StepsTheCycleFromTheMonitorLiveState()
+    {
+        var session = CreateSession("player.exe", "Song");
+        // CreateSession already reports AutoRepeatMode = List; the cycle
+        // steps List -> Track.
+        session.PlaybackInfo!.Controls.IsRepeatEnabled = true;
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.AreEqual(MediaRepeatMode.List, monitor.CurrentSnapshot!.Repeat);
+
+        monitor.CycleRepeat();
+
+        Assert.AreEqual(1, session.RepeatCalls);
+        Assert.AreEqual(MediaRepeatMode.Track, session.LastRepeat, "the cycle steps from the live List state");
+    }
+
+    [TestMethod]
+    public async Task SeekToRatio_SeeksAgainstTheLiveDuration()
+    {
+        var session = CreateSession("player.exe", "Song");
+        // CreateSession's timeline ends at 180s.
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        monitor.SeekToRatio(0.5);
+
+        Assert.AreEqual(1, session.SeekCalls);
+        Assert.AreEqual(TimeSpan.FromSeconds(90).Ticks, session.LastSeekTicks, "half of the live 180s duration");
+    }
+
+    [TestMethod]
+    public async Task SeekToRatio_SettlesWhenTheSessionCannotSeek()
+    {
+        var session = CreateSession("player.exe", "Song");
+        session.PlaybackInfo!.Controls.IsPlaybackPositionEnabled = false;
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        monitor.SeekToRatio(0.5);
+
+        Assert.AreEqual(0, session.SeekCalls, "a non-seekable session takes no seek command");
     }
 
     [TestMethod]
@@ -197,16 +315,16 @@ public class MediaSessionMonitorTests
         monitor.SnapshotChanged += update => lastUpdate = update;
         session.PlaybackInfo = new PlaybackInfoData
         {
-            PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused,
+            PlaybackStatus = MediaPlaybackStatus.Paused,
             IsShuffleActive = false,
-            AutoRepeatMode = MediaPlaybackAutoRepeatMode.None,
+            AutoRepeatMode = MediaRepeatMode.None,
             Controls = new MediaControlsData { IsPlayEnabled = true }
         };
 
         session.RaisePlaybackInfoChanged();
 
         Assert.IsNotNull(lastUpdate);
-        Assert.AreEqual(GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused, monitor.CurrentSnapshot?.Status);
+        Assert.AreEqual(MediaPlaybackStatus.Paused, monitor.CurrentSnapshot?.Status);
         Assert.IsFalse(monitor.CurrentSnapshot?.IsPlaying);
     }
 

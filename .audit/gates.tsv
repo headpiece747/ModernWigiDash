@@ -36,3 +36,4 @@
 2026-08-25T00:25:37Z	01ee2a7	baseline re-run at 01ee2a7 before the architecture deepening wave	ok	0	0	ok	1736	0	ok	ok
 2026-08-25T00:55:08Z	52df4de	C1: extract Twitch chat connection into a module	ok	0	0	ok	1743	0	ok	ok
 2026-08-25T01:15:01Z	89a38ef	C2: REST cycle reads the live subscription set each cycle	ok	0	0	ok	1745	0	ok	ok
+2026-08-25T01:38:53Z	75951d0	C3: media session neutral seam + monitor-owned tap policy	ok	0	0	ok	1753	0	ok	ok

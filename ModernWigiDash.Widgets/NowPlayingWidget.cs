@@ -1,6 +1,3 @@
-using Windows.Media;
-using Windows.Media.Control;
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -381,7 +378,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKColor text = ColorOf(TextColorHex, SKColors.White);
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
 
-        bool repeatActive = snap.Repeat != MediaPlaybackAutoRepeatMode.None;
+        bool repeatActive = snap.Repeat != MediaRepeatMode.None;
         bool canPp = snap.IsPlaying ? snap.CanPause : snap.CanPlay;
 
         // One paint set per frame for all five controls; the icon geometry
@@ -413,7 +410,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         DrawNextIcon(canvas, _layout.NextButton, _nextPaint);
 
         // Repeat (Clean icon button without glass circle)
-        DrawRepeatIcon(canvas, _layout.RepeatButton, _repeatPaint, _repeatPenPaint, snap.Repeat == MediaPlaybackAutoRepeatMode.Track);
+        DrawRepeatIcon(canvas, _layout.RepeatButton, _repeatPaint, _repeatPenPaint, snap.Repeat == MediaRepeatMode.Track);
     }
 
     private static SKColor IconColor(bool active, bool enabled, SKColor accent, SKColor text)
@@ -675,8 +672,8 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         }
 
         if (eventType != TouchEventType.TouchUp) return;
-        var snap = _mediaMonitor?.CurrentSnapshot;
-        if (snap is null)
+        var monitor = _mediaMonitor;
+        if (monitor is null)
         {
             _touchDownPoint = null;
             return;
@@ -687,49 +684,36 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         SKPoint hitPoint = _touchDownPoint ?? localPoint;
         _touchDownPoint = null;
 
+        // The widget sends intents; the monitor decides can-run and argument
+        // from its own latest snapshot, so no tap path reads a snapshot the
+        // widget held (a stale-toggle command is unrepresentable here). The
+        // prev/next taps send a fixed command the session itself refuses
+        // when its capability is off, so they need no veto of their own.
         switch (NowPlayingLayout.GetAction(_layout, hitPoint))
         {
-            case NowPlayingHitAction.Shuffle when snap.CanShuffle:
-                ToggleShuffle(snap);
+            case NowPlayingHitAction.Shuffle:
+                monitor.ToggleShuffle();
                 break;
-            case NowPlayingHitAction.Previous when snap.CanPrev:
-                _mediaMonitor?.Previous();
+            case NowPlayingHitAction.Previous:
+                monitor.Previous();
                 break;
             case NowPlayingHitAction.PlayPause:
-                TogglePlayPause(snap);
+                monitor.TogglePlayPause();
                 break;
-            case NowPlayingHitAction.Next when snap.CanNext:
-                _mediaMonitor?.Next();
+            case NowPlayingHitAction.Next:
+                monitor.Next();
                 break;
-            case NowPlayingHitAction.Repeat when snap.CanRepeat:
-                CycleRepeat(snap);
+            case NowPlayingHitAction.Repeat:
+                monitor.CycleRepeat();
                 break;
             case NowPlayingHitAction.SourceBadge:
-                _mediaMonitor?.CycleSession();
+                monitor.CycleSession();
                 break;
-            case NowPlayingHitAction.Seek when NowPlayingPresentation.CanSeekNow(snap):
-                SeekTo(hitPoint, snap);
+            case NowPlayingHitAction.Seek:
+                double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
+                monitor.SeekToRatio(ratio);
                 break;
         }
-    }
-
-    private void ToggleShuffle(MediaSnapshot snap) => _mediaMonitor?.SetShuffle(!snap.Shuffle);
-
-    private void TogglePlayPause(MediaSnapshot snap)
-    {
-        if (snap.IsPlaying && snap.CanPause) _mediaMonitor?.Pause();
-        else if (!snap.IsPlaying && snap.CanPlay) _mediaMonitor?.Play();
-    }
-
-    private void CycleRepeat(MediaSnapshot snap)
-    {
-        _mediaMonitor?.SetRepeat(NowPlayingPresentation.NextRepeatMode(snap.Repeat));
-    }
-
-    private void SeekTo(SKPoint hitPoint, MediaSnapshot snap)
-    {
-        double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
-        _mediaMonitor?.Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
     }
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);

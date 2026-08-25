@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Windows;
-using Windows.Media;
 using LibUsbDotNet;
 using LibUsbDotNet.Info;
 using LibUsbDotNet.LibUsb;
@@ -424,7 +423,7 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
 
     public bool LastShuffle { get; private set; }
 
-    public MediaPlaybackAutoRepeatMode LastRepeat { get; private set; }
+    public MediaRepeatMode LastRepeat { get; private set; }
 
     public long LastSeekTicks { get; private set; }
 
@@ -477,7 +476,7 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
         return Task.FromResult(true);
     }
 
-    public Task<bool> TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode mode)
+    public Task<bool> TryChangeAutoRepeatModeAsync(MediaRepeatMode mode)
     {
         RepeatCalls++;
         LastRepeat = mode;

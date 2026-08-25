@@ -1,6 +1,3 @@
-using Windows.Foundation;
-using Windows.Media;
-using Windows.Media.Control;
 using Windows.Storage.Streams;
 
 namespace ModernWigiDash.Widgets;
@@ -8,12 +5,20 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// Owns the System Media Transport Controls session subsystem: SMTC manager
 /// bootstrap, current-session tracking, per-session media-properties /
-/// playback / timeline events, and the version-token-guarded snapshot refresh.
-/// Consumers read <see cref="CurrentSnapshot"/> for rendering and react to
-/// <see cref="SnapshotChanged"/> (null payload = session lost). The WinRT
-/// surface is hidden behind the internal <see cref="IMediaSessionSource"/>
-/// seam — a real adapter projects the SMTC manager/session types, and tests
-/// drive a fake through the same interface.
+/// playback / timeline events, and the version-token-guarded snapshot
+/// refresh. Consumers read <see cref="CurrentSnapshot"/> for rendering and
+/// react to <see cref="SnapshotChanged"/> (null payload = session lost). The
+/// WinRT surface is hidden behind the internal <see cref="IMediaSessionSource"/>
+/// seam, and the playback state the seam carries is the neutral
+/// <see cref="MediaPlaybackStatus"/> / <see cref="MediaRepeatMode"/>
+/// vocabulary: <c>WinRtMediaSessionSource</c> is the one file that maps the
+/// SMTC enums to it (and back, for the repeat command). The tap actions
+/// (<see cref="TogglePlayPause"/>, <see cref="ToggleShuffle"/>,
+/// <see cref="CycleRepeat"/>, <see cref="SeekToRatio"/>) decide can-run and
+/// argument from this monitor's own latest snapshot, so a tap can never send
+/// a desired state computed from a snapshot a caller held; the raw commands
+/// (<see cref="Play"/>, <see cref="Pause"/> and friends) are the routing
+/// surface the policy dispatches onto.
 /// </summary>
 public sealed class MediaSessionMonitor : IAsyncDisposable
 {
@@ -108,9 +113,65 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
     public void SetShuffle(bool enabled) => _ = _session?.TryChangeShuffleActiveAsync(enabled);
 
-    public void SetRepeat(MediaPlaybackAutoRepeatMode mode) => _ = _session?.TryChangeAutoRepeatModeAsync(mode);
+    public void SetRepeat(MediaRepeatMode mode) => _ = _session?.TryChangeAutoRepeatModeAsync(mode);
 
     public void Seek(TimeSpan position) => _ = _session?.TryChangePlaybackPositionAsync(position.Ticks);
+
+    /// <summary>
+    /// The play/pause tap policy: a playing session pauses, a non-playing one
+    /// plays, and a session that reports neither capability is a no-op. The
+    /// decision reads this monitor's latest snapshot, so the command targets
+    /// the state the monitor last saw, not a snapshot a caller held.
+    /// </summary>
+    public void TogglePlayPause()
+    {
+        var snap = _snapshot;
+        if (snap is null) return;
+
+        if (snap.IsPlaying && snap.CanPause) Pause();
+        else if (!snap.IsPlaying && snap.CanPlay) Play();
+    }
+
+    /// <summary>
+    /// The shuffle tap policy: inverts the monitor's live shuffle state when
+    /// the session reports shuffleable, otherwise a no-op.
+    /// </summary>
+    public void ToggleShuffle()
+    {
+        var snap = _snapshot;
+        if (snap is null || !snap.CanShuffle) return;
+
+        SetShuffle(!snap.Shuffle);
+    }
+
+    /// <summary>
+    /// The repeat tap policy: steps the presentation's cycle
+    /// (<see cref="NowPlayingPresentation.NextRepeatMode"/>, the one spelling)
+    /// from the monitor's live repeat mode when the session reports
+    /// repeatable, otherwise a no-op.
+    /// </summary>
+    public void CycleRepeat()
+    {
+        var snap = _snapshot;
+        if (snap is null || !snap.CanRepeat) return;
+
+        SetRepeat(NowPlayingPresentation.NextRepeatMode(snap.Repeat));
+    }
+
+    /// <summary>
+    /// The seek tap policy: a ratio of the monitor's live duration, resolved
+    /// and gated (the presentation's <see cref="NowPlayingPresentation.CanSeekNow"/>,
+    /// the one spelling) against the monitor's own snapshot. The caller
+    /// supplies the ratio (a pure layout measurement); pixels never cross
+    /// this seam.
+    /// </summary>
+    public void SeekToRatio(double ratio)
+    {
+        var snap = _snapshot;
+        if (snap is null || !NowPlayingPresentation.CanSeekNow(snap)) return;
+
+        Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
+    }
 
     public ValueTask DisposeAsync()
     {
@@ -229,12 +290,12 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             TrackNumber = trackNumber,
             AlbumTrackCount = albumTrackCount,
             Genres = genres,
-            Status = info?.PlaybackStatus ?? GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed,
+            Status = info?.PlaybackStatus ?? MediaPlaybackStatus.Closed,
             Position = timeline?.Position ?? TimeSpan.Zero,
             Duration = timeline?.EndTime ?? TimeSpan.Zero,
             LastUpdated = timeline?.LastUpdatedTime ?? Clock.GetUtcNow(),
             Shuffle = info?.IsShuffleActive ?? false,
-            Repeat = info?.AutoRepeatMode ?? MediaPlaybackAutoRepeatMode.None,
+            Repeat = info?.AutoRepeatMode ?? MediaRepeatMode.None,
             PlaybackRate = info?.PlaybackRate is > 0 ? info.PlaybackRate.Value : 1.0,
             CanPlay = canPlay,
             CanPause = canPause,
@@ -304,7 +365,7 @@ public sealed class MediaSnapshot
 
     public string[] Genres { get; set; } = [];
 
-    public GlobalSystemMediaTransportControlsSessionPlaybackStatus Status { get; set; }
+    public MediaPlaybackStatus Status { get; set; }
 
     public TimeSpan Position { get; set; }
 
@@ -314,7 +375,7 @@ public sealed class MediaSnapshot
 
     public bool Shuffle { get; set; }
 
-    public MediaPlaybackAutoRepeatMode Repeat { get; set; }
+    public MediaRepeatMode Repeat { get; set; }
 
     public double PlaybackRate { get; set; } = 1.0;
 
@@ -334,7 +395,7 @@ public sealed class MediaSnapshot
 
     public bool CanRepeat { get; set; }
 
-    public bool IsPlaying => Status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+    public bool IsPlaying => Status == MediaPlaybackStatus.Playing;
 }
 
 /// <summary>
@@ -345,9 +406,11 @@ public sealed class MediaSnapshot
 public sealed record MediaSessionUpdate(MediaSnapshot Snapshot, IRandomAccessStreamReference? Thumbnail, string ArtKey);
 
 /// <summary>
-/// Test seam over the WinRT SMTC surface. The real adapter projects
-/// GlobalSystemMediaTransportControlsSessionManager/Session into this shape;
-/// tests drive a fake through the same interface without WinRT.
+/// Test seam over the SMTC surface in the neutral vocabulary. The real
+/// adapter (<c>WinRtMediaSessionSource</c>) projects the WinRT
+/// manager/session types into this shape and maps their enums to
+/// <see cref="MediaPlaybackStatus"/> / <see cref="MediaRepeatMode"/>; tests
+/// drive a fake through the same interface without WinRT.
 /// </summary>
 internal interface IMediaSessionSource
 {
@@ -394,7 +457,7 @@ internal interface IMediaSessionSourceSession
 
     Task<bool> TryChangeShuffleActiveAsync(bool shuffle);
 
-    Task<bool> TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode mode);
+    Task<bool> TryChangeAutoRepeatModeAsync(MediaRepeatMode mode);
 
     Task<bool> TryChangePlaybackPositionAsync(long positionTicks);
 }
@@ -420,11 +483,11 @@ internal sealed class MediaPropertiesData
 
 internal sealed class PlaybackInfoData
 {
-    public GlobalSystemMediaTransportControlsSessionPlaybackStatus? PlaybackStatus { get; set; }
+    public MediaPlaybackStatus? PlaybackStatus { get; set; }
 
     public bool IsShuffleActive { get; set; }
 
-    public MediaPlaybackAutoRepeatMode? AutoRepeatMode { get; set; }
+    public MediaRepeatMode? AutoRepeatMode { get; set; }
 
     public double? PlaybackRate { get; set; }
 
@@ -457,162 +520,4 @@ internal sealed class TimelinePropertiesData
     public TimeSpan EndTime { get; set; }
 
     public DateTimeOffset LastUpdatedTime { get; set; }
-}
-
-/// <summary>Real <see cref="IMediaSessionSource"/> adapter over the WinRT SMTC APIs.</summary>
-internal sealed class WinRtMediaSessionSource : IMediaSessionSource
-{
-    public async Task<IMediaSessionSourceManager?> GetManagerAsync()
-    {
-        var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-        return manager is null ? null : new WinRtManagerAdapter(manager);
-    }
-
-    private sealed class WinRtManagerAdapter : IMediaSessionSourceManager
-    {
-        private readonly GlobalSystemMediaTransportControlsSessionManager _manager;
-
-        public event Action? CurrentSessionChanged;
-
-        public event Action? SessionsChanged;
-
-        public WinRtManagerAdapter(GlobalSystemMediaTransportControlsSessionManager manager)
-        {
-            _manager = manager;
-            manager.CurrentSessionChanged += OnCurrentSessionChanged;
-            manager.SessionsChanged += OnSessionsChanged;
-        }
-
-        private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object _)
-            => CurrentSessionChanged?.Invoke();
-
-        private void OnSessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, object _)
-            => SessionsChanged?.Invoke();
-
-        public IMediaSessionSourceSession? GetCurrentSession()
-        {
-            var session = _manager.GetCurrentSession();
-            return session is null ? null : new WinRtSessionAdapter(session);
-        }
-
-        public IReadOnlyList<IMediaSessionSourceSession> GetSessions()
-        {
-            var sessions = _manager.GetSessions();
-            List<IMediaSessionSourceSession> adapters = new(sessions.Count);
-            foreach (var session in sessions)
-                adapters.Add(new WinRtSessionAdapter(session));
-            return adapters;
-        }
-    }
-
-    private sealed class WinRtSessionAdapter : IMediaSessionSourceSession
-    {
-        private readonly GlobalSystemMediaTransportControlsSession _session;
-
-        public event Action? MediaPropertiesChanged;
-
-        public event Action? PlaybackInfoChanged;
-
-        public event Action? TimelinePropertiesChanged;
-
-        public WinRtSessionAdapter(GlobalSystemMediaTransportControlsSession session)
-        {
-            _session = session;
-            session.MediaPropertiesChanged += OnMediaPropertiesChanged;
-            session.PlaybackInfoChanged += OnPlaybackInfoChanged;
-            session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
-        }
-
-        private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object _)
-            => MediaPropertiesChanged?.Invoke();
-
-        private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, object _)
-            => PlaybackInfoChanged?.Invoke();
-
-        private void OnTimelinePropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object _)
-            => TimelinePropertiesChanged?.Invoke();
-
-        public object Identity => _session;
-
-        public string SourceAppUserModelId => _session.SourceAppUserModelId ?? "";
-
-        public async Task<MediaPropertiesData?> TryGetMediaPropertiesAsync()
-        {
-            var props = await _session.TryGetMediaPropertiesAsync();
-            if (props is null) return null;
-            return new MediaPropertiesData
-            {
-                Title = props.Title,
-                Artist = props.Artist,
-                AlbumTitle = props.AlbumTitle,
-                AlbumArtist = props.AlbumArtist,
-                TrackNumber = props.TrackNumber,
-                AlbumTrackCount = props.AlbumTrackCount,
-                Genres = props.Genres,
-                Thumbnail = props.Thumbnail
-            };
-        }
-
-        public PlaybackInfoData? GetPlaybackInfo()
-        {
-            var info = _session.GetPlaybackInfo();
-            if (info is null) return null;
-            return new PlaybackInfoData
-            {
-                PlaybackStatus = info.PlaybackStatus,
-                IsShuffleActive = info.IsShuffleActive ?? false,
-                AutoRepeatMode = info.AutoRepeatMode,
-                PlaybackRate = info.PlaybackRate,
-                Controls = new MediaControlsData
-                {
-                    IsPlayEnabled = info.Controls.IsPlayEnabled,
-                    IsPauseEnabled = info.Controls.IsPauseEnabled,
-                    IsStopEnabled = info.Controls.IsStopEnabled,
-                    IsNextEnabled = info.Controls.IsNextEnabled,
-                    IsPreviousEnabled = info.Controls.IsPreviousEnabled,
-                    IsPlaybackPositionEnabled = info.Controls.IsPlaybackPositionEnabled,
-                    IsShuffleEnabled = info.Controls.IsShuffleEnabled,
-                    IsRepeatEnabled = info.Controls.IsRepeatEnabled
-                }
-            };
-        }
-
-        public TimelinePropertiesData? GetTimelineProperties()
-        {
-            var timeline = _session.GetTimelineProperties();
-            if (timeline is null) return null;
-            return new TimelinePropertiesData
-            {
-                Position = timeline.Position,
-                EndTime = timeline.EndTime,
-                LastUpdatedTime = timeline.LastUpdatedTime
-            };
-        }
-
-        public Task<bool> TryPlayAsync() => TryControlAsync(() => _session.TryPlayAsync());
-
-        public Task<bool> TryPauseAsync() => TryControlAsync(() => _session.TryPauseAsync());
-
-        public Task<bool> TrySkipNextAsync() => TryControlAsync(() => _session.TrySkipNextAsync());
-
-        public Task<bool> TrySkipPreviousAsync() => TryControlAsync(() => _session.TrySkipPreviousAsync());
-
-        public Task<bool> TryChangeShuffleActiveAsync(bool shuffle) => TryControlAsync(() => _session.TryChangeShuffleActiveAsync(shuffle));
-
-        public Task<bool> TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode mode) => TryControlAsync(() => _session.TryChangeAutoRepeatModeAsync(mode));
-
-        public Task<bool> TryChangePlaybackPositionAsync(long positionTicks) => TryControlAsync(() => _session.TryChangePlaybackPositionAsync(positionTicks));
-
-        private static async Task<bool> TryControlAsync(Func<IAsyncOperation<bool>> operation)
-        {
-            try
-            {
-                return await operation();
-            }
-            catch
-            {
-                return false;
-            }
-        }
-    }
 }

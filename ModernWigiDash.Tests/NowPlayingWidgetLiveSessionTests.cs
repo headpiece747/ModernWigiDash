@@ -1,6 +1,3 @@
-using Windows.Media;
-using Windows.Media.Control;
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -30,8 +27,8 @@ public class NowPlayingWidgetLiveSessionTests
         };
         session.PlaybackInfo = new PlaybackInfoData
         {
-            PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
-            AutoRepeatMode = MediaPlaybackAutoRepeatMode.None,
+            PlaybackStatus = MediaPlaybackStatus.Playing,
+            AutoRepeatMode = MediaRepeatMode.None,
             PlaybackRate = 1.0,
             Controls = new MediaControlsData { IsPlayEnabled = true, IsPauseEnabled = true, IsRepeatEnabled = true, IsPlaybackPositionEnabled = true },
         };
@@ -93,7 +90,7 @@ public class NowPlayingWidgetLiveSessionTests
         widget.OnTouch(tap, TouchEventType.TouchUp);
 
         Assert.AreEqual(1, session.RepeatCalls);
-        Assert.AreEqual(MediaPlaybackAutoRepeatMode.List, session.LastRepeat,
+        Assert.AreEqual(MediaRepeatMode.List, session.LastRepeat,
             "repeat cycles None -> List on tap");
     }
 
@@ -114,5 +111,23 @@ public class NowPlayingWidgetLiveSessionTests
 
         Assert.AreEqual(1, session.SeekCalls);
         Assert.AreEqual((long)(0.492 * 60 * TimeSpan.TicksPerSecond), session.LastSeekTicks, 500_000L);
+    }
+
+    [TestMethod]
+    public void OnTouch_TapOnShuffleButton_WhenSessionReportsNotShuffleable_SendsNoCommand()
+    {
+        var (widget, session) = CreateLiveWidget();
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        var bounds = new SKRect(0, 0, 1016, 592);
+        widget.Render(surface.Canvas, bounds);
+        Assert.IsFalse(session.PlaybackInfo!.Controls.IsShuffleEnabled, "the fixture session reports not-shuffleable");
+
+        // The shuffle button is the leftmost control: at 1016x592 the row
+        // starts at x 616 and the shuffle button spans x 616-664, y 512-560.
+        var tap = new SKPoint(640f, 536f);
+        widget.OnTouch(tap, TouchEventType.TouchDown);
+        widget.OnTouch(tap, TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, session.ShuffleCalls, "the monitor's policy vetoes the tap; no widget-side command fires");
     }
 }
