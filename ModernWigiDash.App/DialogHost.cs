@@ -8,8 +8,9 @@ namespace ModernWigiDash.App;
 /// <summary>
 /// The small host dialogs: the text prompt (page rename), the
 /// device-authorization window (Twitch device login), and the inspector's icon
-/// picker. Owns the authorization window's lifetime tracking;
-/// the window just forwards calls.
+/// picker. The last two are thin adapters over their decision models
+/// (<see cref="IconPickerModel"/> and <see cref="DeviceAuthorizationModel"/>);
+/// this host owns the chrome and the authorization window's lifetime tracking.
 /// </summary>
 internal sealed class DialogHost
 {
@@ -192,6 +193,7 @@ internal sealed class DialogHost
     /// </summary>
     public string? ShowIconPicker(string title, string currentValue)
     {
+        var model = new IconPickerModel(currentValue);
         var dialog = new Window
         {
             Title = title,
@@ -265,11 +267,10 @@ internal sealed class DialogHost
         root.Children.Add(footer);
 
         var accentBrush = _tryFindResource("AccentRed") as Brush ?? Brushes.Red;
-        string chosen = currentValue ?? "";
-        void UpdateSelected(string name)
+        void UpdateChrome()
         {
-            chosen = name;
-            selectedName.Text = name;
+            selectedName.Text = model.Chosen;
+            chip.Text = model.ChipText;
         }
 
         Button BuildIconCell(string name)
@@ -289,11 +290,12 @@ internal sealed class DialogHost
             {
                 cell.Content = TryBuildIconGeometry(pathData);
             }
-            if (name.Equals(chosen, StringComparison.OrdinalIgnoreCase))
+            if (model.IsHighlighted(name))
                 cell.BorderBrush = accentBrush;
             cell.Click += (_, _) =>
             {
-                UpdateSelected(name);
+                model.Select(name);
+                UpdateChrome();
                 foreach (var child in grid.Children.OfType<Button>())
                     child.BorderBrush = Brushes.Transparent;
                 cell.BorderBrush = accentBrush;
@@ -304,11 +306,7 @@ internal sealed class DialogHost
         void RenderGrid()
         {
             grid.Children.Clear();
-            string filter = search.Text?.Trim() ?? "";
-            var names = string.IsNullOrEmpty(filter)
-                ? GriddyIcons.Names
-                : GriddyIcons.Names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
-            foreach (var name in names)
+            foreach (var name in model.VisibleNames)
             {
                 grid.Children.Add(BuildIconCell(name));
             }
@@ -336,7 +334,11 @@ internal sealed class DialogHost
             }
         }
 
-        search.TextChanged += (_, _) => RenderGrid();
+        search.TextChanged += (_, _) =>
+        {
+            model.UpdateSearch(search.Text);
+            RenderGrid();
+        };
 
         browseSvg.Click += (_, _) =>
         {
@@ -347,22 +349,21 @@ internal sealed class DialogHost
                 Error("Unsupported SVG", "Only single-path SVG icons are supported.");
                 return;
             }
-            string relative = SvgIconLoader.CopyToIcons(dlg.FileName);
-            chip.Text = $"Custom: {relative}";
-            UpdateSelected(relative);
+            model.Select(SvgIconLoader.CopyToIcons(dlg.FileName));
+            UpdateChrome();
         };
 
         string? result = null;
         select.Click += (_, _) =>
         {
-            if (string.IsNullOrWhiteSpace(chosen)) return;
-            result = chosen;
-            dialog.DialogResult = true;
+            if (model.Accept() is { } accepted)
+            {
+                result = accepted;
+                dialog.DialogResult = true;
+            }
         };
 
-        if (IconValuePolicy.IsCustom(currentValue))
-            chip.Text = $"Custom: {currentValue}";
-        selectedName.Text = currentValue ?? "";
+        UpdateChrome();
         RenderGrid();
         dialog.Content = root;
         dialog.ShowDialog();
@@ -379,9 +380,10 @@ internal sealed class DialogHost
         {
             _deviceAuthorizationWindow?.Close();
 
+            var model = new DeviceAuthorizationModel(serviceName, verificationUri, userCode, expiresAt, _logError);
             var window = new Window
             {
-                Title = $"ModernWigiDash - {serviceName} Login",
+                Title = model.Title,
                 Width = DeviceAuthWidth,
                 SizeToContent = SizeToContent.Height,
                 Owner = _owner,
@@ -396,7 +398,7 @@ internal sealed class DialogHost
             var root = new StackPanel { Margin = new Thickness(20) };
             root.Children.Add(new TextBlock
             {
-                Text = $"Authorize {serviceName} in your browser",
+                Text = model.Header,
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
                 Margin = new Thickness(0, 0, 0, 10)
@@ -410,7 +412,7 @@ internal sealed class DialogHost
 
             var code = new TextBox
             {
-                Text = userCode,
+                Text = model.Code,
                 IsReadOnly = true,
                 FontSize = 24,
                 FontWeight = FontWeights.Bold,
@@ -421,14 +423,14 @@ internal sealed class DialogHost
             root.Children.Add(code);
             root.Children.Add(new TextBlock
             {
-                Text = verificationUri.AbsoluteUri,
+                Text = model.VerificationText,
                 TextWrapping = TextWrapping.Wrap,
                 Opacity = 0.8,
                 Margin = new Thickness(0, 0, 0, 8)
             });
             root.Children.Add(new TextBlock
             {
-                Text = $"This code expires at {expiresAt.LocalDateTime:t}.",
+                Text = model.ExpirationText,
                 Opacity = 0.8,
                 Margin = new Thickness(0, 0, 0, 16)
             });
@@ -439,36 +441,11 @@ internal sealed class DialogHost
             var close = new Button { Content = "Cancel", Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0) };
             if (_tryFindResource("AccentButton") is Style accentStyle) open.Style = accentStyle;
 
-            open.Click += (_, _) =>
+            open.Click += (_, _) => model.OpenBrowser(uri =>
             {
-                // Only shell-open trusted https://*.twitch.tv URLs — a
-                // tampered verification response must not invoke file:/custom
-                // protocol handlers (same rule as the auto-open site).
-                if (!TrustedBrowserUri.IsTrusted(verificationUri))
-                {
-                    _logError("Refusing to open non-Twitch authorization URL", null);
-                    return;
-                }
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(verificationUri.AbsoluteUri) { UseShellExecute = true });
-                }
-                catch (Exception ex)
-                {
-                    _logError("Unable to open the Twitch authorization page", ex);
-                }
-            };
-            copy.Click += (_, _) =>
-            {
-                try
-                {
-                    Clipboard.SetText(userCode);
-                }
-                catch (Exception ex)
-                {
-                    _logError("Unable to copy the authorization code", ex);
-                }
-            };
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            });
+            copy.Click += (_, _) => model.CopyCode(value => Clipboard.SetText(value));
             close.Click += (_, _) => window.Close();
 
             buttons.Children.Add(open);
@@ -478,7 +455,8 @@ internal sealed class DialogHost
             window.Content = root;
             window.Closed += (_, _) =>
             {
-                if (ReferenceEquals(_deviceAuthorizationWindow, window)) _deviceAuthorizationWindow = null;
+                if (DeviceAuthorizationModel.ClosedWindowClearsSlot(_deviceAuthorizationWindow, window))
+                    _deviceAuthorizationWindow = null;
             };
             _deviceAuthorizationWindow = window;
             window.Show();
