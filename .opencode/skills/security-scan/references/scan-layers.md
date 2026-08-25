@@ -219,6 +219,8 @@ EXPECTED / INTENTIONAL (document in the run's findings, do not fix):
 - Example endpoints in httpclient-factory (E1 on api.example.com / api.test)
 - git subprocess in ablate-ai-layer scripts (AST4, its stated job)
 - The never-block-on-the-human principle (EA2 "without asking")
+- This verdict table's own quoted patterns (the re-scan re-hits
+  RA1/RA2/MP3/TM1/EA2 on the table text itself; self-referential)
 ```
 
 Remediation for a real hit: remove the pattern from the skill, or pin the

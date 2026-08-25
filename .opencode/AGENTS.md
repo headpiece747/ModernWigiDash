@@ -52,7 +52,16 @@ explicit path there). `glider_get_structure` lists no members without
 `includeMembers=true` (a `kinds` filter alone returns the container with zero
 members). `ocr_review` in workspace mode selects only tracked diffs; an
 all-untracked changeset reports "no items selected", so commit first or pass
-an explicit `from`/`to` range.
+an explicit `from`/`to` range. A solution-wide `-p:BaseIntermediateOutputPath`
+breaks multi-TFM builds (NETSDK1005: one project.assets.json per TFM, the
+last restore wins); use a temp `-p:BaseOutputPath` for temp output instead.
+git 2.55 with `text=auto` classifies a file containing a lone CR (a CR not
+followed by LF) as binary (`i/-text w/-text`), so `git add` stores raw bytes
+and the diff becomes a whole-file EOL change: before committing, scan the
+modified files for a stray 0x0D not followed by 0x0A. The PowerShell tool
+transport strips backticks and mangles `$` variables inside inline commands;
+for multi-step byte/regex work, write a `.ps1` to the temp dir and run it
+with `-File`.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.

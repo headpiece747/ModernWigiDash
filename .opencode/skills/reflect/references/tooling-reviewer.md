@@ -20,7 +20,7 @@ Examples of the pattern:
 
 The durable improvement is the skill learning to use available tools, not this one user typing one less ticket title.
 
-Read the active transcript at <ABSOLUTE_PATH> (or use the digest below if no path is given).
+Read the active transcript at `<ABSOLUTE_PATH>` (or use the digest below if no path is given).
 
 Scan for:
 - Tool invocations and command flags the agent had to discover
@@ -48,10 +48,10 @@ If a skill was neither invoked nor a missed-trigger candidate, drop it. Adding t
 Surface 3-5 durable learnings. For each:
 - Principle: one sentence naming the convention or technical fact. Concrete enough that a future agent recognizes when it applies.
 - Evidence: the exact moment in the transcript (turn number or short quote, including the command or flag).
-- Routing: most relevant existing skill (give the `SKILL.md` path as it appears in the transcript), OR `tune description: <skill path>` when the skill should have triggered but didn't, OR "new skill: <kebab-name>".
+- Routing: most relevant existing skill (give the `SKILL.md` path as it appears in the transcript), OR `tune description: <skill path>` when the skill should have triggered but didn't, OR "new skill: `<kebab-name>`".
 
 Skip trivial things (typos, retries). Skip anything already obvious from the existing skill the parent followed. Skip implementation details that drift: specific SHAs, current file paths, version numbers, exact byte counts. Convention generalizes; pinned details don't.
 
 Return as a numbered list. No exposition.
 
-<DIGEST IF FILE PATH UNAVAILABLE>
+`<DIGEST IF FILE PATH UNAVAILABLE>`
