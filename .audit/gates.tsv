@@ -48,3 +48,4 @@
 2026-08-25T04:02:54Z	6b8907f	skills.sh pass (gate trail re-anchor post-commit)	ok	0	0	ok	1796	0	ok	ok
 2026-08-25T04:09:05Z	8e4471a	full-project sweep post-C-series	ok	0	0	ok	1796	0	ok	ok
 2026-08-25T11:54:57Z	8e4471a	fix smtc status name mapping + pin	ok	0	0	ok	1802	0	ok	ok
+2026-08-25T11:59:23Z	f79fca7	fix boot profile load boundary contract	ok	0	0	ok	1803	0	ok	ok

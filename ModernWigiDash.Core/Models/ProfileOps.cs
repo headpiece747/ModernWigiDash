@@ -484,14 +484,14 @@ public static class ProfileOps
         IModernWigiDashContext context,
         bool trusted = false)
     {
-        var info = new FileInfo(path);
-        if (!info.Exists) return new ProfileImportOutcome.Absent();
-        if (ProfileImportSanitizer.IsImportFileTooLarge(info.Length))
-        {
-            return new ProfileImportOutcome.TooLarge(info.Length);
-        }
         try
         {
+            var info = new FileInfo(path);
+            if (!info.Exists) return new ProfileImportOutcome.Absent();
+            if (ProfileImportSanitizer.IsImportFileTooLarge(info.Length))
+            {
+                return new ProfileImportOutcome.TooLarge(info.Length);
+            }
             string json = File.ReadAllText(path);
             ProfileLayout? loaded = ImportJson(json, loader, context, sanitize: !trusted);
             return loaded is null
@@ -501,9 +501,10 @@ public static class ProfileOps
         catch (Exception ex)
         {
             // The file boundary is where foreign-file exceptions die: the
-            // read can fail (permissions, a delete between the existence
-            // check and the read), and the caller maps the verdict to its
-            // own surface.
+            // path stat can itself fail (an invalid path throws in the
+            // FileInfo ctor, a permission fault in the stat), and the read
+            // can fail (permissions, a delete between the existence check
+            // and the read). The caller maps the verdict to its own surface.
             return new ProfileImportOutcome.Failed(ex.Message);
         }
     }

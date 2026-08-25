@@ -893,6 +893,18 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void ImportProfileFile_InvalidPath_ReturnsFailedInsteadOfThrowing()
+    {
+        // A path the stat itself rejects (a NUL character): on .NET 10 the
+        // FileInfo constructor throws, so this used to sail past the boundary
+        // and crash the boot load before the starter-profile fallback.
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile("bad\0path", CreateLoader(), new TestContext());
+
+        Assert.IsTrue(outcome is ProfileImportOutcome.Failed(var detail) && detail is not null,
+            $"expected Failed with the path error, got {outcome}");
+    }
+
+    [TestMethod]
     public void ConvertPropertyValue_JsonElement_DeserializesToTargetType()
     {
         using var doc = System.Text.Json.JsonDocument.Parse("42");
