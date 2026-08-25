@@ -2,8 +2,15 @@
 // repository (github.com/griddy-icons/griddy-icons, MIT). Do not edit by hand.
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// The bundled Griddy Icons (MIT) SVG path table, keyed by icon name with
+/// case-insensitive comparison. Generated from the Griddy Icons repository;
+/// the license is committed as LICENSE-GriddyIcons.txt. Callers use the table
+/// through <c>GriddyIcons</c>.
+/// </summary>
 public static partial class GriddyIconPaths
 {
+    /// <summary>The icon-name to SVG path data map (case-insensitive keys).</summary>
     public static readonly System.Collections.Generic.IReadOnlyDictionary<string, string> Map =
         new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
         {

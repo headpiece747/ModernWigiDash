@@ -11,10 +11,15 @@ namespace ModernWigiDash.Core.Plugins;
 /// </summary>
 public sealed record PluginInfo(string PluginId, string DisplayName, string Category, SKSize DefaultSize, Type WidgetType);
 
+/// <summary>
+/// The widget catalog: registers concrete <see cref="IModernWidget"/> types
+/// under their [WidgetMetadata] id and resolves them for the host.
+/// </summary>
 public class WidgetPluginLoader
 {
     private readonly Dictionary<string, PluginInfo> _registeredPlugins = [];
 
+    /// <summary>The registered catalog entries, in registration order.</summary>
     public IReadOnlyCollection<PluginInfo> RegisteredPlugins => _registeredPlugins.Values;
 
     /// <summary>The catalog entry for <paramref name="pluginId"/>, or null

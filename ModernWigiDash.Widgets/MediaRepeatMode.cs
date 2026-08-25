@@ -12,11 +12,15 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public enum MediaRepeatMode
 {
+    /// <summary>No repeat.</summary>
     None = 0,
 
+    /// <summary>Repeat the current track.</summary>
     Track = 1,
 
+    /// <summary>Repeat the whole list.</summary>
     List = 2,
 
+    /// <summary>A mode the OS reports that the named set does not cover.</summary>
     Unknown = 3
 }

@@ -3,42 +3,60 @@ using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// A tappable button that runs one hotkey action (the HotkeyActionCatalog
+/// kind and its path/command) on release, with a label and description line,
+/// the button colors, and an optional Griddy or custom-SVG icon that edit
+/// mode can drag (the IWidgetIconGrab seam).
+/// </summary>
 [WidgetMetadata("hotkey_button", "Hotkey", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab
 {
+    /// <summary>The "Button Label": the text displayed on the button.</summary>
     [WidgetProperty("Button Label", WidgetPropertyType.Text, "Text displayed on button", "Hotkey")]
     public string ButtonLabel { get; set; } = "Hotkey";
 
+    /// <summary>The "Description": optional secondary text shown below the button label.</summary>
     [WidgetProperty("Description", WidgetPropertyType.Text, "Optional secondary text displayed below the button label", "Tap to run")]
     public string Description { get; set; } = "Tap to run";
 
+    /// <summary>The "Action Type": which trigger the tap runs (the HotkeyActionCatalog name set).</summary>
     [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute")]
     public string ActionType { get; set; } = HotkeyActionCatalog.DefaultName;
 
+    /// <summary>The "Action Path/Command": the executable, file, folder, or URL the action type targets.</summary>
     [WidgetProperty("Action Path/Command", WidgetPropertyType.Path, "Executable, file, folder, or URL. You can type a URL or select a local path.", "")]
     public string ActionCommand { get; set; } = "";
 
+    /// <summary>The "Button Color Hex": the button's glow accent color.</summary>
     [WidgetProperty("Button Color Hex", WidgetPropertyType.Color, "Button glow accent color", "#F59E0B")]
     public string ButtonColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Text Color": the button label color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Button label color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Icon": the Griddy icon shown above the label (blank = none).</summary>
     [WidgetProperty("Icon", WidgetPropertyType.Icon, "Griddy icon shown above the label (blank = none)", "")]
     public string Icon { get; set; } = "";
 
+    /// <summary>The "Icon File": a custom SVG icon file copied into the icons folder; overrides Icon.</summary>
     [WidgetProperty("Icon File", WidgetPropertyType.Path, "Custom SVG icon file copied into the icons folder (overrides Icon)", "")]
     public string IconFile { get; set; } = "";
 
+    /// <summary>The "Icon Color": the icon color.</summary>
     [WidgetProperty("Icon Color", WidgetPropertyType.Color, "Icon color", "#FAFAFA")]
     public string IconColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Icon Size" in px (0 = auto-scale with the widget).</summary>
     [WidgetProperty("Icon Size", WidgetPropertyType.Number, "Icon size in px (0 = auto-scale with the widget)", 0)]
     public int IconSize { get; set; } = 0;
 
+    /// <summary>The "Icon Offset X": horizontal shift of the icon in px (negative = left).</summary>
     [WidgetProperty("Icon Offset X", WidgetPropertyType.Number, "Horizontal shift of the icon in px (negative = left)", 0)]
     public int IconOffsetX { get; set; } = 0;
 
+    /// <summary>The "Icon Offset Y": vertical shift of the icon in px (negative = up).</summary>
     [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
     public int IconOffsetY { get; set; } = 0;
 
@@ -46,6 +64,15 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     // lives exactly here, in the widget that draws the icon — Render, hit
     // testing, and grab-move math all derive from one helper.
 
+    /// <summary>
+    /// Whether the rotated-local point falls inside the drawn icon's hit
+    /// circle (the edit-mode icon-grab region); false when no icon is drawn.
+    /// </summary>
+    /// <param name="width">The widget's width in px.</param>
+    /// <param name="height">The widget's height in px.</param>
+    /// <param name="localX">The point's x in the widget's rotated-local coordinates.</param>
+    /// <param name="localY">The point's y in the widget's rotated-local coordinates.</param>
+    /// <returns>True when the point is inside the icon's hit circle.</returns>
     public bool IsPointOverIcon(float width, float height, float localX, float localY)
     {
         if (!ComputeIconGeometry(width, height, out var center, out float half))
@@ -56,9 +83,29 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         return dx * dx + dy * dy <= half * half;
     }
 
+    /// <summary>
+    /// The icon's center and radius for the given bounds, so the input
+    /// module can grab and move the icon; false when no icon is drawn.
+    /// </summary>
+    /// <param name="width">The widget's width in px.</param>
+    /// <param name="height">The widget's height in px.</param>
+    /// <param name="center">The icon's center in widget coordinates.</param>
+    /// <param name="half">The icon's radius in px.</param>
+    /// <returns>True when an icon is drawn.</returns>
     public bool TryGetIconCenter(float width, float height, out SKPoint center, out float half)
         => ComputeIconGeometry(width, height, out center, out half);
 
+    /// <summary>
+    /// Persists the icon's new offset after an edit-mode grab-move (the
+    /// center is clamped inside the widget bounds); commits through
+    /// SetProperty so the move survives export.
+    /// </summary>
+    /// <param name="placed">The placed instance being moved (its bounds).</param>
+    /// <param name="localX">The icon's center x in the widget's rotated-local coordinates.</param>
+    /// <param name="localY">The icon's center y in the widget's rotated-local coordinates.</param>
+    /// <param name="grabOffsetX">The x distance between the grab point and the icon center.</param>
+    /// <param name="grabOffsetY">The y distance between the grab point and the icon center.</param>
+    /// <returns>True when the offset changed and was persisted.</returns>
     public bool ApplyGrabMove(PlacedWidgetInstance placed, float localX, float localY, float grabOffsetX, float grabOffsetY)
     {
         if (!ComputeIconGeometry(placed.Width, placed.Height, out _, out float half))
@@ -148,6 +195,12 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private readonly SKPaint _descriptionPaint = new() { IsAntialias = true };
 
+    /// <summary>
+    /// Draws the button: the pressed-state glow, the label and description
+    /// text, and the icon (custom SVG file or Griddy) in front of them.
+    /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor btnColor = ColorOf(ButtonColorHex, WidgetPalette.Accent);
@@ -224,6 +277,12 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         }
     }
 
+    /// <summary>
+    /// Tracks the pressed state on TouchDown and runs the configured action
+    /// fire-and-forget on TouchUp.
+    /// </summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local coordinates.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchDown)
@@ -281,6 +340,13 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     // The inspector renderer discovers these through the interface instead of
     // branching on the widget type (no concrete-widget typeof checks).
 
+    /// <summary>
+    /// The special inspector editor for this widget's properties: the icon
+    /// picker for IconFile, the action-command editor for ActionCommand, or
+    /// null when the generic editor suffices.
+    /// </summary>
+    /// <param name="property">The property being inspected.</param>
+    /// <returns>The editor kind, or null for the generic editor.</returns>
     public EditorKind? GetEditorKind(PropertyInfo property)
     {
         if (string.Equals(property.Name, nameof(IconFile), StringComparison.Ordinal)) return EditorKind.IconPicker;
@@ -288,17 +354,32 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         return null;
     }
 
+    /// <summary>
+    /// The companion property written alongside the named-icon editor: the
+    /// IconFile path property that overrides Icon, or null for other
+    /// properties.
+    /// </summary>
+    /// <param name="iconProperty">The named-icon property being edited.</param>
+    /// <returns>The companion file property, or null.</returns>
     public PropertyInfo? GetIconFileCompanion(PropertyInfo iconProperty)
         => string.Equals(iconProperty.Name, nameof(Icon), StringComparison.Ordinal)
             ? typeof(HotkeyButtonWidget).GetProperty(nameof(IconFile))
             : null;
 
+    /// <summary>The choice property (Action Type) whose selected value toggles the action-command editor's visibility.</summary>
     public string? ActionCommandVisibilityChoicePropertyName => nameof(ActionType);
 
+    /// <summary>
+    /// Whether the action-command editor is visible for the selected action
+    /// type: only types that need a command (the HotkeyActionCatalog rule).
+    /// </summary>
+    /// <param name="actionTypeValue">The selected action type value.</param>
+    /// <returns>True when the selected type needs a command.</returns>
     public bool IsActionCommandVisible(string? actionTypeValue)
         => actionTypeValue != null && HotkeyActionCatalog.NeedsCommand(actionTypeValue);
 
 
+    /// <summary>Cancels any in-flight action and disposes the hoisted paints and the action gate.</summary>
     public override async ValueTask DisposeAsync()
     {
         _fillPaint.Dispose();

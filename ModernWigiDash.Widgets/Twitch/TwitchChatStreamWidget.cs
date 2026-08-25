@@ -1,38 +1,55 @@
 namespace ModernWigiDash.Widgets.Twitch;
 
+/// <summary>
+/// The Twitch chat stream widget: connects to a channel's IRC chat through
+/// the TwitchChatConnection module (this widget keeps the property surface,
+/// the rendering, and the touch toggle) and offers the Twitch device-auth
+/// actions through the action invoker seam.
+/// </summary>
 [WidgetMetadata("twitch_chat", "Twitch", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size2x4)]
 public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IWidgetPropertyOptionsProvider, IWidgetActionPresentationProvider
 {
+    /// <summary>The "Channel Name": the channel to chat with, picked from the followed channels after login or typed manually.</summary>
     [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
     public string ChannelName { get; set; } = "twitch";
 
+    /// <summary>The "Twitch Client ID": the public Twitch application ID (not a user token or secret).</summary>
     [WidgetProperty("Twitch Client ID", WidgetPropertyType.Text, "Public Twitch application ID. This is not a user token or secret.", "")]
     public string TwitchClientId { get; set; } = "";
 
+    /// <summary>The "Log in with Twitch" action button: authorizes followed-channel access in the browser.</summary>
     [WidgetProperty("Log in with Twitch", WidgetPropertyType.Button, "Authorize followed-channel access in your browser")]
     public string LoginWithTwitch { get; set; } = "";
 
+    /// <summary>The "Refresh live channels" action button: reloads the followed channels that are currently live.</summary>
     [WidgetProperty("Refresh live channels", WidgetPropertyType.Button, "Reload followed channels that are currently live")]
     public string RefreshLiveChannels { get; set; } = "";
 
+    /// <summary>The "Log out of Twitch" action button: removes the locally stored Twitch authorization.</summary>
     [WidgetProperty("Log out of Twitch", WidgetPropertyType.Button, "Remove the locally stored Twitch authorization")]
     public string LogoutTwitch { get; set; } = "";
 
+    /// <summary>The "Auto Connect" toggle: connect automatically when the widget loads.</summary>
     [WidgetProperty("Auto Connect", WidgetPropertyType.Boolean, "Connect automatically when the widget loads", true)]
     public bool AutoConnect { get; set; } = true;
 
+    /// <summary>The "Header Color": the channel header text color.</summary>
     [WidgetProperty("Header Color", WidgetPropertyType.Color, "Channel header text color", "#F59E0B")]
     public string HeaderColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Message Color": the chat message text color.</summary>
     [WidgetProperty("Message Color", WidgetPropertyType.Color, "Chat message text color", "#F8FAFC")]
     public string MessageColorHex { get; set; } = "#F8FAFC";
 
+    /// <summary>The "Background Color": the widget background color.</summary>
     [WidgetProperty("Background Color", WidgetPropertyType.Color, "Widget background color", "#0F1117")]
     public string BackgroundHex { get; set; } = "#0F1117";
 
+    /// <summary>The "Font Size": the chat text font size in points.</summary>
     [WidgetProperty("Font Size", WidgetPropertyType.Number, "Chat text font size in points", 24)]
     public int FontSize { get; set; } = 24;
 
+    /// <summary>The "Max Messages": how many chat messages to keep on screen.</summary>
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
 
@@ -72,6 +89,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// </summary>
     internal TwitchSession Session { get; set; } = TwitchSession.Shared;
 
+    /// <summary>Binds the connection module to the widget's live properties (feed factory, MaxMessages, Auto Connect, logging, repaint request).</summary>
     public TwitchChatStreamWidget()
     {
         // The live reads (MaxMessages, AutoConnect, Context) keep the module bound
@@ -86,6 +104,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             () => Context?.RequestRender());
     }
 
+    /// <summary>
+    /// Hands the context to the base and starts the chat when Auto Connect is
+    /// on; restores the Twitch session (token + followed channels)
+    /// fire-and-forget.
+    /// </summary>
+    /// <param name="context">The widget context handed to the widget on load.</param>
+    /// <param name="cancellationToken">Cancels the session restore on shutdown.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -93,20 +118,44 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _ = RestoreTwitchSessionAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Runs the named Twitch action (login, refresh live channels, logout)
+    /// fire-and-forget through the session.
+    /// </summary>
+    /// <param name="propertyName">The action property name.</param>
     public void InvokeWidgetAction(string propertyName)
     {
         if (propertyName is nameof(LoginWithTwitch) or nameof(RefreshLiveChannels) or nameof(LogoutTwitch))
             _ = RunTwitchActionAsync(propertyName);
     }
 
+    /// <summary>
+    /// The action's display label: "Twitch logged in" for the login action
+    /// while a session is authenticated, else null (the default label).
+    /// </summary>
+    /// <param name="propertyName">The action property name.</param>
+    /// <returns>The label, or null for the default.</returns>
     public string? GetWidgetActionLabel(string propertyName)
         => string.Equals(propertyName, nameof(LoginWithTwitch), StringComparison.Ordinal) && Session.IsAuthenticated
             ? "Twitch logged in"
             : null;
 
+    /// <summary>
+    /// Whether the login action is active (a session is authenticated), so
+    /// the inspector renders it as toggleable.
+    /// </summary>
+    /// <param name="propertyName">The action property name.</param>
+    /// <returns>True when the session is authenticated.</returns>
     public bool IsWidgetActionActive(string propertyName)
         => string.Equals(propertyName, nameof(LoginWithTwitch), StringComparison.Ordinal) && Session.IsAuthenticated;
 
+    /// <summary>
+    /// The dynamic choice list for the Channel Name property: the session's
+    /// followed channels (login + display label), or empty for other
+    /// properties.
+    /// </summary>
+    /// <param name="propertyName">The property being edited.</param>
+    /// <returns>The choice options for that property.</returns>
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
         if (!string.Equals(propertyName, nameof(ChannelName), StringComparison.Ordinal)) return [];
@@ -116,6 +165,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             .ToArray();
     }
 
+    /// <summary>
+    /// Routes inspector edits into the connection module: a channel change
+    /// restarts the chat when Auto Connect is on, an Auto Connect toggle
+    /// starts or stops it, a MaxMessages change trims the buffer.
+    /// </summary>
+    /// <param name="propertyName">The property that changed.</param>
+    /// <param name="newValue">The new value.</param>
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
         switch (propertyName)
@@ -185,6 +241,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         }
     }
 
+    /// <summary>
+    /// Taps toggle the connection: a TouchUp stops a live chat and starts
+    /// one when not connected.
+    /// </summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local coordinates.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
@@ -215,6 +277,13 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
             () => TwitchChatPresentation.StatusText(state));
     }
 
+    /// <summary>
+    /// Draws the chat: the rounded background, the channel badge and status
+    /// header, and the message list (the connection's whole snapshot, newest
+    /// at the bottom, wrapped and clipped to the content bounds).
+    /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
@@ -306,6 +375,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         canvas.Restore();
     }
 
+    /// <summary>Stops the connection (loop cancel, feed abort, PONG token retirement) and disposes the hoisted paints.</summary>
     public override async ValueTask DisposeAsync()
     {
         _disposed = true;

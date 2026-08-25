@@ -244,8 +244,14 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
     }
 }
 
+/// <summary>
+/// A failed Twitch API call: carries the HTTP status code the failure came
+/// back with.
+/// </summary>
 public sealed class TwitchApiException(int statusCode, string message) : Exception(message)
 {
+    /// <summary>The HTTP status code the failure came back with.</summary>
     public int StatusCode { get; } = statusCode;
+    /// <summary>Whether the failure was an unauthorized response (401, the session's re-login signal).</summary>
     public bool IsUnauthorized => StatusCode == 401;
 }

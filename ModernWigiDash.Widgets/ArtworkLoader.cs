@@ -39,6 +39,7 @@ public sealed class ArtworkLoader
     /// </summary>
     public event Action? ArtworkChanged;
 
+    /// <summary>Production constructor over the WinRT thumbnail decoder.</summary>
     public ArtworkLoader(Action<string, Exception?>? logError = null)
         : this(new WinRtArtworkDecoder(), logError)
     {

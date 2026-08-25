@@ -1,14 +1,23 @@
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// The Stock &amp; Crypto ticker widget: tracks one symbol through the shared
+/// PriceFeedManager (crypto, stock, or FX), renders the label, price, and
+/// change badge, and seeds the one-shot fallback when the live feed has no
+/// price yet.
+/// </summary>
 [WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class CryptoStockTickerWidget : ModernWidgetBase
 {
+    /// <summary>The "Symbol": the crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT) to track.</summary>
     [WidgetProperty("Symbol", WidgetPropertyType.Text, "Crypto name (bitcoin, solana) or stock ticker (AAPL, MSFT)")]
     public string Symbol { get; set; } = "";
 
+    /// <summary>The "Asset Type": forces the asset kind when auto-detection does not recognize the symbol (Auto, Crypto, Stock, or FX Pair).</summary>
     [WidgetProperty("Asset Type", WidgetPropertyType.Choice, "Force type when auto-detection doesn't recognize your symbol", "Auto", "Auto", "Crypto", "Stock", "FX Pair")]
     public string AssetType { get; set; } = "Auto";
 
+    /// <summary>The "Display Name": an optional custom label (blank = auto-generated from the symbol).</summary>
     [WidgetProperty("Display Name", WidgetPropertyType.Text, "Optional custom label (leave blank to auto-generate from symbol)")]
     public string DisplayName { get; set; } = "";
 
@@ -16,18 +25,23 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
     private string ChangeBadge = "";
 
+    /// <summary>The "Show Change" toggle: show or hide the change percentage badge.</summary>
     [WidgetProperty("Show Change", WidgetPropertyType.Boolean, "Show or hide the change percentage badge", true)]
     public bool ShowChange { get; set; } = true;
 
+    /// <summary>The "Price Decimals": decimal places for small-value assets (Auto adjusts to the price).</summary>
     [WidgetProperty("Price Decimals", WidgetPropertyType.Choice, "Decimal places for small-value assets (Auto adjusts to price)", "Auto", "Auto", "2", "4", "6", "8")]
     public string PriceDecimals { get; set; } = "Auto";
 
+    /// <summary>The "Text Color": the symbol and price color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Symbol and price color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Positive Color": the upward change badge color.</summary>
     [WidgetProperty("Positive Color", WidgetPropertyType.Color, "Upward change badge color", "#22C55E")]
     public string PositiveColorHex { get; set; } = "#22C55E";
 
+    /// <summary>The "Negative Color": the downward change badge color.</summary>
     [WidgetProperty("Negative Color", WidgetPropertyType.Color, "Downward change badge color", "#EF4444")]
     public string NegativeColorHex { get; set; } = "#EF4444";
 
@@ -41,6 +55,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     private readonly TickerFallbackPolicy _fallbackPolicy;
     private bool _lastChangePositive;
 
+    /// <summary>Builds the feed-identity subscription tracker and the fallback-seed cadence policy bound to the Clock seam.</summary>
     public CryptoStockTickerWidget()
     {
         _subscription = new(() => _ = FallbackFetchAsync());
@@ -52,6 +67,12 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     /// <summary>Test seam for the fallback-fetch throttle.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
+    /// <summary>
+    /// Hands the context to the base and (re)subscribes the feed identity so
+    /// the shared feed tracks this widget's symbol.
+    /// </summary>
+    /// <param name="context">The widget context handed to the widget on load.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -77,6 +98,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         _subscription.Track(Symbol, AssetKindValue, Feed);
     }
 
+    /// <summary>Unsubscribes the symbol from the shared feed and disposes the hoisted paints.</summary>
     public override ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;
@@ -136,6 +158,14 @@ public class CryptoStockTickerWidget : ModernWidgetBase
             (rawPrice, PriceDecimals, currencySymbol),
             () => TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol));
 
+    /// <summary>
+    /// Draws the symbol label, the price, and the change badge (stale prices
+    /// render neutral with a freshness dot), or the placeholder when no
+    /// symbol is set; seeds the one-shot fallback when the live feed has no
+    /// price yet.
+    /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         if (string.IsNullOrWhiteSpace(Symbol))

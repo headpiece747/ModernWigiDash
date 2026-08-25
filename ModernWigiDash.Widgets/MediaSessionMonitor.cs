@@ -44,8 +44,10 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     /// </summary>
     public event Action<MediaSessionUpdate?>? SnapshotChanged;
 
+    /// <summary>The monitor's latest published snapshot, or null when no session is held.</summary>
     public MediaSnapshot? CurrentSnapshot => _snapshot;
 
+    /// <summary>Production constructor over the WinRT SMTC source.</summary>
     public MediaSessionMonitor(Action<string, Exception?>? logError = null)
         : this(new WinRtMediaSessionSource(), logError)
     {
@@ -115,18 +117,28 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         AttachSession(sessions[nextIdx]);
     }
 
+    /// <summary>Sends the play command to the current session.</summary>
     public void Play() => _ = _session?.TryPlayAsync();
 
+    /// <summary>Sends the pause command to the current session.</summary>
     public void Pause() => _ = _session?.TryPauseAsync();
 
+    /// <summary>Sends the skip-next command to the current session.</summary>
     public void Next() => _ = _session?.TrySkipNextAsync();
 
+    /// <summary>Sends the skip-previous command to the current session.</summary>
     public void Previous() => _ = _session?.TrySkipPreviousAsync();
 
+    /// <summary>Sends the shuffle command to the current session.</summary>
+    /// <param name="enabled">The desired shuffle state.</param>
     public void SetShuffle(bool enabled) => _ = _session?.TryChangeShuffleActiveAsync(enabled);
 
+    /// <summary>Sends the repeat-mode command to the current session.</summary>
+    /// <param name="mode">The desired repeat mode.</param>
     public void SetRepeat(MediaRepeatMode mode) => _ = _session?.TryChangeAutoRepeatModeAsync(mode);
 
+    /// <summary>Sends the seek command to the current session.</summary>
+    /// <param name="position">The desired playback position.</param>
     public void Seek(TimeSpan position) => _ = _session?.TryChangePlaybackPositionAsync(position.Ticks);
 
     /// <summary>
@@ -185,6 +197,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         Seek(TimeSpan.FromSeconds(ratio * snap.Duration.TotalSeconds));
     }
 
+    /// <summary>Unsubscribes, disposes the WinRT manager/session adapters, and clears the snapshot.</summary>
     public ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;
@@ -384,52 +397,76 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 /// </summary>
 public sealed class MediaSnapshot
 {
+    /// <summary>The source app's user-model ID.</summary>
     public string SourceAppId { get; set; } = "";
 
+    /// <summary>The track title (sanitized).</summary>
     public string Title { get; set; } = "";
 
+    /// <summary>The track artist (sanitized).</summary>
     public string Artist { get; set; } = "";
 
+    /// <summary>The album title (sanitized).</summary>
     public string Album { get; set; } = "";
 
+    /// <summary>The album artist (sanitized).</summary>
     public string AlbumArtist { get; set; } = "";
 
+    /// <summary>The track's number within the album.</summary>
     public int TrackNumber { get; set; }
 
+    /// <summary>The album's total track count.</summary>
     public int AlbumTrackCount { get; set; }
 
+    /// <summary>The track's genres (empty when the session reports none).</summary>
     public string[] Genres { get; set; } = [];
 
+    /// <summary>The playback status in the neutral vocabulary.</summary>
     public MediaPlaybackStatus Status { get; set; }
 
+    /// <summary>The playback position.</summary>
     public TimeSpan Position { get; set; }
 
+    /// <summary>The total playback duration.</summary>
     public TimeSpan Duration { get; set; }
 
+    /// <summary>When the timeline properties were last updated (UTC).</summary>
     public DateTimeOffset LastUpdated { get; set; }
 
+    /// <summary>Whether shuffle is active.</summary>
     public bool Shuffle { get; set; }
 
+    /// <summary>The repeat mode in the neutral vocabulary.</summary>
     public MediaRepeatMode Repeat { get; set; }
 
+    /// <summary>The playback rate (1.0 when the session reports none).</summary>
     public double PlaybackRate { get; set; } = 1.0;
 
+    /// <summary>Whether the session reports play enabled.</summary>
     public bool CanPlay { get; set; }
 
+    /// <summary>Whether the session reports pause enabled.</summary>
     public bool CanPause { get; set; }
 
+    /// <summary>Whether the session reports stop enabled.</summary>
     public bool CanStop { get; set; }
 
+    /// <summary>Whether the session reports skip-next enabled.</summary>
     public bool CanNext { get; set; }
 
+    /// <summary>Whether the session reports skip-previous enabled.</summary>
     public bool CanPrev { get; set; }
 
+    /// <summary>Whether the session reports position seeking enabled.</summary>
     public bool CanSeek { get; set; }
 
+    /// <summary>Whether the session reports shuffle enabled.</summary>
     public bool CanShuffle { get; set; }
 
+    /// <summary>Whether the session reports repeat enabled.</summary>
     public bool CanRepeat { get; set; }
 
+    /// <summary>Whether the status is Playing.</summary>
     public bool IsPlaying => Status == MediaPlaybackStatus.Playing;
 }
 

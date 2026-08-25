@@ -13,6 +13,9 @@ public readonly record struct HsvColor(double H, double S, double V);
 /// </summary>
 public static class ColorConversions
 {
+    /// <summary>Converts an <see cref="HsvColor"/> to an opaque <see cref="RgbaColor"/>.</summary>
+    /// <param name="hsv">The HSV value (H wrapped into [0, 360), S and V clamped to [0, 1]).</param>
+    /// <returns>The converted RGBA color (opaque, alpha 255).</returns>
     public static RgbaColor HsvToRgb(HsvColor hsv)
     {
         double h = hsv.H < 0 ? hsv.H % 360 + 360 : hsv.H % 360;
@@ -40,6 +43,9 @@ public static class ColorConversions
             (byte)Math.Round((b + m) * 255));
     }
 
+    /// <summary>Converts an <see cref="RgbaColor"/> to an <see cref="HsvColor"/> (the alpha channel is ignored).</summary>
+    /// <param name="rgb">The RGBA value to convert.</param>
+    /// <returns>The converted HSV value.</returns>
     public static HsvColor RgbToHsv(RgbaColor rgb)
     {
         double r = rgb.R / 255.0, g = rgb.G / 255.0, b = rgb.B / 255.0;
@@ -84,6 +90,7 @@ public readonly record struct PresetSwatch(string Name, string Hex);
 /// </summary>
 public static class PresetPalette
 {
+    /// <summary>The curated swatches in display order (the color popup renders them top to bottom).</summary>
     public static IReadOnlyList<PresetSwatch> Swatches { get; } =
     [
         new("White", "#FAFAFA"),

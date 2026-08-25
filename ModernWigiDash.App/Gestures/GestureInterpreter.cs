@@ -12,7 +12,7 @@ internal enum GesturePageAction
 
 /// <summary>
 /// Result of feeding one input sample into the gesture interpreter. A
-/// readonly struct (the <see cref="InputState"/> precedent): callers only read
+/// readonly struct (the <see cref="ModernWigiDash.App.Input.InputState"/> precedent): callers only read
 /// the three fields, so the per-sample outcome is a value, never a heap
 /// allocation on the touch path.
 /// </summary>

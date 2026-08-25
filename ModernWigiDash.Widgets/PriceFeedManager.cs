@@ -2,27 +2,47 @@ using System.Collections.Concurrent;
 
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// The asset kind a ticker symbol tracks; selects the subscription routing
+/// and the one-shot fallback seed's source leg.
+/// </summary>
 public enum AssetKind
 {
+    /// <summary>Cryptocurrency (Binance WebSocket + REST, CoinGecko seed).</summary>
     Crypto,
+    /// <summary>Stock (Finnhub WebSocket + REST, Yahoo chart seed).</summary>
     Stock,
+    /// <summary>FX pair (Frankfurter REST only; no live WebSocket feed).</summary>
     Fx
 }
 
+/// <summary>
+/// One tracked price sample in the shared map: the value, its change and
+/// currency, the source that wrote it, and the stamp the staleness decision
+/// reads.
+/// </summary>
 public class PriceInfo
 {
     /// <summary>The freshness window in seconds — the one spelling shared by
     /// <see cref="IsStale"/> and the CoinGecko downgrade guard.</summary>
     internal const double FreshnessSeconds = 60;
 
+    /// <summary>The last known price.</summary>
     public decimal Price { get; set; }
+    /// <summary>The last known change percentage.</summary>
     public decimal ChangePercent { get; set; }
+    /// <summary>The currency symbol rendered with the price.</summary>
     public string CurrencySymbol { get; set; } = "$";
+    /// <summary>The source label that last wrote this record (the freshness guard's discriminator).</summary>
     public string Source { get; set; } = "";
+    /// <summary>When the sample was stamped (the staleness decision's input).</summary>
     public DateTime Timestamp { get; set; }
+    /// <summary>The change percent formatted for display (signed, invariant, two decimals).</summary>
     public string FormattedChange =>
         $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%";
+    /// <summary>Whether the change is upward (the badge's color pick).</summary>
     public bool IsPositive => ChangePercent >= 0;
+    /// <summary>Whether the sample is older than the freshness window (the store's clock).</summary>
     public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > FreshnessSeconds;
 
     /// <summary>Test seam: clock for the staleness decision.</summary>
@@ -112,6 +132,11 @@ public sealed class PriceFeedManager : IDisposable
         return client;
     }
 
+    /// <summary>
+    /// Creates a manager over the shared process-wide HttpClient with an
+    /// optional Finnhub API key for the stock quote leg.
+    /// </summary>
+    /// <param name="finnhubApiKey">The Finnhub API key, or null when none is configured.</param>
     public PriceFeedManager(string? finnhubApiKey = null)
         : this(SharedHttpClient, finnhubApiKey)
     {
@@ -432,6 +457,13 @@ public sealed class PriceFeedManager : IDisposable
         _fxRestTask = null;
     }
 
+    /// <summary>
+    /// The shared map's current sample for the symbol under the kind's feed
+    /// key, or null when the symbol has no price yet.
+    /// </summary>
+    /// <param name="symbol">The ticker symbol or coin name.</param>
+    /// <param name="kind">The asset kind (selects the feed key shape).</param>
+    /// <returns>The current sample, or null when untracked or absent.</returns>
     public PriceInfo? GetPrice(string symbol, AssetKind kind)
     {
         string key = SymbolCatalog.ToFeedKey(symbol, kind);
@@ -560,6 +592,10 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Cancels the feed loops and shuts them down; the shared HttpClient is
+    /// deliberately kept alive (it is process-wide, not owned here).
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;

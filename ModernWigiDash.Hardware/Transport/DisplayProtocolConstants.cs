@@ -93,14 +93,14 @@ internal static class DisplayProtocolConstants
 
     /// <summary>
     /// Vendor Command: Add Widget to Screen Config (0x91 = CMD_SCREENCFG_WIDGET_ADD).
-    /// wValue = (page << 8) | widgetId.
+    /// wValue = (page &lt;&lt; 8) | widgetId.
     /// Data = WidgetConfig struct (X:short, Y:short, Width:short, Height:short, BaseClr:ushort, DrawAddr:uint, DrawLock:byte, InvalidateFlag:byte, UpdateFromCache:byte).
     /// </summary>
     public const byte CmdAddWidget = 0x91;
 
     /// <summary>
     /// Vendor Command: Send UI Command / Go To Screen (0x70 = CMD_SEND_UI_CMD).
-    /// wValue = screen command byte: (transition << 2) | screenId.
+    /// wValue = screen command byte: (transition &lt;&lt; 2) | screenId.
     /// </summary>
     public const byte CmdGoToScreen = 0x70;
 
@@ -151,7 +151,7 @@ internal static class DisplayProtocolConstants
     /// <summary>
     /// Vendor Command: Widget Framebuffer Write (0x61 = CMD_SDRAM_WIDGET_WRITE).
     /// Sent via control OUT with 8-byte data payload: [offset(4 LE), length(4 LE)].
-    /// wValue = (page << 8) | widgetId.
+    /// wValue = (page &lt;&lt; 8) | widgetId.
     /// Followed by bulk write of frame data.
     /// </summary>
     public const byte CmdFrameHeader = 0x61;

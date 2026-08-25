@@ -9,12 +9,15 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("now_playing", "Now Playing", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class NowPlayingWidget : ModernWidgetBase
 {
+    /// <summary>The "Accent Color" property: progress fill, active toggles, and placeholder accent.</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Progress fill, active toggles, and placeholder accent", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Text Color" property: title, artist, and icon color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Title, artist, and icon color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Show Source Badge" property: show which app is playing (tap to switch sources).</summary>
     [WidgetProperty("Show Source Badge", WidgetPropertyType.Boolean, "Show which app is playing (tap to switch sources)", true)]
     public bool ShowSourceBadge { get; set; } = true;
 
@@ -25,6 +28,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     private SKPoint? _touchDownPoint;
     private bool _disposed;
 
+    /// <summary>Production constructor; the media monitor and the artwork loader are created in InitializeAsync over the context.</summary>
     public NowPlayingWidget()
     {
     }
@@ -98,6 +102,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
+    /// <summary>
+    /// Binds the context, creates the artwork loader and the media session
+    /// monitor over it, and starts the SMTC bootstrap.
+    /// </summary>
+    /// <param name="context">The widget host context.</param>
+    /// <param name="cancellationToken">Cancels the initialization.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -124,6 +134,13 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         Context?.RequestRender();
     }
 
+    /// <summary>
+    /// Draws the now-playing view (artwork, title/artist meta, progress, and
+    /// the control row) from the monitor's latest snapshot and the per-frame
+    /// layout record, or the idle panel when no session is playing.
+    /// </summary>
+    /// <param name="canvas">The frame canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         _artworkLoader?.DisposeRetired();
@@ -663,6 +680,12 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         return tri.Detach();
     }
 
+    /// <summary>
+    /// Routes a tap to the hit-tested control (shuffle, previous, play/pause,
+    /// next, repeat, source badge, or seek) as an intent to the media monitor.
+    /// </summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local space.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchDown)
@@ -718,6 +741,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
 
     private static bool IsEmpty(string? s) => string.IsNullOrWhiteSpace(s);
 
+    /// <summary>Unsubscribes, disposes the media monitor and the artwork loader, and releases the widget's Skia surfaces.</summary>
     public override async ValueTask DisposeAsync()
     {
         if (_disposed) return;

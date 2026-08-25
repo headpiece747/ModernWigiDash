@@ -85,16 +85,18 @@ effort far under the estimates:
    the Tests project; the report writes to the gitignored `TestResults/`
    beside the Tests project, so the CONTEXT.md citation is the durable
    record).
-2. **Documentation (finding 2): resolved as an advisory switch, not a
-   backfill.** `GenerateDocumentationFile` is now on for Core, Hardware,
-   Widgets, and App (the doc files emit: 52/62/352/195 KB), so editors
-   show the `///` summaries on hover in every src project. The Sdk alone
-   keeps its CS1591-as-error contract (the external plugin surface stays
-   enforced). The six doc codes the switch surfaced on first build (752
-   warnings: CS1591 missing doc 646, CS1573/CS1734 param-tag drift 72,
-   CS1574 unresolvable cref 16, CS1570 bad XML 18, CS1587 misplaced comment
-   6) are NoWarn'd per project with a comment naming the escape hatch:
-   docs in these internal-first projects are advisory, and removing a
-   NoWarn entry re-enforces that code as a build failure. The full backfill
-   of the 646 missing `///` comments remains the follow-on if the advisory
-   stance is ever revisited.
+2. **Documentation (finding 2): resolved with the full backfill
+    (2026-08-25).** `GenerateDocumentationFile` is on for all five src
+    projects and the six doc-code NoWarns the switch introduced are removed:
+    an undocumented public member (CS1591) or a malformed doc comment
+    (CS1570/CS1573/CS1574/CS1587/CS1734) is now a build warning in every
+    project, which the gate's zero-warning bar turns into a build failure.
+    The backfill added the 314 missing `///` summaries (widget-property
+    summaries seed from the `[WidgetProperty]` display name and description)
+    and fixed the 43 malformed-doc sites (20 missing `<param>` tags, 9 bad
+    XML escapes, 6 unresolvable crefs, 6 stray `<paramref>` tags, 2 comments
+    on non-documentable elements) across Core, Hardware, Widgets, and App.
+    The generated `GriddyIconPaths` table carries its type and member docs
+    from the `griddy-generate.ps1` template, so regeneration keeps them. The
+    Sdk alone still escalates CS1591 to an error (the external plugin
+    contract).

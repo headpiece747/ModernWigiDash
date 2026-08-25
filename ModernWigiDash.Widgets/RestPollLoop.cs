@@ -6,7 +6,7 @@ namespace ModernWigiDash.Widgets;
 /// <see cref="FeedLoop"/> (WebSocket session with a reconnect policy):
 /// delay-first, per-symbol failure isolation (one bad fetch must not kill
 /// the cycle or its siblings — the failure routes through the injected
-/// <paramref name="failLog"/> and the cycle continues), and an optional
+/// <c>failLog</c> and the cycle continues), and an optional
 /// batch-tail hook that runs once per cycle after all symbols have polled
 /// (the crypto cycle's CoinGecko fallback rides it). The delay rides an
 /// injected delegate so tests drive the cadence with a fake clock instead

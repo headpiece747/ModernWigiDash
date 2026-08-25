@@ -12,7 +12,7 @@ namespace ModernWigiDash.App.PresentMon;
 /// frozen-data guard). The producer owns the sequencing — session, tracking
 /// reconciliation, polling — and asks this module for the two decisions:
 /// <see cref="Decide"/> before polling, <see cref="IsFrozenSample"/> and
-/// <see cref="NoteLive"/> after. The <see cref="TrackOnly"/> verdict carries
+/// <see cref="NoteLive"/> after. The <see cref="TargetVerdict.TrackOnly"/> verdict carries
 /// the ordering contract: apply tracking, never poll.
 /// </summary>
 internal sealed class TargetTrustPolicy

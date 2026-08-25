@@ -26,13 +26,12 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- Emit the XML doc file for editor hover (the Sdk's
-         GenerateDocumentationFile is the precedent). Docs are advisory in
-         these internal-first projects: the Sdk alone keeps the
-         CS1591-as-error contract, so the six doc codes observed when the
-         switch turned on (2026-08-25 build) are suppressed here instead of
-         gated. Removing a NoWarn entry re-enforces that code. -->
-    <NoWarn>$(NoWarn);CS1570;CS1573;CS1574;CS1587;CS1591;CS1734</NoWarn>
+    <!-- XML docs are enforced at the build, not advisory: no doc-code
+         NoWarn in these projects, so an undocumented public member (CS1591)
+         or a malformed doc comment (CS1570, CS1573, CS1574, CS1587,
+         CS1734) is a build warning the gate's zero-warning bar catches.
+         The Sdk alone escalates CS1591 to an error (its public surface is
+         the cross-assembly widget plugin API). -->
     <!-- Dev builds must parse as "no version" (AppVersion.Parse maps 0.0.0 to
          null -> IsDevBuild, updater disabled). Without this, the SDK default
          1.0.0 makes dev builds look release-stamped and they nag at startup.

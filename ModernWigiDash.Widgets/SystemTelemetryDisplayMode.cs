@@ -9,9 +9,13 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public enum SystemTelemetryDisplayMode
 {
+    /// <summary>The gauge arc (the property default).</summary>
     Gauge,
+    /// <summary>The horizontal progress bar.</summary>
     Bar,
+    /// <summary>The value readout only (no track).</summary>
     Value,
+    /// <summary>The sparkline history graph.</summary>
     Graph
 }
 

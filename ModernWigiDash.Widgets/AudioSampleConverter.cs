@@ -12,11 +12,18 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal static class AudioSampleConverter
 {
+    /// <summary>
+    /// Converts one recorded buffer to float samples per the wave format's
+    /// encoding; null means "cannot convert".
+    /// </summary>
     /// <param name="buffer">The recorded bytes — the VALID region only. NAudio
     /// raises DataAvailable with the full device-buffer allocation (zero-padded
     /// beyond <c>BytesRecorded</c>), so callers must slice to the recorded
     /// region first; converting the padding poisons the spectrum tail and the
     /// waveform ring with silence.</param>
+    /// <param name="encoding">The wave format's sample encoding (the conversion table's key).</param>
+    /// <param name="bytesPerSample">The sample width in bytes (2, 3, or 4; non-positive = cannot convert).</param>
+    /// <returns>The float samples, or null when the encoding or width cannot be converted.</returns>
     public static float[]? Convert(ReadOnlySpan<byte> buffer, WaveFormatEncoding encoding, int bytesPerSample)
     {
         if (bytesPerSample <= 0)

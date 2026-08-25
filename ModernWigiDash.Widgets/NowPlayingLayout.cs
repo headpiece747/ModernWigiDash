@@ -36,7 +36,7 @@ public enum NowPlayingHitAction
 /// from this record and OnTouch hit-tests the same record. The record also
 /// carries the scaled <see cref="Pad"/> and <see cref="ArtGap"/> the render
 /// path draws with — the 24/30 design constants live only in
-/// <see cref="Compute"/>, never re-derived at a draw site.
+/// <see cref="NowPlayingLayout.Compute"/>, never re-derived at a draw site.
 /// </summary>
 public readonly record struct NowPlayingGeometry(
     SKRect ShuffleButton,

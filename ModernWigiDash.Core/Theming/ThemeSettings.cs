@@ -19,36 +19,54 @@ public readonly record struct RgbaColor(byte A, byte R, byte G, byte B);
 /// persisted to app_theme.json next to the executable. Property names map directly
 /// to the resource keys (prop name + "Color") used by App.xaml. The model is
 /// display-free: the dialog's labels, groups, and descriptions live on the App
-/// side (<see cref="ModernWigiDash.App.Theming.ThemePresentation"/>), beside the
-/// UI that renders them.
+/// side (<c>ThemePresentation</c>), beside the UI that renders them.
 /// </summary>
 public class ThemeSettings
 {
     // Surfaces
+    /// <summary>App background behind the panels.</summary>
     public string BgDark { get; set; } = "#121214";
+    /// <summary>Panel background (inspector, dialogs).</summary>
     public string BgPanel { get; set; } = "#1A1A1E";
+    /// <summary>Card background (widgets, list rows).</summary>
     public string BgCard { get; set; } = "#26262B";
+    /// <summary>Default border color.</summary>
     public string Border { get; set; } = "#3F3F46";
 
     // Accents
+    /// <summary>Warning/red accent.</summary>
     public string AccentRed { get; set; } = "#F59E0B";
+    /// <summary>Material primary accent.</summary>
     public string M3Primary { get; set; } = "#FBBF24";
+    /// <summary>Material primary container fill.</summary>
     public string M3PrimaryContainer { get; set; } = "#3F3F46";
+    /// <summary>Material on-primary-container color (text and icons on the primary container).</summary>
     public string M3OnPrimaryContainer { get; set; } = "#FBBF24";
+    /// <summary>Success/green accent.</summary>
     public string AccentGreen { get; set; } = "#10B981";
 
     // Text
+    /// <summary>Primary text color.</summary>
     public string TextPrimary { get; set; } = "#FAFAFA";
+    /// <summary>Secondary text color.</summary>
     public string TextSecondary { get; set; } = "#A1A1AA";
 
     // Interactive states & chrome extras
+    /// <summary>Hover fill for controls.</summary>
     public string ControlHover { get; set; } = "#3F3F46";
+    /// <summary>Hover fill for dropdown items.</summary>
     public string DropdownHover { get; set; } = "#2A2A30";
+    /// <summary>Custom title bar background.</summary>
     public string TitleBar { get; set; } = "#0B0B0C";
+    /// <summary>Status bar background.</summary>
     public string StatusBarBackground { get; set; } = "#0E0E10";
+    /// <summary>Danger-state fill (confirmation dialogs).</summary>
     public string DangerBackground { get; set; } = "#7F1D1D";
+    /// <summary>Danger-state border.</summary>
     public string DangerBorder { get; set; } = "#EF4444";
+    /// <summary>Success-state fill (confirmation dialogs).</summary>
     public string SuccessBackground { get; set; } = "#064E3B";
+    /// <summary>Success-state border.</summary>
     public string SuccessBorder { get; set; } = "#10B981";
 
     /// <summary>
@@ -78,6 +96,11 @@ public class ThemeSettings
     private static readonly string ThemePath =
         Path.Combine(AppContext.BaseDirectory, "app_theme.json");
 
+    /// <summary>
+    /// Loads the theme from app_theme.json next to the executable, falling
+    /// back to the default theme when the file is missing or unparseable.
+    /// </summary>
+    /// <returns>The loaded theme, or a default theme when the file is missing or corrupt.</returns>
     public static ThemeSettings Load()
     {
         try
@@ -99,6 +122,8 @@ public class ThemeSettings
         return new ThemeSettings();
     }
 
+    /// <summary>Persists the active <see cref="Theme"/> to app_theme.json next to the executable.</summary>
+    /// <returns>True when the write succeeded, false on a write failure (the caller surfaces it).</returns>
     public static bool Save()
     {
         try

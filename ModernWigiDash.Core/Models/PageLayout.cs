@@ -1,5 +1,9 @@
 namespace ModernWigiDash.Core.Models;
 
+/// <summary>
+/// One page of the profile: its background, the grid-snap flag, and the
+/// widgets placed on it.
+/// </summary>
 public class PageLayout
 {
     /// <summary>The one default page background — the compositor's parse
@@ -8,26 +12,38 @@ public class PageLayout
     public const string DefaultBackgroundHexColor = "#12141D";
 
     // Export-schema surface: written by ExportJson, never read back by ImportJson.
+    /// <summary>The page's stable identity in the export schema (GUID); never read back on import.</summary>
     public string PageId { get; set; } = Guid.NewGuid().ToString();
+    /// <summary>The page's display name; a blank assignment repairs to the "Main Dashboard" default.</summary>
     public string PageName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Main Dashboard" : value.Trim(); } = "Main Dashboard";
+    /// <summary>The page's background color as a #RRGGBB hex string; a blank assignment repairs to <see cref="DefaultBackgroundHexColor"/>.</summary>
     public string BackgroundHexColor { get => field; set => field = string.IsNullOrWhiteSpace(value) ? DefaultBackgroundHexColor : value.Trim(); } = DefaultBackgroundHexColor;
+    /// <summary>Optional page background image path (relative, sanitized on import).</summary>
     public string BackgroundImagePath { get; set; } = string.Empty;
 
+    /// <summary>Whether widget placement on this page snaps to the design grid.</summary>
     public bool SnapToGrid { get; set; } = true;
 
+    /// <summary>The widgets placed on this page.</summary>
     public List<PlacedWidgetInstance> Widgets { get; set; } = [];
 }
 
+/// <summary>
+/// The persisted profile: its pages, the active page index, and the
+/// page-range invariant enforced at the Pages boundary.
+/// </summary>
 public class ProfileLayout
 {
     // Export-schema surface: written by ExportJson, never read back by ImportJson.
+    /// <summary>The profile's stable identity in the export schema (GUID); never read back on import.</summary>
     public string ProfileId { get; set; } = Guid.NewGuid().ToString();
+    /// <summary>The profile's display name; a blank assignment repairs to the "Default Profile" default.</summary>
     public string ProfileName { get; set => field = string.IsNullOrWhiteSpace(value) ? "Default Profile" : value.Trim(); } = "Default Profile";
     /// <summary>
     /// The profile's pages. The non-empty invariant is enforced at this
     /// boundary — a null or empty assignment repairs to a single default
-    /// page (the same repair rule the <see cref="PageName"/> and
-    /// <see cref="BackgroundHexColor"/> setters apply) — so
+    /// page (the same repair rule the <see cref="PageLayout.PageName"/> and
+    /// <see cref="PageLayout.BackgroundHexColor"/> setters apply) — so
     /// <see cref="ActivePage"/> is total and the old orphan-page fallback is
     /// unrepresentable. In-place removal stays safe: ProfileOps refuses to
     /// delete the last page, and the import sanitizer repairs untrusted input

@@ -474,6 +474,9 @@ public static class ProfileOps
     /// named <see cref="ProfileImportOutcome"/> verdicts to their own surface
     /// instead of re-spelling the read-and-reject sequence.
     /// </summary>
+    /// <param name="path">The profile file to import (its existence and size are checked before any read).</param>
+    /// <param name="loader">The widget catalog the rehydration resolves plugin ids against.</param>
+    /// <param name="context">The host context handed to each rehydrated widget.</param>
     /// <param name="trusted">The app's own persisted profile: the untrusted-import
     /// sanitizer would wipe the user's configured ActionCommand / ImagePath /
     /// BackgroundImagePath values on every restart, so it is skipped. Every

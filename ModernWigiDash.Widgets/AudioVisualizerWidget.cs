@@ -1,15 +1,25 @@
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// Live audio visualizer: draws the system audio output's spectrum as neon
+/// bars, an oscilloscope wave, or a radial pulse. The capture lifecycle and
+/// the double-buffered DSP live in the AudioCaptureLifecycle and
+/// AudioFrameBuffer modules; this widget drives them from Render and Dispose
+/// and draws one snapshot per frame.
+/// </summary>
 [WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x2)]
 public class AudioVisualizerWidget : ModernWidgetBase
 {
 
+    /// <summary>The "Visualizer Style" property: bar spectrum or radial wave.</summary>
     [WidgetProperty("Visualizer Style", WidgetPropertyType.Choice, "Bar spectrum or radial wave", "Neon Bars", "Neon Bars", "Oscilloscope Wave", "Radial Pulse")]
     public string VisualizerStyle { get; set; } = "Neon Bars";
 
+    /// <summary>The "Bar Count" property: number of spectrum bars.</summary>
     [WidgetProperty("Bar Count", WidgetPropertyType.Number, "Number of spectrum bars", 32f)]
     public float BarCount { get; set; } = 32f;
 
+    /// <summary>The "Primary Color" property: color for high spectrum peaks.</summary>
     [WidgetProperty("Primary Color", WidgetPropertyType.Color, "Color for high spectrum peaks", "#F59E0B")]
     public string PrimaryColorHex { get; set; } = "#F59E0B";
 
@@ -35,6 +45,13 @@ public class AudioVisualizerWidget : ModernWidgetBase
     /// </summary>
     internal Func<IAudioCaptureSource> CaptureSourceFactory { get; set; } = () => new WasapiLoopbackCaptureSource();
 
+    /// <summary>
+    /// Binds the context and builds the capture lifecycle (the start/stop
+    /// policy and the NAudio marshaling) over the live source factory and
+    /// clock seams.
+    /// </summary>
+    /// <param name="context">The widget host context.</param>
+    /// <param name="cancellationToken">Cancels the initialization.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -45,6 +62,13 @@ public class AudioVisualizerWidget : ModernWidgetBase
         _lifecycle = new AudioCaptureLifecycle(_buffer, () => CaptureSourceFactory(), () => Time, () => (int)BarCount, context.LogError);
     }
 
+    /// <summary>
+    /// Draws the selected visualizer style from the capture buffer's one
+    /// locked snapshot; capture runs only while this widget renders (the
+    /// lifecycle module owns the start/stop policy).
+    /// </summary>
+    /// <param name="canvas">The frame canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Capture runs only while this widget is being rendered (active page).
@@ -149,6 +173,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
         }
     }
 
+    /// <summary>Stops the capture lifecycle and disposes the widget's reused Skia surfaces.</summary>
     public override ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;

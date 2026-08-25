@@ -13,12 +13,15 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("frame_time", "FPS / Frame Time", Category = "System Monitoring")]
 public class FrameTimeWidget : ModernWidgetBase
 {
+    /// <summary>The "Accent Color" property: primary accent color.</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Text Color" property: header, label, and value color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Show Process" property: show the tracked game/process name.</summary>
     [WidgetProperty("Show Process", WidgetPropertyType.Boolean, "Show the tracked game/process name", true)]
     public bool ShowProcess { get; set; } = true;
 
@@ -70,6 +73,13 @@ public class FrameTimeWidget : ModernWidgetBase
         return _memoDisplay;
     }
 
+    /// <summary>
+    /// Draws the frame-time view (dashboard or overlay) from the store's
+    /// fresh snapshot, or the graceful unavailable placeholder when the
+    /// PresentMon capture is absent.
+    /// </summary>
+    /// <param name="canvas">The frame canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
@@ -197,6 +207,9 @@ public class FrameTimeWidget : ModernWidgetBase
         }
     }
 
+    /// <summary>A release toggles the dashboard/overlay readout view and requests a render.</summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local space.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchUp)
@@ -206,6 +219,7 @@ public class FrameTimeWidget : ModernWidgetBase
         }
     }
 
+    /// <summary>Disposes the widget's hoisted Skia paints.</summary>
     public override ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;

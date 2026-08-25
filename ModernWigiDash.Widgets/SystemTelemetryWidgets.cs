@@ -1,32 +1,46 @@
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// The Hardware Monitor widget: renders one live LibreHardwareService sensor
+/// reading through the SystemTelemetryPresentation display rules, in gauge,
+/// bar, value, or sparkline-graph mode.
+/// </summary>
 [WidgetMetadata("hardware_monitor", "Hardware Monitor", Category = "System Monitoring")]
 public class HardwareMonitorWidget : ModernWidgetBase
 {
+    /// <summary>The "Sensor": the live sensor reading label selected from LibreHardwareService.</summary>
     [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from LibreHardwareService", "")]
     public string SensorLabel { get; set; } = "";
 
+    /// <summary>The "Display Label": overrides the label shown on the widget (empty = the sensor's name).</summary>
     [WidgetProperty("Display Label", WidgetPropertyType.Text, "Override the label shown on the widget (leave empty to use the sensor name)", "")]
     public string DisplayLabel { get; set; } = "";
 
+    /// <summary>The "Unit": overrides the unit shown (empty = the sensor's unit).</summary>
     [WidgetProperty("Unit", WidgetPropertyType.Text, "Override the unit (leave empty to use the sensor's)", "")]
     public string Unit { get; set; } = "";
 
+    /// <summary>The "Display Mode": how the reading is visualized (Gauge, Bar, Value, or Graph).</summary>
     [WidgetProperty("Display Mode", WidgetPropertyType.Choice, "How to visualize the reading", "Gauge", "Gauge", "Bar", "Value", "Graph")]
     public string DisplayMode { get; set; } = "Gauge";
 
+    /// <summary>The "Auto Scale" toggle: scale the gauge/bar to the maximum recorded by the sensor.</summary>
     [WidgetProperty("Auto Scale", WidgetPropertyType.Boolean, "Scale the gauge/bar to the maximum recorded by the sensor", true)]
     public bool AutoScale { get; set; } = true;
 
+    /// <summary>The "Max Value": the manual gauge/bar maximum when Auto Scale is off.</summary>
     [WidgetProperty("Max Value", WidgetPropertyType.Number, "Manual gauge/bar maximum when Auto Scale is off", 100f)]
     public float MaxValue { get; set; } = 100f;
 
+    /// <summary>The "Decimals": the number of decimal places the hero value shows.</summary>
     [WidgetProperty("Decimals", WidgetPropertyType.Number, "Number of decimal places shown", 1f)]
     public float Decimals { get; set; } = 1f;
 
+    /// <summary>The "Accent Color": the primary accent color (gauge progress, graph).</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Text Color": the header, label, and value color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
@@ -76,6 +90,13 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// <summary>Internal test accessor: how many history samples are buffered.</summary>
     internal int HistoryCountForTest => _history.Count;
 
+    /// <summary>
+    /// Draws the reading in its display mode, or the unavailable placeholder:
+    /// the store's freshness gate first, then the sensor-selected and
+    /// sensor-absent placeholders, then the mode dispatch.
+    /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
@@ -150,6 +171,8 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// unit's pixel offset from the value (the +4/+5/+6 deltas are pixel
     /// behavior, not duplication).
     /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="display">The reading display state (value text, unit).</param>
     /// <param name="anchorX">The value's horizontal anchor: its center, or its
     /// right edge when <paramref name="rightAligned"/> is set.</param>
     /// <param name="baselineAnchor">Baseline before the value's own height
@@ -157,6 +180,12 @@ public class HardwareMonitorWidget : ModernWidgetBase
     /// its own metrics, the other modes use 0 for a fixed baseline.</param>
     /// <param name="baselineFromValue">Fraction of the measured value height
     /// added to <paramref name="baselineAnchor"/> for the baseline.</param>
+    /// <param name="valFontSize">The hero value's font size in px.</param>
+    /// <param name="valueColor">The hero value's color.</param>
+    /// <param name="unitColor">The trailing unit's color.</param>
+    /// <param name="unitFontSize">The unit's font size in px.</param>
+    /// <param name="unitOffset">The unit's pixel offset from the value's right edge.</param>
+    /// <param name="rightAligned">Align the value's right edge to the anchor instead of centering it.</param>
     private void DrawHeroValue(
         SKCanvas canvas,
         SystemTelemetryDisplay display,
@@ -302,6 +331,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
             valFontSize, accent, text.WithAlpha(180), 11f, 4f, rightAligned: true);
     }
 
+    /// <summary>Disposes the hoisted paints and the caller-owned sparkline paths.</summary>
     public override ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;

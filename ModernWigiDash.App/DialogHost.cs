@@ -312,9 +312,9 @@ internal sealed class DialogHost
             }
         }
 
-        /// <summary>The 22×22 white path glyph for a Griddy icon, or null when
-        /// the path data does not parse (a malformed name degrades to an empty
-        /// cell, never a crash).</summary>
+        // The 22×22 white path glyph for a Griddy icon, or null when
+        // the path data does not parse (a malformed name degrades to an empty
+        // cell, never a crash).
         static Path? TryBuildIconGeometry(string pathData)
         {
             try

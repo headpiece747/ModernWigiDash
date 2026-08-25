@@ -25,10 +25,15 @@ public sealed record SystemTelemetryDisplay(
 /// </summary>
 public static class SystemTelemetryPresentation
 {
+    /// <summary>The placeholder title when the store has no fresh data at all.</summary>
     public const string NoDataTitle = "No sensor data";
+    /// <summary>The placeholder subtitle for the no-data state.</summary>
     public const string NoDataSubtitle = "Start LibreHardwareService to read hardware sensors";
+    /// <summary>The placeholder title when a snapshot is live but no sensor is selected.</summary>
     public const string NoSensorTitle = "Select a sensor";
+    /// <summary>The placeholder subtitle for the no-sensor-selected state.</summary>
     public const string NoSensorSubtitle = "Open Settings and pick a sensor reading";
+    /// <summary>The placeholder title when the selected sensor is absent from the snapshot.</summary>
     public const string SensorMissingTitle = "Sensor not found";
 
     /// <summary>The store gate: no fresh connected snapshot at all.</summary>

@@ -2,6 +2,10 @@ using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Core.Rendering;
 
+/// <summary>
+/// Composites a page's placed widgets into the 1016x592 SKBitmap frame buffer
+/// that the render tick pushes into frame delivery.
+/// </summary>
 public class SkiaFrameCompositor : IDisposable
 {
     private readonly SKBitmap _frameBuffer = new(DisplayGeometry.FramebufferWidth, DisplayGeometry.FramebufferHeight);
@@ -21,17 +25,21 @@ public class SkiaFrameCompositor : IDisposable
     private string? _lastBgHex;
     private SKColor _lastBgColor = ParseDefaultBackground();
 
+    /// <summary>Creates the compositor and its one reused frame buffer and canvas.</summary>
     public SkiaFrameCompositor()
     {
         _canvas = new SKCanvas(_frameBuffer);
     }
 
+    /// <summary>The composited frame buffer (the SKBitmap the encode seam reads).</summary>
     public SKBitmap FrameBuffer => _frameBuffer;
+    /// <summary>Whether the edit overlay (grid, selection chrome) is drawn; the App syncs it from the Edit Mode checkbox.</summary>
     public bool IsEditMode
     {
         get => _isEditMode;
         set => _isEditMode = value;
     }
+    /// <summary>The placement selected in edit mode (drives the selection outline), or null.</summary>
     public PlacedWidgetInstance? SelectedWidget
     {
         get => _selectedWidget;
@@ -44,6 +52,11 @@ public class SkiaFrameCompositor : IDisposable
             ? fallback
             : new SKColor(18, 20, 29);
 
+    /// <summary>
+    /// Composes the page into the frame buffer: the background, the edit
+    /// overlay, then the placed widgets in ZIndex order.
+    /// </summary>
+    /// <param name="page">The page to compose into the frame buffer.</param>
     public void Compose(PageLayout page)
     {
         SKCanvas canvas = _canvas;
@@ -153,12 +166,15 @@ public class SkiaFrameCompositor : IDisposable
 
     private bool _disposed;
 
+    /// <summary>Releases the frame buffer, canvas, and cached paints.</summary>
     public void Dispose()
     {
         Dispose(disposing: true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>Releases the Skia surfaces when <paramref name="disposing"/> is true.</summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>; false from the finalizer path.</param>
     protected virtual void Dispose(bool disposing)
     {
         if (_disposed) return;

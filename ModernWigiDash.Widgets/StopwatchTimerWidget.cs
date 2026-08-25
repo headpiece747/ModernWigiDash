@@ -1,5 +1,9 @@
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// The Stopwatch &amp; Timer widget: a tap toggles the stopwatch and the
+/// render draws the elapsed time with its running/paused status line.
+/// </summary>
 [WidgetMetadata("stopwatch_timer", "Stopwatch & Timer", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class StopwatchTimerWidget : ModernWidgetBase
 {
@@ -23,9 +27,11 @@ public class StopwatchTimerWidget : ModernWidgetBase
         _startTime = Clock.GetUtcNow().UtcDateTime;
     }
 
+    /// <summary>The "Text Color": the timer digits color.</summary>
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Timer digits color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
+    /// <summary>The "Accent Color": the status label color.</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Status label color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
@@ -34,6 +40,12 @@ public class StopwatchTimerWidget : ModernWidgetBase
     /// <summary>Internal test accessor for the accumulated elapsed time.</summary>
     internal TimeSpan ElapsedForTest => _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
 
+    /// <summary>
+    /// Draws the elapsed time (StopwatchPresentation format) with its status
+    /// dot and status line (running or paused).
+    /// </summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var total = _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
@@ -60,6 +72,12 @@ public class StopwatchTimerWidget : ModernWidgetBase
         canvas.DrawTextWithFallback(statusStr, bounds.MidX - (sb.Width / 2f), bounds.Bottom - 16f, subFont, _subPaint);
     }
 
+    /// <summary>
+    /// A TouchDown toggles the stopwatch (a pause accumulates the elapsed
+    /// time, a resume restarts the start stamp).
+    /// </summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local coordinates.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchDown)
@@ -78,6 +96,7 @@ public class StopwatchTimerWidget : ModernWidgetBase
         }
     }
 
+    /// <summary>Disposes the hoisted paints.</summary>
     public override ValueTask DisposeAsync()
     {
         _textPaint.Dispose();

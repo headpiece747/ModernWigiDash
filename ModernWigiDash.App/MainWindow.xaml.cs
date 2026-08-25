@@ -106,6 +106,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// paint never allocates a new instance.</summary>
     private static readonly SKSamplingOptions FrameSamplingOptions = new(SKFilterMode.Linear);
 
+    /// <summary>Production constructor: the real PresentMon interop, the
+    /// default profile path, and the live system power-mode source.</summary>
     public MainWindow()
         : this(new PresentMonNative(), ProfilePersistence.DefaultProfilePath(), new SystemPowerModeSource())
     {

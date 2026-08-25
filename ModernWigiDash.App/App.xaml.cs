@@ -12,6 +12,11 @@ public partial class App : Application
     /// MainWindow's Closed handler before any teardown dispose runs.</summary>
     internal static volatile bool IsClosing;
 
+    /// <summary>
+    /// The production constructor: pins the log paths next to the profile
+    /// (LocalAppData, never next to the exe), arms the crash handlers, and
+    /// binds the exit marker + final flush.
+    /// </summary>
     public App()
     {
         // Logs live next to the profile, never next to the exe: a Program
@@ -78,6 +83,11 @@ public partial class App : Application
         FileLog.Flush();
     }
 
+    /// <summary>
+    /// Loads the persisted theme and applies it to the application
+    /// resources before the first window shows.
+    /// </summary>
+    /// <param name="e">Startup event arguments.</param>
     protected override void OnStartup(StartupEventArgs e)
     {
         ThemeSettings.Theme = ThemeSettings.Load();

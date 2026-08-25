@@ -50,10 +50,10 @@ internal readonly record struct InputState(PageLayout ActivePage, int PageCount,
 /// Callers feed the source-aware <see cref="Press"/>/<see cref="Move"/>/
 /// <see cref="Release"/> surface with coordinates and the source only; the
 /// controller reads the desktop's live edit mode itself (the injected
-/// <paramref name="desktopEditMode"/> probe) and derives the veto from the
+/// <c>desktopEditMode</c> probe) and derives the veto from the
 /// source, so the call sites never spell it. All page-switch UI work
 /// (tab rebuild, selection, canvas refresh) stays in MainWindow behind the
-/// <paramref name="navigateTo"/> and <paramref name="select"/> seams.
+/// <c>navigateTo</c> and <c>select</c> seams.
 /// </summary>
 internal sealed class InputController
 {

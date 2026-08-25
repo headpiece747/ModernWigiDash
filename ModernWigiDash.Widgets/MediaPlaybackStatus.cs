@@ -13,17 +13,24 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public enum MediaPlaybackStatus
 {
+    /// <summary>The session is open and idle.</summary>
     Opened = 0,
 
+    /// <summary>Playback is running.</summary>
     Playing = 1,
 
+    /// <summary>Playback is paused.</summary>
     Paused = 2,
 
+    /// <summary>Playback has stopped.</summary>
     Stopped = 3,
 
+    /// <summary>The session is closed (no active media).</summary>
     Closed = 4,
 
+    /// <summary>The status is in transition.</summary>
     Changing = 5,
 
+    /// <summary>A status the OS reports that the named set does not cover.</summary>
     Unknown = 6
 }

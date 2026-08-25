@@ -42,9 +42,8 @@ internal static class SvgIconHelper
     {
         /// <summary>
         /// Returns the cached parsed path for <paramref name="key"/>, parsing
-        /// the path data produced by <paramref name="getPathData"/> on first
-        /// use. Invalid or empty paths resolve to an empty <see cref="SKPath"/>
-        /// (never null).
+        /// <paramref name="pathData"/> on first use. Invalid or empty paths
+        /// resolve to an empty <see cref="SKPath"/> (never null).
         /// </summary>
         internal static SKPath GetOrParse(string key, string pathData)
             => GetOrParse(key, () => pathData);

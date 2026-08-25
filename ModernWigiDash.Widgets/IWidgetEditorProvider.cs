@@ -7,8 +7,11 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 public enum EditorKind
 {
+    /// <summary>The icon picker editor (a named icon with an optional file override).</summary>
     IconPicker,
+    /// <summary>The action-command editor (the executable, file, or URL a hotkey action runs).</summary>
     ActionCommand,
+    /// <summary>The location-search editor (the weather widget's geocode pick list).</summary>
     LocationSearch
 }
 

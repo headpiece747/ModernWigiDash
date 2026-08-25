@@ -31,6 +31,14 @@ public sealed record FrameTimeDisplay(
 /// </summary>
 public static class FrameTimePresentation
 {
+    /// <summary>
+    /// Builds the widget's display facts from one snapshot at the placement
+    /// size: the hero strings, the dashboard cards, the overlay rows, and the
+    /// size-dependent visibility decisions.
+    /// </summary>
+    /// <param name="snapshot">The PresentMon snapshot to render.</param>
+    /// <param name="bounds">The widget's placement size (drives the visibility decisions).</param>
+    /// <returns>The display facts the render methods lay out.</returns>
     public static FrameTimeDisplay Build(FrameTimeSnapshotDto snapshot, SKSize bounds)
     {
         // The overlay's frame-time rows derive from the percentile FPS values,

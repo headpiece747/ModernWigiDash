@@ -24,9 +24,16 @@ internal sealed class ProfilePersistence : IDisposable
     private int _dirtyVersion;
     private bool _disposed;
 
+    /// <param name="profilePath">The persisted profile file path the Load/Save
+    /// boundary reads and writes.</param>
     /// <param name="profileProvider">Reads the current profile at save time —
     /// the window's profile reference can be swapped on import, so the module
     /// must never hold a stale reference.</param>
+    /// <param name="debounceDelay">The MarkDirty-to-Flush window; defaults to
+    /// <see cref="DebounceDelay"/>.</param>
+    /// <param name="timeProvider">The clock the debounce delay runs on;
+    /// defaults to <see cref="TimeProvider.System"/>.</param>
+    /// <param name="log">Optional log sink for load and save failures.</param>
     public ProfilePersistence(
         string profilePath,
         Func<ProfileLayout> profileProvider,

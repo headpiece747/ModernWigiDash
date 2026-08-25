@@ -4,7 +4,7 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// The one bounded-read core behind every byte-limited read in the weather
-/// cluster: streams up to <paramref name="cap"/> bytes from any readable
+/// cluster: streams up to <c>cap</c> bytes from any readable
 /// stream into a MemoryStream, chunked via the shared array pool, returning
 /// the buffered bytes. The HTTP leg (<see cref="WeatherGeocoder.ReadBoundedAsync"/>)
 /// and the disk-cache leg (the WeatherClient cache load) are adapters that

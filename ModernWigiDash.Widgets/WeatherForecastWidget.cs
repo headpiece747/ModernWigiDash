@@ -3,9 +3,17 @@ using ModernWigiDash.Core.Models;
 
 namespace ModernWigiDash.Widgets;
 
+/// <summary>
+/// Live weather widget: current conditions, humidity, wind, feels-like, and
+/// high/low, plus the multi-day and hourly forecast strips. The place
+/// resolves from a city name, a ZIP code, or explicit coordinates through the
+/// Open-Meteo cluster (the client, the geocoder, the fetch flow, and the
+/// gated display state).
+/// </summary>
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
 public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider, IWeatherFetchHost
 {
+    /// <summary>The "Location Type" property: city name, ZIP code, or lat,lon pair.</summary>
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
 
@@ -14,45 +22,59 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // ambiguity gate leaves it unresolved and the widget starts blank.
     // "Miami, Florida" is the single unique top scorer — it fetches out of the
     // box on a fresh profile.
+    /// <summary>The "Location" property: city name, ZIP/postal code, or lat,lon pair.</summary>
     [WidgetProperty("Location", WidgetPropertyType.Text, "City name, ZIP/postal code, or lat,lon (e.g. 40.71,-74.00)", "Miami, Florida")]
     public string Location { get; set; } = "Miami, Florida";
 
+    /// <summary>The "Custom Label" property: the custom title display name override.</summary>
     [WidgetProperty("Custom Label", WidgetPropertyType.Text, "Custom title display name override", "")]
     public string CustomLabel { get; set; } = "";
 
+    /// <summary>The "Unit System" property: temperature and speed units.</summary>
     [WidgetProperty("Unit System", WidgetPropertyType.Choice, "Temperature & speed units", "Fahrenheit (°F, mph)", "Fahrenheit (°F, mph)", "Celsius (°C, km/h)", "Celsius (°C, mph)", "Celsius (°C, m/s)", "Kelvin (K, m/s)")]
     public string UnitSystem { get; set; } = WeatherPresentation.DefaultUnitSystem;
 
+    /// <summary>The "Layout Mode" property: the display view style (Detailed, Daily Forecast, Hourly Forecast, Current Only, Compact).</summary>
     [WidgetProperty("Layout Mode", WidgetPropertyType.Choice, "Display view style", WeatherLayout.DefaultLayoutMode, "Detailed", "Daily Forecast", "Hourly Forecast", "Current Only", "Compact")]
     public string LayoutMode { get; set; } = WeatherLayout.DefaultLayoutMode;
 
+    /// <summary>The "Accent Color" property: the primary glowing accent color.</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary glowing accent color", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
 
+    /// <summary>The "Show Humidity" property: display the relative humidity metric.</summary>
     [WidgetProperty("Show Humidity", WidgetPropertyType.Boolean, "Display relative humidity metric", true)]
     public bool ShowHumidity { get; set; } = true;
 
+    /// <summary>The "Show Wind" property: display wind speed and direction.</summary>
     [WidgetProperty("Show Wind", WidgetPropertyType.Boolean, "Display wind speed & direction", true)]
     public bool ShowWind { get; set; } = true;
 
+    /// <summary>The "Show Feels Like" property: display the apparent temperature.</summary>
     [WidgetProperty("Show Feels Like", WidgetPropertyType.Boolean, "Display apparent temperature", true)]
     public bool ShowFeelsLike { get; set; } = true;
 
+    /// <summary>The "Show High / Low" property: display today's max and min temperature.</summary>
     [WidgetProperty("Show High / Low", WidgetPropertyType.Boolean, "Display today's max and min temp", true)]
     public bool ShowHighLow { get; set; } = true;
 
+    /// <summary>The "Show Forecast Strip" property: display the multi-day forecast strip in the Detailed view.</summary>
     [WidgetProperty("Show Forecast Strip", WidgetPropertyType.Boolean, "Display multi-day forecast strip in Detailed view", true)]
     public bool ShowForecast { get; set; } = true;
 
+    /// <summary>The "Static Snapshot" property: freeze the current weather data as a static snapshot.</summary>
     [WidgetProperty("Static Snapshot", WidgetPropertyType.Boolean, "Freeze current weather data as a static snapshot", false)]
     public bool StaticSnapshot { get; set; } = false;
 
+    /// <summary>The "Latitude" property: override latitude; leave empty to auto-resolve from Location.</summary>
     [WidgetProperty("Latitude", WidgetPropertyType.Text, "Override latitude (e.g. 40.7128). Leave empty to auto-resolve from Location.", "")]
     public string Latitude { get; set; } = "";
 
+    /// <summary>The "Longitude" property: override longitude; leave empty to auto-resolve from Location.</summary>
     [WidgetProperty("Longitude", WidgetPropertyType.Text, "Override longitude (e.g. -74.0060). Leave empty to auto-resolve from Location.", "")]
     public string Longitude { get; set; } = "";
 
+    /// <summary>The "Country Code" property: an optional ISO country code that disambiguates same-named cities.</summary>
     [WidgetProperty("Country Code", WidgetPropertyType.Text, "Optional ISO country code (US, DE, CA, JP...) to disambiguate same-named cities worldwide. You can also type \"City, State\" or \"City, Country\" in Location.", "")]
     public string CountryCode { get; set; } = "";
 
@@ -65,6 +87,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     [WidgetProperty("Location Match", WidgetPropertyType.Choice, "Pick the exact place when the city name is ambiguous. Leave empty for automatic.", "")]
     public string LocationMatch { get; set; } = "";
 
+    /// <summary>
+    /// The inspector's dynamic choice list for Location Match: the last
+    /// geocode's candidates plus the empty automatic entry.
+    /// </summary>
+    /// <param name="propertyName">The property the inspector is editing.</param>
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
         if (!string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal)) return [];
@@ -108,9 +135,14 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     // -- IWidgetLocationSearch ------------------------------------------------
 
+    /// <summary>Geocodes the location search query (forwards to the client's city search).</summary>
+    /// <param name="query">The search text.</param>
+    /// <param name="ct">Cancels the search.</param>
     public Task<IReadOnlyList<GeocodeCandidate>> SearchAsync(string query, CancellationToken ct)
         => _client.SearchCitiesAsync(query, ct);
 
+    /// <summary>Commits a pick from the search results: writes the candidate's label into Location.</summary>
+    /// <param name="candidate">The picked geocode candidate.</param>
     public void CommitPick(GeocodeCandidate candidate)
     {
         // The name is the truth: a pick writes only the label. Latitude/Longitude
@@ -119,6 +151,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         SetProperty(nameof(Location), candidate.Label);
     }
 
+    /// <summary>The resolved location's population (null when the resolution has none).</summary>
     public double? CurrentPopulation
     {
         get
@@ -133,6 +166,8 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
     // -- IWidgetEditorProvider ------------------------------------------------
 
+    /// <summary>The editor kind the inspector uses for a property (the location-search editor for Location, none for the rest).</summary>
+    /// <param name="property">The property the inspector is editing.</param>
     public EditorKind? GetEditorKind(PropertyInfo property)
         => string.Equals(property.Name, nameof(Location), StringComparison.Ordinal) ? EditorKind.LocationSearch : null;
 
@@ -172,6 +207,10 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// changed).</summary>
     void IWeatherFetchHost.RequestInspectorRefresh() => Context?.RequestInspectorRefresh();
 
+    /// <summary>
+    /// Constructs the client (the cache file name resolves lazily from the
+    /// rehydrated InstanceId), the gated display state, and the fetch flow.
+    /// </summary>
     public WeatherForecastWidget()
     {
         // The cache name is resolved lazily from the CURRENT InstanceId, not
@@ -279,6 +318,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// tests inject a cancelled token to pin the silent-teardown path).</summary>
     internal CancellationTokenSource? _pollCts;
 
+    /// <summary>
+    /// Binds the context, loads the cached weather, starts the refresh
+    /// PollLoop, and fires the boot fetch (the pre-hydration default location,
+    /// dropped by the identity guard if it is stale on return).
+    /// </summary>
+    /// <param name="context">The widget host context.</param>
+    /// <param name="cancellationToken">Cancels the initialization.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
@@ -338,6 +384,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
+    /// <summary>Stops the refresh loop, cancels and disposes the poll CTS, and releases the widget's Skia surfaces.</summary>
     public override async ValueTask DisposeAsync()
     {
         _refreshPoll?.Dispose();
@@ -357,6 +404,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Routes a resolution-input edit through the invalidation rule (both
+    /// twins drop at the same kind) and force-refreshes when the kind is not
+    /// None.
+    /// </summary>
+    /// <param name="propertyName">The property that changed.</param>
+    /// <param name="newValue">The property's new value.</param>
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
         // The drop granularity is the rule's decision (WeatherInvalidation):
@@ -393,6 +447,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         base.OnPropertyChanged(propertyName, newValue);
     }
 
+    /// <summary>
+    /// Draws the active layout mode from the cached render model (rebuilt
+    /// only when its key changes), kicking the fetch through the single
+    /// cadence gate.
+    /// </summary>
+    /// <param name="canvas">The frame canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // The UI-thread flush of a deferred resolved-label write-back: the
@@ -504,6 +565,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
+    /// <summary>A tap toggles the unit on the unit badge, cycles the layout mode on the layout badge, or force-refreshes the weather.</summary>
+    /// <param name="localPoint">The touch point in the widget's rotated-local space.</param>
+    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
