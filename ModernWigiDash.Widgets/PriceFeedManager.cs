@@ -353,13 +353,18 @@ public sealed class PriceFeedManager : IDisposable
 
     /// <summary>Releases one subscriber claim; true when the LAST claim was
     /// released (the key is removed) — a symbol with remaining subscribers
-    /// keeps its key and cached price.</summary>
+    /// keeps its key and cached price. The decrement is a compare-exchange
+    /// loop: a racing release re-reads the new count instead of both
+    /// applying their own (2 -> 1 twice would leave a 0-claim entry that
+    /// blocks the shutdown decision and the price cleanup).</summary>
     private static bool ReleaseSubscription(ConcurrentDictionary<string, int> subscriptions, string key)
     {
-        if (!subscriptions.TryGetValue(key, out int count)) return false;
-        if (count <= 1) return subscriptions.TryRemove(key, out _);
-        subscriptions.AddOrUpdate(key, count - 1, (_, current) => current - 1);
-        return false;
+        while (true)
+        {
+            if (!subscriptions.TryGetValue(key, out int count)) return false;
+            if (count <= 1) return subscriptions.TryRemove(key, out _);
+            if (subscriptions.TryUpdate(key, count - 1, count)) return false;
+        }
     }
 
     /// <summary>
@@ -372,20 +377,42 @@ public sealed class PriceFeedManager : IDisposable
         // dispose precedes manager lifetime today, but the guard makes the
         // invariant structural).
         if (_disposed) return;
-        if (_cts.IsCancellationRequested)
+        CancellationTokenSource current = Volatile.Read(ref _cts);
+        if (!current.IsCancellationRequested) return;
+
+        // Compare-exchange so only the caller that actually replaced the
+        // cancelled source retires it. A racing swap that loses the CAS
+        // publishes nothing (its replacement is disposed immediately, before
+        // any work could observe it) and adopts the winner's live source.
+        // The plain exchange retired the winner's fresh source too, and its
+        // grace-window dispose then killed a live token that in-flight work
+        // still held.
+        while (true)
         {
             var replacement = new CancellationTokenSource();
-            CancellationTokenSource retired = Interlocked.Exchange(ref _cts, replacement);
-            // The old source's token may still be held by in-flight work the
-            // shutdown cancelled (a mid-flight REST poll's HTTP cancellation
-            // registration). Retire it after a grace window so those
-            // registrations unwind first — disposing it now would turn the
-            // expected cancellations into ObjectDisposedExceptions. Cancel()
-            // aborts in-flight requests synchronously through the token
-            // callbacks; the window covers the queued cancellation callbacks
-            // unwinding, not request latency.
-            _ = Task.Delay(RetiredCtsGrace, CancellationToken.None).ContinueWith(_ => retired.Dispose(), TaskScheduler.Default);
+            CancellationTokenSource replaced = Interlocked.CompareExchange(ref _cts, replacement, current);
+            if (replaced == current)
+            {
+                RetireAfterGrace(replaced);
+                return;
+            }
+            replacement.Dispose();
+            current = replaced;
+            if (!current.IsCancellationRequested) return;
         }
+    }
+
+    private static void RetireAfterGrace(CancellationTokenSource retired)
+    {
+        // The old source's token may still be held by in-flight work the
+        // shutdown cancelled (a mid-flight REST poll's HTTP cancellation
+        // registration). Retire it after a grace window so those
+        // registrations unwind first — disposing it now would turn the
+        // expected cancellations into ObjectDisposedExceptions. Cancel()
+        // aborts in-flight requests synchronously through the token
+        // callbacks; the window covers the queued cancellation callbacks
+        // unwinding, not request latency.
+        _ = Task.Delay(RetiredCtsGrace, CancellationToken.None).ContinueWith(_ => retired.Dispose(), TaskScheduler.Default);
     }
 
     /// <summary>The grace window before a retired (cancelled) CTS is disposed —

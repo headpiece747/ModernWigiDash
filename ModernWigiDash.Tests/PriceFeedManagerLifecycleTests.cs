@@ -57,6 +57,38 @@ public class PriceFeedManagerLifecycleTests
     }
 
     [TestMethod]
+    public void Unsubscribe_RacingReleases_NeverLeaveAZeroClaimEntry()
+    {
+        // Balanced subscribe/unsubscribe pairs racing on one key: the claim
+        // count is a compare-exchange, so the key is removed at the last
+        // claim. A lost racing decrement (the old read-then-decrement) left a
+        // 0-claim entry that blocked the shutdown decision and the price
+        // cleanup. Fake feed + stub HTTP keep the loop/REST churn in-memory.
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
+        using var feed = new PriceFeedManager(
+            new HttpClient(stub),
+            feedFactory: _ => new FakeFeed(),
+            reconnectDelay: TimeSpan.FromSeconds(5));
+
+        const int tasks = 4;
+        const int rounds = 100;
+        var barrier = new Barrier(tasks);
+        Task[] work = Enumerable.Range(0, tasks).Select(_ => Task.Run(() =>
+        {
+            barrier.SignalAndWait();
+            for (int i = 0; i < rounds; i++)
+            {
+                feed.Subscribe("BTC", AssetKind.Crypto);
+                feed.Unsubscribe("BTC", AssetKind.Crypto);
+            }
+        })).ToArray();
+        Task.WaitAll(work);
+
+        Assert.AreEqual(0, feed._subscribedCrypto.Count,
+            "balanced pairs must end with no claim entry (a lost racing decrement leaves a 0-claim entry)");
+    }
+
+    [TestMethod]
     public void FormattedChange_IsInvariantCulture()
     {
         var original = CultureInfo.CurrentCulture;
