@@ -157,9 +157,13 @@ public sealed class PriceFeedManager : IDisposable
             {
                 _binanceLoop ??= CreateBinanceLoop();
                 _binanceLoop.Start();
+                // The loop reads the LIVE membership each cycle (a
+                // ConcurrentDictionary.Keys is a snapshot per call, but the
+                // view is re-read per cycle): a coin subscribed after the
+                // first claim is polled on the next cycle, never frozen out.
                 _cryptoRestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
-                    _subscribedCrypto.Keys,
+                    () => _subscribedCrypto.Keys,
                     PollCryptoAsync,
                     _delay, _failLog,
                     FallbackCoinGeckoAsync);
@@ -178,7 +182,7 @@ public sealed class PriceFeedManager : IDisposable
                 _finnhubLoop.Start();
                 _stockRestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
-                    _subscribedStocks.Keys,
+                    () => _subscribedStocks.Keys,
                     PollStockAsync,
                     _delay, _failLog);
             },
@@ -190,7 +194,7 @@ public sealed class PriceFeedManager : IDisposable
             {
                 _fxRestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
-                    _subscribedFx.Keys,
+                    () => _subscribedFx.Keys,
                     PollFxAsync,
                     _delay, _failLog);
             },

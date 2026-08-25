@@ -306,4 +306,47 @@ public class PriceFeedManagerRestPollTests
 
         Assert.AreEqual(0, stub.Calls, "FX is served by the Frankfurter cycle — the one-shot seed must make no request");
     }
+
+    [TestMethod]
+    public async Task Subscribe_SecondFxPairAfterLoopStart_IsPolledOnTheNextCycle()
+    {
+        // Regression: the REST cycle used to receive the subscription set's
+        // keys at first claim. A ConcurrentDictionary.Keys is a snapshot, and
+        // the loop task never restarts, so a pair subscribed later was never
+        // polled (its widget sat on a blank price). The loop now reads the
+        // live membership each cycle; a late pair is polled on the next one.
+        // The delay parks at a gate the test releases, so the cadence is
+        // driven one cycle at a time.
+        var stub = new StubHttpHandler(_ => Ok("""{"rates":{"2025-08-01":{"USD":1.08},"2025-08-02":{"USD":1.09}}}"""));
+        var gates = new System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource>();
+        Func<TimeSpan, CancellationToken, Task> delay = (_, ct) =>
+        {
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            gates.Enqueue(tcs);
+            ct.Register(() => tcs.TrySetCanceled(ct));
+            return tcs.Task;
+        };
+        using var feed = new PriceFeedManager(new HttpClient(stub), delay: delay);
+
+        // The loop parks at its next delay gate right after each cycle, so
+        // dequeuing the parked gate and completing it drives exactly one cycle.
+        TaskCompletionSource? gate = null;
+
+        feed.Subscribe("EUR/USD", AssetKind.Fx); // first claim starts the FX REST loop
+        await TestWait.WaitUntilAsync(() => gates.TryDequeue(out gate), TimeSpan.FromSeconds(5));
+        gate!.TrySetResult();
+        await TestWait.WaitUntilAsync(() => feed.GetPrice("EUR/USD", AssetKind.Fx) is not null, TimeSpan.FromSeconds(5));
+
+        feed.Subscribe("GBP/USD", AssetKind.Fx); // a second widget joins while the loop is parked
+        TaskCompletionSource? secondGate = null;
+        await TestWait.WaitUntilAsync(() => gates.TryDequeue(out secondGate), TimeSpan.FromSeconds(5));
+        secondGate!.TrySetResult();
+        await TestWait.WaitUntilAsync(() => feed.GetPrice("GBP/USD", AssetKind.Fx) is not null, TimeSpan.FromSeconds(5));
+
+        var gbpusd = feed.GetPrice("GBP/USD", AssetKind.Fx)!;
+        Assert.AreEqual(1.09m, gbpusd.Price, "the late pair must be polled and its price stored");
+        Assert.AreEqual("Frankfurter", gbpusd.Source);
+        Assert.IsTrue(stub.RequestUrls.Any(u => u.Contains("from=GBP&to=USD", StringComparison.Ordinal)),
+            "the Frankfurter cycle must request the late pair's series");
+    }
 }

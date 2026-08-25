@@ -18,13 +18,18 @@ internal static class RestPollLoop
     /// Runs the cycle until <paramref name="isActive"/> reads false or
     /// <paramref name="token"/> cancels (a cancelled delay ends the loop
     /// normally instead of faulting the stored task — an unobserved task
-    /// fault would surface on dispose).
+    /// fault would surface on dispose). <paramref name="subscribed"/> is a
+    /// LIVE view, read once per cycle after the delay: the caller's map owns
+    /// the membership, the loop only observes it, so a symbol subscribed
+    /// while the loop was parked is polled on the next cycle and a released
+    /// symbol stops being polled. A captured list would freeze the set at
+    /// start and starve late symbols (the loop task is never restarted).
     /// </summary>
     internal static async Task RunAsync(
         TimeSpan interval,
         Func<bool> isActive,
         CancellationToken token,
-        IEnumerable<string> subscribed,
+        Func<IEnumerable<string>> subscribed,
         Func<string, Task> pollSymbol,
         Func<TimeSpan, CancellationToken, Task> delay,
         DiagLog failLog,
@@ -42,7 +47,7 @@ internal static class RestPollLoop
                 break;
             }
 
-            foreach (var symbol in subscribed)
+            foreach (var symbol in subscribed())
             {
                 try
                 {
