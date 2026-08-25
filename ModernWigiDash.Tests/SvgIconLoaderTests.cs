@@ -79,4 +79,22 @@ public class SvgIconLoaderTests
             if (copiedPath.Length > 0 && File.Exists(copiedPath)) File.Delete(copiedPath);
         }
     }
+
+    [TestMethod]
+    public void TryGetPath_MalformedSvg_DegradesToNoIcon_WithoutThrowing()
+    {
+        // A file that passes the existence check but is not valid XML must
+        // degrade to a no-icon (false), not throw into the render tick that
+        // probes the icon geometry every frame.
+        string iconPath = WriteTempSvg("<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M4 4");
+        try
+        {
+            Assert.IsFalse(SvgIconLoader.TryGetPath(iconPath, out var path), "a malformed SVG is a no-icon, not a throw");
+            Assert.IsTrue(path is null || path.IsEmpty, "a malformed SVG yields no drawable path");
+        }
+        finally
+        {
+            File.Delete(iconPath);
+        }
+    }
 }

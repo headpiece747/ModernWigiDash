@@ -68,7 +68,18 @@ public static class SvgIconLoader
     private static bool TryExtractSinglePathData(string filePath, out string? pathData)
     {
         pathData = null;
-        var doc = XDocument.Load(filePath);
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Load(filePath);
+        }
+        catch (Exception)
+        {
+            // A malformed SVG (invalid XML, or an I/O failure on the file)
+            // is a no-icon, not a render-tick crash: the path passed the
+            // existence check but does not parse.
+            return false;
+        }
         var paths = doc.Descendants().Where(e => string.Equals(e.Name.LocalName, "path", StringComparison.Ordinal)).ToList();
         if (paths.Count != 1) return false;
         pathData = paths[0].Attribute("d")?.Value;
