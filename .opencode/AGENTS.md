@@ -45,6 +45,15 @@ mapping note near its top (e.g. `find_dead_code` → `glider_find_unused_symbols
 The `outdated` skill's `get_nuget_packages` has no Glider equivalent. Inventory
 with `dotnet list package` and `Directory.Packages.props`.
 
+Verified tooling quirks (2026-08-25 sweep session; each one hit live): the
+`glob` tool never matches files under dot-directories (`.opencode/**` returns
+nothing even from a root `**/` pattern; use `Get-ChildItem` or `grep` with an
+explicit path there). `glider_get_structure` lists no members without
+`includeMembers=true` (a `kinds` filter alone returns the container with zero
+members). `ocr_review` in workspace mode selects only tracked diffs; an
+all-untracked changeset reports "no items selected", so commit first or pass
+an explicit `from`/`to` range.
+
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
 - **opportunity-scan**: scans agentmemory sessions (reactive: one run's artifacts; proactive: window of logs) and recommends what to encode next (rules/skill/hook/subagent/MCP). Outputs a self-contained HTML report in `docs/`.
