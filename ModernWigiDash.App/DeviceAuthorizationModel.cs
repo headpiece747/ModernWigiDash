@@ -22,6 +22,9 @@ internal sealed class DeviceAuthorizationModel
 
     public DeviceAuthorizationModel(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt, Action<string, Exception?> logError)
     {
+        ArgumentNullException.ThrowIfNull(verificationUri);
+        ArgumentNullException.ThrowIfNull(userCode);
+        ArgumentNullException.ThrowIfNull(logError);
         _serviceName = serviceName;
         _verificationUri = verificationUri;
         _userCode = userCode;

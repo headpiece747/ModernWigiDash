@@ -57,3 +57,5 @@
 2026-08-25T12:37:33Z	0b9d70b	fix artwork pixel footprint cap	ok	0	0	ok	1808	0	ok	ok
 2026-08-25T12:41:16Z	08849f0	fix svg icon malformed guard	ok	0	0	ok	1809	0	ok	ok
 2026-08-25T12:50:08Z	4e1ea46	fix twitch chat restart order	ok	0	0	ok	1809	0	ok	ok
+2026-08-25T12:55:29Z	86bc61d	re-record after message amend	ok	0	0	ok	1810	0	ok	ok
+2026-08-25T12:56:40Z	3c66dda	fix device auth model null guards	ok	0	0	ok	1810	0	ok	ok

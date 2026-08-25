@@ -27,6 +27,20 @@ public class DeviceAuthorizationModelTests
     }
 
     [TestMethod]
+    public void Constructor_NullRequiredInputs_ThrowsArgumentNull()
+    {
+        Assert.ThrowsExactly<ArgumentNullException>(
+            () => new DeviceAuthorizationModel("Twitch", null!, "ABCD-EFGH", ExpiresAt, (_, _) => { }),
+            "a null verification URI must be named at construction, not NRE at render");
+        Assert.ThrowsExactly<ArgumentNullException>(
+            () => new DeviceAuthorizationModel("Twitch", new Uri("https://www.twitch.tv/device"), null!, ExpiresAt, (_, _) => { }),
+            "a null user code must be named at construction, not NRE at copy");
+        Assert.ThrowsExactly<ArgumentNullException>(
+            () => new DeviceAuthorizationModel("Twitch", new Uri("https://www.twitch.tv/device"), "ABCD-EFGH", ExpiresAt, null!),
+            "a null log seam must be named at construction, it would break the never-throw contract");
+    }
+
+    [TestMethod]
     public void OpenBrowser_LookalikeHost_RefusesLogsAndNeverOpens()
     {
         var log = new List<(string Message, Exception? Exception)>();
