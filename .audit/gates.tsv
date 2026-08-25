@@ -23,3 +23,14 @@
 2026-08-24T19:47:24Z	ebbdabf	adr-debt-register + friendly-app-name-table refactor + dead-helper pin keyword fix (final, post member-order fix)	ok	0	0	ok	1705	0	ok	ok
 2026-08-24T19:51:24Z	5b935bf	gate re-run after dead-helper pin fix commit	ok	0	0	ok	1705	0	ok	ok
 2026-08-24T19:52:27Z	dea4135	gate re-run after friendly-app-name refactor commit	ok	0	0	ok	1705	0	ok	ok
+2026-08-24T20:23:20Z	e80fd91	manual	ok	0	0	ok	1708	0	ok	ok
+2026-08-24T20:32:32Z	47d90f9	manual	ok	0	0	ok	1718	0	ok	ok
+2026-08-24T20:42:39Z	d18180e	manual	ok	0	0	ok	1725	0	ok	ok
+2026-08-24T20:56:03Z	e820601	manual	ok	0	0	ok	1731	0	ok	ok
+2026-08-24T21:00:26Z	94d4ed1	manual	ok	0	0	ok	1732	0	ok	ok
+2026-08-24T21:05:13Z	a70a3ab	manual	ok	0	0	ok	1732	0	ok	ok
+2026-08-24T21:14:09Z	33723fb	manual	ok	0	0	ok	1736	0	ok	ok
+2026-08-24T21:21:28Z	6408117	manual	ok	0	0	ok	1736	0	ok	ok
+2026-08-24T21:35:34Z	db1fd52	manual	ok	0	0	ok	1736	0	ok	ok
+2026-08-24T21:50:00Z	ad09caf	manual	ok	0	0	ok	1736	0	ok	ok
+2026-08-25T00:25:37Z	01ee2a7	baseline re-run at 01ee2a7 before the architecture deepening wave	ok	0	0	ok	1736	0	ok	ok
