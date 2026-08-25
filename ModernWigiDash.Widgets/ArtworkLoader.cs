@@ -127,7 +127,7 @@ public sealed class ArtworkLoader
 
             if (result.Oversized)
             {
-                _logError?.Invoke("Album art skipped: thumbnail stream exceeds 10 MB", null);
+                _logError?.Invoke("Album art skipped: thumbnail too large to load", null);
                 result = new ArtworkDecodeResult(null, false);
                 _bgColor = DefaultBackground;
             }
@@ -218,6 +218,19 @@ internal sealed record ArtworkDecodeResult(SKBitmap? Bitmap, bool Oversized);
 /// </summary>
 internal sealed class WinRtArtworkDecoder : IArtworkDecoder
 {
+    /// <summary>The decoded bitmap's total-pixel cap (width x height). The
+    /// 10MB file cap does not bound the pixel footprint, so this is the
+    /// second refusal: a small file can encode a very large image. ~16M
+    /// pixels is ~64MB in RGBA8888, far above any album art the 1016x592
+    /// display could show at native size.</summary>
+    internal const long MaxArtworkPixels = 4096L * 4096L;
+
+    /// <summary>Whether a decoded bitmap's total-pixel footprint (width x
+    /// height) is within <see cref="MaxArtworkPixels"/>. The product is a
+    /// long so a hostile dimension pair cannot overflow an int.</summary>
+    internal static bool PixelFootprintWithinCap(int width, int height)
+        => (long)width * height <= MaxArtworkPixels;
+
     public async Task<ArtworkDecodeResult> DecodeAsync(IRandomAccessStreamReference thumbnail)
     {
         using var stream = await thumbnail.OpenReadAsync();
@@ -234,6 +247,17 @@ internal sealed class WinRtArtworkDecoder : IArtworkDecoder
         }
 
         var decoded = await Task.Run(() => SKBitmap.Decode(data)).ConfigureAwait(false);
+        if (decoded is null)
+            return new ArtworkDecodeResult(null, false);
+        if (!PixelFootprintWithinCap(decoded.Width, decoded.Height))
+        {
+            // The 10MB file cap does not bound the decoded pixel footprint: a
+            // small file can encode a very large image. Refuse a bitmap above
+            // the cap so a hostile thumbnail cannot publish a
+            // multi-hundred-MB bitmap.
+            decoded.Dispose();
+            return new ArtworkDecodeResult(null, Oversized: true);
+        }
         return new ArtworkDecodeResult(decoded, false);
     }
 }

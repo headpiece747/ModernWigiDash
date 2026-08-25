@@ -152,7 +152,20 @@ public class ArtworkLoaderTests
 
         Assert.IsNull(loader.Current.Bitmap);
         Assert.AreEqual(1, errors.Count);
-        Assert.IsTrue(errors[0].Contains("10 MB"), $"log was '{errors[0]}'");
+        Assert.IsTrue(errors[0].Contains("too large"), $"log was '{errors[0]}'");
+    }
+
+    [TestMethod]
+    public void PixelFootprintWithinCap_RefusesAboveTheCap()
+    {
+        // At the cap: 4096x4096 is within.
+        Assert.IsTrue(WinRtArtworkDecoder.PixelFootprintWithinCap(4096, 4096));
+        // One pixel over the footprint: refused.
+        Assert.IsFalse(WinRtArtworkDecoder.PixelFootprintWithinCap(4097, 4096));
+        // A legitimate album art size: within.
+        Assert.IsTrue(WinRtArtworkDecoder.PixelFootprintWithinCap(3000, 3000));
+        // A hostile thumbnail encoding a huge image: refused.
+        Assert.IsFalse(WinRtArtworkDecoder.PixelFootprintWithinCap(50000, 50000));
     }
 
     [TestMethod]
