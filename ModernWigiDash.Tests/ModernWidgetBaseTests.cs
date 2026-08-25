@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using ModernWigiDash.Sdk;
 
@@ -77,5 +78,41 @@ public class ModernWidgetBaseTests
 
         Assert.AreEqual("seed", widget.Label);
         Assert.AreEqual(0, context.Renders, "a missing property must not raise a change");
+    }
+
+    [TestMethod]
+    public void SetProperty_MissingProperty_LogsTheMissOnce_NotPerCall()
+    {
+        // A fresh property name: the miss is cached per (type, name), so a
+        // name another test already missed would be a cache hit, not a miss.
+        string logPath = Path.Combine(Path.GetTempPath(), "wmd-misslog-" + Guid.NewGuid().ToString("N") + ".log");
+        FileLog.LogPath = logPath;
+        try
+        {
+            var widget = new TestWidget();
+            widget.SetPropertyForTest("NoSuchPropertyTwice", "a");
+            widget.SetPropertyForTest("NoSuchPropertyTwice", "b");
+            FileLog.Flush();
+            // Restore the default path BEFORE reading: the FileLog writer
+            // holds the temp file open (and the restore is the seam that
+            // closes it), so the read has to happen on the closed file.
+            FileLog.LogPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
+
+            int missLines = File.ReadLines(logPath).Count(line => line.Contains("NoSuchPropertyTwice"));
+            Assert.AreEqual(1, missLines,
+                "the miss is diagnosed once and cached (sentinel), not re-logged per call");
+        }
+        finally
+        {
+            FileLog.LogPath = Path.Combine(AppContext.BaseDirectory, "display_device.log");
+            try
+            {
+                File.Delete(logPath);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup of the temp log.
+            }
+        }
     }
 }

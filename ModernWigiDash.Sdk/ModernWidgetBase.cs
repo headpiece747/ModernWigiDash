@@ -102,9 +102,12 @@ public abstract class ModernWidgetBase : IModernWidget
     /// Cached reflection lookup per (type, property name): SetProperty runs on
     /// inspector write-back and touch toggles; a GetProperty reflection call
     /// per write is measurable on the 30 FPS path. A missing property caches a
-    /// sentinel so the miss is diagnosed once instead of thrashing reflection.
+    /// sentinel (the <see cref="SvgPathParseCache{T}"/> miss-box rule: a
+    /// ConcurrentDictionary never stores a null factory result) so the miss is
+    /// diagnosed once instead of re-running reflection and re-logging on every
+    /// call.
     /// </summary>
-    private static readonly ConcurrentDictionary<(Type Type, string Name), PropertyInfo?> PropertyCache = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Name), PropertyInfoBox> PropertyCache = new();
 
     /// <summary>
     /// The single write path for widget properties that must survive
@@ -120,17 +123,14 @@ public abstract class ModernWidgetBase : IModernWidget
     /// </summary>
     protected void SetProperty(string propertyName, object? value)
     {
-        PropertyInfo? property = PropertyCache.GetOrAdd(
-            (GetType(), propertyName),
-            static key => key.Type.GetProperty(key.Name));
+        PropertyInfo? property = PropertyCache.GetOrAdd((GetType(), propertyName), LookupOrLog).Property;
 
         if (property is null)
         {
-            string message = $"SetProperty: property '{propertyName}' not found on {GetType().FullName}";
-            FileLog.Write(message);
             // Nothing was set — do NOT raise the change or persist an unknown
             // key into PropertyValues (a typo'd property must not silently
-            // write garbage into the export format).
+            // write garbage into the export format). The miss line itself is
+            // logged once, inside LookupOrLog.
             return;
         }
 
@@ -145,6 +145,25 @@ public abstract class ModernWidgetBase : IModernWidget
             property.SetValue(this, value);
             OnPropertyChanged(propertyName, value);
         }
+    }
+
+    private static PropertyInfoBox LookupOrLog((Type Type, string Name) key)
+    {
+        PropertyInfo? property = key.Type.GetProperty(key.Name);
+        if (property is null)
+        {
+            FileLog.Write($"SetProperty: property '{key.Name}' not found on {key.Type.FullName}");
+        }
+        return property is null ? PropertyInfoBox.Miss : new PropertyInfoBox(property);
+    }
+
+    private sealed class PropertyInfoBox
+    {
+        public static readonly PropertyInfoBox Miss = new(null);
+
+        public PropertyInfoBox(PropertyInfo? property) => Property = property;
+
+        public PropertyInfo? Property { get; }
     }
 
     /// <summary>Host call at teardown (widget removed, profile closed):

@@ -50,3 +50,4 @@
 2026-08-25T11:54:57Z	8e4471a	fix smtc status name mapping + pin	ok	0	0	ok	1802	0	ok	ok
 2026-08-25T11:59:23Z	f79fca7	fix boot profile load boundary contract	ok	0	0	ok	1803	0	ok	ok
 2026-08-25T12:05:14Z	7524acb	fix half-opened wasapi capture leak	ok	0	0	ok	1803	0	ok	ok
+2026-08-25T12:12:37Z	a4e501e	fix property miss sentinel once-logged	ok	0	0	ok	1804	0	ok	ok
