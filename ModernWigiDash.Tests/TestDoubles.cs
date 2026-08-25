@@ -80,6 +80,8 @@ internal sealed class TestWidget : ModernWidgetBase
     public override void Render(SKCanvas canvas, SKRect bounds) { }
 
     public SKColor GetColor(string hex, SKColor fallback) => ColorOf(hex, fallback);
+
+    public void SetPropertyForTest(string propertyName, object? value) => SetProperty(propertyName, value);
 }
 
 /// <summary>

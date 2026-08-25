@@ -268,6 +268,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     tryFindResource: TryFindResource),
                 () => _selectedWidget,
                 _dialogHost,
+                this,
                 onProfileChanged: () => _profilePersistence.MarkDirty(),
                 commitLocationPick: candidate =>
                 {

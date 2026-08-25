@@ -59,14 +59,16 @@ public class InspectorControllerTests
         {
             var owner = new Window();
             var (transform, panel, select, placed, widget) = BuildHost();
-            var controller = BuildController(owner, transform, panel, select);
+            var profile = new ProfileLayout();
+            profile.Pages[0].Widgets.Add(placed);
+            var controller = BuildController(owner, transform, panel, select, context: new PersistingContext(profile));
             PropertyInfo prop = typeof(TestWidget).GetProperty(nameof(TestWidget.Label))!;
 
             controller.ApplyPropertyValue(prop, "updated");
 
             Assert.AreEqual("updated", widget.Label);
             Assert.AreEqual("updated", placed.PropertyValues[nameof(TestWidget.Label)],
-                "the write-back seam must persist into the placed instance's PropertyValues");
+                "the write-back seam must commit through the context's commit owner into the placed instance's PropertyValues");
         });
     }
 
@@ -251,9 +253,11 @@ public class InspectorControllerTests
         TransformFieldBindings transform,
         CustomPropertyPanel panel,
         Func<PlacedWidgetInstance?> select,
+        IModernWigiDashContext? context = null,
         Action? onProfileChanged = null)
         => new(transform, panel, select,
-            new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }), onProfileChanged);
+            new DialogHost(owner, new ThemeApplicator(), _ => null, (_, _) => { }),
+            context ?? new TestContext(), onProfileChanged);
 
     /// <summary>The controller ignores the event args (it reads the control
     /// values), so the tests pass one throwaway event.</summary>

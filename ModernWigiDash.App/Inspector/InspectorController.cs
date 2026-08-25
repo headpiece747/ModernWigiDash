@@ -24,6 +24,7 @@ internal sealed class InspectorController
     private readonly Func<PlacedWidgetInstance?> _getSelectedWidget;
     private readonly InspectorValuePolicy _policy = new();
     private readonly DialogHost _dialogHost;
+    private readonly IModernWigiDashContext _context;
     private readonly Action? _onProfileChanged;
     private readonly Action<GeocodeCandidate>? _commitLocationPick;
     private bool _isUpdatingInspector = false;
@@ -38,11 +39,15 @@ internal sealed class InspectorController
     /// inspector must not build its own — DialogHost is stateful (it owns the
     /// device-authorization window), and two instances for one owner would
     /// silently never show that window.</param>
-    /// <param name="onProfileChanged">Invoked after a write-back lands in the
-    /// profile model (transform/opacity/property values) so the owner can arm
-    /// profile persistence. This callback IS the dirty mark on the
-    /// inspector-driven path — exactly one invocation per landed write-back,
-    /// the window's forwarding handlers add none.</param>
+    /// <param name="context">The window's host context — the commit owner for
+    /// property-value write-backs (<c>SetWidgetProperty</c>: instance set +
+    /// change fire + placed-instance persistence + the dirty mark).</param>
+    /// <param name="onProfileChanged">Invoked after a transform/opacity write-back
+    /// lands in the profile model so the owner can arm profile persistence.
+    /// This callback IS the dirty mark on the inspector-driven transform path
+    /// — exactly one invocation per landed write-back, the window's forwarding
+    /// handlers add none. Property-value commits mark instead through the
+    /// context's commit owner (PersistProperty).</param>
     /// <param name="commitLocationPick">Invoked when the user picks a location
     /// search result; the owner resolves the selected widget's
     /// <see cref="IWidgetLocationSearch"/> and commits the candidate.</param>
@@ -51,6 +56,7 @@ internal sealed class InspectorController
         CustomPropertyPanel panel,
         Func<PlacedWidgetInstance?> getSelectedWidget,
         DialogHost dialogHost,
+        IModernWigiDashContext context,
         Action? onProfileChanged = null,
         Action<GeocodeCandidate>? commitLocationPick = null)
     {
@@ -58,6 +64,7 @@ internal sealed class InspectorController
         _panel = panel;
         _getSelectedWidget = getSelectedWidget;
         _dialogHost = dialogHost;
+        _context = context;
         _onProfileChanged = onProfileChanged;
         _commitLocationPick = commitLocationPick;
         // The policy's default warning sink is Debug.WriteLine; the controller
@@ -162,12 +169,14 @@ internal sealed class InspectorController
 
     /// <summary>
     /// Single write-back seam: converts a raw value (TextBox strings arrive as
-    /// text) to the property's CLR type and writes it into the widget instance
-    /// and the profile. The renderer never writes the model directly. The
-    /// re-entrancy guard is enforced HERE, at the funnel: every editor
-    /// write-back routes through this seam, so a programmatic set during a
-    /// panel rebuild is suppressed for every editor type — an unguarded
-    /// builder is unrepresentable.
+    /// text) to the property's CLR type, then commits through the context's
+    /// <see cref="IModernWigiDashContext.SetWidgetProperty"/> owner — the same
+    /// commit the widget's own <c>SetProperty</c> routes through (instance
+    /// set, change fire, placed-instance persistence, dirty mark). The
+    /// renderer never writes the model directly. The re-entrancy guard is
+    /// enforced HERE, at the funnel: every editor write-back routes through
+    /// this seam, so a programmatic set during a panel rebuild is suppressed
+    /// for every editor type — an unguarded builder is unrepresentable.
     /// </summary>
     public void ApplyPropertyValue(PropertyInfo? prop, object value)
     {
@@ -176,20 +185,17 @@ internal sealed class InspectorController
         var selected = _getSelectedWidget();
         if (selected?.ActiveInstance is null || prop is null) return;
 
-        object? converted = value;
         // TextBox input arrives as string; convert to the property's CLR type
         // so a Number/Color/etc. property is never silently dropped by a
         // SetValue type mismatch.
+        object? commit = value;
         if (value is string str)
         {
-            if (!_policy.TryConvertStringToType(prop, str, out object? convertedValue)) return;
-            converted = convertedValue;
+            if (!_policy.TryConvertStringToType(prop, str, out object? converted)) return;
+            commit = converted;
         }
 
-        prop.SetValue(selected.ActiveInstance, converted);
-        selected.ActiveInstance.OnPropertyChanged(prop.Name, converted);
-        selected.PropertyValues[prop.Name] = converted;
-        _onProfileChanged?.Invoke();
+        _context.SetWidgetProperty(selected.ActiveInstance, prop, commit);
     }
 
     /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation write-backs.</summary>

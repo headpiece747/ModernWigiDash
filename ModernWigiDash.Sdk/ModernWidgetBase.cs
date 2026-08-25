@@ -108,13 +108,15 @@ public abstract class ModernWidgetBase : IModernWidget
 
     /// <summary>
     /// The single write path for widget properties that must survive
-    /// Export→Import: sets the instance property, raises
-    /// <see cref="OnPropertyChanged"/>, and persists the value into the owning
-    /// placed instance's PropertyValues via the context. Every mutation path
-    /// (inspector write-back, icon-grab moves, widget OnTouch toggles) routes
-    /// through this or the inspector's equivalent, so the instance ↔
-    /// PropertyValues invariant has exactly one owner instead of being spread
-    /// across modules with the occasional violation.
+    /// Export→Import: resolves the property (cached, a missing name logs once
+    /// and writes nothing), then commits through the context's
+    /// <see cref="IModernWigiDashContext.SetWidgetProperty"/> owner — instance
+    /// set, change raised, and persistence into the owning placed instance's
+    /// PropertyValues in one spelling. The inspector's write-back funnel
+    /// commits through the same owner. Pre-initialization (the context not
+    /// handed yet, e.g. an uninit'd test widget's OnTouch): the instance
+    /// still gets the value and the change still fires — there is no placed
+    /// instance to persist to yet.
     /// </summary>
     protected void SetProperty(string propertyName, object? value)
     {
@@ -132,10 +134,17 @@ public abstract class ModernWidgetBase : IModernWidget
             return;
         }
 
-        property.SetValue(this, value);
-
-        OnPropertyChanged(propertyName, value);
-        Context?.PersistProperty(this, propertyName, value);
+        if (Context is { } context)
+        {
+            context.SetWidgetProperty(this, property, value);
+        }
+        else
+        {
+            // Pre-initialization leg: the instance carries the value; the
+            // placed half has no owner yet.
+            property.SetValue(this, value);
+            OnPropertyChanged(propertyName, value);
+        }
     }
 
     /// <summary>Host call at teardown (widget removed, profile closed):

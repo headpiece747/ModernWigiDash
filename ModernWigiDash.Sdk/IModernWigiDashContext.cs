@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace ModernWigiDash.Sdk;
 
 /// <summary>
@@ -51,5 +53,24 @@ public interface IModernWigiDashContext
     /// </summary>
     void PersistProperty(object widget, string propertyName, object? value)
     {
+    }
+
+    /// <summary>
+    /// The single commit owner for "set a property value on a placed widget":
+    /// sets the instance property, raises
+    /// <see cref="IModernWidget.OnPropertyChanged"/>, and persists into the
+    /// owning placed instance's PropertyValues through
+    /// <see cref="PersistProperty"/>. The inspector's write-back funnel and
+    /// <see cref="ModernWidgetBase.SetProperty"/> both commit through here, so
+    /// the instance ↔ PropertyValues invariant has one spelling: a write path
+    /// that forgets the PropertyValues half cannot exist, because there is no
+    /// other commit. The default performs the full commit (the persistence
+    /// half virtualizes to the embedder's PersistProperty).
+    /// </summary>
+    void SetWidgetProperty(object widget, PropertyInfo property, object? value)
+    {
+        property.SetValue(widget, value);
+        (widget as IModernWidget)?.OnPropertyChanged(property.Name, value);
+        PersistProperty(widget, property.Name, value);
     }
 }
