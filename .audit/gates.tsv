@@ -52,3 +52,4 @@
 2026-08-25T12:05:14Z	7524acb	fix half-opened wasapi capture leak	ok	0	0	ok	1803	0	ok	ok
 2026-08-25T12:12:37Z	a4e501e	fix property miss sentinel once-logged	ok	0	0	ok	1804	0	ok	ok
 2026-08-25T12:20:14Z	c1a855c	fix feed subscription atomicity	ok	0	0	ok	1805	0	ok	ok
+2026-08-25T12:23:57Z	ed88b4d	fix media session refresh version atomicity	ok	0	0	ok	1805	0	ok	ok

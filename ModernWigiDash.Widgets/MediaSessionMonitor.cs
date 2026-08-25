@@ -234,7 +234,11 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
     private async Task RefreshAsync()
     {
-        int refreshVersion = ++_refreshVersion;
+        // The SMTC events fire on arbitrary threads, so several refreshes can
+        // be in flight at once. Only the newest may publish a snapshot: the
+        // version bump is atomic and the stale check below reads the latest
+        // value, so a refresh overtaken after its await bails out.
+        int refreshVersion = Interlocked.Increment(ref _refreshVersion);
         var session = _session;
         if (session is null)
         {
@@ -248,7 +252,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             var props = await session.TryGetMediaPropertiesAsync().ConfigureAwait(false);
             var info = session.GetPlaybackInfo();
             var timeline = session.GetTimelineProperties();
-            if (_disposed || refreshVersion != _refreshVersion) return;
+            if (_disposed || refreshVersion != Volatile.Read(ref _refreshVersion)) return;
 
             var previous = _snapshot;
             var snapshot = BuildSnapshot(session, props, info, timeline);
