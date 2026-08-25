@@ -98,6 +98,13 @@ internal sealed class TwitchChatConnection : IAsyncDisposable
     {
         string channel = TwitchIrcMessages.NormalizeChannel(channelRaw);
         RetirePongToken();
+        // Retire the old loop before clearing the buffer: a still-running
+        // loop is appending the old channel's messages, and clearing first
+        // would let a late append land in the fresh buffer for the new
+        // channel. The new PONG token is created after the old loop is
+        // disposed so its unwinding cannot observe the new token.
+        _loop?.Dispose();
+        _loop = null;
         _pongCts = new CancellationTokenSource();
         lock (_messagesLock)
         {
@@ -108,7 +115,6 @@ internal sealed class TwitchChatConnection : IAsyncDisposable
 
         // The IRC loop is a FeedLoop: connect to handshake to read messages
         // to exponential backoff reconnect, driven through the feed seam.
-        _loop?.Dispose();
         _loop = new FeedLoop(
             IrcEndpoint,
             _createFeed,

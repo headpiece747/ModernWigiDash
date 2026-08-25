@@ -56,3 +56,4 @@
 2026-08-25T12:32:06Z	b93a47d	fix winrt media session adapter disposal	ok	0	0	ok	1807	0	ok	ok
 2026-08-25T12:37:33Z	0b9d70b	fix artwork pixel footprint cap	ok	0	0	ok	1808	0	ok	ok
 2026-08-25T12:41:16Z	08849f0	fix svg icon malformed guard	ok	0	0	ok	1809	0	ok	ok
+2026-08-25T12:50:08Z	4e1ea46	fix twitch chat restart order	ok	0	0	ok	1809	0	ok	ok
