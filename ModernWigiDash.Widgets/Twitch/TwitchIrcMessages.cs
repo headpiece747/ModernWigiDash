@@ -34,6 +34,28 @@ internal static class TwitchIrcMessages
 {
     private const int MaxMessageLength = 400;
 
+    /// <summary>The channel joined when the widget's channel name is empty or
+    /// invalid: the existing empty-channel fallback, now the wire-format
+    /// module's fact (the JOIN builder and the header badge both read it, so
+    /// the fallback can never drift between the two).</summary>
+    internal const string DefaultChannel = "twitch";
+
+    /// <summary>
+    /// Normalizes a channel name for the IRC JOIN and the header badge: trims,
+    /// drops the leading '#', and lowercases. Invalid names - empty, over
+    /// length (Twitch's 25-char cap), or carrying an embedded CR/LF (which
+    /// could inject extra IRC lines into the JOIN command) - fall back to
+    /// <see cref="DefaultChannel"/>. The validity rule is the shared Sdk
+    /// <see cref="TwitchChannelRule"/> the profile sanitizer also applies
+    /// (one rule, both entry points).
+    /// </summary>
+    internal static string NormalizeChannel(string channel)
+    {
+        var c = channel.Trim().TrimStart('#');
+        if (c.Length == 0) return DefaultChannel;
+        return TwitchChannelRule.IsValid(c) ? c.ToLowerInvariant() : DefaultChannel;
+    }
+
     /// <summary>The deterministic name palette: a name hashes to one of these colors.</summary>
     internal static readonly SKColor[] NamePalette =
     {

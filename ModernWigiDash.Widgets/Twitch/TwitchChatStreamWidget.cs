@@ -1,14 +1,8 @@
-
-
 namespace ModernWigiDash.Widgets.Twitch;
 
 [WidgetMetadata("twitch_chat", "Twitch", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size2x4)]
 public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IWidgetPropertyOptionsProvider, IWidgetActionPresentationProvider
 {
-    private const string AnonymousNickPrefix = "justinfan";
-    private const string AnonymousPass = "SCHMOOPIIE";
-    private static readonly Uri IrcEndpoint = new("wss://irc-ws.chat.twitch.tv:443");
-
     [WidgetProperty("Channel Name", WidgetPropertyType.Choice, "Select a followed channel after Twitch login, or type a channel manually.", "twitch")]
     public string ChannelName { get; set; } = "twitch";
 
@@ -42,25 +36,18 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
 
-    private readonly Lock _messagesLock = new();
-    private readonly List<ChatMessage> _messages = new();
-    // The render-side snapshot list is replaced wholesale on every mutation
-    // (add/trim/clear), so the render thread iterates it without a per-frame
-    // _messages.ToArray() allocation under the lock.
-    private List<ChatMessage> _renderSnapshot = [];
     private readonly WrapCache _wrapCache = new();
-    private CancellationTokenSource? _pongCts;
-    private FeedLoop? _feedLoop;
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
-    // Status + detail as ONE volatile reference: the render thread composes
-    // them into the status line, and two independent volatiles could tear
-    // (new status with the previous detail for one frame). The payload type
-    // and its one-spelling factories live in TwitchChatPresentation.
-    private volatile TwitchChatPresentation.ChatState _chatState = TwitchChatPresentation.ChatState.Disconnected();
     private volatile bool _disposed;
+    // The chat connection module: the IRC endpoint, the anonymous credentials,
+    // the handshake, the PONG keepalive, the reconnect loop, the ChatState
+    // transition, and the message buffer all live there behind the
+    // IWebSocketFeed seam. The widget keeps the property surface, the
+    // rendering, and the touch, and drives the module from its properties.
+    private readonly TwitchChatConnection _connection;
 
     // Hoisted paints: every color is computed per render (theme/status-driven),
-    // so each paint is one field reused via Color mutation — the 30 FPS render
+    // so each paint is one field reused via Color mutation - the 30 FPS render
     // allocates no SKPaint.
     private readonly SKPaint _bgPaint = new() { IsAntialias = true };
     private readonly SKPaint _badgePaint = new() { IsAntialias = true };
@@ -72,8 +59,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// <summary>
     /// Test seam for the IRC socket. Defaults to the shared
     /// <see cref="ClientWebSocketFeed"/> adapter; tests inject an in-memory
-    /// feed so the IRC loop (handshake, reconnect backoff, message parsing) is
-    /// drivable without a network.
+    /// feed so the connection module is drivable without a network.
     /// </summary>
     internal Func<IWebSocketFeed> FeedFactory { get; set; } = () => new ClientWebSocketFeed();
 
@@ -81,19 +67,29 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// The Twitch session (one process-wide singleton by default). Test seam in
     /// the <see cref="FeedFactory"/> image: InitializeAsync restores the session
     /// fire-and-forget, and the shared session's real token store + client must
-    /// never be reached from a test host — a valid stored token would perform a
+    /// never be reached from a test host - a valid stored token would perform a
     /// real network restore and mutate the singleton's followed-channel state.
     /// </summary>
     internal TwitchSession Session { get; set; } = TwitchSession.Shared;
 
-    /// <summary>One chat line — plain data; the wrapped lines come from the
-    /// widget's shared <see cref="WrapCache"/>.</summary>
-    private sealed record ChatMessage(string Username, string Text, SKColor Color);
+    public TwitchChatStreamWidget()
+    {
+        // The live reads (MaxMessages, AutoConnect, Context) keep the module bound
+        // to the widget's current facts: a test's post-ctor FeedFactory swap
+        // and an inspector write both take effect.
+        _connection = new TwitchChatConnection(
+            () => FeedFactory(),
+            () => MaxMessages,
+            () => AutoConnect && !_disposed,
+            msg => Context?.LogInfo(msg),
+            (msg, ex) => Context?.LogError(msg, ex),
+            () => Context?.RequestRender());
+    }
 
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
-        if (AutoConnect) StartConnection();
+        if (AutoConnect) _connection.Start(ChannelName);
         _ = RestoreTwitchSessionAsync(cancellationToken);
     }
 
@@ -125,18 +121,14 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         switch (propertyName)
         {
             case nameof(ChannelName):
-                if (AutoConnect) StartConnection();
+                if (AutoConnect) _connection.Start(ChannelName);
                 break;
             case nameof(AutoConnect):
-                if (newValue is true) StartConnection();
-                else StopConnection();
+                if (newValue is true) _connection.Start(ChannelName);
+                else _connection.Stop();
                 break;
             case nameof(MaxMessages):
-                lock (_messagesLock)
-                {
-                    while (_messages.Count > TwitchChatStatusPolicy.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
-                    _renderSnapshot = [.. _messages];
-                }
+                _connection.TrimMessages();
                 break;
         }
         base.OnPropertyChanged(propertyName, newValue);
@@ -196,191 +188,14 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
-        if (_chatState.Status == ChatStatus.Connected) StopConnection();
-        else StartConnection();
-    }
-
-    private void StartConnection()
-    {
-        RetirePongToken();
-        _pongCts = new CancellationTokenSource();
-        lock (_messagesLock)
-        {
-            _messages.Clear();
-            _renderSnapshot = [];
-        }
-        _chatState = TwitchChatPresentation.ChatState.Connecting();
-        Context.RequestRender();
-
-        // The IRC loop is a FeedLoop: connect → handshake → read messages →
-        // exponential backoff reconnect, driven through the feed seam.
-        _feedLoop?.Dispose();
-        _feedLoop = new FeedLoop(
-            IrcEndpoint,
-            FeedFactory,
-            ConnectIrcAsync,
-            DispatchIncomingMessage,
-            new ExponentialBackoffReconnectPolicy(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)),
-            onCycleEnded: _ => SetReconnectingStatus(),
-            onStopped: () =>
-            {
-                _chatState = TwitchChatPresentation.ChatState.Disconnected();
-                Context.RequestRender();
-            },
-            continueAfterCycle: () => AutoConnect && !_disposed,
-            onError: ex => Context.LogError("Twitch IRC error", ex));
-        _feedLoop.Start();
-    }
-
-    private void StopConnection()
-    {
-        _feedLoop?.Dispose();
-        _feedLoop = null;
-        RetirePongToken();
-        _chatState = TwitchChatPresentation.ChatState.Disconnected();
-        Context.RequestRender();
-    }
-
-    /// <summary>
-    /// The alive-phase PONG-token retirement: cancel and drop the reference,
-    /// do NOT dispose. An in-flight PONG task may still hold the token (the
-    /// fire-and-forget task at the Ping dispatch passes it to the socket
-    /// send), and disposing a source with live holders is what the deferral
-    /// the Sdk's PollLoop/FrameDelivery and the feed manager apply avoids;
-    /// the dropped source is GC'd when its last holder unwinds. The terminal
-    /// variant (DisposeAsync) is the only site that disposes: by then the
-    /// feed loop, the only PONG launcher, has unwound, so no holder remains.
-    /// </summary>
-    private void RetirePongToken()
-    {
-        _pongCts?.Cancel();
-        _pongCts = null;
-    }
-
-    /// <summary>Runs after the feed connected: the anonymous IRC handshake and
-    /// the "Joining #channel" status.</summary>
-    private async Task ConnectIrcAsync(IWebSocketFeed feed, CancellationToken ct)
-    {
-        var channel = NormalizeChannel(ChannelName);
-        string nick = AnonymousNickPrefix + Random.Shared.Next(1000000, 9999999).ToString(CultureInfo.InvariantCulture);
-        string pass = AnonymousPass;
-
-        await SendIrcLineAsync(feed, "CAP REQ :twitch.tv/commands twitch.tv/tags", ct).ConfigureAwait(false);
-        await SendIrcLineAsync(feed, "PASS " + pass, ct).ConfigureAwait(false);
-        await SendIrcLineAsync(feed, "NICK " + nick, ct).ConfigureAwait(false);
-        await SendIrcLineAsync(feed, "JOIN #" + channel, ct).ConfigureAwait(false);
-
-        _chatState = TwitchChatPresentation.ChatState.JoiningChannel(channel);
-        Context.RequestRender();
-    }
-
-    private void SetReconnectingStatus()
-    {
-        _chatState = TwitchChatPresentation.ChatState.Reconnecting();
-        Context.RequestRender();
-    }
-
-    private static Task SendIrcLineAsync(IWebSocketFeed socket, string line, CancellationToken ct)
-        => socket.SendTextAsync(line + "\r\n", ct);
-
-    private void DispatchIncomingMessage(string data)
-    {
-        foreach (var rawLine in data.Split("\r\n", StringSplitOptions.RemoveEmptyEntries))
-        {
-            HandleLine(rawLine);
-        }
-    }
-
-    private void HandleLine(string line)
-    {
-        if (!TwitchIrcMessages.TryParse(line, out var message)) return;
-
-        switch (message.Kind)
-        {
-            case IrcMessageKind.Ping:
-                {
-                    var sock = _feedLoop?.Current;
-                    if (sock != null)
-                    {
-                        CancellationToken token = _pongCts?.Token ?? CancellationToken.None;
-                        _ = Task.Run(async () =>
-                        {
-                            try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token).ConfigureAwait(false); }
-                            catch
-                            {
-                                System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
-                            }
-                        }, token);
-                    }
-                    break;
-                }
-            case IrcMessageKind.RoomState:
-                _chatState = TwitchChatPresentation.ChatState.Live();
-                Context.RequestRender();
-                break;
-            case IrcMessageKind.Privmsg:
-                HandlePrivmsg(message);
-                break;
-            case IrcMessageKind.Notice:
-                {
-                    var (newStatus, changed) = TwitchChatStatusPolicy.StatusFromNotice(message.Text, _chatState.Status);
-                    if (changed)
-                    {
-                        _chatState = newStatus == ChatStatus.Connected ? TwitchChatPresentation.ChatState.Live() : TwitchChatPresentation.ChatState.LoginFailed();
-                        if (newStatus == ChatStatus.Connected) Context.RequestRender();
-                        else Context.LogError("Twitch login failed: " + message.Text);
-                    }
-                    else
-                    {
-                        Context.LogInfo("Twitch notice: " + message.Text);
-                    }
-                    break;
-                }
-            case IrcMessageKind.Other:
-                break;
-        }
-    }
-
-    private void HandlePrivmsg(IrcMessage message)
-    {
-        var colorHex = message.ColorHex;
-        var color = colorHex.StartsWith('#') && SKColor.TryParse(colorHex, out var parsed) ? parsed : SKColors.White;
-        if (color == SKColors.White) color = TwitchIrcMessages.PaletteColorFor(message.Login.Length > 0 ? message.Login : message.Username);
-
-        lock (_messagesLock)
-        {
-            _messages.Add(new ChatMessage(message.Username, message.Text, color));
-            while (_messages.Count > TwitchChatStatusPolicy.ClampMaxMessages(MaxMessages)) _messages.RemoveAt(0);
-            _renderSnapshot = [.. _messages];
-        }
-        Context?.RequestRender();
+        if (_connection.State.Status == ChatStatus.Connected) _connection.Stop();
+        else _connection.Start(ChannelName);
     }
 
     /// <summary>Internal test accessor: how many chat messages the live IRC
-    /// loop has parsed (drive the loop through <see cref="FeedFactory"/>).</summary>
-    internal int MessageCountForTest
-    {
-        get
-        {
-            lock (_messagesLock) return _messages.Count;
-        }
-    }
-
-    /// <summary>
-    /// Normalizes a channel name for IRC JOIN and the header badge: trims,
-    /// drops the leading '#', and lowercases. Invalid names — empty,
-    /// over-length (Twitch's 25-char cap), or carrying an embedded CR/LF
-    /// (which could inject extra IRC lines into the JOIN command) — fall back
-    /// to "twitch", the existing empty-channel fallback. The validity rule is
-    /// the shared Sdk <see cref="TwitchChannelRule"/> the profile sanitizer
-    /// also applies (one rule, both entry points).
-    /// </summary>
-    private static string NormalizeChannel(string channel)
-    {
-        var c = channel.Trim().TrimStart('#');
-        if (c.Length == 0) return "twitch";
-        return TwitchChannelRule.IsValid(c) ? c.ToLowerInvariant() : "twitch";
-    }
+    /// loop has parsed (forwards the module's count through the
+    /// <see cref="FeedFactory"/> seam).</summary>
+    internal int MessageCountForTest => _connection.MessageCount;
 
     // The header strings are memoized per input (the shared MemoSlot shape):
     // Render composes the badge and status line every frame, but both change
@@ -391,11 +206,10 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     private readonly MemoSlot<(ChatStatus Status, string Detail), string> _statusMemo = new();
 
     private string ChannelBadge()
-        => _badgeMemo.GetOrCompute(ChannelName, () => "#" + NormalizeChannel(ChannelName).ToUpperInvariant());
+        => _badgeMemo.GetOrCompute(ChannelName, () => "#" + TwitchIrcMessages.NormalizeChannel(ChannelName).ToUpperInvariant());
 
-    private string StatusLine()
+    private string StatusLine(TwitchChatPresentation.ChatState state)
     {
-        TwitchChatPresentation.ChatState state = _chatState;
         return _statusMemo.GetOrCompute(
             (state.Status, state.Detail),
             () => TwitchChatPresentation.StatusText(state));
@@ -426,9 +240,12 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         string channelBadge = ChannelBadge();
         canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, _badgePaint, SKTextAlign.Left);
 
-        string statusText = StatusLine();
+        // One read of the module's state for the whole frame: the status
+        // color, the status line, and the empty hint all agree.
+        var state = _connection.State;
+        string statusText = StatusLine(state);
 
-        _statusPaint.Color = TwitchChatPresentation.StatusColor(_chatState.Status);
+        _statusPaint.Color = TwitchChatPresentation.StatusColor(state.Status);
         canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, _statusPaint, SKTextAlign.Right);
 
         float headerBottom = top + titleSize + 8f * scale;
@@ -443,8 +260,8 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         canvas.ClipRect(contentBounds);
 
         // The render snapshot is replaced wholesale on every mutation, so no
-        // per-frame _messages.ToArray() under the lock is needed.
-        var snapshot = _renderSnapshot;
+        // per-frame allocation under a lock is needed.
+        var snapshot = _connection.Messages;
 
         float msgSize = baseFontSize * scale;
         float userSize = (Math.Max(10f, baseFontSize - 2f)) * scale;
@@ -455,7 +272,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         {
             var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
             _emptyPaint.Color = headerColor.WithAlpha(130);
-            var hint = TwitchChatPresentation.EmptyHint(_chatState.Status, AutoConnect);
+            var hint = TwitchChatPresentation.EmptyHint(state.Status, AutoConnect);
             canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, _emptyPaint, SKTextAlign.Left);
             canvas.Restore();
             return;
@@ -498,14 +315,7 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
         _emptyPaint.Dispose();
         _userPaint.Dispose();
         _msgPaint.Dispose();
-        _feedLoop?.Dispose(); // cancels, aborts the live feed, and awaits the loop task
-        _feedLoop = null;
-        // The terminal PONG-token retirement: the feed loop (the only PONG
-        // launcher) unwound above, so no in-flight holder remains and the
-        // graceful cancel + dispose is safe here, unlike RetirePongToken's
-        // alive-phase deferral.
-        if (_pongCts is { } cts) await cts.CancelAsync().ConfigureAwait(false);
-        _pongCts?.Dispose();
+        await _connection.DisposeAsync().ConfigureAwait(false); // cancels the loop, aborts the feed, retires the PONG token
         await base.DisposeAsync().ConfigureAwait(false);
     }
 }

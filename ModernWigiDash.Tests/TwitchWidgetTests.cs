@@ -53,9 +53,10 @@ public class TwitchWidgetTests
     [TestMethod]
     public async Task TwitchWidget_RendersMessagesWithEmojisWithoutErrors()
     {
-        // A raw IRC line through the widget's real path (FakeFeed → IRC loop →
-        // parser → message list), the same wiring TwitchChatStreamLoopTests
-        // drives — the widget owns no message-injection seam anymore.
+        // A raw IRC line through the widget's real path (FakeFeed to the
+        // connection module to parser to message list), the same wiring
+        // TwitchChatConnectionTests drives - the widget owns no
+        // message-injection seam.
         var feed = new FakeFeed();
         feed.QueueMessage(":GamerOne!GamerOne@GamerOne.tmi.twitch.tv PRIVMSG #test :Hello world! 🔥 🎉 💬\r\n");
         var widget = new TwitchChatStreamWidget { AutoConnect = true, ChannelName = "test" };
