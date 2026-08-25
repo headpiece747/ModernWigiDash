@@ -170,7 +170,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  ModernWigiDash.App (WPF host)                          │
-│  MainWindow + partials (Context, ServiceIntegration)     │
+│  MainWindow + partials (Context, Update)                 │
 │  Compositor → RGB565 → FrameDelivery → direct USB        │
 │  Touch: engine 16ms poll → gesture detection → widgets   │
 │  Producers: LHS shared memory (sensors), PresentMon      │
@@ -191,7 +191,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ┌─────────────────────────────────────────────────────────┐
 │  ModernWigiDash.Core                                    │
-│  Compositor, Theming, Rendering, Telemetry, Models      │
+│  Compositor, Theming, Rendering, Plugins, Models         │
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐

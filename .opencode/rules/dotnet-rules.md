@@ -30,7 +30,7 @@
 ## 2. Architecture
 
 - Architecture is documented in `CONTEXT.md` (domain glossary + layering diagram). Never assume a different architecture; read CONTEXT.md first.
-- The CONTEXT.md layering table is machine-pinned by `ArchitectureTests.ProjectReferences_OnlyTheDocumentedLayeringEdges_Holds`: every csproj `ProjectReference` must be one of the table's edges, and the slnx holds exactly the six projects. Adding a project or a reference requires updating the CONTEXT.md table in the same change, or the gate fails.
+- The CONTEXT.md layering table is machine-pinned by `ArchitectureTests.ProjectReferences_OnlyTheDocumentedLayeringEdges_Hold`: every csproj `ProjectReference` must be one of the table's edges, and the slnx holds exactly the six projects. Adding a project or a reference requires updating the CONTEXT.md table in the same change, or the gate fails.
 - Dependency direction is inward (Sdk the leaf, App the top): Core → Sdk, Hardware → Sdk, Widgets → Core + Sdk, App → Core + Hardware + Sdk + Widgets. No other edges; the `ArchitectureTests` allowlist is the one owner (the CONTEXT.md Architecture Overview's reference-edges line is its documented form).
 - Widgets are instantiated via reflection (parameterless ctor). They cannot receive injected dependencies. Static stores with `LastUpdate` staleness tracking (LhmSensorStore, FrameTimeStore) are the pragmatic, deliberate pattern; don't "fix" them with DI.
 - Synchronous transport interface is a deliberate ADR-0001 decision. USB I/O is inherently blocking; do NOT wrap `DisplayHidTransport` in fake async. Do not convert it to async without revisiting the ADR.
