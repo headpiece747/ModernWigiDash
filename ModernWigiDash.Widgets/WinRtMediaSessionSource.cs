@@ -10,13 +10,17 @@ namespace ModernWigiDash.Widgets;
 /// GlobalSystemMediaTransportControlsSessionManager/Session types into the
 /// neutral <see cref="IMediaSessionSource"/> seam and maps the SMTC enums to
 /// the neutral vocabulary exactly once, here:
-/// <see cref="MediaPlaybackStatus"/> / <see cref="MediaRepeatMode"/> on the
-/// way in, <see cref="ToWinRtRepeat"/> on the way out. The named SMTC values
-/// share their ordinals with the neutral enums, so each mapping is a range
-/// check plus a cast; anything the OS reports outside the named set lands on
-/// the neutral <c>Unknown</c> (and the repeat command's <c>Unknown</c> arm,
-/// which the monitor's tap policy never produces, maps back to
-/// <c>None</c>). The thumbnail stream reference stays WinRT by design: it is
+/// <see cref="ToNeutralStatus"/> / <see cref="ToNeutralRepeat"/> on the way
+/// in, <see cref="ToWinRtRepeat"/> on the way out. The mapping is by NAME,
+/// not by ordinal: the neutral members mirror the SMTC member names, and
+/// anything the OS reports outside the named set lands on the neutral
+/// <c>Unknown</c> (and the repeat command's <c>Unknown</c> arm, which the
+/// monitor's tap policy never produces, maps back to <c>None</c>). The old
+/// cast-based mapping assumed ordinal agreement; the status enum does not
+/// share its ordinals with the neutral one (the repeat enum happens to), so
+/// the name-based mapping is pinned against the real enums by
+/// <c>WinRtMediaSessionSourceTests</c>. The thumbnail stream reference stays
+/// WinRT by design: it is
 /// the artwork pipeline's blob, a separate consumer of the seam.
 /// </summary>
 internal sealed class WinRtMediaSessionSource : IMediaSessionSource
@@ -26,6 +30,48 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
         var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
         return manager is null ? null : new WinRtManagerAdapter(manager);
     }
+
+    /// <summary>The WinRT to neutral status mapping, the one place it is
+    /// spelled, by name: each named SMTC value projects to the same-named
+    /// neutral member; anything outside the named set is
+    /// <see cref="MediaPlaybackStatus.Unknown"/>.</summary>
+    internal static MediaPlaybackStatus ToNeutralStatus(GlobalSystemMediaTransportControlsSessionPlaybackStatus status)
+        => status switch
+        {
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed => MediaPlaybackStatus.Closed,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Opened => MediaPlaybackStatus.Opened,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Changing => MediaPlaybackStatus.Changing,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped => MediaPlaybackStatus.Stopped,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => MediaPlaybackStatus.Playing,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused => MediaPlaybackStatus.Paused,
+            _ => MediaPlaybackStatus.Unknown
+        };
+
+    /// <summary>The WinRT to neutral repeat mapping, the one place it is
+    /// spelled, by name: each named SMTC value projects to the same-named
+    /// neutral member; anything outside the named set is
+    /// <see cref="MediaRepeatMode.Unknown"/>.</summary>
+    internal static MediaRepeatMode ToNeutralRepeat(MediaPlaybackAutoRepeatMode mode)
+        => mode switch
+        {
+            MediaPlaybackAutoRepeatMode.None => MediaRepeatMode.None,
+            MediaPlaybackAutoRepeatMode.Track => MediaRepeatMode.Track,
+            MediaPlaybackAutoRepeatMode.List => MediaRepeatMode.List,
+            _ => MediaRepeatMode.Unknown
+        };
+
+    /// <summary>The neutral to WinRT repeat mapping for the command path.
+    /// The monitor's tap policy only ever produces the three named modes;
+    /// the <c>Unknown</c> arm is total-mapping insurance and degrades to
+    /// <c>None</c>.</summary>
+    internal static MediaPlaybackAutoRepeatMode ToWinRtRepeat(MediaRepeatMode mode)
+        => mode switch
+        {
+            MediaRepeatMode.None => MediaPlaybackAutoRepeatMode.None,
+            MediaRepeatMode.Track => MediaPlaybackAutoRepeatMode.Track,
+            MediaRepeatMode.List => MediaPlaybackAutoRepeatMode.List,
+            _ => MediaPlaybackAutoRepeatMode.None
+        };
 
     private sealed class WinRtManagerAdapter : IMediaSessionSourceManager
     {
@@ -173,24 +219,5 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
                 return false;
             }
         }
-
-        /// <summary>The WinRT → neutral status mapping, the one place it is
-        /// spelled: the six named SMTC values share their ordinals with the
-        /// neutral enum; everything else is <see cref="MediaPlaybackStatus.Unknown"/>.</summary>
-        private static MediaPlaybackStatus ToNeutralStatus(GlobalSystemMediaTransportControlsSessionPlaybackStatus status)
-            => (int)status is >= 0 and <= 5 ? (MediaPlaybackStatus)(int)status : MediaPlaybackStatus.Unknown;
-
-        /// <summary>The WinRT → neutral repeat mapping, the one place it is
-        /// spelled: the three named SMTC values share their ordinals with the
-        /// neutral enum; everything else is <see cref="MediaRepeatMode.Unknown"/>.</summary>
-        private static MediaRepeatMode ToNeutralRepeat(MediaPlaybackAutoRepeatMode mode)
-            => (int)mode is >= 0 and <= 2 ? (MediaRepeatMode)(int)mode : MediaRepeatMode.Unknown;
-
-        /// <summary>The neutral → WinRT repeat mapping for the command path.
-        /// The monitor's tap policy only ever produces the three named modes;
-        /// the <c>Unknown</c> arm is total-mapping insurance and degrades to
-        /// <c>None</c>.</summary>
-        private static MediaPlaybackAutoRepeatMode ToWinRtRepeat(MediaRepeatMode mode)
-            => (int)mode is >= 0 and <= 2 ? (MediaPlaybackAutoRepeatMode)(int)mode : MediaPlaybackAutoRepeatMode.None;
     }
 }
