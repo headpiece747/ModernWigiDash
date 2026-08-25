@@ -88,6 +88,16 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
             manager.SessionsChanged += OnSessionsChanged;
         }
 
+        /// <summary>Releases the WinRT event subscriptions taken in the
+        /// constructor. The monitor disposes the adapter it holds so the
+        /// WinRT manager does not keep its handlers (and the adapter) alive
+        /// past the monitor's lifetime.</summary>
+        public void Dispose()
+        {
+            _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
+            _manager.SessionsChanged -= OnSessionsChanged;
+        }
+
         private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, object _)
             => CurrentSessionChanged?.Invoke();
 
@@ -126,6 +136,17 @@ internal sealed class WinRtMediaSessionSource : IMediaSessionSource
             session.MediaPropertiesChanged += OnMediaPropertiesChanged;
             session.PlaybackInfoChanged += OnPlaybackInfoChanged;
             session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
+        }
+
+        /// <summary>Releases the WinRT event subscriptions taken in the
+        /// constructor. The monitor disposes the adapter it holds (and every
+        /// fresh wrapper it discards) so the WinRT session does not
+        /// accumulate dead handlers.</summary>
+        public void Dispose()
+        {
+            _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+            _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+            _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
         }
 
         private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, object _)

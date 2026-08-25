@@ -359,6 +359,10 @@ internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
 
     public int SessionsChangedSubscriptionCount { get; private set; }
 
+    public int DisposalCount { get; private set; }
+
+    public void Dispose() => DisposalCount++;
+
     public event Action? CurrentSessionChanged
     {
         add { _currentSessionChanged += value; CurrentSessionChangedSubscriptionCount++; }
@@ -428,6 +432,10 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
     public MediaRepeatMode LastRepeat { get; private set; }
 
     public long LastSeekTicks { get; private set; }
+
+    public int DisposalCount { get; private set; }
+
+    public void Dispose() => DisposalCount++;
 
     public event Action? MediaPropertiesChanged
     {

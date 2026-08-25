@@ -364,6 +364,43 @@ public class MediaSessionMonitorTests
     }
 
     [TestMethod]
+    public async Task DisposeAsync_DisposesTheManagerAndSessionAdapters()
+    {
+        var session = CreateSession("music.exe", "Track");
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        await monitor.DisposeAsync();
+
+        // The neutral unsubscription above is only half the release: the
+        // adapters own the WinRT event subscriptions, and the monitor must
+        // dispose them so the WinRT manager/session do not outlive it.
+        Assert.AreEqual(1, manager.DisposalCount, "the held manager adapter is disposed on dispose");
+        Assert.AreEqual(1, session.DisposalCount, "the held session adapter is disposed on dispose");
+    }
+
+    [TestMethod]
+    public async Task AttachSession_ReplacingDisposesTheReleasedSession()
+    {
+        var a = CreateSession("a.exe", "Track A");
+        var b = CreateSession("b.exe", "Track B");
+        var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a, b] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.AreEqual(0, a.DisposalCount);
+        Assert.AreEqual(0, b.DisposalCount);
+
+        monitor.CycleSession();
+
+        // Advancing to b releases the adapter the monitor held on a: its
+        // WinRT subscriptions are torn down, so the WinRT session does not
+        // accumulate a dead handler. The newly held session is not disposed.
+        Assert.AreEqual(1, a.DisposalCount, "the released session adapter is disposed on replacement");
+        Assert.AreEqual(0, b.DisposalCount, "the newly held session adapter is not disposed");
+    }
+
+    [TestMethod]
     public async Task SlowRefresh_CompletingAfterNewerRefresh_DoesNotOverwriteSnapshot()
     {
         var session = CreateSession("radio.exe", "Initial");

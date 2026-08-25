@@ -100,6 +100,13 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         }
 
         int nextIdx = (idx + 1) % sessions.Count;
+        // GetSessions() wraps every session in a fresh subscription (the
+        // WinRT seam); release the ones that are neither the one being kept
+        // nor the one AttachSession releases, so they do not accumulate.
+        for (int i = 0; i < sessions.Count; i++)
+        {
+            if (i != nextIdx && i != idx) sessions[i].Dispose();
+        }
         AttachSession(sessions[nextIdx]);
     }
 
@@ -184,6 +191,11 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             _manager.SessionsChanged -= OnSessionsChanged;
         }
         DetachSessionEvents();
+        // The adapters own the WinRT event subscriptions the monitor's
+        // neutral unsubscription does not reach; release them so the WinRT
+        // manager/session do not outlive the monitor.
+        _manager?.Dispose();
+        _session?.Dispose();
         _manager = null;
         _session = null;
         _snapshot = null;
@@ -209,10 +221,24 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
     private void AttachSession(IMediaSessionSourceSession? session)
     {
-        if (ReferenceEquals(_session?.Identity, session?.Identity)) return;
+        // The in-memory seam hands back the very instance it holds, so a
+        // same-reference attach is a no-op.
+        if (ReferenceEquals(_session, session)) return;
 
+        // A fresh wrapper for a session we already hold (the WinRT seam
+        // builds one per call): tear down its subscriptions and keep the
+        // adapter we already own.
+        if (session is not null && ReferenceEquals(_session?.Identity, session.Identity))
+        {
+            session.Dispose();
+            return;
+        }
+
+        // Release the held session (if any) and adopt the new one, or none.
         DetachSessionEvents();
+        var old = _session;
         _session = session;
+        old?.Dispose();
 
         if (session is not null)
         {
@@ -421,7 +447,7 @@ internal interface IMediaSessionSource
     Task<IMediaSessionSourceManager?> GetManagerAsync();
 }
 
-internal interface IMediaSessionSourceManager
+internal interface IMediaSessionSourceManager : IDisposable
 {
     event Action? CurrentSessionChanged;
 
@@ -432,7 +458,7 @@ internal interface IMediaSessionSourceManager
     IReadOnlyList<IMediaSessionSourceSession> GetSessions();
 }
 
-internal interface IMediaSessionSourceSession
+internal interface IMediaSessionSourceSession : IDisposable
 {
     /// <summary>Stable identity of the underlying SMTC session for equality checks.</summary>
     object Identity { get; }
