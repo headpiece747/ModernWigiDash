@@ -31,11 +31,13 @@ public class PriceInfo
 
 /// <summary>
 /// The shared price-streaming manager: ref-counted subscription claims, the
-/// price-map policy (freshness stamp, the BinanceUS downgrade guard), the
 /// two WebSocket feed loops, and the REST cycle wiring. One REST quote leg
 /// per source sits behind the manager's shared HTTP seam — legs own URL
 /// shape and response parse, and this class never builds a URL or parses a
-/// source payload itself.
+/// source payload itself. The price map and its merge policy are the
+/// <see cref="PriceMapStore"/> seam: every write site routes through the
+/// store's live/fallback rules, so a new source is a rule choice, not a
+/// re-derivation.
 /// </summary>
 public sealed class PriceFeedManager : IDisposable
 {
@@ -51,7 +53,11 @@ public sealed class PriceFeedManager : IDisposable
     internal static readonly TimeSpan RestInterval = TimeSpan.FromSeconds(30);
 
     private readonly string _finnhubKey;
-    private readonly ConcurrentDictionary<string, PriceInfo> _prices = new();
+    // The price map and every write into it are the store seam: the merge
+    // rules (live overwrite, the fallback downgrade guard) and the record
+    // stamping live there, against this clock read live at write time (a
+    // test that swaps Clock after construction is still honored).
+    private readonly PriceMapStore _store;
     // Subscriber claim counts: N widgets on one symbol hold N claims, so one
     // widget's unsubscribe only releases when the last claim leaves.
     internal readonly ConcurrentDictionary<string, int> _subscribedCrypto = new();
@@ -137,6 +143,11 @@ public sealed class PriceFeedManager : IDisposable
         // Idempotent across instances that share a client (the static default).
         httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd("ModernWigiDash/2.0");
 
+        // The store seam gets the clock as a live read (not a captured
+        // provider): the Frankfurter leg's date window and the store's
+        // stamps/guard all see a test's post-construction Clock swap.
+        _store = new(() => Clock.GetUtcNow().UtcDateTime);
+
         // One leg per REST source: the URL shape, the wire parse and the
         // source label live with the source (one leg module per source), so a
         // wire-format change touches exactly one leg.
@@ -168,7 +179,10 @@ public sealed class PriceFeedManager : IDisposable
                     _delay, _failLog,
                     FallbackCoinGeckoAsync);
             },
-            key => _ = SendWsSubscribeAsync(FeedKind.Binance, key));
+            key => _ = SendWsSubscribeAsync(FeedKind.Binance, key),
+            // The crypto one-shot seed: the CoinGecko leg (its id resolution
+            // from the single catalog table rides along as the guard).
+            new(CoinGeckoRestLeg.SourceLabel, "$", (key, ct) => CoinGeckoLeg.FetchAsync(key, ct)));
         _stockWiring = new(
             SymbolCatalog.IsValidSymbol,
             _subscribedStocks,
@@ -186,7 +200,10 @@ public sealed class PriceFeedManager : IDisposable
                     PollStockAsync,
                     _delay, _failLog);
             },
-            key => _ = SendWsSubscribeAsync(FeedKind.Finnhub, key));
+            key => _ = SendWsSubscribeAsync(FeedKind.Finnhub, key),
+            // The stock one-shot seed: the Yahoo chart leg (its symbol guard
+            // is the only validation the seed path has).
+            new(YahooRestLeg.SourceLabel, YahooRestLeg.CurrencySymbol, (key, ct) => YahooRestLeg.FetchAsync(key, ct)));
         _fxWiring = new(
             symbol => SymbolCatalog.IsValidFxInput(symbol, out _),
             _subscribedFx,
@@ -198,40 +215,61 @@ public sealed class PriceFeedManager : IDisposable
                     PollFxAsync,
                     _delay, _failLog);
             },
-            WsSubscribe: null);
+            WsSubscribe: null,
+            // No seed leg: the Frankfurter cycle already serves FX (a
+            // one-shot seed would duplicate it, and the series response has
+            // no single best quote to seed from).
+            Seed: null);
     }
 
     /// <summary>
     /// One asset kind's feed wiring — the per-kind half that
-    /// <see cref="Subscribe"/> and <see cref="Unsubscribe"/> differ on: the
-    /// validation guard, the ref-counted subscription map, what the first
-    /// claim starts (WS loop and/or REST cycle, in the kind's own order), and
-    /// the WS subscribe payload (null when the kind has no socket). The
-    /// shared routine owns the sequence (validate → claim → start →
-    /// subscribe), so a fourth asset kind is one table row, not a fourth
-    /// copy of the steps.
+    /// <see cref="Subscribe"/>, <see cref="Unsubscribe"/>, and
+    /// <see cref="SeedFallbackAsync"/> differ on: the validation guard, the
+    /// ref-counted subscription map, what the first claim starts (WS loop
+    /// and/or REST cycle, in the kind's own order), the WS subscribe payload
+    /// (null when the kind has no socket), and the one-shot seed leg (null
+    /// when the kind's cycle already serves it — FX, the Frankfurter cycle).
+    /// The shared routines own their sequences (validate → claim → start →
+    /// subscribe; the seed's fetch → apply), so a fourth asset kind is one
+    /// table row, not a fourth copy of the steps.
     /// </summary>
     private sealed record FeedKindWiring(
         Func<string, bool> IsValid,
         ConcurrentDictionary<string, int> Subscriptions,
         Action OnFirstClaim,
-        Action<string>? WsSubscribe);
+        Action<string>? WsSubscribe,
+        SeedLeg? Seed);
+
+    /// <summary>The kind's one-shot seed leg: the source label the seeded
+    /// record is stored under, its currency symbol, and the fetch (the leg's
+    /// own validation guard rides along — the seed path has no subscription
+    /// boundary to validate at).</summary>
+    private sealed record SeedLeg(string SourceLabel, string CurrencySymbol, Func<string, CancellationToken, Task<QuoteSample?>> Fetch);
 
     private readonly FeedKindWiring _cryptoWiring;
     private readonly FeedKindWiring _stockWiring;
     private readonly FeedKindWiring _fxWiring;
 
     /// <summary>
-    /// The kind's feed wiring — the one table <see cref="Subscribe"/> and
-    /// <see cref="Unsubscribe"/> both route through, so the kind→(validation,
-    /// map, startup, subscribe) mapping is spelled exactly once.
+    /// The kind's feed wiring — the one table <see cref="Subscribe"/>,
+    /// <see cref="Unsubscribe"/>, and <see cref="SeedFallbackAsync"/> all
+    /// route through, so the kind→(validation, map, startup, subscribe,
+    /// seed) mapping is spelled exactly once. Every named kind has an arm:
+    /// an unnamed value (a cast of an out-of-range int, which no boundary
+    /// can produce) fails loudly instead of riding a silent default, and a
+    /// new kind is one arm plus one table row.
     /// </summary>
-    private FeedKindWiring WiringFor(AssetKind kind) => kind switch
+    private FeedKindWiring WiringFor(AssetKind kind)
     {
-        AssetKind.Crypto => _cryptoWiring,
-        AssetKind.Fx => _fxWiring,
-        _ => _stockWiring,
-    };
+        switch (kind)
+        {
+            case AssetKind.Crypto: return _cryptoWiring;
+            case AssetKind.Stock: return _stockWiring;
+            case AssetKind.Fx: return _fxWiring;
+        }
+        throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+    }
 
     /// <summary>
     /// Validates the symbol for the asset kind, ref-counts the claim, and on
@@ -301,7 +339,7 @@ public sealed class PriceFeedManager : IDisposable
         // symbol with remaining subscribers keeps its cached price.
         if (fullyReleased)
         {
-            _prices.TryRemove(key, out _);
+            _store.TryRemove(key);
         }
 
         // Ref-counted shutdown: when the last subscriber leaves, stop the
@@ -370,40 +408,27 @@ public sealed class PriceFeedManager : IDisposable
     public PriceInfo? GetPrice(string symbol, AssetKind kind)
     {
         string key = SymbolCatalog.ToFeedKey(symbol, kind);
-        return _prices.TryGetValue(key, out var info) ? info : null;
+        return _store.TryGet(key);
     }
 
     /// <summary>
-    /// The one-shot fallback seed — the manager's single seeding operation, which
-    /// the ticker's render tick and the subscription seed ride. It owns the source
-    /// routing (crypto → CoinGecko leg, stock → Yahoo leg, FX is a no-op — the
-    /// Frankfurter cycle already serves FX), the price-map write under the fallback
-    /// downgrade guard (a fresh live price is never downgraded — the same rule the
-    /// crypto-cycle batch tail applies), and the failure log with cadence dedup. It
-    /// never throws, so a fire-and-forget caller is safe.
+    /// The one-shot fallback seed — the manager's single seeding operation,
+    /// which the ticker's render tick and the subscription seed ride. The
+    /// kind's seed leg is a column of the kind table (crypto → CoinGecko,
+    /// stock → Yahoo, FX → none), and the map write rides the store's
+    /// fallback rule (a fresh live price is never downgraded — the same rule
+    /// the crypto-cycle batch tail applies). It never throws, so a
+    /// fire-and-forget caller is safe.
     /// </summary>
     public async Task SeedFallbackAsync(string symbol, AssetKind kind)
     {
-        // FX is a no-op: the Frankfurter REST cycle already serves FX symbols —
-        // a one-shot seed would duplicate it, and its series response has no
-        // single best quote to seed from.
-        if (kind == AssetKind.Fx) return;
-
-        (string key, string source) = kind == AssetKind.Crypto
-            ? (SymbolCatalog.ToFeedKey(symbol, AssetKind.Crypto), CoinGeckoRestLeg.SourceLabel)
-            : (symbol.ToUpperInvariant(), YahooRestLeg.SourceLabel);
+        if (WiringFor(kind).Seed is not SeedLeg seed) return;
+        string key = SymbolCatalog.ToFeedKey(symbol, kind);
         try
         {
-            QuoteSample? sample = kind == AssetKind.Crypto
-                ? await CoinGeckoLeg.FetchAsync(key, _cts.Token).ConfigureAwait(false)
-                : await YahooRestLeg.FetchAsync(key, _cts.Token).ConfigureAwait(false);
+            QuoteSample? sample = await seed.Fetch(key, _cts.Token).ConfigureAwait(false);
             if (sample is not QuoteSample quote) return;
-            _prices.AddOrUpdate(
-                key,
-                _ => NewPrice(quote.Price, quote.ChangePercent, source),
-                (_, existing) => ShouldKeepExisting(existing, source, Clock.GetUtcNow().UtcDateTime)
-                    ? existing
-                    : NewPrice(quote.Price, quote.ChangePercent, source));
+            _store.ApplyFallback(key, quote.Price, quote.ChangePercent, seed.SourceLabel, seed.CurrencySymbol);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -413,31 +438,6 @@ public sealed class PriceFeedManager : IDisposable
             _failLog.Write($"One-shot fallback seed failed for {LogSanitizer.Sanitize(symbol)}: {ex.Message}");
         }
     }
-
-    /// <summary>Builds a fresh price record for the shared map: the timestamp
-    /// is always "now" and the source labels the record — one spelling for
-    /// the store sites (the per-feed currency symbol stays parameterized,
-    /// e.g. Frankfurter's empty symbol for cross rates).</summary>
-    private PriceInfo NewPrice(decimal price, decimal? changePercent, string source, string currencySymbol = "$")
-        => new()
-        {
-            Price = price,
-            ChangePercent = changePercent ?? 0m,
-            Source = source,
-            Timestamp = Clock.GetUtcNow().UtcDateTime,
-            CurrencySymbol = currencySymbol
-        };
-
-    /// <summary>The fallback downgrade guard — the one spelling every fallback
-    /// store site (the one-shot seed, the crypto-cycle batch tail) applies
-    /// before writing a fallback sample: a fresh record from any OTHER source
-    /// is kept — live feed data is never downgraded by the fallback's slower
-    /// cadence and coarser data. A same-source refresh and a stale record are
-    /// replaced. Pure over the existing record, the incoming source, and the
-    /// clock so the rule is directly testable without the price map.</summary>
-    internal static bool ShouldKeepExisting(PriceInfo existing, string incomingSource, DateTime now)
-        => !string.Equals(existing.Source, incomingSource, StringComparison.Ordinal)
-            && (now - existing.Timestamp).TotalSeconds < PriceInfo.FreshnessSeconds;
 
     /// <summary>Diagnostic log with cadence dedup for the per-tick feed
     /// failures — the module's runtime surface (configuration paths use
@@ -474,19 +474,20 @@ public sealed class PriceFeedManager : IDisposable
     internal Task PollFxAsync(string key) => PollLegAsync(key, FxRestLeg);
 
     /// <summary>The hop the REST cycle runs per symbol: the leg owns the
-    /// request and the parse; the manager owns the map write (the leg never
+    /// request and the parse; the store owns the map write (the leg never
     /// touches the price map).</summary>
     private async Task PollLegAsync(string key, PriceRestLeg leg)
     {
         QuoteSample? sample = await leg.FetchAsync(key, _cts.Token).ConfigureAwait(false);
         if (sample is not QuoteSample quote) return;
-        _prices[key] = NewPrice(quote.Price, quote.ChangePercent, leg.SourceLabel, leg.CurrencySymbol);
+        _store.ApplyLive(key, quote.Price, quote.ChangePercent, leg.SourceLabel, leg.CurrencySymbol);
     }
 
     /// <summary>
     /// The crypto cycle's batch tail: one CoinGecko request for every
     /// subscribed base coin. A fresh live price is never downgraded by the
-    /// fallback (see <see cref="ShouldKeepExisting"/>).
+    /// fallback (the store's fallback rule, see
+    /// <see cref="PriceMapStore.ApplyFallback"/>).
     /// </summary>
     internal async Task FallbackCoinGeckoAsync()
     {
@@ -497,16 +498,7 @@ public sealed class PriceFeedManager : IDisposable
             if (samples is null) return;
             foreach (var (key, sample) in samples)
             {
-                _prices.AddOrUpdate(key,
-                    _ => NewPrice(sample.Price, sample.ChangePercent, CoinGeckoRestLeg.SourceLabel),
-                    (_, existing) =>
-                    {
-                        if (ShouldKeepExisting(existing, CoinGeckoRestLeg.SourceLabel, Clock.GetUtcNow().UtcDateTime))
-                        {
-                            return existing;
-                        }
-                        return NewPrice(sample.Price, sample.ChangePercent ?? existing.ChangePercent, CoinGeckoRestLeg.SourceLabel);
-                    });
+                _store.ApplyFallback(key, sample.Price, sample.ChangePercent, CoinGeckoRestLeg.SourceLabel);
             }
         }
         catch
@@ -522,7 +514,7 @@ public sealed class PriceFeedManager : IDisposable
             _failLog.Write("Failed to parse Binance ticker message; ignoring");
             return;
         }
-        _prices[coin] = NewPrice(price, change, "Binance");
+        _store.ApplyLive(coin, price, change, "Binance");
     }
 
     private void ParseFinnhubMessage(string json)
@@ -532,10 +524,12 @@ public sealed class PriceFeedManager : IDisposable
             _failLog.Write("Failed to parse Finnhub message; ignoring");
             return;
         }
+        // A trade message carries no change figure: the store's live rule
+        // keeps the previously known change (the quote leg's) instead of
+        // zeroing it.
         foreach (var trade in trades)
         {
-            _prices.AddOrUpdate(trade.Symbol, _ => NewPrice(trade.Price, null, "Finnhub"),
-                (_, existing) => NewPrice(trade.Price, existing.ChangePercent, "Finnhub"));
+            _store.ApplyLive(trade.Symbol, trade.Price, null, "Finnhub");
         }
     }
 

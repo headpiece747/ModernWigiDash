@@ -8,8 +8,10 @@ namespace ModernWigiDash.Tests;
 /// The REST quote legs behind <see cref="PriceFeedManager"/>: one fetch →
 /// parse → store hop per symbol, driven through the injectable HttpClient.
 /// The cycle cadence itself is the RestPollLoop module (pinned by
-/// RestPollLoopTests through its injected delay delegate), and the wire
-/// parsers the legs call are pinned separately in the messages tests.
+/// RestPollLoopTests through its injected delay delegate), the wire parsers
+/// the legs call are pinned separately in the messages tests, and the
+/// price-map merge rules are pinned at the <see cref="PriceMapStore"/> seam
+/// (PriceMapStoreTests).
 /// </summary>
 [TestClass]
 public class PriceFeedManagerRestPollTests
@@ -31,6 +33,27 @@ public class PriceFeedManagerRestPollTests
         Assert.AreEqual(1.4m, info.ChangePercent);
         Assert.AreEqual("Finnhub", info.Source);
         StringAssert.Contains(stub.RequestUrls[0], "token=test-key");
+    }
+
+    [TestMethod]
+    public async Task PollStockAsync_FinnhubQuoteMissingChange_KeepsTheExistingChange()
+    {
+        // The Finnhub quote's day change (dp) is optional: a quote without
+        // it must not zero a previously known change (the store's live
+        // change-keep, the rule the Finnhub WS trade path spelled by hand).
+        var stub = new StubHttpHandler(
+            StubHttpHandler.Ok("""{"c":150.5,"d":2.1,"dp":1.4,"h":152,"l":148,"o":148.5,"pc":148.5}"""),
+            StubHttpHandler.Ok("""{"c":151.0,"d":2.5,"h":152,"l":148,"o":148.5,"pc":148.5}"""));
+        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key");
+
+        await feed.PollStockAsync("AAPL");
+        await feed.PollStockAsync("AAPL"); // the second quote omits dp
+
+        var info = feed.GetPrice("AAPL", AssetKind.Stock);
+        Assert.IsNotNull(info);
+        Assert.AreEqual(151.0m, info.Price);
+        Assert.AreEqual(1.4m, info.ChangePercent, "a quote missing its day change must keep the previously known change");
+        Assert.AreEqual("Finnhub", info.Source);
     }
 
     [TestMethod]
@@ -134,56 +157,6 @@ public class PriceFeedManagerRestPollTests
         var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61), Clock = clock };
 
         Assert.IsTrue(info.IsStale, "a price stamped outside the 60s window is stale");
-    }
-
-    [TestMethod]
-    public void ShouldKeepExisting_FreshOtherSource_True()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = BinanceUsRestLeg.SourceLabel, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
-
-        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
-            "a fresh BinanceUS price must not be downgraded by the CoinGecko fallback");
-    }
-
-    [TestMethod]
-    public void ShouldKeepExisting_StaleOtherSource_False()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = BinanceUsRestLeg.SourceLabel, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61) };
-
-        Assert.IsFalse(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
-            "a stale BinanceUS price may be replaced by the fallback");
-    }
-
-    [TestMethod]
-    public void ShouldKeepExisting_SameSourceRefresh_False()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = "CoinGecko", Timestamp = clock.GetUtcNow().UtcDateTime };
-
-        Assert.IsFalse(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
-            "a same-source refresh must replace the previous fallback sample");
-    }
-
-    [TestMethod]
-    public void ShouldKeepExisting_FreshWebSocketBinance_True()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 100m, Source = "Binance", Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
-
-        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "CoinGecko", clock.GetUtcNow().UtcDateTime),
-            "the live Binance WebSocket price is protected from the CoinGecko fallback too");
-    }
-
-    [TestMethod]
-    public void ShouldKeepExisting_FreshFinnhubAgainstYahoo_True()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var existing = new PriceInfo { Price = 150.5m, Source = "Finnhub", Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-30) };
-
-        Assert.IsTrue(PriceFeedManager.ShouldKeepExisting(existing, "Yahoo", clock.GetUtcNow().UtcDateTime),
-            "a fresh Finnhub stock price must not be downgraded by the Yahoo one-shot seed");
     }
 
     [TestMethod]

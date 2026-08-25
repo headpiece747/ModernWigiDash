@@ -6,7 +6,8 @@ namespace ModernWigiDash.Widgets;
 /// single ids= request, parsed once) and the widget's one-shot fetch (one
 /// id resolved from the <see cref="SymbolCatalog"/> crypto table). The leg
 /// owns the wire format; the price-map merge policy (including the BinanceUS
-/// freshness guard) stays with the manager, which applies the samples.
+/// freshness guard) stays with the manager's <see cref="PriceMapStore"/>
+/// seam, which applies the samples.
 /// </summary>
 internal sealed class CoinGeckoRestLeg(HttpClient http)
 {

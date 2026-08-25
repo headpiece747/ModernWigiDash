@@ -7,7 +7,7 @@ namespace ModernWigiDash.Widgets;
 /// for the day-over-day change, and the currency symbol is empty — cross
 /// rates carry no currency. The generic fetch → parse hop is the
 /// <see cref="PriceRestLeg"/> machine; the price-map store policy stays
-/// with the manager.
+/// with the manager's <see cref="PriceMapStore"/> seam.
 /// </summary>
 internal static class FrankfurterRestLeg
 {

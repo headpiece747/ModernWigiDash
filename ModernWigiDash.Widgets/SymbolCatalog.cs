@@ -165,14 +165,21 @@ internal static class SymbolCatalog
     /// <summary>
     /// Maps a user-entered symbol to the canonical feed key for an asset kind:
     /// crypto aliases resolve to the base coin (e.g. "bitcoin" → "BTC"), FX
-    /// pairs to "EURUSD", everything else to the upper-cased symbol.
+    /// pairs to "EURUSD", stocks to the upper-cased symbol. Every named kind
+    /// has an arm: an unnamed value (a cast of an out-of-range int, which no
+    /// boundary can produce) fails loudly instead of riding a silent
+    /// default, and a new kind is one arm.
     /// </summary>
-    internal static string ToFeedKey(string symbol, AssetKind kind) => kind switch
+    internal static string ToFeedKey(string symbol, AssetKind kind)
     {
-        AssetKind.Crypto => CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpperInvariant(),
-        AssetKind.Fx => NormalizeFxKey(symbol),
-        _ => symbol.ToUpperInvariant()
-    };
+        switch (kind)
+        {
+            case AssetKind.Crypto: return CryptoAliases.TryGetValue(symbol, out var alias) ? alias.Symbol : symbol.ToUpperInvariant();
+            case AssetKind.Stock: return symbol.ToUpperInvariant();
+            case AssetKind.Fx: return NormalizeFxKey(symbol);
+        }
+        throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
+    }
 
     // Timeout guards the match against catastrophic backtracking on hostile input.
     private static readonly Regex FxPairRegex = new("^(?<base>[A-Za-z]{3})/(?<quote>[A-Za-z]{3})$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));

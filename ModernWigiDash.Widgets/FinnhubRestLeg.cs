@@ -4,7 +4,8 @@ namespace ModernWigiDash.Widgets;
 /// The Finnhub quote leg (the stock REST cycle): the API key rides the
 /// URL and the quote parse owns the nullable day-change. The generic
 /// fetch → parse hop is the <see cref="PriceRestLeg"/> machine; the
-/// price-map store policy stays with the manager.
+/// price-map store policy stays with the manager's
+/// <see cref="PriceMapStore"/> seam.
 /// </summary>
 internal static class FinnhubRestLeg
 {

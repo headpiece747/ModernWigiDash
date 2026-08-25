@@ -6,7 +6,7 @@ namespace ModernWigiDash.Widgets;
 /// regular market price and the previous close, and the change percent is
 /// derived from them. The generic fetch → parse hop is the
 /// <see cref="PriceRestLeg"/> machine; the price-map store policy stays
-/// with the manager.
+/// with the manager's <see cref="PriceMapStore"/> seam.
 /// </summary>
 internal static class YahooChartRestLeg
 {

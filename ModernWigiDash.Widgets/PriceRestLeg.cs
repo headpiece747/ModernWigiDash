@@ -11,9 +11,9 @@ internal readonly record struct QuoteSample(decimal Price, decimal? ChangePercen
 /// shared HTTP seam: validation guard → URL build for the symbol → one GET →
 /// the source's wire parse → the quote sample. The leg owns the source's
 /// wire format (URL shape + response parse, the parsers live in
-/// <see cref="PriceFeedMessages"/>), never the price map — the manager
-/// applies the sample with its source-specific merge policy, so a URL or
-/// parse bug localizes in one construction site per source.
+/// <see cref="PriceFeedMessages"/>), never the price map — the manager's
+/// <see cref="PriceMapStore"/> applies the sample with its merge rules, so
+/// a URL or parse bug localizes in one construction site per source.
 /// </summary>
 internal sealed class PriceRestLeg(
     HttpClient http,

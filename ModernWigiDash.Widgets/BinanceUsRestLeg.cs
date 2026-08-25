@@ -4,8 +4,8 @@ namespace ModernWigiDash.Widgets;
 /// The BinanceUS 24h-ticker leg (the crypto REST cycle): the URL shape,
 /// the wire parse, the source label and the currency symbol in one place —
 /// the source's wire format lives with the source. The generic fetch →
-/// parse hop is the <see cref="PriceRestLeg"/> machine; the price-map
-/// store policy stays with the manager.
+/// parse hop is the <see cref="PriceRestLeg"/> machine; the price-map store
+/// policy stays with the manager's <see cref="PriceMapStore"/> seam.
 /// </summary>
 internal static class BinanceUsRestLeg
 {
