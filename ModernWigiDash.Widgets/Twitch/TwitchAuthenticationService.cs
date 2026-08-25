@@ -7,6 +7,7 @@ internal sealed class TwitchSession
     private readonly TwitchTokenStore _tokenStore;
     private readonly Func<string, TwitchApiClient> _clientFactory;
     private readonly TimeProvider _timeProvider;
+    private readonly Action<Uri> _openBrowser;
     /// <summary>
     /// The session-mutation write gate. The user paths (restore/login/
     /// refresh-channels/logout) hold it across their whole operation; the
@@ -26,16 +27,17 @@ internal sealed class TwitchSession
 
     /// <summary>Production entry point used by the widgets (reflection-instantiated).</summary>
     public TwitchSession()
-        : this(new TwitchTokenStore(), clientId => new TwitchApiClient(clientId), TimeProvider.System)
+        : this(new TwitchTokenStore(), clientId => new TwitchApiClient(clientId), TimeProvider.System, OpenAuthorizationPage)
     {
     }
 
-    /// <summary>Test seam: injectable token store, client factory, and clock.</summary>
-    internal TwitchSession(TwitchTokenStore tokenStore, Func<string, TwitchApiClient> clientFactory, TimeProvider timeProvider)
+    /// <summary>Test seam: injectable token store, client factory, clock, and browser open.</summary>
+    internal TwitchSession(TwitchTokenStore tokenStore, Func<string, TwitchApiClient> clientFactory, TimeProvider timeProvider, Action<Uri> openBrowser)
     {
         _tokenStore = tokenStore;
         _clientFactory = clientFactory;
         _timeProvider = timeProvider;
+        _openBrowser = openBrowser;
     }
 
     public IReadOnlyList<TwitchFollowedChannel> FollowedChannels
@@ -552,7 +554,7 @@ internal sealed class TwitchSession
         return value?.Trim() ?? "";
     }
 
-    private static void TryOpenBrowser(Uri verificationUri, IModernWigiDashContext context)
+    private void TryOpenBrowser(Uri verificationUri, IModernWigiDashContext context)
     {
         // Defense-in-depth: only shell-open trusted https URLs on twitch.tv so a
         // tampered response cannot invoke file:/custom protocol handlers.
@@ -564,11 +566,15 @@ internal sealed class TwitchSession
 
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(verificationUri.AbsoluteUri) { UseShellExecute = true });
+            _openBrowser(verificationUri);
         }
         catch (Exception ex)
         {
             context.LogError("Unable to open the Twitch authorization page", ex);
         }
     }
+
+    /// <summary>The production browser open; the test ctor binds a recorder instead.</summary>
+    private static void OpenAuthorizationPage(Uri uri)
+        => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
 }

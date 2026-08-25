@@ -78,13 +78,14 @@ public class TwitchSessionTests
         return env.Trim();
     }
 
-    private static (TwitchSession Session, FakeClient Client, TwitchTokenStore Store, string StorePath) CreateSession()
+    private static (TwitchSession Session, FakeClient Client, TwitchTokenStore Store, string StorePath, List<Uri> Opened) CreateSession()
     {
         string storePath = Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin");
         var store = new TwitchTokenStore(storePath);
         var client = new FakeClient { ValidationResult = Validation() };
-        var session = new TwitchSession(store, _ => client, TimeProvider.System);
-        return (session, client, store, storePath);
+        List<Uri> opened = [];
+        var session = new TwitchSession(store, _ => client, TimeProvider.System, opened.Add);
+        return (session, client, store, storePath, opened);
     }
 
     [TestCleanup]
@@ -100,7 +101,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Restore_WithStoredToken_ValidatesAndLoadsChannels()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token());
         client.Channels = [new TwitchFollowedChannel("streamer", "Streamer")];
@@ -116,7 +117,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Restore_UnauthorizedToken_RefreshesAndAuthenticates()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token());
         client.ValidationUnauthorized = true;
@@ -133,7 +134,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Restore_RefreshRejected_ClearsStateAndStore()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token());
         client.ValidationUnauthorized = true;
@@ -149,9 +150,10 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Login_DeviceFlow_AuthenticatesAndClosesAuthDialog()
     {
-        var (session, client, _, _) = CreateSession();
+        var (session, client, _, _, opened) = CreateSession();
         var context = new TestContext();
-        client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
+        Uri verificationUri = new("https://twitch.tv/activate");
+        client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", verificationUri, DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
         client.Channels = [new TwitchFollowedChannel("streamer", "Streamer")];
 
@@ -160,13 +162,15 @@ public class TwitchSessionTests
         Assert.IsTrue(session.IsAuthenticated);
         Assert.AreEqual(1, context.AuthShown);
         Assert.AreEqual(1, context.AuthClosed, "The auth dialog must close after the flow completes");
+        Assert.AreEqual(1, opened.Count, "The device flow must open the verification page exactly once");
+        Assert.AreEqual(verificationUri, opened[0]);
         Assert.AreEqual(1, session.FollowedChannels.Count);
     }
 
     [TestMethod]
     public async Task Login_TestClientIdMismatch_Throws()
     {
-        var (session, client, _, _) = CreateSession();
+        var (session, client, _, _, _) = CreateSession();
         var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
@@ -178,9 +182,23 @@ public class TwitchSessionTests
     }
 
     [TestMethod]
+    public async Task Login_NonTwitchVerificationUri_RefusesToOpenBrowser()
+    {
+        var (session, client, _, _, opened) = CreateSession();
+        var context = new TestContext();
+        client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://faketwitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
+        client.PollToken = Token();
+
+        await session.LoginAsync(TestClientId, context, CancellationToken.None);
+
+        Assert.AreEqual(0, opened.Count, "A lookalike host must never reach the browser open");
+        StringAssert.Contains(context.Errors[0], "Refusing to open non-Twitch authorization URL");
+    }
+
+    [TestMethod]
     public async Task Logout_RevokesTokenAndClearsState()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token();
@@ -196,7 +214,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Restore_WrongTestClientId_IsRefused()
     {
-        var (session, _, store, _) = CreateSession();
+        var (session, _, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token("other-client-id"));
 
@@ -213,7 +231,7 @@ public class TwitchSessionTests
         var store = new TwitchTokenStore(storePath);
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
         var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", 3600, ["chat:read"]) };
-        var session = new TwitchSession(store, _ => client, clock);
+        var session = new TwitchSession(store, _ => client, clock, _ => { });
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId(), expiresAt: clock.GetUtcNow().AddSeconds(10)));
 
@@ -237,7 +255,7 @@ public class TwitchSessionTests
         var store = new TwitchTokenStore(storePath);
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
         var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", expiresIn, []) };
-        var session = new TwitchSession(store, _ => client, clock);
+        var session = new TwitchSession(store, _ => client, clock, _ => { });
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId()));
 
@@ -251,7 +269,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task Login_PollTokenWithStaleClientId_StampReassertsTheResolvedClient()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         client.Device = new TwitchDeviceAuthorization("device-code", "USER-CODE", new Uri("https://twitch.tv/activate"), DateTimeOffset.UtcNow.AddMinutes(5), 5);
         client.PollToken = Token(clientId: "stale-client-id");
@@ -265,7 +283,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task ValidateTick_RefreshRejected_ClearsStateAndEndsTheMonitor()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId()));
         client.ValidationUnauthorized = true;
@@ -281,7 +299,7 @@ public class TwitchSessionTests
     [TestMethod]
     public async Task ValidateTick_HungValidation_DoesNotHoldTheUserGate()
     {
-        var (session, client, store, _) = CreateSession();
+        var (session, client, store, _, _) = CreateSession();
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId()));
         client.ValidatePark = new TaskCompletionSource();

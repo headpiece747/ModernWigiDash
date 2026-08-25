@@ -17,7 +17,8 @@ public class TwitchWidgetTests
             Session = new TwitchSession(
                 new TwitchTokenStore(Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin")),
                 _ => throw new NotSupportedException("An empty store must never reach the API client"),
-                TimeProvider.System)
+                TimeProvider.System,
+                _ => throw new NotSupportedException("An empty store must never reach the browser open"))
         };
         var optionsProvider = (IWidgetPropertyOptionsProvider)widget;
 
@@ -64,7 +65,8 @@ public class TwitchWidgetTests
         widget.Session = new TwitchSession(
             new TwitchTokenStore(Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin")),
             _ => throw new NotSupportedException("An empty store must never reach the API client"),
-            TimeProvider.System);
+            TimeProvider.System,
+            _ => throw new NotSupportedException("An empty store must never reach the browser open"));
         await widget.InitializeAsync(new TestContext(), CancellationToken.None);
 
         await TestWait.WaitUntilAsync(() => widget.MessageCountForTest >= 1, TimeSpan.FromSeconds(3));
