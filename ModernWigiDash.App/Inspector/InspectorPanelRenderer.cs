@@ -59,15 +59,22 @@ internal static class InspectorPanelRenderer
     /// </summary>
     /// <param name="widget">The placed widget being inspected; action buttons
     /// and the icon picker resolve its active instance at interaction time.</param>
+    /// <param name="descriptions">The editor descriptions to render, one per
+    /// property or action (the pure model's output).</param>
+    /// <param name="target">The element collection the editors render into
+    /// (cleared by the caller).</param>
+    /// <param name="callbacks">The host callbacks the editors and dialogs
+    /// route through.</param>
     public static void Render(
         PlacedWidgetInstance widget,
         IReadOnlyList<EditorDescription> descriptions,
         UIElementCollection target,
         InspectorCallbacks callbacks)
     {
-        ComboBox? actionTypeCombo = null;
-        StackPanel? actionCommandPanel = null;
-        var provider = widget.ActiveInstance as IWidgetEditorProvider;
+        var wiring = new ActionCommandWiring
+        {
+            Provider = widget.ActiveInstance as IWidgetEditorProvider
+        };
 
         foreach (var desc in descriptions)
         {
@@ -77,85 +84,130 @@ internal static class InspectorPanelRenderer
                 continue;
             }
 
-            var propPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-            propPanel.Children.Add(new TextBlock
-            {
-                Text = desc.DisplayName,
-                FontSize = 11,
-                Foreground = Brushes.White,
-                Margin = new Thickness(0, 0, 0, 4)
-            });
-
-            switch (desc.PropertyType)
-            {
-                case WidgetPropertyType.Choice when desc.Options.Count > 0:
-                    var combo = BuildOptionCombo(desc.Options, desc, callbacks);
-                    if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) actionTypeCombo = combo;
-                    propPanel.Children.Add(combo);
-                    break;
-                case WidgetPropertyType.Font:
-                    IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
-                    ? desc.Options
-                    : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray();
-                    propPanel.Children.Add(BuildOptionCombo(fontOptions, desc, callbacks));
-                    break;
-                case WidgetPropertyType.Icon:
-                    propPanel.Children.Add(BuildIconEditor(widget, desc, callbacks));
-                    break;
-                case WidgetPropertyType.Boolean:
-                    propPanel.Children.Add(BuildBooleanEditor(desc, callbacks));
-                    break;
-                case WidgetPropertyType.Color:
-                    propPanel.Children.Add(BuildColorEditor(desc, callbacks));
-                    break;
-                case WidgetPropertyType.Path:
-                    if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
-                    {
-                        propPanel.Children.Add(BuildPathEditor(desc, callbacks,
-                            "Select action folder", "Select action file or executable", "Programs and files (*.*)|*.*"));
-                        actionCommandPanel = propPanel;
-                    }
-                    else
-                    {
-                        propPanel.Children.Add(BuildPathEditor(desc, callbacks,
-                            "Select image folder", "Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*"));
-                    }
-                    break;
-                case WidgetPropertyType.SensorSelector:
-                    propPanel.Children.Add(BuildSensorSelector(desc, callbacks));
-                    break;
-                case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.LocationSearch:
-                    if (widget.ActiveInstance is IWidgetLocationSearch search)
-                    {
-                        propPanel.Children.Add(BuildLocationSearchEditor(desc, search, callbacks));
-                        break;
-                    }
-                    // The widget advertises the location-search editor without
-                    // implementing the contract: degrade to the plain text
-                    // editor.
-                    propPanel.Children.Add(BuildTextEditor(desc, callbacks));
-                    break;
-                default:
-                    // Text or Number
-                    propPanel.Children.Add(BuildTextEditor(desc, callbacks));
-                    break;
-            }
-
-            target.Add(propPanel);
+            AddPropertyPanel(widget, desc, target, callbacks, wiring);
         }
 
-        if (actionTypeCombo != null && actionCommandPanel != null && provider != null)
+        WireActionCommandVisibility(wiring);
+    }
+
+    /// <summary>
+    /// The action-command wiring state accumulated while building property
+    /// editors: the action-type combo (when the widget names it), the
+    /// action-command path panel (when the widget marks it), and the provider
+    /// that decides whether the panel shows. <see cref="Render"/> wires the
+    /// panel's visibility to the combo once both halves exist.
+    /// </summary>
+    private sealed class ActionCommandWiring
+    {
+        public required IWidgetEditorProvider? Provider { get; init; }
+        public ComboBox? TypeCombo { get; set; }
+        public StackPanel? CommandPanel { get; set; }
+    }
+
+    /// <summary>
+    /// Builds one property's editor panel (title + the type-specific editor)
+    /// and adds it to <paramref name="target"/>. Records the action-command
+    /// wiring halves it produces in <paramref name="wiring"/>.
+    /// </summary>
+    private static void AddPropertyPanel(PlacedWidgetInstance widget, EditorDescription desc, UIElementCollection target, InspectorCallbacks callbacks, ActionCommandWiring wiring)
+    {
+        var propPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        propPanel.Children.Add(new TextBlock
         {
-            void UpdateActionCommandVisibility()
-            {
-                string? selected = actionTypeCombo.SelectedValue?.ToString();
-                actionCommandPanel.Visibility = provider.IsActionCommandVisible(selected)
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-            actionTypeCombo.SelectionChanged += (_, _) => UpdateActionCommandVisibility();
-            UpdateActionCommandVisibility();
+            Text = desc.DisplayName,
+            FontSize = 11,
+            Foreground = Brushes.White,
+            Margin = new Thickness(0, 0, 0, 4)
+        });
+
+        BuildPropertyEditor(widget, desc, propPanel, callbacks, wiring);
+        target.Add(propPanel);
+    }
+
+    /// <summary>
+    /// Adds the type-specific editor for one property description into
+    /// <paramref name="panel"/>. The choice and path branches record the
+    /// action-command wiring halves in <paramref name="wiring"/>.
+    /// </summary>
+    private static void BuildPropertyEditor(PlacedWidgetInstance widget, EditorDescription desc, StackPanel panel, InspectorCallbacks callbacks, ActionCommandWiring wiring)
+    {
+        var provider = wiring.Provider;
+        switch (desc.PropertyType)
+        {
+            case WidgetPropertyType.Choice when desc.Options.Count > 0:
+                var combo = BuildOptionCombo(desc.Options, desc, callbacks);
+                if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) wiring.TypeCombo = combo;
+                panel.Children.Add(combo);
+                break;
+            case WidgetPropertyType.Font:
+                IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
+                ? desc.Options
+                : FontHelper.GetAllFamilies().Select(family => new WidgetPropertyOption(family, family)).ToArray();
+                panel.Children.Add(BuildOptionCombo(fontOptions, desc, callbacks));
+                break;
+            case WidgetPropertyType.Icon:
+                panel.Children.Add(BuildIconEditor(widget, desc, callbacks));
+                break;
+            case WidgetPropertyType.Boolean:
+                panel.Children.Add(BuildBooleanEditor(desc, callbacks));
+                break;
+            case WidgetPropertyType.Color:
+                panel.Children.Add(BuildColorEditor(desc, callbacks));
+                break;
+            case WidgetPropertyType.Path:
+                if (provider?.GetEditorKind(desc.Property) == EditorKind.ActionCommand)
+                {
+                    panel.Children.Add(BuildPathEditor(desc, callbacks,
+                        "Select action folder", "Select action file or executable", "Programs and files (*.*)|*.*"));
+                    wiring.CommandPanel = panel;
+                }
+                else
+                {
+                    panel.Children.Add(BuildPathEditor(desc, callbacks,
+                        "Select image folder", "Select image file", "Image files (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif|All files (*.*)|*.*"));
+                }
+                break;
+            case WidgetPropertyType.SensorSelector:
+                panel.Children.Add(BuildSensorSelector(desc, callbacks));
+                break;
+            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.LocationSearch:
+                if (widget.ActiveInstance is IWidgetLocationSearch search)
+                {
+                    panel.Children.Add(BuildLocationSearchEditor(desc, search, callbacks));
+                    break;
+                }
+                // The widget advertises the location-search editor without
+                // implementing the contract: degrade to the plain text
+                // editor.
+                panel.Children.Add(BuildTextEditor(desc, callbacks));
+                break;
+            default:
+                // Text or Number
+                panel.Children.Add(BuildTextEditor(desc, callbacks));
+                break;
         }
+    }
+
+    /// <summary>
+    /// Wires the action-command panel's visibility to the action-type combo
+    /// once both halves exist (a widget that names its action-type choice and
+    /// marks its command path): the panel shows or hides as the chosen action
+    /// kind toggles.
+    /// </summary>
+    private static void WireActionCommandVisibility(ActionCommandWiring wiring)
+    {
+        if (wiring.TypeCombo is not { } combo || wiring.CommandPanel is not { } panel || wiring.Provider is not { } provider)
+            return;
+
+        void UpdateActionCommandVisibility()
+        {
+            string? selected = combo.SelectedValue?.ToString();
+            panel.Visibility = provider.IsActionCommandVisible(selected)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        combo.SelectionChanged += (_, _) => UpdateActionCommandVisibility();
+        UpdateActionCommandVisibility();
     }
 
     private static Button BuildActionButton(PlacedWidgetInstance widget, EditorDescription desc, InspectorCallbacks callbacks)

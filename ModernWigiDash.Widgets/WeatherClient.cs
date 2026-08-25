@@ -170,45 +170,14 @@ internal sealed class WeatherClient
 
             if (!_fetchControl.Lat.HasValue || !_fetchControl.Lon.HasValue)
             {
-                // No coordinates: the resolution failed, was left
-                // unresolved, or refused to break a tie. If the identity
-                // changed while it was in flight, this is a STALE failure
-                // (the stale success path's verdict) — the widget must
-                // re-fetch the new identity immediately, not treat it as a
-                // plain failed attempt.
-                if (window.Dropped)
-                {
-                    return new WeatherFetchResult.Stale(fetchQueryKey);
-                }
-                // A genuine tie CARRIES the tied candidates (they are the
-                // widget's Location Match dropdown) instead of collapsing
-                // into a bare failure: the user should be offered the pick,
-                // not a dead end. Every other no-coordinates outcome — a
-                // failed geocode, or an empty-candidate tie that is
-                // unresolvable anyway — stays a plain failure.
-                if (resolution is WeatherResolutionOutcome.Ambiguous ambiguous && ambiguous.Candidates.Count > 0)
-                {
-                    return new WeatherFetchResult.Tie(ambiguous.Candidates, fetchQueryKey);
-                }
-                return new WeatherFetchResult.Failed();
+                return BuildNoCoordinatesVerdict(window, resolution, fetchQueryKey);
             }
 
             double lat = _fetchControl.Lat.Value;
             double lon = _fetchControl.Lon.Value;
 
-            // The forecast leg: the URL's invariant F4 formatting lives in the
-            // resolver behind the geocoder's door — a comma-decimal OS locale
-            // must never interpolate "40,7100" into the query at a call site.
-            string json = await _geocoder.ReadForecastAsync(lat, lon, cancellationToken).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(root);
-            var (humidity, hourlyForecasts) = WeatherForecastParser.ParseHourlyForecast(root);
-            var (highTempC, lowTempC, dailyForecasts) = WeatherForecastParser.ParseDailyForecast(root);
-            var snapshot = new WeatherSnapshot(
-                tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
-                dailyForecasts, hourlyForecasts, _fetchControl.ResolvedCityName, lat, lon, isDay);
+            var snapshot = await BuildSnapshotAsync(lat, lon, _fetchControl.ResolvedCityName, cancellationToken)
+                .ConfigureAwait(false);
 
             // The stale check: the widget invalidates the client (clearing
             // the identity query) when ANY resolution input changes. If that
@@ -261,6 +230,53 @@ internal sealed class WeatherClient
             _fetchControl.End();
             FetchCompletedCount++;
         }
+    }
+
+    /// <summary>
+    /// The no-coordinates verdict: the resolution failed, was left
+    /// unresolved, or refused to break a tie. If the identity changed while
+    /// the fetch was in flight, this is a STALE failure (the stale success
+    /// path's verdict): the widget must re-fetch the new identity
+    /// immediately, not treat it as a plain failed attempt. A genuine tie
+    /// CARRIES the tied candidates (they are the widget's Location Match
+    /// dropdown) instead of collapsing into a bare failure: the user should
+    /// be offered the pick, not a dead end. Every other no-coordinates
+    /// outcome (a failed geocode, or an empty-candidate tie that is
+    /// unresolvable anyway) stays a plain failure.
+    /// </summary>
+    private static WeatherFetchResult BuildNoCoordinatesVerdict(CaptureWindowGuard window, WeatherResolutionOutcome? resolution, string fetchQueryKey)
+    {
+        if (window.Dropped)
+        {
+            return new WeatherFetchResult.Stale(fetchQueryKey);
+        }
+        if (resolution is WeatherResolutionOutcome.Ambiguous ambiguous && ambiguous.Candidates.Count > 0)
+        {
+            return new WeatherFetchResult.Tie(ambiguous.Candidates, fetchQueryKey);
+        }
+        return new WeatherFetchResult.Failed();
+    }
+
+    /// <summary>
+    /// The forecast leg: reads the Open-Meteo current + hourly + daily
+    /// response for the resolved coordinates, parses each block through the
+    /// pure parser rules, and assembles the snapshot. The URL's invariant
+    /// F4 formatting lives in the resolver behind the geocoder's door (a
+    /// comma-decimal OS locale must never interpolate "40,7100" into the
+    /// query at a call site).
+    /// </summary>
+    private async Task<WeatherSnapshot> BuildSnapshotAsync(double lat, double lon, string cityName, CancellationToken cancellationToken)
+    {
+        string json = await _geocoder.ReadForecastAsync(lat, lon, cancellationToken).ConfigureAwait(false);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var (tempC, feelsLikeC, windSpeedKmH, weatherCode, isDay) = WeatherForecastParser.ParseCurrentWeather(root);
+        var (humidity, hourlyForecasts) = WeatherForecastParser.ParseHourlyForecast(root);
+        var (highTempC, lowTempC, dailyForecasts) = WeatherForecastParser.ParseDailyForecast(root);
+        return new WeatherSnapshot(
+            tempC, feelsLikeC, humidity, windSpeedKmH, weatherCode, highTempC, lowTempC,
+            dailyForecasts, hourlyForecasts, cityName, lat, lon, isDay);
     }
 
     /// <summary>
