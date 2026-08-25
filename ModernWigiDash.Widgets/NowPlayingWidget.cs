@@ -119,7 +119,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _artworkLoader?.NotifySnapshotChanged(update);
     }
 
-    private void OnArtworkChanged(ArtworkLoaded? _)
+    private void OnArtworkChanged()
     {
         Context?.RequestRender();
     }

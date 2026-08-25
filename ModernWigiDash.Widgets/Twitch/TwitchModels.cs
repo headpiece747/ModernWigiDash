@@ -93,9 +93,6 @@ internal sealed class TwitchFollowedStreamsResponse
 
 internal sealed class TwitchFollowedStreamResponse
 {
-    [JsonPropertyName("user_id")]
-    public string UserId { get; set; } = "";
-
     [JsonPropertyName("user_login")]
     public string UserLogin { get; set; } = "";
 

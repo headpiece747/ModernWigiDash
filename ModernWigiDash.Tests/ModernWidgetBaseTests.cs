@@ -1,6 +1,5 @@
 using System.IO;
 using System.Reflection;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

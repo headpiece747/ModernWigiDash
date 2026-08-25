@@ -32,11 +32,12 @@ public sealed class ArtworkLoader
     private bool _disposed;
 
     /// <summary>
-    /// Raised after the loader finishes processing a snapshot change: with the
-    /// published artwork state after a completed reload (payload null when the
-    /// session was lost), or with the current state for clear/no-op updates.
+    /// Raised after the loader finishes processing a snapshot change (a
+    /// completed reload, a skipped or failed load, a clear, or a no-op
+    /// update): the subscriber requests a render and reads
+    /// <see cref="Current"/> for the published state.
     /// </summary>
-    public event Action<ArtworkLoaded?>? ArtworkChanged;
+    public event Action? ArtworkChanged;
 
     public ArtworkLoader(Action<string, Exception?>? logError = null)
         : this(new WinRtArtworkDecoder(), logError)
@@ -63,7 +64,7 @@ public sealed class ArtworkLoader
         {
             DisposeArtwork();
             _bgColor = DefaultBackground;
-            ArtworkChanged?.Invoke(null);
+            ArtworkChanged?.Invoke();
             return;
         }
 
@@ -77,7 +78,7 @@ public sealed class ArtworkLoader
         }
         else
         {
-            ArtworkChanged?.Invoke(Current);
+            ArtworkChanged?.Invoke();
         }
     }
 
@@ -106,7 +107,7 @@ public sealed class ArtworkLoader
         if (thumbnail is null)
         {
             _bgColor = DefaultBackground;
-            ArtworkChanged?.Invoke(new ArtworkLoaded(null, artKey, DefaultBackground));
+            ArtworkChanged?.Invoke();
             return;
         }
 
@@ -149,7 +150,7 @@ public sealed class ArtworkLoader
                 _loadingArtworkKey = "";
         }
 
-        ArtworkChanged?.Invoke(Current);
+        ArtworkChanged?.Invoke();
     }
 
     private void DisposeArtwork()

@@ -1,6 +1,3 @@
-using ModernWigiDash.App;
-using ModernWigiDash.Widgets;
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>

@@ -63,3 +63,4 @@
 2026-08-25T13:00:02Z	0c57a16	re-record after amend	ok	0	0	ok	1810	0	ok	ok
 2026-08-25T13:01:52Z	5ba0aa0	re-record after amend	ok	0	0	ok	1810	0	ok	ok
 2026-08-25T13:06:48Z	8c1fb94	refactor trusted uri composite gate	ok	0	0	ok	1810	0	ok	ok
+2026-08-25T13:13:39Z	bf100e4	chore dead code sweep	ok	0	0	ok	1810	0	ok	ok

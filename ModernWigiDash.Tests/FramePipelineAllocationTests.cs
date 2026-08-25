@@ -1,7 +1,5 @@
-using ModernWigiDash.Core.Models;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Hardware.Transport;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 

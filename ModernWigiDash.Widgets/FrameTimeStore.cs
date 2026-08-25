@@ -15,9 +15,6 @@ public static class FrameTimeStore
         defaultMaxAge: TimeSpan.FromSeconds(5),
         lastUpdateOf: dto => dto.LastUpdate);
 
-    /// <summary>Default staleness window for frame-time data (~1s poll cadence).</summary>
-    public static TimeSpan DefaultMaxAge => Facade.DefaultMaxAge;
-
     /// <summary>
     /// Internal test seam: builds a store bound to a fake clock (and optional
     /// max age) so the facade freshness tests can drive time. The production
