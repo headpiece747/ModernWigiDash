@@ -1,38 +1,16 @@
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The visualizer's capture lifecycle driven through the
+/// The visualizer's capture lifecycle driven through the widget's
 /// <see cref="IAudioCaptureSource"/> seam — no WASAPI hardware. Render starts
 /// capture, sample blocks feed the analyzer, and the watchdog does not kill a
-/// fresh capture (the first-callback race the old inline capture had).
+/// fresh capture (the first-callback race the old inline capture had). The
+/// policy itself (locks, deferred-stop marshaling, start-failure retry) is
+/// pinned at the module interface in AudioCaptureLifecycleTests.
 /// </summary>
 [TestClass]
 public class AudioVisualizerWidgetTests
 {
-    private sealed class FakeCaptureSource : IAudioCaptureSource
-    {
-        private volatile bool _isCapturing;
-        public bool IsCapturing => _isCapturing;
-        public event Action<float[]>? SamplesAvailable;
-        public List<float[]> Delivered { get; } = [];
-
-        public void Start() => _isCapturing = true;
-
-        public void Stop()
-        {
-            _isCapturing = false;
-            SamplesAvailable = null;
-        }
-
-        public void Emit(float[] samples)
-        {
-            Delivered.Add(samples);
-            SamplesAvailable?.Invoke(samples);
-        }
-
-        public void Dispose() => Stop();
-    }
-
     private static SKCanvas CreateCanvas()
     {
         var surface = SKSurface.Create(new SKImageInfo(406, 296));
@@ -42,7 +20,7 @@ public class AudioVisualizerWidgetTests
     [TestMethod]
     public async Task Render_StartsCaptureOnFirstRender()
     {
-        var source = new FakeCaptureSource();
+        var source = new FakeAudioCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
         await widget.InitializeAsync(new TestContext());
 
@@ -56,7 +34,7 @@ public class AudioVisualizerWidgetTests
     [TestMethod]
     public async Task Render_WithSampleBlocks_DrawsWithoutException()
     {
-        var source = new FakeCaptureSource();
+        var source = new FakeAudioCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
         await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
@@ -83,7 +61,7 @@ public class AudioVisualizerWidgetTests
         // first DataAvailable callback measured elapsed-since-epoch (> 1s) and
         // killed a brand-new capture. The timestamp is primed before start, so
         // an immediately-emitted block must be consumed, not stop capture.
-        var source = new FakeCaptureSource();
+        var source = new FakeAudioCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source };
         await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
@@ -101,7 +79,7 @@ public class AudioVisualizerWidgetTests
         // 1s grace period elapses, the next sample block must stop capture.
         // Driven through the injected clock so no real time is slept.
         var clock = new FakeTimeProvider();
-        var source = new FakeCaptureSource();
+        var source = new FakeAudioCaptureSource();
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => source, Time = clock };
         await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));
@@ -111,7 +89,7 @@ public class AudioVisualizerWidgetTests
         source.Emit(Enumerable.Repeat(0.25f, 512).ToArray());
 
         // The stop is marshaled off the capture thread (see the watchdog note
-        // in OnSamplesAvailable), so it lands asynchronously — poll for it.
+        // in AudioCaptureLifecycle), so it lands asynchronously — poll for it.
         await TestWait.WaitUntilAsync(() => !source.IsCapturing, TimeSpan.FromSeconds(5));
         Assert.IsFalse(source.IsCapturing, "A stale capture must be stopped by the watchdog");
         await widget.DisposeAsync();
@@ -123,9 +101,9 @@ public class AudioVisualizerWidgetTests
         // Page-switch-back: a stale capture stops, but the next render (the
         // page returning to view) must start capture again on a fresh source.
         var clock = new FakeTimeProvider();
-        var firstSource = new FakeCaptureSource();
-        var secondSource = new FakeCaptureSource();
-        var sources = new Queue<FakeCaptureSource>([firstSource, secondSource]);
+        var firstSource = new FakeAudioCaptureSource();
+        var secondSource = new FakeAudioCaptureSource();
+        var sources = new Queue<FakeAudioCaptureSource>([firstSource, secondSource]);
         var widget = new AudioVisualizerWidget { CaptureSourceFactory = () => sources.Dequeue(), Time = clock };
         await widget.InitializeAsync(new TestContext());
         widget.Render(CreateCanvas(), new SKRect(0, 0, 406, 296));

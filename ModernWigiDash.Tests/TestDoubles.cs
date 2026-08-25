@@ -498,6 +498,53 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
 }
 
 /// <summary>
+/// The in-memory <see cref="IAudioCaptureSource"/>: emission, start/stop
+/// truth, disposal counting, and the half-opened-source path (FailStart) —
+/// the visualizer's capture-lifecycle tests and the widget's
+/// render/capture interplay drive the same double.
+/// </summary>
+internal sealed class FakeAudioCaptureSource : IAudioCaptureSource
+{
+    private volatile bool _isCapturing;
+
+    public bool IsCapturing => _isCapturing;
+
+    /// <summary>When set, Start throws — the half-opened-source path the
+    /// lifecycle must dispose and retry.</summary>
+    public bool FailStart { get; set; }
+
+    public int DisposalCount { get; private set; }
+
+    public List<float[]> Delivered { get; } = [];
+
+    public event Action<float[]>? SamplesAvailable;
+
+    public void Start()
+    {
+        if (FailStart) throw new InvalidOperationException("capture start failed");
+        _isCapturing = true;
+    }
+
+    public void Stop()
+    {
+        _isCapturing = false;
+        SamplesAvailable = null;
+    }
+
+    public void Emit(float[] samples)
+    {
+        Delivered.Add(samples);
+        SamplesAvailable?.Invoke(samples);
+    }
+
+    public void Dispose()
+    {
+        DisposalCount++;
+        Stop();
+    }
+}
+
+/// <summary>
 /// Owns the App on a dedicated STA thread (DialogHostTests and
 /// MainWindowConstructionTests used to copy this): WPF object creation
 /// requires STA, Application.Current is process-wide (created once), and

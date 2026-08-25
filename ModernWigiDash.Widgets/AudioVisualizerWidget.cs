@@ -13,15 +13,12 @@ public class AudioVisualizerWidget : ModernWidgetBase
     [WidgetProperty("Primary Color", WidgetPropertyType.Color, "Color for high spectrum peaks", "#F59E0B")]
     public string PrimaryColorHex { get; set; } = "#F59E0B";
 
-    private IAudioCaptureSource? _captureSource;
     private readonly AudioFrameBuffer _buffer = new();
-    // Capture lifecycle is touched from the UI render thread (start), the
-    // capture thread (the watchdog stop), and the thread pool (the deferred
-    // NAudio dispose) — one lock serializes the start/stop sequences so a
-    // watchdog firing as the page switches back can never unsubscribe/dispose
-    // a source mid-start (a lost race self-heals on the next render tick,
-    // which re-arms capture).
-    private readonly Lock _captureLock = new();
+    // The capture lifecycle (when a source is alive, the lock protocol, the
+    // stale-render watchdog, the deferred-stop marshaling) is owned by the
+    // AudioCaptureLifecycle module; this widget drives it from Render and
+    // Dispose and draws one snapshot.
+    private AudioCaptureLifecycle? _lifecycle;
     private bool _disposed;
 
     /// <summary>
@@ -38,107 +35,21 @@ public class AudioVisualizerWidget : ModernWidgetBase
     /// </summary>
     internal Func<IAudioCaptureSource> CaptureSourceFactory { get; set; } = () => new WasapiLoopbackCaptureSource();
 
-    // Capture is tied to rendering: it starts on the first Render (i.e. when
-    // the widget's page becomes active) and stops when Render stops being
-    // called for a grace period (page switched away). WASAPI loopback capture
-    // would otherwise run forever in the background for a hidden widget.
-    private volatile bool _capturing;
-    private volatile bool _stopQueued;
-    private long _lastRenderTimestamp = TimeProvider.System.GetTimestamp();
-
-    public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
-        return base.InitializeAsync(context, cancellationToken);
-        // Capture starts lazily on the first Render, not here.
-    }
-
-    private void EnsureLiveAudioCapture()
-    {
-        if (_capturing) return;
-
-        lock (_captureLock)
-        {
-            if (_capturing) return;
-            StartLiveAudioCapture();
-            _capturing = true;
-        }
-    }
-
-    private void StopLiveAudioCapture()
-    {
-        if (!_capturing) return;
-
-        lock (_captureLock)
-        {
-            _stopQueued = false;
-            IAudioCaptureSource? source = _captureSource;
-            _captureSource = null;
-            _capturing = false;
-            try
-            {
-                if (source != null) source.SamplesAvailable -= OnSamplesAvailable;
-                source?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Context?.LogError("Failed to stop audio capture", ex);
-            }
-        }
-    }
-
-    private void StartLiveAudioCapture()
-    {
-        try
-        {
-            IAudioCaptureSource source = CaptureSourceFactory();
-            source.SamplesAvailable += OnSamplesAvailable;
-            source.Start();
-            _captureSource = source;
-        }
-        catch (Exception ex)
-        {
-            _captureSource?.Dispose();
-            _captureSource = null;
-            Context?.LogError("Failed to initialize audio capture", ex);
-        }
-    }
-
-    private void OnSamplesAvailable(float[] samples)
-    {
-        // Watchdog: when the widget is no longer rendered (page switched
-        // away), stop capture instead of running forever. _lastRenderTimestamp
-        // is primed before capture starts, so the first callback cannot kill a
-        // fresh capture.
-        //
-        // NAudio raises DataAvailable from inside ReadNextPacket on the capture
-        // thread, and WasapiCapture.Dispose joins that same thread. Stopping
-        // synchronously here would self-join and deadlock the capture thread
-        // while it holds the capture lock, blocking the UI render thread on
-        // that lock forever. The stop is therefore deferred to the thread pool
-        // and the lock still serializes it against a concurrent start.
-        if (Time.GetElapsedTime(_lastRenderTimestamp).TotalSeconds > 1.0)
-        {
-            // Queue at most one deferred stop; the first work item that runs
-            // resets the flag (under the lock) before disposing.
-            if (!_stopQueued)
-            {
-                _stopQueued = true;
-                ThreadPool.QueueUserWorkItem(_ => StopLiveAudioCapture());
-            }
-            return;
-        }
-
-        _buffer.Feed(samples, _buffer.ClampBars((int)BarCount));
+        await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
+        // Capture starts lazily on the first Render, not here; the lifecycle
+        // module owns the start/stop policy and the NAudio marshaling. The
+        // factory and clock are live reads so the test seams (settable after
+        // construction) take effect on every start.
+        _lifecycle = new AudioCaptureLifecycle(_buffer, () => CaptureSourceFactory(), () => Time, () => (int)BarCount, context.LogError);
     }
 
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         // Capture runs only while this widget is being rendered (active page).
-        // Prime the watchdog timestamp BEFORE capture starts, so the first
-        // DataAvailable callback can never measure elapsed-since-epoch and
-        // kill a fresh capture.
-        _lastRenderTimestamp = Time.GetTimestamp();
-        EnsureLiveAudioCapture();
+        // The lifecycle module owns the start-on-render / stop-on-stale policy.
+        _lifecycle?.OnRender();
 
         SKColor barColor = ColorOf(PrimaryColorHex, WidgetPalette.Accent);
 
@@ -242,7 +153,7 @@ public class AudioVisualizerWidget : ModernWidgetBase
     {
         if (_disposed) return ValueTask.CompletedTask;
         _disposed = true;
-        StopLiveAudioCapture();
+        _lifecycle?.Dispose();
         _oscilloscopePath?.Dispose();
         _barPaint.Dispose();
         _oscilloscopeLinePaint.Dispose();

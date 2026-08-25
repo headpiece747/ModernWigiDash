@@ -5,21 +5,20 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The audio-capture seam behind the visualizer: a source of mono float
 /// samples from the system audio output, drivable by an in-memory fake in
-/// tests. The widget renders snapshots and never touches WASAPI; capture
-/// lifecycle (start/stop) is the source's job.
+/// tests. The <see cref="AudioCaptureLifecycle"/> module is the seam's only
+/// consumer: it owns when a source is alive (start-on-render / stop-on-stale)
+/// and calls <see cref="Start"/> once per source it creates; the widget
+/// renders snapshots and never touches WASAPI.
 /// </summary>
 internal interface IAudioCaptureSource : IDisposable
 {
-    bool IsCapturing { get; }
-
     /// <summary>Delivers a block of interleaved float samples (one per
     /// 4-byte frame, matching the device format). Raised on the capture
     /// thread; the consumer must not block.</summary>
     event Action<float[]>? SamplesAvailable;
 
+    /// <summary>Starts capturing; the lifecycle calls it once per source.</summary>
     void Start();
-
-    void Stop();
 }
 
 /// <summary>
@@ -39,8 +38,6 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
 #pragma warning disable CS0618
     private WasapiLoopbackCapture? _capture;
 #pragma warning restore CS0618
-
-    public bool IsCapturing => _capture != null;
 
     public event Action<float[]>? SamplesAvailable;
 
@@ -80,7 +77,7 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
 #pragma warning restore CS0618
     }
 
-    public void Stop()
+    private void Stop()
     {
         var capture = _capture;
         _capture = null;
