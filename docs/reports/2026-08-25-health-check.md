@@ -68,3 +68,33 @@ Suppression config: none. `.editorconfig` analyzer tuning is deliberate and writ
 1. **Test Coverage (B, measured):** run one `dotnet test ModernWigiDash.slnx --collect:"XPlat Code Coverage"` baseline, store the report under `docs/reports/`, and cite it in CONTEXT.md. Effort: about 1 hour.
 2. **Documentation (B to A):** set `GenerateDocumentationFile` on Core, Hardware, Widgets, and App, fix the resulting missing-XML gaps on public members (24 + 3 + 73 + 3 public types; the widget reflection surface and the Sdk-facing seams first). Effort: about 1 hour plus fixes.
 3. **Code Quality (review list):** split the two biggest hotspots if complexity becomes a maintenance complaint: `InspectorPanelRenderer.Render` (CC 19, 98 lines) and `WeatherClient.FetchCurrentAsync` (CC 16, 124 lines). Both are test-pinned. Effort: 1-2 hours each.
+
+## Carried decisions resolved (2026-08-25, same day)
+
+Both 2026-08-21 carried decisions closed by the post-sweep fix wave; actual
+effort far under the estimates:
+
+1. **Test Coverage (finding 1): resolved, measured.** The baseline run
+   landed in ~30 s of test time (the suite itself runs in 27 s; the "~1
+   hour" estimate predated that speed): 87.9% of the 13,304 instrumented
+   src lines covered (Sdk 92.9%, Widgets 91.9%, Hardware 89.7%, Core
+   85.7%, App 79.0%), recorded in CONTEXT.md's Testing section beside the
+   memory footprint baseline. Repeatable command: `dotnet test
+   ModernWigiDash.slnx -c Release --collect:"XPlat Code Coverage"`
+   (`coverlet.collector` 10.0.1 was already CPM-pinned and referenced by
+   the Tests project; the report writes to the gitignored `TestResults/`
+   beside the Tests project, so the CONTEXT.md citation is the durable
+   record).
+2. **Documentation (finding 2): resolved as an advisory switch, not a
+   backfill.** `GenerateDocumentationFile` is now on for Core, Hardware,
+   Widgets, and App (the doc files emit: 52/62/352/195 KB), so editors
+   show the `///` summaries on hover in every src project. The Sdk alone
+   keeps its CS1591-as-error contract (the external plugin surface stays
+   enforced). The six doc codes the switch surfaced on first build (752
+   warnings: CS1591 missing doc 646, CS1573/CS1734 param-tag drift 72,
+   CS1574 unresolvable cref 16, CS1570 bad XML 18, CS1587 misplaced comment
+   6) are NoWarn'd per project with a comment naming the escape hatch:
+   docs in these internal-first projects are advisory, and removing a
+   NoWarn entry re-enforces that code as a build failure. The full backfill
+   of the 646 missing `///` comments remains the follow-on if the advisory
+   stance is ever revisited.
