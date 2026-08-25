@@ -72,7 +72,20 @@ internal sealed class WasapiLoopbackCaptureSource : IAudioCaptureSource
             }
         };
 
-        capture.StartRecording();
+        // A StartRecording failure disposes the local and rethrows: the
+        // lifecycle disposes this source on a failed start, but the release
+        // path (Stop) can only release what _capture references, which is
+        // assigned on success only. Without the local dispose a persistently
+        // failing start would leak one MMDevice capture per retry.
+        try
+        {
+            capture.StartRecording();
+        }
+        catch
+        {
+            capture.Dispose();
+            throw;
+        }
         _capture = capture;
 #pragma warning restore CS0618
     }
