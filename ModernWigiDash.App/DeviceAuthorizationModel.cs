@@ -44,12 +44,13 @@ internal sealed class DeviceAuthorizationModel
 
     /// <summary>
     /// Opens the verification URL through the shell-open seam, after the
-    /// trusted-URL gate. A tampered URL (anything but https on twitch.tv) is
-    /// refused and logged; the seam never runs for it.
+    /// trusted-URL gate (the shared <see cref="TrustedUriPolicy"/> composite:
+    /// https on twitch.tv). A tampered URL is refused and logged; the seam
+    /// never runs for it.
     /// </summary>
     public void OpenBrowser(Action<Uri> open)
     {
-        if (!TrustedBrowserUri.IsTrusted(_verificationUri))
+        if (!TrustedUriPolicy.IsTwitchAuthorizationUri(_verificationUri))
         {
             _logError(RefusalMessage, null);
             return;

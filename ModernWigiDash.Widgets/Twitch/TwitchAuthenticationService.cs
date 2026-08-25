@@ -556,8 +556,7 @@ internal sealed class TwitchSession
     {
         // Defense-in-depth: only shell-open trusted https URLs on twitch.tv so a
         // tampered response cannot invoke file:/custom protocol handlers.
-        if (!string.Equals(verificationUri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
-            !TrustedUriPolicy.IsTwitchAuthorizationHost(verificationUri.Host))
+        if (!TrustedUriPolicy.IsTwitchAuthorizationUri(verificationUri))
         {
             context.LogError($"Refusing to open non-Twitch authorization URL: {verificationUri}");
             return;
