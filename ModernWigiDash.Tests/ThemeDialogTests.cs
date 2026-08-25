@@ -7,15 +7,23 @@ using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.Tests;
 
+/// <summary>
+/// Thin wiring pins for the theme dialog as a forwarder: the decision rules
+/// (entries, validity verdict, apply, reset) are pinned at the
+/// <see cref="ThemeDraft"/> interface in ThemeDraftTests; these tests only
+/// pin that the window builds one editor per entry and forwards the editor's
+/// changes and the Reset click into the draft.
+/// </summary>
 [TestClass]
 public class ThemeDialogTests
 {
     private static readonly StaHost Host = new("ThemeDialogTests-STA");
 
     [TestMethod]
-    public void Ctor_BuildsOneColorEditorPerThemeProperty()
+    public void Ctor_BuildsOneEditorPerEntry_SeededFromTheActiveTheme()
         => Host.Run<object?>(() =>
         {
+            ThemeSettings.Theme = new ThemeSettings { AccentGreen = "#123456" };
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
@@ -23,28 +31,17 @@ public class ThemeDialogTests
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
             var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();
             Assert.AreEqual(ThemeSettings.StringProperties.Count, editors.Count);
+            // AccentGreen is the first entry in group-then-name display order,
+            // so the seed must have reached its editor.
+            Assert.AreEqual("#123456", editors[0].Hex);
             return null;
         });
 
     [TestMethod]
-    public void InvalidHex_DisablesApply()
+    public void EditorTextChange_ForwardsTheValidityVerdictToTheApplyButton()
         => Host.Run<object?>(() =>
         {
-            var owner = new Window();
-            WpfWindow.ShowOwner(owner);
-            var dialog = new ThemeDialog(owner, new ThemeApplicator());
-            dialog.Show(); // a Window's visual tree exists only after it is shown
-            dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-            var editor = dialog.FindVisualChildren<ColorPickerEditor>().First();
-            editor.HexBox.Text = "zzz";
-            Assert.IsFalse(dialog.ApplyIsEnabledForTest);
-            return null;
-        });
-
-    [TestMethod]
-    public void ValidHex_EnablesApply()
-        => Host.Run<object?>(() =>
-        {
+            ThemeSettings.Theme = new ThemeSettings();
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
@@ -59,34 +56,21 @@ public class ThemeDialogTests
         });
 
     [TestMethod]
-    public void Reset_RestoresDefaultsAndReEnablesApply()
+    public void ResetClick_SyncsEveryEditorToTheDraftsDefaults()
         => Host.Run<object?>(() =>
         {
+            ThemeSettings.Theme = new ThemeSettings();
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-
-            var editor = dialog.FindVisualChildren<ColorPickerEditor>().First();
-            editor.HexBox.Text = "zzz";
-            Assert.IsFalse(dialog.ApplyIsEnabledForTest);
-
+            var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();
+            editors[0].HexBox.Text = "zzz";
             var reset = dialog.FindVisualChildren<Button>().First(b => b.Content as string == "Reset");
             reset.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-
-            Assert.IsTrue(dialog.ApplyIsEnabledForTest);
-            var defaults = new ThemeSettings();
-            var props = ThemeSettings.StringProperties
-                .OrderBy(p => ThemePresentation.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
-                .ThenBy(p => p.Name)
-                .ToList();
-            var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();
             for (int i = 0; i < editors.Count; i++)
-            {
-                string expected = (string?)defaults.GetType().GetProperty(props[i].Name)?.GetValue(defaults) ?? "#000000";
-                Assert.AreEqual(expected, editors[i].Hex);
-            }
+                Assert.AreEqual(dialog.DraftForTest.Entries[i].Hex, editors[i].Hex);
             return null;
         });
 

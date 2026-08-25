@@ -8,11 +8,14 @@ namespace ModernWigiDash.App.Dialogs;
 /// <summary>
 /// Theme customization dialog: edits the chrome theme colors (outside the
 /// widget canvas) grouped by category, with hex validation and apply/reset.
-/// Extracted from MainWindow so the dialog owns its entire UI lifetime.
+/// Extracted from MainWindow so the dialog owns its entire UI lifetime. The
+/// decision rules (entries, validity verdict, apply, reset) live in
+/// <see cref="ThemeDraft"/>; this window builds the editors and forwards.
 /// </summary>
 internal sealed class ThemeDialog : Window
 {
     private readonly ThemeApplicator _themeApplicator;
+    private readonly ThemeDraft _draft;
     private readonly List<(string Key, ColorPickerEditor Editor)> _entries = [];
     private Button _btnApply = null!;
 
@@ -22,6 +25,7 @@ internal sealed class ThemeDialog : Window
     public ThemeDialog(Window owner, ThemeApplicator themeApplicator)
     {
         _themeApplicator = themeApplicator;
+        _draft = new ThemeDraft();
 
         Title = "🎨 Theme Customization";
         Width = 440;
@@ -33,7 +37,7 @@ internal sealed class ThemeDialog : Window
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
         Content = BuildUi();
-        Validate();
+        RefreshApplyState();
     }
 
     private Grid BuildUi()
@@ -57,20 +61,15 @@ internal sealed class ThemeDialog : Window
         Grid.SetRow(scroll, 1);
         var fields = new StackPanel();
 
-        var props = ThemeSettings.StringProperties
-            .OrderBy(p => ThemePresentation.Groups.TryGetValue(p.Name, out var group) ? group : p.Name)
-            .ThenBy(p => p.Name);
-
         string currentGroup = "";
-        foreach (var prop in props)
+        foreach (var entry in _draft.Entries)
         {
-            string group = ThemePresentation.Groups.TryGetValue(prop.Name, out var grp) ? grp : "Other";
-            if (!string.Equals(group, currentGroup, StringComparison.Ordinal))
+            if (!string.Equals(entry.Group, currentGroup, StringComparison.Ordinal))
             {
-                currentGroup = group;
+                currentGroup = entry.Group;
                 fields.Children.Add(new TextBlock
                 {
-                    Text = group.ToUpperInvariant(),
+                    Text = entry.Group.ToUpperInvariant(),
                     FontSize = 12,
                     FontWeight = FontWeights.Bold,
                     Foreground = Application.Current.Resources["M3Primary"] as Brush ?? Brushes.White,
@@ -78,35 +77,35 @@ internal sealed class ThemeDialog : Window
                 });
             }
 
-            string current = (string?)prop.GetValue(ThemeSettings.Theme) ?? "#000000";
-            string friendly = ThemePresentation.FriendlyName(prop.Name);
-            string desc = ThemePresentation.Descriptions.TryGetValue(prop.Name, out var d) ? d : "";
-
             var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
             var label = new TextBlock
             {
-                Text = friendly,
+                Text = entry.FriendlyName,
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 2),
-                ToolTip = $"{friendly} ({prop.Name})"
+                ToolTip = $"{entry.FriendlyName} ({entry.Name})"
             };
             var hint = new TextBlock
             {
-                Text = desc,
+                Text = entry.Description,
                 FontSize = 10,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 4)
             };
-            var editor = new ColorPickerEditor { Hex = current };
-            editor.Changed += () => Validate();
+            var editor = new ColorPickerEditor { Hex = entry.Hex };
+            editor.Changed += () =>
+            {
+                _draft.UpdateHex(entry.Name, editor.Hex);
+                RefreshApplyState();
+            };
             row.Children.Add(label);
             row.Children.Add(hint);
             row.Children.Add(editor);
             fields.Children.Add(row);
-            _entries.Add((prop.Name, editor));
+            _entries.Add((entry.Name, editor));
         }
         scroll.Content = fields;
         root.Children.Add(scroll);
@@ -119,10 +118,10 @@ internal sealed class ThemeDialog : Window
 
         btnReset.Click += (_, _) =>
         {
-            var defaults = new ThemeSettings();
+            _draft.ResetToDefaults();
             foreach (var (key, editor) in _entries)
-                editor.Hex = (string?)defaults.GetType().GetProperty(key)?.GetValue(defaults) ?? "#000000";
-            Validate(); // programmatic Hex sets never raise Changed — re-arm Apply explicitly
+                editor.Hex = _draft.HexFor(key);
+            RefreshApplyState(); // programmatic Hex sets never raise Changed — re-arm Apply explicitly
         };
 
         btnCancel.Click += (_, _) => Close();
@@ -150,19 +149,12 @@ internal sealed class ThemeDialog : Window
         return root;
     }
 
-    private void Validate()
-    {
-        bool valid = _entries.All(e => e.Editor.IsValidHex);
-        _btnApply.IsEnabled = valid;
-    }
+    private void RefreshApplyState()
+        => _btnApply.IsEnabled = _draft.IsValid;
 
     private void ApplyFromDialog()
     {
-        foreach (var (key, editor) in _entries)
-        {
-            if (ThemeSettings.ParseColor(editor.Hex) is not null)
-                ThemeSettings.Theme.GetType().GetProperty(key)?.SetValue(ThemeSettings.Theme, editor.Hex);
-        }
+        _draft.ApplyToSettings();
         if (!ThemeSettings.Save())
         {
             MessageBox.Show("Could not write app_theme.json next to the app. The colors will apply for this session only.",
@@ -173,6 +165,8 @@ internal sealed class ThemeDialog : Window
     }
 
     internal bool ApplyIsEnabledForTest => _btnApply.IsEnabled;
+
+    internal ThemeDraft DraftForTest => _draft;
 
     internal IEnumerable<T> FindVisualChildren<T>() where T : DependencyObject
         => FindVisualChildren<T>(this);
