@@ -124,6 +124,28 @@ session death is survivable.
   work points at) and pick up from the state it records instead of
   re-deriving it.
 
+## Registry candidates (intake filter, skills.sh pass 2026-08-24)
+
+A skill proposed from skills.sh or any upstream registry must pass every
+check below before install. A failed check is a dated rejection in the
+Not Installed section, never a silent skip. The registry leaderboard is a
+lagging index for an adopted upstream (renames ship upstream and the
+leaderboard lags; `two-axis-review` to `code-review` is the recorded case),
+so a sync diffs against the upstream repo, never the leaderboard.
+
+1. **Shape**: local .NET desktop app. No web/TS, no database, no cloud, no
+   media/video surface.
+2. **Name**: unique across the project (`.opencode/skills/`) and the global
+   (`~/.config/opencode/skills/`) locations, which opencode enforces.
+3. **No new external runtime**: no npm/Python/global-CLI install, nothing
+   inserted into the LLM provider traffic path, no telemetry, no cloud
+   service.
+4. **Distinctiveness**: no overlap with the existing catalog (judgment
+   today; a mechanical scan once the catalog distinctiveness check lands).
+5. **Hygiene**: `agnix` and `skillspector --no-llm` green after install.
+6. **Claims**: a performance or quality claim is measured with a with/without
+   run before the skill earns the catalog, or rejected on the claim alone.
+
 ## Not Installed (deliberately)
 
 - `cwm-roslyn-navigator` MCP server: redundant with Glider
@@ -137,6 +159,33 @@ session death is survivable.
 - Workflow skills that duplicate existing skills (plan, tdd, checkpoint,
   wrap-up, de-sloppify), the project already has a `desloppify` skill and
   the global `tdd` skill
+- Registry pass 2026-08-24 (skills.sh leaderboard, top ~400 + mattpocock
+  upstream at `6654f6b`), each against the intake filter above:
+  `triage` (a 7-label issue state machine the to-spec to-tickets to
+  implement flow does not use; the `/triage` flag reference in
+  `docs/agents/issue-tracker.md` is annotated, not activated), `prototype`
+  (duplicates the ported poteto prototype playbook; its UI branch is
+  web-shaped: one route, a URL search param, a pnpm task runner), `wizard`
+  (a bash + `.env` + WSL wizard; the human-only steps here are owned by the
+  elevated runner and `hardware-e2e-validation`), `teach` (education
+  workspace, no project need), `to-questionnaire` (async decision docs for
+  another human; the solo project settles decisions in-session through the
+  `question` tool and grilling), `retro` + `implement-spec` (upstream
+  `in-progress`, skipped), `obra/superpowers` (every salient skill overlaps
+  an installed one: systematic-debugging = diagnosing-bugs,
+  test-driven-development = tdd, verification-before-completion =
+  principle-prove-it-works + verify, requesting/receiving-code-review = the
+  code-review skill + code-reviewer agent, writing-plans/executing-plans =
+  to-spec/implement, subagent-driven-development = implement + the task
+  tool), `JuliusBrussee/caveman` (a product, not a skill: an npm CLI, a
+  BSL-1.1 proxy in the provider traffic path, telemetry on by default; its
+  pixel mode renders SKILL.md bodies to PNG, which agnix, skillspector, and
+  the prose gate cannot lint; the terseness idea is already unslop +
+  technical-writing), `vercel-labs/find-skills` + `anthropics/skill-creator`
+  (meta overlap: the intake filter above plus `authoring-a-skill` and
+  `writing-for-agents`), and the leaderboard's dominant categories by shape
+  (AI video/media, web UI design, databases, cloud, SaaS CLIs): no
+  .NET/desktop surface on the top ~400
 
 ## Verification Commands
 

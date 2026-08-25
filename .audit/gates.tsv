@@ -44,3 +44,4 @@
 2026-08-25T02:41:46Z	102fd5f	C7: one property commit owner, retire the inspector funnel twin	ok	0	0	ok	1785	0	ok	FAIL(1)
 2026-08-25T02:44:41Z	102fd5f	C7: one property commit owner, retire the inspector funnel twin	ok	0	0	ok	1785	0	ok	ok
 2026-08-25T03:03:20Z	64ce8bf	C8: one price-map merge owner + complete kind table	ok	0	0	ok	1796	0	ok	ok
+2026-08-25T04:00:03Z	ed85411	skills.sh pass: mattpocock re-verify 6654f6b, intake filter, dated rejections	ok	0	0	ok	1796	0	ok	ok
