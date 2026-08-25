@@ -270,3 +270,24 @@ neither the arriving one nor the held instance the attach releases
 FreshSessionWrapper double plus the manager's FreshWrapperFor seam
 knob; the AudioCaptureLifecycle comment that still described the
 pre-a4e501e half-opened-capture leak was updated in the same commit.
+
+## Test-suite flake hunt (2026-08-25, post-review)
+
+The one remaining flake (the hardware history-cap render test) was not a
+production bug: the test host let a leaked window keep its engine and
+telemetry loops alive for the rest of the process, and a leaked 1 Hz
+sensor loop wrote a real snapshot into the static LhmSensorStore
+mid-render, nulling the reading the test had seeded. Root cause
+(f89b907): StaHost.EnsureApp reused the process-wide WPF Application and
+mutated its shared Resources on the per-class STA thread; the Application
+ctor queues DoStartup as a dispatcher operation, and a nested ShowDialog
+(the DialogHost tests) ran it and built + showed the StartupUri MainWindow
+with a real USB engine and telemetry loops that no test closed. EnsureApp
+now makes one fresh App per invoke and clears the private _startupUri
+field (the StartupUri setter rejects null), so DoStartup is windowless and
+each invoke owns its Resources on a single thread. The same commit also
+isolates a throwing ShutdownOrchestrator step, gates PollLoop and FeedLoop
+Start/Stop/Dispose, lands the Twitch login-failed log before the state
+publish, and makes the InPageMutation close assert the close error is null
+instead of leaking the window. 15x flake-hunt loop clean; gate green at
+1812 tests.
