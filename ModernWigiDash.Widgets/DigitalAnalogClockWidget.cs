@@ -17,6 +17,12 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     [WidgetProperty("Time Format", WidgetPropertyType.Choice, "12 or 24 hour format", "12H", "12H", "24H")]
     public string TimeFormat { get; set; } = "12H";
 
+    /// <summary>The "Show Seconds" property: display seconds in digital mode
+    /// (the hh:mm:ss / HH:mm:ss variants; the analog mode, the AM/PM badge,
+    /// and the date are untouched).</summary>
+    [WidgetProperty("Show Seconds", WidgetPropertyType.Boolean, "Display seconds in digital mode", false)]
+    public bool ShowSeconds { get; set; } = false;
+
     /// <summary>The "Accent Color" property: primary accent color for typography or hands.</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "Primary accent color for typography or hands", "#F59E0B")]
     public string AccentColorHex { get; set; } = "#F59E0B";
@@ -46,11 +52,14 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     private readonly SKPaint _centerDotPaint = new() { IsAntialias = true };
 
     // The digital-mode strings are memoized on the displayed second + date +
-    // format: the time string changes once per second (the date once a day),
-    // so the 30 FPS render reformats once per second, not once per frame.
+    // format + seconds toggle: the time string changes once per second (the
+    // date once a day), so the 30 FPS render reformats once per second, not
+    // once per frame, and a seconds toggle within the same second reformats
+    // once instead of serving the stale string.
     private long _memoSecond = -1;
     private DateTime _memoDay;
     private string _memoFormat = "";
+    private bool _memoShowSeconds;
     private string _memoTime = "";
     private string _memoAmpm = "";
     private string _memoDate = "";
@@ -58,7 +67,7 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     private (string Time, string Ampm, string Date) DigitalStrings(DateTime now)
     {
         long second = (long)now.TimeOfDay.TotalSeconds;
-        if (_memoSecond == second && _memoDay == now.Date && string.Equals(_memoFormat, TimeFormat, StringComparison.Ordinal))
+        if (_memoSecond == second && _memoDay == now.Date && _memoShowSeconds == ShowSeconds && string.Equals(_memoFormat, TimeFormat, StringComparison.Ordinal))
         {
             return (_memoTime, _memoAmpm, _memoDate);
         }
@@ -66,7 +75,8 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
         _memoSecond = second;
         _memoDay = now.Date;
         _memoFormat = TimeFormat;
-        _memoTime = ClockPresentation.FormatClockTime(now, TimeFormat);
+        _memoShowSeconds = ShowSeconds;
+        _memoTime = ClockPresentation.FormatClockTime(now, TimeFormat, ShowSeconds);
         _memoAmpm = ClockPresentation.AmPm(now, TimeFormat);
         _memoDate = ClockPresentation.Date(now);
         return (_memoTime, _memoAmpm, _memoDate);
@@ -98,7 +108,11 @@ public class DigitalAnalogClockWidget : ModernWidgetBase
     {
         var (timeStr, amPmStr, dateStr) = DigitalStrings(now);
 
-        float fontSize = Math.Min(bounds.Width / 5.5f, bounds.Height / 2.2f);
+        // The width divisor is the 5-char hh:mm/HH:mm shape (5.5); the seconds
+        // variant is 8 chars and scales the divisor in proportion so the
+        // longer string keeps the same per-char fit.
+        int timeCharCount = 5 + (ShowSeconds ? 3 : 0);
+        float fontSize = Math.Min(bounds.Width / (timeCharCount * 1.1f), bounds.Height / 2.2f);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
         _textPaint.Color = textColor;
 

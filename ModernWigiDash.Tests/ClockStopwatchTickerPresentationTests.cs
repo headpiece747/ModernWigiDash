@@ -45,6 +45,18 @@ public class ClockStopwatchTickerPresentationTests
     }
 
     [TestMethod]
+    public void Clock_FormatTime_ShowSeconds_AppendsSecondsForBothChoices()
+    {
+        var now = new DateTime(2026, 8, 7, 13, 37, 5, DateTimeKind.Unspecified);
+        var midnight = new DateTime(2026, 8, 7, 0, 5, 9, DateTimeKind.Unspecified);
+
+        Assert.AreEqual("01:37:05", ClockPresentation.FormatClockTime(now, "12H", showSeconds: true));
+        Assert.AreEqual("13:37:05", ClockPresentation.FormatClockTime(now, "24H", showSeconds: true));
+        Assert.AreEqual("12:05:09", ClockPresentation.FormatClockTime(midnight, "12H", showSeconds: true), "the midnight roll keeps the seconds variant");
+        Assert.AreEqual("00:05:09", ClockPresentation.FormatClockTime(midnight, "24H", showSeconds: true));
+    }
+
+    [TestMethod]
     public void Clock_HandAngles_Noon_PointStraightUp()
     {
         var noon = new DateTime(2026, 8, 10, 12, 0, 0, DateTimeKind.Unspecified);

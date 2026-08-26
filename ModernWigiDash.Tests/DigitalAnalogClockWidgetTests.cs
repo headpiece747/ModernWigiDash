@@ -46,6 +46,72 @@ public class DigitalAnalogClockWidgetTests
     }
 
     [TestMethod]
+    public void Render_DigitalMode_ShowSeconds_DrawsTime()
+    {
+        var widget = CreateWidget(Afternoon, "12H");
+        widget.ShowSeconds = true;
+
+        using var surface = CreateSurface();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 203, 148));
+
+        // The seconds variant draws a smaller 8-char string, so the exact
+        // center pixel may fall between glyphs: scan the time row instead.
+        var pixels = surface.PeekPixels();
+        bool painted = false;
+        for (int x = 30; x < 174 && !painted; x += 2)
+        {
+            painted = pixels.GetPixelColor(x, 74) != SKColors.Transparent;
+        }
+        Assert.IsTrue(painted, "The digital clock with seconds must paint output");
+    }
+
+    [TestMethod]
+    public void Render_ShowSecondsToggle_ReformatsWithinTheSameSecond()
+    {
+        // The memo keys on the seconds toggle: flipping it within the same
+        // second must reformat the time string (and re-fit the font), not
+        // serve the stale 5-char string. A fixed clock + surface makes the
+        // pixel diff deterministic.
+        var widget = CreateWidget(Afternoon, "12H");
+
+        using var surface = CreateSurface();
+        var bounds = new SKRect(0, 0, 203, 148);
+        surface.Canvas.Clear(SKColors.Transparent);
+        widget.Render(surface.Canvas, bounds);
+        var before = SampleTimeRegion(surface);
+
+        widget.ShowSeconds = true;
+        surface.Canvas.Clear(SKColors.Transparent);
+        widget.Render(surface.Canvas, bounds);
+        var after = SampleTimeRegion(surface);
+
+        Assert.IsFalse(before.SequenceEqual(after), "toggling seconds within the same second must change the rendered time");
+    }
+
+    /// <summary>Scans the time region's pixel colors (the rows the time string,
+    /// the AM/PM badge, and the date line draw on): two renders with a fixed
+    /// clock differ here only when the formatted string or its fit changed.
+    /// The region scan (instead of one row) is font-size robust: the seconds
+    /// variant draws a smaller string whose glyph extent does not always
+    /// reach a single fixed row.</summary>
+    private static List<byte> SampleTimeRegion(SKSurface surface)
+    {
+        var colors = surface.PeekPixels();
+        var samples = new List<byte>(512);
+        for (int y = 25; y < 100; y += 3)
+        {
+            for (int x = 10; x < 194; x += 4)
+            {
+                SKColor c = colors.GetPixelColor(x, y);
+                samples.Add(c.Red);
+                samples.Add(c.Green);
+                samples.Add(c.Blue);
+            }
+        }
+        return samples;
+    }
+
+    [TestMethod]
     public void Render_AnalogMode_DrawsHands()
     {
         var widget = CreateWidget(Afternoon);

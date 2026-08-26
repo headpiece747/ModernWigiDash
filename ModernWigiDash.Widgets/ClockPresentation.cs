@@ -14,9 +14,20 @@ public static class ClockPresentation
     public static string Date(DateTime now)
         => now.ToString("dddd, MMMM dd, yyyy", CultureInfo.InvariantCulture);
 
-    /// <summary>Formats the digital clock time for the 12H/24H choice.</summary>
-    public static string FormatClockTime(DateTime now, string timeFormat)
-        => string.Equals(timeFormat, "24H", StringComparison.Ordinal) ? now.ToString("HH:mm", CultureInfo.InvariantCulture) : now.ToString("hh:mm", CultureInfo.InvariantCulture);
+    /// <summary>Formats the digital clock time for the 12H/24H choice; the
+    /// seconds variant (the Show Seconds property, digital mode only) appends
+    /// the seconds.</summary>
+    public static string FormatClockTime(DateTime now, string timeFormat, bool showSeconds = false)
+        => now.ToString(PatternFor(timeFormat, showSeconds), CultureInfo.InvariantCulture);
+
+    private static string PatternFor(string timeFormat, bool showSeconds)
+        => (string.Equals(timeFormat, "24H", StringComparison.Ordinal), showSeconds) switch
+        {
+            (true, true) => "HH:mm:ss",
+            (true, false) => "HH:mm",
+            (false, true) => "hh:mm:ss",
+            _ => "hh:mm"
+        };
 
     /// <summary>
     /// The analog hands' angles in radians (straight up = 0, clockwise). The
