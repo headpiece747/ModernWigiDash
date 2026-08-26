@@ -68,6 +68,21 @@ public interface IModernWigiDashContext
     }
 
     /// <summary>
+    /// Launches the named AutoHotkey script with the user's own interpreter
+    /// (ADR-0019: the interpreter path is machine-local, user-supplied in the
+    /// settings; the app bundles nothing). The host owns the kill-switch
+    /// veto and the refusal lines (a checked kill switch, an unset or
+    /// missing interpreter). The default is a no-op (the <see cref="NavigatePage"/>
+    /// precedent: test hosts and other embedders may not have an
+    /// interpreter); the App's context resolves the interpreter from its
+    /// machine-local settings and spawns.
+    /// </summary>
+    /// <param name="scriptPath">The .ahk script path to launch.</param>
+    void LaunchAutoHotkeyScript(string scriptPath)
+    {
+    }
+
+    /// <summary>
     /// The single commit owner for "set a property value on a placed widget":
     /// sets the instance property, raises
     /// <see cref="IModernWidget.OnPropertyChanged"/>, and persists into the

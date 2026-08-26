@@ -1,3 +1,4 @@
+using System.IO;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;
@@ -125,6 +126,45 @@ public partial class MainWindow
             return;
         }
         _ = Dispatcher.InvokeAsync(Navigate);
+    }
+
+    /// <summary>
+    /// The AutoHotkey spawn (the IModernWigiDashContext seam the hotkey
+    /// widget's Run AHK Script action routes through, ADR-0019): the
+    /// interpreter is the user's own, read live from the machine-local
+    /// settings at spawn time (a settings write-through is seen on the next
+    /// action without a restart). The kill-switch veto and the interpreter
+    /// checks refuse with one log line each (the seam's documented refusal
+    /// surface); a spawn is a bare launch, no tracking. Safe from any
+    /// thread (Process.Start is thread-safe; the settings read is a
+    /// reference read of the record the settings commits swap).
+    /// </summary>
+    public void LaunchAutoHotkeyScript(string scriptPath)
+    {
+        AppSettings settings = _appSettings;
+        if (settings.KillSwitch)
+        {
+            _hotkeyLog.Write("AHK spawn refused: the kill switch is checked (Settings)");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(settings.AhkInterpreterPath))
+        {
+            _hotkeyLog.Write("AHK spawn refused: no AutoHotkey interpreter path set (Settings)");
+            return;
+        }
+
+        string interpreter = settings.AhkInterpreterPath;
+        if (!File.Exists(interpreter))
+        {
+            _hotkeyLog.Write($"AHK spawn refused: interpreter not found: {interpreter}");
+            return;
+        }
+        if (!_ahkApi.Launch(interpreter, scriptPath))
+        {
+            _hotkeyLog.Write($"AHK spawn failed: {interpreter}");
+            return;
+        }
+        _hotkeyLog.Write($"AHK launched: {scriptPath}");
     }
 
     #endregion

@@ -21,7 +21,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     public string Description { get; set; } = "Tap to run";
 
     /// <summary>The "Action Type": which trigger the tap runs (the HotkeyActionCatalog name set).</summary>
-    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute", "Next Page", "Previous Page")]
+    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute", "Next Page", "Previous Page", "Run AHK Script")]
     public string ActionType { get; set; } = HotkeyActionCatalog.DefaultName;
 
     /// <summary>The "Global Hotkey": the OS-level chord that fires this button (blank = none; edited with the key-capture editor).</summary>
@@ -330,6 +330,17 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
             if (string.IsNullOrWhiteSpace(action.Value) && HotkeyActionCatalog.NeedsCommand(ActionType))
             {
                 Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
+                return;
+            }
+            if (action.Kind == HotkeyActionKind.AhkScript)
+            {
+                // The AHK spawn is the host's (the context seam, ADR-0019): it
+                // resolves the user's interpreter from the machine-local
+                // settings and owns the kill-switch veto and the refusal
+                // lines. A blank script path is caught by the empty-command
+                // skip above (this type needs a command).
+                Context?.LaunchAutoHotkeyScript(action.Value);
+                Context?.RequestRender();
                 return;
             }
             var executor = ActionExecutor ?? HotkeyActionExecutor.ExecuteAsync;

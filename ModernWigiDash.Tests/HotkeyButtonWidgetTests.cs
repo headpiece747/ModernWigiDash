@@ -253,10 +253,18 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
-    public void HotkeyActionCatalog_NeedsCommand_OnlyLaunchAndUrl()
+    public void HotkeyActionCatalog_NeedsCommand_LaunchUrlAndAhkScript()
     {
+        // The command-reading set is exactly the entries with no fixed value:
+        // Launch App, Open URL, and Run AHK Script (the user's script path is
+        // the command the AHK spawn reads, ADR-0019).
+        CollectionAssert.AreEquivalent(
+            new[] { "Launch App", "Open URL", "Run AHK Script" },
+            HotkeyActionCatalog.Entries.Where(e => e.FixedValue is null).Select(e => e.Name).ToList(),
+            "the NeedsCommand set is exactly the no-fixed-value entries");
         Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Launch App"));
         Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Open URL"));
+        Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Run AHK Script"));
         foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.FixedValue is not null))
         {
             Assert.IsFalse(HotkeyActionCatalog.NeedsCommand(entry.Name), entry.Name);
@@ -277,6 +285,18 @@ public class HotkeyButtonWidgetTests
         Assert.AreEqual("-1", previous.Value);
         Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Next Page"));
         Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Previous Page"));
+    }
+
+    [TestMethod]
+    public void HotkeyActionCatalog_RunAhkScript_CarriesTheAhkScriptKind()
+    {
+        // The Run AHK Script entry: the script path rides the command value
+        // (the AhkScript kind, no fixed value), and the summary spells the
+        // kind + path for the inspector.
+        var action = HotkeyActionCatalog.Create("Run AHK Script", @"C:\scripts\fan.ahk");
+        Assert.AreEqual(HotkeyActionKind.AhkScript, action.Kind);
+        Assert.AreEqual(@"C:\scripts\fan.ahk", action.Value);
+        Assert.AreEqual("Run AHK C:\\scripts\\fan.ahk", action.Summary());
     }
 
     [TestMethod]
@@ -312,6 +332,51 @@ public class HotkeyButtonWidgetTests
 
         await TestWait.WaitUntilAsync(() => context.NavigatePageCalls.Count > 0, TimeSpan.FromSeconds(2));
         CollectionAssert.AreEqual(new[] { -1 }, context.NavigatePageCalls);
+    }
+
+    [TestMethod]
+    public async Task OnTouch_RunAhkScriptAction_RoutesToTheContextInsteadOfTheExecutor()
+    {
+        var executor = new FakeExecutor();
+        var context = new TestContext();
+        var widget = new HotkeyButtonWidget
+        {
+            ActionType = "Run AHK Script",
+            ActionCommand = @"C:\scripts\fan.ahk"
+        };
+        widget.ActionExecutor = executor.Execute;
+        await widget.InitializeAsync(context).ConfigureAwait(false);
+
+        widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
+
+        await TestWait.WaitUntilAsync(() => context.AhkScriptCalls.Count > 0, TimeSpan.FromSeconds(2));
+        CollectionAssert.AreEqual(new[] { @"C:\scripts\fan.ahk" }, context.AhkScriptCalls,
+            "the Run AHK Script action routes the script path through the context seam");
+        Assert.AreEqual(0, executor.Calls, "the SendInput executor never sees an AHK action");
+    }
+
+    [TestMethod]
+    public async Task OnTouch_RunAhkScriptAction_BlankScriptPath_SkipsWithTheEmptyCommandLine()
+    {
+        // A blank script path is caught by the fire path's empty-command
+        // skip (the type needs a command): neither the spawn seam nor the
+        // executor sees it.
+        var executor = new FakeExecutor();
+        var context = new TestContext();
+        var widget = new HotkeyButtonWidget
+        {
+            ActionType = "Run AHK Script",
+            ActionCommand = ""
+        };
+        widget.ActionExecutor = executor.Execute;
+        await widget.InitializeAsync(context).ConfigureAwait(false);
+
+        widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
+
+        await TestWait.WaitUntilAsync(() => context.Errors.Count > 0, TimeSpan.FromSeconds(2));
+        StringAssert.Contains(context.Errors[0], "Action Path/Command is empty");
+        Assert.AreEqual(0, context.AhkScriptCalls.Count, "a blank script path never reaches the spawn seam");
+        Assert.AreEqual(0, executor.Calls, "a blank script path never reaches the executor");
     }
 
     [TestMethod]

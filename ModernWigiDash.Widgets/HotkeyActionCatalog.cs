@@ -33,15 +33,16 @@ internal static class HotkeyActionCatalog
         new("Media Next", HotkeyActionKind.MediaKey, MediaKeyCatalog.Next),
         new("Media Previous", HotkeyActionKind.MediaKey, MediaKeyCatalog.Previous),
         new("Media Stop", HotkeyActionKind.MediaKey, MediaKeyCatalog.Stop),
-new("Volume Up", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeUp),
+        new("Volume Up", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeUp),
         new("Volume Down", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeDown),
         new("Mute", HotkeyActionKind.MediaKey, MediaKeyCatalog.Mute),
         new("Next Page", HotkeyActionKind.PageNavigate, "1"),
         new("Previous Page", HotkeyActionKind.PageNavigate, "-1"),
+        new("Run AHK Script", HotkeyActionKind.AhkScript, null),
     ];
 
     /// <summary>
-    /// True when the named action reads a command value (Launch/URL): the
+    /// True when the named action reads a command value (Launch/URL/AHK script): the
     /// inspector's action-command editor visibility and the executor's
     /// empty-command skip both route through this. An unknown name (a
     /// hand-edited profile) is false: it degrades to the Launch kind, and an
@@ -49,7 +50,7 @@ new("Volume Up", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeUp),
     /// unknown-name rule), never a silent no-op.
     /// </summary>
     public static bool NeedsCommand(string actionType)
-            => Find(actionType) is { FixedValue: null };
+        => Find(actionType) is { FixedValue: null };
 
     /// <summary>
     /// Maps the action-type name to its action. A name absent from the

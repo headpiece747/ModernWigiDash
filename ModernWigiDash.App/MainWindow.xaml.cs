@@ -151,6 +151,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // AppSettings wiring step loads the settings.
     private readonly AppSettingsStore _appSettingsStore;
     private AppSettings _appSettings = new();
+    // The AHK spawn seam (ADR-0019): production is Process.Start, tests
+    // inject a recorder the way they swap the hotkey API.
+    private readonly AhkLaunchApi _ahkApi;
 
     // The global-hotkey integration (ADR-0019): the P/Invoke seam (the test
     // host injects a fake the way it swaps the tray surface), the
@@ -208,16 +211,20 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// routing pin never drives a standby ritual at the user's attached
     /// display; the hotkey API is injectable so the window's hotkey pin
     /// registers against a fake instead of the OS (a real RegisterHotKey
-    /// can lose to another program and flap the pin).</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null)
+    /// can lose to another program and flap the pin); the AHK spawn and the
+    /// app-settings store are injectable so the spawn policy (the
+    /// kill-switch veto, the interpreter checks) pins against a temp file
+    /// and a recorder instead of the user's machine-local settings.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null, AhkLaunchApi? ahkApi = null, AppSettingsStore? appSettingsStore = null)
     {
         _traySurface = traySurface;
         _sessionEndStandby = sessionEndStandby;
         _hotkeyApi = hotkeyApi ?? HotkeyApi.Default;
+        _ahkApi = ahkApi ?? AhkLaunchApi.Default;
         // The store's log seam references the window's hotkey DiagLog, so the
         // assignment rides the constructor body (a field initializer cannot
         // reference another instance field, even inside the lambda).
-        _appSettingsStore = new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
+        _appSettingsStore = appSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
         // connect + touch poll explicitly. Start precedes InitializeComponent:

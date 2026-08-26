@@ -7,6 +7,7 @@ using LibUsbDotNet;
 using LibUsbDotNet.Info;
 using LibUsbDotNet.LibUsb;
 using LibUsbDotNet.Main;
+using ModernWigiDash.App.Hotkey;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.Hardware.Transport;
@@ -31,6 +32,8 @@ internal class TestContext : IModernWigiDashContext
     public List<string> Infos { get; } = [];
     /// <summary>The NavigatePage deltas fired through the context seam (the hotkey widget's page-flip routing pin).</summary>
     public List<int> NavigatePageCalls { get; } = [];
+    /// <summary>The AHK script paths fired through the context seam (the hotkey widget's Run AHK Script routing pin).</summary>
+    public List<string> AhkScriptCalls { get; } = [];
 
     public void LogInfo(string message) => Infos.Add(LogLine.Sanitize(message));
     public void LogError(string message, Exception? ex = null)
@@ -43,6 +46,8 @@ internal class TestContext : IModernWigiDashContext
     public virtual void PersistProperty(object widget, string propertyName, object? value) { }
 
     public virtual void NavigatePage(int delta) => NavigatePageCalls.Add(delta);
+
+    public virtual void LaunchAutoHotkeyScript(string scriptPath) => AhkScriptCalls.Add(scriptPath);
 }
 
 /// <summary>
@@ -1004,4 +1009,27 @@ internal sealed class FakeTraySurface(bool showBringsUp = true) : ITrayIconSurfa
     public void RaiseMenu(TrayMenuCommand command) => MenuSelected?.Invoke(command);
 
     public void Dispose() => Disposed = true;
+}
+
+/// <summary>The window's fake hotkey API: records every registration and
+/// unregistration, never refuses (a test chord is always free).</summary>
+internal sealed class FakeHotkeyApi
+{
+    public record Registration(IntPtr Hwnd, int Id, int Mod, ushort Vk);
+
+    public List<Registration> Registered { get; } = [];
+    public List<(IntPtr Hwnd, int Id, ushort Vk)> Unregistered { get; } = [];
+
+    public HotkeyApi Api { get; }
+
+    public FakeHotkeyApi()
+    {
+        Api = new HotkeyApi(
+            (handle, id, mod, vk) =>
+            {
+                Registered.Add(new Registration(handle, id, mod, vk));
+                return true;
+            },
+            (handle, id, vk) => Unregistered.Add((handle, id, vk)));
+    }
 }

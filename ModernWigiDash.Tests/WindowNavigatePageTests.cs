@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using ModernWigiDash.App.Hotkey;
 using ModernWigiDash.App.Power;
 
 namespace ModernWigiDash.Tests;
@@ -178,29 +177,6 @@ public class WindowNavigatePageTests
         string profilePath = Path.Combine(dir, "profile.json");
         File.WriteAllText(profilePath, json);
         return profilePath;
-    }
-
-    /// <summary>The window's fake hotkey API: records every registration and
-    /// unregistration, never refuses (a test chord is always free).</summary>
-    private sealed class FakeHotkeyApi
-    {
-        public record Registration(IntPtr Handle, int Id, int Mod, ushort Vk);
-
-        public List<Registration> Registered { get; } = [];
-        public List<(IntPtr Handle, int Id, ushort Vk)> Unregistered { get; } = [];
-
-        public HotkeyApi Api { get; }
-
-        public FakeHotkeyApi()
-        {
-            Api = new HotkeyApi(
-                (handle, id, mod, vk) =>
-                {
-                    Registered.Add(new Registration(handle, id, mod, vk));
-                    return true;
-                },
-                (handle, id, vk) => Unregistered.Add((handle, id, vk)));
-        }
     }
 
     /// <summary>Posts a message to the window's HWND (the OS's WM_HOTKEY
