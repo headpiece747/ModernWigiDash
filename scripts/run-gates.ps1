@@ -1,7 +1,16 @@
 # run-gates.ps1 - the house verification gate with a durable trail row.
 #
 # Runs the four house gates in order, stopping at the first failure:
-#   1. dotnet build  (Release, --nologo)
+#   1. dotnet build  (Release, --nologo, --no-incremental: a FORCED
+#                     recompile. An incremental build can report
+#                     UP-TO-DATE - and 0 warnings - over changed content
+#                     when its timestamp check is stale (hit live 2026-08-26:
+#                     a real CS8600 was invisible until a --no-incremental
+#                     rebuild), so the row's warning column only means
+#                     something when every project actually recompiled. If
+#                     the app is running from bin\Release the forced
+#                     recompile fails on a locked output file: stop the app
+#                     (the harness `stop`) and re-run.)
 #   2. dotnet test   (the house temp-BaseOutputPath command - NEVER
 #                     --no-build with that path: it would run the previous
 #                     build's stale artifacts instead of the changed tree)
@@ -56,8 +65,8 @@ function Add-GateRow {
     Write-Output ('gate row appended: ' + $row)
 }
 
-# --- 1. build ---
-$buildOut = dotnet build $sln -c Release --nologo 2>&1 | Out-String
+# --- 1. build (forced recompile: see the header note on --no-incremental) ---
+$buildOut = dotnet build $sln -c Release --nologo --no-incremental 2>&1 | Out-String
 $buildOk  = ($LASTEXITCODE -eq 0)
 $bw = 0; $be = 0
 if ($buildOut -match '(\d+) Warning\(s\)') { $bw = [int]$Matches[1] }

@@ -1,12 +1,20 @@
 #!/bin/sh
-# Gate guard: refuse the commit unless the last gate run (scripts/run-gates.ps1)
-# is green and current. Activated once per clone with:
+# Gate guard + lone-CR guard: refuse the commit unless (a) the last gate run
+# (scripts/run-gates.ps1) is green and current, and (b) no staged text file
+# carries a lone CR (the git 2.55 text=auto binary-classification trap).
+# Activated once per clone with:
 #   git config core.hooksPath scripts/hooks
-# The guard logic lives in scripts/gate-guard.ps1 (testable, ASCII-only).
+# The guard logic lives in scripts/gate-guard.ps1 (testable via -GatesFile)
+# and scripts/scan-staged-cr.ps1 (both ASCII-only).
 git_root=$(git rev-parse --show-toplevel)
 if command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/gate-guard.ps1"
+    ps=powershell.exe
 else
-    powershell -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/gate-guard.ps1"
+    ps=powershell
 fi
+"$ps" -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/gate-guard.ps1"
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+"$ps" -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/scan-staged-cr.ps1"
 exit $?
