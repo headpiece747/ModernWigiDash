@@ -284,6 +284,55 @@ public class ProfileOpsTests
             "a safe token (letters, digits, '-', '_') must survive import unchanged");
     }
 
+    // ── close behavior (the window's close semantics, carried by the JSON) ──
+
+    [TestMethod]
+    public void ImportJson_CloseBehaviorAbsent_StaysAbsent()
+    {
+        // Absent means "this profile has no opinion" — it must NOT be
+        // normalized to the default, or the import merge cannot tell absent
+        // apart from a foreign "quit" and would drop the local value.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A"}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.IsNull(loaded.CloseBehavior, "an absent close behavior must stay absent");
+    }
+
+    [TestMethod]
+    public void ImportJson_CloseBehaviorValid_IsPreserved()
+    {
+        // A foreign profile can override the local behavior by naming a
+        // behavior this build recognizes.
+        var quit = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A"}],"CloseBehavior":"quit"}""", CreateLoader(), new TestContext());
+        var tray = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A"}],"CloseBehavior":"hideToTray"}""", CreateLoader(), new TestContext());
+
+        Assert.AreEqual(CloseBehaviorPolicy.Quit, quit!.CloseBehavior, "'quit' must survive import unchanged");
+        Assert.AreEqual(CloseBehaviorPolicy.HideToTray, tray!.CloseBehavior, "'hideToTray' must survive import unchanged");
+    }
+
+    [TestMethod]
+    public void ImportJson_CloseBehaviorCorrupt_IsNormalizedToQuit()
+    {
+        // Untrusted input: a hand-edited file can never smuggle in a behavior.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A"}],"CloseBehavior":"flyToTheMoon"}""", CreateLoader(), new TestContext());
+
+        Assert.AreEqual(CloseBehaviorPolicy.Quit, loaded!.CloseBehavior,
+            "a present-but-unknown close behavior must normalize to the safe default");
+    }
+
+    [TestMethod]
+    public void ExportImport_CloseBehavior_RoundTrips()
+    {
+        // The export is a whole-object serialize, so the field rides along:
+        // a non-default value must survive export and the import re-read.
+        var profile = new ProfileLayout { CloseBehavior = CloseBehaviorPolicy.HideToTray };
+        string json = ProfileOps.ExportJson(profile);
+        var loaded = ProfileOps.ImportJson(json, CreateLoader(), new TestContext());
+
+        Assert.AreEqual(CloseBehaviorPolicy.HideToTray, loaded!.CloseBehavior,
+            "the close behavior must survive the export/import round trip");
+    }
+
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
 
     [TestMethod]

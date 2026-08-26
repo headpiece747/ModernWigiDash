@@ -88,6 +88,19 @@ public static class ProfileImportSanitizer
         // count, so it can still point past the repaired list).
         profile.ActivePageIndex = Math.Min(profile.ActivePageIndex, profile.Pages.Count - 1);
 
+        // The close behavior travels with the JSON, so a foreign profile can
+        // dictate it. The untrusted-input rule: an ABSENT value (null) stays
+        // absent — "this profile has no opinion", and the import merge keeps
+        // the local value — while a PRESENT value must be a known spelling.
+        // Anything else (hand-edited junk, a future value this build doesn't
+        // know) normalizes to the safe default, so a foreign profile can only
+        // override the local behavior by naming a behavior this build
+        // recognizes.
+        if (profile.CloseBehavior is not null && !CloseBehaviorPolicy.IsKnown(profile.CloseBehavior))
+        {
+            profile.CloseBehavior = CloseBehaviorPolicy.Quit;
+        }
+
         if (!string.IsNullOrWhiteSpace(profile.ActivePage?.BackgroundImagePath))
         {
             profile.ActivePage.BackgroundImagePath = SafeRelativePath(profile.ActivePage.BackgroundImagePath);

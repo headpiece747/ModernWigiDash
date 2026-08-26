@@ -77,4 +77,19 @@ public class ProfileLayout
     /// (IndexOutOfRangeException) instead of fabricating a page.
     /// </summary>
     public PageLayout ActivePage => Pages[Math.Clamp(ActivePageIndex, 0, Pages.Count - 1)];
+
+    /// <summary>
+    /// The window's close behavior as the raw persisted value (the
+    /// <see cref="CloseBehaviorPolicy"/> vocabulary: "quit" | "hideToTray").
+    /// Null when this profile has no opinion — the pre-feature and
+    /// hand-crafted shapes; the runtime read resolves through
+    /// <see cref="CloseBehaviorPolicy.Resolve"/> (null → the default Quit).
+    /// The settings dialog is the one writer; the untrusted-import rule
+    /// (absent stays absent, present-but-corrupt normalizes to
+    /// <see cref="CloseBehaviorPolicy.Quit"/>) lives in
+    /// <see cref="ProfileImportSanitizer"/>; the import merge (an imported
+    /// profile lacking the field keeps the local value) runs at the window's
+    /// import handler so the next export carries it.
+    /// </summary>
+    public string? CloseBehavior { get; set; }
 }
