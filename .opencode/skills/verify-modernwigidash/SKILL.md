@@ -52,7 +52,7 @@ The feature recipes in `features/` pair every user action with one `wmd-verify.p
 
 | Handle | Surface |
 |---|---|
-| `Theme` (id `BtnTheme`, name `🎨 Theme`) | theme dialog opener (top bar) |
+| `Settings` (id `BtnSettings`, name `⚙️ Settings`) | settings hub opener (top bar); open by id, the needle `Settings` also matches the hub's window title |
 | `Theme Customization` (window title `🎨 Theme Customization`) | theme dialog |
 | `AddPage` (id `BtnAddPage`, name `+ Add Page`) | add page |
 | `📄 <PageName>` (tab button name) | page tab |
@@ -60,7 +60,10 @@ The feature recipes in `features/` pair every user action with one `wmd-verify.p
 | `✕` (tab close button, name = glyph) | delete page (repeated, `list` + `click-nth`) |
 | `Rename Page` (window title, fixed) | rename prompt, input is a nameless `[Edit]` → `set-in "Rename Page" "<value>"` |
 | `Delete Page` (window title) | page-delete confirm dialog (body names the page + widget count) |
-| `ExportProfile` (`💾 Export Profile`), `ImportProfile`, `ClearCanvas` | status bar actions |
+| `ClearCanvas` | status bar action |
+| `Settings` (window title) | settings hub dialog: Appearance/Behavior/Profile groups, modal over the main window |
+| `Export profile...`, `Import profile...` (buttons inside the `Settings` window) | profile round-trip actions (moved from the status bar into the hub's Profile group) |
+| `Customize theme colors...` (button inside the `Settings` window) | opens the theme dialog nested over the hub |
 | `ActiveCount` (id `TxtActiveCount`, value `Active Widgets: N`) | status bar count |
 | `SearchCatalog` (id `TxtSearchCatalog`) | catalog filter box |
 | `<pluginId>` (catalog row `ListItem`, Name = `PluginInfo { ... }` ToString, e.g. `weather_forecast`) | catalog row identity node, read-only (`find`/`list` for filter/count/proof) |

@@ -17,6 +17,17 @@
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
   </ItemGroup>
 
+  <!-- WinForms compile reference for the tray icon (ADR-0018): UseWindowsForms
+       is deliberately NOT set because it adds global System.Drawing +
+       System.Windows.Forms usings (to the WPF markup temp project included)
+       that collide with the WPF System.Windows types. The explicit
+       framework reference carries the same compile reference without the
+       usings; the WinForms runtime assemblies already ship in the
+       WindowsDesktop shared framework the WPF reference resolves to. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="MessagePack" />
     <PackageReference Include="SkiaSharp.Views.WPF" />

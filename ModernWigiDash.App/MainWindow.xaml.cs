@@ -35,11 +35,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
 
     // The wiring-assigned fields (_framePump, _powerLifecycle, _telemetry,
     // _profile, _inputController, _deviceTouchDrain, _delivery, _inspector,
-    // _dialogHost, _pageTabs, _profilePersistence) are null!-typed: they hold
-    // null in the startup artifact's pre-module window, which the context's
-    // null-tolerant facade (MainWindow.Context.cs) treats as a benign no-op.
-    // BuildStartupWiring assigns them in its step order; the ordering facts
-    // are pinned by StartupWiringTests.
+    // _dialogHost, _pageTabs, _profilePersistence, _tray) are null!-typed: they
+    // hold null in the startup artifact's pre-module window, which the
+    // context's null-tolerant facade (MainWindow.Context.cs) treats as a
+    // benign no-op. BuildStartupWiring assigns them in its step order; the
+    // ordering facts are pinned by StartupWiringTests.
 
     private ProfileLayout _profile = null!;
     private PlacedWidgetInstance? _selectedWidget;
@@ -85,6 +85,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // concatenated into every line, so the vocabulary cannot drift.
     private readonly DiagLog _hwLog = new("HW", 1);
     private readonly DiagLog _profileLog = new("PROFILE", 1);
+    private readonly DiagLog _trayLog = new("TRAY", 1);
 
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
@@ -92,6 +93,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private Inspector.InspectorController _inspector = null!;
     private DialogHost _dialogHost = null!;
     private PageTabsView _pageTabs = null!;
+
+    /// <summary>The notification-area icon (ADR-0018): the show/quit routing
+    /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
+    /// reads (a dead tray falls the close through to a normal exit). Wired by
+    /// the startup Tray step, removed by the plan's TrayDispose step.</summary>
+    private TrayIconController _tray = null!;
 
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
@@ -416,6 +423,22 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _compositor.IsEditMode = ChkEditMode.IsChecked == true;
         }),
 
+        new WiringStep("Tray", () =>
+        {
+            // The notification-area icon (ADR-0018): always present, the
+            // single-click and the menu's show item route to ShowFromTray,
+            // the menu's Quit closes through the normal close sequence
+            // (teardown + standby) and then shuts the app down explicitly -
+            // a hidden window's Close does not trip OnLastWindowClose.
+            // BEFORE the wired arm: its handlers forward to the window like
+            // every other module.
+            _tray = new TrayIconController(
+                onShow: ShowFromTray,
+                onQuit: QuitFromTray,
+                log: _trayLog);
+            _tray.Start();
+        }),
+
         new WiringStep("Wired", () =>
         {
             // The wired arm is the LAST step: the guarded XAML handlers (the
@@ -448,6 +471,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
         new TeardownStep("FrameDelivery", _delivery.Dispose),
         new TeardownStep("Profile", () => ProfileOps.DisposeProfile(_profile)),
         new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
+        // The tray icon is removed after the profile state has landed (the
+        // persist-first guarantee covers the exit affordance: the user who
+        // saw the icon go can trust the profile was saved).
+        new TeardownStep("TrayDispose", _tray.Dispose),
         new TeardownStep("Compositor", _compositor.Dispose)
     ],
     // The engine dispose is the one step that must never be skipped:
@@ -853,7 +880,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         SkiaCanvas.InvalidateVisual();
     }
 
-    private void BtnExport_Click(object _, RoutedEventArgs e)
+    private void ExportProfile()
     {
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
@@ -871,7 +898,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         }
     }
 
-    private void BtnImport_Click(object _, RoutedEventArgs e)
+    private void ImportProfile()
     {
         var dlg = new OpenFileDialog { Filter = "Display Profile (*.json)|*.json" };
         if (dlg.ShowDialog() == true)
@@ -884,6 +911,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 case ProfileImportOutcome.Loaded(var loaded):
                     try
                     {
+                        // The close behavior travels with the JSON, but an
+                        // imported profile lacking it (null, "no opinion")
+                        // must not drop the local value: the merge re-stamps
+                        // the local close behavior onto the imported profile
+                        // before the swap, so the next export carries it.
+                        loaded.CloseBehavior = CloseBehaviorPolicy.MergeImport(loaded.CloseBehavior, _profile.CloseBehavior);
+
                         // One swap site: ReplaceProfile disposes the old profile's
                         // widget instances and returns the imported profile active.
                         _profile = ProfileOps.ReplaceProfile(_profile, loaded);
@@ -944,14 +978,76 @@ public partial class MainWindow : Window, IModernWigiDashContext
         TxtUsbStatus.Text = label;
     }
 
-    private void BtnTheme_Click(object _, RoutedEventArgs e)
+    private void BtnSettings_Click(object _, RoutedEventArgs e)
     {
-        ShowThemeDialog();
+        ShowSettingsDialog();
     }
 
-    private void ShowThemeDialog()
+    /// <summary>
+    /// The tray/second-launch activation: shows a hidden window (restoring
+    /// it from the tray hide) and brings it forward. Both callers arrive on
+    /// the UI thread (the tray icon's events are WPF-routed; the
+    /// single-instance guard hops through the App's dispatcher).
+    /// </summary>
+    internal void ShowFromTray()
     {
-        new Dialogs.ThemeDialog(this, _themeApplicator).ShowDialog();
+        if (!IsVisible)
+        {
+            WindowState = WindowState.Normal;
+            Show();
+        }
+        Activate();
+    }
+
+    /// <summary>
+    /// The tray menu's "Quit" (ADR-0018): the explicit-quit path through the
+    /// normal close sequence (OnClosing, the teardown plan, the display
+    /// standby), then an explicit Shutdown. A hidden window's Close does not
+    /// trip OnLastWindowClose, so without the Shutdown the process would
+    /// linger with its icon already gone; the IsShuttingDown guard keeps the
+    /// visible-window case (where OnLastWindowClose already scheduled the
+    /// shutdown) a single shutdown.
+    /// </summary>
+    internal void QuitFromTray()
+    {
+        Close();
+        // Close() on the visible window already scheduled the shutdown
+        // through OnLastWindowClose, and WPF's Shutdown is idempotent when
+        // the shutdown is in flight - so the call below is safe either way.
+        // It is the ONLY thing that ends a process whose only window was
+        // hidden: a hidden window's Close does not trip OnLastWindowClose.
+        Application.Current?.Shutdown();
+    }
+
+    /// <summary>
+    /// Opens the settings hub (ADR-0018): the close-behavior radios read the
+    /// profile's raw persisted value and write it back through
+    /// <see cref="CommitCloseBehavior"/> the moment they are checked; the
+    /// Profile group's export/import buttons route to the window's file
+    /// flows.
+    /// </summary>
+    private void ShowSettingsDialog()
+    {
+        new Dialogs.SettingsDialog(
+            this,
+            _themeApplicator,
+            currentCloseBehavior: _profile.CloseBehavior,
+            onCommitCloseBehavior: CommitCloseBehavior,
+            onExportProfile: ExportProfile,
+            onImportProfile: ImportProfile).ShowDialog();
+    }
+
+    /// <summary>
+    /// The close-behavior write-through from the settings hub (ADR-0018):
+    /// the radio's check is the change, so the profile is committed and
+    /// marked dirty in place - no Apply step to forget. The canvas is
+    /// untouched (the setting is not a page/widget mutation), so no
+    /// mutation-shape refresh runs.
+    /// </summary>
+    private void CommitCloseBehavior(string value)
+    {
+        _profile.CloseBehavior = value;
+        _profilePersistence.MarkDirty();
     }
 
     private static void Log(string msg) => FileLog.Write(msg);

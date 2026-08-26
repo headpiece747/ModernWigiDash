@@ -53,6 +53,15 @@ public class TeardownPlanTests
     }
 
     [TestMethod]
+    public void BuildTeardownPlan_TrayDisposeLandsAfterTheProfilePersist()
+    {
+        TeardownPlan plan = PlanOfLiveWindow();
+
+        Assert.IsTrue(IndexOf(plan, "ProfilePersist") < IndexOf(plan, "TrayDispose"),
+            "the profile state lands on disk before the exit affordance (the tray icon) disappears - a user who saw the icon go can trust the profile was saved");
+    }
+
+    [TestMethod]
     public void WriteExitMarker_MarkerPlusFinalFlush_LandInTheFile()
     {
         // A short marker line sits under both flush cadences (8 KB / 250 ms),

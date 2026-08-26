@@ -58,7 +58,7 @@
                     </Button>
                     <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
                     <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
-                    <Button x:Name="BtnTheme" Content="🎨 Theme" Padding="12,6" Margin="0,0,16,0" Click="BtnTheme_Click"/>
+                    <Button x:Name="BtnSettings" Content="⚙️ Settings" Padding="12,6" Margin="0,0,16,0" Click="BtnSettings_Click"/>
                     <Border x:Name="UsbBadgeBorder" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,6">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="UsbStatusDot" Width="8" Height="8" Fill="{DynamicResource DangerBorder}" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -297,8 +297,6 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="💾 Export Profile" Width="120" Height="26" Margin="4,0" FontSize="11" Click="BtnExport_Click"/>
-                    <Button Content="📂 Import Profile" Width="120" Height="26" Margin="4,0" FontSize="11" Click="BtnImport_Click"/>
                     <Button Content="🧹 Clear Canvas" Width="120" Height="26" Margin="4,0" FontSize="11" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Click="BtnClear_Click"/>
                 </StackPanel>
             </Grid>

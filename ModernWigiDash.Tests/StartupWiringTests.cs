@@ -67,6 +67,15 @@ public class StartupWiringTests
     }
 
     [TestMethod]
+    public void BuildStartupWiring_TrayPrecedesTheWiredArm()
+    {
+        StartupWiring plan = PlanOfLiveWindow();
+
+        Assert.IsTrue(IndexOf(plan, "Tray") < IndexOf(plan, "Wired"),
+            "the tray's click handlers forward to the window's show/quit like every other module - the wired arm must arm last, after the tray exists");
+    }
+
+    [TestMethod]
     public void BuildStartupWiring_StepNames_AreUnique()
     {
         StartupWiring plan = PlanOfLiveWindow();

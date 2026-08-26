@@ -41,7 +41,8 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Theme dialog](./theme.md) covers opening, canceling, applying, and resetting the chrome theme, with the app_theme.json persistence proof.
+- [Settings hub](./settings-hub.md) covers opening the hub, its three groups, and the close-behavior radio's immediate profile persistence, with the on-disk CloseBehavior second-view proof.
+- [Theme dialog](./theme.md) covers opening (from the settings hub's Appearance group), canceling, applying, and resetting the chrome theme, with the app_theme.json persistence proof.
 - [Pages](./pages.md) covers adding, switching, renaming, and deleting pages through the tab strip, with the tab-count and tab-name proofs.
 - [Place a widget](./place-widget.md) covers placing from the catalog, the Active Widgets count proof, the canvas preview snapshot, and deleting through the inspector.
 - [Profile round trip](./profile-roundtrip.md) covers export and import of the profile file, with the on-disk JSON second-view proof.
