@@ -61,7 +61,45 @@ and the diff becomes a whole-file EOL change: before committing, scan the
 modified files for a stray 0x0D not followed by 0x0A. The PowerShell tool
 transport strips backticks and mangles `$` variables inside inline commands;
 for multi-step byte/regex work, write a `.ps1` to the temp dir and run it
-with `-File`.
+with `-File`. Verified 2026-08-26 (close-to-tray verification session; each
+hit live): `display_device.log` timestamps are UTC while file mtimes print
+local (that machine is UTC-4), so compare `LastWriteTimeUtc` against log
+lines and grep log windows in UTC (a local-time window silently misses the
+event); an inline `-Command` through the elevated runner fails to parse when
+the inner string carries `"` and `|` together (a regex; "The string is
+missing the terminator"), the same `.ps1` + `-File` rule as above;
+PowerShell double-quoted strings: `"$var: text"` throws
+`InvalidVariableReferenceWithDrive` (the `:` parses as a drive qualifier;
+write `${var}:`), and `$Pid` is a read-only automatic variable (never a
+`param` or assignment target); `PostMessage`/`WM_CLOSE` to the elevated app
+from a normal-IL shell returns False (UIPI) and says nothing, so the harness
+`stop` needs the elevated runner for its clean close (it now clean-closes
+first because a force-kill wedges the display pipe for up to 30 s on the next
+launch); the title-bar badge dot and border (`UsbStatusDot`/`UsbBadgeBorder`)
+expose no UIA peer (only the `TxtUsbStatus` text does), so assert the dot by
+pixel sampling at (textLeft-12, textTop+8±4) (the 8 px dot sits 8 px left of
+the text, 12 px inside the border padding; a Connected badge on the default
+theme samples exactly `#10B981`); UIA top-level queries can transiently miss
+the main window right after a close/reopen (retry once before concluding);
+app state locations: `profile.json` in `%LOCALAPPDATA%\ModernWigiDash`, but
+the theme in `app_theme.json` next to the executable
+(`AppContext.BaseDirectory`), not LocalAppData (a stale dev-machine copy in
+`bin\Release` silently overrides every color: a stale `AccentGreen=#12141D`
+hid the "green" badge behind the amber `Connected` label; `wmd-verify.ps1`
+backup/restore-profile now cover both locations, the exe copy as
+`app_theme.exe-dir.json`); a PowerShell here-string's closing `"@` must sit
+at column 0 (a leading space keeps the string open, so everything after it,
+including whole `function` definitions, is silently swallowed into the
+string content: the script still parses with zero errors and runs, the
+swallowed function just does not exist, "The term X is not recognized";
+diagnose with `[Parser]::ParseFile` and enumerate the
+`FunctionDefinitionAst` nodes, or check that every `"@` line starts with
+bytes 34,64; hit live in `wmd-verify.ps1` where one space before the
+WmdUser32 terminator deleted `Ensure-WinMsg`); and Windows PowerShell 5.1's
+`Add-Type -MemberDefinition` compiles with a C# 5-era compiler, so an
+expression-bodied method (`public static bool F() => Expr;`) fails with
+"; expected" at the `=>`: use a regular method body (lambdas and `var` are
+C# 3 and compile fine; hit live in the harness's `WmdWinMsg` Add-Type).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.

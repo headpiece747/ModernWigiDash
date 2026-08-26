@@ -39,9 +39,19 @@ value <needle>                    Print the Value or Name of the first matching 
   shot <path>                       Screenshot the main app window to <path> (PNG).
   wait <namePart> [-Seconds <n>]    Wait up to n seconds (default 15) for a window whose title contains <namePart>.
   backup-profile                    Back up profile.json + app_theme.json from %LOCALAPPDATA%\ModernWigiDash
-                                    (theme files included when present).
-  restore-profile                   Restore the backed-up files (no-op when nothing was backed up).
-  stop                              Kill the process launched by launch (only that recorded pid, never by name).
+                                    PLUS the theme file next to the launched exe (the app persists its theme to
+                                    AppContext.BaseDirectory/app_theme.json, NOT the LocalAppData dir; the
+                                    LocalAppData copy is included only when present).
+  restore-profile                   Restore the backed-up files (no-op when nothing was backed up); the
+                                    exe-dir theme goes back to the launched exe's directory.
+  stop                              Clean-close the recorded pid (WM_CLOSE through the app's own close path:
+                                    profile persisted, display to standby, pipe released). Force-kills ONLY when
+                                    WM_CLOSE cannot be delivered (no window, or the app runs at a higher
+                                    integrity level than this shell) and says so: a force-kill wedges the
+                                    display's bulk pipe (the next launch's first connect fails its 1.2 MB init
+                                    write and reconnects through the LibUsb fallback after up to 30 s). A
+                                    hideToTray profile hides instead of exiting on WM_CLOSE: stop then Refuses
+                                    to force-kill and points at the tray menu's Quit instead.
   clean                             stop + restore-profile + drop the state file (evidence is never touched).
 
 State: %TEMP%\opencode\wmd-verify.state.json  {pid, exe, startedUtc, profileBackup}
@@ -49,7 +59,10 @@ State: %TEMP%\opencode\wmd-verify.state.json  {pid, exe, startedUtc, profileBack
 Rules this script enforces:
   - launch refuses to start when another ModernWigiDash.App.exe is already
     running (shared-instance rule: verification drives its own instance).
-  - stop/clean kill only the pid recorded at launch.
+  - stop/clean touch only the pid recorded at launch (never by name);
+    stop clean-closes first (the app's own close path) and force-kills only
+    when WM_CLOSE cannot be delivered, saying so (a force-kill wedges the
+    display pipe).
    - find/list/click/click-nth share one natural tree-order walk (left-to-right
      within each container; the page strip's per-tab buttons read in tab order).
 Exit codes: 0 ok, 1 fail (message on stderr).
@@ -597,6 +610,34 @@ function Ensure-User32 {
     }
 }
 
+function Ensure-WinMsg {
+    # Window enumeration + WM_CLOSE for the clean-close stop path. Separate
+    # type (own -as [type] guard) so it can never collide with WmdUser32's
+    # members if both run in one process.
+    if (-not ('WmdVerify.WmdWinMsg' -as [type])) {
+        Add-Type -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l);
+public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr l);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+[DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
+public static IntPtr FindMainHwnd(int pid) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) => {
+        var sb = new System.Text.StringBuilder(256);
+        GetWindowTextW(h, sb, 256);
+        uint p; GetWindowThreadProcessId(h, out p);
+        if (sb.ToString() == "ModernWigiDash" && p == (uint)pid && IsWindowVisible(h)) { found = h; return false; }
+        return true;
+    }, IntPtr.Zero);
+    return found;
+}
+public static bool PostClose(IntPtr h) { return PostMessageW(h, 0x0010, IntPtr.Zero, IntPtr.Zero); }
+"@ -Name WmdWinMsg -Namespace WmdVerify
+    }
+}
+
 function Do-ClickScreen([int]$x, [int]$y) {
     Ensure-User32
     if (-not ('WmdVerify.WmdMouse' -as [type])) {
@@ -833,7 +874,7 @@ switch ($Command) {
         Write-Output ('clicked match #' + $n + ' of "' + $Rest[0] + '" (name="' + [WmdUia.Core]::Name($el) + '") via ' + $how)
     }
     'list' {
-        # Read-only: numbered matches in tree order with positions — run it
+        # Read-only: numbered matches in tree order with positions - run it
         # before click-nth to prove which #N is which (e.g. the per-tab close
         # buttons of the page strip).
         if ($Rest.Count -lt 1) { Fail "usage: list <needle> [buttons]   (read-only)" }
@@ -972,6 +1013,17 @@ switch ($Command) {
                 $saved += $f
             }
         }
+        # The theme the app ACTUALLY loads persists next to the executable
+        # (ThemeSettings.ThemePath = AppContext.BaseDirectory/app_theme.json),
+        # not in the LocalAppData dir above. A stale dev-machine copy in
+        # bin\Release silently overrides every color (it once hid the
+        # "green" badge behind an amber label via AccentGreen=#12141D).
+        # Back it up under a distinct name so restore never collides.
+        $exeTheme = if ($s.exe) { Join-Path (Split-Path $s.exe -Parent) 'app_theme.json' } else { $null }
+        if ($exeTheme -and (Test-Path $exeTheme)) {
+            Copy-Item $exeTheme (Join-Path $dir 'app_theme.exe-dir.json') -Force
+            $saved += 'app_theme.json (next to exe)'
+        }
         $s | Add-Member -NotePropertyName profileBackup -NotePropertyValue $dir -Force
         Write-State $s
         if ($saved.Count -eq 0) { Write-Output "nothing to back up (no profile files yet)" } else { Write-Output ("backed up " + ($saved -join ', ') + " -> " + $dir) }
@@ -984,22 +1036,63 @@ switch ($Command) {
         if (-not (Test-Path $appData)) { New-Item -ItemType Directory -Path $appData -Force | Out-Null }
         $restored = @()
         foreach ($f in Get-ChildItem $dir -File) {
+            if ($f.Name -eq 'app_theme.exe-dir.json') { continue }  # routed to the exe dir below
             Copy-Item (Join-Path $dir $f.Name) (Join-Path $appData $f.Name) -Force
             $restored += $f.Name
+        }
+        $exeThemeSrc = Join-Path $dir 'app_theme.exe-dir.json'
+        $exeThemeDst = if ($s -and $s.exe) { Join-Path (Split-Path $s.exe -Parent) 'app_theme.json' } else { $null }
+        if ($exeThemeDst -and (Test-Path $exeThemeSrc)) {
+            Copy-Item $exeThemeSrc $exeThemeDst -Force
+            $restored += 'app_theme.json (next to exe)'
         }
         if ($s) { Write-State $s }
         Write-Output ("restored " + ($restored -join ', '))
     }
-    'stop' {
+'stop' {
         $s = Read-State
         if (-not $s -or -not $s.pid) { Write-Output "no launched pid recorded - nothing to stop"; return }
         $proc = Get-Process -Id $s.pid -ErrorAction SilentlyContinue
         if (-not $proc) { Write-Output ("pid " + [int]$s.pid + " already gone"); Remove-Item (Join-Path $env:TEMP "opencode\wmd-verify.state.json") -Force; return }
-        Stop-Process -Id $proc.Id -Force
+        # Clean close first: WM_CLOSE runs the app's own close path (profile
+        # persisted, tray removed, display to standby), which releases the
+        # display's bulk pipe. A force-kill wedges that pipe: control writes
+        # pass, the 1.2 MB init blank-frame write hits the 30 s pipe timeout,
+        # and the next launch's badge reads Connecting until the LibUsb
+        # fallback reconnects (up to 30 s).
+        Ensure-WinMsg
+        $h = [WmdVerify.WmdWinMsg]::FindMainHwnd([int]$s.pid)
+        if ($h -ne [IntPtr]::Zero -and [WmdVerify.WmdWinMsg]::PostClose($h)) {
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Date) -lt $deadline -and (Get-Process -Id $s.pid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
+            if (-not (Get-Process -Id $s.pid -ErrorAction SilentlyContinue)) {
+                Write-Output ("stopped pid " + [int]$s.pid + " via clean close (the app's own close path: profile persisted, display to standby)")
+                return
+            }
+            # Alive after WM_CLOSE: never force-kill from here. Either a
+            # hideToTray profile hid the window (the close intercept cancels
+            # the close; the tray menu's Quit is the only exit) or the close
+            # path is hung (a modal dialog parked over the main window).
+            $alive = Get-Process -Id $s.pid -ErrorAction SilentlyContinue
+            if ($alive -and -not $alive.MainWindowVisible) {
+                Fail ("pid " + [int]$s.pid + " hid instead of exiting: the profile's close behavior is hideToTray, so WM_CLOSE cancelled the close. Quit through the tray icon's menu (Quit); not force-killing, because a force-kill wedges the display pipe (30 s Connecting badge on the next launch).")
+            }
+            Fail ("pid " + [int]$s.pid + " survived WM_CLOSE + 20 s with the window still visible (close path hung, e.g. a modal dialog parked over it?) - close the dialog and re-run stop; not force-killing (a force-kill wedges the display pipe).")
+        }
+        # WM_CLOSE not delivered: the main window is missing, or UIPI refused
+        # the message because the app runs at a higher integrity level than
+        # this shell (re-run this command through the elevated runner for a
+        # clean close). Last resort only.
+        Write-Output "note: WM_CLOSE was not delivered (no visible main window, or the app runs at a higher integrity level than this shell - run stop through the elevated runner for a clean close)"
+        try {
+            Stop-Process -Id $proc.Id -Force
+        } catch {
+            Fail ("force-kill also refused (" + $_.Exception.Message + "): the app runs elevated and this shell cannot reach it - re-run stop through the elevated runner; not escalating further.")
+        }
         $deadline = (Get-Date).AddSeconds(10)
         while ((Get-Date) -lt $deadline -and (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
-        if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) { Fail ("pid " + [int]$s.pid + " survived Stop-Process 10s; not escalating (inspect manually)") }
-        Write-Output ("stopped pid " + [int]$s.pid)
+        if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) { Fail ("pid " + [int]$proc.Id + " survived Stop-Process 10s; not escalating (inspect manually)") }
+        Write-Output ("stopped pid " + [int]$proc.Id + " via FORCE-KILL (last resort) - the display pipe is wedged: the next launch's first connect fails its init write and reconnects through the LibUsb fallback after up to 30 s")
     }
     'clean' {
         & $PSCommandPath stop

@@ -1,6 +1,6 @@
 # Theme dialog
 
-The chrome theme: a modal dialog that edits the app's non-canvas colors (window chrome, panels, text), with Apply persisting them to `app_theme.json` next to the profile. It opens nested over the settings hub (the hub's Appearance group is the opener; see `settings-hub.md`).
+The chrome theme: a modal dialog that edits the app's non-canvas colors (window chrome, panels, text), with Apply persisting them to `app_theme.json` **next to the executable** (`AppContext.BaseDirectory`, i.e. the `bin\Release\...` dir of the launched build), not in `%LOCALAPPDATA%\ModernWigiDash`, which holds only `profile.json` and the logs. A fresh install has no theme file and gets the built-in defaults (the contract a GitHub download ships). It opens nested over the settings hub (the hub's Appearance group is the opener; see `settings-hub.md`).
 
 ## Sub-features
 
@@ -33,4 +33,5 @@ Preconditions:
 - `Apply` is disabled until every hex entry validates; a failed `set` leaves it disabled. Check the Apply state (or just look at the `shot`) before blaming the click.
 - Resetting then applying persists the *defaults*, not the previous values. Backups (not memory) are the restore path.
 - A `Theme Save Failed` message box means `app_theme.json` could not be written (read-only dir). It is a product signal, not a harness gap: report it, don't retry.
+- The theme file lives next to the exe and SURVIVES REBUILDS (the build never deletes extra files from `bin\Release`). A stale dev-machine copy silently overrides every color on every launch. Real case (2026-08-26): a stale `AccentGreen=#12141D` (near-background navy) made the Connected badge's "green" dot invisible while the label still read `Connected` in amber. Before concluding "the theme is the defaults", check `app_theme.json` next to the launched exe, not LocalAppData. `backup-profile` now backs it up as `app_theme.exe-dir.json` and `restore-profile`/`clean` route it back to the exe dir.
 - Theme changes apply to the running session immediately; a relaunched app re-reads `app_theme.json` at startup. The restore via `clean` covers reruns, not the relaunch.

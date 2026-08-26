@@ -21,12 +21,15 @@ Preconditions:
 
 - **Read the state.** Run `value UsbStatus`. Expect `Simulated` (the mapping: Connected / Simulated / Connecting / Disconnected). Record it.
 - **Pin the label set.** Run `dump | Select-String "UsbStatus"` once after launch and once after the settle: the text moved (or stayed) only within the four labels. Proof: the two outputs, saved as `<evidence>/usb/badgeset.txt`.
-- **No phantom states.** The badge dot color is not UIA-readable; the text is the assertion. Any text outside the four labels is a product regression, report it, do not work around it.
+- **No phantom states.** The badge dot color is not UIA-readable (no peer; the Gotchas spell the pixel-sampling fallback), so the text is the assertion. Any text outside the four labels is a product regression, report it, do not work around it.
 - **Device case (out of scope, documented).** With the display attached and the app run elevated per the hardware-e2e-validation skill, the same command expects `Connected`. This skill does not drive that case itself.
 
 ## Gotchas
 
 - Right after launch the badge can read `Connecting` or the initial `WigiDash` label before the first connect verdict; read `value UsbStatus` again after one or two 5 s cycles before calling the state wrong.
+- The badge dot (`UsbStatusDot`) and border (`UsbBadgeBorder`) expose NO UIA peer (WPF decorative elements); only the `TxtUsbStatus` text block is reachable. To assert the dot color, sample pixels at (textLeft-12, textTop+8±4): the 8 px dot sits 8 px left of the text, 12 px inside the border padding (verified 2026-08-26: a live `Connected` badge on the default theme samples exactly `#10B981`, the default `AccentGreen`).
+- The `Connected` label text is amber (`M3Primary`) by design: green is the DOT's job. A stale `app_theme.json` next to the exe (the theme's real location, not LocalAppData) can re-color `AccentGreen` to a near-background value and make the dot invisible while the label still reads `Connected` in amber: check the exe-dir theme file before calling the badge wrong (see `theme.md`).
 - Elevation changes the outcome: an elevated launch on a machine with the display attached can reach `Connected`, which invalidates this feature's Simulated expectation. The pre-condition (no display, unelevated) is part of the proof.
 - The engine's standby/teardown only happens at app close; a stopped app is not a `Disconnected` state. The feature is about a live app, so prove it before any `stop`.
+- The harness `stop` clean-closes first (WM_CLOSE through the app's own close path, which runs the standby handshake and releases the display pipe). Do not bypass it with a manual `Stop-Process` when you intend to launch again: a force-killed app wedges the display's bulk pipe, and the next launch's first connect fails its 1.2 MB init write, so the badge reads `Connecting`/`Disconnected` for up to 30 s until the LibUsb fallback reconnects.
 - The badge text is the presenter's gate source of truth (the same value the touch-routing policy gates on); a wrong label here is load-bearing, not cosmetic.
