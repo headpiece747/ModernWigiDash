@@ -32,7 +32,10 @@ internal sealed class ThemeDialog : Window
         Height = 680;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Owner = owner;
-        Background = Application.Current.Resources["BgPanel"] as Brush ?? Brushes.Black;
+        // Track the resource key instead of capturing the brush object: ApplyToApplication
+        // reassigns the dictionary entry on every theme apply, so an open dialog must
+        // repaint in place instead of waiting to be rebuilt.
+        SetResourceReference(BackgroundProperty, "BgPanel");
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
@@ -52,9 +55,9 @@ internal sealed class ThemeDialog : Window
             Text = "Chrome Theme — colors outside the widget canvas",
             FontSize = 15,
             FontWeight = FontWeights.Bold,
-            Foreground = Application.Current.Resources["TextPrimary"] as Brush ?? Brushes.White,
             Margin = new Thickness(0, 0, 0, 12)
         };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
         root.Children.Add(title);
 
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -67,14 +70,15 @@ internal sealed class ThemeDialog : Window
             if (!string.Equals(entry.Group, currentGroup, StringComparison.Ordinal))
             {
                 currentGroup = entry.Group;
-                fields.Children.Add(new TextBlock
+                var groupHeader = new TextBlock
                 {
                     Text = entry.Group.ToUpperInvariant(),
                     FontSize = 12,
                     FontWeight = FontWeights.Bold,
-                    Foreground = Application.Current.Resources["M3Primary"] as Brush ?? Brushes.White,
                     Margin = new Thickness(0, 8, 0, 6)
-                });
+                };
+                groupHeader.SetResourceReference(TextBlock.ForegroundProperty, "M3Primary");
+                fields.Children.Add(groupHeader);
             }
 
             var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
@@ -83,18 +87,18 @@ internal sealed class ThemeDialog : Window
                 Text = entry.FriendlyName,
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 2),
                 ToolTip = $"{entry.FriendlyName} ({entry.Name})"
             };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
             var hint = new TextBlock
             {
                 Text = entry.Description,
                 FontSize = 10,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 0, 0, 4)
             };
+            hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
             var editor = new ColorPickerEditor { Hex = entry.Hex };
             editor.Changed += () =>
             {

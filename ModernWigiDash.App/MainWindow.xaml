@@ -56,13 +56,13 @@
                         <Path x:Name="UpdateIconPath" Width="18" Height="18" Stretch="Uniform"
                               Fill="{DynamicResource M3Primary}"/>
                     </Button>
-                    <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
-                    <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
-                    <Button x:Name="BtnSettings" Content="⚙️ Settings" Padding="12,6" Margin="0,0,16,0" Click="BtnSettings_Click"/>
+                    <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" FontSize="13" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
+                    <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" FontSize="13" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
+                    <Button x:Name="BtnSettings" Content="⚙️ Settings" FontSize="13" Padding="12,6" Margin="0,0,16,0" Click="BtnSettings_Click"/>
                     <Border x:Name="UsbBadgeBorder" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,6">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse x:Name="UsbStatusDot" Width="8" Height="8" Fill="{DynamicResource DangerBorder}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource M3Primary}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource M3Primary}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

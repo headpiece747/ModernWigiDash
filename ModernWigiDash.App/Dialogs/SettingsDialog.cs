@@ -54,7 +54,10 @@ internal sealed class SettingsDialog : Window
         Height = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Owner = owner;
-        Background = Application.Current.Resources["BgPanel"] as Brush ?? Brushes.Black;
+        // Track the resource key instead of capturing the brush object: ApplyToApplication
+        // reassigns the dictionary entry on every theme apply, so an open dialog must
+        // repaint in place instead of waiting to be rebuilt.
+        SetResourceReference(BackgroundProperty, "BgPanel");
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
@@ -81,9 +84,9 @@ internal sealed class SettingsDialog : Window
             Text = "Settings",
             FontSize = 15,
             FontWeight = FontWeights.Bold,
-            Foreground = Application.Current.Resources["TextPrimary"] as Brush ?? Brushes.White,
             Margin = new Thickness(0, 0, 0, 12)
         };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
         root.Children.Add(title);
 
         var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -113,21 +116,23 @@ internal sealed class SettingsDialog : Window
     private static StackPanel BuildGroupHeader(SettingsModel.Group group)
     {
         var header = new StackPanel { Margin = new Thickness(0, 8, 0, 6) };
-        header.Children.Add(new TextBlock
+        var groupTitle = new TextBlock
         {
             Text = group.Title.ToUpperInvariant(),
             FontSize = 12,
-            FontWeight = FontWeights.Bold,
-            Foreground = Application.Current.Resources["M3Primary"] as Brush ?? Brushes.White
-        });
-        header.Children.Add(new TextBlock
+            FontWeight = FontWeights.Bold
+        };
+        groupTitle.SetResourceReference(TextBlock.ForegroundProperty, "M3Primary");
+        header.Children.Add(groupTitle);
+        var groupDescription = new TextBlock
         {
             Text = group.Description,
             FontSize = 10,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
             Margin = new Thickness(0, 2, 0, 4)
-        });
+        };
+        groupDescription.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+        header.Children.Add(groupDescription);
         return header;
     }
 
@@ -167,9 +172,9 @@ internal sealed class SettingsDialog : Window
                 GroupName = "CloseBehavior",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = Application.Current.Resources["TextPrimary"] as Brush ?? Brushes.White,
                 Margin = new Thickness(0, 6, 0, 0)
             };
+            radio.SetResourceReference(RadioButton.ForegroundProperty, "TextPrimary");
             _radioByValue[option.Value] = radio;
             row.Children.Add(radio);
             row.Children.Add(BuildRowHint(option.Description, leftIndent: 20));
@@ -207,23 +212,29 @@ internal sealed class SettingsDialog : Window
     }
 
     private static TextBlock BuildRowLabel(string text)
-        => new()
+    {
+        var label = new TextBlock
         {
             Text = text,
             FontSize = 11,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = Application.Current.Resources["TextPrimary"] as Brush ?? Brushes.White
+            FontWeight = FontWeights.SemiBold
         };
+        label.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
+        return label;
+    }
 
     private static TextBlock BuildRowHint(string text, double leftIndent = 0)
-        => new()
+    {
+        var hint = new TextBlock
         {
             Text = text,
             FontSize = 10,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Application.Current.Resources["TextSecondary"] as Brush ?? Brushes.White,
             Margin = new Thickness(leftIndent, 2, 0, 4)
         };
+        hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+        return hint;
+    }
 
     internal IEnumerable<T> FindVisualChildren<T>() where T : DependencyObject
         => FindVisualChildren<T>(this);

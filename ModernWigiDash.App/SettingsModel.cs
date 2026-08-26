@@ -37,14 +37,14 @@ internal sealed class SettingsModel
     /// exit first, then the tray keep-alive.</summary>
     public static readonly IReadOnlyList<BehaviorOption> CloseBehaviors =
     [
-        new(
+new(
             CloseBehaviorPolicy.Quit,
             "Quit when the window closes",
-            "The pre-feature behavior: closing, minimizing, or pressing Alt+F4 exits the app."),
+            "Closing, minimizing, or Alt+F4 exits the app."),
         new(
             CloseBehaviorPolicy.HideToTray,
             "Keep running in the tray when the window closes",
-            "The window hides to the tray icon and the display stays live; only the tray menu's Quit exits the app.")
+            "Hides to the tray; only the tray's Quit exits.")
     ];
 
     /// <summary>The value the checked radio carries for a raw persisted
