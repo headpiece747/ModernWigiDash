@@ -50,7 +50,9 @@ internal static class HotkeyActionExecutor
         public IntPtr ExtraInfo;
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
+    // Entry point spelled explicitly so the binding cannot drift from the
+    // export on a method rename (ADR-0020).
+    [DllImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
 
     public static async Task ExecuteAsync(IReadOnlyList<HotkeyAction> actions, CancellationToken cancellationToken)

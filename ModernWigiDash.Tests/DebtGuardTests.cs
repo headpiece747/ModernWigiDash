@@ -336,6 +336,45 @@ public sealed class DebtGuardTests
             + ". A private method nothing calls is debt (dotnet-rules 4/10): wire it up or delete it in this commit. A reflection-sensitive name gets an allow-list entry above with its reason.");
     }
 
+    // --- P/Invoke bindings ---
+
+    [TestMethod]
+    public void HouseRules_DllImports_NameTheirEntryPointExplicitly()
+    {
+        // Without an explicit EntryPoint the binding resolves to the method
+        // name, so a rename silently re-targets the call (or, when the name
+        // was never an export, the first real call throws
+        // EntryPointNotFoundException - the 2026-08-26 hotkey crash,
+        // invisible to every test because they inject fakes). Spelling the
+        // entry point makes the export a construction fact the diff shows;
+        // PInvokeBindingTests probes each spelled pair against the real DLL
+        // at the gate (ADR-0020).
+        var root = RepoScan.GetRepoRoot();
+        var violations = new List<string>();
+        foreach (var project in RepoScan.SrcProjects)
+        {
+            foreach (var file in Directory.EnumerateFiles(Path.Combine(root, project), "*.cs", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+                if (rel.Contains("/obj/") || rel.Contains("/bin/"))
+                    continue; // generated code is not house text
+
+                var code = RepoScan.StripCode(File.ReadAllText(file), stripStrings: false);
+                foreach (var dllImport in RepoScan.FindDllImports(code))
+                {
+                    if (dllImport.EntryPoint is not null)
+                        continue;
+                    violations.Add($"{rel}:{RepoScan.LineAt(code, dllImport.Index)}: [DllImport] without an explicit EntryPoint (the binding defaults to the method name)");
+                }
+            }
+        }
+
+        violations = violations.OrderBy(v => v).ToList();
+        Assert.AreEqual(0, violations.Count,
+            "P/Invoke entry points must be spelled explicitly: " + string.Join("; ", violations)
+            + ". Without EntryPoint the binding resolves to the method name, so a rename silently re-targets the call and a never-existing export crashes the first real call (the 2026-08-26 hotkey crash). Add EntryPoint = \"<export>\" to the attribute; PInvokeBindingTests probes the spelled export against the real DLL (ADR-0020).");
+    }
+
     // --- shared helpers ---
 
     private sealed class Candidate

@@ -201,6 +201,40 @@ internal static class RepoScan
     }
 
     /// <summary>
+    /// One [DllImport] attribute found in comment-only stripped code: the
+    /// attribute's index (for line mapping), its first argument (the dll
+    /// name as a string literal or a const identifier), and the spelled
+    /// entry point (null when the attribute leaves the binding to the
+    /// method name).
+    /// </summary>
+    internal sealed record DllImportRef(int Index, string DllExpression, string? EntryPoint);
+
+    /// <summary>
+    /// Finds every [DllImport] attribute in comment-only stripped code
+    /// (stripStrings: false: the dll name and the entry point live in string
+    /// literals, and the full strip would blank them; a comment that merely
+    /// names DllImport is blanked). The attribute's argument list is flat
+    /// (literals and enum references, no nested parens), so the first close
+    /// paren ends it even across line breaks.
+    /// </summary>
+    internal static List<DllImportRef> FindDllImports(string code)
+    {
+        var refs = new List<DllImportRef>();
+        foreach (Match attr in new Regex(@"\[DllImport\((?<args>[^)]*)\)").Matches(code))
+        {
+            var args = attr.Groups["args"].Value;
+            var dll = Regex.Match(args, @"^\s*(?<expr>""(?<lit>[^""]+)""|(?<ident>[A-Za-z_]\w*))");
+            var entry = Regex.Match(args, @"\bEntryPoint\s*=\s*""(?<ep>[^""]+)""");
+            refs.Add(new DllImportRef(
+                attr.Index,
+                dll.Success ? dll.Groups["expr"].Value : string.Empty,
+                entry.Success ? entry.Groups["ep"].Value : null));
+        }
+
+        return refs;
+    }
+
+    /// <summary>
     /// Blanks a source region, keeping newlines so line numbers survive.
     /// </summary>
     private static string Blank(string source, int start, int end)

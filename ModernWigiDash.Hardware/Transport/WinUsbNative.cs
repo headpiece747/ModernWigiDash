@@ -16,15 +16,19 @@ internal static class WinUsbNative
 {
     private const string WinUsbDll = "winusb.dll";
 
-    [DllImport(WinUsbDll, SetLastError = true)]
+    // Entry points are spelled explicitly so the binding resolves to the
+    // spelled export and a method rename cannot silently change what is
+    // called (ADR-0020); PInvokeBindingTests probes each pair against the
+    // real DLL at the gate.
+    [DllImport(WinUsbDll, EntryPoint = "WinUsb_Initialize", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool WinUsb_Initialize(IntPtr DeviceHandle, out IntPtr InterfaceHandle);
 
-    [DllImport(WinUsbDll, SetLastError = true)]
+    [DllImport(WinUsbDll, EntryPoint = "WinUsb_Free", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool WinUsb_Free(IntPtr InterfaceHandle);
 
-    [DllImport(WinUsbDll, SetLastError = true)]
+    [DllImport(WinUsbDll, EntryPoint = "WinUsb_SetPipePolicy", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool WinUsb_SetPipePolicy(
         IntPtr InterfaceHandle, byte PipeId, uint Id, uint Length, IntPtr Value);
@@ -34,7 +38,7 @@ internal static class WinUsbNative
     /// <summary>
     /// Synchronous bulk write using WinUsb_WritePipe with a pinned IntPtr buffer.
     /// </summary>
-    [DllImport(WinUsbDll, SetLastError = true)]
+    [DllImport(WinUsbDll, EntryPoint = "WinUsb_WritePipe", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool WinUsb_WritePipe(
         IntPtr InterfaceHandle,
@@ -54,7 +58,7 @@ internal static class WinUsbNative
         public ushort Length;
     }
 
-    [DllImport(WinUsbDll, SetLastError = true)]
+    [DllImport(WinUsbDll, EntryPoint = "WinUsb_ControlTransfer", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool WinUsb_ControlTransfer(
         IntPtr InterfaceHandle,
@@ -136,34 +140,34 @@ internal static class SetupApiNative
         public char DevicePath;
     }
 
-    [DllImport(SetupApiDll, SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport(SetupApiDll, EntryPoint = "SetupDiGetClassDevsW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr SetupDiGetClassDevsW(
         ref NativeGuid ClassGuid, string? Enumerator, IntPtr HwndParent, uint Flags);
 
-    [DllImport(SetupApiDll, SetLastError = true)]
+    [DllImport(SetupApiDll, EntryPoint = "SetupDiEnumDeviceInterfaces", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetupDiEnumDeviceInterfaces(
         IntPtr DeviceInfoSet, IntPtr DeviceInfoData, ref NativeGuid InterfaceClassGuid,
         uint MemberIndex, ref SpDeviceInterfaceData DeviceInterfaceData);
 
-    [DllImport(SetupApiDll, SetLastError = true)]
+    [DllImport(SetupApiDll, EntryPoint = "SetupDiGetDeviceInterfaceDetailW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetupDiGetDeviceInterfaceDetailW(
         IntPtr DeviceInfoSet, ref SpDeviceInterfaceData DeviceInterfaceData,
         IntPtr DeviceInterfaceDetailData, uint DeviceInterfaceDetailDataSize,
         out uint RequiredSize, IntPtr RelatedDeviceInfoData);
 
-    [DllImport(SetupApiDll, SetLastError = true)]
+    [DllImport(SetupApiDll, EntryPoint = "SetupDiDestroyDeviceInfoList", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
 
-    [DllImport(Kernel32Dll, SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport(Kernel32Dll, EntryPoint = "CreateFileW", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateFileW(
         string lpFileName, uint dwDesiredAccess, uint dwShareMode,
         IntPtr lpSecurityAttributes, uint dwCreationDisposition,
         uint dwFlagsAndAttributes, IntPtr hTemplateFile);
 
-    [DllImport(Kernel32Dll, SetLastError = true)]
+    [DllImport(Kernel32Dll, EntryPoint = "CloseHandle", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool CloseHandle(IntPtr hObject);
 }

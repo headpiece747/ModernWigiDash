@@ -190,24 +190,33 @@ internal sealed class TrackedTargetResolver
         public string ExeFile;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    // Entry points are spelled explicitly so the binding resolves to the
+    // spelled export and a method rename cannot silently change what is
+    // called (ADR-0020); PInvokeBindingTests probes each pair against the
+    // real DLL at the gate.
+    [DllImport("kernel32.dll", EntryPoint = "CreateToolhelp32Snapshot", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessId);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport("kernel32.dll", EntryPoint = "Process32First", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool Process32First(IntPtr hSnapshot, ref ProcessEntry32 lppe);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport("kernel32.dll", EntryPoint = "Process32Next", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool Process32Next(IntPtr hSnapshot, ref ProcessEntry32 lppe);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", EntryPoint = "CloseHandle", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
     private static extern IntPtr GetForegroundWindow();
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    // The method name is the bare export, but the attribute's
+    // CharSet.Unicode already resolves the call to the W export (a full
+    // window title comes back, which the A export would mangle); the
+    // spelling keeps that resolution a construction fact, not a runtime
+    // default (ADR-0020).
+    [DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
 }

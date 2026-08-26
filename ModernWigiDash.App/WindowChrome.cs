@@ -13,7 +13,9 @@ namespace ModernWigiDash.App;
 /// </summary>
 internal static class WindowChrome
 {
-    [DllImport("dwmapi.dll")]
+    // Entry point spelled explicitly so the binding cannot drift from the
+    // export on a method rename (ADR-0020).
+    [DllImport("dwmapi.dll", EntryPoint = "DwmSetWindowAttribute")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
     private const int DwmwaUseImmersiveDarkMode = 20;

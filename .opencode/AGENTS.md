@@ -141,6 +141,30 @@ is strict about shape: `MA0006` wants `string.Equals(a, b,
 StringComparison.Ordinal)` for string compares, `MA0158` wants the
 `System.Threading.Lock` struct over an `object` gate, and `S3218` refuses a
 variable that shadows an outer one (a test's `Handle` became `Hwnd`).
+Verified 2026-08-26 (hotkey entry-point crash; each hit live): a
+`[DllImport]` without an explicit `EntryPoint` binds against the *method
+name*, so an extern named `RegisterHotKeyPInvoke` resolves an export that
+does not exist and throws `EntryPointNotFoundException` on the first real
+call. Every hotkey test injects `FakeHotkeyApi`, so the production
+`HotkeyApi.Default` binding was the one unexercised surface, and the crash
+only surfaced in the on-device loop (the app died at every launch's startup
+refresh because the persisted `Ctrl+P` chord made startup register for
+real). The audit found the same shape in 20 of the 22 src `DllImport`s
+(`WinUsbNative`, `TrackedTargetResolver`, `SendInput`,
+`DwmSetWindowAttribute`). It is now pinned at the gate (ADR-0020):
+`DebtGuardTests` requires every src `[DllImport]` to spell its
+`EntryPoint`, and `PInvokeBindingTests` probes every spelled (dll, entry
+point) against the real DLL (`GetModuleHandleW`/`LoadLibraryW` +
+`GetProcAddress`, an export-table lookup that never calls the imported
+function), so a binding miss fails the gate, not the device loop. New
+`[DllImport]`s are covered automatically (the probe sweeps all src).
+Convention for the next OS-boundary feature: land the production-adapter
+pin with the feature (invoke the production binding in a test; the
+real-registry `RegistryAutostartStoreTests` and real-DPAPI
+`TwitchTokenStoreTests` precedents) - the device loop verifies, it does
+not debug. Note for the probe's own externs: `GetProcAddress` takes an
+`LPCSTR`, so its pin needs `CharSet.Ansi` (the W variants of the other
+two take `LPCWSTR` and match the default marshaling).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
@@ -332,8 +356,12 @@ so a sync diffs against the upstream repo, never the leaderboard.
   - the frame pipeline's encode + buffer pool have one entry (the
     `IRgb565Encoder.Encode` call and every `FrameBufferPool` reference sit in
     `FrameDelivery` + the pool's own file),
-  - no dead private helpers (a private method with no call site in its type's
-    files or the project XAML, transitive chains included).
+- no dead private helpers (a private method with no call site in its type's
+     files or the project XAML, transitive chains included),
+   - every P/Invoke in src spells its entry point explicitly (the
+     method-name binding is a rename away from the first-call
+     EntryPointNotFoundException; the spelled pairs are probed against the
+     real DLL by `PInvokeBindingTests`, ADR-0020).
   A violation fails the gate and the failure message spells the fix; a new
   legitimate site is a deliberate allow-list edit with a reason.
 - Branch review: incoming PRs and feature branches are reviewed with the

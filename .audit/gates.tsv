@@ -105,3 +105,5 @@
 2026-08-26T15:31:52Z	c8b8eec	fix hotkey entry point binding (registerhotkey pinvoke)	ok	0	0	FAIL	1950	1	SKIP	SKIP
 2026-08-26T15:44:53Z	c8b8eec	stabilize guard test + fix hotkey pinvoke	ok	0	0	ok	1951	0	ok	ok
 2026-08-26T15:46:23Z	c8953d9	fix hotkey entry point binding	ok	0	0	ok	1951	0	ok	ok
+2026-08-26T16:11:47Z	32f9d4e	pin P/Invoke bindings at the gate (ADR-0020)	ok	0	0	ok	1955	0	FAIL	SKIP
+2026-08-26T16:16:22Z	32f9d4e	pin P/Invoke bindings at the gate (ADR-0020)	ok	0	0	ok	1955	0	ok	ok
