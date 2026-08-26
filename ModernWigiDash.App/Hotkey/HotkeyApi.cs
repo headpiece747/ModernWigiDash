@@ -24,9 +24,17 @@ internal sealed class HotkeyApi(RegisterHotKeyFn registerHotKey, UnregisterHotKe
     internal RegisterHotKeyFn RegisterHotKey { get; } = registerHotKey;
     internal UnregisterHotKeyFn UnregisterHotKey { get; } = unregisterHotKey;
 
-    [DllImport("user32.dll", SetLastError = true)]
+    // The exports are the ANSI-only "RegisterHotKey"/"UnregisterHotKey" (no
+    // W/A suffix in user32.dll): the entry points are spelled explicitly,
+    // because the method names (the ...PInvoke suffix) are not the export
+    // names. Pinned against the real user32.dll by HotkeyApiTests, which
+    // invokes the production delegates with the zero-parameter chord (a
+    // wrong entry point still throws EntryPointNotFoundException on that
+    // first call, the 2026-08-26 crash; the chord is inert and released
+    // immediately, so no registration residue remains).
+    [DllImport("user32.dll", EntryPoint = "RegisterHotKey", SetLastError = true)]
     private static extern bool RegisterHotKeyPInvoke(IntPtr hWnd, int id, int fsModifiers, ushort vk);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", EntryPoint = "UnregisterHotKey")]
     private static extern void UnregisterHotKeyPInvoke(IntPtr hWnd, int id, ushort vk);
 }

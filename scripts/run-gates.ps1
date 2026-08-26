@@ -48,6 +48,26 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Label = (($Label -replace '[\r\n\t]', ' ').Trim())
 if ([string]::IsNullOrWhiteSpace($Label)) { $Label = 'manual' }
 
+# Capture a native command's combined output + exit code without letting
+# stderr kill the script: PS 5.1 + $ErrorActionPreference='Stop' treats
+# redirected native stderr lines as terminating errors (dotnet format
+# emits analyzer diagnostics on stderr; on 2026-08-26 that took the gate
+# down mid-format with no trail row appended). The command is a
+# scriptblock on purpose: it keeps the original inline argument syntax
+# (which dotnet parses correctly), whereas building an argument array and
+# splatting it makes PowerShell mangle flags like "-p:Name=value".
+function Get-NativeOutput {
+    param([scriptblock]$Command)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Command 2>&1 | Out-String
+        return [pscustomobject]@{ Output = $output; ExitCode = $LASTEXITCODE }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Add-GateRow {
     param(
         [string]$l, [string]$build, [string]$warn, [string]$err,
@@ -66,8 +86,9 @@ function Add-GateRow {
 }
 
 # --- 1. build (forced recompile: see the header note on --no-incremental) ---
-$buildOut = dotnet build $sln -c Release --nologo --no-incremental 2>&1 | Out-String
-$buildOk  = ($LASTEXITCODE -eq 0)
+$r = Get-NativeOutput { dotnet build $sln -c Release --nologo --no-incremental }
+$buildOut = $r.Output
+$buildOk  = ($r.ExitCode -eq 0)
 $bw = 0; $be = 0
 if ($buildOut -match '(\d+) Warning\(s\)') { $bw = [int]$Matches[1] }
 if ($buildOut -match '(\d+) Error\(s\)')    { $be = [int]$Matches[1] }
@@ -79,8 +100,9 @@ if (-not $buildOk) {
 }
 
 # --- 2. test (fresh artifacts via the temp BaseOutputPath) ---
-$testOut = dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false -v q 2>&1 | Out-String
-$testOk  = ($LASTEXITCODE -eq 0)
+$r = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false -v q }
+$testOut = $r.Output
+$testOk  = ($r.ExitCode -eq 0)
 $tp = 'n/a'; $tf = 'n/a'
 if ($testOut -match 'Failed:\s*(\d+)') { $tf = $Matches[1] }
 if ($testOut -match 'Passed:\s*(\d+)') { $tp = $Matches[1] }
@@ -92,8 +114,9 @@ if (-not $testOk) {
 }
 
 # --- 3. format ---
-$fmtOut = dotnet format $sln --verify-no-changes --verbosity quiet 2>&1 | Out-String
-$fmtOk  = ($LASTEXITCODE -eq 0)
+$r = Get-NativeOutput { dotnet format $sln --verify-no-changes --verbosity quiet }
+$fmtOut = $r.Output
+$fmtOk  = ($r.ExitCode -eq 0)
 if (-not $fmtOk) {
     Write-Output $fmtOut
     Add-GateRow -l $Label -build ok -warn $bw -err $be -test ok -passed $tp -failed $tf -fmt FAIL -prose SKIP
