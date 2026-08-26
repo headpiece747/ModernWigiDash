@@ -299,6 +299,91 @@ public class DisplayDeviceEngineTests
         Assert.IsFalse(content.Contains("Standby NOT confirmed"), "a no-device dispose is not a standby failure");
     }
 
+    // ── the non-disposing standby (the session-end path) ────────────
+
+    [TestMethod]
+    public void TryGoToStandby_WhenConfirmed_ReturnsTrueAndLeavesTheEngineAlive()
+    {
+        // The session-end path: the display reaches the vendor sleep state
+        // and the engine stays up (not disposed, connection intact) — the
+        // caller runs the teardown or is killed right after.
+        var fake = new FakeTransport { GoToStandbyResult = true };
+        using var engine = new DisplayDeviceEngine(fake, ConnectionState.Connected);
+
+        bool confirmed = engine.TryGoToStandby();
+
+        Assert.IsTrue(confirmed, "the transport's confirmed verdict must propagate");
+        Assert.IsFalse(fake.Disposed, "the standby must not dispose the transport");
+        Assert.AreEqual(ConnectionState.Connected, engine.State, "the standby must not tear down the connection state");
+    }
+
+    [TestMethod]
+    public void TryGoToStandby_WhenNotConfirmed_LogsTheVerdict()
+    {
+        // The dispose path's rule: a standby that did not confirm must leave
+        // its tagged verdict line — a silent attempt would hide a display
+        // left lit on the Welcome screen.
+        var fake = new FakeTransport(); // GoToStandbyResult defaults to false
+        using var engine = new DisplayDeviceEngine(fake);
+
+        bool confirmed = engine.TryGoToStandby();
+        FileLog.Flush();
+
+        Assert.IsFalse(confirmed, "the transport's false verdict must propagate");
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("[STANDBY] Standby NOT confirmed"),
+            "an unconfirmed standby must leave its tagged verdict line, the dispose path's rule");
+    }
+
+    [TestMethod]
+    public void TryGoToStandby_WhenHangsPastTheBudget_AbandonsAndLogsTheVerdict()
+    {
+        // The wedged-pipe scenario: a standby that wedges past
+        // StandbyCloseBudget must not freeze the caller — the bounded wait
+        // abandons it, and the log names the abandon path.
+        var fake = new FakeTransport { GoToStandbyBlockMs = 3000 };
+        using var engine = new DisplayDeviceEngine(fake);
+
+        var stopwatch = Stopwatch.StartNew();
+        bool confirmed = engine.TryGoToStandby();
+        stopwatch.Stop();
+        FileLog.Flush();
+
+        Assert.IsFalse(confirmed);
+        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"the standby must stay inside the bounded budget, took {stopwatch.Elapsed.TotalSeconds:0.0} s");
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("bounded wait expired"),
+            "the verdict must name the abandon path (the budget expired, not a failed write)");
+    }
+
+    [TestMethod]
+    public void TryGoToStandby_WhenNoTransport_ReturnsFalseSilently()
+    {
+        // Production ctor, never started: no device — the expected no-device
+        // state, and no verdict line, the no-device dispose's rule.
+        var engine = new DisplayDeviceEngine();
+
+        bool confirmed = engine.TryGoToStandby();
+        FileLog.Flush();
+
+        Assert.IsFalse(confirmed, "no device: nothing to put to standby");
+        string content = ReadLog(_logPath);
+        Assert.IsFalse(content.Contains("Standby NOT confirmed"), "a no-device standby is not a standby failure");
+    }
+
+    [TestMethod]
+    public void TryGoToStandby_WhenDisposed_ReturnsFalse()
+    {
+        // A disposed engine has no live transport and no business sending
+        // control transfers — the liveness guard refuses before any work.
+        var fake = new FakeTransport { GoToStandbyResult = true };
+        var engine = new DisplayDeviceEngine(fake);
+        engine.Dispose();
+
+        Assert.IsFalse(engine.TryGoToStandby(), "a disposed engine must refuse the standby");
+    }
+
     private static string ReadLog(string path)
     {
         if (!File.Exists(path)) return "";

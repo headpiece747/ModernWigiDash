@@ -443,6 +443,75 @@ public sealed class DisplayDeviceEngine : IDisposable
     private static void Log(string msg) => FileLog.Write(msg);
 
     /// <summary>
+    /// The non-disposing standby: the dispose path's bounded-wait,
+    /// verdict-reading sequence for a caller that wants the display in its
+    /// vendor sleep state WITHOUT tearing the engine down. The session-end
+    /// path is the production caller: a system shutdown while the display is
+    /// live kills the process mid-frame-stream, the documented wedge case
+    /// (the display has no auto-sleep, stays lit, and the next connect can
+    /// hang on the init blank-frame write until a physical unplug), so the
+    /// standby ritual runs while the session ends. Returns the truthful
+    /// verdict — true only when the transport confirmed the standby writes;
+    /// false when there is no live transport (nothing to standby), the
+    /// bounded wait expired, or the standby threw. Every non-confirmed
+    /// verdict logs through the shared STANDBY vocabulary. Safe to call
+    /// concurrently with <see cref="Dispose"/>: the transport's own
+    /// connection gate degrades a mid-dispose call to a false verdict.
+    /// </summary>
+    public bool TryGoToStandby()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0)
+        {
+            return false;
+        }
+
+        IDisplayTransport? transport;
+        lock (_lock)
+        {
+            transport = _transport;
+        }
+        if (transport is null)
+        {
+            // No device (never connected, or removed): nothing to put to
+            // standby — the expected no-device state, not a failure.
+            return false;
+        }
+
+        // The dispose path's sequence, verbatim: off-thread with the bounded
+        // StandbyCloseBudget wait (a hung device holds the control transfer
+        // out to its pipe timeout), and the verdict read from the task's
+        // Result only once Wait confirms completion (the 2026-08-21 rule:
+        // Wait(timeout) reports completion, not the result).
+        bool confirmed = false;
+        bool settled = false;
+        bool threw = false;
+        try
+        {
+            var standbyTask = Task.Run(() => transport.GoToStandby());
+            settled = standbyTask.Wait(StandbyCloseBudget);
+            if (settled)
+            {
+                confirmed = standbyTask.Result;
+            }
+        }
+        catch (Exception ex)
+        {
+            threw = true;
+            _standbyLog.Write($"Standby failed: {ex.Message}");
+        }
+        // The non-confirmed verdict is observable, the dispose path's rule:
+        // a display left lit on the Welcome screen is a fact the log must
+        // carry (a silent standby attempt would hide it).
+        if (!confirmed && !threw)
+        {
+            _standbyLog.Write(settled
+                ? "Standby NOT confirmed: the standby control writes did not succeed — the display may stay lit"
+                : "Standby NOT confirmed: the bounded wait expired — a hung standby was abandoned, and the display may stay lit");
+        }
+        return confirmed;
+    }
+
+    /// <summary>
     /// Releases all resources used by the engine.
     /// </summary>
     public void Dispose()
