@@ -1,4 +1,5 @@
 using System.IO;
+using ModernWigiDash.App.Power;
 
 namespace ModernWigiDash.Tests;
 
@@ -127,6 +128,6 @@ public class DeviceTouchDrainTests
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "profile.json");
         File.WriteAllText(path, ProfileOps.ExportJson(profile));
-        return new MainWindow(new StubPresentMonNative(), path);
+        return new MainWindow(new StubPresentMonNative(), path, new NoopPowerModeSource(), new FakeTraySurface());
     }
 }

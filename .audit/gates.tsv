@@ -87,3 +87,5 @@
 2026-08-26T00:25:36Z	05ee78f	manual	ok	0	0	ok	1856	0	ok	ok
 2026-08-26T00:45:50Z	921c652	manual	ok	0	0	ok	1864	0	ok	ok
 2026-08-26T01:04:49Z	81d2f8e	manual	ok	0	0	ok	1866	0	ok	ok
+2026-08-26T01:08:35Z	5713e60	manual	FAIL	40	8	SKIP	n/a	n/a	SKIP	SKIP
+2026-08-26T01:11:40Z	5713e60	manual	ok	0	0	ok	1866	0	ok	ok

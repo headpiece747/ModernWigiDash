@@ -1,4 +1,5 @@
 using System.IO;
+using ModernWigiDash.App.Power;
 using AppClass = ModernWigiDash.App.App;
 
 namespace ModernWigiDash.Tests;
@@ -98,7 +99,7 @@ public class TeardownPlanTests
             Path.GetTempPath(), "wmd-teardown-" + Guid.NewGuid().ToString("N"), "profile.json");
         return Host.Run(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 return window.BuildTeardownPlan();

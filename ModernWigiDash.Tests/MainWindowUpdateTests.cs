@@ -1,4 +1,5 @@
 using System.Windows;
+using ModernWigiDash.App.Power;
 using ModernWigiDash.App.Update;
 
 namespace ModernWigiDash.Tests;
@@ -16,7 +17,7 @@ public class MainWindowUpdateTests
     {
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 Assert.IsNotNull(window.UpdateButton, "the update button must exist in the header");
@@ -36,7 +37,7 @@ public class MainWindowUpdateTests
     {
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 window.ApplyUpdateState(new UpdateUiState(UpdateState.Available, "Update v0.5.0 available"));

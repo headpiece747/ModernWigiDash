@@ -1,4 +1,5 @@
 using System.IO;
+using ModernWigiDash.App.Power;
 
 namespace ModernWigiDash.Tests;
 
@@ -18,7 +19,7 @@ public class MainWindowConstructionTests
     {
         var (title, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
             string title = window.Title;
             try
             {
@@ -40,7 +41,7 @@ public class MainWindowConstructionTests
     {
         var (_, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 window.Close();
@@ -61,7 +62,7 @@ public class MainWindowConstructionTests
         var (hex, error) = Host.Invoke(() =>
         {
             string tempDir = Path.Combine(Path.GetTempPath(), "wmd-bg-" + Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(new StubPresentMonNative(), Path.Combine(tempDir, "profile.json"));
+            var window = new MainWindow(new StubPresentMonNative(), Path.Combine(tempDir, "profile.json"), new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 return (object?)window.PageBgPicker.Hex;

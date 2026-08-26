@@ -1,4 +1,5 @@
 using System.IO;
+using ModernWigiDash.App.Power;
 
 namespace ModernWigiDash.Tests;
 
@@ -121,7 +122,7 @@ public class ProfileMutationContractTests
         string profilePath = Path.Combine(Path.GetTempPath(), "wmd-mutant-" + Guid.NewGuid().ToString("N"), "profile.json");
         var (buildResult, buildError) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
             // The window's constructor persisted the starter profile
             // (snap ON) on first launch.
             Assert.IsTrue(File.ReadAllText(profilePath).Contains("\"SnapToGrid\": true"),

@@ -91,7 +91,7 @@ public class StartupWiringTests
             Path.GetTempPath(), "wmd-startup-" + Guid.NewGuid().ToString("N"), "profile.json");
         return Host.Run(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
             try
             {
                 // The constructor already applied one plan; this second build
