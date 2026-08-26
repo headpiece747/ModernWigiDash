@@ -278,14 +278,14 @@ public class WeatherPresentationTests
     public void BuildSubtitle_TieWithNoData_PromptToPick()
     {
         Assert.AreEqual("Multiple cities found \u2014 pick one in Settings",
-            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "Victoria", 2, 0));
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "Victoria", 2, 0));
     }
 
     [TestMethod]
-    public void BuildSubtitle_Priority_TieWinsOverCustomLabelConfirmation()
+    public void BuildSubtitle_TieWithResolvedCity_StillTheAmbiguityPrompt()
     {
         Assert.AreEqual("Multiple cities found \u2014 pick one in Settings",
-            WeatherPresentation.BuildSubtitle("Victoria", "Home", "Victoria", 3, 0),
+            WeatherPresentation.BuildSubtitle("Victoria", "Victoria", 3, 0),
             "the most actionable message wins — a tie beats every other prompt");
     }
 
@@ -293,33 +293,28 @@ public class WeatherPresentationTests
     public void BuildSubtitle_NoLocation_NoLocationPrompt()
     {
         Assert.AreEqual("Set a location in Settings",
-            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "", 0, 0));
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", 0, 0));
     }
 
     [TestMethod]
     public void BuildSubtitle_LocationSetButUnresolved_SpellingPrompt()
     {
         Assert.AreEqual("Check spelling \u2014 try 'City, State' or 'City, Country'",
-            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "", "Xyzzyville", 0, 0));
+            WeatherPresentation.BuildSubtitle(WeatherPresentation.UnknownLocationLabel, "Xyzzyville", 0, 0));
     }
 
     [TestMethod]
-    public void BuildSubtitle_ResolvedCityWithDifferentCustomLabel_ConfirmationShowsResolvedCity()
+    public void BuildSubtitle_ResolvedCityWithCustomLabel_NoConfirmationSubtitle()
     {
-        Assert.AreEqual("Berlin, Germany",
-            WeatherPresentation.BuildSubtitle("Berlin, Germany", "Home", "Berlin, Germany", 0, 5));
-    }
-
-    [TestMethod]
-    public void BuildSubtitle_ResolvedCityMatchingCustomLabel_NoSubtitle()
-    {
-        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "Berlin, Germany", "Berlin, Germany", 0, 5));
+        // The resolved city no longer echoes under a custom label: the
+        // confirmation line was the "still shows underneath" complaint.
+        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "Berlin, Germany", 0, 5));
     }
 
     [TestMethod]
     public void BuildSubtitle_ResolvedEverything_NoSubtitle()
     {
-        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "", "Berlin, Germany", 1, 5));
+        Assert.IsNull(WeatherPresentation.BuildSubtitle("Berlin, Germany", "Berlin, Germany", 1, 5));
     }
 
     // --- BuildStalenessText: the header staleness line ------------------------

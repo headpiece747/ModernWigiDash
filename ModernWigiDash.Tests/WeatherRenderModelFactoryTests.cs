@@ -23,10 +23,11 @@ public class WeatherRenderModelFactoryTests
             string? customLabel = null,
             string resolvedCity = "Berlin, Berlin, Germany",
             int candidateCount = 0,
-            bool locationSet = false)
+            bool locationSet = false,
+            bool hideLocation = false)
         => new(dataVersion, DesignBounds, WeatherLayout.DefaultLayoutMode,
             WeatherPresentation.DefaultUnitSystem, customLabel ?? "", resolvedCity,
-            true, true, true, true, true, candidateCount, locationSet);
+            true, true, true, true, true, hideLocation, candidateCount, locationSet);
 
     private static WeatherRenderModelInputs Inputs(
         WeatherRenderModelKey key,
@@ -141,6 +142,7 @@ public class WeatherRenderModelFactoryTests
             baseKey with { ShowWind = false },
             baseKey with { ShowHighLow = false },
             baseKey with { ShowForecast = false },
+            baseKey with { HideLocation = true },
             baseKey with { CandidateCount = 5 },
         };
 
@@ -270,6 +272,67 @@ public class WeatherRenderModelFactoryTests
         Assert.AreEqual(inputs.Key, model.Key);
     }
 
+    [TestMethod]
+    public void Resolve_HideLocation_ResolvesTheHeaderToBlank()
+    {
+        // Hide Location suppresses the location title: the resolved city
+        // renders nothing.
+        var model = WeatherRenderModelFactory.Resolve(null,
+            Inputs(Key(resolvedCity: "Paris, France", hideLocation: true)));
+
+        Assert.AreEqual("", model.TruncatedHeader,
+            "Hide Location with no custom label renders a blank header title.");
+    }
+
+    [TestMethod]
+    public void Resolve_HideLocation_UnknownLocationPlaceholder_StillBlank()
+    {
+        // The unknown-location placeholder is a location title too: it must
+        // hide with the resolved city, not only the resolved city.
+        var model = WeatherRenderModelFactory.Resolve(null,
+            Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, hideLocation: true)));
+
+        Assert.AreEqual("", model.TruncatedHeader,
+            "the unknown-location placeholder hides with Hide Location.");
+    }
+
+    [TestMethod]
+    public void Resolve_HideLocation_BlankCity_NeutralLabelAlsoHides()
+    {
+        // The neutral-label fallback is the same logical state ("no
+        // resolution") rendered another way: it hides too.
+        var model = WeatherRenderModelFactory.Resolve(null,
+            Inputs(Key(resolvedCity: "", hideLocation: true), neutralLabel: "Neutral Label"));
+
+        Assert.AreEqual("", model.TruncatedHeader,
+            "a blank resolved city hides instead of falling back to the neutral label.");
+    }
+
+    [TestMethod]
+    public void Resolve_HideLocation_WithCustomLabel_TheLabelStillShows()
+    {
+        // A custom label is the user's own title, not the location: it
+        // survives Hide Location.
+        var model = WeatherRenderModelFactory.Resolve(null,
+            Inputs(Key(resolvedCity: "Paris, France", customLabel: "Home", hideLocation: true)));
+
+        Assert.AreEqual("HOME", model.TruncatedHeader,
+            "a custom label still shows while the location title hides.");
+    }
+
+    [TestMethod]
+    public void Resolve_HideLocation_EmptyLocation_TheGuidanceSubtitleStillShows()
+    {
+        // Hide Location touches the header title only: the guidance line
+        // (set a location / check spelling / tie) is unaffected.
+        var model = WeatherRenderModelFactory.Resolve(null,
+            Inputs(Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, hideLocation: true),
+                locationText: "", candidateCount: 0, daily: [], hourly: []));
+
+        Assert.AreEqual("Set a location in Settings", model.SubtitleText,
+            "the guidance subtitle survives Hide Location.");
+    }
+
     // --- Subtitle text tests ---
 
     [TestMethod]
@@ -328,18 +391,19 @@ public class WeatherRenderModelFactoryTests
     }
 
     [TestMethod]
-    public void Resolve_CustomLabelWithResolvedCity_DrawsResolvedCityConfirmation()
+    public void Resolve_CustomLabelWithResolvedCity_NoConfirmationSubtitle()
     {
-        // User set a custom label — the widget shows the resolved city
-        // so the user can confirm the widget resolved the right place.
+        // The resolved city no longer echoes under a custom label: the
+        // confirmation subtitle was the "still shows underneath" complaint,
+        // so a labeled, resolved header draws no subtitle.
         var inputs = Inputs(
             Key(resolvedCity: "Springfield, Massachusetts, United States", customLabel: "Home"),
             candidateCount: 0);
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
-        Assert.AreEqual("Springfield, Massachusetts, United States", model.SubtitleText,
-            "A custom label with a resolved city must show the resolved city for confirmation.");
+        Assert.IsNull(model.SubtitleText,
+            "A custom label with a resolved city draws no confirmation subtitle.");
     }
 
     [TestMethod]
@@ -372,10 +436,10 @@ public class WeatherRenderModelFactoryTests
     }
 
     [TestMethod]
-    public void Resolve_TieTakesPrecedenceOverCustomLabel()
+    public void Resolve_TieWithCustomLabel_StillDrawsTheAmbiguityHint()
     {
-        // Priority: a tie with candidates always shows the ambiguity
-        // hint, even if a custom label is set.
+        // A tie with candidates shows the ambiguity hint even when a custom
+        // label is set (the label touches the header title only).
         var inputs = Inputs(
             Key(resolvedCity: "Berlin", customLabel: "Home", candidateCount: 5),
             candidateCount: 5, daily: [], hourly: []);
@@ -383,14 +447,14 @@ public class WeatherRenderModelFactoryTests
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
         Assert.AreEqual("Multiple cities found \u2014 pick one in Settings", model.SubtitleText,
-            "The tie hint must take precedence over the custom-label confirmation.");
+            "the tie hint shows even with a custom label set.");
     }
 
     [TestMethod]
-    public void Resolve_FailedResolutionTakesPrecedenceOverCustomLabel()
+    public void Resolve_FailedResolutionWithCustomLabel_StillDrawsTheSpellingHint()
     {
-        // Priority: a failed resolution with a custom label still
-        // shows the spelling guidance (the user typed something that didn't work).
+        // A failed resolution with a custom label still shows the spelling
+        // guidance (the user typed something that did not work).
         var inputs = Inputs(
             Key(resolvedCity: WeatherPresentation.UnknownLocationLabel, customLabel: "My Place"),
             locationText: "asdf", candidateCount: 0, daily: [], hourly: []);
@@ -398,7 +462,7 @@ public class WeatherRenderModelFactoryTests
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
         Assert.AreEqual("Check spelling \u2014 try 'City, State' or 'City, Country'", model.SubtitleText,
-            "A failed resolution must take precedence over the custom-label confirmation.");
+            "a failed resolution shows the spelling hint even with a custom label set.");
     }
 
     [TestMethod]

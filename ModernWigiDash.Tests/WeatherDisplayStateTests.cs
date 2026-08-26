@@ -319,8 +319,8 @@ public class WeatherDisplayStateTests
     private static readonly SKRect Bounds = new(0, 0, 1016, 592);
     private static readonly WeatherHeaderLayout Header = WeatherLayout.ComputeHeader(Bounds, 1f, 1f);
 
-    private static (WeatherRenderModelInputs, DateTime) View(WeatherDisplayState state)
-            => state.CaptureRenderView(Bounds, Header, 1f, "Detailed", "Fahrenheit (°F, mph)", "",
+    private static (WeatherRenderModelInputs, DateTime) View(WeatherDisplayState state, bool hideLocation = false)
+            => state.CaptureRenderView(Bounds, Header, 1f, "Detailed", "Fahrenheit (°F, mph)", "", hideLocation,
                 true, true, true, true, true, "Miami, Florida"); // all five display options on
 
     [TestMethod]
@@ -341,6 +341,20 @@ public class WeatherDisplayStateTests
         Assert.AreEqual(23.4, v1.CurrentTempC);
         Assert.AreEqual("Miami, Florida", v1.LocationText);
         Assert.AreEqual(Stamp, t1);
+    }
+
+    [TestMethod]
+    public void CaptureRenderView_HideLocation_RidesTheKey()
+    {
+        var state = NewState();
+        state.TryApply(ApplyRequest(FullSnapshot));
+
+        var (v1, _) = View(state);
+        var (v2, _) = View(state, hideLocation: true);
+
+        Assert.IsFalse(v1.Key.HideLocation);
+        Assert.IsTrue(v2.Key.HideLocation,
+            "the hide-location flag must ride the render-model key — the header title is a key-owned display fact");
     }
 
     [TestMethod]

@@ -87,11 +87,18 @@ internal static class WeatherRenderModelFactory
         // edit's drop) falls back to the injected neutral label, so the header
         // matches the fresh-widget seed instead of rendering blank: the same
         // logical state ("no resolution") shows the neutral label whether or
-        // not a drop has run. The subtitle already treats blank as unresolved.
+        // not a drop has run. HideLocation suppresses the location title
+        // (resolved city, the unknown-location placeholder, and the neutral
+        // fallback alike) while a custom label still shows; the guidance
+        // subtitle is unaffected.
         string cityRaw;
         if (!string.IsNullOrWhiteSpace(inputs.Key.CustomLabel))
         {
             cityRaw = inputs.Key.CustomLabel;
+        }
+        else if (inputs.Key.HideLocation)
+        {
+            cityRaw = "";
         }
         else if (!string.IsNullOrWhiteSpace(inputs.Key.ResolvedCity))
         {
@@ -118,7 +125,7 @@ internal static class WeatherRenderModelFactory
         // verdict included — the build module no longer reaches into
         // fetch-control state for a display fact).
         model.SubtitleText = WeatherPresentation.BuildSubtitle(
-            inputs.Key.ResolvedCity, inputs.Key.CustomLabel, inputs.LocationText,
+            inputs.Key.ResolvedCity, inputs.LocationText,
             inputs.CandidateCount, inputs.Daily.Count);
 
         return model;

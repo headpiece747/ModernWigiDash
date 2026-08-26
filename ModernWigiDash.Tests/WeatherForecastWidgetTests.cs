@@ -370,6 +370,7 @@ public class WeatherForecastWidgetTests
         AssertRebuilds("LayoutMode", () => widget.LayoutMode = "Compact");
         AssertRebuilds("UnitSystem", () => widget.UnitSystem = "Celsius (°C, km/h)");
         AssertRebuilds("CustomLabel", () => widget.CustomLabel = "Home");
+        AssertRebuilds("HideLocation", () => widget.HideLocation = true);
         AssertRebuilds("ShowFeelsLike", () => widget.ShowFeelsLike = false);
         AssertRebuilds("ShowHumidity", () => widget.ShowHumidity = false);
         AssertRebuilds("ShowWind", () => widget.ShowWind = false);

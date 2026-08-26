@@ -216,14 +216,16 @@ internal static class WeatherPresentation
 
     /// <summary>
     /// The subtitle guidance line below the header: the ONE spelling of the
-    /// guidance or confirmation text. The priority order ensures the most
-    /// actionable message wins — a tie always beats "set a location", a
-    /// custom label always shows the resolved city for confirmation. The
-    /// unresolved verdict (blank or the neutral unknown-location label) is a
-    /// display fact owned HERE, so the build module and the widget no longer
-    /// reach into fetch-control state for it. Null: no guidance applies.
+    /// guidance text. The priority order ensures the most actionable message
+    /// wins — a tie always beats "set a location". A custom label adds no
+    /// confirmation line: echoing the resolved city under the label was the
+    /// "still shows underneath" complaint, so a resolved city draws no
+    /// subtitle at all. The unresolved verdict (blank or the neutral
+    /// unknown-location label) is a display fact owned HERE, so the build
+    /// module and the widget no longer reach into fetch-control state for
+    /// it. Null: no guidance applies.
     /// </summary>
-    public static string? BuildSubtitle(string? resolvedCity, string customLabel, string? locationText, int candidateCount, int dailyCount)
+    public static string? BuildSubtitle(string? resolvedCity, string? locationText, int candidateCount, int dailyCount)
     {
         bool isUnresolved = string.IsNullOrWhiteSpace(resolvedCity)
             || string.Equals(resolvedCity, UnknownLocationLabel, StringComparison.Ordinal);
@@ -238,16 +240,10 @@ internal static class WeatherPresentation
             // No location set yet.
             return "Set a location in Settings";
         }
-        if (isUnresolved && !string.IsNullOrWhiteSpace(locationText))
+        if (isUnresolved)
         {
             // Location was set but failed to resolve.
             return "Check spelling \u2014 try 'City, State' or 'City, Country'";
-        }
-        if (!isUnresolved && !string.IsNullOrWhiteSpace(customLabel)
-            && !string.Equals(customLabel, resolvedCity, StringComparison.Ordinal))
-        {
-            // Custom label set: show the resolved city for confirmation.
-            return resolvedCity;
         }
         return null;
     }

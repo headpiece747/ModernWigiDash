@@ -26,6 +26,10 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     [WidgetProperty("Location", WidgetPropertyType.Text, "City name, ZIP/postal code, or lat,lon (e.g. 40.71,-74.00)", "Miami, Florida")]
     public string Location { get; set; } = "Miami, Florida";
 
+    /// <summary>The "Hide Location" property: hide the location name from the header title.</summary>
+    [WidgetProperty("Hide Location", WidgetPropertyType.Boolean, "Hide the location name from the header (a custom label still shows)", false)]
+    public bool HideLocation { get; set; } = false;
+
     /// <summary>The "Custom Label" property: the custom title display name override.</summary>
     [WidgetProperty("Custom Label", WidgetPropertyType.Text, "Custom title display name override", "")]
     public string CustomLabel { get; set; } = "";
@@ -491,7 +495,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // input back — the build module receives a torn-write-free view.
         var (buildInputs, lastSuccessFetchTime) = _displayState.CaptureRenderView(
             bounds, header, s,
-            LayoutMode, UnitSystem, CustomLabel,
+            LayoutMode, UnitSystem, CustomLabel, HideLocation,
             ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast,
             Location);
 

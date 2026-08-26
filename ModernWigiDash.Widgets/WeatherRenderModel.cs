@@ -8,8 +8,11 @@ namespace ModernWigiDash.Widgets;
 /// location's emptiness rides here, not in the data version: it changes the
 /// subtitle's guidance line while no fetch applies (a failed or pending
 /// fetch never bumps the version), so a location edit with no data must
-/// still rebuild. Built once per build; the cache hit test is a single
-/// record comparison.
+/// still rebuild. HideLocation rides here too: it changes the header title
+/// (the resolved city, the unknown-location placeholder, and the neutral
+/// fallback alike render nothing while a custom label still shows) without
+/// any fetch or data bump. Built once per build; the cache hit test is a
+/// single record comparison.
 /// </summary>
 internal sealed record WeatherRenderModelKey(
     int DataVersion,
@@ -23,6 +26,7 @@ internal sealed record WeatherRenderModelKey(
     bool ShowWind,
     bool ShowHighLow,
     bool ShowForecast,
+    bool HideLocation,
     int CandidateCount,
     bool LocationSet = false);
 

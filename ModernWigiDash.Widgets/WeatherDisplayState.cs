@@ -260,7 +260,7 @@ internal sealed class WeatherDisplayState
     /// </summary>
     internal (WeatherRenderModelInputs Inputs, DateTime LastSuccessFetchTime) CaptureRenderView(
         SKRect bounds, WeatherHeaderLayout header, float scale,
-        string layoutMode, string unitSystem, string customLabel,
+        string layoutMode, string unitSystem, string customLabel, bool hideLocation,
         bool showFeelsLike, bool showHumidity, bool showWind, bool showHighLow, bool showForecast,
         string location)
     {
@@ -278,6 +278,7 @@ new WeatherRenderModelKey(
                     state.DataVersion, bounds,
                     layoutMode, unitSystem, customLabel, _identity.ResolvedName,
                     showFeelsLike, showHumidity, showWind, showHighLow, showForecast,
+                    hideLocation,
                     _identity.Candidates.Count,
                     LocationSet: !string.IsNullOrWhiteSpace(location)),
                 state.WeatherCode, state.IsDay, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
