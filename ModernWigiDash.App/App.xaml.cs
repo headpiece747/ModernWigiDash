@@ -13,6 +13,14 @@ public partial class App : Application
     /// MainWindow's Closed handler before any teardown dispose runs.</summary>
     internal static volatile bool IsClosing;
 
+    /// <summary>The autostart-minimized start flag (ADR-0019): set from the
+    /// launch args (<see cref="StartupLaunchPolicy.StartupMinimizedArg"/>, the
+    /// flag the HKCU Run entry appends to the exe path) before the StartupUri
+    /// window is constructed, and read once by MainWindow's ctor, which opens
+    /// the window minimized under it. Under a test host the flag is set
+    /// directly (the host's launch args never carry it).</summary>
+    internal static volatile bool StartMinimized;
+
     /// <summary>The single-instance guard (the primary owns the named
     /// handles; the kernel releases them on process death, so a force-killed
     /// instance can never wedge the next launch). Null on the secondary
@@ -103,6 +111,11 @@ public partial class App : Application
     /// <param name="e">Startup event arguments.</param>
     protected override void OnStartup(StartupEventArgs e)
     {
+        // The autostart flag (ADR-0019) is read before anything else: the
+        // StartupUri window is constructed after OnStartup returns, and the
+        // window's ctor consumes the flag to open minimized.
+        StartMinimized = StartupLaunchPolicy.RequestsMinimizedStart(e.Args);
+
         // The guard is production-only: under a test host the entry assembly
         // is the test runner, and the guard's second-launch path (signal the
         // running instance, then Shutdown) would shut down the test's own

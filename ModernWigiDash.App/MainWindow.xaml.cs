@@ -62,6 +62,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// when the behavior is on.</summary>
     private bool _quitting;
 
+    /// <summary>
+    /// The one-shot autostart-minimize latch (ADR-0019): armed around the
+    /// startup WindowState write so the minimize-to-tray intercept
+    /// (ADR-0018, M2) cannot hide the window the autostart path deliberately
+    /// opened minimized. The startup state change's own event consumes it
+    /// (the handler check-clears before its other guards), and the explicit
+    /// clear after the write keeps it one-shot if no event fires for the
+    /// change - so the first real user minimize is never swallowed.
+    /// </summary>
+    private bool _startupMinimizeLatch;
+
 #pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
     // application, and edit-mode manipulation decisions live in InputController;
@@ -94,6 +105,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DiagLog _hwLog = new("HW", 1);
     private readonly DiagLog _profileLog = new("PROFILE", 1);
     private readonly DiagLog _trayLog = new("TRAY", 1);
+    private readonly DiagLog _startupLog = new("AUTOSTART", 1);
 
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
@@ -121,6 +133,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// test host (whose engine is the real engine - a unit test must never
     /// drive a standby ritual at the user's attached display).</summary>
     private readonly Func<bool>? _sessionEndStandby;
+
+    /// <summary>
+    /// The autostart seam (ADR-0019): read, write, and delete of the app's
+    /// HKCU Run entry. Production is the registry adapter; a window-level
+    /// test swaps in an in-memory fake the way it swaps the tray surface -
+    /// no constructor chain change.
+    /// </summary>
+    internal IAutostartStore AutostartStore { get; set; } = new RegistryAutostartStore();
 
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
@@ -191,6 +211,20 @@ public partial class MainWindow : Window, IModernWigiDashContext
         foreach (WiringStep step in BuildStartupWiring(presentMonNative, profilePath, powerModeSource).OrderedSteps)
         {
             step.Run();
+        }
+
+        // The autostart path (ADR-0019): a launch carrying the --startup flag
+        // (the HKCU Run entry's command line) opens the window minimized - the
+        // user sees the window they just signed in with, and the display
+        // streams either way. The latch (armed around the write below) keeps
+        // the minimize-to-tray intercept from hiding it at sign-in; the
+        // explicit clear keeps the latch one-shot if WPF raises no state
+        // change for the startup write.
+        if (App.StartMinimized)
+        {
+            _startupMinimizeLatch = true;
+            WindowState = WindowState.Minimized;
+            _startupMinimizeLatch = false;
         }
     }
 
@@ -1108,6 +1142,16 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// </summary>
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
+        // The autostart minimize (ADR-0019) is deliberate, not a user
+        // minimize: the one-shot latch vetoes the hide for the startup state
+        // change only, and it is cleared here before the other guards (the
+        // explicit clear in the ctor covers the no-event path), so the first
+        // real user minimize still intercepts.
+        if (_startupMinimizeLatch)
+        {
+            _startupMinimizeLatch = false;
+            return;
+        }
         if (!_wired || WindowState != WindowState.Minimized)
         {
             return;
@@ -1144,6 +1188,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _themeApplicator,
             currentCloseBehavior: _profile.CloseBehavior,
             onCommitCloseBehavior: CommitCloseBehavior,
+            currentAutostart: AutostartStore.TryGetCommandLine() is not null,
+            onCommitAutostart: CommitAutostart,
             onExportProfile: ExportProfile,
             onImportProfile: ImportProfile).ShowDialog();
     }
@@ -1159,6 +1205,34 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         _profile.CloseBehavior = value;
         _profilePersistence.MarkDirty();
+    }
+
+    /// <summary>
+    /// The Start-with-Windows write-through from the settings hub (ADR-0019):
+    /// the checkbox's check is the change, so the Run entry is written or
+    /// deleted in place - no Apply step to forget, and the profile is
+    /// untouched (the entry is deliberately outside it, so an imported
+    /// profile cannot overwrite it). The command line points at the
+    /// currently running exe with the --startup flag; an unresolvable exe
+    /// path is a refusal log line, never a throw into the dialog.
+    /// </summary>
+    private void CommitAutostart(bool enabled)
+    {
+        if (!enabled)
+        {
+            AutostartStore.SetCommandLine(null);
+            _startupLog.Write("Run entry removed (Start with Windows off)");
+            return;
+        }
+        string? exePath = Environment.ProcessPath;
+        if (exePath is null)
+        {
+            _startupLog.Write("Run entry not written: the running exe path could not be resolved");
+            return;
+        }
+        string commandLine = AutostartPolicy.BuildCommandLine(exePath);
+        AutostartStore.SetCommandLine(commandLine);
+        _startupLog.Write(() => $"Run entry written ({commandLine})");
     }
 
     private static void Log(string msg) => FileLog.Write(msg);

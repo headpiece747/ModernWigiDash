@@ -8,16 +8,20 @@ namespace ModernWigiDash.App.Dialogs;
 /// <see cref="SettingsModel"/> display facts. Appearance opens the existing
 /// <see cref="ThemeDialog"/> as a nested modal; Behavior's close-behavior
 /// radios write through to the window's commit seam the moment they are
-/// checked (there is no Apply step: the radio write is the change, and the
-/// window marks the profile dirty there); Profile's export/import buttons
-/// route to the window's file flows. Closing the dialog (button, X, or
-/// Escape) simply ends the hub - nothing is pending.
+/// checked, and the Start-with-Windows checkbox (ADR-0019) writes or deletes
+/// the app's HKCU Run entry the same way (the registry is the single source
+/// of truth, so the checkbox seeds from the entry's presence); there is no
+/// Apply step anywhere - the control write is the change, and the window
+/// marks the profile dirty where the profile is what changed. Profile's
+/// export/import buttons route to the window's file flows. Closing the
+/// dialog (button, X, or Escape) simply ends the hub - nothing is pending.
 /// </summary>
 internal sealed class SettingsDialog : Window
 {
     private readonly ThemeApplicator _themeApplicator;
     private readonly SettingsModel _model = new();
     private readonly Action<string> _onCommitCloseBehavior;
+    private readonly Action<bool> _onCommitAutostart;
     private readonly Action _onExportProfile;
     private readonly Action _onImportProfile;
     private readonly Dictionary<string, RadioButton> _radioByValue = [];
@@ -32,6 +36,13 @@ internal sealed class SettingsDialog : Window
     /// <param name="onCommitCloseBehavior">Fires with the behavior value the
     /// moment a radio is checked. The window writes the profile and marks it
     /// dirty.</param>
+    /// <param name="currentAutostart">Whether the app's Run entry exists -
+    /// the store's presence, read by the window before the hub opens. The
+    /// registry is the single source of truth, so the checkbox seeds from
+    /// the entry's current state.</param>
+    /// <param name="onCommitAutostart">Fires with the checkbox's new state
+    /// the moment it is checked or unchecked. The window writes or deletes
+    /// the Run entry (the write is the change, like the radio writes).</param>
     /// <param name="onExportProfile">Fires on the Profile group's export
     /// button (the window's SaveFileDialog + ProfileOps flow).</param>
     /// <param name="onImportProfile">Fires on the Profile group's import
@@ -41,11 +52,14 @@ internal sealed class SettingsDialog : Window
         ThemeApplicator themeApplicator,
         string? currentCloseBehavior,
         Action<string> onCommitCloseBehavior,
+        bool currentAutostart,
+        Action<bool> onCommitAutostart,
         Action onExportProfile,
         Action onImportProfile)
     {
         _themeApplicator = themeApplicator;
         _onCommitCloseBehavior = onCommitCloseBehavior;
+        _onCommitAutostart = onCommitAutostart;
         _onExportProfile = onExportProfile;
         _onImportProfile = onImportProfile;
 
@@ -61,7 +75,7 @@ internal sealed class SettingsDialog : Window
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
-        Content = BuildUi(currentCloseBehavior);
+        Content = BuildUi(currentCloseBehavior, currentAutostart);
 
         PreviewKeyDown += (_, e) =>
         {
@@ -73,7 +87,7 @@ internal sealed class SettingsDialog : Window
         };
     }
 
-    private Grid BuildUi(string? currentCloseBehavior)
+    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart)
     {
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
@@ -99,7 +113,7 @@ internal sealed class SettingsDialog : Window
         var sections = new (SettingsModel.Group Group, UIElement Content)[]
         {
             (SettingsModel.Groups[0], BuildAppearanceGroup()),
-            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior)),
+            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart)),
             (SettingsModel.Groups[2], BuildProfileGroup())
         };
         foreach (var (group, content) in sections)
@@ -154,7 +168,7 @@ internal sealed class SettingsDialog : Window
         return row;
     }
 
-    private UIElement BuildBehaviorGroup(string? currentCloseBehavior)
+    private UIElement BuildBehaviorGroup(string? currentCloseBehavior, bool currentAutostart)
     {
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
         row.Children.Add(BuildRowLabel("Close the window"));
@@ -181,6 +195,27 @@ internal sealed class SettingsDialog : Window
             radio.IsChecked = string.Equals(option.Value, checkedValue, StringComparison.Ordinal);
             radio.Checked += (_, _) => _onCommitCloseBehavior(option.Value);
         }
+
+        // The Start with Windows row (ADR-0019): the checkbox's check is the
+        // change, like the radios - the Run entry is written or deleted
+        // through the seam with no Apply step. The seed precedes the
+        // subscription, so opening the hub with the entry present commits
+        // nothing.
+        row.Children.Add(BuildRowLabel("Start with Windows", topMargin: 12));
+        row.Children.Add(BuildRowHint(
+            "Launches the app at sign-in with the window minimized; the display streams either way."));
+        var autostart = new CheckBox
+        {
+            Content = "Start with Windows",
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 6, 0, 0),
+            IsChecked = currentAutostart
+        };
+        autostart.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
+        row.Children.Add(autostart);
+        autostart.Checked += (_, _) => _onCommitAutostart(true);
+        autostart.Unchecked += (_, _) => _onCommitAutostart(false);
 
         return row;
     }
@@ -211,13 +246,14 @@ internal sealed class SettingsDialog : Window
         return row;
     }
 
-    private static TextBlock BuildRowLabel(string text)
+    private static TextBlock BuildRowLabel(string text, double topMargin = 0)
     {
         var label = new TextBlock
         {
             Text = text,
             FontSize = 11,
-            FontWeight = FontWeights.SemiBold
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, topMargin, 0, 0)
         };
         label.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
         return label;
