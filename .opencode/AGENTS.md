@@ -57,8 +57,12 @@ breaks multi-TFM builds (NETSDK1005: one project.assets.json per TFM, the
 last restore wins); use a temp `-p:BaseOutputPath` for temp output instead.
 git 2.55 with `text=auto` classifies a file containing a lone CR (a CR not
 followed by LF) as binary (`i/-text w/-text`), so `git add` stores raw bytes
-and the diff becomes a whole-file EOL change: before committing, scan the
-modified files for a stray 0x0D not followed by 0x0A. The PowerShell tool
+and the diff becomes a whole-file EOL change: the pre-commit hook now scans
+the staged blobs for a stray 0x0D not followed by 0x0A
+(`scripts/scan-staged-cr.ps1`, skipping files git itself treats as binary
+via its NUL-in-first-8KB heuristic) and refuses the commit, so the manual
+scan step is retired (the temp-dir `scan-lone-cr.ps1`, which scanned the
+working tree instead of the index, is obsolete). The PowerShell tool
 transport strips backticks and mangles `$` variables inside inline commands;
 for multi-step byte/regex work, write a `.ps1` to the temp dir and run it
 with `-File`. Verified 2026-08-26 (close-to-tray verification session; each
@@ -100,6 +104,43 @@ WmdUser32 terminator deleted `Ensure-WinMsg`); and Windows PowerShell 5.1's
 expression-bodied method (`public static bool F() => Expr;`) fails with
 "; expected" at the `=>`: use a regular method body (lambdas and `var` are
 C# 3 and compile fine; hit live in the harness's `WmdWinMsg` Add-Type).
+Verified 2026-08-26 (manager-parity session; each hit live): an incremental
+`dotnet build` reports 0 warnings for UP-TO-DATE projects and can even
+report UP-TO-DATE over changed content when its timestamp check is stale
+(a real CS8600 hid that way): the gate's build stage now force-recompiles
+(`--no-incremental`, 2026-08-26), and a manual warning-clean claim on a
+changed project still needs `dotnet build <project> -c Release
+--no-incremental`. `dotnet format` enforces trailing whitespace, final
+newlines, and line endings but never indentation (a deliberately
+de-indented collection-expression line went uncorrected; two indent
+defects shipped in `9d9eae3` and were fixed in `c15797f`): after any edit
+that touches a multi-line statement or collection expression, verify the
+edited region's leading whitespace by byte inspection, and do not trust
+`git show | Select-Object` for that (the tool output mangles leading
+spaces). The `edit` tool's mid-line `oldString` match can consume or add
+indentation around the match; verify the region after the edit the same
+way. The `write` tool omits the final newline (the format gate catches it
+in `.md`; add it for scripts). The `grep` tool's path parameter is
+unreliable here; use `bash` + `Select-String` / `Get-Content`. PS 5.1 has
+no `Set-Content -Encoding UTF8NoBOM` (a .NET Core alias); use the `edit`
+tool or `[System.IO.File]::WriteAllText` with `UTF8Encoding($false)`. The
+drive-qualifier trap also bites `$_`: `"LINE$_: text"` is a ParserError,
+not just `"$var: text"`; use `${var}:` or string concatenation. `FileLog`
+cadence-flushes (8 KB / 250 ms), so a window test that reads the
+redirected log must `FileLog.Flush()` first and open the file with
+`FileShare.ReadWrite`. `HwndSource.HandleMessage` is internal: a window
+test posts a Win32 message (e.g. `WM_HOTKEY`) with a `PostMessage`
+P/Invoke and pumps the dispatcher with a `DispatcherFrame`/`PushFrame`
+loop. `HotkeyActionExecutor.ParseVirtualKey` uppercases the main key (a
+`ctrl+x` test expects `'X'`), and the WM_HOTKEY modifier word carries
+`MOD_NOREPEAT` (`0x4000`) because it always rides the registration (a
+Ctrl+Alt+Shift chord reads `16391`). A collection expression cannot target
+a non-generic `ICollection` (CS9174; use `new[]`), and a cref like
+`<c>Process.Start</c>` is ambiguous (CS0419; qualify it). The analyzer set
+is strict about shape: `MA0006` wants `string.Equals(a, b,
+StringComparison.Ordinal)` for string compares, `MA0158` wants the
+`System.Threading.Lock` struct over an `object` gate, and `S3218` refuses a
+variable that shadows an outer one (a test's `Handle` became `Hwnd`).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
@@ -253,7 +294,13 @@ so a sync diffs against the upstream repo, never the leaderboard.
   `end_of_line` to `.editorconfig`, it recreates a ~45,000-error wall on
   Windows checkouts)
 - Full gate run (build → test → format → prose, stops at first failure,
-  appends one trail row per run to `.audit/gates.tsv`):
+  appends one trail row per run to `.audit/gates.tsv`). The build stage is
+  a forced recompile (`--no-incremental`): the row's warning column covers
+  every project every run, and an mtime-stale incremental build can never
+  report UP-TO-DATE over changed content (a real CS8600 hid exactly that
+  way, 2026-08-26); if the app is running from `bin\Release` the forced
+  recompile fails on a locked output file, so stop the app (the harness
+  `stop`) and re-run:
   `scripts\run-gates.ps1`, use it for full gate runs instead of the three
   commands above. The prose stage is the 2026-08-23 em-dash sweep's scope,
   kept honest by the gate: no em dash (U+2014) in living prose (`.md`
@@ -265,8 +312,12 @@ so a sync diffs against the upstream repo, never the leaderboard.
   and the run is at most 60 min old (`-MaxAgeMinutes` on the guard). Install
   once per clone with `git config core.hooksPath scripts/hooks` (the hook file
   `scripts/hooks/pre-commit` is committed; the activation is local config).
-  Logic lives in `scripts/gate-guard.ps1` (testable via `-GatesFile`). Escape
-  per invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'`.
+  Logic lives in `scripts/gate-guard.ps1` (testable via `-GatesFile`); the
+  hook then runs `scripts/scan-staged-cr.ps1`, which refuses the commit
+  when a staged text file (git's own binary heuristic aside) carries a
+  lone CR (the git 2.55 `text=auto` binary-classification trap). Escape
+  per invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate
+  check; the CR scan still runs).
 - Debt guardrails (`DebtGuardTests`, runs in the gate's test stage, so the
   commit guard enforces them before every commit): the mechanical debt layer
   is machine-pinned against the src tree (raw scan, the `ArchitectureTests`
