@@ -189,7 +189,7 @@ public class HotkeyButtonWidgetTests
         {
             var action = HotkeyActionCatalog.Create(entry.Name, "ignored");
             Assert.AreEqual(HotkeyActionKind.MediaKey, action.Kind, entry.Name);
-            Assert.AreEqual(entry.MediaKey, action.Value, entry.Name);
+            Assert.AreEqual(entry.FixedValue, action.Value, entry.Name);
         }
 
         // The derived loop above is self-referential (both sides read the
@@ -257,10 +257,110 @@ public class HotkeyButtonWidgetTests
     {
         Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Launch App"));
         Assert.IsTrue(HotkeyActionCatalog.NeedsCommand("Open URL"));
-        foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.MediaKey is not null))
+        foreach (var entry in HotkeyActionCatalog.Entries.Where(e => e.FixedValue is not null))
         {
             Assert.IsFalse(HotkeyActionCatalog.NeedsCommand(entry.Name), entry.Name);
         }
+    }
+
+    [TestMethod]
+    public void HotkeyActionCatalog_PageNavigateActions_CarryTheirFixedDelta()
+    {
+        // The page-flip actions: the fixed delta rides the entry (the "MediaKey"
+        // field renamed to the general "FixedValue"), and neither needs a
+        // command value - the fire path routes them through the context.
+        var next = HotkeyActionCatalog.Create("Next Page", "ignored");
+        Assert.AreEqual(HotkeyActionKind.PageNavigate, next.Kind);
+        Assert.AreEqual("1", next.Value);
+        var previous = HotkeyActionCatalog.Create("Previous Page", "ignored");
+        Assert.AreEqual(HotkeyActionKind.PageNavigate, previous.Kind);
+        Assert.AreEqual("-1", previous.Value);
+        Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Next Page"));
+        Assert.IsFalse(HotkeyActionCatalog.NeedsCommand("Previous Page"));
+    }
+
+    [TestMethod]
+    public async Task OnTouch_PageNavigateAction_RoutesToTheContextInsteadOfTheExecutor()
+    {
+        var executor = new FakeExecutor();
+        var context = new TestContext();
+        var widget = new HotkeyButtonWidget
+        {
+            ActionType = "Next Page",
+            ActionCommand = ""
+        };
+        widget.ActionExecutor = executor.Execute;
+        await widget.InitializeAsync(context).ConfigureAwait(false);
+
+        widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
+
+        await TestWait.WaitUntilAsync(() => context.NavigatePageCalls.Count > 0, TimeSpan.FromSeconds(2));
+        CollectionAssert.AreEqual(new[] { 1 }, context.NavigatePageCalls,
+            "the page-flip action routes the delta through the context seam");
+        Assert.AreEqual(0, executor.Calls, "the SendInput executor never sees a page-flip action");
+    }
+
+    [TestMethod]
+    public async Task OnTouch_PreviousPageAction_SendsTheNegativeDelta()
+    {
+        var context = new TestContext();
+        var widget = new HotkeyButtonWidget { ActionType = "Previous Page" };
+        widget.ActionExecutor = new FakeExecutor().Execute;
+        await widget.InitializeAsync(context).ConfigureAwait(false);
+
+        widget.OnTouch(new SKPoint(10, 10), TouchEventType.TouchUp);
+
+        await TestWait.WaitUntilAsync(() => context.NavigatePageCalls.Count > 0, TimeSpan.FromSeconds(2));
+        CollectionAssert.AreEqual(new[] { -1 }, context.NavigatePageCalls);
+    }
+
+    [TestMethod]
+    public void GlobalHotkey_ParsesToTheRegisterHotKeyOperands()
+    {
+        var widget = new HotkeyButtonWidget { GlobalHotkey = "Ctrl+Alt+X" } as IGlobalHotkeyProvider;
+
+        Assert.IsTrue(widget.TryGetGlobalHotkey(out int flags, out ushort vk, out string chord));
+        Assert.AreEqual(GlobalHotkeyChordPolicy.ModControl | GlobalHotkeyChordPolicy.ModAlt, flags);
+        Assert.AreEqual((ushort)'X', vk);
+        Assert.AreEqual("Ctrl+Alt+X", chord);
+    }
+
+    [TestMethod]
+    public void GlobalHotkey_BlankOrUnparseableChord_IsNone()
+    {
+        foreach (string value in new[] { "", "   ", "F1", "Ctrl", "Ctrl+Ctrl+X", "Ctrl+Nope" })
+        {
+            var provider = new HotkeyButtonWidget { GlobalHotkey = value } as IGlobalHotkeyProvider;
+            Assert.IsFalse(provider.TryGetGlobalHotkey(out _, out _, out _), $"the chord {value} must parse to none");
+        }
+    }
+
+    [TestMethod]
+    public async Task FireGlobalHotkey_UsesTheSameFirePathAsATap()
+    {
+        var executor = new FakeExecutor();
+        var provider = new HotkeyButtonWidget
+        {
+            ActionType = "Mute",
+            ActionCommand = ""
+        } as IGlobalHotkeyProvider;
+        ((HotkeyButtonWidget)provider).ActionExecutor = executor.Execute;
+
+        provider.FireGlobalHotkey();
+
+        await TestWait.WaitUntilAsync(() => executor.Calls > 0, TimeSpan.FromSeconds(2));
+        Assert.AreEqual(1, executor.Calls, "the hotkey trigger is the tap's single fire entry");
+    }
+
+    [TestMethod]
+    public void GetEditorKind_GlobalHotkey_IsTheKeyCaptureEditor()
+    {
+        var widget = new HotkeyButtonWidget();
+        var provider = (IWidgetEditorProvider)widget;
+
+        var property = typeof(HotkeyButtonWidget).GetProperty(nameof(HotkeyButtonWidget.GlobalHotkey));
+        Assert.IsNotNull(property, "the GlobalHotkey property must exist on the widget");
+        Assert.AreEqual(EditorKind.KeyCapture, provider.GetEditorKind(property));
     }
 
     [TestMethod]

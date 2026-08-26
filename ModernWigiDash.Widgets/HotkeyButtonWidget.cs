@@ -10,7 +10,7 @@ namespace ModernWigiDash.Widgets;
 /// mode can drag (the IWidgetIconGrab seam).
 /// </summary>
 [WidgetMetadata("hotkey_button", "Hotkey", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
-public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab
+public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab, IGlobalHotkeyProvider
 {
     /// <summary>The "Button Label": the text displayed on the button.</summary>
     [WidgetProperty("Button Label", WidgetPropertyType.Text, "Text displayed on button", "Hotkey")]
@@ -21,8 +21,12 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     public string Description { get; set; } = "Tap to run";
 
     /// <summary>The "Action Type": which trigger the tap runs (the HotkeyActionCatalog name set).</summary>
-    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute")]
+    [WidgetProperty("Action Type", WidgetPropertyType.Choice, "Trigger action type", HotkeyActionCatalog.DefaultName, "Launch App", "Open URL", "Media Play / Pause", "Media Next", "Media Previous", "Media Stop", "Volume Up", "Volume Down", "Mute", "Next Page", "Previous Page")]
     public string ActionType { get; set; } = HotkeyActionCatalog.DefaultName;
+
+    /// <summary>The "Global Hotkey": the OS-level chord that fires this button (blank = none; edited with the key-capture editor).</summary>
+    [WidgetProperty("Global Hotkey", WidgetPropertyType.Text, "OS-level hotkey that fires this button (blank = none).", "")]
+    public string GlobalHotkey { get; set; } = "";
 
     /// <summary>The "Action Path/Command": the executable, file, folder, or URL the action type targets.</summary>
     [WidgetProperty("Action Path/Command", WidgetPropertyType.Path, "Executable, file, folder, or URL. You can type a URL or select a local path.", "")]
@@ -312,6 +316,17 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         try
         {
             var action = HotkeyActionCatalog.Create(ActionType, ActionCommand);
+            if (action.Kind == HotkeyActionKind.PageNavigate
+                && int.TryParse(action.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int delta))
+            {
+                // The page-flip actions route through the context (the
+                // window's SwitchToPage, whose SetActivePageIndex gate clamps
+                // the boundary identically to a swipe), not the SendInput
+                // executor.
+                Context?.NavigatePage(delta);
+                Context?.RequestRender();
+                return;
+            }
             if (string.IsNullOrWhiteSpace(action.Value) && HotkeyActionCatalog.NeedsCommand(ActionType))
             {
                 Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
@@ -351,6 +366,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     {
         if (string.Equals(property.Name, nameof(IconFile), StringComparison.Ordinal)) return EditorKind.IconPicker;
         if (string.Equals(property.Name, nameof(ActionCommand), StringComparison.Ordinal)) return EditorKind.ActionCommand;
+        if (string.Equals(property.Name, nameof(GlobalHotkey), StringComparison.Ordinal)) return EditorKind.KeyCapture;
         return null;
     }
 
@@ -377,6 +393,29 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// <returns>True when the selected type needs a command.</returns>
     public bool IsActionCommandVisible(string? actionTypeValue)
         => actionTypeValue != null && HotkeyActionCatalog.NeedsCommand(actionTypeValue);
+
+    // -- IGlobalHotkeyProvider (the window's discovery seam) -------------------
+    // The window (the HWND owner) registers the chord and routes WM_HOTKEY to
+    // the fire path; the widget keeps the chord vocabulary (the parse is the
+    // Widgets-layer policy) and the single fire entry (tap and hotkey share
+    // the gate, timeout, and failure logging).
+
+    /// <summary>The stored chord parsed into its RegisterHotKey operands (the GlobalHotkeyChordPolicy rules).</summary>
+    bool IGlobalHotkeyProvider.TryGetGlobalHotkey(out int modFlags, out ushort virtualKey, out string chord)
+    {
+        if (GlobalHotkeyChordPolicy.TryParseChord(GlobalHotkey, out modFlags, out virtualKey))
+        {
+            chord = GlobalHotkey.Trim();
+            return true;
+        }
+        modFlags = 0;
+        virtualKey = 0;
+        chord = "";
+        return false;
+    }
+
+    /// <summary>Fires the configured action - the same entry point as a touch-up.</summary>
+    void IGlobalHotkeyProvider.FireGlobalHotkey() => _ = ExecuteActionsAsync();
 
 
     /// <summary>Cancels any in-flight action and disposes the hoisted paints and the action gate.</summary>

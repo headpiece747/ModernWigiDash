@@ -11,7 +11,8 @@ internal enum HotkeyActionKind
     Delay,
     Launch,
     OpenUrl,
-    MediaKey
+    MediaKey,
+    PageNavigate
 }
 
 /// <summary>
@@ -35,6 +36,7 @@ internal sealed class HotkeyAction
             HotkeyActionKind.OpenUrl => $"Open {Value}",
             HotkeyActionKind.Delay => $"Wait {Math.Max(0, DelayMs)} ms",
             HotkeyActionKind.MediaKey => $"Media: {MediaKeyCatalog.GetDisplayName(Value) ?? Value}",
+            HotkeyActionKind.PageNavigate => string.Equals(Value, "-1", StringComparison.Ordinal) ? "Previous page" : "Next page",
             _ => $"{Kind}: {Value}"
         };
 }

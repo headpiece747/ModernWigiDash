@@ -12,7 +12,9 @@ public enum EditorKind
     /// <summary>The action-command editor (the executable, file, or URL a hotkey action runs).</summary>
     ActionCommand,
     /// <summary>The location-search editor (the weather widget's geocode pick list).</summary>
-    LocationSearch
+    LocationSearch,
+    /// <summary>The key-capture editor (the hotkey widget's global-hotkey chord).</summary>
+    KeyCapture
 }
 
 /// <summary>

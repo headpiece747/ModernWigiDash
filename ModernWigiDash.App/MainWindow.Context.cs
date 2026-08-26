@@ -1,3 +1,5 @@
+using ModernWigiDash.Widgets;
+
 namespace ModernWigiDash.App;
 
 /// <summary>
@@ -91,6 +93,38 @@ public partial class MainWindow
             placed.PropertyValues[propertyName] = value;
             _profilePersistence?.MarkDirty();
         }
+
+        // A global-hotkey chord edit is one of the registration triggers
+        // (ADR-0019): re-run the idempotent pass so the OS state follows the
+        // edit. (A pre-profile window is a benign no-op - the pass guards on
+        // the handle, which exists only after Show.)
+        if (string.Equals(propertyName, nameof(HotkeyButtonWidget.GlobalHotkey), StringComparison.Ordinal))
+            RefreshGlobalHotkeys();
+    }
+
+    /// <summary>
+    /// Navigates the active page by the delta (the IModernWigiDashContext
+    /// seam the hotkey widget's page-flip actions route through): the
+    /// window's SwitchToPage seam, whose SetActivePageIndex gate clamps the
+    /// page boundary identically to a swipe (an out-of-range step is a
+    /// no-op, never a wrap). Marshals to the dispatcher off the UI thread
+    /// (the context contract: safe from any thread).
+    /// </summary>
+    public void NavigatePage(int delta)
+    {
+        if (delta == 0) return;
+
+        void Navigate()
+        {
+            if (_profile is { } profile)
+                SwitchToPage(profile.ActivePageIndex + delta);
+        }
+        if (Dispatcher.CheckAccess())
+        {
+            Navigate();
+            return;
+        }
+        _ = Dispatcher.InvokeAsync(Navigate);
     }
 
     #endregion

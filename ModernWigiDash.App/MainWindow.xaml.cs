@@ -1,8 +1,10 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using ModernWigiDash.App.Hotkey;
 using ModernWigiDash.App.Power;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
@@ -106,6 +108,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly DiagLog _profileLog = new("PROFILE", 1);
     private readonly DiagLog _trayLog = new("TRAY", 1);
     private readonly DiagLog _startupLog = new("AUTOSTART", 1);
+    private readonly DiagLog _hotkeyLog = new("HOTKEY", 1);
 
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
@@ -142,10 +145,30 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// </summary>
     internal IAutostartStore AutostartStore { get; set; } = new RegistryAutostartStore();
 
+    // The machine-local settings (ADR-0019): the kill switch + the AHK
+    // interpreter path, deliberately outside the profile so an import can
+    // never overwrite them. The store is inert (path + log only) until the
+    // AppSettings wiring step loads the settings.
+    private readonly AppSettingsStore _appSettingsStore;
+    private AppSettings _appSettings = new();
+
+    // The global-hotkey integration (ADR-0019): the P/Invoke seam (the test
+    // host injects a fake the way it swaps the tray surface), the
+    // registration owner (wired by the GlobalHotkeys step; inert until the
+    // window's SourceInitialized hands it the HWND), and the window handle
+    // the registrations ride on (zero until Show creates it).
+    private readonly HotkeyApi _hotkeyApi;
+    private GlobalHotkeyManager? _globalHotkeyManager;
+    private IntPtr _hotkeyHwnd = IntPtr.Zero;
+
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
     // before the profile load step).
     private ProfilePersistence _profilePersistence = null!;
+
+    /// <summary>The loaded profile (test seam: the window-level pins read
+    /// the active page index and the page set through it).</summary>
+    internal ProfileLayout Profile => _profile;
 
     // Theme application: resources + preview shadow + per-window DWM chrome +
     // the applied-log line, all behind one seam (ThemeApplicator).
@@ -183,11 +206,18 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// surface is injectable so the window's close-intercept tests drive a
     /// live fake; the session-end standby probe is injectable so the
     /// routing pin never drives a standby ritual at the user's attached
-    /// display.</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null)
+    /// display; the hotkey API is injectable so the window's hotkey pin
+    /// registers against a fake instead of the OS (a real RegisterHotKey
+    /// can lose to another program and flap the pin).</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null)
     {
         _traySurface = traySurface;
         _sessionEndStandby = sessionEndStandby;
+        _hotkeyApi = hotkeyApi ?? HotkeyApi.Default;
+        // The store's log seam references the window's hotkey DiagLog, so the
+        // assignment rides the constructor body (a field initializer cannot
+        // reference another instance field, even inside the lambda).
+        _appSettingsStore = new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
         // connect + touch poll explicitly. Start precedes InitializeComponent:
@@ -198,6 +228,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         InitializeComponent();
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
         SourceInitialized += OnUpdateCheckAtStartup;
+        SourceInitialized += OnHotkeysSourceInitialized;
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
         // The startup wiring is one named artifact (BuildStartupWiring),
@@ -385,6 +416,28 @@ public partial class MainWindow : Window, IModernWigiDashContext
             PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
         }),
 
+        new WiringStep("AppSettings", () =>
+        {
+            // The machine-local settings (ADR-0019): the kill switch + the
+            // AHK interpreter path, deliberately outside the profile so a
+            // profile import can never overwrite them. AFTER ProfileLoad:
+            // the settings are app-scoped (the order is a reading
+            // convenience, not a dependency); the global-hotkey wiring
+            // below reads them.
+            _appSettings = _appSettingsStore.Load();
+        }),
+
+        new WiringStep("GlobalHotkeys", () =>
+        {
+            // The global-hotkey registration owner (ADR-0019): inert until
+            // the window's SourceInitialized hands it the HWND (the handle
+            // exists only after Show; the wiring runs in the constructor).
+            // The first idempotent refresh runs there; every later trigger
+            // (a profile mutation, a chord edit, the kill switch, the
+            // interpreter path) re-runs the same pass.
+            _globalHotkeyManager = new GlobalHotkeyManager(_hotkeyApi, _hotkeyLog);
+        }),
+
         new WiringStep("SnapToGridResync", () =>
         {
             // Resync the page-level toggle from the loaded profile the same
@@ -553,6 +606,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
         new TeardownStep("FrameDelivery", _delivery.Dispose),
         new TeardownStep("Profile", () => ProfileOps.DisposeProfile(_profile)),
         new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
+        // The global hotkeys are released before the tray icon goes (ADR-0019):
+        // a tray Quit must not leave the OS holding the app's chords after the
+        // message loop dies.
+        new TeardownStep("GlobalHotkeys", () => _globalHotkeyManager?.Dispose()),
         // The tray icon is removed after the profile state has landed (the
         // persist-first guarantee covers the exit affordance: the user who
         // saw the icon go can trust the profile was saved).
@@ -711,6 +768,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
         UpdateActiveCount();
         SkiaCanvas.InvalidateVisual();
         _profilePersistence.MarkDirty();
+
+        // A profile mutation can change the hotkey-provider set (a widget
+        // placed or removed, a page added): re-run the idempotent
+        // registration pass (ADR-0019). A pre-Show window is a benign
+        // no-op (the pass guards on the handle).
+        RefreshGlobalHotkeys();
     }
 
     /// <summary>Page-background picker commit: writes the active page's
@@ -918,6 +981,81 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
+
+    #region Global Hotkeys (ADR-0019)
+
+    /// <summary>
+    /// The global-hotkey attach: the window's HWND is created at Show (the
+    /// wiring ran in the constructor, before the handle existed), so the
+    /// attach adds the WM_HOTKEY hook to the window's HwndSource and runs
+    /// the first idempotent registration pass. A hidden or minimized window
+    /// keeps pumping its message loop, so the hotkeys work while the app
+    /// is tray-hidden.
+    /// </summary>
+    private void OnHotkeysSourceInitialized(object? sender, EventArgs e)
+    {
+        _hotkeyHwnd = new WindowInteropHelper(this).Handle;
+        HwndSource.FromHwnd(_hotkeyHwnd)?.AddHook(OnHotkeyWndProc);
+        RefreshGlobalHotkeys();
+    }
+
+    /// <summary>
+    /// The WM_HOTKEY hook (0x0312): the message's wParam is the registered
+    /// hotkey's id; the manager routes it to the owning widget's fire path
+    /// (the same entry point as a tap). An unknown id leaves the message
+    /// for the default handler.
+    /// </summary>
+    private IntPtr OnHotkeyWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == 0x0312 && _globalHotkeyManager is { } manager && manager.Fire(wParam.ToInt32()))
+            handled = true;
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// The idempotent global-hotkey registration pass (ADR-0019): collects
+    /// the profile's hotkey-capable widgets in profile order through the
+    /// optional <see cref="IGlobalHotkeyProvider"/> capability (no
+    /// widget-type checks), resolves the desired set (a tripped kill switch
+    /// registers nothing; a duplicate (modifiers, key) cell goes to the
+    /// first widget in profile order, the later duplicates log one line
+    /// each), and hands it to the manager for the register/unregister
+    /// diff. Runs on the first Show (SourceInitialized), every profile
+    /// mutation, a chord edit (the PersistProperty tail), a kill-switch
+    /// toggle, and an interpreter-path change.
+    /// </summary>
+    internal void RefreshGlobalHotkeys()
+    {
+        if (_hotkeyHwnd == IntPtr.Zero || _globalHotkeyManager is not { } manager) return;
+
+        var candidates = new List<DesiredGlobalHotkey>();
+        if (_profile is { } profile)
+        {
+            foreach (PageLayout page in profile.Pages)
+            {
+                foreach (PlacedWidgetInstance placed in page.Widgets)
+                {
+                    if (placed.ActiveInstance is not IGlobalHotkeyProvider provider) continue;
+                    if (provider.TryGetGlobalHotkey(out int modFlags, out ushort virtualKey, out string chord))
+                        candidates.Add(new DesiredGlobalHotkey(modFlags, virtualKey, chord, provider));
+                }
+            }
+        }
+
+        bool killSwitchTripped = _appSettings.KillSwitch;
+        var (desired, dropped) = GlobalHotkeyPolicy.ResolveDesired(killSwitchTripped, candidates);
+        if (!killSwitchTripped)
+        {
+            // The kill-switch veto drops every candidate by design (not a
+            // duplicate) - the duplicate log lines apply to the
+            // profile-order conflicts only.
+            foreach (DesiredGlobalHotkey duplicate in dropped)
+                _hotkeyLog.Write(() => $"Global hotkey {duplicate.Chord} is claimed by an earlier widget; the later one stays tap-only");
+        }
+        manager.Refresh(_hotkeyHwnd, desired);
+    }
+
+    #endregion
 
     /// <summary>
     /// The window's page-delete seam: the single UI gate (the module's
@@ -1190,6 +1328,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
             onCommitCloseBehavior: CommitCloseBehavior,
             currentAutostart: AutostartStore.TryGetCommandLine() is not null,
             onCommitAutostart: CommitAutostart,
+            currentKillSwitch: _appSettings.KillSwitch,
+            onCommitKillSwitch: CommitKillSwitch,
+            currentAhkPath: _appSettings.AhkInterpreterPath,
+            onCommitAhkPath: CommitAhkInterpreter,
+            onBrowseAhkInterpreter: BrowseAhkInterpreter,
             onExportProfile: ExportProfile,
             onImportProfile: ImportProfile).ShowDialog();
     }
@@ -1233,6 +1376,54 @@ public partial class MainWindow : Window, IModernWigiDashContext
         string commandLine = AutostartPolicy.BuildCommandLine(exePath);
         AutostartStore.SetCommandLine(commandLine);
         _startupLog.Write(() => $"Run entry written ({commandLine})");
+    }
+
+    /// <summary>
+    /// The kill-switch write-through from the settings hub (ADR-0019): the
+    /// checkbox's check is the change, so the machine-local setting commits
+    /// in place (the profile is untouched - the switch lives beside it) and
+    /// the idempotent registration pass re-runs: a tripped switch vetoes
+    /// every registration, a released one re-registers the profile's
+    /// chords.
+    /// </summary>
+    private void CommitKillSwitch(bool killSwitch)
+    {
+        _appSettings = _appSettings with { KillSwitch = killSwitch };
+        _appSettingsStore.Save(_appSettings);
+        _hotkeyLog.Write(() => killSwitch
+            ? "Kill switch tripped: global hotkeys unregistered, AHK spawning disabled"
+            : "Kill switch released: re-registering the profile's global hotkeys");
+        RefreshGlobalHotkeys();
+    }
+
+    /// <summary>
+    /// The AHK interpreter write-through from the settings hub (ADR-0019):
+    /// the machine-local path commits in place (the Run AHK Script action
+    /// resolves it at spawn time) and the registration pass re-runs (the
+    /// interpreter path is one of the documented triggers, so the pass is
+    /// idempotently safe).
+    /// </summary>
+    private void CommitAhkInterpreter(string path)
+    {
+        _appSettings = _appSettings with { AhkInterpreterPath = path.Trim() };
+        _appSettingsStore.Save(_appSettings);
+        RefreshGlobalHotkeys();
+    }
+
+    /// <summary>
+    /// The AHK interpreter Browse from the settings hub: the window owns
+    /// the file dialog (the dialog-host pattern); a chosen path commits
+    /// through <see cref="CommitAhkInterpreter"/>.
+    /// </summary>
+    private void BrowseAhkInterpreter()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select the AutoHotkey interpreter",
+            Filter = "AutoHotkey|autohotkey.exe|Executables (*.exe)|*.exe"
+        };
+        if (dialog.ShowDialog(this) == true)
+            CommitAhkInterpreter(dialog.FileName);
     }
 
     private static void Log(string msg) => FileLog.Write(msg);

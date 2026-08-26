@@ -181,6 +181,9 @@ internal static class InspectorPanelRenderer
                 // editor.
                 panel.Children.Add(BuildTextEditor(desc, callbacks));
                 break;
+            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.KeyCapture:
+                panel.Children.Add(BuildKeyCaptureEditor(desc, callbacks));
+                break;
             default:
                 // Text or Number
                 panel.Children.Add(BuildTextEditor(desc, callbacks));
@@ -395,6 +398,84 @@ internal static class InspectorPanelRenderer
         txt.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
         return txt;
     }
+
+    /// <summary>
+    /// The key-capture editor (the hotkey widget's global-hotkey chord): the
+    /// chord's text box (typed chords commit through the single funnel like
+    /// the plain text editor; the chord vocabulary validates them at
+    /// registration time) plus the "Press keys..." capture. While capturing,
+    /// the box's PreviewKeyDown routes the press through the pure
+    /// <see cref="KeyCaptureModel"/> rules (the modifier order, the
+    /// no-modifier refusal, the modifier-key-as-main-key refusal) and a
+    /// recorded chord writes the box (the TextChanged commit is the single
+    /// write path). Only the vocabulary's main keys (letters, digits,
+    /// F1-F24) map to a name - a symbol or modifier press is swallowed and
+    /// the capture stays armed; a focus loss cancels the capture.
+    /// </summary>
+    private static UIElement BuildKeyCaptureEditor(EditorDescription desc, InspectorCallbacks callbacks)
+    {
+        var model = new KeyCaptureModel(desc.CurrentValue?.ToString() ?? "");
+        var box = new TextBox { Text = model.Chord };
+        box.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
+
+        var btn = new Button
+        {
+            Content = "Press keys...",
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        btn.Click += (_, _) =>
+        {
+            model.BeginCapture();
+            box.Focus();
+        };
+
+        box.PreviewKeyDown += (_, e) =>
+        {
+            if (!model.IsCapturing) return;
+            string? name = ChordKeyName(e.Key);
+            if (name is null)
+            {
+                // A symbol or modifier press: swallowed (the capture stays
+                // armed, the box keeps its text).
+                e.Handled = true;
+                return;
+            }
+            bool captured = model.CaptureKey(
+                name,
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Alt),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
+                Keyboard.Modifiers.HasFlag(ModifierKeys.Windows));
+            if (captured)
+            {
+                e.Handled = true; // a recorded chord never types into the box
+                box.Text = model.Chord; // the TextChanged commit is the write
+            }
+        };
+        box.LostFocus += (_, _) => model.CancelCapture();
+
+        var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
+        DockPanel.SetDock(btn, Dock.Right);
+        row.Children.Add(btn);
+        row.Children.Add(box);
+        return row;
+    }
+
+    /// <summary>
+    /// The capture's key-name mapping: the chord vocabulary's main keys only
+    /// (letters, digits, F1-F24) map to a name; everything else (a symbol,
+    /// a modifier) is null, so the capture cannot record a chord the
+    /// vocabulary would refuse.
+    /// </summary>
+    internal static string? ChordKeyName(Key key) => key switch
+    {
+        >= Key.A and <= Key.Z => ((char)('A' + (key - Key.A))).ToString(),
+        >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
+        >= Key.NumPad0 and <= Key.NumPad9 => ((char)('0' + (key - Key.NumPad0))).ToString(),
+        >= Key.F1 and <= Key.F24 => key.ToString(),
+        _ => null
+    };
 
     /// <summary>
     /// The search-as-you-type Location editor: a TextBox with a results popup,

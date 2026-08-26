@@ -29,6 +29,8 @@ internal class TestContext : IModernWigiDashContext
     public int AuthClosed { get; private set; }
     public List<string> Errors { get; } = [];
     public List<string> Infos { get; } = [];
+    /// <summary>The NavigatePage deltas fired through the context seam (the hotkey widget's page-flip routing pin).</summary>
+    public List<int> NavigatePageCalls { get; } = [];
 
     public void LogInfo(string message) => Infos.Add(LogLine.Sanitize(message));
     public void LogError(string message, Exception? ex = null)
@@ -39,6 +41,8 @@ internal class TestContext : IModernWigiDashContext
     public void CloseDeviceAuthorization() => AuthClosed++;
 
     public virtual void PersistProperty(object widget, string propertyName, object? value) { }
+
+    public virtual void NavigatePage(int delta) => NavigatePageCalls.Add(delta);
 }
 
 /// <summary>

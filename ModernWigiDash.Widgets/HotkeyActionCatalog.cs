@@ -2,11 +2,12 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// One hotkey action-type entry: the persisted/display name, the
-/// <see cref="HotkeyActionKind"/> it produces, and the fixed media-key value
-/// (media actions only; null means the action reads the user's
-/// Action Path/Command instead).
+/// <see cref="HotkeyActionKind"/> it produces, and the fixed value
+/// (the media key for media actions, the page delta for the page-navigate
+/// actions; null means the action reads the user's Action Path/Command
+/// instead).
 /// </summary>
-internal sealed record HotkeyActionEntry(string Name, HotkeyActionKind Kind, string? MediaKey);
+internal sealed record HotkeyActionEntry(string Name, HotkeyActionKind Kind, string? FixedValue);
 
 /// <summary>
 /// The single owner of the hotkey action-type vocabulary: the name set the
@@ -32,10 +33,12 @@ internal static class HotkeyActionCatalog
         new("Media Next", HotkeyActionKind.MediaKey, MediaKeyCatalog.Next),
         new("Media Previous", HotkeyActionKind.MediaKey, MediaKeyCatalog.Previous),
         new("Media Stop", HotkeyActionKind.MediaKey, MediaKeyCatalog.Stop),
-        new("Volume Up", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeUp),
+new("Volume Up", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeUp),
         new("Volume Down", HotkeyActionKind.MediaKey, MediaKeyCatalog.VolumeDown),
         new("Mute", HotkeyActionKind.MediaKey, MediaKeyCatalog.Mute),
-];
+        new("Next Page", HotkeyActionKind.PageNavigate, "1"),
+        new("Previous Page", HotkeyActionKind.PageNavigate, "-1"),
+    ];
 
     /// <summary>
     /// True when the named action reads a command value (Launch/URL): the
@@ -46,7 +49,7 @@ internal static class HotkeyActionCatalog
     /// unknown-name rule), never a silent no-op.
     /// </summary>
     public static bool NeedsCommand(string actionType)
-        => Find(actionType) is { MediaKey: null };
+            => Find(actionType) is { FixedValue: null };
 
     /// <summary>
     /// Maps the action-type name to its action. A name absent from the
@@ -59,7 +62,7 @@ internal static class HotkeyActionCatalog
         HotkeyActionEntry? entry = Find(actionType);
         return entry is null
             ? new HotkeyAction { Kind = HotkeyActionKind.Launch, Value = actionCommand }
-            : new HotkeyAction { Kind = entry.Kind, Value = entry.MediaKey ?? actionCommand };
+            : new HotkeyAction { Kind = entry.Kind, Value = entry.FixedValue ?? actionCommand };
     }
 
     private static HotkeyActionEntry? Find(string actionType)

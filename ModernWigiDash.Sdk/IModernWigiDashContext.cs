@@ -56,6 +56,18 @@ public interface IModernWigiDashContext
     }
 
     /// <summary>
+    /// Navigates the profile's active page by the given delta (positive =
+    /// forward, negative = back). The page boundary clamps identically to a
+    /// swipe (the host's SetActivePageIndex gate); a zero or out-of-range
+    /// step is a no-op. The default is a no-op (the <see cref="PersistProperty"/>
+    /// precedent: test hosts and other embedders may not track pages); the
+    /// App's context routes it to its SwitchToPage seam.
+    /// </summary>
+    void NavigatePage(int delta)
+    {
+    }
+
+    /// <summary>
     /// The single commit owner for "set a property value on a placed widget":
     /// sets the instance property, raises
     /// <see cref="IModernWidget.OnPropertyChanged"/>, and persists into the

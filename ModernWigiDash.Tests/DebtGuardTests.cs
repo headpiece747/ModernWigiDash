@@ -132,6 +132,8 @@ public sealed class DebtGuardTests
                 "the process-lifetime PresentMon service DLL (NativeLibrary.Load): the handle is deliberately not freed - the DLL belongs to the service directory and the client session lives as long as the process",
             ["ModernWigiDash.Widgets/HotkeyActionExecutor.cs"] =
                 "the SendInput P/Invoke fires input events; the call acquires and owns no handle",
+            ["ModernWigiDash.App/Hotkey/HotkeyApi.cs"] =
+                "the RegisterHotKey/UnregisterHotKey P/Invoke registers and releases message-loop hotkeys; the calls acquire and own no handle",
         };
 
         var root = RepoScan.GetRepoRoot();
