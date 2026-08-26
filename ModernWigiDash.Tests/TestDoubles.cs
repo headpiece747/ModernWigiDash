@@ -692,6 +692,16 @@ internal sealed class StaHost
         ResetApplicationState();
         var app = new AppClass();
         app.InitializeComponent();
+        // The test App must never auto-shutdown: a test window's close (the
+        // last shown window of the test's Application) would otherwise begin
+        // the Application's shutdown through OnLastWindowClose, and a
+        // half-shut-down Application's static state makes the NEXT invoke's
+        // App.InitializeComponent FailFast (the single-instance guard's
+        // second-launch Shutdown was the recorded case; the same trap
+        // through a window close). Production keeps the default
+        // OnLastWindowClose; only the re-created-per-invoke test App is
+        // pinned to explicit shutdown.
+        app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         // The Application constructor queues DoStartup as a dispatcher
         // operation; any later pump on this thread (a nested ShowDialog, a
         // Dispatcher.Run) runs it and would construct + show the StartupUri
@@ -949,4 +959,39 @@ internal static class TestWait
 internal static class WpfWindow
 {
     public static void ShowOwner(Window owner) => owner.Show();
+}
+
+/// <summary>
+/// The in-memory tray surface the tray-controller and the window
+/// close-intercept tests drive: records the show/hide/dispose calls, tracks
+/// the live state the N1 guard reads, and re-raises the seam's events on
+/// demand.
+/// </summary>
+internal sealed class FakeTraySurface : ITrayIconSurface
+{
+    public int ShowCount { get; private set; }
+    public bool HideCalled { get; private set; }
+    public bool Disposed { get; private set; }
+    public bool IsLive { get; private set; }
+
+    public event Action? SingleClicked;
+    public event Action<TrayMenuCommand>? MenuSelected;
+
+    public void Show()
+    {
+        ShowCount++;
+        IsLive = true;
+    }
+
+    public void Hide()
+    {
+        HideCalled = true;
+        IsLive = false;
+    }
+
+    public void RaiseSingleClick() => SingleClicked?.Invoke();
+
+    public void RaiseMenu(TrayMenuCommand command) => MenuSelected?.Invoke(command);
+
+    public void Dispose() => Disposed = true;
 }

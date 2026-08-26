@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -54,6 +55,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
     // ctor statement.
     private bool _wired;
 
+    /// <summary>The explicit-quit flag (ADR-0018): set by the tray's Quit
+    /// (<see cref="QuitClose"/>) before the close, so the close intercept -
+    /// which hides to the tray when the close behavior is on - vetoes itself
+    /// and the tray's Quit always exits. The tray's Quit is the only exit
+    /// when the behavior is on.</summary>
+    private bool _quitting;
+
 #pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
     // application, and edit-mode manipulation decisions live in InputController;
@@ -100,6 +108,20 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// the startup Tray step, removed by the plan's TrayDispose step.</summary>
     private TrayIconController _tray = null!;
 
+    /// <summary>The tray surface the Tray wiring step hands to the
+    /// controller: null in production (the controller creates the WinForms
+    /// adapter), an injected fake in the test host (whose own Application
+    /// must survive, and whose test output dir has no icon resource, so the
+    /// production surface would read dead and the N1 fallback would swallow
+    /// every hide).</summary>
+    private readonly ITrayIconSurface? _traySurface;
+
+    /// <summary>The session-end standby seam: null in production (routes to
+    /// the engine's real <c>TryGoToStandby</c>), an injected probe in the
+    /// test host (whose engine is the real engine - a unit test must never
+    /// drive a standby ritual at the user's attached display).</summary>
+    private readonly Func<bool>? _sessionEndStandby;
+
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
     // before the profile load step).
@@ -137,9 +159,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>Full seam: the power-mode source is injectable so production
-    /// subscribes to SystemEvents and test hosts pass a no-op.</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource)
+    /// subscribes to SystemEvents and test hosts pass a no-op; the tray
+    /// surface is injectable so the window's close-intercept tests drive a
+    /// live fake; the session-end standby probe is injectable so the
+    /// routing pin never drives a standby ritual at the user's attached
+    /// display.</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null)
     {
+        _traySurface = traySurface;
+        _sessionEndStandby = sessionEndStandby;
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
         // connect + touch poll explicitly. Start precedes InitializeComponent:
@@ -435,8 +463,28 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _tray = new TrayIconController(
                 onShow: ShowFromTray,
                 onQuit: QuitFromTray,
-                log: _trayLog);
+                log: _trayLog,
+                surface: _traySurface);
             _tray.Start();
+        }),
+
+        new WiringStep("CloseIntercept", () =>
+        {
+            // The close behavior (ADR-0018): X, Alt+F4, and minimize hide to
+            // the tray instead of closing or minimizing when the profile's
+            // close behavior is the tray keep-alive AND the tray icon is
+            // live (N1: a dead tray falls the action through to the normal
+            // behavior, because a hidden window with no tray is
+            // unreachable). The decision routes through
+            // CloseInterceptPolicy so a hand-edited profile can never
+            // smuggle in a hide. SessionEnding runs the non-disposing
+            // standby seam: a system shutdown while the display is live is
+            // the documented wedge case (the display has no auto-sleep),
+            // and the session end is the one chance to run the ritual
+            // before the process dies.
+            Closing += OnWindowClosing;
+            StateChanged += OnWindowStateChanged;
+            Application.Current.SessionEnding += (_, _) => RunSessionEndStandby();
         }),
 
         new WiringStep("Wired", () =>
@@ -1004,13 +1052,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// normal close sequence (OnClosing, the teardown plan, the display
     /// standby), then an explicit Shutdown. A hidden window's Close does not
     /// trip OnLastWindowClose, so without the Shutdown the process would
-    /// linger with its icon already gone; the IsShuttingDown guard keeps the
-    /// visible-window case (where OnLastWindowClose already scheduled the
-    /// shutdown) a single shutdown.
+    /// linger with its icon already gone; WPF's Shutdown is idempotent, so
+    /// the visible-window case (where OnLastWindowClose already scheduled
+    /// the shutdown) stays a single shutdown.
     /// </summary>
     internal void QuitFromTray()
     {
-        Close();
+        QuitClose();
         // Close() on the visible window already scheduled the shutdown
         // through OnLastWindowClose, and WPF's Shutdown is idempotent when
         // the shutdown is in flight - so the call below is safe either way.
@@ -1018,6 +1066,69 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // hidden: a hidden window's Close does not trip OnLastWindowClose.
         Application.Current?.Shutdown();
     }
+
+    /// <summary>
+    /// The explicit-quit close (ADR-0018): the veto flag lands before the
+    /// close so the close intercept (which hides to the tray when the
+    /// behavior is on) vetoes itself and the tray's Quit always exits. Named
+    /// apart from the tray caller so the test host - whose own Application
+    /// must survive - can drive the veto + close without the shutdown.
+    /// </summary>
+    internal void QuitClose()
+    {
+        _quitting = true;
+        Close();
+    }
+
+    /// <summary>
+    /// The close intercept (ADR-0018): a window close (X, Alt+F4) hides to
+    /// the tray instead of closing when the resolved close behavior is the
+    /// tray keep-alive and the tray icon is live. With the behavior on and
+    /// the tray dead (N1) the close falls through to the normal exit: a
+    /// hidden window with no tray is unreachable, and losing the app is
+    /// worse than leaving it.
+    /// </summary>
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (!_wired || _quitting)
+        {
+            return;
+        }
+        if (CloseInterceptPolicy.ShouldHide(_profile.CloseBehavior, _tray.IsLive))
+        {
+            e.Cancel = true;
+            Hide();
+        }
+    }
+
+    /// <summary>
+    /// The minimize intercept (ADR-0018, M2): a minimize hides to the tray
+    /// under the same policy as a close, so the window never lingers as a
+    /// minimized taskbar entry the user would have to restore.
+    /// </summary>
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+    {
+        if (!_wired || WindowState != WindowState.Minimized)
+        {
+            return;
+        }
+        if (CloseInterceptPolicy.ShouldHide(_profile.CloseBehavior, _tray.IsLive))
+        {
+            Hide();
+        }
+    }
+
+    /// <summary>
+    /// The session-end standby (ADR-0018): the production caller is the
+    /// App's SessionEnding event (wired by the CloseIntercept step). A
+    /// system shutdown or logoff kills the process mid-frame-stream, and
+    /// this is the one chance to run the display's standby ritual before
+    /// the process dies. Routes through the injectable seam (the test
+    /// probe) or the engine's real non-disposing seam, and returns the
+    /// truthful verdict.
+    /// </summary>
+    internal bool RunSessionEndStandby()
+        => _sessionEndStandby is { } probe ? probe() : _usbDevice.TryGoToStandby();
 
     /// <summary>
     /// Opens the settings hub (ADR-0018): the close-behavior radios read the

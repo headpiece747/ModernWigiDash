@@ -121,37 +121,4 @@ public class TrayIconControllerTests
         Assert.IsFalse(fake.HideCalled);
         Assert.IsFalse(fake.Disposed, "a never-started controller holds no surface to release");
     }
-
-    /// <summary>
-    /// The in-memory tray surface the controller's tests drive: records the
-    /// show/hide/dispose calls and re-raises the seam's events on demand.
-    /// </summary>
-    private sealed class FakeTraySurface : ITrayIconSurface
-    {
-        public int ShowCount { get; private set; }
-        public bool HideCalled { get; private set; }
-        public bool Disposed { get; private set; }
-        public bool IsLive { get; private set; }
-
-        public event Action? SingleClicked;
-        public event Action<TrayMenuCommand>? MenuSelected;
-
-        public void Show()
-        {
-            ShowCount++;
-            IsLive = true;
-        }
-
-        public void Hide()
-        {
-            HideCalled = true;
-            IsLive = false;
-        }
-
-        public void RaiseSingleClick() => SingleClicked?.Invoke();
-
-        public void RaiseMenu(TrayMenuCommand command) => MenuSelected?.Invoke(command);
-
-        public void Dispose() => Disposed = true;
-    }
 }
