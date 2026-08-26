@@ -41,7 +41,20 @@ internal sealed class TrayIconController(
         _surface.SingleClicked += () => onShow();
         _surface.MenuSelected += OnMenuSelected;
         _surface.Show();
-        _log.Write("icon shown");
+        // The verdict line reads the SAME live state the N1 guard reads, so
+        // the log can never claim an icon that the close path would not
+        // trust (the 2026-08-25 trap: the ico was missing from the output,
+        // Show() refused to bring the icon up, and an unconditional "icon
+        // shown" line hid the dead tray while the N1 guard fell every close
+        // through to a normal exit).
+        if (_surface.IsLive)
+        {
+            _log.Write("icon shown");
+        }
+        else
+        {
+            _log.Write("icon NOT shown (icon file missing or unreadable): the N1 guard falls the close through to a normal exit");
+        }
     }
 
     /// <summary>Removes the icon and releases the surface (idempotent,

@@ -73,14 +73,24 @@
          font instances are shipped. -->
     <Resource Include="..\ModernWigiDash.Core\Resources\Fonts\Geist-VariableFont_wght.ttf">
       <Link>Resources\Fonts\Geist-VariableFont_wght.ttf</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
     <Resource Include="Resources\Logo\logo.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
+    <!-- The tray (ADR-0018) loads a PHYSICAL ico next to the exe (the
+         WinForms NotifyIcon icon is a File.Exists read, not a WPF pack URI),
+         so logo.ico rides two item types: Resource embeds it (the XAML
+         Window.Icon + WindowChrome pack URI resolve from the assembly blob,
+         which works with no disk file at all) and None carries the copy to
+         the output. A Resource item's CopyToOutputDirectory is dead
+         metadata: the copy targets only walk Content/None/EmbeddedResource/
+         Compile, so the ico never reached the output until the None item
+         (caught by the live UIA pass 2026-08-25: the tray silently never
+         came up and the N1 guard fell every close through to a normal exit). -->
     <Resource Include="Resources\Logo\logo.ico">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Resource>
+    <None Include="Resources\Logo\logo.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

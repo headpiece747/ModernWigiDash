@@ -965,9 +965,12 @@ internal static class WpfWindow
 /// The in-memory tray surface the tray-controller and the window
 /// close-intercept tests drive: records the show/hide/dispose calls, tracks
 /// the live state the N1 guard reads, and re-raises the seam's events on
-/// demand.
+/// demand. A <c>showBringsUp: false</c> instance mirrors the production
+/// surface's refused Show (the ico file missing from the output), so the
+/// controller's honest verdict line is drivable without an OS notification
+/// area.
 /// </summary>
-internal sealed class FakeTraySurface : ITrayIconSurface
+internal sealed class FakeTraySurface(bool showBringsUp = true) : ITrayIconSurface
 {
     public int ShowCount { get; private set; }
     public bool HideCalled { get; private set; }
@@ -980,7 +983,10 @@ internal sealed class FakeTraySurface : ITrayIconSurface
     public void Show()
     {
         ShowCount++;
-        IsLive = true;
+        if (showBringsUp)
+        {
+            IsLive = true;
+        }
     }
 
     public void Hide()

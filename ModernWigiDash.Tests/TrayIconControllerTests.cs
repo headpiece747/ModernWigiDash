@@ -111,6 +111,31 @@ public class TrayIconControllerTests
     }
 
     [TestMethod]
+    public void Start_DeadSurface_LogsNotShown_NotIconShown()
+    {
+        var lines = new List<string>();
+        var deadSurface = new FakeTraySurface(showBringsUp: false);
+        var controller = new TrayIconController(() => { }, () => { }, new DiagLog("TRAY", 1, logFirst: true, write: lines.Add), deadSurface);
+
+        controller.Start();
+
+        Assert.AreEqual(1, lines.Count);
+        StringAssert.Contains(lines[0], "NOT shown", "a Show that never brought the icon up must log the dead-tray verdict, not the shown line (the N1 guard reads the same live state the verdict derives from)");
+    }
+
+    [TestMethod]
+    public void Start_LiveSurface_LogsIconShown()
+    {
+        var lines = new List<string>();
+        var liveSurface = new FakeTraySurface();
+        var controller = new TrayIconController(() => { }, () => { }, new DiagLog("TRAY", 1, logFirst: true, write: lines.Add), liveSurface);
+
+        controller.Start();
+
+        Assert.AreEqual("[TRAY] icon shown", lines[0], "a Show that brought the icon up logs the shown line (the honest verdict reads the surface's live state, so it cannot claim more than the N1 guard would trust)");
+    }
+
+    [TestMethod]
     public void Dispose_WithoutStart_IsANoOp()
     {
         var fake = new FakeTraySurface();
