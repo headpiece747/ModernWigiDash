@@ -67,13 +67,22 @@ public class SingleInstanceGuardTests
         SignalActivation(handles);
         SignalActivation(handles);
 
-        // The callbacks fire on thread-pool threads: the house's async poll
-        // (the Thread.Sleep-loop replacement) waits for both. Five seconds
-        // is the house TestWait budget - under the parallel test load a
-        // tighter window flakes on a slow scheduler.
-        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(5));
-        Assert.AreEqual(2, Volatile.Read(ref activations),
-            "both activations must fire the callback — the one-shot registration re-parks for the second signal");
+        // The callbacks fire on thread-pool threads: one OS event +
+        // thread-pool round trip per signal, the second through the
+        // one-shot re-park. The house TestWait budget of five seconds is
+        // load-sensitive here (a 2026-08-26 full-suite gate run consumed
+        // the whole budget with both signals still undelivered), so this
+        // test waits thirty.
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(30));
+        // The guard re-parks BEFORE resetting (the no-lost-signal ordering),
+        // so a fast second signal can be delivered TWICE: the re-park
+        // observes the still-set event and fires again. That over-delivery
+        // is benign and documented in the guard, so the invariant pinned
+        // here is >= 2 (no lost signal, and the second activation is only
+        // reachable through the re-park), never the exactly-once count of 2,
+        // which is a scheduling artifact.
+        Assert.IsTrue(Volatile.Read(ref activations) >= 2,
+            "both activations must fire the callback - the one-shot registration re-parks for the second signal");
     }
 
     [TestMethod]
