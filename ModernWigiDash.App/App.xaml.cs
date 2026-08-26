@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;
@@ -11,6 +12,12 @@ public partial class App : Application
     /// own token is cancelled (see <see cref="CrashSuppression"/>). Set by
     /// MainWindow's Closed handler before any teardown dispose runs.</summary>
     internal static volatile bool IsClosing;
+
+    /// <summary>The single-instance guard (the primary owns the named
+    /// handles; the kernel releases them on process death, so a force-killed
+    /// instance can never wedge the next launch). Null on the secondary
+    /// launch's early-exit path.</summary>
+    private SingleInstanceGuard? _instanceGuard;
 
     /// <summary>
     /// The production constructor: pins the log paths next to the profile
@@ -67,7 +74,11 @@ public partial class App : Application
         // flushes may leave the last lines — including the shutdown standby
         // verdict — buffered when the process exits. The exit marker doubles
         // as the "the app reached a clean exit" line for log analysis.
-        Exit += (_, _) => WriteExitMarker();
+        Exit += (_, _) =>
+        {
+            _instanceGuard?.Dispose();
+            WriteExitMarker();
+        };
     }
 
     /// <summary>
@@ -84,14 +95,64 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Loads the persisted theme and applies it to the application
-    /// resources before the first window shows.
+    /// The single-instance guard runs before the window (the StartupUri) is
+    /// created: a second launch signals the running instance to show itself
+    /// and exits (a second engine would fight the same USB device). Then the
+    /// persisted theme loads and applies before the first window shows.
     /// </summary>
     /// <param name="e">Startup event arguments.</param>
     protected override void OnStartup(StartupEventArgs e)
     {
+        // The guard is production-only: under a test host the entry assembly
+        // is the test runner, and the guard's second-launch path (signal the
+        // running instance, then Shutdown) would shut down the test's own
+        // Application mid-invoke - a half-shut-down Application's static
+        // state then makes the next test's App resource load FailFast. The
+        // module's verdict + signal policy is pinned by
+        // SingleInstanceGuardTests against the injected handle seam.
+        if (IsProductionEntry)
+        {
+            _instanceGuard = new SingleInstanceGuard(ActivateMainWindow);
+            if (!_instanceGuard.IsPrimary)
+            {
+                FileLog.Write("[App] Second launch: signaled the running instance, exiting");
+                Shutdown();
+                return;
+            }
+        }
+
         ThemeSettings.Theme = ThemeSettings.Load();
         ThemeManager.ApplyToApplication();
         base.OnStartup(e);
+    }
+
+    /// <summary>True when this App assembly is the process's entry assembly
+    /// (the production WPF entry point). Under a test host the entry
+    /// assembly is the test runner, so the single-instance guard - whose
+    /// second-launch path calls the WPF Shutdown method - must not run.</summary>
+    private static bool IsProductionEntry
+        => Assembly.GetEntryAssembly() is { } entry
+           && string.Equals(entry.FullName, typeof(App).Assembly.FullName, StringComparison.Ordinal);
+
+    /// <summary>The primary's activation hop: the guard's signal arrives on
+    /// a thread-pool thread, so the window work hops to the dispatcher
+    /// (the window's <c>ShowFromTray</c> shows and activates it).</summary>
+    private void ActivateMainWindow()
+    {
+        // Fire-and-forget by design: the hop targets the UI thread and the
+        // callback cannot meaningfully be awaited from the thread-pool
+        // caller (the dispatcher-hop discard shape, MainWindow's update
+        // check precedent).
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            foreach (Window window in Windows)
+            {
+                if (window is MainWindow main)
+                {
+                    main.ShowFromTray();
+                    break;
+                }
+            }
+        });
     }
 }
