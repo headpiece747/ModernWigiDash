@@ -293,6 +293,34 @@ take the tokens and the ParseError array (calling `.Errors` on the
 errors array member-enumerates to `$null` and reads as one phantom
 error), and `$stmt.SafeAst` is `$null` for some top-level statements in
 5.1, so top-level type checks test the statement itself.
+Verified 2026-08-27 (agentmemory MCP fix-all session; each hit live):
+probing a Node stdio MCP from Windows PowerShell hits two .NET
+Framework reader traps even in the working shape: the in-memory pipe
+reader (Process + StreamReader) reports stdout EOF ~25-30 ms after the
+initialize response while the node process stays alive (no
+stdout.close/process.exit anywhere in the dist), and
+`[System.IO.File]::ReadAllText` on a cmd-redirected stdout file while
+the writer is alive throws an IOException sharing violation (the cmd
+`>` handle denies a concurrent read), so the working probe shape is a
+static stdin file (all MCP messages, LF-terminated) + a quoted .bat
+(`C:\Program Files\nodejs\npx.cmd` -y <pkg> < in.txt > out.txt 2>
+err.txt; node.exe lives under a spaced path) + Start-Process + a fixed
+wait + taskkill /T /F of the tree + reading out.txt only after the
+writer is dead; re-verified against @agentmemory/mcp@0.9.29 (the
+initialize answered serverInfo agentmemory 0.9.29 and tools/list
+carried exactly the 7 standalone tools: memory_recall, memory_save,
+memory_sessions, memory_smart_search, memory_export, memory_audit,
+memory_governance_delete). And a process-lifecycle fact: a long-lived
+opencode process does not re-launch an MCP connection that closed
+between sessions: the graceful `MCP connection closed` WARN for
+agentmemory at 2026-08-27T16:43:46Z (the same shape as the 2026-08-05
+close) was never followed by a re-launch, and the two sessions that
+followed bootstrapped only `mcp:glider:*` / `mcp:glider-trace:*` at
+start (no agentmemory tools, no startup WARN/ERROR), so a session
+missing a configured MCP's tools needs an opencode restart, not a
+config edit: the config entry, the warm _npx cache
+(36167fce64e0f40c), and the server command were all verified healthy by
+the probe, and no node process survives (zero node.exe/npx.exe).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
