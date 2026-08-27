@@ -1,4 +1,3 @@
-using System.Threading;
 
 namespace ModernWigiDash.Tests;
 

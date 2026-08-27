@@ -1,4 +1,3 @@
-using System.IO;
 using ModernWigiDash.App.Power;
 
 namespace ModernWigiDash.Tests;

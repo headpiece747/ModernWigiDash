@@ -113,7 +113,7 @@ Verified 2026-08-26 (manager-parity session; each hit live): an incremental
 report UP-TO-DATE over changed content when its timestamp check is stale
 (a real CS8600 hid that way): the gate's build stage now force-recompiles
 (`--no-incremental`, 2026-08-26), and a manual warning-clean claim on a
-changed project still needs `dotnet build <project> -c Release
+changed project still needs `dotnet build MyProject.csproj -c Release
 --no-incremental`. `dotnet format` enforces trailing whitespace, final
 newlines, and line endings but never indentation (a deliberately
 de-indented collection-expression line went uncorrected; two indent
@@ -243,7 +243,7 @@ line). `[ref]` parameters are illegal in a PowerShell function signature
 form (ordinal by default).
 
 ### Meta Skills (from coleam00/skills, MIT)
-- **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
+- **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
 - **opportunity-scan**: scans agentmemory sessions (reactive: one run's artifacts; proactive: window of logs) and recommends what to encode next (rules/skill/hook/subagent/MCP). Outputs a self-contained HTML report in `docs/`.
 - **ablate-ai-layer**: measures whether the always-loaded AI instructions still earn their place by running the same task with the layer intact vs stripped, in throwaway git worktrees. The skill's own `map_layer.py` (`.opencode/skills/ablate-ai-layer/scripts/`) is adapted for `.opencode/`; `--runner` wraps `opencode run`.
 - **second-brain-audit**: audits CONTEXT.md / AGENTS.md for state-shaped claims that stopped being true (memory rot), against the codebase + agentmemory. Phase 3 script skipped (no monetary values here); Phase 2 does the work.
@@ -472,7 +472,7 @@ so a sync diffs against the upstream repo, never the leaderboard.
   pre-pass is `scripts\ref-check.ps1` (the rules-check-drift step 0).
 - Live-stack run requires elevation. **User preference: no per-call UAC prompts**:
   use the no-consent runner:
-  `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "<cmd>"`
+  `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "[command]"`
   (drops the command into `pending.ps1`, triggers the `WmdElevatedRunner` scheduled
   task, created once with `/RL HIGHEST`, so `schtasks /Run` needs no consent, and
   polls `result.txt`; the elevated token is held by the task, the command runs in the

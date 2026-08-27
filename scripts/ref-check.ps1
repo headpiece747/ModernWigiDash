@@ -15,8 +15,9 @@
 #
 # Path-likeness filter (a backtick span is checked only if it):
 #   - has no placeholder/glob characters (< > * ( ) { } | ? space),
-#   - is not a URL (http), a user-home path (~), or a drive-letter path (C:),
-#     (machine-local temp paths are deliberate and user-specific),
+#   - is not a URL (http), a user-home path (~), a drive-letter path (C:),
+#     or an env-var span (%...%), (machine-local / runtime paths are
+#     deliberate and user-specific, never repo paths),
 #   - is not relative-parent navigation (..), and does not start with a
 #     separator (command-invocation tokens like /wayfinder, absolute paths),
 #   - contains a separator only if the last segment carries a known
@@ -54,7 +55,12 @@ param(
         'hooks/',            # the Claude Code hooks dir, named in the "Not Installed" section
         'bin/',              # prose-gate exclusion vocabulary, generic build dirs
         'obj/',              # prose-gate exclusion vocabulary, generic build dirs
-        'CONTEXT-MAP.md'     # upstream template token (docs/agents/domain.md names the multi-context layout); this repo is single-context, so it is absent by design
+        'CONTEXT-MAP.md',    # upstream template token (docs/agents/domain.md names the multi-context layout); this repo is single-context, so it is absent by design
+        'app_settings.json',       # runtime data file (the machine-local app settings in %LOCALAPPDATA%, not the repo)
+        'app_theme.exe-dir.json',  # the harness backup name for the exe-dir theme copy (a test-artifact name, not a repo path)
+        'autohotkey.exe',          # the user-supplied AutoHotkey interpreter (external, never bundled, ADR-0019)
+        'scan-lone-cr.ps1',        # the retired temp-dir manual CR scan (obsolete: the pre-commit hook owns the scan now)
+        'System.Text.Json'         # the .NET namespace/type name, not a file (ends in .Json, a known extension, by accident)
     )
 )
 
@@ -85,6 +91,7 @@ function Test-PathLike([string]$span) {
     if ($span -match '^https?://') { return $false }
     if ($span.StartsWith('~')) { return $false }
     if ($span -match '^[A-Za-z]:') { return $false }
+    if ($span.Contains('%')) { return $false }
     if ($span -match '^[/\\]') { return $false }
     if ($span -match '\.\.') { return $false }
     $lastSeg = ($span -split '[/\\]')[-1]
