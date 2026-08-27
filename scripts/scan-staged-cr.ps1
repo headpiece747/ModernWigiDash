@@ -18,8 +18,14 @@
 $ErrorActionPreference = 'Stop'
 $root = (& git rev-parse --show-toplevel).Trim()
 
-& git -C $root rev-parse --verify HEAD 2>$null | Out-Null
+# git writes to stderr when HEAD does not exist; under EAP=Stop a native
+# command's stderr becomes a terminating NativeCommandError in PS 5.1, so
+# the existence check runs under a temporarily relaxed EAP.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$null = & git -C $root rev-parse --verify HEAD 2>$null
 $haveHead = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevEap
 if ($haveHead) {
     # Staged delta (add/copy/modify/rename/typechange; deletes carry no new
     # bytes).

@@ -262,6 +262,37 @@ package discovery through the registry search API
 the working route, and `npm pack <pkg>` + a `rg -U` pass over the unpacked
 `dist/` (external URLs, telemetry keywords, spawn/daemon surface) is the
 working pre-wire safety inspection for an npm MCP.
+Verified 2026-08-27 (harness lint-layer session; each hit live): a
+comment-only catch block (`catch { # reason }`) is a parse error under
+Windows PowerShell 5.1 (the 5.1 parser reports MissingEndCurlyBrace; a
+truly empty `catch { }` parses fine), so empty-catch documentation must
+sit on the line above the try, not inside the block (the first
+documentation pass put the reasons inline and left wmd-verify.ps1 with
+17 parse errors; the ParseRegression pin now requires the
+preceding-line reason). The installed PSScriptAnalyzer 1.25.0
+(Microsoft-signed) accepts the legacy settings schema only (a
+`RuleConfig` key is rejected with SETTINGS_ERROR, and the module's
+shipped `Settings\*.psd1` presets use the legacy keys), and within it
+the per-rule `Rules = @{ X = @{ Enable = $false } }` form silently
+ignored five of six probed rules while `ExcludeRules = @( ... )`
+disabled every one. `Invoke-ScriptAnalyzer -Path <file> -Recurse:$false`
+returns a flat array of DiagnosticRecords, or `$null` when the file is
+clean (the `$null` must be wrapped before enumerating). PS 5.1's
+`Join-Path` concatenates a rooted child path instead of honoring it
+(`C:\a` + `C:\b\c.md` gives `C:\a\C:\b\c.md`), so rooted-path entries
+need an `IsPathRooted` bypass (ref-check.ps1). Under
+`$ErrorActionPreference = 'Stop'`, a native command's stderr becomes a
+terminating `NativeCommandError` in PS 5.1 (`git ... 2>$null` dies when
+git writes anything to stderr; scan-staged-cr.ps1's no-HEAD
+first-commit path hit it and now runs under a temporarily relaxed EAP).
+A PS 5.1 double-quoted string drops the backtick before an unrecognized
+character (a backtick before `s` yields a bare `s`), so doc bodies that
+must carry literal backticks are single-quoted (the ref-check test
+seam). `[Parser]::ParseFile` returns the AST while the `[ref]` slots
+take the tokens and the ParseError array (calling `.Errors` on the
+errors array member-enumerates to `$null` and reads as one phantom
+error), and `$stmt.SafeAst` is `$null` for some top-level statements in
+5.1, so top-level type checks test the statement itself.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
@@ -386,10 +417,15 @@ so a sync diffs against the upstream repo, never the leaderboard.
   v0.11.2 binary + 4 ports are server mode only, deliberately not used),
   no telemetry code on the standalone path, and no external endpoint
   without explicit provider config (keyless default: BM25 + local store).
-  `memory_save` + `memory_smart_search` were verified by a stdio MCP
-  round-trip probe before the entry landed. The full 54-tool server
-  (daemon + `iii.exe`) stays a parked upgrade: start it and the shim
-  proxies all tools, which would also restore `/recall`'s lesson step.
+   `memory_save` + `memory_smart_search` were verified by a stdio MCP
+   round-trip probe before the entry landed. Dated final decision
+   2026-08-27 (parked-resolution pass): the full 54-tool server (daemon +
+   `iii.exe` + 4 ports) is REJECTED for this repo: the standalone 7-tool
+   surface covers every workflow in use, the daemon + native binary is a
+   larger attack surface than the file-backed store, and the safety
+   inspection (dist walk) verified the standalone path only. Reopening is
+   a deliberate act (start the daemon; the shim then proxies all 54
+   tools, which would also restore `/recall`'s lesson step), not drift.
 - **cs4ai** (dotnet tool + skill, archived 2026-08-27): a semantic C#
   editor CLI surfaced from `~/.claude/skills`, off-catalog and never
   intake-reviewed; its "use INSTEAD OF Grep/Read/Edit" directive conflicts
@@ -397,22 +433,54 @@ so a sync diffs against the upstream repo, never the leaderboard.
   `glider_rename_symbol` / `glider_move_type` / `glider_move_member` and
   codegraph. The user does not run Claude Code, so the skill directory was
   archived to `~\.claude\skills-archived\cs4ai` (out of the skill scan
-  path; restore is one move) and the `cs4ai` dotnet global tool stays
-  installed. Reintake is a deliberate decision, not drift.
-
-### Parked candidates (dated, re-evaluate on the next pass)
-
-- **PSScriptAnalyzer + Pester** (PowerShellGet modules, no new runtime):
-  a lint + test layer for the harness `.ps1` scripts (wmd-verify,
-  run-gates, gate-guard, the elevated runner); their bug history (the
-  here-string terminator that deleted `Ensure-WinMsg`, the PS 5.1 Add-Type
-  C#5 trap) was caught by hand each time. Parked 2026-08-27 (not picked).
-- **markdownlint-cli** (npm global): prose lint for CONTEXT.md/ADRs. Weak
-  candidate: ADR-0010 is the cautionary tale (a mechanical prose gate made
-  a ~45k-error wall); if adopted, opt-in skill step only, never a gate
-  stage. Parked 2026-08-27.
+   path; restore is one move) and the `cs4ai` dotnet global tool stays
+   installed. Reintake is a deliberate decision, not drift.
+- **PSScriptAnalyzer + Pester** (PowerShellGet modules, adopted
+  2026-08-27, the parked-candidate resolution): the lint + test layer for
+  the harness `.ps1` scripts (wmd-verify, run-gates, gate-guard, the
+  elevated runner); their bug history (the here-string terminator that
+  deleted `Ensure-WinMsg`, the PS 5.1 Add-Type C#5 trap) was caught by
+  hand each time until this. Check-3 runtime: none new (Windows
+  PowerShell 5.1 + bundled PowerShellGet; Pester 5.7.1 needed
+  `-SkipPublisherCheck` to shadow the bundled Microsoft-signed 3.4.0,
+  both CurrentUser scope). Implementation: `scripts\ps-hygiene.ps1`
+  (opt-in lint layer, NOT a gate stage, ADR-0010 precedent) runs three
+  passes over `scripts\` + `.opencode\skills\`: the pure-ASCII byte sweep
+  (PS 5.1 mis-parses non-ASCII), PSScriptAnalyzer with
+  `scripts\psa-settings.psd1` (every exclusion a dated allow-list entry
+  with its reason; `ExcludeRules` is the reliable disable key in the
+  installed 1.25.0, the per-rule `Rules.Enable` form silently ignores
+  five of the six probed rules), and Pester over `scripts\tests\` (24
+  tests: GateGuard 7, RefCheck 6, ScanStagedCr 5, ParseRegression 6
+  covering the commit-guard verdict surface, the stale-reference
+  pre-pass, the staged-blob lone-CR scan against scratch repos, and the
+  harness syntax-surface regression pins: zero parse errors, the 19
+  top-level functions, the C#5-era Add-Type payloads compile, the
+  here-string terminators at column 0, and every empty catch documented
+  with its preceding-line reason). First run fixed three real non-ASCII
+  bugs (a BOM + two em dashes in `build-release.ps1`, an em dash in
+  `measure-coverage.ps1`, a paint glyph in the `Get-AnyWindow` comment of
+  `wmd-verify.ps1`) and the PS 5.1 comment-only-catch parse error the
+  documentation comments almost introduced (17 parse errors before the
+  fix; the reason comments now sit above the try).
 
 ## Not Installed (deliberately)
+
+- markdownlint-cli (npm global, dated final rejection 2026-08-27, the
+  parked-candidate resolution): prose lint for CONTEXT.md/ADRs. ADR-0010
+  is the cautionary tale (a mechanical prose gate made a ~45k-error
+  wall), the prose surface is already governed by the `unslop` and
+  `technical-writing` style rules, and an npm-global tool is
+  disproportionate for what a style pass covers. Reintake is a
+  deliberate decision (opt-in skill step only, never a gate stage), not
+  drift.
+- `retro` + `implement-spec` (mattpocock upstream, dated final rejection
+  2026-08-27, the parked-candidate resolution): both still sit in
+  upstream's `in-progress/` bucket at `6654f6b` (re-verified
+  2026-08-27, no newer upstream), and both overlap installed skills:
+  `retro` (session retrospective + environment improvement suggestions)
+  is `reflect` + `opportunity-scan`, `implement-spec` is `implement`.
+  Reintake when they graduate upstream, not drift.
 
 - `cwm-roslyn-navigator` MCP server: redundant with Glider
 - bash workflow hooks (`hooks/`), not Windows-native; the repo's build/test
@@ -436,8 +504,9 @@ so a sync diffs against the upstream repo, never the leaderboard.
   elevated runner and `hardware-e2e-validation`), `teach` (education
   workspace, no project need), `to-questionnaire` (async decision docs for
   another human; the solo project settles decisions in-session through the
-  `question` tool and grilling), `retro` + `implement-spec` (upstream
-  `in-progress`, skipped), `obra/superpowers` (every salient skill overlaps
+   `question` tool and grilling), `retro` + `implement-spec` (upstream
+   `in-progress` at `6654f6b`; superseded 2026-08-27 by the dated final
+   rejection in Not Installed), `obra/superpowers` (every salient skill overlaps
   an installed one: systematic-debugging = diagnosing-bugs,
   test-driven-development = tdd, verification-before-completion =
   principle-prove-it-works + verify, requesting/receiving-code-review = the
@@ -472,11 +541,18 @@ so a sync diffs against the upstream repo, never the leaderboard.
   way, 2026-08-26); if the app is running from `bin\Release` the forced
   recompile fails on a locked output file, so stop the app (the harness
   `stop`) and re-run:
-`scripts\run-gates.ps1`, use it for full gate runs instead of the three
-   commands above. The former 4th stage (the 2026-08-23 em-dash prose
-   scan) was retired 2026-08-27: em-dash usage is governed by the prose
-   style rules (the `unslop` and `technical-writing` skills), not by the
-   gate.
+ `scripts\run-gates.ps1`, use it for full gate runs instead of the three
+    commands above. The former 4th stage (the 2026-08-23 em-dash prose
+    scan) was retired 2026-08-27: em-dash usage is governed by the prose
+    style rules (the `unslop` and `technical-writing` skills), not by the
+    gate.
+- Harness ps1 lint (opt-in, NOT a gate stage, the ADR-0010 precedent):
+  `scripts\ps-hygiene.ps1` runs the pure-ASCII sweep over every repo
+  `.ps1`, PSScriptAnalyzer with the dated exclusion allow-list
+  (`scripts\psa-settings.psd1`), and the 24 Pester tests over
+  `scripts\tests\` (GateGuard / RefCheck / ScanStagedCr /
+  ParseRegression). Run it when a harness script changes, after a
+  tooling install, or before a release.
 - Commit guard: a pre-commit hook blocks a commit unless the last gate row in
   `.audit/gates.tsv` is green in all three stages, its sha equals current HEAD,
   and the run is at most 60 min old (`-MaxAgeMinutes` on the guard). Install
@@ -537,10 +613,15 @@ so a sync diffs against the upstream repo, never the leaderboard.
   wraps it with the house verdict table. `agnix` (npm global, `agnix .`)
   validates SKILL.md / AGENTS.md / agent-frontmatter shape (448 rules); run
   it after authoring or porting a skill (authoring-a-skill step 2,
-  create-verification-skill step 4). `ctxlint` (npm global) lints root-level
-  context files; its reference base-path (the context file's own directory)
-  does not fit `.opencode/AGENTS.md`, so the deterministic stale-reference
-  pre-pass is `scripts\ref-check.ps1` (the rules-check-drift step 0).
+   create-verification-skill step 4). `ctxlint` (npm global) lints root-level
+   context files; its reference base-path (the context file's own directory)
+   does not fit `.opencode/AGENTS.md`, so the deterministic stale-reference
+   pre-pass is `scripts\ref-check.ps1` (the rules-check-drift step 0).
+   The harness ps1 surface gets its own scanner: `scripts\ps-hygiene.ps1`
+   (pure-ASCII sweep + PSScriptAnalyzer over `scripts\psa-settings.psd1`
+   + Pester over `scripts\tests\`; run when the harness scripts change or
+   before a release, opt-in by the ADR-0010 precedent, never a gate
+   stage).
 - Live-stack run requires elevation. **User preference: no per-call UAC prompts**:
   use the no-consent runner:
   `C:\Users\tobia\AppData\Local\Temp\opencode\wmd-elevated\run-elev-no-uac.ps1 -Command "[command]"`

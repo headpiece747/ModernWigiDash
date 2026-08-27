@@ -127,7 +127,16 @@ Get-ChildItem -Path $root -Recurse -File -Force -ErrorAction SilentlyContinue |
     ForEach-Object { $fileNameMap[$_.Name.ToLowerInvariant()] = $true }
 
 foreach ($rel in $Files) {
-    $full = Join-Path $root $rel
+    # Absolute entries are used as-is (the test seam passes temp docs);
+    # relative entries resolve against the repo root. PS 5.1's Join-Path
+    # concatenates a rooted child instead of honoring it, so the rooted
+    # case must bypass the join.
+    if ([System.IO.Path]::IsPathRooted($rel)) {
+        $full = $rel
+    }
+    else {
+        $full = Join-Path $root $rel
+    }
     if (-not (Test-Path -LiteralPath $full)) {
         Write-Output ("ref-check: skipping, doc not found: $rel")
         continue

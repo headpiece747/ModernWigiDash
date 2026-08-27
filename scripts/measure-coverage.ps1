@@ -91,7 +91,7 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet test failed (exit $LASTEXITCODE); see $
 
 # --- 2. Parse this invocation's cobertura result ---
 # One test project => exactly one report today; if a second test project is
-# ever added, each emits its own report and the gate must aggregate them —
+# ever added, each emits its own report and the gate must aggregate them:
 # fail loudly on ambiguity instead of silently keeping the newest.
 $Coverage = @(Get-ChildItem -Path $ResultsDir -Recurse -Filter "coverage.cobertura.xml" |
     Where-Object { $_.LastWriteTime -ge $runStart })

@@ -72,6 +72,19 @@ Trigger conditions:
 - The canary is a time bound on shared machines, so it must stay generous
   (50 ms against the 33 ms cadence) or CI goes flaky.
 
+## Revisit notes
+
+2026-08-27 (parked-resolution pass): the exit conditions were re-checked and
+no trigger fired. The timing canary is green (a full-frame encode stays
+under the 50 ms bound), the protocol is unchanged (same frame payload,
+same measured ~55 ms bulk write), and no on-device measurement attributes a
+visible hitch to the encode. One reading note on trigger 1: the measured
+write (~55 ms) is already below twice the cadence (66 ms), so that trigger
+reads as "the write becomes cheap enough that the ring's identity cost no
+longer outweighs the benefit", not as a threshold the pipeline has crossed.
+The binding constraint stays the
+buffer-drawn-is-exactly-the-buffer-sent identity. Decision unchanged.
+
 ## Date
 
 2026-08-24

@@ -502,7 +502,7 @@ function Get-AnyWindow([string]$namePart) {
     # Substring (case-insensitive) Name match over the pid-scoped app tree,
     # first Window-typed match (same walk as Get-DialogWindow). A UIA
     # PropertyCondition on Name is an EXACT match (it failed on "Theme
-    # Customization" vs the actual Name "🎨 Theme Customization"), and owned
+    # Customization" vs the actual Name, the same words with a palette emoji prepended), and owned
     # WPF dialogs live inside the OWNER's UIA subtree - not as desktop-root
     # children - so a root-children probe misses them entirely.
     Init-Uia
@@ -569,6 +569,8 @@ function Set-FirstWritableText($winEl, [string]$value) {
     while ($stack.Count -gt 0) {
         $el = $stack.Pop()
         $vp = $null
+        # best-effort probe: no ValuePattern is the continue branch (a
+        # comment-only catch is a PS 5.1 parse error, so the reason lives here)
         try { $vp = [WmdUia.Core]::ValuePattern($el) } catch { }
         # A writable ValuePattern alone is NOT a text input: WPF exposes the
         # window TitleBar (50037) as a control whose writable ValuePattern
@@ -580,6 +582,7 @@ function Set-FirstWritableText($winEl, [string]$value) {
                     [WmdUia.Core]::SetValue($vp, $value)
                     return [WmdUia.Core]::PatternValue($vp)
                 }
+            # best-effort probe: an unwritable pattern is the continue branch
             } catch { }
         }
         Queue-Children $stack $el
@@ -692,6 +695,7 @@ function Do-Click($el) {
             [WmdUia.Core]::Invoke($inv)
             return "invoke"
         }
+    # best-effort probe: no InvokePattern falls through to the mouse click
     } catch { }
     $r = [WmdUia.Core]::BoundingRect($el)
     Do-ClickScreen ([int]($r.Left + ($r.Right - $r.Left) / 2)) ([int]($r.Top + ($r.Bottom - $r.Top) / 2))
@@ -741,6 +745,7 @@ function Collect-Elements([string]$needle, $buttonOnly) {
             # pattern is absent, so test for a non-null result.
             $invokable = $false
             $pat = $null
+            # best-effort probe: no InvokePattern means queue the children
             try { $pat = [WmdUia.Core]::InvokePattern($el) } catch { }
             if ($null -ne $pat) { $invokable = $true }
             if (-not $invokable) { Queue-Children $stack $el; continue }
@@ -901,6 +906,7 @@ switch ($Command) {
         if (-not $el) { Fail ('no control matching "' + $Rest[0] + '"') }
         $val = $null
         # v4 ValuePattern via the bridge: PatternValue returns the string itself.
+        # best-effort probe: no ValuePattern falls back to the element Name
         try { $vp = [WmdUia.Core]::ValuePattern($el); if ($null -ne $vp) { $val = [WmdUia.Core]::PatternValue($vp) } } catch { }
         if (-not $val) { $val = [WmdUia.Core]::Name($el) }
         Write-Output $val

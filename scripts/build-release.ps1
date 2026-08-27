@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [switch]$SkipTelemetry,
     [string]$Version = "",
@@ -93,7 +93,7 @@ if (-not [string]::IsNullOrWhiteSpace($Version)) {
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     # Enforce the stamp: a missing FileVersion (csproj 0.0.0) shipped once
-    # as a silent regression — fail the build instead of the eyeball pass.
+    # as a silent regression. Fail the build instead of the eyeball pass.
     $fileVersion = (Get-Item (Join-Path $publishOut "ModernWigiDash.App.exe")).VersionInfo.FileVersion
     if ($fileVersion -ne $Version) { throw "Version stamp check failed: exe FileVersion is '$fileVersion', expected '$Version'" }
 }
