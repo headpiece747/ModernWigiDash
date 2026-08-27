@@ -98,7 +98,7 @@ Proof artifacts live in the run's evidence dir and survive `clean` (cleanup neve
 
 ## Cleanup
 
-1. Roll back the feature's profile mutations (`restore-profile` covers profile.json, the theme file next to the launched exe (the app's real theme location, backed up as `app_theme.exe-dir.json`), and the LocalAppData theme copy when present; drive undo paths first when the feature has them).
+1. Roll back the feature's profile mutations (`restore-profile` covers profile.json, the theme file in the LocalAppData state dir (the app's real theme location since ADR-0021), and the legacy exe-dir theme copy backed up as `app_theme.exe-dir.json`; drive undo paths first when the feature has them).
 2. Run `clean`. Confirm the evidence dir still exists complete.
 3. Never kill by process name. The harness kills only the recorded pid, and `stop` clean-closes first (the app's own close path, which releases the display pipe); it force-kills only when WM_CLOSE cannot be delivered and says so. A manual force-kill wedges the display for up to 30 s on the next launch. If a driver step spawned extra processes (it shouldn't), list them for the user instead of sweeping.
 

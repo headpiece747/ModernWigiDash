@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using ModernWigiDash.Core.Plugins;
+using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.Core.Models;
 
@@ -426,7 +427,12 @@ public static class ProfileOps
 
     private static readonly JsonSerializerOptions ExportOptions = new() { WriteIndented = true };
 
-    /// <summary>Serializes the profile to JSON.</summary>
+    /// <summary>
+    /// Serializes the profile to JSON. This stays a BARE profile on purpose:
+    /// the persisted profile.json (ProfilePersistence.Save) and the boot load
+    /// must never carry the export bundle's theme section (ADR-0021) - the
+    /// manual export composes it through <see cref="ProfileExportTheme.WithTheme"/>.
+    /// </summary>
     public static string ExportJson(ProfileLayout profile)
         => JsonSerializer.Serialize(profile, ExportOptions);
 
@@ -505,10 +511,14 @@ public static class ProfileOps
                 return new ProfileImportOutcome.TooLarge(info.Length);
             }
             string json = File.ReadAllText(path);
+            // The export bundle's optional theme section (ADR-0021) is
+            // extracted from this one size-guarded read; the verdict carries
+            // it so no caller ever re-reads the file unguarded.
+            ThemeSettings? bundledTheme = ProfileExportTheme.ReadTheme(json);
             ProfileLayout? loaded = ImportJson(json, loader, context, sanitize: !trusted);
             return loaded is null
                 ? new ProfileImportOutcome.Failed("Unparseable profile JSON")
-                : new ProfileImportOutcome.Loaded(loaded);
+                : new ProfileImportOutcome.Loaded(loaded, bundledTheme);
         }
         catch (Exception ex)
         {

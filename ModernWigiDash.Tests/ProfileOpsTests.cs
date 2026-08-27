@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using ModernWigiDash.Core.Plugins;
+using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.Tests;
 
@@ -850,9 +851,12 @@ public class ProfileOpsTests
     private static ProfileLayout RequireLoaded(ProfileImportOutcome outcome)
         => outcome switch
         {
-            ProfileImportOutcome.Loaded(var profile) => profile,
+            ProfileImportOutcome.Loaded(var profile, _) => profile,
             _ => throw new AssertFailedException($"expected Loaded, got {outcome.GetType().Name}")
         };
+
+    private static ThemeSettings? BundledThemeOf(ProfileImportOutcome outcome)
+        => outcome is ProfileImportOutcome.Loaded(_, var theme) ? theme : null;
 
     [TestMethod]
     public void ImportProfileFile_ValidUntrustedFile_LoadsAndSanitizes()
@@ -951,6 +955,58 @@ public class ProfileOpsTests
 
         Assert.IsTrue(outcome is ProfileImportOutcome.Failed(var detail) && detail is not null,
             $"expected Failed with the path error, got {outcome}");
+    }
+
+    // ── the export bundle's theme section (ADR-0021) ───────────────
+
+    [TestMethod]
+    public void ImportProfileFile_BundleWithThemeSection_LoadedCarriesTheTheme()
+    {
+        string path = Path.Combine(NewImportTempDir(), "bundle.json");
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var theme = new ThemeSettings { BgDark = "#0A0B0C", AccentGreen = "#0D0E0F" };
+        File.WriteAllText(path, ProfileExportTheme.WithTheme(ProfileOps.ExportJson(profile), theme));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        var loaded = RequireLoaded(outcome);
+        Assert.AreEqual(2, loaded.Pages.Count, "the profile half of the bundle loads as before");
+        var bundled = BundledThemeOf(outcome);
+        Assert.IsNotNull(bundled, "the boundary must extract the bundle's theme section from its one size-guarded read");
+        Assert.AreEqual("#0A0B0C", bundled.BgDark);
+        Assert.AreEqual("#0D0E0F", bundled.AccentGreen);
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_BareProfile_BundledThemeIsNull()
+    {
+        string path = Path.Combine(NewImportTempDir(), "profile.json");
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        File.WriteAllText(path, ProfileOps.ExportJson(profile));
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        RequireLoaded(outcome);
+        Assert.IsNull(BundledThemeOf(outcome), "a bare profile (legacy exports and the app's own file) carries no theme");
+    }
+
+    [TestMethod]
+    public void ImportProfileFile_MalformedThemeSection_StillLoadsWithNullTheme()
+    {
+        string path = Path.Combine(NewImportTempDir(), "bundle.json");
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var root = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.Nodes.JsonObject>(ProfileOps.ExportJson(profile))!;
+        root[ProfileExportTheme.JsonKey] = "not-a-theme";
+        File.WriteAllText(path, root.ToJsonString());
+
+        ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(path, CreateLoader(), new TestContext());
+
+        RequireLoaded(outcome);
+        Assert.IsNull(BundledThemeOf(outcome),
+            "an unshaped theme section degrades to null: the profile still loads, the restore is simply not offered");
     }
 
     [TestMethod]

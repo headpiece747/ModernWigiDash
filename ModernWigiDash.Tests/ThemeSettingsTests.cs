@@ -1,3 +1,4 @@
+using System.IO;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
@@ -256,5 +257,226 @@ public class ThemeSettingsTests
         Assert.AreEqual("#FAFAFA", theme.TextPrimary);
         Assert.AreEqual("#A1A1AA", theme.TextSecondary);
         Assert.AreEqual("#0B0B0C", theme.TitleBar);
+    }
+
+    // ── ADR-0021: the theme file lives in the user state dir ──────────
+
+    private static string NewThemeTempDir()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "wmd-theme-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static string WriteThemeFile(string dir, string name, string bgDark)
+    {
+        string path = Path.Combine(dir, name);
+        bool ok = ThemeSettings.Save(new ThemeSettings { BgDark = bgDark }, path);
+        Assert.IsTrue(ok, $"the seam save to '{path}' must succeed");
+        return path;
+    }
+
+    [TestMethod]
+    public void DefaultPath_LivesInTheUserStateDir()
+    {
+        string expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ModernWigiDash", "app_theme.json");
+
+        Assert.AreEqual(expected, ThemeSettings.DefaultPath(),
+            "the one theme file location is the state dir, beside profile.json and app_settings.json");
+    }
+
+    [TestMethod]
+    public void DefaultPath_LivesInTheProfileStateDirectory()
+    {
+        string stateDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            ProfilePersistence.DirectoryName);
+
+        Assert.IsTrue(
+            ThemeSettings.DefaultPath().StartsWith(stateDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+            "lockstep pin: the theme file must live in the profile's state dir (one dir for profile, settings, and theme)");
+    }
+
+    [TestMethod]
+    public void LegacyPath_IsTheExeDirThemeFile()
+        => Assert.AreEqual(Path.Combine(AppContext.BaseDirectory, "app_theme.json"), ThemeSettings.LegacyPath());
+
+    [TestMethod]
+    public void Save_CreatesTheMissingDirectory_AndRoundTrips()
+    {
+        string dir = NewThemeTempDir();
+        try
+        {
+            string path = Path.Combine(dir, "nested", "deeper", "app_theme.json");
+
+            Assert.IsTrue(ThemeSettings.Save(new ThemeSettings { BgDark = "#010203" }, path));
+
+            var read = ThemeSettings.LoadFrom(path);
+            Assert.IsNotNull(read);
+            Assert.AreEqual("#010203", read.BgDark);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void LoadFrom_AbsentOrCorrupt_ReturnsNull()
+    {
+        string dir = NewThemeTempDir();
+        try
+        {
+            Assert.IsNull(ThemeSettings.LoadFrom(Path.Combine(dir, "absent.json")));
+
+            string corrupt = Path.Combine(dir, "corrupt.json");
+            File.WriteAllText(corrupt, "{ not a theme");
+            Assert.IsNull(ThemeSettings.LoadFrom(corrupt));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetAbsentLegacyParseable_MigratesTheLegacyCopy()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = Path.Combine(dir, "state", "app_theme.json");
+            string legacy = WriteThemeFile(dir, "legacy.json", "#A1A2A3");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual("#A1A2A3", loaded.BgDark, "the migrated colors are what the user last saw");
+            var migrated = ThemeSettings.LoadFrom(target);
+            Assert.IsNotNull(migrated, "the migration must carry the copy across to the state dir");
+            Assert.AreEqual("#A1A2A3", migrated.BgDark);
+            Assert.AreEqual(1, lines.Count, "exactly one log line for the migration");
+            StringAssert.Contains(lines[0], "Migrated legacy theme file");
+            StringAssert.Contains(lines[0], legacy);
+            StringAssert.Contains(lines[0], target);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetPresent_ReturnsTheTarget_WithoutMigrating()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = WriteThemeFile(dir, "state.json", "#010203");
+            string legacy = WriteThemeFile(dir, "legacy.json", "#A1A2A3");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual("#010203", loaded.BgDark, "the state file wins when present");
+            Assert.AreEqual(0, lines.Count, "no migration runs (and nothing is logged) once the state file exists");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetAbsentLegacyAbsent_ReturnsTheDefaultsWithNoLogLine()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            var loaded = ThemeSettings.Load(
+                Path.Combine(dir, "state", "app_theme.json"),
+                Path.Combine(dir, "absent-legacy.json"),
+                lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark);
+            Assert.AreEqual(0, lines.Count, "a fresh install (no file anywhere) is the silent defaults case");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetAbsentLegacyCorrupt_ReturnsTheDefaultsWithOneLine()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = Path.Combine(dir, "state", "app_theme.json");
+            string legacy = Path.Combine(dir, "legacy.json");
+            File.WriteAllText(legacy, "{ corrupt legacy");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark);
+            Assert.IsFalse(File.Exists(target), "a corrupt legacy copy is never carried across");
+            Assert.AreEqual(1, lines.Count);
+            StringAssert.Contains(lines[0], "unparseable");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetCorrupt_ReturnsTheDefaultsWithTheFallbackLine_AndNeverRepairsFromTheLegacy()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = Path.Combine(dir, "state.json");
+            File.WriteAllText(target, "{ corrupt state file");
+            string legacy = WriteThemeFile(dir, "legacy.json", "#A1A2A3");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark,
+                "a corrupt state file degrades to the defaults, the pre-ADR-0021 corrupt-file rule");
+            Assert.AreEqual(1, lines.Count);
+            StringAssert.Contains(lines[0], "Theme load failed");
+            Assert.IsFalse(lines.Any(l => l.Contains("Migrated legacy theme file")),
+                "the migration runs only when the state file is ABSENT, never as a corrupt-file repair");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void MigrateLegacyCopy_SameTargetAndLegacyPath_ReturnsNull()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string path = WriteThemeFile(dir, "same.json", "#A1A2A3");
+
+            var migrated = ThemeSettings.MigrateLegacyCopy(path, path, lines.Add);
+
+            Assert.IsNull(migrated, "the same-file guard: a path cannot migrate into itself");
+            Assert.AreEqual(0, lines.Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
     }
 }

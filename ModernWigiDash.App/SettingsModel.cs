@@ -30,7 +30,7 @@ internal sealed class SettingsModel
     [
         new("Appearance", "The chrome palette outside the widget canvas."),
         new("Behavior", "How the app reacts when the window is closed or minimized."),
-        new("Profile", "Travel the display layout as a JSON file.")
+        new("Profile", "Travel the display layout (and the theme) as a JSON file.")
     ];
 
     /// <summary>The close-behavior entries in display order: the pre-feature

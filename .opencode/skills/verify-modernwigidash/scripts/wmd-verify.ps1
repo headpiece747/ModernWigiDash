@@ -38,12 +38,12 @@ value <needle>                    Print the Value or Name of the first matching 
                                       cursor-placement gate + activation dance as click-at.
   shot <path>                       Screenshot the main app window to <path> (PNG).
   wait <namePart> [-Seconds <n>]    Wait up to n seconds (default 15) for a window whose title contains <namePart>.
-  backup-profile                    Back up profile.json + app_theme.json from %LOCALAPPDATA%\ModernWigiDash
-                                    PLUS the theme file next to the launched exe (the app persists its theme to
-                                    AppContext.BaseDirectory/app_theme.json, NOT the LocalAppData dir; the
-                                    LocalAppData copy is included only when present).
-  restore-profile                   Restore the backed-up files (no-op when nothing was backed up); the
-                                    exe-dir theme goes back to the launched exe's directory.
+backup-profile                    Back up profile.json + app_theme.json from %LOCALAPPDATA%\ModernWigiDash
+                                     (the theme's real location since ADR-0021) PLUS any legacy theme copy
+                                     next to the launched exe (the one-time migration source, backed up as
+                                     app_theme.exe-dir.json).
+   restore-profile                   Restore the backed-up files (no-op when nothing was backed up); the
+                                     exe-dir theme goes back to the launched exe's directory.
   stop                              Clean-close the recorded pid (WM_CLOSE through the app's own close path:
                                     profile persisted, display to standby, pipe released). Force-kills ONLY when
                                     WM_CLOSE cannot be delivered (no window, or the app runs at a higher
@@ -1013,12 +1013,12 @@ switch ($Command) {
                 $saved += $f
             }
         }
-        # The theme the app ACTUALLY loads persists next to the executable
-        # (ThemeSettings.ThemePath = AppContext.BaseDirectory/app_theme.json),
-        # not in the LocalAppData dir above. A stale dev-machine copy in
-        # bin\Release silently overrides every color (it once hid the
-        # "green" badge behind an amber label via AccentGreen=#12141D).
-        # Back it up under a distinct name so restore never collides.
+        # Since ADR-0021 the theme the app loads lives in the LocalAppData
+        # state dir (the loop above already backs that copy up). The exe-dir
+        # copy is now a read-only one-time migration source (the app reads it
+        # only when the state file is absent). Back it up under a distinct
+        # name so a verify run can neither trigger an unexpected migration
+        # nor lose a deliberately placed legacy copy.
         $exeTheme = if ($s.exe) { Join-Path (Split-Path $s.exe -Parent) 'app_theme.json' } else { $null }
         if ($exeTheme -and (Test-Path $exeTheme)) {
             Copy-Item $exeTheme (Join-Path $dir 'app_theme.exe-dir.json') -Force

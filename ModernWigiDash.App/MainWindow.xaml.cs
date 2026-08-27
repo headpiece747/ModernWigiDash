@@ -10,6 +10,7 @@ using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Plugins;
 using ModernWigiDash.Core.Rendering;
+using ModernWigiDash.Core.Theming;
 using ModernWigiDash.Hardware.Transport;
 
 using ModernWigiDash.Widgets;
@@ -1124,7 +1125,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             try
             {
-                string json = ProfileOps.ExportJson(_profile);
+                // The theme rides the export bundle (ADR-0021) as a per-item
+                // restore item; the persisted profile.json stays bare.
+                string json = ProfileExportTheme.WithTheme(ProfileOps.ExportJson(_profile), ThemeSettings.Theme);
                 File.WriteAllText(dlg.FileName, json);
                 _dialogHost.Info("Export Complete", "Profile exported successfully!");
             }
@@ -1145,7 +1148,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
             // maps the named verdicts to its own surface.
             switch (ProfileOps.ImportProfileFile(dlg.FileName, _loader, this))
             {
-                case ProfileImportOutcome.Loaded(var loaded):
+                case ProfileImportOutcome.Loaded(var loaded, var bundledTheme):
+                    bool swapped = false;
                     try
                     {
                         // The close behavior travels with the JSON, but an
@@ -1163,11 +1167,17 @@ public partial class MainWindow : Window, IModernWigiDashContext
                         // picker, and the snap-to-grid resync (a RawWrite): the
                         // old force-write of the checkbox is gone.
                         ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
+                        swapped = true;
                     }
                     catch (Exception ex)
                     {
                         _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
                     }
+                    // The bundle's theme item runs after a successful profile
+                    // swap, so a declined or failed theme never undoes the
+                    // imported profile, and a failed import never offers the
+                    // theme of a profile that was not applied.
+                    if (swapped) OfferBundledTheme(bundledTheme);
                     break;
                 case ProfileImportOutcome.TooLarge:
                     _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
@@ -1181,6 +1191,43 @@ public partial class MainWindow : Window, IModernWigiDashContext
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// The export bundle's theme item (ADR-0021): offered when the bundled
+    /// theme differs from the current one (the applicator's fingerprint is
+    /// the one change signal, so a default-theme export never prompts a
+    /// default-themed machine), and applied only behind the user's confirm.
+    /// The profile import itself never touches the theme file.
+    /// </summary>
+    private void OfferBundledTheme(ThemeSettings? bundledTheme)
+    {
+        if (bundledTheme is null) return;
+        bool differs = !string.Equals(
+            ThemeApplicator.Fingerprint(bundledTheme),
+            ThemeApplicator.Fingerprint(ThemeSettings.Theme),
+            StringComparison.Ordinal);
+        if (!differs) return;
+        if (!_dialogHost.Confirm("Restore Theme", "The imported profile includes a theme. Apply it to this machine?")) return;
+        ApplyBundledTheme(bundledTheme);
+    }
+
+    /// <summary>
+    /// Applies a confirmed bundle theme: the active theme is replaced
+    /// wholesale, the state-dir file is persisted (a failed write surfaces
+    /// one line and the colors still apply for the session, the
+    /// ThemeDialog's rule), and the applicator re-applies the resources.
+    /// </summary>
+    private void ApplyBundledTheme(ThemeSettings theme)
+    {
+        ThemeSettings.Theme = theme;
+        if (!ThemeSettings.Save())
+        {
+            _dialogHost.Error(
+                "Theme Save Failed",
+                "Could not write app_theme.json to the user state directory. The colors apply for this session only.");
+        }
+        _themeApplicator.Apply(this);
     }
 
     private void BtnClear_Click(object _, RoutedEventArgs e)

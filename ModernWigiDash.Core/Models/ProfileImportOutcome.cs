@@ -1,3 +1,5 @@
+using ModernWigiDash.Core.Theming;
+
 namespace ModernWigiDash.Core.Models;
 
 /// <summary>
@@ -18,8 +20,13 @@ public abstract record ProfileImportOutcome
     {
     }
 
-    /// <summary>The file loaded, sanitized (when untrusted), and rehydrated.</summary>
-    public sealed record Loaded(ProfileLayout Profile) : ProfileImportOutcome;
+    /// <summary>The file loaded, sanitized (when untrusted), and rehydrated.
+    /// <see cref="BundledTheme"/> is the export bundle's optional theme section
+    /// (ADR-0021), extracted from the boundary's one size-guarded read: null
+    /// when the file carries no theme (legacy exports and the app's own
+    /// profile.json never do). The boot load ignores it; only the manual
+    /// import offers the restore, and only behind the user's confirm.</summary>
+    public sealed record Loaded(ProfileLayout Profile, ThemeSettings? BundledTheme = null) : ProfileImportOutcome;
 
     /// <summary>No file at the path (the first-boot case).</summary>
     public sealed record Absent : ProfileImportOutcome;

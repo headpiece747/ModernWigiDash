@@ -59,12 +59,14 @@ internal sealed class ProfilePersistence : IDisposable
     /// oversized, corrupt, or unparseable — the caller falls back to the
     /// starter profile. The app's own file loads as TRUSTED input: the
     /// untrusted-import rules would wipe the user's configured ActionCommand,
-    /// absolute ImagePath, and BackgroundImagePath on every restart.
+    /// absolute ImagePath, and BackgroundImagePath on every restart. The
+    /// export bundle's theme section is ignored here: the boot load never
+    /// restores a theme (ADR-0021), only the manual import offers it.
     /// </summary>
     public ProfileLayout? Load(WidgetPluginLoader loader, IModernWigiDashContext context)
     {
         ProfileImportOutcome outcome = ProfileOps.ImportProfileFile(_profilePath, loader, context, trusted: true);
-        if (outcome is ProfileImportOutcome.Loaded(var profile))
+        if (outcome is ProfileImportOutcome.Loaded(var profile, _))
         {
             return profile;
         }

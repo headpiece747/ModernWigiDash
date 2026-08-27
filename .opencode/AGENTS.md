@@ -85,13 +85,17 @@ pixel sampling at (textLeft-12, textTop+8±4) (the 8 px dot sits 8 px left of
 the text, 12 px inside the border padding; a Connected badge on the default
 theme samples exactly `#10B981`); UIA top-level queries can transiently miss
 the main window right after a close/reopen (retry once before concluding);
-app state locations: `profile.json` in `%LOCALAPPDATA%\ModernWigiDash`, but
-the theme in `app_theme.json` next to the executable
-(`AppContext.BaseDirectory`), not LocalAppData (a stale dev-machine copy in
-`bin\Release` silently overrides every color: a stale `AccentGreen=#12141D`
-hid the "green" badge behind the amber `Connected` label; `wmd-verify.ps1`
-backup/restore-profile now cover both locations, the exe copy as
-`app_theme.exe-dir.json`); a PowerShell here-string's closing `"@` must sit
+app state locations: all three state files (`profile.json`,
+`app_settings.json`, `app_theme.json`) live in
+`%LOCALAPPDATA%\ModernWigiDash` (the theme moved there with ADR-0021: the
+former exe-dir location carried a stale-copy hazard, a stale dev-machine copy
+in `bin\Release` once silently overrode every color, a stale
+`AccentGreen=#12141D` hid the "green" badge behind the amber `Connected`
+label). The exe-dir `app_theme.json` copy is now a read-only one-time
+migration source (absent state file + parseable legacy copy migrates and
+logs one line); `wmd-verify.ps1` backup/restore-profile covers both
+locations, the exe copy as `app_theme.exe-dir.json`); a PowerShell
+here-string's closing `"@` must sit
 at column 0 (a leading space keeps the string open, so everything after it,
 including whole `function` definitions, is silently swallowed into the
 string content: the script still parses with zero errors and runs, the

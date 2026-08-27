@@ -29,9 +29,11 @@ public class UpdateScriptTests
         Directory.CreateDirectory(install);
         Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64"));
 
-        // Old install: exe + a user file that must survive.
+        // Old install: exe + a user file that must survive. (The theme file no
+        // longer lives in the install dir - ADR-0021 moved it to the user
+        // state dir - so a neutral name keeps the pin honest.)
         File.WriteAllText(Path.Combine(install, fakeExe), "old-exe");
-        File.WriteAllText(Path.Combine(install, "app_theme.json"), "user-theme");
+        File.WriteAllText(Path.Combine(install, "user-note.txt"), "user-theme");
         // Staged new exe + Resources.
         File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe), "new-exe");
         Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64", "Resources"));
@@ -65,7 +67,7 @@ public class UpdateScriptTests
 
         Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, fakeExe)));
         Assert.IsFalse(File.Exists(Path.Combine(install, fakeExe + ".old")), "the .old must be cleaned after a successful swap");
-        Assert.AreEqual("user-theme", File.ReadAllText(Path.Combine(install, "app_theme.json")), "user files must survive");
+        Assert.AreEqual("user-theme", File.ReadAllText(Path.Combine(install, "user-note.txt")), "user files must survive");
         Assert.IsTrue(File.Exists(Path.Combine(install, "Resources", "font.ttf")), "staged Resources must be copied");
         Assert.IsFalse(File.Exists(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe)),
             "the stage must be deleted after applying");
