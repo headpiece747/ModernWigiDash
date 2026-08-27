@@ -230,12 +230,17 @@ printed a bare `0x`) while the comparison is fine, so for byte-level work
 write a `.ps1` to the temp dir and run it with `-File` (the existing escape
 hatch, hit again). The repo's default branch is `master`
 (origin/HEAD -> origin/master): `origin/main` is an "unknown revision". The
-shared CI runner consumed even the 30 s wait of
+shared CI runner starved the thread pool of
 `SingleInstanceGuardTests.Primary_ActivationSignal_FiresTheCallbackAndReParks`
-on the v0.6.8 push (2026-08-26 had widened 5 s to 30 s); the ceiling is 60 s
-now (f10a306), a later 2026-08-27 re-run consumed the full 60 s so it
-widened to 120 s, and the budget is a ceiling, not a target (a healthy
-machine finishes in well under a second). In a function whose return is captured, use
+past the 30 s ceiling on the v0.6.8 push (2026-08-26 had widened 5 s to
+30 s) and past the 60 s ceiling on 2026-08-27, so widening the ceiling is
+unbounded (a healthy machine finishes in well under a second, but a loaded
+runner can starve the pool arbitrarily; the failures are non-monotonic, a
+re-run can pass inside the ceiling the prior run exhausted). The fix is not
+a bigger ceiling but a bounded CI retry: the CI workflow runs this test
+alone in a fresh test host, up to 3 attempts, while the other 2005 tests run
+once unmasked; a real regression fails every attempt, a runner-load flake
+lands on a less-loaded moment and passes. In a function whose return is captured, use
 `Write-Host`, never `Write-Output` (the emitted line is space-joined onto the
 return value; hit live when it polluted `$text` and mangled CONTEXT.md's first
 line). `[ref]` parameters are illegal in a PowerShell function signature

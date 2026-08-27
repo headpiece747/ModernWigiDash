@@ -68,14 +68,14 @@ public class SingleInstanceGuardTests
 
         // The callbacks fire on thread-pool threads: one OS event +
         // thread-pool round trip per signal, the second through the
-        // one-shot re-park. The house TestWait budget of five seconds is
-        // load-sensitive here (a 2026-08-26 full-suite gate run consumed
-        // the whole budget with both signals still undelivered), so this
-        // test waits two minutes: the budget is only a ceiling (a healthy
-        // machine finishes in well under a second), and the shared CI runner
-        // consumed thirty on the 2026-08-26 v0.6.8 push and the full sixty
-        // on a 2026-08-27 re-run, so the ceiling widens to two minutes.
-        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(120));
+        // one-shot re-park. This is load-sensitive: on a loaded shared CI
+        // runner the thread pool can be starved past any fixed ceiling (it
+        // consumed 30 s on the 2026-08-26 v0.6.8 push and the full 60 s on a
+        // 2026-08-27 run). The ceiling here is a per-attempt timeout, not a
+        // target: the CI workflow runs this test in a fresh test host with a
+        // bounded retry, so a runner-load flake lands on a less-loaded
+        // moment and passes, while a real regression fails every attempt.
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(60));
         // The guard re-parks BEFORE resetting (the no-lost-signal ordering),
         // so a fast second signal can be delivered TWICE: the re-park
         // observes the still-set event and fires again. That over-delivery
