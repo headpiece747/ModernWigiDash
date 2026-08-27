@@ -246,7 +246,22 @@ return value; hit live when it polluted `$text` and mangled CONTEXT.md's first
 line). `[ref]` parameters are illegal in a PowerShell function signature
 (ParserError); return the value or use a script-scope variable. `String.Replace`'s
 3-arg (`StringComparison`) overload does not resolve in PS 5.1; use the 2-arg
-form (ordinal by default).
+ form (ordinal by default).
+
+Verified 2026-08-27 (tooling inventory pass; each hit live): the global
+opencode config spans two files that merge (`~/.config/opencode/opencode.json`:
+providers, model, permissions, agent overrides;
+`~/.config/opencode/opencode.jsonc`: the ollama provider and the ONLY
+definition of the `codegraph` MCP), and the project `opencode.json` adds
+`glider`, `glider-trace`, and `agentmemory`: a "cleanup" that deletes the
+`.jsonc` silently loses codegraph. OpenCode also surfaces skills from
+`~/.claude/skills` (verified: `cs4ai` was surfaced from there), so that
+directory is a skill scan path even though no other agent uses it. npm
+package discovery through the registry search API
+(`https://registry.npmjs.org/-/v1/search?text=...`) + `gh search repos` is
+the working route, and `npm pack <pkg>` + a `rg -U` pass over the unpacked
+`dist/` (external URLs, telemetry keywords, spawn/daemon surface) is the
+working pre-wire safety inspection for an npm MCP.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
@@ -356,6 +371,47 @@ so a sync diffs against the upstream repo, never the leaderboard.
 6. **Claims**: a performance or quality claim is measured with a with/without
    run before the skill earns the catalog, or rejected on the claim alone.
 
+### Accepted under the relaxed filter (2026-08-27 tooling pass)
+
+- **agentmemory** (MCP, accepted 2026-08-27): the session-memory MCP the
+  global `/remember` and `/recall` commands wrap. Canonical package
+  `rohitg00/agentmemory`; wired project-scoped in `opencode.json` as
+  `@agentmemory/mcp@0.9.29`, the standalone entrypoint (probes a full
+  server at `localhost:3111`, falls back to a 7-tool local surface on
+  file-backed storage at `~\.agentmemory\standalone.json`). Check-3
+  runtime: Node (already present, v24) + the npx-cached npm packages
+  `@agentmemory/mcp` and the `@agentmemory/agentmemory` core (~6.3 MB).
+  Safety half verified by dist inspection 2026-08-27: no daemon, no
+  ports, no native binary on the standalone path (the pinned iii-engine
+  v0.11.2 binary + 4 ports are server mode only, deliberately not used),
+  no telemetry code on the standalone path, and no external endpoint
+  without explicit provider config (keyless default: BM25 + local store).
+  `memory_save` + `memory_smart_search` were verified by a stdio MCP
+  round-trip probe before the entry landed. The full 54-tool server
+  (daemon + `iii.exe`) stays a parked upgrade: start it and the shim
+  proxies all tools, which would also restore `/recall`'s lesson step.
+- **cs4ai** (dotnet tool + skill, archived 2026-08-27): a semantic C#
+  editor CLI surfaced from `~/.claude/skills`, off-catalog and never
+  intake-reviewed; its "use INSTEAD OF Grep/Read/Edit" directive conflicts
+  with the MCP-first house rule and its edit surface overlaps
+  `glider_rename_symbol` / `glider_move_type` / `glider_move_member` and
+  codegraph. The user does not run Claude Code, so the skill directory was
+  archived to `~\.claude\skills-archived\cs4ai` (out of the skill scan
+  path; restore is one move) and the `cs4ai` dotnet global tool stays
+  installed. Reintake is a deliberate decision, not drift.
+
+### Parked candidates (dated, re-evaluate on the next pass)
+
+- **PSScriptAnalyzer + Pester** (PowerShellGet modules, no new runtime):
+  a lint + test layer for the harness `.ps1` scripts (wmd-verify,
+  run-gates, gate-guard, the elevated runner); their bug history (the
+  here-string terminator that deleted `Ensure-WinMsg`, the PS 5.1 Add-Type
+  C#5 trap) was caught by hand each time. Parked 2026-08-27 (not picked).
+- **markdownlint-cli** (npm global): prose lint for CONTEXT.md/ADRs. Weak
+  candidate: ADR-0010 is the cautionary tale (a mechanical prose gate made
+  a ~45k-error wall); if adopted, opt-in skill step only, never a gate
+  stage. Parked 2026-08-27.
+
 ## Not Installed (deliberately)
 
 - `cwm-roslyn-navigator` MCP server: redundant with Glider
@@ -387,7 +443,9 @@ so a sync diffs against the upstream repo, never the leaderboard.
   principle-prove-it-works + verify, requesting/receiving-code-review = the
   code-review skill + code-reviewer agent, writing-plans/executing-plans =
   to-spec/implement, subagent-driven-development = implement + the task
-  tool), `JuliusBrussee/caveman` (a product, not a skill: an npm CLI, a
+  tool; 2026-08-27: a stale `plugin` entry in the global
+  `~/.config/opencode/opencode.json` referenced this repo, nothing was
+  ever installed, and the entry was removed), `JuliusBrussee/caveman` (a product, not a skill: an npm CLI, a
   BSL-1.1 proxy in the provider traffic path, telemetry on by default; its
 pixel mode renders SKILL.md bodies to PNG, which agnix and skillspector
    cannot lint; the terseness idea is already unslop +
