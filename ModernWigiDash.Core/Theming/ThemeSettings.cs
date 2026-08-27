@@ -108,6 +108,15 @@ public class ThemeSettings
     /// the state dir can never split between the two owners.</summary>
     public const string StateDirectoryName = "ModernWigiDash";
 
+    /// <summary>The pre-read size cap for a theme file (ADR-0021): a real theme
+    /// is ~1 KB, so 1 MB rejects a hostile multi-GB file before the read
+    /// (the pre-read-reject shape the profile-import guard already owns) and
+    /// bounds the startup allocation. Over-cap degrades like an unparseable
+    /// file: defaults, one log line.</summary>
+    internal const int MaxThemeFileBytes = 1024 * 1024;
+
+    private static readonly JsonSerializerOptions SaveOptions = new() { WriteIndented = true };
+
     /// <summary>The one theme file location: %LOCALAPPDATA%\ModernWigiDash\app_theme.json
     /// (ADR-0021). The old exe-dir location is a read-only legacy migration
     /// source (<see cref="LegacyPath"/>), never a read/write target.</summary>
@@ -152,9 +161,22 @@ public class ThemeSettings
         {
             if (File.Exists(targetPath))
             {
+                if (new FileInfo(targetPath).Length > MaxThemeFileBytes)
+                {
+                    string capMessage = $"Theme file '{targetPath}' is over the {MaxThemeFileBytes / (1024 * 1024)} MB cap, falling back to defaults";
+                    System.Diagnostics.Debug.WriteLine(capMessage);
+                    log?.Invoke(capMessage);
+                    return new ThemeSettings();
+                }
                 string json = File.ReadAllText(targetPath);
                 var loaded = JsonSerializer.Deserialize<ThemeSettings>(json);
                 if (loaded != null) return loaded;
+                // Present but a JSON null (the truncated-write shape): one line,
+                // so a hand-broken state file is observable instead of silent.
+                string nullMessage = $"Theme file '{targetPath}' deserialized to null, falling back to defaults";
+                System.Diagnostics.Debug.WriteLine(nullMessage);
+                log?.Invoke(nullMessage);
+                return new ThemeSettings();
             }
         }
         catch (Exception ex)
@@ -185,8 +207,9 @@ public class ThemeSettings
         ThemeSettings? legacy = LoadFrom(legacyPath);
         if (legacy is null)
         {
-            // The legacy copy exists but does not parse: one line, no migration.
-            log?.Invoke($"[THEME] Legacy theme file '{legacyPath}' is unparseable; not migrating");
+            // The legacy copy exists but does not load (unparseable or over
+            // the size cap): one line, no migration.
+            log?.Invoke($"[THEME] Legacy theme file '{legacyPath}' is unparseable or over the size cap; not migrating");
             return null;
         }
 
@@ -199,12 +222,13 @@ public class ThemeSettings
 
     /// <summary>Loads a theme from an explicit path (the read half of the test
     /// seam; production routes through <see cref="Load(string, string, Action{string}?)"/>):
-    /// absent or unparseable returns null.</summary>
+    /// absent, over the size cap, or unparseable returns null.</summary>
     internal static ThemeSettings? LoadFrom(string path)
     {
         try
         {
             if (!File.Exists(path)) return null;
+            if (new FileInfo(path).Length > MaxThemeFileBytes) return null;
             return JsonSerializer.Deserialize<ThemeSettings>(File.ReadAllText(path));
         }
         catch (Exception)
@@ -239,8 +263,6 @@ public class ThemeSettings
             return false;
         }
     }
-
-    private static readonly JsonSerializerOptions SaveOptions = new() { WriteIndented = true };
 
     /// <summary>
     /// Parses a #RRGGBB or #AARRGGBB hex string into a <see cref="RgbaColor"/>, or returns

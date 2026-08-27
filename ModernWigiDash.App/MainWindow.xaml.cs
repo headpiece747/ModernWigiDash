@@ -1194,20 +1194,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>
-    /// The export bundle's theme item (ADR-0021): offered when the bundled
-    /// theme differs from the current one (the applicator's fingerprint is
-    /// the one change signal, so a default-theme export never prompts a
-    /// default-themed machine), and applied only behind the user's confirm.
-    /// The profile import itself never touches the theme file.
+    /// The export bundle's theme item (ADR-0021): the offer decision routes
+    /// through <see cref="ThemeRestorePolicy"/> (null gate + fingerprint gate,
+    /// pinned without a window), then the confirm; a declined confirm is a
+    /// no-op and the profile import never touches the theme file.
     /// </summary>
     private void OfferBundledTheme(ThemeSettings? bundledTheme)
     {
-        if (bundledTheme is null) return;
-        bool differs = !string.Equals(
-            ThemeApplicator.Fingerprint(bundledTheme),
-            ThemeApplicator.Fingerprint(ThemeSettings.Theme),
-            StringComparison.Ordinal);
-        if (!differs) return;
+        if (!ThemeRestorePolicy.ShouldOffer(bundledTheme, ThemeSettings.Theme)) return;
         if (!_dialogHost.Confirm("Restore Theme", "The imported profile includes a theme. Apply it to this machine?")) return;
         ApplyBundledTheme(bundledTheme);
     }

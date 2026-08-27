@@ -479,4 +479,127 @@ public class ThemeSettingsTests
             Directory.Delete(dir, true);
         }
     }
+
+    [TestMethod]
+    public void Load_TargetAbsentLegacyParseableButTheMigrationWriteFails_HonorsTheInMemoryCopyAndLogs()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            // The target's parent is an existing FILE: Directory.CreateDirectory
+            // throws, so the migration write fails (the read-only-dir shape,
+            // no elevation needed).
+            string blocker = Path.Combine(dir, "blocker");
+            File.WriteAllText(blocker, "a file, not a directory");
+            string target = Path.Combine(blocker, "app_theme.json");
+            string legacy = WriteThemeFile(dir, "legacy.json", "#0A0B0C");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual("#0A0B0C", loaded.BgDark,
+                "a failed migration write still honors the colors the user last saw for this session");
+            Assert.IsFalse(File.Exists(target), "nothing is written where the write failed");
+            Assert.AreEqual(1, lines.Count);
+            StringAssert.Contains(lines[0], "migration write");
+            StringAssert.Contains(lines[0], "in-memory copy");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetOverTheSizeCap_ReturnsTheDefaultsWithOneLine()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = Path.Combine(dir, "state.json");
+            File.WriteAllBytes(target, new byte[ThemeSettings.MaxThemeFileBytes + 1]);
+            string legacy = WriteThemeFile(dir, "legacy.json", "#A1A2A3");
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark,
+                "a hostile multi-GB theme file is rejected before the read, not after a multi-GB allocation");
+            Assert.AreEqual(1, lines.Count);
+            StringAssert.Contains(lines[0], "cap");
+            Assert.IsFalse(lines.Any(l => l.Contains("Migrated legacy theme file")),
+                "a present (even hostile) state file never triggers the migration");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetIsJsonNull_ReturnsTheDefaultsWithOneLine()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            // The truncated-write shape: Deserialize<ThemeSettings>("null")
+            // returns null without throwing, so the silent-defaults hole gets
+            // its own observable line.
+            string target = Path.Combine(dir, "state.json");
+            File.WriteAllText(target, "null");
+
+            var loaded = ThemeSettings.Load(target, Path.Combine(dir, "absent-legacy.json"), lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark);
+            Assert.AreEqual(1, lines.Count, "a present-but-null state file is observable, not silent");
+            StringAssert.Contains(lines[0], "deserialized to null");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void LoadFrom_OverTheSizeCap_ReturnsNull()
+    {
+        string dir = NewThemeTempDir();
+        try
+        {
+            string path = Path.Combine(dir, "hostile.json");
+            File.WriteAllBytes(path, new byte[ThemeSettings.MaxThemeFileBytes + 1]);
+
+            Assert.IsNull(ThemeSettings.LoadFrom(path),
+                "the read seam is capped before the read (the legacy leg degrades to the unparseable line)");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [TestMethod]
+    public void Load_TargetAbsentLegacyOverCap_NotMigratedWithOneLine()
+    {
+        string dir = NewThemeTempDir();
+        var lines = new List<string>();
+        try
+        {
+            string target = Path.Combine(dir, "state", "app_theme.json");
+            string legacy = Path.Combine(dir, "legacy.json");
+            File.WriteAllBytes(legacy, new byte[ThemeSettings.MaxThemeFileBytes + 1]);
+
+            var loaded = ThemeSettings.Load(target, legacy, lines.Add);
+
+            Assert.AreEqual(new ThemeSettings().BgDark, loaded.BgDark, "an over-cap legacy copy is never carried across");
+            Assert.IsFalse(File.Exists(target));
+            Assert.AreEqual(1, lines.Count);
+            StringAssert.Contains(lines[0], "unparseable or over the size cap");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

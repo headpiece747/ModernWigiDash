@@ -38,12 +38,12 @@ value <needle>                    Print the Value or Name of the first matching 
                                       cursor-placement gate + activation dance as click-at.
   shot <path>                       Screenshot the main app window to <path> (PNG).
   wait <namePart> [-Seconds <n>]    Wait up to n seconds (default 15) for a window whose title contains <namePart>.
-backup-profile                    Back up profile.json + app_theme.json from %LOCALAPPDATA%\ModernWigiDash
-                                     (the theme's real location since ADR-0021) PLUS any legacy theme copy
-                                     next to the launched exe (the one-time migration source, backed up as
-                                     app_theme.exe-dir.json).
-   restore-profile                   Restore the backed-up files (no-op when nothing was backed up); the
-                                     exe-dir theme goes back to the launched exe's directory.
+  backup-profile                    Back up profile.json + app_theme.json from %LOCALAPPDATA%\ModernWigiDash
+                                    (the theme's real location since ADR-0021) PLUS any legacy theme copy
+                                    next to the launched exe (the one-time migration source, backed up as
+                                    app_theme.exe-dir.json).
+  restore-profile                   Restore the backed-up files (no-op when nothing was backed up); the
+                                    exe-dir theme goes back to the launched exe's directory.
   stop                              Clean-close the recorded pid (WM_CLOSE through the app's own close path:
                                     profile persisted, display to standby, pipe released). Force-kills ONLY when
                                     WM_CLOSE cannot be delivered (no window, or the app runs at a higher
@@ -797,7 +797,7 @@ switch ($Command) {
             if ($s.pid -and [WmdUia.Core]::ProcessId($win) -ne [int]$s.pid) { Fail ('window matching "' + $winPart + '" belongs to pid ' + [WmdUia.Core]::ProcessId($win) + ', not the launched pid ' + [int]$s.pid) }
             if (-not [WmdUia.Core]::IsEnabled($win)) { Fail ('window "' + $winPart + '" is disabled') }
             $r = [WmdUia.Core]::BoundingRect($win)
-Write-Output (
+            Write-Output (
                 'ok: pid=' + $proc.Id + ' window "' + $winPart + '" @(' +
                 $r.Left + ',' + $r.Top + ') ' + ($r.Right - $r.Left) + 'x' + ($r.Bottom - $r.Top) +
                 ' pid=' + [WmdUia.Core]::ProcessId($win) + ' enabled'
