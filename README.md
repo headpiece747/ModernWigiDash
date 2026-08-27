@@ -69,9 +69,12 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003). The app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy. The readout drops to **zero when the tracked target isn't actually displayed** (e.g. a backgrounded fullscreen game) instead of showing its hidden render rate |
 | **In-App Auto-Update** | Checks GitHub once at startup; downloads a slim app-only zip (~90 MB, SHA-256 verified) and swaps the executable in place on restart, no manual zip juggling |
 | **Power Lifecycle** | Windows sleep/resume handling: the 30 FPS pump pauses on suspend and restarts with a forced USB reconnect on wake |
-| **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards; loadable from `app_theme.json` |
+| **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards. Persisted to `app_theme.json` in `%LocalAppData%\ModernWigiDash` (a pre-release copy next to the exe migrates automatically, one time); the profile export carries the theme and import offers a one-click restore |
 | **Profile Persistence** | Auto-saved profile (`profile.json` in `%LocalAppData%\ModernWigiDash`). Widget placements, pages, and property values survive restarts via debounced save + flush-on-close; `display_device.log` and `crash.log` live in the same folder, never next to the exe |
-| **Profile Import / Export** | Manual JSON profile round-trip with import sanitization: widget/page count caps, ActionCommand stripping, and path checks against malicious profiles |
+| **Profile Import / Export** | Manual JSON profile round-trip with import sanitization: widget/page count caps, ActionCommand stripping, and path checks against malicious profiles. The export bundle carries an optional theme section; a restore offer on import is declined safely (the profile import itself never touches the theme file) |
+| **Tray & Settings Hub** | Per-profile opt-in **hide to tray** on close or minimize, with a system tray icon (Show / Quit) and a single-instance guard (a second launch activates the first window). The **⚙️ Settings hub** groups Appearance (theme colors, page background), Behavior (close behavior, start with Windows, hotkey kill switch), and Profile (export / import) |
+| **Start with Windows** | Per-user autostart (HKCU, no elevation) with a Settings checkbox; the autostarted instance opens minimized and keeps streaming frames to the display |
+| **Global Hotkeys** | The Hotkey widget binds an OS-level chord (Ctrl/Alt/Shift/Win + key) that fires even while the app is hidden to the tray, including a **Flip page** action and a **Run AHK Script** action that spawns your own AutoHotkey script. A machine-local **kill switch** in Settings vetoes the global registration and the AHK spawn (the anti-cheat off-switch) |
 | **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
 | **Extensible Plugin SDK** | Build isolated C# widget assemblies targeting `ModernWigiDash.Sdk` |
 
@@ -86,12 +89,12 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Audio Visualizer** | Real-time multi-band spectrum and oscilloscope visualization from WASAPI loopback capture |
 | **Now Playing** | Windows System Media Transport Controls integration with album artwork and transport buttons |
 | **Twitch** | Real-time channel chat viewer and live-channel status with Device-Authorization login |
-| **Hotkey** | Customizable macro buttons with vector icon support |
+| **Hotkey** | Customizable macro buttons with vector icon support, global hotkey chords (tray-aware), and user AutoHotkey script actions |
 | **Stock & Crypto** | Real-time crypto, stock, and FX price feeds (Binance, Finnhub, Yahoo, CoinGecko) |
-| **Clock** | Analog and digital clocks |
+| **Clock** | Analog and digital clocks (optional seconds display) |
 | **Stopwatch & Timer** | Stopwatch and countdown timer |
 | **Picture & GIF Viewer** | Static image and animated GIF playback |
-| **Weather Forecast** | Multi-day weather conditions with live refresh |
+| **Weather Forecast** | Multi-day weather conditions with live refresh (optional hide-location) |
 | **Text** | Static or animated text banners |
 
 ---

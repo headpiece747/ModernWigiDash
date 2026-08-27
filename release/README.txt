@@ -40,6 +40,35 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
+== What's new in v0.6.8 ==
+
+  - Settings hub: the title-bar gear opens one hub with three groups:
+    Appearance (theme colors, page background), Behavior (close behavior,
+    Start with Windows, hotkey kill switch), and Profile (export / import).
+  - Hide to tray: opt in per profile (Behavior group). Close and minimize
+    then hide instead of exit; the tray icon brings the window back and
+    only the tray's  Quit  exits. A second launch activates the first
+    window instead of opening a duplicate.
+  - Start with Windows: per-user autostart (no admin needed). The
+    autostarted instance opens minimized and keeps streaming frames.
+  - Global hotkeys: the Hotkey widget can bind an OS-level chord
+    (Ctrl/Alt/Shift/Win + key) that fires even while the app is hidden
+    to the tray, including a  Flip page  action and a  Run AHK Script
+    action that spawns your own AutoHotkey script (interpreter path set
+    in the hub). The Behavior group's kill switch disables the global
+    registration and the AHK spawn without touching any other action.
+  - Theme: app_theme.json now lives in %LOCALAPPDATA%\ModernWigiDash; a
+    copy next to the exe from older releases migrates automatically,
+    one time. Profile exports carry the theme, and importing one offers
+    a one-click  Restore Theme  (declining leaves your theme untouched).
+  - Clock: optional seconds display (hh:mm:ss / HH:mm:ss).
+  - Weather: optional Hide Location (the city name hides; the custom
+    label and the guidance lines keep rendering).
+  - Fixes: the global-hotkey startup crash (a P/Invoke binding miss),
+    the audio-capture retry after a failed start, updater digest-case
+    hardening, and the exit standby verdict line.
+
+
 == Data locations & reset ==
 
   Profile + settings:  %LOCALAPPDATA%\ModernWigiDash\
@@ -78,7 +107,10 @@ ModernWigiDash — G.Skill WigiDash widget stack
      Settings -> Apps -> Installed apps ->
        "LibreHardwareService"     -> Uninstall
        "Intel PresentMon"         -> Uninstall
-  2. Delete the ModernWigiDash-win-x64 folder.
+  2. (If you enabled Start with Windows) untick it in the settings hub,
+     or delete the  ModernWigiDash  value under
+     HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
+  3. Delete the ModernWigiDash-win-x64 folder.
 
 == License & credits ==
 
