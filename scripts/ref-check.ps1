@@ -60,7 +60,8 @@ param(
         'app_theme.exe-dir.json',  # the harness backup name for the exe-dir theme copy (a test-artifact name, not a repo path)
         'autohotkey.exe',          # the user-supplied AutoHotkey interpreter (external, never bundled, ADR-0019)
         'scan-lone-cr.ps1',        # the retired temp-dir manual CR scan (obsolete: the pre-commit hook owns the scan now)
-        'System.Text.Json'         # the .NET namespace/type name, not a file (ends in .Json, a known extension, by accident)
+        'System.Text.Json',        # the .NET namespace/type name, not a file (ends in .Json, a known extension, by accident)
+        'iii.exe'                  # the agentmemory server-mode daemon binary (the parked 54-tool upgrade; external npx binary, never in the repo)
     )
 )
 

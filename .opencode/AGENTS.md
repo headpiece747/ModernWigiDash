@@ -447,8 +447,8 @@ so a sync diffs against the upstream repo, never the leaderboard.
   `~/.config/opencode/opencode.json` referenced this repo, nothing was
   ever installed, and the entry was removed), `JuliusBrussee/caveman` (a product, not a skill: an npm CLI, a
   BSL-1.1 proxy in the provider traffic path, telemetry on by default; its
-pixel mode renders SKILL.md bodies to PNG, which agnix and skillspector
-   cannot lint; the terseness idea is already unslop +
+  pixel mode renders SKILL.md bodies to PNG, which agnix and skillspector
+  cannot lint; the terseness idea is already unslop +
   technical-writing), `vercel-labs/find-skills` + `anthropics/skill-creator`
   (meta overlap: the intake filter above plus `authoring-a-skill` and
   `writing-for-agents`), and the leaderboard's dominant categories by shape
