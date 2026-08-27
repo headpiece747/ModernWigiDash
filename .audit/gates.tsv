@@ -129,3 +129,5 @@
 2026-08-27T13:40:51Z	d02c1d5	manual	ok	0	0	ok	2006	0	ok	ok
 2026-08-27T14:16:47Z	16f3389	retire prose stage (3-stage gate)	ok	0	0	ok	2006	0	ok
 2026-08-27T14:57:38Z	f814212	wire agentmemory MCP	ok	0	0	ok	2006	0	ok
+2026-08-27T16:08:38Z	7c1b384	drift pass: ref-check iii.exe exemption + AGENTS.md indent fixes	ok	0	0	ok	2006	0	ok
+2026-08-27T16:11:30Z	5083b9f	trail: commit the drift-pass gate rows at 5083b9f	ok	0	0	ok	2006	0	ok
