@@ -24,7 +24,7 @@ internal sealed class SettingsDialog : Window
     private readonly Action<bool> _onCommitAutostart;
     private readonly Action<bool> _onCommitKillSwitch;
     private readonly Action<string> _onCommitAhkPath;
-    private readonly Action _onBrowseAhkInterpreter;
+    private readonly Func<string?> _onBrowseAhkInterpreter;
     private readonly Action _onExportProfile;
     private readonly Action _onImportProfile;
     private readonly Dictionary<string, RadioButton> _radioByValue = [];
@@ -59,8 +59,10 @@ internal sealed class SettingsDialog : Window
     /// <param name="onCommitAhkPath">Fires with the path box's new value when
     /// the box loses focus. The window persists the machine-local path.</param>
     /// <param name="onBrowseAhkInterpreter">Fires on the interpreter row's
-    /// Browse button (the window owns the file dialog; a chosen path commits
-    /// through the same seam).</param>
+    /// Browse button (the window owns the file dialog and commits a chosen
+    /// path through the same commit seam) and returns the chosen path, so
+    /// the row can write it back into the box and the displayed path can
+    /// never drift from the persisted one; null on cancel.</param>
     /// <param name="onExportProfile">Fires on the Profile group's export
     /// button (the window's SaveFileDialog + ProfileOps flow).</param>
     /// <param name="onImportProfile">Fires on the Profile group's import
@@ -76,7 +78,7 @@ internal sealed class SettingsDialog : Window
         Action<bool> onCommitKillSwitch,
         string currentAhkPath,
         Action<string> onCommitAhkPath,
-        Action onBrowseAhkInterpreter,
+        Func<string?> onBrowseAhkInterpreter,
         Action onExportProfile,
         Action onImportProfile)
     {
@@ -270,7 +272,9 @@ internal sealed class SettingsDialog : Window
         // action spawns - a machine-local path (app_settings.json, never
         // the profile), nothing bundled or auto-detected. The box commits
         // on focus loss; Browse routes to the window's file dialog (a
-        // chosen path commits through the same seam).
+        // chosen path commits through the same seam and rides back into
+        // the box, so the displayed path cannot drift from the persisted
+        // one; a cancel leaves the box untouched).
         row.Children.Add(BuildRowLabel("AutoHotkey", topMargin: 12));
         row.Children.Add(BuildRowHint(
             "The user's AutoHotkey interpreter (autohotkey.exe) for the Run AHK Script action; blank leaves the action refusing."));
@@ -287,7 +291,12 @@ internal sealed class SettingsDialog : Window
             Padding = new Thickness(8, 2, 8, 2),
             Margin = new Thickness(4, 0, 0, 0)
         };
-        browse.Click += (_, _) => _onBrowseAhkInterpreter();
+        browse.Click += (_, _) =>
+        {
+            string? chosen = _onBrowseAhkInterpreter();
+            if (chosen is null) return; // a cancel leaves the box (and the setting) untouched
+            ahkPath.Text = chosen; // the committed path rides back into the box
+        };
         ahkRow.Children.Add(ahkPath);
         ahkRow.Children.Add(browse);
         row.Children.Add(ahkRow);

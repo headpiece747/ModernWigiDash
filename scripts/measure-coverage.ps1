@@ -44,11 +44,26 @@ $ResultsRoot = [System.IO.Path]::GetFullPath($ResultsDir)
 # GetFullPath resolves '..' segments, so a crafted
 # "<temp>\opencode\..\important" path cannot masquerade as a child.
 $IsDisposable = $ResultsRoot.StartsWith($TempRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+$BuildIsDisposable = $BuildRoot.StartsWith($TempRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 $BuildsUnderResults = $BuildRoot.Equals($ResultsRoot, [System.StringComparison]::OrdinalIgnoreCase) `
     -or $BuildRoot.StartsWith($ResultsRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) `
     -or $ResultsRoot.StartsWith($BuildRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
 if ($IsDisposable -and $BuildsUnderResults) {
     throw "ResultsDir and BuildDir must be distinct/non-nested - the fresh-results cleanup would delete the build output before the run"
+}
+# The build dir gets the same disposable-treatment. A stale bin output
+# left by a previous run could let the run measure coverage over
+# assemblies that are not the current source: the documented trap
+# (hit live 2026-08-26) is that an incremental build can report
+# UP-TO-DATE over changed content when its timestamp check is stale, and
+# dotnet test has no --no-incremental flag to override that. Wiping the
+# bin output first is the coverage-run equivalent: a missing output can
+# never be judged up-to-date, so the build must recompile. An explicit
+# -BuildDir outside the scratch root is left alone. (The intermediate
+# obj\ state lives under the project trees, same as the gate's test
+# stage; the wiped bin output forces the full build either way.)
+if ($BuildIsDisposable -and (Test-Path $BuildDir)) {
+    Remove-Item -Path $BuildDir -Recurse -Force
 }
 if ($IsDisposable -and (Test-Path $ResultsDir)) {
     Remove-Item -Path $ResultsDir -Recurse -Force
@@ -57,9 +72,20 @@ New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
 $runStart = Get-Date
 
 Write-Host "Running the full suite with coverage collection..."
+# dotnet test builds before testing (incrementally, recompiling changed
+# content - the house temp-BaseOutputPath test shape: never --no-build,
+# that would run a previous build's stale artifacts). The disposable
+# BuildDir wipe above starts the bin output clean, so the coverage numbers
+# can only measure this run's binaries. The trailing separator on the
+# BaseOutputPath value is load-bearing: without it MSBuild concatenates
+# $(BaseOutputPath)$(Configuration) into a "<dir>Release" SIBLING of the
+# build dir, which the wipe would never reach. -p:CollectCoverage is not
+# spelled: the XPlat collector collects by default once attached (verified
+# against this toolchain 2026-08-26; the CONTEXT.md baseline command
+# spells it the same way).
 & dotnet test $Sln -c Release --nologo `
-    "-p:BaseOutputPath=$BuildDir" -nodeReuse:false `
-    --collect:"XPlat Code Coverage" -p:CollectCoverage=true `
+    "-p:BaseOutputPath=$BuildDir\" -nodeReuse:false `
+    --collect:"XPlat Code Coverage" `
     --results-directory $ResultsDir *> $Log
 if ($LASTEXITCODE -ne 0) { throw "dotnet test failed (exit $LASTEXITCODE); see $Log" }
 

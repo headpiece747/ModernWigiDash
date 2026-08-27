@@ -9,6 +9,8 @@ namespace ModernWigiDash.Core.Theming;
 /// <summary>
 /// WPF-free color value produced by <see cref="ThemeSettings.ParseColor"/>.
 /// Kept as a plain record struct so the Core library has no UI framework dependency.
+/// The sequential layout is the MA0008 analyzer pin: every field is a byte
+/// (blittable), and the deterministic layout keeps the record cheap to copy.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public readonly record struct RgbaColor(byte A, byte R, byte G, byte B);

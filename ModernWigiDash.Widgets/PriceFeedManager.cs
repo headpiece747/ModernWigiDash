@@ -93,6 +93,13 @@ public sealed class PriceFeedManager : IDisposable
     private Task? _stockRestTask;
     private Task? _cryptoRestTask;
     private Task? _fxRestTask;
+    // The first-claim startup (the ??= create + Start) and the last-release
+    // teardown (cancel + dispose + null) are two non-atomic field sequences
+    // over the same fields; the gate makes them one serialized unit, so a
+    // startup can never read a loop the teardown just nulled (an NRE) or
+    // start one the teardown just disposed (a dead socket behind a live
+    // claim).
+    private readonly Lock _lifecycleGate = new();
     private bool _disposed;
 
     /// <summary>Test seam: injectable clock for price timestamps and staleness.</summary>
@@ -304,7 +311,6 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     public void Subscribe(string symbol, AssetKind kind)
     {
-        EnsureActive();
         FeedKindWiring wiring = WiringFor(kind);
         if (!wiring.IsValid(symbol))
         {
@@ -316,10 +322,27 @@ public sealed class PriceFeedManager : IDisposable
         string key = SymbolCatalog.ToFeedKey(symbol, kind);
         if (wiring.Subscriptions.AddOrUpdate(key, 1, (_, count) => count + 1) == 1)
         {
-            wiring.OnFirstClaim();
-            // Push an incremental subscribe so symbols added after the socket
-            // connected still receive real-time ticks (kinds with a socket).
-            wiring.WsSubscribe?.Invoke(key);
+            // The claim itself is atomic (the dictionary's CAS), but the
+            // first-claim startup and the last-release teardown are two
+            // non-atomic field sequences over the same loop fields: the
+            // lifecycle gate serializes them. The in-gate dispose re-check
+            // releases a claim a dispose beat to the gate (a disposed
+            // manager never starts a loop), and EnsureActive re-arms a cts
+            // a racing shutdown cancelled, so a loop is never created with
+            // an already-dead token.
+            lock (_lifecycleGate)
+            {
+                if (_disposed)
+                {
+                    ReleaseSubscription(wiring.Subscriptions, key);
+                    return;
+                }
+                EnsureActive();
+                wiring.OnFirstClaim();
+                // Push an incremental subscribe so symbols added after the socket
+                // connected still receive real-time ticks (kinds with a socket).
+                wiring.WsSubscribe?.Invoke(key);
+            }
         }
     }
 
@@ -369,10 +392,17 @@ public sealed class PriceFeedManager : IDisposable
 
         // Ref-counted shutdown: when the last subscriber leaves, stop the
         // sockets and pollers so the static per-widget feed does not hold
-        // process-lifetime network handles.
-        if (_subscribedCrypto.IsEmpty && _subscribedStocks.IsEmpty && _subscribedFx.IsEmpty)
+        // process-lifetime network handles. The empty check rides the
+        // lifecycle gate (the same one Subscribe's first-claim startup
+        // holds): a claim landing between this release and the check is
+        // visible under the gate, so the shutdown never retires a feed a
+        // racing subscribe just claimed.
+        lock (_lifecycleGate)
         {
-            ShutdownLoops();
+            if (_subscribedCrypto.IsEmpty && _subscribedStocks.IsEmpty && _subscribedFx.IsEmpty)
+            {
+                ShutdownLoops();
+            }
         }
     }
 
@@ -444,7 +474,9 @@ public sealed class PriceFeedManager : IDisposable
     /// see <see cref="EnsureActive"/>.</summary>
     internal static readonly TimeSpan RetiredCtsGrace = TimeSpan.FromSeconds(30);
 
-    /// <summary>Cancels the feed loops and closes the sockets when no subscribers remain.</summary>
+    /// <summary>Cancels the feed loops and closes the sockets when no subscribers
+    /// remain. The caller holds <see cref="_lifecycleGate"/>: the teardown and
+    /// the first-claim startup are one serialized unit.</summary>
     private void ShutdownLoops()
     {
         _cts.Cancel();
@@ -600,12 +632,18 @@ public sealed class PriceFeedManager : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _cts.Cancel();
-        // Deliberately NOT disposed here: fire-and-forget sends may still be
-        // awaiting with this token (the loops break on OCE and never re-touch
-        // it); the codebase's deferral pattern lets the source be GC'ed.
-        _binanceLoop?.Dispose();
-        _finnhubLoop?.Dispose();
+        // Under the lifecycle gate: a first-claim startup holding the gate
+        // either finishes first (its loops are then retired here) or sees
+        // the dispose flag and releases its claim instead of starting.
+        lock (_lifecycleGate)
+        {
+            _cts.Cancel();
+            // Deliberately NOT disposed here: fire-and-forget sends may still be
+            // awaiting with this token (the loops break on OCE and never re-touch
+            // it); the codebase's deferral pattern lets the source be GC'ed.
+            _binanceLoop?.Dispose();
+            _finnhubLoop?.Dispose();
+        }
         // The manager never owns its HttpClient: the default instance shares
         // the static process-wide client, so disposing it here would kill every
         // other feed manager's socket reuse (the latent cross-widget break).

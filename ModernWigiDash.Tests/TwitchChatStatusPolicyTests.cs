@@ -72,6 +72,41 @@ public class TwitchChatStatusPolicyTests
     }
 
     [TestMethod]
+    public void StatusFromNotice_LoginUnsuccessful_Disconnects()
+    {
+        var (status, changed) = TwitchChatStatusPolicy.StatusFromNotice("Login unsuccessful", ChatStatus.Connecting);
+        Assert.IsTrue(changed);
+        Assert.AreEqual(ChatStatus.Disconnected, status);
+    }
+
+    [TestMethod]
+    public void StatusFromNotice_ImproperlyFormattedAuth_Disconnects()
+    {
+        var (status, changed) = TwitchChatStatusPolicy.StatusFromNotice("Improperly formatted auth", ChatStatus.Connecting);
+        Assert.IsTrue(changed);
+        Assert.AreEqual(ChatStatus.Disconnected, status);
+    }
+
+    [TestMethod]
+    public void StatusFromNotice_FailureWhileAlreadyDisconnected_IsNotATransition()
+    {
+        // A repeated failure notice landing on the state the rule already
+        // set is not a transition: the connection logs it as a notice
+        // instead of re-logging the failure and re-publishing the state.
+        var (status, changed) = TwitchChatStatusPolicy.StatusFromNotice("Login authentication failed", ChatStatus.Disconnected);
+        Assert.IsFalse(changed);
+        Assert.AreEqual(ChatStatus.Disconnected, status);
+    }
+
+    [TestMethod]
+    public void StatusFromNotice_NotLoggedInWhileAlreadyConnected_IsNotATransition()
+    {
+        var (status, changed) = TwitchChatStatusPolicy.StatusFromNotice("you are not logged in", ChatStatus.Connected);
+        Assert.IsFalse(changed);
+        Assert.AreEqual(ChatStatus.Connected, status);
+    }
+
+    [TestMethod]
     public void StatusFromNotice_EmptyNotice_KeepsTheCurrentStatus()
     {
         var (status, changed) = TwitchChatStatusPolicy.StatusFromNotice("", ChatStatus.Connecting);

@@ -165,6 +165,28 @@ real-registry `RegistryAutostartStoreTests` and real-DPAPI
 not debug. Note for the probe's own externs: `GetProcAddress` takes an
 `LPCSTR`, so its pin needs `CharSet.Ansi` (the W variants of the other
 two take `LPCWSTR` and match the default marshaling).
+Verified 2026-08-26 (audit-fix session; each hit live): a WPF `KeyEventArgs`
+built through the only public ctor (`new(Keyboard.PrimaryDevice,
+PresentationSource.FromVisual(el), 0, key)`) carries `RoutedEvent` null, so
+`RaiseEvent` throws `InvalidOperationException` (Every RoutedEventArgs must
+have a non-null RoutedEvent); the synthesizable shape is to set
+`press.RoutedEvent = UIElement.PreviewKeyDownEvent` before the raise (the
+setter throws only while an event is mid-route, a fresh instance never is).
+`Key`/`SystemKey` are otherwise read-only, so a `Key.System` press is not
+synthesizable and its routing (System to the event's system key) is pinned
+through the pure `ResolvePressKey` seam instead (`KeyCaptureEditorTests`).
+`dotnet format` given a bare directory name (no `.slnx`/`.csproj`
+extension) prints the command help instead of formatting; the file name is
+required. The `edit` tool's indent mangle and the `write` tool's missing
+final newline (both documented above) bit again this session on
+`PriceFeedManager.cs` / `KeyCaptureEditorTests.cs`; the gate's format stage
+caught both (the backstop works, but verify the edited region's leading
+whitespace and a new file's final newline before the gate). The audit's
+claim list itself existed only as a temp-dir script plus scrollback, which
+forced a reconstruction of its E1-E6 test-gap subset; it is now persisted
+at `docs/reports/2026-08-26-audit-findings.md` with the re-runnable
+`docs/reports/2026-08-26-audit-verify-claims.ps1` (a claim list that lives
+only in scrollback is a bug: the session-lifecycle rule).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.

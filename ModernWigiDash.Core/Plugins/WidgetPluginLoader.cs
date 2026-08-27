@@ -123,9 +123,12 @@ public class WidgetPluginLoader
             {
                 ex = tie.InnerException;
             }
-            string message = $"Widget instantiation failed for {pluginId} ({info.WidgetType.FullName}): {ex.Message}";
-            FileLog.Write(message);
-            return new WidgetCreateResult.Broken(message);
+            // The file log takes the full exception (LogLine flattens the
+            // frames and bounds the line: type + message + top frames, never
+            // a multi-MB line); the Broken reason stays concise, because it
+            // rides the skip line the rehydration logs.
+            FileLog.Write($"Widget instantiation failed for {pluginId} ({info.WidgetType.FullName}): {ex.ToString()}");
+            return new WidgetCreateResult.Broken($"Widget instantiation failed for {pluginId} ({info.WidgetType.FullName}): {ex.Message}");
         }
     }
 

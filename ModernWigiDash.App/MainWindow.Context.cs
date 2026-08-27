@@ -133,8 +133,10 @@ public partial class MainWindow
     /// widget's Run AHK Script action routes through, ADR-0019): the
     /// interpreter is the user's own, read live from the machine-local
     /// settings at spawn time (a settings write-through is seen on the next
-    /// action without a restart). The kill-switch veto and the interpreter
-    /// checks refuse with one log line each (the seam's documented refusal
+    /// action without a restart). The kill-switch veto, the blank-script
+    /// refusal (the widget's fire path skips a blank command before routing,
+    /// so this is the seam's own defense in depth), and the interpreter
+    /// checks each refuse with one log line (the seam's documented refusal
     /// surface); a spawn is a bare launch, no tracking. Safe from any
     /// thread (Process.Start is thread-safe; the settings read is a
     /// reference read of the record the settings commits swap).
@@ -145,6 +147,11 @@ public partial class MainWindow
         if (settings.KillSwitch)
         {
             _hotkeyLog.Write("AHK spawn refused: the kill switch is checked (Settings)");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(scriptPath))
+        {
+            _hotkeyLog.Write("AHK spawn refused: no script path set (the widget's command is blank)");
             return;
         }
         if (string.IsNullOrWhiteSpace(settings.AhkInterpreterPath))

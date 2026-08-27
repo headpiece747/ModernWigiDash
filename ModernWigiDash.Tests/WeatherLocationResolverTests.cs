@@ -77,6 +77,19 @@ public class WeatherLocationResolverTests
     }
 
     [TestMethod]
+    public void Resolve_UnpairedSurrogateInSuffix_DegradesWithoutThrowing()
+    {
+        // A hand-edited profile can smuggle a lone \uXXXX escape into the
+        // location field; NormalizeForMatch degrades to the raw value
+        // instead of throwing ArgumentException out of the resolution.
+        var result = WeatherLocationResolver.Resolve(
+            [C("Missouri", "United States", "US", 100)],
+            "Springfield", "MO\uD800", null, null);
+
+        Assert.IsNotNull(result, "a bad query component must resolve, not throw");
+    }
+
+    [TestMethod]
     public void Resolve_Abbreviation_DoesNotMatchUnrelatedJurisdiction()
     {
         // "TX" must not resolve a Texas candidate whose admin1 is "Texas" via

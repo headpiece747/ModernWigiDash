@@ -233,13 +233,22 @@ public static class ProfileOps
         try
         {
             WidgetCreateResult created = loader.CreateInstanceResult(placed.PluginId);
-            if (created is WidgetCreateResult.Broken broken)
+            if (created is WidgetCreateResult.Ok(var widget))
             {
-                context.LogError($"Widget '{placed.PluginId}' is broken and was skipped: {broken.Reason}");
+                instance = widget;
+            }
+            else if (created is WidgetCreateResult.Broken(var reason))
+            {
+                context.LogError($"Widget '{placed.PluginId}' is broken and was skipped: {reason}");
                 return null;
             }
-            if (created is not WidgetCreateResult.Ok ok) return null;
-            instance = ok.Widget;
+            else // WidgetCreateResult.NotFound: a hand-crafted or older profile
+                 // can name a plugin this build does not register; the skip is
+                 // logged, never silent.
+            {
+                context.LogError($"Widget '{placed.PluginId}' is not in the catalog and was skipped");
+                return null;
+            }
 
             // A size the imported JSON omitted (the model default still
             // stands) falls back to the widget's declared preset — the same

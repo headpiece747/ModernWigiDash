@@ -62,7 +62,7 @@ public class TwitchSessionTests
         DateTimeOffset? expiresAt = null)
         => new(clientId, accessToken, "refresh-token", expiresAt ?? DateTimeOffset.UtcNow.AddHours(1), []);
 
-    private static TwitchTokenValidation Validation(string clientId = TestClientId) => new(clientId, "user-1", "viewer", 3600, []);
+    private static TwitchTokenValidation Validation(string clientId = TestClientId) => new(clientId, "user-1", 3600, []);
 
     /// <summary>
     /// The client id the tick's resolver would pick on this machine: the tick
@@ -230,7 +230,7 @@ public class TwitchSessionTests
         string storePath = Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin");
         var store = new TwitchTokenStore(storePath);
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
-        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", 3600, ["chat:read"]) };
+        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", 3600, ["chat:read"]) };
         var session = new TwitchSession(store, _ => client, clock, _ => { });
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId(), expiresAt: clock.GetUtcNow().AddSeconds(10)));
@@ -254,7 +254,7 @@ public class TwitchSessionTests
         string storePath = Path.Combine(Path.GetTempPath(), $"wmd-twitch-{Guid.NewGuid():N}.bin");
         var store = new TwitchTokenStore(storePath);
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 12, 0, 0, TimeSpan.Zero));
-        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", "viewer", expiresIn, []) };
+        var client = new FakeClient { ValidationResult = new TwitchTokenValidation(TestClientId, "user-1", expiresIn, []) };
         var session = new TwitchSession(store, _ => client, clock, _ => { });
         var context = new TestContext();
         store.Save(Token(clientId: MachineClientId()));

@@ -59,7 +59,9 @@ internal sealed class AppSettingsStore
     /// Loads the settings; an absent file returns the defaults and a corrupt
     /// or unreadable one repairs to the defaults with one log line (the
     /// absent-service house pattern: a bad machine-local file is a degraded
-    /// default, never a throw into the wiring).
+    /// default, never a throw into the wiring). A hand-edited JSON that
+    /// carries a null interpreter path normalizes to the blank default, so
+    /// the value contract ("" = unset) holds past the boundary.
     /// </summary>
     public AppSettings Load()
     {
@@ -67,16 +69,21 @@ internal sealed class AppSettingsStore
         {
             if (!File.Exists(_path)) return new AppSettings();
             using var stream = File.OpenRead(_path);
-            return JsonSerializer.Deserialize<AppSettings>(stream) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(stream) ?? new AppSettings();
+            return settings with { AhkInterpreterPath = settings.AhkInterpreterPath ?? "" };
         }
-        catch (Exception ex) when (ex is IOException or JsonException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException or JsonException or NotSupportedException)
         {
             _log?.Invoke($"app_settings.json unreadable; using defaults ({ex.Message})");
             return new AppSettings();
         }
     }
 
-    /// <summary>Persists the settings atomically; a failed write logs one line (best-effort).</summary>
+    /// <summary>
+    /// Persists the settings atomically; a failed write logs one line
+    /// (best-effort) and removes the temp litter, so a later save never
+    /// trips over a stale .tmp (the ProfilePersistence Save shape).
+    /// </summary>
     public void Save(AppSettings settings)
     {
         try
@@ -88,9 +95,24 @@ internal sealed class AppSettingsStore
             File.WriteAllText(tmp, JsonSerializer.Serialize(settings, SaveOptions));
             File.Move(tmp, _path, overwrite: true);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
         {
             _log?.Invoke($"app_settings.json save failed: {ex.Message}");
+            // The write or the move may have failed AFTER creating the temp
+            // file - remove the litter best-effort so a later save never
+            // trips over a stale .tmp.
+            try
+            {
+                File.Delete(_path + ".tmp");
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup; the save failure is already logged.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort cleanup; the save failure is already logged.
+            }
         }
     }
 }

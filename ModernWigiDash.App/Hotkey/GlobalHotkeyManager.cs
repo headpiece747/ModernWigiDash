@@ -12,7 +12,9 @@ namespace ModernWigiDash.App.Hotkey;
 /// so the OS state is not churned); a changed set unregisters the removed
 /// cells and registers the added ones. A cell the OS refuses (owned by
 /// another program) stays untracked - that widget's hotkey is inert, tapping
-/// still works - and logs one line (once per cell per session).
+/// still works - and logs one line (once per cell per session). Every member
+/// runs on the window's UI thread (the context seam marshals off-thread calls
+/// to the dispatcher), so the dictionaries stay unsynchronized by design.
 /// </summary>
 internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposable
 {
@@ -59,11 +61,18 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
             _idByCell.Remove(cell);
         }
 
-        // Register the cells that joined (an already-held cell keeps its id).
+        // Add the cells that joined; a held cell whose owner instance was replaced (a profile import rehydrated the widget) is released and re-registered onto the new owner.
         foreach (DesiredGlobalHotkey hotkey in desired)
         {
-            var cell = (hotkey.ModFlags, hotkey.VirtualKey);
-            if (_idByCell.ContainsKey(cell)) continue;
+            var cell = (Flags: hotkey.ModFlags, Vk: hotkey.VirtualKey);
+            if (_idByCell.TryGetValue(cell, out int heldId))
+            {
+                if (ReferenceEquals(_registered.GetValueOrDefault(heldId).Owner, hotkey.Owner))
+                    continue;
+                api.UnregisterHotKey(handle, heldId, cell.Vk);
+                _idByCell.Remove(cell);
+                _registered.Remove(heldId);
+            }
             int id = _nextId++;
             if (api.RegisterHotKey(handle, id, hotkey.ModFlags | ModNoRepeat, hotkey.VirtualKey))
             {

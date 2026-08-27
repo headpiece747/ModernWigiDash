@@ -163,6 +163,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly HotkeyApi _hotkeyApi;
     private GlobalHotkeyManager? _globalHotkeyManager;
     private IntPtr _hotkeyHwnd = IntPtr.Zero;
+    // The duplicate-chord conflicts already logged this session (the
+    // manager's foreign-logged mirror for the profile-order conflicts, which
+    // are dropped before the manager sees them): one line per conflict per
+    // session, not one per refresh.
+    private readonly HashSet<(int Flags, ushort Vk)> _duplicateLogged = new();
 
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
@@ -221,9 +226,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
         _sessionEndStandby = sessionEndStandby;
         _hotkeyApi = hotkeyApi ?? HotkeyApi.Default;
         _ahkApi = ahkApi ?? AhkLaunchApi.Default;
-        // The store's log seam references the window's hotkey DiagLog, so the
-        // assignment rides the constructor body (a field initializer cannot
-        // reference another instance field, even inside the lambda).
+        // The constructor-argument fallback rides the constructor body (a
+        // field initializer cannot see the arguments), like the api seams
+        // above; the store's log seam references the window's hotkey DiagLog.
         _appSettingsStore = appSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
         // The engine is inert until Start: construction never probes USB, the
         // window's field initializer only allocates. Start the background
@@ -615,8 +620,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
         new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
         // The global hotkeys are released before the tray icon goes (ADR-0019):
         // a tray Quit must not leave the OS holding the app's chords after the
-        // message loop dies.
-        new TeardownStep("GlobalHotkeys", () => _globalHotkeyManager?.Dispose()),
+        // message loop dies. The manager is nulled and the handle zeroed with
+        // the dispose, so a post-teardown RefreshGlobalHotkeys or WM_HOTKEY
+        // hits the guards above instead of a disposed manager on a dead HWND.
+        new TeardownStep("GlobalHotkeys", () =>
+        {
+            _globalHotkeyManager?.Dispose();
+            _globalHotkeyManager = null;
+            _hotkeyHwnd = IntPtr.Zero;
+        }),
         // The tray icon is removed after the profile state has landed (the
         // persist-first guarantee covers the exit affordance: the user who
         // saw the icon go can trust the profile was saved).
@@ -1055,9 +1067,14 @@ public partial class MainWindow : Window, IModernWigiDashContext
         {
             // The kill-switch veto drops every candidate by design (not a
             // duplicate) - the duplicate log lines apply to the
-            // profile-order conflicts only.
+            // profile-order conflicts only, one line per conflict per
+            // session.
             foreach (DesiredGlobalHotkey duplicate in dropped)
+            {
+                if (!_duplicateLogged.Add((duplicate.ModFlags, duplicate.VirtualKey)))
+                    continue;
                 _hotkeyLog.Write(() => $"Global hotkey {duplicate.Chord} is claimed by an earlier widget; the later one stays tap-only");
+            }
         }
         manager.Refresh(_hotkeyHwnd, desired);
     }
@@ -1420,17 +1437,20 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>
     /// The AHK interpreter Browse from the settings hub: the window owns
     /// the file dialog (the dialog-host pattern); a chosen path commits
-    /// through <see cref="CommitAhkInterpreter"/>.
+    /// through <see cref="CommitAhkInterpreter"/> and is returned so the
+    /// hub's box can display it (the box and the persisted path cannot
+    /// drift); a cancel returns null and leaves the setting untouched.
     /// </summary>
-    private void BrowseAhkInterpreter()
+    private string? BrowseAhkInterpreter()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Select the AutoHotkey interpreter",
             Filter = "AutoHotkey|autohotkey.exe|Executables (*.exe)|*.exe"
         };
-        if (dialog.ShowDialog(this) == true)
-            CommitAhkInterpreter(dialog.FileName);
+        if (dialog.ShowDialog(this) != true) return null;
+        CommitAhkInterpreter(dialog.FileName);
+        return dialog.FileName;
     }
 
     private static void Log(string msg) => FileLog.Write(msg);

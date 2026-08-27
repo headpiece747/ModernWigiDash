@@ -6,12 +6,13 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// The window's AutoHotkey spawn policy pinned on a live STA window
-/// (ADR-0019): the kill-switch veto, the unset-interpreter refusal, the
-/// missing-interpreter refusal, and the success path (the user's settings
-/// interpreter + the script path ride the spawn seam exactly once, with the
-/// launch line). The spawn seam is the injected recorder, so no real
-/// interpreter runs; the app-settings store is a temp file, so the pin never
-/// touches the user's machine-local settings.
+/// (ADR-0019): the kill-switch veto, the blank-script refusal, the
+/// unset-interpreter refusal, the missing-interpreter refusal, and the
+/// success path (the user's settings interpreter + the script path ride
+/// the spawn seam exactly once, with the launch line). The spawn seam is
+/// the injected recorder, so no real interpreter runs; the app-settings
+/// store is a temp file, so the pin never touches the user's
+/// machine-local settings.
 /// </summary>
 [TestClass]
 public class WindowAhkScriptTests
@@ -106,6 +107,41 @@ public class WindowAhkScriptTests
 
                 Assert.AreEqual(0, spawns.Count, "a missing interpreter never spawns");
                 StringAssert.Contains(ReadLog(FileLog.LogPath), $"[HOTKEY] AHK spawn refused: interpreter not found: {missing}");
+            }
+            finally
+            {
+                FileLog.LogPath = originalLogPath;
+                window.QuitClose();
+                DeleteDirs(settingsDir, logDir);
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
+    public void LaunchAutoHotkeyScript_BlankScriptPath_RefusesWithoutSpawning()
+    {
+        var (spawns, ahkApi) = Recorder();
+        string settingsDir = CreateTempDir();
+        // A valid interpreter path isolates the refusal to the blank
+        // script: without the guard the spawn would run a pointless
+        // interpreter.
+        string interpreter = Path.Combine(settingsDir, "autohotkey.exe");
+        File.WriteAllText(interpreter, "dummy interpreter (the fake spawn seam never executes it)");
+        var (store, logDir) = SeedStoreAndLog(new AppSettings { AhkInterpreterPath = interpreter }, settingsDir);
+        string profilePath = SeedProfile();
+        string originalLogPath = FileLog.LogPath;
+        Host.Run<object?>(() =>
+        {
+            FileLog.LogPath = Path.Combine(logDir, "display_device.log");
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store);
+            try
+            {
+                window.LaunchAutoHotkeyScript("   ");
+                FileLog.Flush();
+
+                Assert.AreEqual(0, spawns.Count, "a blank script path never spawns (a pointless interpreter)");
+                StringAssert.Contains(ReadLog(FileLog.LogPath), "[HOTKEY] AHK spawn refused: no script path set (the widget's command is blank)");
             }
             finally
             {

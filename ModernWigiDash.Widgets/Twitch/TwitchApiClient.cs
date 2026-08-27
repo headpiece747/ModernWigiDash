@@ -135,7 +135,6 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
         return new TwitchTokenValidation(
             payload.ClientId,
             payload.UserId,
-            payload.Login,
             payload.ExpiresIn,
             payload.Scopes ?? []);
     }

@@ -6,7 +6,9 @@ namespace ModernWigiDash.Tests;
 /// <summary>
 /// The window's global-hotkey manager pinned through the fake <see
 /// cref="HotkeyApi"/>: the register diff (added cells register, removed
-/// cells unregister, held cells keep their ids), the MOD_NOREPEAT added at
+/// cells unregister, held cells keep their ids, a cell whose owner instance
+/// was replaced - the profile-import case - is re-registered onto the new
+/// owner), the MOD_NOREPEAT added at
 /// the OS boundary, the foreign-owned refusal (untracked + one log line per
 /// cell per session), the WM_HOTKEY routing to the owning widget, and the
 /// teardown release.
@@ -134,6 +136,28 @@ public class GlobalHotkeyManagerTests
             new[] { "[HOTKEY] Global hotkey Ctrl+A is owned by another program; this widget's hotkey is inert (tapping still works)" },
             logLines,
             "the refusal logs one line per cell per session, not one per refresh");
+    }
+
+    [TestMethod]
+    public void Refresh_OwnerInstanceReplaced_ReleasesTheStaleIdAndReroutesToTheNewOwner()
+    {
+        var (manager, fake, _) = CreateManager();
+        var oldOwner = new FakeProvider();
+        var newOwner = new FakeProvider();
+        var cell = (Mod: 0x2, Vk: (ushort)'A');
+
+        manager.Refresh(Handle, [Candidate(oldOwner, cell.Mod, cell.Vk, "Ctrl+A")]);
+        int staleId = fake.Registered.Single().Id;
+        manager.Refresh(Handle, [Candidate(newOwner, cell.Mod, cell.Vk, "Ctrl+A")]);
+
+        Assert.AreEqual(1, fake.Unregistered.Count, "the stale owner's registration is released");
+        Assert.AreEqual(staleId, fake.Unregistered.Single().Id);
+        int freshId = fake.Registered.Single(r => r.Id != staleId).Id;
+        Assert.AreNotEqual(staleId, freshId, "the cell gets a fresh id for the new owner");
+        Assert.IsFalse(manager.Fire(staleId), "the stale id no longer routes to the disposed owner");
+        Assert.IsTrue(manager.Fire(freshId), "the fresh id routes");
+        Assert.AreEqual(0, oldOwner.Fires, "the disposed owner's fire path never fires");
+        Assert.AreEqual(1, newOwner.Fires, "the fresh id routes to the new owner instance");
     }
 
     [TestMethod]

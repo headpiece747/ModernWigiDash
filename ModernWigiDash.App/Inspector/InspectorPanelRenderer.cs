@@ -182,7 +182,7 @@ internal static class InspectorPanelRenderer
                 panel.Children.Add(BuildTextEditor(desc, callbacks));
                 break;
             case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.KeyCapture:
-                panel.Children.Add(BuildKeyCaptureEditor(desc, callbacks));
+                panel.Children.Add(BuildKeyCaptureEditor(desc, callbacks).Editor);
                 break;
             default:
                 // Text or Number
@@ -408,11 +408,14 @@ internal static class InspectorPanelRenderer
     /// <see cref="KeyCaptureModel"/> rules (the modifier order, the
     /// no-modifier refusal, the modifier-key-as-main-key refusal) and a
     /// recorded chord writes the box (the TextChanged commit is the single
-    /// write path). Only the vocabulary's main keys (letters, digits,
-    /// F1-F24) map to a name - a symbol or modifier press is swallowed and
-    /// the capture stays armed; a focus loss cancels the capture.
+    /// write path). Every press during capture is swallowed - a refused press
+    /// never types into the box and corrupts the stored chord; the
+    /// vocabulary's main keys (letters, digits, F1-F24) map to a name, a
+    /// symbol, modifier, or numpad press stays armed (a numpad digit's name
+    /// would spell the same chord as the number row but register a different
+    /// virtual key), Escape cancels, and a focus loss cancels the capture.
     /// </summary>
-    private static UIElement BuildKeyCaptureEditor(EditorDescription desc, InspectorCallbacks callbacks)
+    internal static (UIElement Editor, KeyCaptureModel Model) BuildKeyCaptureEditor(EditorDescription desc, InspectorCallbacks callbacks)
     {
         var model = new KeyCaptureModel(desc.CurrentValue?.ToString() ?? "");
         var box = new TextBox { Text = model.Chord };
@@ -427,17 +430,30 @@ internal static class InspectorPanelRenderer
         btn.Click += (_, _) =>
         {
             model.BeginCapture();
-            box.Focus();
+            if (!box.Focus())
+            {
+                // A box that cannot take focus can never receive the press:
+                // the armed capture would be a zombie (no LostFocus can fire),
+                // so the failed focus cancels it.
+                model.CancelCapture();
+            }
         };
 
         box.PreviewKeyDown += (_, e) =>
         {
             if (!model.IsCapturing) return;
-            string? name = ChordKeyName(e.Key);
+            Key key = ResolvePressKey(e.Key, e.SystemKey);
+            if (key == Key.Escape)
+            {
+                e.Handled = true;
+                model.CancelCapture();
+                return;
+            }
+            string? name = ChordKeyName(key);
             if (name is null)
             {
-                // A symbol or modifier press: swallowed (the capture stays
-                // armed, the box keeps its text).
+                // A symbol, modifier, or numpad press: swallowed (the
+                // capture stays armed, the box keeps its text).
                 e.Handled = true;
                 return;
             }
@@ -447,11 +463,9 @@ internal static class InspectorPanelRenderer
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Alt),
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
                 Keyboard.Modifiers.HasFlag(ModifierKeys.Windows));
+            e.Handled = true; // every press during capture stays out of the box
             if (captured)
-            {
-                e.Handled = true; // a recorded chord never types into the box
                 box.Text = model.Chord; // the TextChanged commit is the write
-            }
         };
         box.LostFocus += (_, _) => model.CancelCapture();
 
@@ -459,20 +473,32 @@ internal static class InspectorPanelRenderer
         DockPanel.SetDock(btn, Dock.Right);
         row.Children.Add(btn);
         row.Children.Add(box);
-        return row;
+        return (row, model);
     }
+
+    /// <summary>
+    /// The capture's press-key resolution: Alt (and Win) combo presses
+    /// arrive as <c>Key.System</c> carrying the real key in the event's
+    /// system key, so the press routes to that key when the primary is
+    /// System (without the resolution an Alt chord is unrecordable, the
+    /// System key mapping to no name); every other primary key passes
+    /// through untouched.
+    /// </summary>
+    internal static Key ResolvePressKey(Key key, Key systemKey) =>
+        key == Key.System ? systemKey : key;
 
     /// <summary>
     /// The capture's key-name mapping: the chord vocabulary's main keys only
     /// (letters, digits, F1-F24) map to a name; everything else (a symbol,
-    /// a modifier) is null, so the capture cannot record a chord the
-    /// vocabulary would refuse.
+    /// a modifier, a numpad key) is null, so the capture cannot record a
+    /// chord the vocabulary would refuse or that would spell one key while
+    /// registering another (the numpad digits share the number row's names
+    /// but carry distinct virtual keys).
     /// </summary>
     internal static string? ChordKeyName(Key key) => key switch
     {
         >= Key.A and <= Key.Z => ((char)('A' + (key - Key.A))).ToString(),
         >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
-        >= Key.NumPad0 and <= Key.NumPad9 => ((char)('0' + (key - Key.NumPad0))).ToString(),
         >= Key.F1 and <= Key.F24 => key.ToString(),
         _ => null
     };

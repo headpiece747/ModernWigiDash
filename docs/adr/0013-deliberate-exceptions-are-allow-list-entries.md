@@ -59,6 +59,13 @@ Handle-disposal entries (`HouseRules_HandleAcquiringFiles_CarryTheirDisposalEvid
 - `ModernWigiDash.Widgets/HotkeyActionExecutor.cs`: the SendInput P/Invoke
   fires input events and acquires and owns no handle. The entry suppresses
   the marker regex. Exit: only when the P/Invoke leaves the file.
+- `ModernWigiDash.App/Hotkey/HotkeyApi.cs` (ADR-0019): the
+  RegisterHotKey/UnregisterHotKey P/Invoke registers and releases
+  message-loop hotkeys. The marker regex sees the extern, but the calls
+  acquire and own no handle: the registration identity is a caller-chosen
+  id in the OS message loop, released through UnregisterHotKey on the
+  owning manager's dispose path (`GlobalHotkeyManager`), not in this
+  delegate bag. Exit: only when the P/Invoke leaves the file.
 
 ## Consequences
 

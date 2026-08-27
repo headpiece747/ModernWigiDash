@@ -28,7 +28,6 @@ internal sealed record TwitchDeviceAuthorization(
 internal sealed record TwitchTokenValidation(
     string ClientId,
     string UserId,
-    string Login,
     int ExpiresIn,
     string[] Scopes);
 

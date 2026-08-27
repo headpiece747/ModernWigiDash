@@ -9,28 +9,39 @@ namespace ModernWigiDash.Widgets.Twitch;
 public static class TwitchChatStatusPolicy
 {
     /// <summary>
-    /// The NOTICE → connection-state rule: a login-failure notice (or an
-    /// invalid nick) disconnects the chat, the "you are not logged in" notice
-    /// means the anonymous session is live, and any other notice leaves the
-    /// state untouched. The widget derives its detail text and log channel
-    /// from the result.
+    /// The NOTICE → connection-state rule: a login-failure notice
+    /// (authentication failed, login unsuccessful, improperly formatted
+    /// auth, or an invalid nick) disconnects the chat, the "you are not
+    /// logged in" notice means the anonymous session is live, and any other
+    /// notice leaves the state untouched. <c>Changed</c> reports the actual
+    /// transition (a repeated notice that lands on the state the rule
+    /// already set is not a transition: the connection logs it as a notice
+    /// instead of re-logging the failure and re-publishing the state). The
+    /// widget derives its detail text and log channel from the result.
     /// </summary>
     public static (ChatStatus Status, bool Changed) StatusFromNotice(string noticeText, ChatStatus current)
     {
         ArgumentNullException.ThrowIfNull(noticeText);
-        if (noticeText.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase)
-            || noticeText.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase))
+        ChatStatus status = current;
+        if (IsLoginFailureNotice(noticeText))
         {
-            return (ChatStatus.Disconnected, true);
+            status = ChatStatus.Disconnected;
         }
-
-        if (noticeText.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
+        else if (noticeText.Contains("you are not logged in", StringComparison.OrdinalIgnoreCase))
         {
-            return (ChatStatus.Connected, true);
+            status = ChatStatus.Connected;
         }
-
-        return (current, false);
+        return (status, status != current);
     }
+
+    // The login-failure NOTICE texts the server sends (substring match: a
+    // real NOTICE carries a server prefix / appended reason, and the match
+    // is substring-based by contract).
+    private static bool IsLoginFailureNotice(string noticeText)
+        => noticeText.Contains("Login authentication failed", StringComparison.OrdinalIgnoreCase)
+            || noticeText.Contains("Login unsuccessful", StringComparison.OrdinalIgnoreCase)
+            || noticeText.Contains("Improperly formatted auth", StringComparison.OrdinalIgnoreCase)
+            || noticeText.Contains("Invalid NICK", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The message-buffer trim rule: the chat holds at most the
     /// clamped MaxMessages (5..100) — one spelling shared by the receive path

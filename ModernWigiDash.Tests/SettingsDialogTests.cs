@@ -15,12 +15,18 @@ namespace ModernWigiDash.Tests;
 /// box from their persisted states (without committing, ADR-0019), writes a
 /// radio check and the checkbox toggles through to their commit seams,
 /// commits the AHK path on focus loss, and routes the Profile group's
-/// buttons and the AHK Browse button to their seams.
+/// buttons and the AHK Browse button to their seams (a chosen path rides
+/// back into the box, a cancel leaves it untouched).
 /// </summary>
 [TestClass]
 public class SettingsDialogTests
 {
     private static readonly StaHost Host = new("SettingsDialogTests-STA");
+
+    // The Browse seam's chosen-path default (the cancel pin passes null):
+    // the hub writes a chosen path back into the box, so the routing pin
+    // asserts the displayed path followed the persisted one.
+    private const string ChosenBrowsePath = @"C:\Chosen\autohotkey.exe";
 
     private static (SettingsDialog Dialog, List<string> Commits, List<bool> AutostartCommits, List<bool> KillSwitchCommits, List<string> AhkCommits, List<string> Clicked) Build(
         string? persistedCloseBehavior,
@@ -31,7 +37,8 @@ public class SettingsDialogTests
         List<bool> autostartCommits,
         List<bool> killSwitchCommits,
         List<string> ahkCommits,
-        List<string> clicked)
+        List<string> clicked,
+        string? browseResult = ChosenBrowsePath)
     {
         ThemeSettings.Theme = new ThemeSettings();
         var owner = new Window();
@@ -47,7 +54,7 @@ public class SettingsDialogTests
             value => killSwitchCommits.Add(value),
             seededAhkPath,
             value => ahkCommits.Add(value),
-            () => clicked.Add("browse"),
+            () => { clicked.Add("browse"); return browseResult; },
             () => clicked.Add("export"),
             () => clicked.Add("import"));
         dialog.Show(); // a Window's visual tree exists only after it is shown
@@ -220,7 +227,7 @@ public class SettingsDialogTests
         });
 
     [TestMethod]
-    public void AhkBrowseButton_RoutesToTheBrowseSeam()
+    public void AhkBrowseButton_RoutesToTheBrowseSeam_AndWritesTheChosenPathBackIntoTheBox()
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, clicked) = Build(null, false, false, "", [], [], [], [], []);
@@ -228,6 +235,23 @@ public class SettingsDialogTests
                 .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
             browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CollectionAssert.AreEqual(new[] { "browse" }, clicked, "Browse routes to the window's file-dialog seam");
+            Assert.AreEqual(ChosenBrowsePath, AhkPathTextBox(dialog).Text,
+                "the chosen path rides back into the box (the displayed path cannot drift from the persisted one)");
+            dialog.Close();
+            return null;
+        });
+
+    [TestMethod]
+    public void AhkBrowseButton_CancelLeavesTheBoxUntouched()
+        => Host.Run<object?>(() =>
+        {
+            var (dialog, _, _, _, _, clicked) = Build(null, false, false, @"C:\Seeded\autohotkey.exe", [], [], [], [], [], browseResult: null);
+            var browse = dialog.FindVisualChildren<Button>()
+                .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
+            browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            CollectionAssert.AreEqual(new[] { "browse" }, clicked);
+            Assert.AreEqual(@"C:\Seeded\autohotkey.exe", AhkPathTextBox(dialog).Text,
+                "a cancel returns null and leaves the box (and the setting) untouched");
             dialog.Close();
             return null;
         });

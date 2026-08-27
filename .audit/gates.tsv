@@ -107,3 +107,7 @@
 2026-08-26T15:46:23Z	c8953d9	fix hotkey entry point binding	ok	0	0	ok	1951	0	ok	ok
 2026-08-26T16:11:47Z	32f9d4e	pin P/Invoke bindings at the gate (ADR-0020)	ok	0	0	ok	1955	0	FAIL	SKIP
 2026-08-26T16:16:22Z	32f9d4e	pin P/Invoke bindings at the gate (ADR-0020)	ok	0	0	ok	1955	0	ok	ok
+2026-08-26T16:33:50Z	1187636	manual	ok	0	0	ok	1955	0	ok	ok
+2026-08-26T23:48:04Z	1187636	manual	ok	0	0	ok	1973	0	FAIL	SKIP
+2026-08-26T23:50:04Z	1187636	manual	ok	0	0	ok	1973	0	ok	ok
+2026-08-27T00:24:08Z	1187636	manual	ok	0	0	ok	1974	0	ok	ok

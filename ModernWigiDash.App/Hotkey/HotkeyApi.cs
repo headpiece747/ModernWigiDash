@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Hotkey;
 
@@ -33,6 +32,7 @@ internal sealed class HotkeyApi(RegisterHotKeyFn registerHotKey, UnregisterHotKe
     // first call, the 2026-08-26 crash; the chord is inert and released
     // immediately, so no registration residue remains).
     [DllImport("user32.dll", EntryPoint = "RegisterHotKey", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool RegisterHotKeyPInvoke(IntPtr hWnd, int id, int fsModifiers, ushort vk);
 
     [DllImport("user32.dll", EntryPoint = "UnregisterHotKey")]

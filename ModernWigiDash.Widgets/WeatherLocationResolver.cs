@@ -574,7 +574,20 @@ internal static class WeatherLocationResolver
     /// punctuates the Grenada capital differently than the user types).</summary>
     private static string NormalizeForMatch(string value)
     {
-        string normalized = value.Normalize(NormalizationForm.FormD);
+        // A hand-edited profile can carry an unpaired surrogate into the
+        // location field (a lone \uXXXX escape parses into one), and
+        // Normalize throws ArgumentException on such a string: degrade to
+        // the raw value instead of failing the whole resolution over one
+        // bad component.
+        string normalized;
+        try
+        {
+            normalized = value.Normalize(NormalizationForm.FormD);
+        }
+        catch (ArgumentException)
+        {
+            return value;
+        }
         var builder = new StringBuilder(normalized.Length);
         foreach (char c in normalized)
         {

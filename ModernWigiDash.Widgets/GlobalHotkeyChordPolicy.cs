@@ -20,8 +20,6 @@ internal static class GlobalHotkeyChordPolicy
     public const int ModShift = 0x4;
     /// <summary>Win32 MOD_WIN.</summary>
     public const int ModWin = 0x8;
-    /// <summary>Win32 MOD_NOREPEAT (the OS must not autorepeat the hotkey).</summary>
-    public const int ModNoRepeat = 0x4000;
 
     /// <summary>
     /// Parses the stored chord into its RegisterHotKey operands. Returns
