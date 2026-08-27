@@ -234,7 +234,13 @@ shared CI runner consumed even the 30 s wait of
 `SingleInstanceGuardTests.Primary_ActivationSignal_FiresTheCallbackAndReParks`
 on the v0.6.8 push (2026-08-26 had widened 5 s to 30 s); the ceiling is 60 s
 now (f10a306) and the budget is a ceiling, not a target (a healthy machine
-finishes in well under a second).
+finishes in well under a second). In a function whose return is captured, use
+`Write-Host`, never `Write-Output` (the emitted line is space-joined onto the
+return value; hit live when it polluted `$text` and mangled CONTEXT.md's first
+line). `[ref]` parameters are illegal in a PowerShell function signature
+(ParserError); return the value or use a script-scope variable. `String.Replace`'s
+3-arg (`StringComparison`) overload does not resolve in PS 5.1; use the 2-arg
+form (ordinal by default).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
