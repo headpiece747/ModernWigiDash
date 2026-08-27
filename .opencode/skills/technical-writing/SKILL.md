@@ -89,7 +89,7 @@ Source: asd-ste100.org (Issue 9, 2025), fetched 2026-07-18. The numbered rules a
 - Keep the small words that show structure. "Ensure that the switch is off" keeps "that" because it makes the sentence parse one way. Never trade clarity for word count.
 - Repeat the article in a series when it prevents a misread: "the client and the host", not "the client and host", when they are two things.
 - Say which parts "and" or "or" joins when a sentence can group two ways. "Both...and", "either...or", and "if...then" are free disambiguators.
-- Use periods, not semicolons. Replace an em dash with a new sentence.
+- Use periods, not semicolons. Prefer a new sentence over an em dash, and keep a dash only when it is the clearest separator.
 - Make text in parentheses a full grammatical unit or its own sentence. Never form plurals with "(s)".
 - No slashes: write "a, b, or both" instead of "a/b" or "and/or".
 - Call each thing by one name, everywhere. A doc that says "the gate", "the ratchet", and "the budget check" for one thing teaches three things. Rewording an unchanged sentence between edits costs the same way: don't churn what didn't change.

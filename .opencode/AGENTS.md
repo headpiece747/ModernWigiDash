@@ -331,7 +331,9 @@ session death is survivable.
 
 A skill proposed from skills.sh or any upstream registry must pass every
 check below before install. A failed check is a dated rejection in the
-Not Installed section, never a silent skip. The registry leaderboard is a
+Not Installed section, never a silent skip. Check 3's runtime half is
+ask-first, not an automatic rejection: it is settled in-session, with the
+reason the runtime is needed spelled out. The registry leaderboard is a
 lagging index for an adopted upstream (renames ship upstream and the
 leaderboard lags; `two-axis-review` to `code-review` is the recorded case),
 so a sync diffs against the upstream repo, never the leaderboard.
@@ -340,9 +342,14 @@ so a sync diffs against the upstream repo, never the leaderboard.
    media/video surface.
 2. **Name**: unique across the project (`.opencode/skills/`) and the global
    (`~/.config/opencode/skills/`) locations, which opencode enforces.
-3. **No new external runtime**: no npm/Python/global-CLI install, nothing
-   inserted into the LLM provider traffic path, no telemetry, no cloud
-   service.
+3. **External runtime: ask first.** A tool, skill, or program that needs a
+   new runtime (npm/Node, Python, `uv`, a global CLI, a new package
+   manager) is allowed, but only after I flag it and explain exactly why
+   that runtime is needed and what it pulls in (the 2026-08-27 decision
+   replaced the outright ban, which had ruled out useful tools without a
+   case-by-case look). The safety half stays hard and fails the check on
+   its own: nothing inserted into the LLM provider traffic path, no
+   telemetry, no cloud service.
 4. **Distinctiveness**: no overlap with the existing catalog (judgment
    today; a mechanical scan once the catalog distinctiveness check lands).
 5. **Hygiene**: `agnix` and `skillspector --no-llm` green after install.
@@ -382,8 +389,8 @@ so a sync diffs against the upstream repo, never the leaderboard.
   to-spec/implement, subagent-driven-development = implement + the task
   tool), `JuliusBrussee/caveman` (a product, not a skill: an npm CLI, a
   BSL-1.1 proxy in the provider traffic path, telemetry on by default; its
-  pixel mode renders SKILL.md bodies to PNG, which agnix, skillspector, and
-  the prose gate cannot lint; the terseness idea is already unslop +
+pixel mode renders SKILL.md bodies to PNG, which agnix and skillspector
+   cannot lint; the terseness idea is already unslop +
   technical-writing), `vercel-labs/find-skills` + `anthropics/skill-creator`
   (meta overlap: the intake filter above plus `authoring-a-skill` and
   `writing-for-agents`), and the leaderboard's dominant categories by shape
@@ -399,7 +406,7 @@ so a sync diffs against the upstream repo, never the leaderboard.
   (line endings are deliberately unpinned, ADR-0010; do NOT re-add
   `end_of_line` to `.editorconfig`, it recreates a ~45,000-error wall on
   Windows checkouts)
-- Full gate run (build → test → format → prose, stops at first failure,
+- Full gate run (build → test → format, stops at first failure,
   appends one trail row per run to `.audit/gates.tsv`). The build stage is
   a forced recompile (`--no-incremental`): the row's warning column covers
   every project every run, and an mtime-stale incremental build can never
@@ -407,14 +414,13 @@ so a sync diffs against the upstream repo, never the leaderboard.
   way, 2026-08-26); if the app is running from `bin\Release` the forced
   recompile fails on a locked output file, so stop the app (the harness
   `stop`) and re-run:
-  `scripts\run-gates.ps1`, use it for full gate runs instead of the three
-  commands above. The prose stage is the 2026-08-23 em-dash sweep's scope,
-  kept honest by the gate: no em dash (U+2014) in living prose (`.md`
-  outside `.desloppify/`, `.superpowers/`, `docs/(superpowers|archive|reports)/`,
-  `.opencode/(skills|agents|node_modules)/`, `.git/`, `bin/`, `obj/`; the one
-  exempt line is the ADR-0009 quoted hint example).
+`scripts\run-gates.ps1`, use it for full gate runs instead of the three
+   commands above. The former 4th stage (the 2026-08-23 em-dash prose
+   scan) was retired 2026-08-27: em-dash usage is governed by the prose
+   style rules (the `unslop` and `technical-writing` skills), not by the
+   gate.
 - Commit guard: a pre-commit hook blocks a commit unless the last gate row in
-  `.audit/gates.tsv` is green in all four stages, its sha equals current HEAD,
+  `.audit/gates.tsv` is green in all three stages, its sha equals current HEAD,
   and the run is at most 60 min old (`-MaxAgeMinutes` on the guard). Install
   once per clone with `git config core.hooksPath scripts/hooks` (the hook file
   `scripts/hooks/pre-commit` is committed; the activation is local config).
@@ -457,7 +463,8 @@ so a sync diffs against the upstream repo, never the leaderboard.
   `.desloppify/`) is the periodic deep sweep for redundant abstractions and
   boilerplate; its mechanical residue (dead helpers, the anti-patterns above)
   stays pinned in `DebtGuardTests` so it cannot regress between sweeps.
-  `unslop` is the prose pass (already gated by the prose stage), not a code
+  `unslop` is the prose pass (its em-dash scan was retired from the gate
+  2026-08-27; the style rules govern), not a code
   sweep. Run a desloppify pass before a release or after a large refactor;
   record findings under `docs/reports/` and pin what is mechanical.
 - Agent hygiene scanners (the 2026-08-23 awesome-claude-code adoption pass;

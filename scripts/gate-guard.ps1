@@ -3,7 +3,7 @@
 # Reads the last row of the gate trail (.audit/gates.tsv, written by
 # run-gates.ps1) and blocks the commit when:
 #   - the trail is missing (no evidence of any gate run),
-#   - the last row is not ok in build/test/format/prose,
+#   - the last row is not ok in build/test/format,
 #   - the gate row's sha != current HEAD (the tree moved after the gate:
 #     pull, rebase, or a commit made elsewhere),
 #   - the gate run is older than -MaxAgeMinutes (default 60).
@@ -47,8 +47,8 @@ if ($lines.Count -lt 2) {
     Block 'the gate trail has no rows. Run scripts\run-gates.ps1 first.'
 }
 $cols = @($lines[-1] -split "`t")
-if ($cols.Count -lt 11) {
-    Block ('unparseable gate row (expected 11 columns): ' + $lines[-1] + '. Re-run scripts\run-gates.ps1 (the trail predates the prose stage).')
+if ($cols.Count -lt 10) {
+    Block ('unparseable gate row (expected 10 columns): ' + $lines[-1] + '. Re-run scripts\run-gates.ps1 (the trail predates the current row shape).')
 }
 
 $ts = $cols[0]
@@ -57,9 +57,6 @@ $notOk = @()
 if ($cols[3] -ne 'ok') { $notOk += ('build=' + $cols[3]) }
 if ($cols[6] -ne 'ok') { $notOk += ('test=' + $cols[6]) }
 if ($cols[9] -ne 'ok') { $notOk += ('format=' + $cols[9]) }
-# 'n/a' is the honest legacy value (the prose stage did not exist in that
-# run); the four-stage gate never emits it, so post-upgrade runs are strict.
-if ($cols[10] -ne 'ok' -and $cols[10] -ne 'n/a') { $notOk += ('prose=' + $cols[10]) }
 if ($notOk.Count -gt 0) {
     Block ('the last gate is not green (' + ($notOk -join ', ') + '). Fix the failure and re-run scripts\run-gates.ps1.' )
 }

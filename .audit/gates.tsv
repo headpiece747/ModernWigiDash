@@ -1,4 +1,4 @@
-﻿ts	sha	label	build	warnings	errors	test	passed	failed	format	prose
+﻿ts	sha	label	build	warnings	errors	test	passed	failed	format
 2026-08-21T23:18:58Z	2fbcb5b	seed: full gate post 2fbcb5b	ok	0	0	ok	1621	0	ok	n/a
 2026-08-23T02:26:10Z	3671786	manual	ok	0	0	ok	1634	0	ok	n/a
 2026-08-23T12:14:22Z	8f242bb	manual	ok	0	0	ok	1634	0	ok	n/a
@@ -127,3 +127,4 @@
 2026-08-27T12:55:57Z	ced5e5b	manual	ok	0	0	ok	2006	0	ok	ok
 2026-08-27T13:21:07Z	a7fcb24	manual	ok	0	0	ok	2006	0	ok	ok
 2026-08-27T13:40:51Z	d02c1d5	manual	ok	0	0	ok	2006	0	ok	ok
+2026-08-27T14:16:47Z	16f3389	retire prose stage (3-stage gate)	ok	0	0	ok	2006	0	ok
