@@ -233,8 +233,9 @@ hatch, hit again). The repo's default branch is `master`
 shared CI runner consumed even the 30 s wait of
 `SingleInstanceGuardTests.Primary_ActivationSignal_FiresTheCallbackAndReParks`
 on the v0.6.8 push (2026-08-26 had widened 5 s to 30 s); the ceiling is 60 s
-now (f10a306) and the budget is a ceiling, not a target (a healthy machine
-finishes in well under a second). In a function whose return is captured, use
+now (f10a306), a later 2026-08-27 re-run consumed the full 60 s so it
+widened to 120 s, and the budget is a ceiling, not a target (a healthy
+machine finishes in well under a second). In a function whose return is captured, use
 `Write-Host`, never `Write-Output` (the emitted line is space-joined onto the
 return value; hit live when it polluted `$text` and mangled CONTEXT.md's first
 line). `[ref]` parameters are illegal in a PowerShell function signature

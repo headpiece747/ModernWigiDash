@@ -71,10 +71,11 @@ public class SingleInstanceGuardTests
         // one-shot re-park. The house TestWait budget of five seconds is
         // load-sensitive here (a 2026-08-26 full-suite gate run consumed
         // the whole budget with both signals still undelivered), so this
-        // test waits sixty: the budget is only a ceiling (a healthy
-        // machine finishes in well under a second) and a shared CI runner
-        // consumed even thirty on 2026-08-27.
-        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(60));
+        // test waits two minutes: the budget is only a ceiling (a healthy
+        // machine finishes in well under a second), and the shared CI runner
+        // consumed thirty on the 2026-08-26 v0.6.8 push and the full sixty
+        // on a 2026-08-27 re-run, so the ceiling widens to two minutes.
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(120));
         // The guard re-parks BEFORE resetting (the no-lost-signal ordering),
         // so a fast second signal can be delivered TWICE: the re-park
         // observes the still-set event and fires again. That over-delivery
