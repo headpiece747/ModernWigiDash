@@ -797,10 +797,10 @@ switch ($Command) {
             if ($s.pid -and [WmdUia.Core]::ProcessId($win) -ne [int]$s.pid) { Fail ('window matching "' + $winPart + '" belongs to pid ' + [WmdUia.Core]::ProcessId($win) + ', not the launched pid ' + [int]$s.pid) }
             if (-not [WmdUia.Core]::IsEnabled($win)) { Fail ('window "' + $winPart + '" is disabled') }
             $r = [WmdUia.Core]::BoundingRect($win)
-            Write-Output (
-                'ok: window "' + $winPart + '" @(' +
+Write-Output (
+                'ok: pid=' + $proc.Id + ' window "' + $winPart + '" @(' +
                 $r.Left + ',' + $r.Top + ') ' + ($r.Right - $r.Left) + 'x' + ($r.Bottom - $r.Top) +
-                ') pid=' + [WmdUia.Core]::ProcessId($win) + ' enabled'
+                ' pid=' + [WmdUia.Core]::ProcessId($win) + ' enabled'
             )
         } else {
             $win = Get-MainWindow
@@ -812,7 +812,7 @@ switch ($Command) {
             Write-Output (
                 'ok: pid=' + $proc.Id + ' window "ModernWigiDash" @(' +
                 $r.Left + ',' + $r.Top + ') ' + ($r.Right - $r.Left) + 'x' + ($r.Bottom - $r.Top) +
-                ') enabled ' + $logNote
+                ' enabled ' + $logNote
             )
         }
     }

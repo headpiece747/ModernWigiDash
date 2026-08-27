@@ -190,7 +190,51 @@ claim list itself existed only as a temp-dir script plus scrollback, which
 forced a reconstruction of its E1-E6 test-gap subset; it is now persisted
 at `docs/reports/2026-08-26-audit-findings.md` with the re-runnable
 `docs/reports/2026-08-26-audit-verify-claims.ps1` (a claim list that lives
-only in scrollback is a bug: the session-lifecycle rule).
+ only in scrollback is a bug: the session-lifecycle rule).
+
+Verified 2026-08-27 (theme relocation + v0.6.8 release session; each hit
+live): a .NET 10 `System.Text.Json` strictness: a `JsonValue.Create(value)`
+without options holds a customized value that refuses to write under a
+different `JsonSerializerOptions` (`JsonObject.ToJsonString` throws
+`InvalidOperationException_JsonSerializerOptionsNoTypeInfoResolverSpecified`
+only at runtime, the 4 test failures the compiler and the first build both
+missed); the house pattern is to serialize the payload with the target's own
+options and `JsonNode.Parse` the result into a plain node
+(`ProfileExportTheme.WithTheme`; the round-trip pins sit in
+`ProfileExportThemeTests`). Lockstep pins between two compile-time constants
+are MSTEST0032 always-true (the pin is tautological at the analyzer level):
+spell the lockstep against a derived value instead (a `StartsWith` over the
+composed path, not `Assert.AreEqual(ConstA, ConstB)`, `ThemeSettingsTests`),
+and drop the `!` after `Assert.IsNotNull` (S8969: the MSTest asserts carry
+the null-flow attribute). The `write` tool again wrote bare-LF endings and no
+final newline into new files: the format gate caught the missing newline on
+`ProfileExportTheme.cs` (the backstop works), and the new ADR landed as 98
+bare LFs on this CRLF checkout (git normalizes at commit, but byte-normalize
+a new file to CRLF before the gate to keep the working tree uniform). `gh`
+through this transport: a `--jq` expression with `\(` string interpolation is
+mangled ("accepts at most 1 arg(s), received 5"), use a plain object
+projection (`{name: .name, size: .size}`) and read the JSON; `gh --json ...
+--jq '.[0]'` returns a JSON string in PowerShell, so `$run.databaseId` is
+empty (the run id printed blank and `gh run watch` showed usage),
+`ConvertFrom-Json` first or drop the `--jq`; git/gh push remote chatter goes
+to stderr, so `2>&1` paints a successful push as a NativeCommandError, judge
+the `old..new` line and `$LASTEXITCODE` instead of the error color (both the
+master push and the v0.6.8 tag push read like failures). `rg` output through
+the bash tool is plain strings, not MatchInfo: `$_ .Line` is $null
+("cannot call a method on a null-valued expression"), use `-match` on the
+string. A PowerShell statement cannot be piped: `for (...) { if (...)
+{ Write-Host $x } } | Select-Object` is a ParserError ("an empty pipe element
+is not allowed"), collect into an array or wrap in `$(...)`. Inline
+byte/format-specifier display through the transport is unreliable (`${x:X2}`
+printed a bare `0x`) while the comparison is fine, so for byte-level work
+write a `.ps1` to the temp dir and run it with `-File` (the existing escape
+hatch, hit again). The repo's default branch is `master`
+(origin/HEAD -> origin/master): `origin/main` is an "unknown revision". The
+shared CI runner consumed even the 30 s wait of
+`SingleInstanceGuardTests.Primary_ActivationSignal_FiresTheCallbackAndReParks`
+on the v0.6.8 push (2026-08-26 had widened 5 s to 30 s); the ceiling is 60 s
+now (f10a306) and the budget is a ceiling, not a target (a healthy machine
+finishes in well under a second).
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use `v<last>..HEAD` as the range on a clean tree.
