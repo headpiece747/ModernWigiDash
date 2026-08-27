@@ -30,4 +30,8 @@ internal readonly record struct PageTabVisual(PageTabItem Item)
 
     /// <summary>The icon glyph size inside the icon buttons.</summary>
     public static double IconFontSize { get; } = 10;
+
+    /// <summary>The tab label's font size: matches the strip's "+ Add Page"
+    /// button, so the 6 starter page names render at one size.</summary>
+    public static double TabFontSize { get; } = 12;
 }

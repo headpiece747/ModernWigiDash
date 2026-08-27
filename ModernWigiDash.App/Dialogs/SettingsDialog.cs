@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using ModernWigiDash.App.Controls;
 using ModernWigiDash.App.Theming;
 
 namespace ModernWigiDash.App.Dialogs;
@@ -6,8 +7,10 @@ namespace ModernWigiDash.App.Dialogs;
 /// <summary>
 /// Settings hub dialog (ADR-0018): three groups built from
 /// <see cref="SettingsModel"/> display facts. Appearance opens the existing
-/// <see cref="ThemeDialog"/> as a nested modal; Behavior's close-behavior
-/// radios write through to the window's commit seam the moment they are
+/// <see cref="ThemeDialog"/> as a nested modal and hosts the page-background
+/// picker (the active page's canvas color, relocated from the page-tab
+/// strip), writing through on the moment a color is picked; Behavior's
+/// close-behavior radios write through to the window's commit seam the moment they are
 /// checked, and the Start-with-Windows checkbox (ADR-0019) writes or deletes
 /// the app's HKCU Run entry the same way (the registry is the single source
 /// of truth, so the checkbox seeds from the entry's presence); there is no
@@ -27,6 +30,7 @@ internal sealed class SettingsDialog : Window
     private readonly Func<string?> _onBrowseAhkInterpreter;
     private readonly Action _onExportProfile;
     private readonly Action _onImportProfile;
+    private readonly Action<string> _onCommitPageBackground;
     private readonly Dictionary<string, RadioButton> _radioByValue = [];
 
     /// <param name="owner">The owner window for modal centering.</param>
@@ -67,6 +71,13 @@ internal sealed class SettingsDialog : Window
     /// button (the window's SaveFileDialog + ProfileOps flow).</param>
     /// <param name="onImportProfile">Fires on the Profile group's import
     /// button (the window's OpenFileDialog + ProfileOps flow).</param>
+    /// <param name="currentPageBackground">The active page's persisted
+    /// background hex, read by the window before the hub opens. Seeds the
+    /// Appearance group's page-background picker.</param>
+    /// <param name="onCommitPageBackground">Fires with the picker's new hex
+    /// the moment a color is picked. The window writes the active page's
+    /// background and marks the profile dirty (the pick is the change, like
+    /// the radio and checkbox writes).</param>
     public SettingsDialog(
         Window owner,
         ThemeApplicator themeApplicator,
@@ -80,7 +91,9 @@ internal sealed class SettingsDialog : Window
         Action<string> onCommitAhkPath,
         Func<string?> onBrowseAhkInterpreter,
         Action onExportProfile,
-        Action onImportProfile)
+        Action onImportProfile,
+        string currentPageBackground,
+        Action<string> onCommitPageBackground)
     {
         _themeApplicator = themeApplicator;
         _onCommitCloseBehavior = onCommitCloseBehavior;
@@ -90,6 +103,7 @@ internal sealed class SettingsDialog : Window
         _onBrowseAhkInterpreter = onBrowseAhkInterpreter;
         _onExportProfile = onExportProfile;
         _onImportProfile = onImportProfile;
+        _onCommitPageBackground = onCommitPageBackground;
 
         Title = "Settings";
         Width = 460;
@@ -103,7 +117,7 @@ internal sealed class SettingsDialog : Window
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
-        Content = BuildUi(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath);
+        Content = BuildUi(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath, currentPageBackground);
 
         PreviewKeyDown += (_, e) =>
         {
@@ -115,7 +129,7 @@ internal sealed class SettingsDialog : Window
         };
     }
 
-    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath)
+    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, string currentPageBackground)
     {
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
@@ -140,7 +154,7 @@ internal sealed class SettingsDialog : Window
         // SettingsModelTests, so a reordered model fails the gate.
         var sections = new (SettingsModel.Group Group, UIElement Content)[]
         {
-            (SettingsModel.Groups[0], BuildAppearanceGroup()),
+            (SettingsModel.Groups[0], BuildAppearanceGroup(currentPageBackground)),
             (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath)),
             (SettingsModel.Groups[2], BuildProfileGroup())
         };
@@ -178,7 +192,7 @@ internal sealed class SettingsDialog : Window
         return header;
     }
 
-    private UIElement BuildAppearanceGroup()
+    private UIElement BuildAppearanceGroup(string currentPageBackground)
     {
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
         row.Children.Add(BuildRowLabel("Theme colors"));
@@ -193,6 +207,17 @@ internal sealed class SettingsDialog : Window
         // The theme dialog owns its full lifetime; this hub just opens it.
         button.Click += (_, _) => new ThemeDialog(this, _themeApplicator).ShowDialog();
         row.Children.Add(button);
+
+        // The page-background row (the former strip swatch, relocated here):
+        // the active page's canvas color, written through the moment a color
+        // is picked - the pick is the change, like the other rows.
+        row.Children.Add(BuildRowLabel("Page background", topMargin: 12));
+        row.Children.Add(BuildRowHint(
+            "The canvas background color behind the widgets on the active page."));
+        var pageBgEditor = new ColorPickerEditor();
+        pageBgEditor.Hex = currentPageBackground;
+        pageBgEditor.Applied += _onCommitPageBackground;
+        row.Children.Add(pageBgEditor);
         return row;
     }
 

@@ -56,27 +56,6 @@ public class MainWindowConstructionTests
         Assert.IsNull(error, error?.ToString());
     }
 
-    [TestMethod]
-    public void Construct_PageBackgroundPicker_ReflectsStarterPageBackground()
-    {
-        var (hex, error) = Host.Invoke(() =>
-        {
-            string tempDir = Path.Combine(Path.GetTempPath(), "wmd-bg-" + Guid.NewGuid().ToString("N"));
-            var window = new MainWindow(new StubPresentMonNative(), Path.Combine(tempDir, "profile.json"), new NoopPowerModeSource(), new FakeTraySurface());
-            try
-            {
-                return (object?)window.PageBgPicker.Hex;
-            }
-            finally
-            {
-                window.Close();
-            }
-        });
-
-        Assert.IsNull(error, error?.ToString());
-        Assert.AreEqual(ModernWigiDash.Core.Models.PageLayout.DefaultBackgroundHexColor, hex);
-    }
-
     /// <summary>
     /// Leaves the process without an Application so other test classes (whose
     /// SharedApp Lazy unconditionally calls new App()) can still create theirs.

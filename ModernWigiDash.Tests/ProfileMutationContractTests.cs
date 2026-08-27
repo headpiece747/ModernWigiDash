@@ -23,21 +23,21 @@ public class ProfileMutationContractTests
     }
 
     [TestMethod]
-    public void Structural_ResyncsPickerFromProfile_LeavesSnapToggleAlone()
+    public void Structural_RebuildsTheTabStrip_LeavesSnapToggleAlone()
     {
         var (_, error) = Host.Invoke(() =>
         {
             var window = NewWindow();
             try
             {
-                // Diverge both page-level controls from the profile state.
-                window.PageBgPicker.Hex = "#FF0000";
+                // Diverge the page-level toggle from the profile state.
                 window.ChkSnapToGrid.IsChecked = false;
+                var firstTabBefore = window.PanelPageTabs.Children[0];
 
                 window.ApplyProfileMutation(ProfileMutationShape.Structural, null);
 
-                Assert.AreEqual(PageLayout.DefaultBackgroundHexColor, window.PageBgPicker.Hex,
-                    "a structural mutation re-syncs the picker from the profile");
+                Assert.AreNotSame(firstTabBefore, window.PanelPageTabs.Children[0],
+                    "a structural mutation re-syncs the tab strip from the profile");
                 Assert.IsFalse(window.ChkSnapToGrid.IsChecked == true,
                     "a structural mutation never resyncs the snap toggle — only RawWrite does");
             }
@@ -58,14 +58,14 @@ public class ProfileMutationContractTests
             var window = NewWindow();
             try
             {
-                // Diverge both page-level controls from the profile state.
-                window.PageBgPicker.Hex = "#FF0000";
+                // Diverge the page-level toggle from the profile state.
                 window.ChkSnapToGrid.IsChecked = false;
+                var firstTabBefore = window.PanelPageTabs.Children[0];
 
                 window.ApplyProfileMutation(ProfileMutationShape.Transform, null);
 
-                Assert.AreEqual("#FF0000", window.PageBgPicker.Hex,
-                    "a transform (in-page) mutation never re-syncs the picker");
+                Assert.AreSame(firstTabBefore, window.PanelPageTabs.Children[0],
+                    "a transform (in-page) mutation never rebuilds the tab strip");
                 Assert.IsFalse(window.ChkSnapToGrid.IsChecked == true,
                     "a transform (in-page) mutation never touches the snap toggle");
             }
@@ -82,23 +82,21 @@ public class ProfileMutationContractTests
     public void RawWrite_ResyncsPageControlsFromTheProfile()
     {
         // A raw write (an import) replaces the whole profile state: the
-        // funnel re-syncs the page-level controls from the profile, so a
-        // display-only control divergence (the picker's Hex setter commits
-        // nothing) cannot survive a raw write. The snap toggle is already in
-        // sync after construction, so its resync is a no-op write here.
+        // funnel re-syncs the page-level controls from the profile. The snap
+        // toggle is already in sync after construction (its write-back handler
+        // would land a divergence into the profile, so it cannot stage one),
+        // so its resync is a no-op write here; the tab strip is rebuilt.
         var (_, error) = Host.Invoke(() =>
         {
             var window = NewWindow();
             try
             {
-                // Diverge the picker display from the profile state without
-                // touching the profile (the Hex setter is display-only).
-                window.PageBgPicker.Hex = "#FF0000";
+                var firstTabBefore = window.PanelPageTabs.Children[0];
 
                 window.ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
 
-                Assert.AreEqual(PageLayout.DefaultBackgroundHexColor, window.PageBgPicker.Hex,
-                    "a raw write re-syncs the picker from the (imported) profile");
+                Assert.AreNotSame(firstTabBefore, window.PanelPageTabs.Children[0],
+                    "a raw write rebuilds the tab strip from the (imported) profile");
                 Assert.IsTrue(window.ChkSnapToGrid.IsChecked == true,
                     "a raw write re-syncs the snap toggle from the (imported) page's state");
             }

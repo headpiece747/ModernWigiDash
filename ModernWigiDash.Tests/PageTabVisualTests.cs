@@ -60,6 +60,15 @@ public class PageTabVisualTests
     }
 
     [TestMethod]
+    public void TabFontSize_MatchesTheAddPageButton()
+    {
+        // The 6 starter page names render at one size: the tab label font is
+        // the strip's "+ Add Page" button font (12px), not the 13px the
+        // default Button style would inherit.
+        Assert.AreEqual(12, PageTabVisual.TabFontSize);
+    }
+
+    [TestMethod]
     public void CanDelete_FlowsFromTheItem_WhenDeleteAllowed()
     {
         var visual = Visual(isActive: true, canDelete: true);

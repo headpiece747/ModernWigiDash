@@ -84,6 +84,7 @@ internal sealed class PageTabsView
         var pageButton = new Button
         {
             Content = $"📄 {tab.PageName}",
+            FontSize = PageTabVisual.TabFontSize,
             Padding = visual.TabPadding,
             Style = visual.IsActive ? (Style)_findResource("AccentButton")! : (Style)_findResource(typeof(Button))!,
         };

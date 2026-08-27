@@ -4,7 +4,6 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
-        xmlns:controls="clr-namespace:ModernWigiDash.App.Controls"
         mc:Ignorable="d"
         Title="ModernWigiDash"
         PreviewKeyDown="MainWindow_PreviewKeyDown"
@@ -173,7 +172,6 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <ScrollViewer x:Name="ScrollerPageTabs" Grid.Column="0" HorizontalScrollBarVisibility="Auto"
                                       VerticalScrollBarVisibility="Disabled" MaxWidth="900"
@@ -181,8 +179,6 @@
                             <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
                         </ScrollViewer>
                         <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>
-                        <controls:ColorPickerEditor x:Name="PageBgPicker" Grid.Column="2" ShowHexBox="False"
-                                                    Margin="12,0,0,0" VerticalAlignment="Center"/>
                     </Grid>
                 </Border>
             </Grid>

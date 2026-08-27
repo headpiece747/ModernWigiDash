@@ -402,11 +402,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 SwitchToPage,
                 RenamePage,
                 DeletePage);
-
-            // Page-background picker: the swatch commits the active page's
-            // color. Its Hex is kept in sync by ApplyProfileMutation (the
-            // mutation funnel).
-            PageBgPicker.Applied += OnPageBackgroundApplied;
         }),
 
         new WiringStep("ProfileLoad", () =>
@@ -425,7 +420,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
                 _profilePersistence.Save();
             }
             _pageTabs.Rebuild(_profile);
-            PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
         }),
 
         new WiringStep("AppSettings", () =>
@@ -748,8 +742,8 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// "what happens after a mutation" (refresh shape, dirty mark, structural
     /// flag) per site — doubled or missing marks are unrepresentable. The
     /// shape selects the refresh bundle:
-    /// <see cref="ProfileMutationShape.Structural"/> re-syncs the tab strip and
-    /// the page-background picker (the page set changed);
+    /// <see cref="ProfileMutationShape.Structural"/> re-syncs the tab strip
+    /// (the page set changed);
     /// <see cref="ProfileMutationShape.RawWrite"/> (an import) additionally
     /// re-syncs the snap-to-grid toggle from the imported page, whose handler
     /// routes through this same contract;
@@ -768,7 +762,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
         if (shape is ProfileMutationShape.Structural or ProfileMutationShape.RawWrite)
         {
             _pageTabs.Rebuild(_profile);
-            PageBgPicker.Hex = _profile.ActivePage.BackgroundHexColor;
         }
 
         if (shape is ProfileMutationShape.RawWrite)
@@ -795,11 +788,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         RefreshGlobalHotkeys();
     }
 
-    /// <summary>Page-background picker commit: writes the active page's
-    /// BackgroundHexColor (the compositor diffs it per frame, so the change
-    /// flows to the physical display on the next tick). The post-conditions ride
-    /// the mutation funnel; the swatch itself is kept in sync by the commit.</summary>
-    private void OnPageBackgroundApplied(string hex)
+    /// <summary>Page-background write-through from the settings hub: writes
+    /// the active page's BackgroundHexColor (the compositor diffs it per
+    /// frame, so the change flows to the physical display on the next tick).
+    /// The post-conditions ride the mutation funnel.</summary>
+    private void CommitPageBackground(string hex)
     {
         _profile.ActivePage.BackgroundHexColor = hex;
         ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
@@ -1358,7 +1351,9 @@ public partial class MainWindow : Window, IModernWigiDashContext
             onCommitAhkPath: CommitAhkInterpreter,
             onBrowseAhkInterpreter: BrowseAhkInterpreter,
             onExportProfile: ExportProfile,
-            onImportProfile: ImportProfile).ShowDialog();
+            onImportProfile: ImportProfile,
+            currentPageBackground: _profile.ActivePage.BackgroundHexColor,
+            onCommitPageBackground: CommitPageBackground).ShowDialog();
     }
 
     /// <summary>
