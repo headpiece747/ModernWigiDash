@@ -13,7 +13,7 @@ public class CryptoStockTickerWidgetTests
     private static PriceFeedManager CreateOfflineFeed() => new(
         new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
         "test-key",
-        feedFactory: _ => new FakeFeed(),
+        feedFactory: () => new FakeFeed(),
         reconnectDelay: TimeSpan.FromMilliseconds(10));
 
     [TestMethod]
@@ -155,7 +155,7 @@ public class CryptoStockTickerWidgetTests
         // the one-shot fallback at most once per 15s (the FeedSubscription
         // seed covers the immediate case; this covers the failed-seed retry).
         var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
-        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key", feedFactory: _ => new FakeFeed(), reconnectDelay: TimeSpan.FromMilliseconds(10));
+        using var feed = new PriceFeedManager(new HttpClient(stub), "test-key", feedFactory: () => new FakeFeed(), reconnectDelay: TimeSpan.FromMilliseconds(10));
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
         var widget = new CryptoStockTickerWidget { Symbol = "BTC", AssetType = "Crypto", Feed = feed, Clock = clock };
         using var surface = SKSurface.Create(new SKImageInfo(203, 148));

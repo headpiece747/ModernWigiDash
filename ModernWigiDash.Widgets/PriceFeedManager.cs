@@ -61,12 +61,6 @@ public class PriceInfo
 /// </summary>
 public sealed class PriceFeedManager : IDisposable
 {
-    internal enum FeedKind
-    {
-        Binance,
-        Finnhub
-    }
-
     /// <summary>The one REST poll cadence, spelled once for every source —
     /// per-interval fields could drift apart, and they did the design
     /// around them.</summary>
@@ -84,12 +78,10 @@ public sealed class PriceFeedManager : IDisposable
     internal readonly ConcurrentDictionary<string, int> _subscribedStocks = new();
     internal readonly ConcurrentDictionary<string, int> _subscribedFx = new();
 
-    private readonly Func<FeedKind, IWebSocketFeed> _feedFactory;
+    private readonly Func<IWebSocketFeed> _feedFactory;
     private readonly TimeSpan _reconnectDelay;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private CancellationTokenSource _cts = new();
-    private FeedLoop? _binanceLoop;
-    private FeedLoop? _finnhubLoop;
     private Task? _stockRestTask;
     private Task? _cryptoRestTask;
     private Task? _fxRestTask;
@@ -153,11 +145,11 @@ public sealed class PriceFeedManager : IDisposable
     internal PriceFeedManager(
         HttpClient httpClient,
         string? finnhubApiKey = null,
-        Func<FeedKind, IWebSocketFeed>? feedFactory = null,
+        Func<IWebSocketFeed>? feedFactory = null,
         TimeSpan? reconnectDelay = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
-        _feedFactory = feedFactory ?? (_ => new ClientWebSocketFeed());
+        _feedFactory = feedFactory ?? (() => new ClientWebSocketFeed());
         _reconnectDelay = reconnectDelay ?? TimeSpan.FromSeconds(5);
         // The loop-delay seam (the FeedLoop pattern): tests drive the REST
         // cycle's cadence with a fake clock; production uses real delays.
@@ -193,13 +185,15 @@ public sealed class PriceFeedManager : IDisposable
         // ref-counted map, first-claim startup (the kind's own loop/REST order,
         // incl. its gates), and WS subscribe payload — Subscribe/Unsubscribe
         // run the shared sequence over it.
-        _cryptoWiring = new(
-            SymbolCatalog.IsValidSymbol,
-            _subscribedCrypto,
-            () =>
+        FeedKindWiring cryptoWiring = null!;
+        cryptoWiring = new FeedKindWiring
+        {
+            IsValid = SymbolCatalog.IsValidSymbol,
+            Subscriptions = _subscribedCrypto,
+            OnFirstClaim = () =>
             {
-                _binanceLoop ??= CreateBinanceLoop();
-                _binanceLoop.Start();
+                cryptoWiring.Loop ??= CreateBinanceLoop();
+                cryptoWiring.Loop.Start();
                 // The loop reads the LIVE membership each cycle (a
                 // ConcurrentDictionary.Keys is a snapshot per call, but the
                 // view is re-read per cycle): a coin subscribed after the
@@ -211,35 +205,42 @@ public sealed class PriceFeedManager : IDisposable
                     _delay, _failLog,
                     FallbackCoinGeckoAsync);
             },
-            key => _ = SendWsSubscribeAsync(FeedKind.Binance, key),
+            WsSubscribeFrame = key => PriceFeedMessages.BuildBinanceSubscribe([key]),
             // The crypto one-shot seed: the CoinGecko leg (its id resolution
             // from the single catalog table rides along as the guard).
-            new(CoinGeckoRestLeg.SourceLabel, "$", (key, ct) => CoinGeckoLeg.FetchAsync(key, ct)));
-        _stockWiring = new(
-            SymbolCatalog.IsValidSymbol,
-            _subscribedStocks,
-            () =>
+            Seed = new(CoinGeckoRestLeg.SourceLabel, "$", (key, ct) => CoinGeckoLeg.FetchAsync(key, ct)),
+        };
+        _cryptoWiring = cryptoWiring;
+        FeedKindWiring stockWiring = null!;
+        stockWiring = new FeedKindWiring
+        {
+            IsValid = SymbolCatalog.IsValidSymbol,
+            Subscriptions = _subscribedStocks,
+            OnFirstClaim = () =>
             {
                 // A missing Finnhub key disables the stock feeds entirely; the
                 // claim still counts (so Unsubscribe stays balanced) and the
                 // Yahoo seed in SeedFallbackAsync keeps working as the fallback.
                 if (string.IsNullOrEmpty(_finnhubKey)) return;
-                _finnhubLoop ??= CreateFinnhubLoop();
-                _finnhubLoop.Start();
+                stockWiring.Loop ??= CreateFinnhubLoop();
+                stockWiring.Loop.Start();
                 _stockRestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
                     () => _subscribedStocks.Keys,
                     PollStockAsync,
                     _delay, _failLog);
             },
-            key => _ = SendWsSubscribeAsync(FeedKind.Finnhub, key),
+            WsSubscribeFrame = key => PriceFeedMessages.BuildFinnhubSubscribe(key),
             // The stock one-shot seed: the Yahoo chart leg (its symbol guard
             // is the only validation the seed path has).
-            new(YahooRestLeg.SourceLabel, YahooRestLeg.CurrencySymbol, (key, ct) => YahooRestLeg.FetchAsync(key, ct)));
-        _fxWiring = new(
-            symbol => SymbolCatalog.IsValidFxInput(symbol, out _),
-            _subscribedFx,
-            () =>
+            Seed = new(YahooRestLeg.SourceLabel, YahooRestLeg.CurrencySymbol, (key, ct) => YahooRestLeg.FetchAsync(key, ct)),
+        };
+        _stockWiring = stockWiring;
+        _fxWiring = new FeedKindWiring
+        {
+            IsValid = symbol => SymbolCatalog.IsValidFxInput(symbol, out _),
+            Subscriptions = _subscribedFx,
+            OnFirstClaim = () =>
             {
                 _fxRestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
@@ -247,11 +248,13 @@ public sealed class PriceFeedManager : IDisposable
                     PollFxAsync,
                     _delay, _failLog);
             },
-            WsSubscribe: null,
+            // No socket: the Frankfurter REST cycle is the FX feed.
+            WsSubscribeFrame = null,
             // No seed leg: the Frankfurter cycle already serves FX (a
             // one-shot seed would duplicate it, and the series response has
             // no single best quote to seed from).
-            Seed: null);
+            Seed = null,
+        };
     }
 
     /// <summary>
@@ -259,19 +262,27 @@ public sealed class PriceFeedManager : IDisposable
     /// <see cref="Subscribe"/>, <see cref="Unsubscribe"/>, and
     /// <see cref="SeedFallbackAsync"/> differ on: the validation guard, the
     /// ref-counted subscription map, what the first claim starts (WS loop
-    /// and/or REST cycle, in the kind's own order), the WS subscribe payload
-    /// (null when the kind has no socket), and the one-shot seed leg (null
-    /// when the kind's cycle already serves it — FX, the Frankfurter cycle).
-    /// The shared routines own their sequences (validate → claim → start →
-    /// subscribe; the seed's fetch → apply), so a fourth asset kind is one
-    /// table row, not a fourth copy of the steps.
+    /// and/or REST cycle, in the kind's own order), the WS subscribe frame
+    /// builder (null when the kind has no socket), and the one-shot seed leg
+    /// (null when the kind's cycle already serves it — FX, the Frankfurter
+    /// cycle). The row also owns the WS loop it starts (<see cref="Loop"/>,
+    /// created lazily on the first claim and disposed at shutdown), so the
+    /// loop is keyed by the row, not a parallel feed-kind enum. The shared
+    /// routines own their sequences (validate → claim → start → subscribe;
+    /// the seed's fetch → apply), so a fourth asset kind is one table row,
+    /// not a fourth copy of the steps.
     /// </summary>
-    private sealed record FeedKindWiring(
-        Func<string, bool> IsValid,
-        ConcurrentDictionary<string, int> Subscriptions,
-        Action OnFirstClaim,
-        Action<string>? WsSubscribe,
-        SeedLeg? Seed);
+    private sealed class FeedKindWiring
+    {
+        public required Func<string, bool> IsValid { get; init; }
+        public required ConcurrentDictionary<string, int> Subscriptions { get; init; }
+        public required Action OnFirstClaim { get; init; }
+        public required Func<string, string>? WsSubscribeFrame { get; init; }
+        public required SeedLeg? Seed { get; init; }
+        // The WS loop this row starts: created lazily on the first claim and
+        // disposed at shutdown. Null while no claim has started it.
+        public FeedLoop? Loop { get; set; }
+    }
 
     /// <summary>The kind's one-shot seed leg: the source label the seeded
     /// record is stored under, its currency symbol, and the fetch (the leg's
@@ -341,7 +352,10 @@ public sealed class PriceFeedManager : IDisposable
                 wiring.OnFirstClaim();
                 // Push an incremental subscribe so symbols added after the socket
                 // connected still receive real-time ticks (kinds with a socket).
-                wiring.WsSubscribe?.Invoke(key);
+                if (wiring.WsSubscribeFrame is not null)
+                {
+                    _ = SendWsSubscribeAsync(wiring, key);
+                }
             }
         }
     }
@@ -349,19 +363,17 @@ public sealed class PriceFeedManager : IDisposable
     /// <summary>
     /// Sends an incremental WebSocket subscription for a symbol added after the
     /// feed socket was already connected. No-op when the socket is not open.
-    /// The wire shape is the <see cref="PriceFeedMessages"/> builder for the
-    /// feed's kind, the same spelling the connect-time payload uses.
+    /// The loop and the wire frame both ride the caller's wiring row: the
+    /// frame builder is the <see cref="PriceFeedMessages"/> builder for the
+    /// kind, the same spelling the connect-time payload uses.
     /// </summary>
-    private async Task SendWsSubscribeAsync(FeedKind feed, string symbol)
+    private async Task SendWsSubscribeAsync(FeedKindWiring wiring, string symbol)
     {
         try
         {
-            IWebSocketFeed? ws = feed == FeedKind.Finnhub ? _finnhubLoop?.Current : _binanceLoop?.Current;
+            IWebSocketFeed? ws = wiring.Loop?.Current;
             if (ws == null || !ws.IsOpen) return;
-            string message = feed == FeedKind.Finnhub
-                ? PriceFeedMessages.BuildFinnhubSubscribe(symbol)
-                : PriceFeedMessages.BuildBinanceSubscribe([symbol]);
-            await ws.SendTextAsync(message, _cts.Token).ConfigureAwait(false);
+            await ws.SendTextAsync(wiring.WsSubscribeFrame!(symbol), _cts.Token).ConfigureAwait(false);
         }
         catch
         {
@@ -480,13 +492,21 @@ public sealed class PriceFeedManager : IDisposable
     private void ShutdownLoops()
     {
         _cts.Cancel();
-        _binanceLoop?.Dispose();
-        _finnhubLoop?.Dispose();
-        _binanceLoop = null;
-        _finnhubLoop = null;
+        DisposeLoops();
         _stockRestTask = null;
         _cryptoRestTask = null;
         _fxRestTask = null;
+    }
+
+    /// <summary>The one loop-teardown both shutdown paths route through: each
+    /// wiring row disposes (and nulls) the WS loop it owns, so the loop's
+    /// lifetime is keyed by the row at both its ends.</summary>
+    private void DisposeLoops()
+    {
+        _cryptoWiring.Loop?.Dispose();
+        _cryptoWiring.Loop = null;
+        _stockWiring.Loop?.Dispose();
+        _stockWiring.Loop = null;
     }
 
     /// <summary>
@@ -538,14 +558,14 @@ public sealed class PriceFeedManager : IDisposable
 
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),
-        () => _feedFactory(FeedKind.Binance),
+        _feedFactory,
         (feed, ct) => feed.SendTextAsync(PriceFeedMessages.BuildBinanceSubscribe(_subscribedCrypto.Keys), ct),
         ParseBinanceTicker,
         new FixedReconnectPolicy(_reconnectDelay));
 
     private FeedLoop CreateFinnhubLoop() => new(
         new Uri($"wss://ws.finnhub.io?token={_finnhubKey}"),
-        () => _feedFactory(FeedKind.Finnhub),
+        _feedFactory,
         async (feed, ct) =>
         {
             foreach (var sym in _subscribedStocks.Keys)
@@ -641,8 +661,7 @@ public sealed class PriceFeedManager : IDisposable
             // Deliberately NOT disposed here: fire-and-forget sends may still be
             // awaiting with this token (the loops break on OCE and never re-touch
             // it); the codebase's deferral pattern lets the source be GC'ed.
-            _binanceLoop?.Dispose();
-            _finnhubLoop?.Dispose();
+            DisposeLoops();
         }
         // The manager never owns its HttpClient: the default instance shares
         // the static process-wide client, so disposing it here would kill every

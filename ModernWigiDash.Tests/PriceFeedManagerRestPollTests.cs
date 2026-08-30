@@ -99,7 +99,7 @@ public class PriceFeedManagerRestPollTests
     public async Task FallbackCoinGeckoAsync_SubscribedAlias_StoresPrice()
     {
         var stub = new StubHttpHandler(_ => Ok("""{"bitcoin":{"usd":65000,"usd_24h_change":2.5}}"""));
-        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: _ => new FakeFeed());
+        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: () => new FakeFeed());
         feed.Subscribe("bitcoin", AssetKind.Crypto);
 
         await feed.FallbackCoinGeckoAsync();
@@ -170,7 +170,7 @@ public class PriceFeedManagerRestPollTests
                 : Ok("""{"bitcoin":{"usd":60000.0,"usd_24h_change":1.5}}""");
         });
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: _ => new FakeFeed()) { Clock = clock };
+        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: () => new FakeFeed()) { Clock = clock };
         feed.Subscribe("bitcoin", AssetKind.Crypto);
 
         await feed.PollCryptoAsync("BTC");
@@ -194,7 +194,7 @@ public class PriceFeedManagerRestPollTests
                 : Ok("""{"bitcoin":{"usd":60000.0,"usd_24h_change":1.5}}""");
         });
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: _ => new FakeFeed()) { Clock = clock };
+        using var feed = new PriceFeedManager(new HttpClient(stub), feedFactory: () => new FakeFeed()) { Clock = clock };
         feed.Subscribe("bitcoin", AssetKind.Crypto);
 
         await feed.PollCryptoAsync("BTC");

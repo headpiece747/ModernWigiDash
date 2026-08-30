@@ -17,7 +17,7 @@ public class PriceFeedSocketLoopTests
         var feed = new FakeFeed();
         using var manager = new PriceFeedManager(
             new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
-            feedFactory: _ => feed,
+            feedFactory: () => feed,
             reconnectDelay: TimeSpan.FromMilliseconds(20));
         feed.QueueMessage("""{"e":"24hrTicker","s":"BTCUSDT","c":"65432.10","P":"1.23"}""");
 
@@ -39,7 +39,7 @@ public class PriceFeedSocketLoopTests
         var feed = new FakeFeed();
         using var manager = new PriceFeedManager(
             new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
-            feedFactory: _ => feed,
+            feedFactory: () => feed,
             reconnectDelay: TimeSpan.FromMilliseconds(20));
 
         manager.Subscribe("BTC", AssetKind.Crypto);
@@ -59,7 +59,7 @@ public class PriceFeedSocketLoopTests
         var feed = new FakeFeed();
         using var manager = new PriceFeedManager(
             new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
-            feedFactory: _ => feed,
+            feedFactory: () => feed,
             reconnectDelay: TimeSpan.FromMilliseconds(20));
 
         // A parked connect keeps the feed observed live (Current set, IsOpen)
@@ -91,7 +91,7 @@ public class PriceFeedSocketLoopTests
         using var manager = new PriceFeedManager(
             new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
             finnhubApiKey: "test-key",
-            feedFactory: _ => feed,
+            feedFactory: () => feed,
             reconnectDelay: TimeSpan.FromMilliseconds(20));
 
         manager.Subscribe("AAPL", AssetKind.Stock);
@@ -109,7 +109,7 @@ public class PriceFeedSocketLoopTests
         var feed = new FakeFeed();
         using var manager = new PriceFeedManager(
             new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
-            feedFactory: _ => feed,
+            feedFactory: () => feed,
             reconnectDelay: TimeSpan.FromMilliseconds(20));
 
         manager.Subscribe("BTC", AssetKind.Crypto);

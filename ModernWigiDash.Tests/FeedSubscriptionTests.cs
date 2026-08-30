@@ -13,7 +13,7 @@ public class FeedSubscriptionTests
     private static PriceFeedManager CreateOfflineFeed() => new(
         new HttpClient(new StubHttpHandler(_ => StubHttpHandler.NotFound())),
         "test-key",
-        feedFactory: _ => new FakeFeed(),
+        feedFactory: () => new FakeFeed(),
         reconnectDelay: TimeSpan.FromMilliseconds(10));
 
     [TestMethod]

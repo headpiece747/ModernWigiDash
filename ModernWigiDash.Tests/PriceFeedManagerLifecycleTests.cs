@@ -67,7 +67,7 @@ public class PriceFeedManagerLifecycleTests
         var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
         using var feed = new PriceFeedManager(
             new HttpClient(stub),
-            feedFactory: _ => new FakeFeed(),
+            feedFactory: () => new FakeFeed(),
             reconnectDelay: TimeSpan.FromSeconds(5));
 
         const int tasks = 4;
