@@ -730,7 +730,11 @@ internal sealed class StaHost
     /// Application) and the shutdown flag that <see cref="Window.Close"/>
     /// sets when the closed window was the Application's last one —
     /// <see cref="Window.Show"/> silently no-ops while the flag is set, so
-    /// any later window test would show nothing at all.
+    /// any later window test would show nothing at all. Also resets
+    /// <see cref="App.IsClosing"/> (the app's own close/teardown flag, set by
+    /// the window's Closed handler): it is process-wide, so once any window
+    /// test closes a window the flag would stay set for the rest of the test
+    /// process and silently no-op every later guarded dispatcher hop.
     /// </summary>
     public static void ResetApplicationState()
     {
@@ -745,6 +749,8 @@ internal sealed class StaHost
         PropertyInfo shuttingDown = typeof(Application).GetProperty("IsShuttingDown", flags)
             ?? throw new InvalidOperationException("Application.IsShuttingDown property not found");
         shuttingDown.SetValue(null, false);
+
+        ModernWigiDash.App.App.IsClosing = false;
     }
 
     /// <summary>

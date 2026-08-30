@@ -1271,7 +1271,15 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
         if (!IsVisible)
         {
-            WindowState = WindowState.Normal;
+            // The minimize-intercept leg leaves the window Minimized: force
+            // Normal so the restore does not re-show minimized. The
+            // close-intercept leg preserves the window's own state (a
+            // maximized window comes back maximized), so only the Minimized
+            // state needs the repair.
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = WindowState.Normal;
+            }
             Show();
         }
         Activate();
@@ -1334,7 +1342,13 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>
     /// The minimize intercept (ADR-0018, M2): a minimize hides to the tray
     /// under the same policy as a close, so the window never lingers as a
-    /// minimized taskbar entry the user would have to restore.
+    /// minimized taskbar entry the user would have to restore. Two vetoes
+    /// keep the hide from swallowing the app: a disabled owner is behind a
+    /// modal dialog (WPF disables the owner for ShowDialog), and a system-
+    /// wide minimize (Win+D) with the dialog open would hide the owner and
+    /// cascade the hide to the dialog, so the app disappears mid-dialog;
+    /// the _quitting mirror of the close intercept keeps a state change
+    /// mid-quit from hiding (harmless today, a future trap otherwise).
     /// </summary>
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
@@ -1348,7 +1362,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
             _startupMinimizeLatch = false;
             return;
         }
-        if (!_wired || WindowState != WindowState.Minimized)
+        if (!_wired || _quitting || !IsEnabled || WindowState != WindowState.Minimized)
         {
             return;
         }

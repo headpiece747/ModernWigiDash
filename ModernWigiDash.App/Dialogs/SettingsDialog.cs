@@ -31,7 +31,7 @@ internal sealed class SettingsDialog : Window
     private readonly Action _onExportProfile;
     private readonly Action _onImportProfile;
     private readonly Action<string> _onCommitPageBackground;
-    private readonly Dictionary<string, RadioButton> _radioByValue = [];
+
 
     /// <param name="owner">The owner window for modal centering.</param>
     /// <param name="themeApplicator">Applies the current theme to this
@@ -242,7 +242,6 @@ internal sealed class SettingsDialog : Window
                 Margin = new Thickness(0, 6, 0, 0)
             };
             radio.SetResourceReference(RadioButton.ForegroundProperty, "TextPrimary");
-            _radioByValue[option.Value] = radio;
             row.Children.Add(radio);
             row.Children.Add(BuildRowHint(option.Description, leftIndent: 20));
             radio.IsChecked = string.Equals(option.Value, checkedValue, StringComparison.Ordinal);

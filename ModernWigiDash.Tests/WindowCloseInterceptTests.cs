@@ -10,10 +10,15 @@ namespace ModernWigiDash.Tests;
 /// close with the tray keep-alive behavior hides instead of closing (and
 /// the tray's QuitClose still exits through the veto), a minimize hides
 /// under the same policy, a quit-behavior close runs the normal sequence,
-/// and the session-end standby routes to the engine's seam. The tray
-/// surface is the injected live fake: the production surface reads dead in
-/// the test host (its icon resource is not in the test output dir), and the
-/// N1 fallback would swallow every hide.
+/// the N1 fallback (the tray dead) runs the normal close instead of
+/// hiding into a void, a system-wide minimize with a modal dialog open
+/// (the disabled owner) vetoes the hide, the tray show restores the
+/// hidden window keeping the close leg's maximized state (and forcing
+/// Normal back after the minimize leg), and the session-end standby
+/// routes to the engine's seam. The tray surface is the injected live
+/// fake: the production surface reads dead in the test host (its icon
+/// resource is not in the test output dir), and the N1 fallback would
+/// swallow every hide.
 /// </summary>
 [TestClass]
 public class WindowCloseInterceptTests
@@ -136,6 +141,141 @@ public class WindowCloseInterceptTests
             }
             finally
             {
+                window.QuitClose();
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
+    public void Close_WithHideToTrayBehavior_DeadTray_RunsTheNormalCloseSequence()
+    {
+        bool closedFired = false;
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        Host.Run<object?>(() =>
+        {
+            // The dead tray: a surface that can never bring the icon up
+            // (the ico missing from the output, the 2026-08-25 trap). The
+            // N1 guard falls the close through to the normal exit instead
+            // of hiding into a void - a hidden window with no tray is
+            // unreachable.
+            var deadTray = new FakeTraySurface(showBringsUp: false);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), deadTray);
+            window.Show();
+            window.Closed += (_, _) => closedFired = true;
+            try
+            {
+                window.Close();
+
+                Assert.IsTrue(closedFired, "the N1 fallback runs the normal close (the teardown) when the tray is dead");
+                Assert.IsFalse(window.IsVisible);
+            }
+            finally
+            {
+                if (!closedFired)
+                {
+                    window.QuitClose();
+                }
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
+    public void ShowFromTray_AfterTheCloseIntercept_RestoresTheWindow_KeepsTheMaximizedState()
+    {
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        Host.Run<object?>(() =>
+        {
+            var fake = new FakeTraySurface();
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake);
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                window.WindowState = WindowState.Maximized;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                window.Close(); // the intercept hides (Hide does not touch the state)
+                Assert.IsFalse(window.IsVisible, "the close intercept hides the maximized window");
+
+                window.ShowFromTray();
+
+                Assert.IsTrue(window.IsVisible, "the tray show restores the hidden window");
+                Assert.AreEqual(
+                    WindowState.Maximized,
+                    window.WindowState,
+                    "the close-intercept leg preserves the window's own state - the user must not re-maximize every hide/restore cycle");
+            }
+            finally
+            {
+                window.QuitClose();
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
+    public void ShowFromTray_AfterTheMinimizeIntercept_RestoresInNormalState()
+    {
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        Host.Run<object?>(() =>
+        {
+            var fake = new FakeTraySurface();
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake);
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+
+                window.WindowState = WindowState.Minimized; // the intercept hides
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                Assert.IsFalse(window.IsVisible, "the minimize intercept hides the window");
+
+                window.ShowFromTray();
+
+                Assert.IsTrue(window.IsVisible, "the tray show restores the hidden window");
+                Assert.AreEqual(
+                    WindowState.Normal,
+                    window.WindowState,
+                    "the minimize leg leaves the window Minimized: the restore forces Normal back (a re-shown minimized window would be invisible)");
+            }
+            finally
+            {
+                window.QuitClose();
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
+    public void Minimize_WithADisabledOwner_VetoesTheHide()
+    {
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        Host.Run<object?>(() =>
+        {
+            var fake = new FakeTraySurface();
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake);
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                // WPF disables the owner while a modal dialog is up
+                // (ShowDialog): a system-wide minimize (Win+D) with the
+                // dialog open must not hide the owner, or the hide
+                // cascades to the dialog and the app disappears
+                // mid-dialog.
+                window.IsEnabled = false;
+
+                window.WindowState = WindowState.Minimized;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                Assert.IsTrue(window.IsVisible, "the disabled owner vetoes the minimize hide (a modal dialog is open)");
+                Assert.AreEqual(WindowState.Minimized, window.WindowState, "the minimize proceeds normally instead of hiding");
+            }
+            finally
+            {
+                window.IsEnabled = true;
                 window.QuitClose();
             }
             return null;
