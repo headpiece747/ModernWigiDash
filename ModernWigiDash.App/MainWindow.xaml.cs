@@ -19,7 +19,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -1346,22 +1346,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// </summary>
     private void ShowSettingsDialog()
     {
-        new Dialogs.SettingsDialog(
-            this,
-            _themeApplicator,
-            currentCloseBehavior: _profile.CloseBehavior,
-            onCommitCloseBehavior: CommitCloseBehavior,
-            currentAutostart: AutostartStore.TryGetCommandLine() is not null,
-            onCommitAutostart: CommitAutostart,
-            currentKillSwitch: _appSettings.KillSwitch,
-            onCommitKillSwitch: CommitKillSwitch,
-            currentAhkPath: _appSettings.AhkInterpreterPath,
-            onCommitAhkPath: CommitAhkInterpreter,
-            onBrowseAhkInterpreter: BrowseAhkInterpreter,
-            onExportProfile: ExportProfile,
-            onImportProfile: ImportProfile,
-            currentPageBackground: _profile.ActivePage.BackgroundHexColor,
-            onCommitPageBackground: CommitPageBackground).ShowDialog();
+        new Dialogs.SettingsDialog(this, _themeApplicator, this).ShowDialog();
     }
 
     /// <summary>
@@ -1455,6 +1440,35 @@ public partial class MainWindow : Window, IModernWigiDashContext
         CommitAhkInterpreter(dialog.FileName);
         return dialog.FileName;
     }
+
+    // ISettingsHubHost (the settings hub's named host seam, the ADR-0008
+    // image): the window is the production host. The seeds read the
+    // persisted state live at open time (the dialog reads Seed once in its
+    // ctor), and the commit members forward to the existing write-through
+    // seams above, so the hub and the window cannot drift on what an open
+    // hub sees or a check writes.
+    SettingsHubSeed ISettingsHubHost.Seed => new(
+        _profile.CloseBehavior,
+        AutostartStore.TryGetCommandLine() is not null,
+        _appSettings.KillSwitch,
+        _appSettings.AhkInterpreterPath,
+        _profile.ActivePage.BackgroundHexColor);
+
+    void ISettingsHubHost.CommitCloseBehavior(string value) => CommitCloseBehavior(value);
+
+    void ISettingsHubHost.CommitAutostart(bool enabled) => CommitAutostart(enabled);
+
+    void ISettingsHubHost.CommitKillSwitch(bool tripped) => CommitKillSwitch(tripped);
+
+    void ISettingsHubHost.CommitAhkInterpreter(string path) => CommitAhkInterpreter(path);
+
+    string? ISettingsHubHost.BrowseAhkInterpreter() => BrowseAhkInterpreter();
+
+    void ISettingsHubHost.ExportProfile() => ExportProfile();
+
+    void ISettingsHubHost.ImportProfile() => ImportProfile();
+
+    void ISettingsHubHost.CommitPageBackground(string hex) => CommitPageBackground(hex);
 
     private static void Log(string msg) => FileLog.Write(msg);
 }

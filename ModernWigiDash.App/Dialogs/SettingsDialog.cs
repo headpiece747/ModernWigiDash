@@ -23,87 +23,26 @@ internal sealed class SettingsDialog : Window
 {
     private readonly ThemeApplicator _themeApplicator;
     private readonly SettingsModel _model = new();
-    private readonly Action<string> _onCommitCloseBehavior;
-    private readonly Action<bool> _onCommitAutostart;
-    private readonly Action<bool> _onCommitKillSwitch;
-    private readonly Action<string> _onCommitAhkPath;
-    private readonly Func<string?> _onBrowseAhkInterpreter;
-    private readonly Action _onExportProfile;
-    private readonly Action _onImportProfile;
-    private readonly Action<string> _onCommitPageBackground;
-
+    private readonly ISettingsHubHost _host;
 
     /// <param name="owner">The owner window for modal centering.</param>
     /// <param name="themeApplicator">Applies the current theme to this
     /// window's chrome and to the theme editor it opens.</param>
-    /// <param name="currentCloseBehavior">The raw persisted close-behavior
-    /// value. The seed routes through
-    /// <see cref="SettingsModel.CheckedCloseBehaviorFor"/>, so an absent or
-    /// unknown value seeds the default radio.</param>
-    /// <param name="onCommitCloseBehavior">Fires with the behavior value the
-    /// moment a radio is checked. The window writes the profile and marks it
-    /// dirty.</param>
-    /// <param name="currentAutostart">Whether the app's Run entry exists -
-    /// the store's presence, read by the window before the hub opens. The
-    /// registry is the single source of truth, so the checkbox seeds from
-    /// the entry's current state.</param>
-    /// <param name="onCommitAutostart">Fires with the checkbox's new state
-    /// the moment it is checked or unchecked. The window writes or deletes
-    /// the Run entry (the write is the change, like the radio writes).</param>
-    /// <param name="currentKillSwitch">The persisted kill-switch state (ADR-0019),
-    /// read by the window before the hub opens. Off (the default) means the
-    /// global-hotkey integration is live.</param>
-    /// <param name="onCommitKillSwitch">Fires with the checkbox's new state
-    /// the moment it is checked or unchecked. The window persists the
-    /// machine-local setting and re-runs the idempotent hotkey registration
-    /// pass.</param>
-    /// <param name="currentAhkPath">The persisted AutoHotkey interpreter
-    /// path (ADR-0019), read by the window before the hub opens; blank when
-    /// unset (nothing is bundled or auto-detected).</param>
-    /// <param name="onCommitAhkPath">Fires with the path box's new value when
-    /// the box loses focus. The window persists the machine-local path.</param>
-    /// <param name="onBrowseAhkInterpreter">Fires on the interpreter row's
-    /// Browse button (the window owns the file dialog and commits a chosen
-    /// path through the same commit seam) and returns the chosen path, so
-    /// the row can write it back into the box and the displayed path can
-    /// never drift from the persisted one; null on cancel.</param>
-    /// <param name="onExportProfile">Fires on the Profile group's export
-    /// button (the window's SaveFileDialog + ProfileOps flow).</param>
-    /// <param name="onImportProfile">Fires on the Profile group's import
-    /// button (the window's OpenFileDialog + ProfileOps flow).</param>
-    /// <param name="currentPageBackground">The active page's persisted
-    /// background hex, read by the window before the hub opens. Seeds the
-    /// Appearance group's page-background picker.</param>
-    /// <param name="onCommitPageBackground">Fires with the picker's new hex
-    /// the moment a color is picked. The window writes the active page's
-    /// background and marks the profile dirty (the pick is the change, like
-    /// the radio and checkbox writes).</param>
+    /// <param name="host">The named host seam (the ADR-0008 image): the hub
+    /// reads its five open-time seeds once from
+    /// <see cref="ISettingsHubHost.Seed"/> and routes every write-through and
+    /// file flow through the host's commit members. The close-behavior seed
+    /// routes through <see cref="SettingsModel.CheckedCloseBehaviorFor"/>, so
+    /// an absent or unknown value seeds the default radio; every other seed
+    /// is the host's persisted state at open time.</param>
     public SettingsDialog(
         Window owner,
         ThemeApplicator themeApplicator,
-        string? currentCloseBehavior,
-        Action<string> onCommitCloseBehavior,
-        bool currentAutostart,
-        Action<bool> onCommitAutostart,
-        bool currentKillSwitch,
-        Action<bool> onCommitKillSwitch,
-        string currentAhkPath,
-        Action<string> onCommitAhkPath,
-        Func<string?> onBrowseAhkInterpreter,
-        Action onExportProfile,
-        Action onImportProfile,
-        string currentPageBackground,
-        Action<string> onCommitPageBackground)
+        ISettingsHubHost host)
     {
         _themeApplicator = themeApplicator;
-        _onCommitCloseBehavior = onCommitCloseBehavior;
-        _onCommitAutostart = onCommitAutostart;
-        _onCommitKillSwitch = onCommitKillSwitch;
-        _onCommitAhkPath = onCommitAhkPath;
-        _onBrowseAhkInterpreter = onBrowseAhkInterpreter;
-        _onExportProfile = onExportProfile;
-        _onImportProfile = onImportProfile;
-        _onCommitPageBackground = onCommitPageBackground;
+        _host = host;
+        var seed = host.Seed;
 
         Title = "Settings";
         Width = 460;
@@ -117,7 +56,7 @@ internal sealed class SettingsDialog : Window
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
-        Content = BuildUi(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath, currentPageBackground);
+        Content = BuildUi(seed.CloseBehavior, seed.Autostart, seed.KillSwitch, seed.AhkInterpreterPath, seed.PageBackground);
 
         PreviewKeyDown += (_, e) =>
         {
@@ -216,7 +155,7 @@ internal sealed class SettingsDialog : Window
             "The canvas background color behind the widgets on the active page."));
         var pageBgEditor = new ColorPickerEditor();
         pageBgEditor.Hex = currentPageBackground;
-        pageBgEditor.Applied += _onCommitPageBackground;
+        pageBgEditor.Applied += _host.CommitPageBackground;
         row.Children.Add(pageBgEditor);
         return row;
     }
@@ -245,7 +184,7 @@ internal sealed class SettingsDialog : Window
             row.Children.Add(radio);
             row.Children.Add(BuildRowHint(option.Description, leftIndent: 20));
             radio.IsChecked = string.Equals(option.Value, checkedValue, StringComparison.Ordinal);
-            radio.Checked += (_, _) => _onCommitCloseBehavior(option.Value);
+            radio.Checked += (_, _) => _host.CommitCloseBehavior(option.Value);
         }
 
         // The Start with Windows row (ADR-0019): the checkbox's check is the
@@ -266,8 +205,8 @@ internal sealed class SettingsDialog : Window
         };
         autostart.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
         row.Children.Add(autostart);
-        autostart.Checked += (_, _) => _onCommitAutostart(true);
-        autostart.Unchecked += (_, _) => _onCommitAutostart(false);
+        autostart.Checked += (_, _) => _host.CommitAutostart(true);
+        autostart.Unchecked += (_, _) => _host.CommitAutostart(false);
 
         // The kill-switch row (ADR-0019): like the autostart checkbox, the
         // check is the change - the window persists the machine-local
@@ -289,8 +228,8 @@ internal sealed class SettingsDialog : Window
         };
         killSwitch.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
         row.Children.Add(killSwitch);
-        killSwitch.Checked += (_, _) => _onCommitKillSwitch(true);
-        killSwitch.Unchecked += (_, _) => _onCommitKillSwitch(false);
+        killSwitch.Checked += (_, _) => _host.CommitKillSwitch(true);
+        killSwitch.Unchecked += (_, _) => _host.CommitKillSwitch(false);
 
         // The AutoHotkey row (ADR-0019): the interpreter the Run AHK Script
         // action spawns - a machine-local path (app_settings.json, never
@@ -308,7 +247,7 @@ internal sealed class SettingsDialog : Window
             Margin = new Thickness(0, 6, 0, 0)
         };
         var ahkPath = new TextBox { Text = currentAhkPath, Width = 260 };
-        ahkPath.LostFocus += (_, _) => _onCommitAhkPath(ahkPath.Text?.Trim() ?? "");
+        ahkPath.LostFocus += (_, _) => _host.CommitAhkInterpreter(ahkPath.Text?.Trim() ?? "");
         var browse = new Button
         {
             Content = "Browse...",
@@ -317,7 +256,7 @@ internal sealed class SettingsDialog : Window
         };
         browse.Click += (_, _) =>
         {
-            string? chosen = _onBrowseAhkInterpreter();
+            string? chosen = _host.BrowseAhkInterpreter();
             if (chosen is null) return; // a cancel leaves the box (and the setting) untouched
             ahkPath.Text = chosen; // the committed path rides back into the box
         };
@@ -341,13 +280,13 @@ internal sealed class SettingsDialog : Window
             Width = 150,
             Margin = new Thickness(0, 0, 8, 0)
         };
-        export.Click += (_, _) => _onExportProfile();
+        export.Click += (_, _) => _host.ExportProfile();
         var import = new Button
         {
             Content = "Import profile...",
             Width = 150
         };
-        import.Click += (_, _) => _onImportProfile();
+        import.Click += (_, _) => _host.ImportProfile();
         buttons.Children.Add(export);
         buttons.Children.Add(import);
         row.Children.Add(buttons);

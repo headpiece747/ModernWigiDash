@@ -9,16 +9,20 @@ using ModernWigiDash.Core.Theming;
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// Thin wiring pins for the settings hub as a forwarder: the display facts
-/// are pinned at the <see cref="SettingsModel"/> interface in
-/// SettingsModelTests; these tests only pin that the window seeds the
+/// Thin wiring pins for the settings hub as a forwarder over its named host
+/// seam: the display facts are pinned at the <see cref="SettingsModel"/>
+/// interface in SettingsModelTests; these tests bind an in-memory fake
+/// <see cref="ISettingsHubHost"/> and only pin that the hub seeds the
 /// checked radio from the persisted value (without committing), seeds the
 /// Start-with-Windows and kill-switch checkboxes and the AutoHotkey path
 /// box from their persisted states (without committing, ADR-0019), writes a
 /// radio check and the checkbox toggles through to their commit seams,
 /// commits the AHK path on focus loss, and routes the Profile group's
 /// buttons and the AHK Browse button to their seams (a chosen path rides
-/// back into the box, a cancel leaves it untouched).
+/// back into the box, a cancel leaves it untouched). The window's
+/// production-host side of the seam is the explicit forward to the window's
+/// write-through seams, which the seams' own pins cover (WindowAutostartTests,
+/// WindowAhkScriptTests).
 /// </summary>
 [TestClass]
 public class SettingsDialogTests
@@ -30,42 +34,54 @@ public class SettingsDialogTests
     // asserts the displayed path followed the persisted one.
     private const string ChosenBrowsePath = @"C:\Chosen\autohotkey.exe";
 
+    /// <summary>The in-memory fake host the hub's seam drives against: the
+    /// open-time seeds plus a capture list per commit member (the Browse
+    /// seam also records its click and answers with the canned path).</summary>
+    private sealed class FakeHubHost : ISettingsHubHost
+    {
+        public FakeHubHost(SettingsHubSeed seed, string? browseResult)
+        {
+            Seed = seed;
+            BrowseResult = browseResult;
+        }
+
+        public SettingsHubSeed Seed { get; }
+        public string? BrowseResult { get; }
+        public List<string> CloseBehaviorCommits { get; } = [];
+        public List<bool> AutostartCommits { get; } = [];
+        public List<bool> KillSwitchCommits { get; } = [];
+        public List<string> AhkCommits { get; } = [];
+        public List<string> Clicked { get; } = [];
+        public List<string> PageBgCommits { get; } = [];
+
+        public void CommitCloseBehavior(string value) => CloseBehaviorCommits.Add(value);
+        public void CommitAutostart(bool enabled) => AutostartCommits.Add(enabled);
+        public void CommitKillSwitch(bool tripped) => KillSwitchCommits.Add(tripped);
+        public void CommitAhkInterpreter(string path) => AhkCommits.Add(path);
+        public string? BrowseAhkInterpreter() { Clicked.Add("browse"); return BrowseResult; }
+        public void ExportProfile() => Clicked.Add("export");
+        public void ImportProfile() => Clicked.Add("import");
+        public void CommitPageBackground(string hex) => PageBgCommits.Add(hex);
+    }
+
     private static (SettingsDialog Dialog, List<string> Commits, List<bool> AutostartCommits, List<bool> KillSwitchCommits, List<string> AhkCommits, List<string> Clicked, List<string> PageBgCommits) Build(
         string? persistedCloseBehavior,
         bool seededAutostart,
         bool seededKillSwitch,
         string seededAhkPath,
-        List<string> commits,
-        List<bool> autostartCommits,
-        List<bool> killSwitchCommits,
-        List<string> ahkCommits,
-        List<string> clicked,
         string seededPageBackground = ModernWigiDash.Core.Models.PageLayout.DefaultBackgroundHexColor,
         string? browseResult = ChosenBrowsePath)
     {
         ThemeSettings.Theme = new ThemeSettings();
         var owner = new Window();
         WpfWindow.ShowOwner(owner);
-        var pageBgCommits = new List<string>();
-        var dialog = new SettingsDialog(
-            owner,
-            new ThemeApplicator(),
-            persistedCloseBehavior,
-            value => commits.Add(value),
-            seededAutostart,
-            value => autostartCommits.Add(value),
-            seededKillSwitch,
-            value => killSwitchCommits.Add(value),
-            seededAhkPath,
-            value => ahkCommits.Add(value),
-            () => { clicked.Add("browse"); return browseResult; },
-            () => clicked.Add("export"),
-            () => clicked.Add("import"),
-            seededPageBackground,
-            value => pageBgCommits.Add(value));
+        var host = new FakeHubHost(
+            new SettingsHubSeed(persistedCloseBehavior, seededAutostart, seededKillSwitch, seededAhkPath, seededPageBackground),
+            browseResult);
+        var dialog = new SettingsDialog(owner, new ThemeApplicator(), host);
         dialog.Show(); // a Window's visual tree exists only after it is shown
         dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-        return (dialog, commits, autostartCommits, killSwitchCommits, ahkCommits, clicked, pageBgCommits);
+        return (dialog, host.CloseBehaviorCommits, host.AutostartCommits, host.KillSwitchCommits, host.AhkCommits, host.Clicked, host.PageBgCommits);
     }
 
     private static RadioButton RadioFor(SettingsDialog dialog, string value)
@@ -79,7 +95,7 @@ public class SettingsDialogTests
     public void Ctor_SeedsTheCheckedRadioFromThePersistedValue()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, _, _) = Build(CloseBehaviorPolicy.HideToTray, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, _, _, _, _) = Build(CloseBehaviorPolicy.HideToTray, false, false, "");
             Assert.IsTrue(RadioFor(dialog, CloseBehaviorPolicy.HideToTray).IsChecked == true);
             Assert.IsTrue(RadioFor(dialog, CloseBehaviorPolicy.Quit).IsChecked == false);
             dialog.Close();
@@ -92,7 +108,7 @@ public class SettingsDialogTests
         {
             foreach (var persisted in new string?[] { null, "", "QUIT", "bogus" })
             {
-                var (dialog, _, _, _, _, _, _) = Build(persisted, false, false, "", [], [], [], [], []);
+                var (dialog, _, _, _, _, _, _) = Build(persisted, false, false, "");
                 Assert.IsTrue(RadioFor(dialog, CloseBehaviorPolicy.Default).IsChecked == true);
                 dialog.Close();
             }
@@ -103,7 +119,7 @@ public class SettingsDialogTests
     public void Ctor_FiresNoCommitWhenSeeding()
         => Host.Run<object?>(() =>
         {
-            var (dialog, commits, _, _, _, _, _) = Build(CloseBehaviorPolicy.HideToTray, false, false, "", [], [], [], [], []);
+            var (dialog, commits, _, _, _, _, _) = Build(CloseBehaviorPolicy.HideToTray, false, false, "");
             Assert.AreEqual(0, commits.Count);
             dialog.Close();
             return null;
@@ -113,7 +129,7 @@ public class SettingsDialogTests
     public void RadioCheck_WritesTheValueThroughToTheCommitSeam()
         => Host.Run<object?>(() =>
         {
-            var (dialog, commits, _, _, _, _, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, commits, _, _, _, _, _) = Build(null, false, false, "");
             RadioFor(dialog, CloseBehaviorPolicy.HideToTray).IsChecked = true;
             CollectionAssert.AreEqual(new[] { CloseBehaviorPolicy.HideToTray }, commits);
             RadioFor(dialog, CloseBehaviorPolicy.Quit).IsChecked = true;
@@ -126,7 +142,7 @@ public class SettingsDialogTests
     public void ProfileButtons_RouteToTheirSeams()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, "");
             var export = dialog.FindVisualChildren<Button>().First(b => string.Equals(b.Content as string, "Export profile...", StringComparison.Ordinal));
             export.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             var import = dialog.FindVisualChildren<Button>().First(b => string.Equals(b.Content as string, "Import profile...", StringComparison.Ordinal));
@@ -140,7 +156,7 @@ public class SettingsDialogTests
     public void AppearanceGroup_ExposesTheThemeEditorButton()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, _, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, _, _, _, _) = Build(null, false, false, "");
             var buttons = dialog.FindVisualChildren<Button>().ToList();
             Assert.IsTrue(buttons.Any(b => string.Equals(b.Content as string, "Customize theme colors...", StringComparison.Ordinal)));
             dialog.Close();
@@ -154,7 +170,7 @@ public class SettingsDialogTests
     public void Ctor_SeedsThePageBackgroundPickerFromTheActivePage_WithoutCommitting()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, _, pageBgCommits) = Build(null, false, false, "", [], [], [], [], [], seededPageBackground: "#123456");
+            var (dialog, _, _, _, _, _, pageBgCommits) = Build(null, false, false, "", seededPageBackground: "#123456");
             Assert.AreEqual("#123456", PageBackgroundEditor(dialog).Hex,
                 "the row seeds from the active page's persisted background");
             Assert.AreEqual(0, pageBgCommits.Count, "the seed, like the other seeds, commits nothing");
@@ -166,7 +182,7 @@ public class SettingsDialogTests
     public void PageBackgroundPicker_WritesThroughToTheCommitSeam()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, _, pageBgCommits) = Build(null, false, false, "", [], [], [], [], [], seededPageBackground: "#123456");
+            var (dialog, _, _, _, _, _, pageBgCommits) = Build(null, false, false, "", seededPageBackground: "#123456");
             PageBackgroundEditor(dialog).HexBox.Text = "#654321";
             CollectionAssert.AreEqual(new[] { "#654321" }, pageBgCommits,
                 "a valid hex change commits the new color the moment it lands");
@@ -182,7 +198,7 @@ public class SettingsDialogTests
     public void Ctor_SeedsTheAutostartCheckboxFromTheStoreState_WithoutCommitting()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, autostartCommits, _, _, _, _) = Build(null, true, false, "", [], [], [], [], []);
+            var (dialog, _, autostartCommits, _, _, _, _) = Build(null, true, false, "");
             Assert.IsTrue(AutostartCheckBox(dialog).IsChecked == true, "the entry's presence seeds the checkbox");
             Assert.AreEqual(0, autostartCommits.Count, "the seed, like the radio seed, commits nothing");
             dialog.Close();
@@ -193,7 +209,7 @@ public class SettingsDialogTests
     public void AutostartCheckbox_WritesThroughToTheCommitSeam()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, autostartCommits, _, _, _, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, autostartCommits, _, _, _, _) = Build(null, false, false, "");
             Assert.IsTrue(AutostartCheckBox(dialog).IsChecked == false, "an absent entry seeds the checkbox unchecked");
             AutostartCheckBox(dialog).IsChecked = true;
             CollectionAssert.AreEqual(new[] { true }, autostartCommits, "checking commits the enabled state");
@@ -230,7 +246,7 @@ public class SettingsDialogTests
     public void Ctor_SeedsTheKillSwitchCheckbox_WithoutCommitting()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, killSwitchCommits, _, _, _) = Build(null, false, true, "", [], [], [], [], []);
+            var (dialog, _, _, killSwitchCommits, _, _, _) = Build(null, false, true, "");
             Assert.IsTrue(KillSwitchCheckBox(dialog).IsChecked == true, "a tripped kill switch seeds the checkbox checked");
             Assert.AreEqual(0, killSwitchCommits.Count, "the seed, like the other seeds, commits nothing");
             dialog.Close();
@@ -241,7 +257,7 @@ public class SettingsDialogTests
     public void KillSwitchCheckbox_WritesThroughToTheCommitSeam()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, killSwitchCommits, _, _, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, killSwitchCommits, _, _, _) = Build(null, false, false, "");
             Assert.IsTrue(KillSwitchCheckBox(dialog).IsChecked == false, "the integration defaults live (unchecked)");
             KillSwitchCheckBox(dialog).IsChecked = true;
             CollectionAssert.AreEqual(new[] { true }, killSwitchCommits, "tripping commits true");
@@ -255,7 +271,7 @@ public class SettingsDialogTests
     public void Ctor_SeedsTheAhkPathBox_WithoutCommitting()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, ahkCommits, _, _) = Build(null, false, false, @"C:\Tools\autohotkey.exe", [], [], [], [], []);
+            var (dialog, _, _, _, ahkCommits, _, _) = Build(null, false, false, @"C:\Tools\autohotkey.exe");
             Assert.AreEqual(@"C:\Tools\autohotkey.exe", AhkPathTextBox(dialog).Text);
             Assert.AreEqual(0, ahkCommits.Count, "the seed commits nothing");
             dialog.Close();
@@ -266,7 +282,7 @@ public class SettingsDialogTests
     public void AhkPathBox_LostFocusCommitsTheTrimmedValue()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, ahkCommits, _, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, _, ahkCommits, _, _) = Build(null, false, false, "");
             AhkPathTextBox(dialog).Text = "  C:\\Tools\\autohotkey.exe  ";
             AhkPathTextBox(dialog).RaiseEvent(new RoutedEventArgs(TextBox.LostFocusEvent));
             CollectionAssert.AreEqual(new[] { @"C:\Tools\autohotkey.exe" }, ahkCommits,
@@ -279,7 +295,7 @@ public class SettingsDialogTests
     public void AhkBrowseButton_RoutesToTheBrowseSeam_AndWritesTheChosenPathBackIntoTheBox()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, "", [], [], [], [], []);
+            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, "");
             var browse = dialog.FindVisualChildren<Button>()
                 .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
             browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -294,7 +310,7 @@ public class SettingsDialogTests
     public void AhkBrowseButton_CancelLeavesTheBoxUntouched()
         => Host.Run<object?>(() =>
         {
-            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, @"C:\Seeded\autohotkey.exe", [], [], [], [], [], browseResult: null);
+            var (dialog, _, _, _, _, clicked, _) = Build(null, false, false, @"C:\Seeded\autohotkey.exe", browseResult: null);
             var browse = dialog.FindVisualChildren<Button>()
                 .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
             browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
