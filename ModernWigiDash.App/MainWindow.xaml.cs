@@ -19,7 +19,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -1096,76 +1096,48 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         var dlg = new OpenFileDialog { Filter = "Display Profile (*.json)|*.json" };
         if (dlg.ShowDialog() == true)
         {
-            // The import boundary is ProfileOps' one funnel: the size guard
-            // (before any read) and the parse are owned there; the window
-            // maps the named verdicts to its own surface.
-            switch (ProfileOps.ImportProfileFile(dlg.FileName, _loader, this))
-            {
-                case ProfileImportOutcome.Loaded(var loaded, var bundledTheme):
-                    bool swapped = false;
-                    try
-                    {
-                        // The close behavior travels with the JSON, but an
-                        // imported profile lacking it (null, "no opinion")
-                        // must not drop the local value: the merge re-stamps
-                        // the local close behavior onto the imported profile
-                        // before the swap, so the next export carries it.
-                        loaded.CloseBehavior = CloseBehaviorPolicy.MergeImport(loaded.CloseBehavior, _profile.CloseBehavior);
-
-                        // One swap site: ReplaceProfile disposes the old profile's
-                        // widget instances and returns the imported profile active.
-                        _profile = ProfileOps.ReplaceProfile(_profile, loaded);
-
-                        // The funnel owns everything after the swap — tab strip,
-                        // picker, and the snap-to-grid resync (a RawWrite): the
-                        // old force-write of the checkbox is gone.
-                        ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
-                        swapped = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
-                    }
-                    // The bundle's theme item runs after a successful profile
-                    // swap, so a declined or failed theme never undoes the
-                    // imported profile, and a failed import never offers the
-                    // theme of a profile that was not applied.
-                    if (swapped) OfferBundledTheme(bundledTheme);
-                    break;
-                case ProfileImportOutcome.TooLarge:
-                    _dialogHost.Error("Import Error", "The selected profile file is too large to import.");
-                    break;
-                case ProfileImportOutcome.Failed(var detail):
-                    _dialogHost.Error("Import Error", $"Error importing profile: {detail}");
-                    break;
-                // Absent: a delete between the dialog and the read is a
-                // benign no-op, the file the dialog handed back is gone.
-                case ProfileImportOutcome.Absent:
-                    break;
-            }
+            // The import flow owns the verdict sequence (the close-behavior
+            // merge, the one swap site, the post-swap theme offer); the
+            // boundary's size guard and parse are ProfileOps' one funnel, and
+            // the window is the flow's production host.
+            ProfileImportFlow.Run(ProfileOps.ImportProfileFile(dlg.FileName, _loader, this), this);
         }
     }
 
-    /// <summary>
-    /// The export bundle's theme item (ADR-0021): the offer decision routes
-    /// through <see cref="ThemeRestorePolicy"/> (null gate + fingerprint gate,
-    /// pinned without a window), then the confirm; a declined confirm is a
-    /// no-op and the profile import never touches the theme file.
-    /// </summary>
-    private void OfferBundledTheme(ThemeSettings? bundledTheme)
+    // IProfileImportHost (the manual import flow's named host seam, the
+    // ADR-0008 image): the window is the production host. The flow's
+    // sequence (the merge, the swap, the post-swap theme offer) is pinned
+    // at the module's interface; these members are the window-side
+    // implementation the flow drives.
+    string? IProfileImportHost.LocalCloseBehavior => _profile.CloseBehavior;
+
+    ThemeSettings IProfileImportHost.CurrentTheme => ThemeSettings.Theme;
+
+    bool IProfileImportHost.SwapProfile(ProfileLayout imported)
     {
-        if (!ThemeRestorePolicy.ShouldOffer(bundledTheme, ThemeSettings.Theme)) return;
-        if (!_dialogHost.Confirm("Restore Theme", "The imported profile includes a theme. Apply it to this machine?")) return;
-        ApplyBundledTheme(bundledTheme);
+        try
+        {
+            // One swap site: ReplaceProfile disposes the old profile's widget
+            // instances and returns the imported profile active.
+            _profile = ProfileOps.ReplaceProfile(_profile, imported);
+
+            // The funnel owns everything after the swap - tab strip, picker,
+            // and the snap-to-grid resync (a RawWrite): the old force-write of
+            // the checkbox is gone.
+            ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
+            return false;
+        }
     }
 
-    /// <summary>
-    /// Applies a confirmed bundle theme: the active theme is replaced
-    /// wholesale, the state-dir file is persisted (a failed write surfaces
-    /// one line and the colors still apply for the session, the
-    /// ThemeDialog's rule), and the applicator re-applies the resources.
-    /// </summary>
-    private void ApplyBundledTheme(ThemeSettings theme)
+    bool IProfileImportHost.ConfirmThemeRestore()
+        => _dialogHost.Confirm("Restore Theme", "The imported profile includes a theme. Apply it to this machine?");
+
+    void IProfileImportHost.ApplyTheme(ThemeSettings theme)
     {
         ThemeSettings.Theme = theme;
         if (!ThemeSettings.Save())
@@ -1176,6 +1148,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         }
         _themeApplicator.Apply(this);
     }
+
+    void IProfileImportHost.ShowError(string title, string message) => _dialogHost.Error(title, message);
 
     private void BtnClear_Click(object _, RoutedEventArgs e)
     {

@@ -88,8 +88,8 @@ public class ProfileLayout
     /// (absent stays absent, present-but-corrupt normalizes to
     /// <see cref="CloseBehaviorPolicy.Quit"/>) lives in
     /// <see cref="ProfileImportSanitizer"/>; the import merge (an imported
-    /// profile lacking the field keeps the local value) runs at the window's
-    /// import handler so the next export carries it.
+    /// profile lacking the field keeps the local value) runs in the import
+    /// flow (ProfileImportFlow) so the next export carries it.
     /// </summary>
     public string? CloseBehavior { get; set; }
 }
