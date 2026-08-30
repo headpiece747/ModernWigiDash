@@ -475,7 +475,14 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         catch (Exception ex)
         {
-            return new BoundedWaitVerdict(false, false, ex);
+            // The wait wraps the work's exception in an AggregateException.
+            // The verdict's Error feeds the caller's failure lines, which
+            // want the vendor's own wording (the GetBaseException precedent
+            // in RunConnectAttempt).
+            Exception error = ex is AggregateException { InnerExceptions.Count: > 0 } aggregate
+                ? aggregate.GetBaseException()
+                : ex;
+            return new BoundedWaitVerdict(false, false, error);
         }
     }
 

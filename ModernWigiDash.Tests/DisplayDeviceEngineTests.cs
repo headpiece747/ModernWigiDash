@@ -391,10 +391,8 @@ public class DisplayDeviceEngineTests
 
         Assert.IsFalse(confirmed, "a throwing standby is a refusal, not a confirmation");
         string content = ReadLog(_logPath);
-        Assert.IsTrue(content.Contains("[STANDBY] Standby failed"),
-            "a throwing standby must leave its tagged failure line in the log");
-        Assert.IsTrue(content.Contains("control write refused mid-ritual"),
-            "the failure line must carry the device's error");
+        Assert.IsTrue(content.Contains("[STANDBY] Standby failed: control write refused mid-ritual"),
+            "the failure line must carry the device's error unwrapped (no AggregateException prefix)");
         Assert.IsFalse(fake.Disposed, "the session-end standby must not dispose the transport");
     }
 

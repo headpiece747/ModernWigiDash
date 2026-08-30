@@ -384,6 +384,21 @@ local model, and its line-level findings on this slice were all
 test-coverage gaps (a per-mode no-data gate pin, an empty-list
 boundary) — the rule-level issues were the code-reviewer agent's, so
 both layers earn their place.
+Verified 2026-08-30 (architecture pass; each hit live): the
+hard timeout of `ocr_review` is about 720s (the local model is
+about 1.2 min per file), so a 52-file range must be batched into
+commit-range slices of up to 8 files, and even an 8-9 file range
+can time out under load (retry, or split further). A single-commit
+range (3-9 files) is the reliable unit. A zero-yield delay seam (a
+`delay` delegate that returns `Task.CompletedTask`) never yields in
+`RestPollLoop.RunAsync`, and `PriceFeedManager.Subscribe` runs the
+loop inline on the first claim, so a test hangs instead of
+completing: use the parkable delay seam (a per-cycle
+`TaskCompletionSource` park, the `RestPollLoopTests.FakeClockDelay`
+shape). And a positional argument placed after named arguments binds
+to the next positional parameter (the `PriceFeedManager` one was
+`finnhubApiKey: string`, so a positional `delay` value was
+CS1739): name the trailing parameter.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.

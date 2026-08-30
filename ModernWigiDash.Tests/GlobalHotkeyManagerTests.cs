@@ -231,4 +231,29 @@ public class GlobalHotkeyManagerTests
         CollectionAssert.AreEqual(Array.Empty<string>(), logLines,
             "the kill-switch veto's drops are not duplicates: no duplicate line while tripped");
     }
+
+    [TestMethod]
+    public void RefreshPass_TrippedThenUntripped_LogsTheDuplicateOnceOnTheFirstUntrippedPass()
+    {
+        // A tripped pass must leave the per-session duplicate state untouched:
+        // the guard suppresses the line while tripped without marking the
+        // cell logged, so the first un-tripped pass after an un-trip logs the
+        // conflict exactly once (a tripped pass that marked the cell would
+        // suppress the line for the rest of the session).
+        var (manager, fake, logLines) = CreateManager();
+        var first = Candidate(new FakeProvider(), 0x2, (ushort)'A', "Ctrl+A");
+        var duplicate = Candidate(new FakeProvider(), 0x2, (ushort)'A', "ctrl+a");
+        var line = "[HOTKEY] Global hotkey ctrl+a is claimed by an earlier widget; the later one stays tap-only";
+
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: true);
+        logLines.Clear();
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
+        Assert.AreEqual(1, fake.Registered.Count, "the first un-tripped pass registers the surviving widget's cell");
+        CollectionAssert.AreEqual(new[] { line }, logLines,
+            "the first un-tripped pass must log the duplicate exactly once");
+
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
+        CollectionAssert.AreEqual(new[] { line }, logLines,
+            "and never again (the cell is now marked logged)");
+    }
 }
