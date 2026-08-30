@@ -1085,9 +1085,14 @@ internal sealed class FakeTransport : IDisplayTransport
     /// <summary>Simulates a standby that wedges past the engine's
     /// StandbyCloseBudget (the wedged bulk-pipe scenario).</summary>
     public int GoToStandbyBlockMs { get; set; }
+    /// <summary>Simulates a standby whose control transfer throws (a device
+    /// that errors mid-ritual); the engine's bounded-wait verdict must land
+    /// the failure line and the caller must not see the raw exception.</summary>
+    public string? GoToStandbyFailure { get; set; }
     public bool GoToStandby()
     {
         if (GoToStandbyBlockMs > 0) Thread.Sleep(GoToStandbyBlockMs);
+        if (GoToStandbyFailure is not null) throw new InvalidOperationException(GoToStandbyFailure);
         return GoToStandbyResult;
     }
     /// <summary>Simulates a device whose Dispose hangs behind an in-flight

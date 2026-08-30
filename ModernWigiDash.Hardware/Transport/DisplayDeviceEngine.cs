@@ -426,13 +426,14 @@ public sealed class DisplayDeviceEngine : IDisposable
         // is equally fine.
         if (oldTransport != null)
         {
-            try
+            // The engine's one bounded-wait sequence (RunBounded): an
+            // abandoned dispose is acceptable on every caller (the reconnect
+            // replaces the transport), so the verdict is logged only when
+            // the disposal itself threw.
+            BoundedWaitVerdict verdict = RunBounded(() => { oldTransport.Dispose(); return true; }, DisposeAbandonBudget);
+            if (verdict.Error is not null)
             {
-                Task.Run(() => oldTransport.Dispose()).Wait(DisposeAbandonBudget);
-            }
-            catch (Exception ex)
-            {
-                _disposeLog.Write($"Transport disposal failed or timed out: {ex.Message}");
+                _disposeLog.Write($"Transport disposal failed or timed out: {verdict.Error.Message}");
             }
         }
     }
@@ -441,6 +442,42 @@ public sealed class DisplayDeviceEngine : IDisposable
     /// Writes a log message to the log file.
     /// </summary>
     private static void Log(string msg) => FileLog.Write(msg);
+
+    /// <summary>
+    /// The verdict of the engine's one bounded off-thread wait: whether the
+    /// work finished inside the budget (<see cref="Settled"/>), the bool
+    /// verdict it returned (meaningful only when settled), and the exception
+    /// that escaped the work or the wait.
+    /// </summary>
+    private sealed record BoundedWaitVerdict(bool Settled, bool Confirmed, Exception? Error);
+
+    /// <summary>
+    /// The engine's one bounded off-thread wait: runs a blocking vendor call
+    /// on a threadpool thread under an explicit budget and returns the
+    /// truthful verdict. The device's verdict is read from the task's
+    /// <c>Result</c> only once <see cref="Task.Wait(TimeSpan)"/> confirms
+    /// completion (the 2026-08-21 rule: Wait(timeout) reports completion,
+    /// not the result), so the completion-versus-result invariant has one
+    /// owner and the call sites keep only their own log lines.
+    /// </summary>
+    private static BoundedWaitVerdict RunBounded(Func<bool> work, TimeSpan budget)
+    {
+        try
+        {
+            var task = Task.Run(work);
+            bool settled = task.Wait(budget);
+            bool confirmed = false;
+            if (settled)
+            {
+                confirmed = task.Result;
+            }
+            return new BoundedWaitVerdict(settled, confirmed, null);
+        }
+        catch (Exception ex)
+        {
+            return new BoundedWaitVerdict(false, false, ex);
+        }
+    }
 
     /// <summary>
     /// The non-disposing standby: the dispose path's bounded-wait,
@@ -477,38 +514,27 @@ public sealed class DisplayDeviceEngine : IDisposable
             return false;
         }
 
-        // The dispose path's sequence, verbatim: off-thread with the bounded
-        // StandbyCloseBudget wait (a hung device holds the control transfer
-        // out to its pipe timeout), and the verdict read from the task's
-        // Result only once Wait confirms completion (the 2026-08-21 rule:
-        // Wait(timeout) reports completion, not the result).
-        bool confirmed = false;
-        bool settled = false;
-        bool threw = false;
-        try
+        // The engine's one bounded-wait sequence (RunBounded): off-thread
+        // under the StandbyCloseBudget (a hung device holds the control
+        // transfer out to its pipe timeout), the verdict read from the
+        // task's Result only once Wait confirms completion — the 2026-08-21
+        // rule owned by the routine, so the call site cannot re-derive it.
+        BoundedWaitVerdict verdict = RunBounded(() => transport.GoToStandby(), StandbyCloseBudget);
+        if (verdict.Error is not null)
         {
-            var standbyTask = Task.Run(() => transport.GoToStandby());
-            settled = standbyTask.Wait(StandbyCloseBudget);
-            if (settled)
-            {
-                confirmed = standbyTask.Result;
-            }
-        }
-        catch (Exception ex)
-        {
-            threw = true;
-            _standbyLog.Write($"Standby failed: {ex.Message}");
+            _standbyLog.Write($"Standby failed: {verdict.Error.Message}");
+            return false;
         }
         // The non-confirmed verdict is observable, the dispose path's rule:
         // a display left lit on the Welcome screen is a fact the log must
         // carry (a silent standby attempt would hide it).
-        if (!confirmed && !threw)
+        if (!verdict.Confirmed)
         {
-            _standbyLog.Write(settled
+            _standbyLog.Write(verdict.Settled
                 ? "Standby NOT confirmed: the standby control writes did not succeed — the display may stay lit"
                 : "Standby NOT confirmed: the bounded wait expired — a hung standby was abandoned, and the display may stay lit");
         }
-        return confirmed;
+        return verdict.Confirmed;
     }
 
     /// <summary>
@@ -531,45 +557,30 @@ public sealed class DisplayDeviceEngine : IDisposable
             transport = _transport;
         }
 
-        // Off-thread with a bounded wait: a hung device can hold a control
-        // transfer out to its pipe timeout (worst case the transport's
-        // CloseBound), and standby is exactly such a control transfer.
-        // StandbyCloseBudget is the abandon point, derived strictly shorter
-        // than CloseBound, so close can never stall on a hung pipe — a
-        // leaked handle at exit beats a frozen window. (The old rationale
-        // — waiting out an in-flight frame write behind the transport's
-        // coarse lock — retired with that lock: the hot paths no longer
-        // serialize, and the transport's teardown drains in-flight
-        // transfers before freeing the backend.)
-        bool standbyConfirmed = false;
-        bool standbySettled = false;
-        bool standbyThrew = false;
-        try
-        {
-            var standbyTask = Task.Run(() => transport?.GoToStandby() ?? false);
-            // Wait(timeout) reports only that the task finished inside the
-            // budget; the device's verdict rides the task's RESULT, readable
-            // only once completion is known — on the abandon path the hung
-            // standby is left to run out (a leaked handle at exit beats a
-            // frozen window).
-            standbySettled = standbyTask.Wait(StandbyCloseBudget);
-            if (standbySettled)
-            {
-                standbyConfirmed = standbyTask.Result;
-            }
-        }
-        catch (Exception ex)
-        {
-            standbyThrew = true;
-            _standbyLog.Write($"Standby failed during dispose: {ex.Message}");
-        }
+        // The engine's one bounded-wait sequence (RunBounded): a hung device
+        // can hold a control transfer out to its pipe timeout (worst case the
+        // transport's CloseBound), and standby is exactly such a control
+        // transfer. StandbyCloseBudget is the abandon point, derived strictly
+        // shorter than CloseBound, so close can never stall on a hung pipe —
+        // a leaked handle at exit beats a frozen window; on the abandon path
+        // the hung standby is left to run out. (The old rationale — waiting
+        // out an in-flight frame write behind the transport's coarse lock —
+        // retired with that lock: the hot paths no longer serialize, and the
+        // transport's teardown drains in-flight transfers before freeing the
+        // backend.)
+        BoundedWaitVerdict standbyVerdict = RunBounded(() => transport?.GoToStandby() ?? false, StandbyCloseBudget);
         // The standby verdict is observable: a standby that did not confirm
         // (no live connection, the control writes failed, or the bounded
         // wait expired) must not go silent — the display may stay lit on
-        // the Welcome screen, and that is a fact the log must carry.
-        if (transport is not null && !standbyConfirmed && !standbyThrew)
+        // the Welcome screen, and that is a fact the log must carry. A
+        // throwing standby is the failure line instead.
+        if (standbyVerdict.Error is not null)
         {
-            _standbyLog.Write(standbySettled
+            _standbyLog.Write($"Standby failed during dispose: {standbyVerdict.Error.Message}");
+        }
+        else if (transport is not null && !standbyVerdict.Confirmed)
+        {
+            _standbyLog.Write(standbyVerdict.Settled
                 ? "Standby NOT confirmed during dispose: the standby control writes did not succeed — the display may stay lit"
                 : "Standby NOT confirmed during dispose: the bounded close wait expired — a hung standby was abandoned at exit, and the display may stay lit");
         }

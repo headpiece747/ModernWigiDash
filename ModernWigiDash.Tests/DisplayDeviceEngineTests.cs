@@ -285,6 +285,26 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
+    public void Dispose_WhenStandbyThrows_LogsTheFailureVerdict()
+    {
+        // A standby that throws (a device that errors mid-ritual) lands the
+        // failure line through the engine's one bounded-wait routine — the
+        // raw exception never escapes Dispose.
+        var fake = new FakeTransport { GoToStandbyFailure = "control write refused mid-ritual" };
+        var engine = new DisplayDeviceEngine(fake);
+
+        engine.Dispose();
+        FileLog.Flush();
+
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("[STANDBY] Standby failed during dispose"),
+            "a throwing standby must leave its tagged failure line in the log");
+        Assert.IsTrue(content.Contains("control write refused mid-ritual"),
+            "the failure line must carry the device's error");
+        Assert.IsTrue(fake.Disposed, "a throwing standby must not stop the teardown from disposing the transport");
+    }
+
+    [TestMethod]
     public void Dispose_WhenNoDevice_LogsNoStandbyVerdict()
     {
         // Production ctor, never started: no device, no transport — nothing to
@@ -355,6 +375,27 @@ public class DisplayDeviceEngineTests
         string content = ReadLog(_logPath);
         Assert.IsTrue(content.Contains("bounded wait expired"),
             "the verdict must name the abandon path (the budget expired, not a failed write)");
+    }
+
+    [TestMethod]
+    public void TryGoToStandby_WhenStandbyThrows_LogsTheFailureVerdictAndReturnsFalse()
+    {
+        // A standby that throws lands the failure line through the engine's
+        // one bounded-wait routine (the same sequence the dispose path runs)
+        // and refuses the standby — the raw exception never escapes.
+        var fake = new FakeTransport { GoToStandbyFailure = "control write refused mid-ritual" };
+        using var engine = new DisplayDeviceEngine(fake);
+
+        bool confirmed = engine.TryGoToStandby();
+        FileLog.Flush();
+
+        Assert.IsFalse(confirmed, "a throwing standby is a refusal, not a confirmation");
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("[STANDBY] Standby failed"),
+            "a throwing standby must leave its tagged failure line in the log");
+        Assert.IsTrue(content.Contains("control write refused mid-ritual"),
+            "the failure line must carry the device's error");
+        Assert.IsFalse(fake.Disposed, "the session-end standby must not dispose the transport");
     }
 
     [TestMethod]
