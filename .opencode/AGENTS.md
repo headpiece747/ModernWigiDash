@@ -321,6 +321,24 @@ missing a configured MCP's tools needs an opencode restart, not a
 config edit: the config entry, the warm _npx cache
 (36167fce64e0f40c), and the server command were all verified healthy by
 the probe, and no node process survives (zero node.exe/npx.exe).
+Verified 2026-08-30 (close-behavior fix session; each hit live): a
+fresh Windows PowerShell 5.1 process initializes `$LASTEXITCODE` to
+`$null`, so `if ($LASTEXITCODE -ne 0)` after a command that never set
+it reads as a failure (`$null -ne 0` is true): `wmd-verify.ps1`'s
+`clean` re-invoked `stop` and checked the code, but `stop`'s success
+paths ended with a bare `return`, so every successful stop misread as
+a failure and `clean` skipped `restore-profile`. The success paths now
+end in an explicit `exit 0` (`Fail` already exited 1). And the .NET 10
+`dotnet format` whitespace engine normalizes doc-comment indentation
+even though it leaves code indentation alone (the 2026-08-26
+collection-expression case stands): a class doc comment before
+`[TestClass]` under a file-scoped namespace is canonical at column 0
+(the shape every other test file in the repo already has), and a
+latent 4-space-indented doc block in `WindowCloseInterceptTests.cs`
+surfaced the moment the file was edited, the format stage demanding
+the column-0 rewrite. When a format-stage whitespace complaint points
+at text you did not write, run `dotnet format` (not
+`--verify-no-changes`) once and keep the engine's canonical form.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.

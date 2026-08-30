@@ -1059,7 +1059,7 @@ switch ($Command) {
         $s = Read-State
         if (-not $s -or -not $s.pid) { Write-Output "no launched pid recorded - nothing to stop"; return }
         $proc = Get-Process -Id $s.pid -ErrorAction SilentlyContinue
-        if (-not $proc) { Write-Output ("pid " + [int]$s.pid + " already gone"); Remove-Item (Join-Path $env:TEMP "opencode\wmd-verify.state.json") -Force; return }
+        if (-not $proc) { Write-Output ("pid " + [int]$s.pid + " already gone"); Remove-Item (Join-Path $env:TEMP "opencode\wmd-verify.state.json") -Force; exit 0 }
         # Clean close first: WM_CLOSE runs the app's own close path (profile
         # persisted, tray removed, display to standby), which releases the
         # display's bulk pipe. A force-kill wedges that pipe: control writes
@@ -1073,7 +1073,7 @@ switch ($Command) {
             while ((Get-Date) -lt $deadline -and (Get-Process -Id $s.pid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
             if (-not (Get-Process -Id $s.pid -ErrorAction SilentlyContinue)) {
                 Write-Output ("stopped pid " + [int]$s.pid + " via clean close (the app's own close path: profile persisted, display to standby)")
-                return
+                exit 0
             }
             # Alive after WM_CLOSE: never force-kill from here. Either a
             # hideToTray profile hid the window (the close intercept cancels
@@ -1099,6 +1099,7 @@ switch ($Command) {
         while ((Get-Date) -lt $deadline -and (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 250 }
         if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) { Fail ("pid " + [int]$proc.Id + " survived Stop-Process 10s; not escalating (inspect manually)") }
         Write-Output ("stopped pid " + [int]$proc.Id + " via FORCE-KILL (last resort) - the display pipe is wedged: the next launch's first connect fails its init write and reconnects through the LibUsb fallback after up to 30 s")
+        exit 0
     }
     'clean' {
         & $PSCommandPath stop
