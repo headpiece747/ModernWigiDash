@@ -366,6 +366,24 @@ would have tripped it). The strip now blanks a run of three or more
 opening quotes to its closing quote run (the possibly longer full
 run, per the C# spec), pinned by the `StripCode_RawStringLiteral_*`
 tests.
+Verified 2026-08-30 (no-data view session; each hit live): a
+non-ASCII fixture byte silently corrupted between sessions (a stray
+`A` (0x41) inserted before each `°` in two `WeatherWidgetRendererTests`
+literals): the transport's display mangles `°` in BOTH directions
+(file reads and `git show` both print `A°`), so the corruption is
+invisible in every tool output and only a committed diff against a
+clean parent exposes it — verify non-ASCII fixture lines at the byte
+level (a `.ps1` that decodes the file as UTF-8 and prints `U+XXXX`
+codepoints) before committing, and `git show <sha> -- <file>` for
+what a commit actually changed. The UTF-8 degree sign is `C2 B0`
+(`C3 B0` is U+00F0 `ð` — a byte scan for the wrong sequence reads
+zero and masks the corruption; hit live: the first scan reported a
+clean file). `ocr_review` range mode (`from`/`to` over a multi-commit
+slice) is a working third review layer: 14 files in 12 min on the
+local model, and its line-level findings on this slice were all
+test-coverage gaps (a per-mode no-data gate pin, an empty-list
+boundary) — the rule-level issues were the code-reviewer agent's, so
+both layers earn their place.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
