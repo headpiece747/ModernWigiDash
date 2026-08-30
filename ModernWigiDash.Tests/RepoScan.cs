@@ -152,7 +152,12 @@ internal static class RepoScan
 
                 if (run >= 3)
                 {
+                    // The closing run may be longer than the opening one (the
+                    // spec requires at least as long); consume the full run so
+                    // the surplus does not re-enter the stream and mispair the
+                    // strings after the literal.
                     var closeAt = -1;
+                    var closeRun = 0;
                     for (var k = i + run; k + run <= len; k++)
                     {
                         var candidate = 0;
@@ -162,11 +167,12 @@ internal static class RepoScan
                         if (candidate >= run)
                         {
                             closeAt = k;
+                            closeRun = candidate;
                             break;
                         }
                     }
 
-                    var end = closeAt >= 0 ? closeAt + run : len;
+                    var end = closeAt >= 0 ? closeAt + closeRun : len;
                     sb.Append(Blank(source, i, end));
                     i = end;
                     continue;

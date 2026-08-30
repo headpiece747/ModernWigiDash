@@ -456,6 +456,22 @@ public sealed class DebtGuardTests
             "the string after the raw string must be stripped like any other string");
     }
 
+    [TestMethod]
+    public void StripCode_RawStringLiteral_LongerClosingRun_ConsumesTheFullRun()
+    {
+        // The C# spec allows the closing run to be LONGER than the opening
+        // run; the surplus must be consumed with the literal, not left in
+        // the stream to re-pair as a phantom string (the same corruption
+        // class the raw-string handling exists to kill).
+        var source = "var a = \"\"\"\nbody\n\"\"\"\";\nvar b = \"x\";\n";
+        var code = RepoScan.StripCode(source);
+
+        Assert.IsTrue(code.Contains("var b = "),
+            "the code after the literal must survive (the surplus closing quote must not open a phantom string)");
+        Assert.IsFalse(code.Contains("x"),
+            "the string after the literal must be stripped like any other string");
+    }
+
     // --- shared helpers ---
 
     private sealed class Candidate
@@ -629,4 +645,3 @@ public sealed class DebtGuardTests
             .ToList();
     }
 }
-
