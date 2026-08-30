@@ -13,6 +13,9 @@ public class TwitchSessionTests
         public TwitchTokenValidation? ValidationResult;
         public bool ValidationUnauthorized;
         public bool RefreshRejected;
+        // Rejects EVERY access token (including a just-rotated one): the
+        // validate-side 400/401 the refresh-verdict routine's catch covers.
+        public bool ValidateRejected;
         // When set, ValidateAsync parks on this task — the "hung network" the
         // validation-gate tests drive (the tick's network call holds no gate).
         public TaskCompletionSource? ValidatePark;
@@ -37,6 +40,7 @@ public class TwitchSessionTests
             if (ValidatePark is { } park) await park.Task.ConfigureAwait(false);
             // Only the STALE token is unauthorized — the refreshed token validates.
             if (ValidationUnauthorized && accessToken == "access-token") throw new TwitchApiException(401, "unauthorized");
+            if (ValidateRejected) throw new TwitchApiException(401, "validate rejected");
             return ValidationResult!;
         }
 
@@ -164,6 +168,27 @@ public class TwitchSessionTests
         Assert.IsFalse(ok);
         Assert.AreEqual(1, context.Errors.Count(e => e.Contains("Twitch token refresh rejected (HTTP 400)")),
             "the rejection's one log line must land exactly once, through the context seam");
+    }
+
+    [TestMethod]
+    public async Task Restore_ValidateRejected_ClearsStateAndStore()
+    {
+        // The rejection rule covers both legs of the verdict: a rotated access
+        // token that fails validation is a dead credential set (the refresh
+        // token is already spent), so the user path clears exactly as on a
+        // refresh-side rejection.
+        var (session, client, store, _, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token());
+        client.ValidationUnauthorized = true;
+        client.RefreshedToken = Token(accessToken: "refreshed-access");
+        client.ValidateRejected = true;
+
+        bool ok = await session.RestoreAsync(TestClientId, context, CancellationToken.None);
+
+        Assert.IsFalse(ok);
+        Assert.IsFalse(session.IsAuthenticated);
+        Assert.IsNull(store.Load(), "a validate-side rejection must delete the stored token");
     }
 
     [TestMethod]
@@ -332,6 +357,26 @@ public class TwitchSessionTests
         Assert.IsFalse(kept);
         Assert.AreEqual(1, context.Errors.Count(e => e.Contains("Twitch token refresh rejected (HTTP 400)")),
             "the rejection's one log line must land exactly once, through the context seam");
+    }
+
+    [TestMethod]
+    public async Task ValidateTick_ValidateRejected_ClearsStateAndEndsTheMonitor()
+    {
+        // The tick routes through the same verdict routine: a validate-side
+        // 400/401 spends the snapshot's refresh token, so the still-current
+        // clear fires exactly as on a refresh-side rejection.
+        var (session, client, store, _, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId()));
+        client.ValidationUnauthorized = true;
+        client.RefreshedToken = Token(accessToken: "refreshed-access");
+        client.ValidateRejected = true;
+
+        bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
+
+        Assert.IsFalse(kept, "a validate-side rejection ends the monitor");
+        Assert.IsFalse(session.IsAuthenticated);
+        Assert.IsNull(store.Load(), "a validate-side rejection must delete the stored token");
     }
 
     [TestMethod]

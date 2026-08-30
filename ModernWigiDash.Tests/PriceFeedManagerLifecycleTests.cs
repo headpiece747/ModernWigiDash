@@ -89,6 +89,95 @@ public class PriceFeedManagerLifecycleTests
     }
 
     [TestMethod]
+    public void Subscribe_AfterDispose_NeverStartsALoop()
+    {
+        // The in-gate dispose re-check: a claim that beats a dispose to the
+        // lifecycle gate is released, so a disposed manager never starts a
+        // loop (the 2026-08-26 race made the first-claim startup and the
+        // last-release teardown one serialized unit; this pins the
+        // disposed leg of that unit).
+        var stub = new StubHttpHandler(_ => StubHttpHandler.NotFound());
+        var feed = new PriceFeedManager(
+            new HttpClient(stub),
+            feedFactory: () => new FakeFeed(),
+            reconnectDelay: TimeSpan.FromSeconds(5));
+        feed.Dispose();
+
+        feed.Subscribe("BTC", AssetKind.Crypto);
+
+        Assert.AreEqual(0, feed._subscribedCrypto.Count,
+            "the claim must be released on a disposed manager (a disposed manager never starts a loop)");
+    }
+
+    [TestMethod]
+    public async Task Resubscribe_AfterLastReleaseShutdown_RearmsALiveToken()
+    {
+        // EnsureActive's re-arm: a re-subscribe after the last-release
+        // shutdown must run the fresh REST cycle on a live token, not the
+        // shutdown's cancelled one (a cancelled token ends the cycle before
+        // its first hop, so a REST delegate hit after the re-subscribe is
+        // the live-token proof). The delay seam parks each cycle on its own
+        // token (the RestPollLoopTests FakeClockDelay shape, minus the clock):
+        // the test releases the park to drive one cycle at a time, the park's
+        // token registration is what a shutdown cancellation must reach, and
+        // a completed/cancelled park is replaced by the next delay call, so
+        // the re-armed cycle parks on a fresh token. The delayCalls count
+        // increments after the park decision, so a waited count proves the
+        // cycle is parked before the test releases it.
+        int restCalls = 0;
+        int delayCalls = 0;
+        var stub = new StubHttpHandler(_ =>
+        {
+            Interlocked.Increment(ref restCalls);
+            return StubHttpHandler.NotFound();
+        });
+        var fake = new FakeFeed();
+        TaskCompletionSource<bool> park = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Func<TimeSpan, CancellationToken, Task> delay = (_, ct) =>
+        {
+            if (ct.IsCancellationRequested) return Task.FromCanceled(ct);
+            var p = park;
+            if (p.Task.IsCompleted)
+                park = p = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            ct.Register(() => p.TrySetCanceled(ct));
+            Interlocked.Increment(ref delayCalls);
+            return p.Task;
+        };
+        void ReleasePark()
+        {
+            var p = park;
+            park = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            p.TrySetResult(true);
+        }
+
+        using var feed = new PriceFeedManager(
+            new HttpClient(stub),
+            feedFactory: () => fake,
+            reconnectDelay: TimeSpan.FromSeconds(5),
+            delay: delay);
+
+        feed.Subscribe("BTC", AssetKind.Crypto);
+        Assert.AreEqual(1, Volatile.Read(ref delayCalls), "the first cycle must park delay-first (no poll before the window)");
+        await TestWait.WaitUntilAsync(() => fake.ConnectCount >= 1, TimeSpan.FromSeconds(5));
+
+        ReleasePark();
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref restCalls) > 0, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref delayCalls) >= 2, TimeSpan.FromSeconds(5));
+
+        feed.Unsubscribe("BTC", AssetKind.Crypto); // last release: the shutdown cancels the token
+        int restBefore = Volatile.Read(ref restCalls);
+
+        feed.Subscribe("BTC", AssetKind.Crypto);
+        await TestWait.WaitUntilAsync(() => fake.ConnectCount >= 2, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref delayCalls) >= 3, TimeSpan.FromSeconds(5));
+        ReleasePark();
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref restCalls) > restBefore, TimeSpan.FromSeconds(5));
+
+        Assert.IsTrue(Volatile.Read(ref restCalls) > restBefore,
+            "the fresh REST cycle must poll on a live token (a shutdown-cancelled token ends it before its first hop)");
+    }
+
+    [TestMethod]
     public void FormattedChange_IsInvariantCulture()
     {
         var original = CultureInfo.CurrentCulture;

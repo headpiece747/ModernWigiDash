@@ -124,6 +124,12 @@ public sealed class DebtGuardTests
         var markers = new Regex(@"static\s+extern|MemoryMappedFile|NativeLibrary|UsbContext|new\s+Mutex\b|Mutex\.Open");
         var evidence = new Regex(
             @":\s*IDisposable|void\s+Dispose\s*\(|using\s*\(|using\s+[\w.]+\s+[A-Za-z_]\w*\s*=|CloseHandle\s*\(|WinUsb_Free\s*\(|FreeLibrary\s*\(");
+        // A release API DECLARED in an extern bag is not disposal evidence
+        // (the bag spells the entry point; the adapter that acquires the
+        // handle calls the release): strip the declarations before the
+        // evidence check so only a call - or the IDisposable / dispose /
+        // using shapes - counts.
+        var externDeclarations = new Regex(@"static\s+extern[^;{]*\)\s*;");
         var allowed = new Dictionary<string, string>
         {
             ["ModernWigiDash.App/WindowChrome.cs"] =
@@ -134,6 +140,10 @@ public sealed class DebtGuardTests
                 "the SendInput P/Invoke fires input events; the call acquires and owns no handle",
             ["ModernWigiDash.App/Hotkey/HotkeyApi.cs"] =
                 "the RegisterHotKey/UnregisterHotKey P/Invoke registers and releases message-loop hotkeys; the calls acquire and own no handle",
+            ["ModernWigiDash.Hardware/Transport/WinUsbNative.cs"] =
+                "the WinUSB extern bag: the file declares the release APIs but never calls them - WinUsbBulkDevice acquires the interface handle and releases it through the bag in its Dispose",
+            ["ModernWigiDash.Hardware/Transport/SetupApiNative.cs"] =
+                "the SetupAPI extern bag: the file declares CloseHandle but never calls it - WinUsbBulkDevice acquires the device handle and releases it through the bag in its Dispose",
         };
 
         var root = RepoScan.GetRepoRoot();
@@ -150,7 +160,7 @@ public sealed class DebtGuardTests
 
                 var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
                 markerFiles.Add(rel);
-                if (evidence.IsMatch(code))
+                if (evidence.IsMatch(externDeclarations.Replace(code, "")))
                     continue;
                 if (allowed.ContainsKey(rel))
                     continue;
