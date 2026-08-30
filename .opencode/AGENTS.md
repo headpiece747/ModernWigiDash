@@ -238,7 +238,7 @@ unbounded (a healthy machine finishes in well under a second, but a loaded
 runner can starve the pool arbitrarily; the failures are non-monotonic, a
 re-run can pass inside the ceiling the prior run exhausted). The fix is not
 a bigger ceiling but a bounded CI retry: the CI workflow runs this test
-alone in a fresh test host, up to 3 attempts, while the other 2005 tests run
+alone in a fresh test host, up to 3 attempts, while the other 2024 tests run
 once unmasked; a real regression fails every attempt, a runner-load flake
 lands on a less-loaded moment and passes. In a function whose return is captured, use
 `Write-Host`, never `Write-Output` (the emitted line is space-joined onto the
