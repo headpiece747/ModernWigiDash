@@ -391,19 +391,19 @@ public sealed class DebtGuardTests
         // `new MainWindow(` explicitly (the deleted short test ctors turn a
         // short target-typed call into a compile error).
         var root = RepoScan.GetRepoRoot();
-        var violations = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, RepoScan.TestsProject), "*.cs", SearchOption.AllDirectories))
-        {
-            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
-            if (rel.Contains("/obj/") || rel.Contains("/bin/"))
-                continue; // generated code is not house text
+        var files = new SortedSet<string>();
+        foreach (var hit in RepoScan.ScanTests(new Regex(@"new\s+MainWindow\s*\(")))
+            files.Add(hit.Split(':', 2)[0].Replace('\\', '/'));
 
-            var code = RepoScan.StripCode(File.ReadAllText(file));
+        var violations = new List<string>();
+        foreach (var file in files)
+        {
+            var code = RepoScan.StripCode(File.ReadAllText(Path.Combine(root, file.Replace('/', Path.DirectorySeparatorChar))));
             foreach (var ctor in RepoScan.FindMainWindowCtors(code))
             {
                 if (ctor.Args.Contains("InertEngine") || ctor.Args.Contains("DisplayDeviceEngine("))
                     continue;
-                violations.Add($"{rel}:{RepoScan.LineAt(code, ctor.Index)}: new MainWindow without an inert USB engine");
+                violations.Add($"{file}:{RepoScan.LineAt(code, ctor.Index)}: new MainWindow without an inert USB engine");
             }
         }
 
@@ -435,6 +435,25 @@ public sealed class DebtGuardTests
             "the InertEngine binding of an injected construction must be captured");
         Assert.IsTrue(refs[2].Args.Contains("DisplayDeviceEngine("),
             "the explicit DisplayDeviceEngine binding of an injected construction must be captured");
+    }
+
+    [TestMethod]
+    public void StripCode_RawStringLiteral_BlanksTheBodyAndKeepsTheStringsAfter()
+    {
+        // A raw string literal in scanned source must be blanked wholesale:
+        // its body is literal content, not code the pins should see, and the
+        // strings after it must keep their pairing (a mispaired quote run
+        // would corrupt the rest of the file's strip - the shape the
+        // injected-violation snippet above relies on staying invisible).
+        var source = "var a = \"\"\"\n    new MainWindow(pm, path, power, tray);\n    \"\"\";\nvar b = \"x\";\n";
+        var code = RepoScan.StripCode(source);
+
+        Assert.AreEqual(0, RepoScan.FindMainWindowCtors(code).Count,
+            "the raw string body must be blanked (it is literal content, not code)");
+        Assert.IsTrue(code.Contains("var b = "),
+            "code after the raw string literal must survive the strip (the quote pairing stays sound)");
+        Assert.IsFalse(code.Contains("x"),
+            "the string after the raw string must be stripped like any other string");
     }
 
     // --- shared helpers ---
@@ -610,3 +629,4 @@ public sealed class DebtGuardTests
             .ToList();
     }
 }
+

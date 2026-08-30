@@ -75,6 +75,10 @@ internal static class RepoScan
             var dir = Path.Combine(root, project);
             foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
             {
+                var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+                if (rel.Contains("/obj/") || rel.Contains("/bin/"))
+                    continue; // generated code is not house text
+
                 var code = raw ? File.ReadAllText(file) : StripCode(File.ReadAllText(file));
                 foreach (Match match in pattern.Matches(code))
                 {
@@ -82,7 +86,7 @@ internal static class RepoScan
                     for (var k = 0; k < match.Index; k++)
                         if (code[k] == '\n')
                             lineNo++;
-                    violations.Add($"{Path.GetRelativePath(root, file)}:{lineNo}: {match.Value}");
+                    violations.Add($"{rel}:{lineNo}: {match.Value}");
                 }
             }
         }
@@ -98,8 +102,12 @@ internal static class RepoScan
     /// dead-helper pin scans occurrences this way because interpolated-string
     /// holes are code (a call inside $"...{Call()}..." is a real use), while a
     /// name inside a plain string literal only ever makes the pin conservative.
-    /// Every variant blanks in place, so indices and line numbers agree with
-    /// the original text and with each other.
+    /// A raw string literal (three or more opening quotes) is blanked wholesale
+    /// to its closing quote run: its body is literal content, not code the pins
+    /// should see, and the quote run would otherwise corrupt the pairing of
+    /// every string after it in the file. Every variant blanks in place, so
+    /// indices and line numbers agree with the original text and with each
+    /// other.
     /// </summary>
     internal static string StripCode(string source, bool stripStrings = true)
     {
@@ -133,6 +141,37 @@ internal static class RepoScan
 
             if (stripStrings && c == '"')
             {
+                // A run of three or more quotes opens a raw string literal
+                // (a normal string can open with at most two: the empty
+                // string). Blank to the closing run (at least as long) so the
+                // body stays invisible and the strings after the literal keep
+                // their pairing.
+                var run = 0;
+                while (i + run < len && source[i + run] == '"')
+                    run++;
+
+                if (run >= 3)
+                {
+                    var closeAt = -1;
+                    for (var k = i + run; k + run <= len; k++)
+                    {
+                        var candidate = 0;
+                        while (k + candidate < len && source[k + candidate] == '"')
+                            candidate++;
+
+                        if (candidate >= run)
+                        {
+                            closeAt = k;
+                            break;
+                        }
+                    }
+
+                    var end = closeAt >= 0 ? closeAt + run : len;
+                    sb.Append(Blank(source, i, end));
+                    i = end;
+                    continue;
+                }
+
                 var start = i;
                 var j = i - 1;
                 var verbatim = false;
