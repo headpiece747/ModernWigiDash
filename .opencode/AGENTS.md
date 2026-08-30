@@ -339,6 +339,33 @@ surfaced the moment the file was edited, the format stage demanding
 the column-0 rewrite. When a format-stage whitespace complaint points
 at text you did not write, run `dotnet format` (not
 `--verify-no-changes`) once and keep the engine's canonical form.
+Verified 2026-08-30 (USB engine seam session; each hit live): the
+stale temp test DLL: `dotnet build` without
+`-p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\`
+writes to `bin\`, so a later `dotnet test --no-build` with that
+`-p` silently runs the stale temp DLL (a test deleted in the same
+session still ran; the one "failure" was a probe test already
+removed). Build the test project with the same `-p` before any
+`--no-build` run. `ocr_review`: workspace mode selects only tracked
+diffs (an all-untracked changeset reports "no items selected"), has
+no workspace resume, and its local LLM (ninfer/qwen3.8-27b at
+127.0.0.1:8080) is slow (16 min for a 15-file diff, 5 min for a
+2-file diff); the commit-based form (`commit: <sha>`) is the reliable
+route and needs a large `timeoutMinutes` (the default timed out
+mid-run on the big diff). `git hash-object` on a tracked file
+applies the clean filter (CRLF to LF per `.gitattributes`), so raw
+working-tree bytes never match the index blob on a CRLF file
+(compare `git ls-files -s` instead). And `RepoScan.StripCode` (the
+shared strip behind every raw-scan pin) had no raw-string-literal
+handling: a triple-quote open was consumed two quotes at a time and
+the next quote opened a phantom string that re-paired every quote
+after it, silently corrupting the rest of a scanned file's strip
+(the gate only stayed green because the misparse happened to blank
+the body; a pin whose own injected-violation snippet is a raw string
+would have tripped it). The strip now blanks a run of three or more
+opening quotes to its closing quote run (the possibly longer full
+run, per the C# spec), pinned by the `StripCode_RawStringLiteral_*`
+tests.
 
 ### Meta Skills (from coleam00/skills, MIT)
 - **rules-check-drift**: checks `.opencode/AGENTS.md` / `.opencode/rules/` / `CONTEXT.md` against recent changes; reports now-false rules and drifted map entries, minimal edit only. Run before every merge; use the last release tag (e.g. `v0.6.8..HEAD`) as the range on a clean tree.
