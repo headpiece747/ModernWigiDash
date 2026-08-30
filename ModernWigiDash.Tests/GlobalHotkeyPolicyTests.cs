@@ -76,4 +76,73 @@ public class GlobalHotkeyPolicyTests
         Assert.AreEqual(0, desired.Count);
         Assert.AreEqual(0, dropped.Count);
     }
+
+    /// <summary>A live widget that offers a global hotkey: both
+    /// <see cref="IModernWidget"/> (the shape of
+    /// <c>PlacedWidgetInstance.ActiveInstance</c>) and the provider
+    /// capability.</summary>
+    private sealed class FakeHotkeyWidget : IModernWidget, IGlobalHotkeyProvider
+    {
+        private readonly int _modFlags;
+        private readonly ushort _virtualKey;
+        private readonly string _chord;
+        private readonly bool _offered;
+
+        public FakeHotkeyWidget(int modFlags, ushort virtualKey, string chord, bool offered)
+        {
+            _modFlags = modFlags;
+            _virtualKey = virtualKey;
+            _chord = chord;
+            _offered = offered;
+        }
+
+        public string InstanceId { get; set; } = "fake-hotkey";
+        public SKSize DefaultSize => new(10, 10);
+        public ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default) => default;
+        public void Render(SKCanvas canvas, SKRect bounds) { }
+        public void OnTouch(SKPoint localPoint, TouchEventType eventType) { }
+        public void OnPropertyChanged(string propertyName, object? newValue) { }
+        public ValueTask DisposeAsync() => default;
+        public bool TryGetGlobalHotkey(out int modFlags, out ushort virtualKey, out string chord)
+        {
+            modFlags = _modFlags;
+            virtualKey = _virtualKey;
+            chord = _chord;
+            return _offered;
+        }
+        public void FireGlobalHotkey() { }
+    }
+
+    [TestMethod]
+    public void CollectCandidates_ProfileOrder_CollectsOnlyTheOfferingProviders()
+    {
+        var offered = new FakeHotkeyWidget(0x2, (ushort)'A', "Ctrl+A", offered: true);
+        var declined = new FakeHotkeyWidget(0x4, (ushort)'B', "Shift+B", offered: false);
+        var pageTwo = new FakeHotkeyWidget(0x1, (ushort)'C', "Alt+C", offered: true);
+
+        var profile = new ProfileLayout();
+        profile.Pages[0].Widgets.Add(new PlacedWidgetInstance { ActiveInstance = offered });
+        profile.Pages[0].Widgets.Add(new PlacedWidgetInstance { ActiveInstance = declined });
+        profile.Pages[0].Widgets.Add(new PlacedWidgetInstance());
+        profile.Pages[0].Widgets.Add(new PlacedWidgetInstance { ActiveInstance = new StopwatchTimerWidget() });
+        profile.Pages.Add(new PageLayout());
+        profile.Pages[1].Widgets.Add(new PlacedWidgetInstance { ActiveInstance = pageTwo });
+
+        var candidates = GlobalHotkeyPolicy.CollectCandidates(profile);
+
+        Assert.AreEqual(2, candidates.Count,
+            "the declined provider, the instance-less placement, and the non-provider widget contribute nothing");
+        Assert.AreSame(offered, candidates[0].Owner, "page one's offering widget is first (profile order)");
+        Assert.AreSame(pageTwo, candidates[1].Owner, "page two's offering widget is second (pages are walked in order)");
+        Assert.AreEqual(0x2, candidates[0].ModFlags);
+        Assert.AreEqual((ushort)'A', candidates[0].VirtualKey);
+        Assert.AreEqual("Ctrl+A", candidates[0].Chord);
+    }
+
+    [TestMethod]
+    public void CollectCandidates_NullProfile_CollectsNothing()
+    {
+        Assert.AreEqual(0, GlobalHotkeyPolicy.CollectCandidates(null).Count,
+            "a pre-profile window collects no candidates (the benign no-op)");
+    }
 }

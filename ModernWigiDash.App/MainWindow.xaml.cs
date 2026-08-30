@@ -164,11 +164,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
     private readonly HotkeyApi _hotkeyApi;
     private GlobalHotkeyManager? _globalHotkeyManager;
     private IntPtr _hotkeyHwnd = IntPtr.Zero;
-    // The duplicate-chord conflicts already logged this session (the
-    // manager's foreign-logged mirror for the profile-order conflicts, which
-    // are dropped before the manager sees them): one line per conflict per
-    // session, not one per refresh.
-    private readonly HashSet<(int Flags, ushort Vk)> _duplicateLogged = new();
 
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
@@ -1017,13 +1012,10 @@ public partial class MainWindow : Window, IModernWigiDashContext
     }
 
     /// <summary>
-    /// The idempotent global-hotkey registration pass (ADR-0019): collects
-    /// the profile's hotkey-capable widgets in profile order through the
-    /// optional <see cref="IGlobalHotkeyProvider"/> capability (no
-    /// widget-type checks), resolves the desired set (a tripped kill switch
-    /// registers nothing; a duplicate (modifiers, key) cell goes to the
-    /// first widget in profile order, the later duplicates log one line
-    /// each), and hands it to the manager for the register/unregister
+    /// The global-hotkey registration trigger (ADR-0019): hands the profile's
+    /// provider widgets (the policy's profile-order walk) and the machine-
+    /// local kill switch to the manager's pass, which resolves the desired
+    /// set, logs the duplicate conflicts, and runs the register/unregister
     /// diff. Runs on the first Show (SourceInitialized), every profile
     /// mutation, a chord edit (the PersistProperty tail), a kill-switch
     /// toggle, and an interpreter-path change.
@@ -1031,37 +1023,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
     internal void RefreshGlobalHotkeys()
     {
         if (_hotkeyHwnd == IntPtr.Zero || _globalHotkeyManager is not { } manager) return;
-
-        var candidates = new List<DesiredGlobalHotkey>();
-        if (_profile is { } profile)
-        {
-            foreach (PageLayout page in profile.Pages)
-            {
-                foreach (PlacedWidgetInstance placed in page.Widgets)
-                {
-                    if (placed.ActiveInstance is not IGlobalHotkeyProvider provider) continue;
-                    if (provider.TryGetGlobalHotkey(out int modFlags, out ushort virtualKey, out string chord))
-                        candidates.Add(new DesiredGlobalHotkey(modFlags, virtualKey, chord, provider));
-                }
-            }
-        }
-
-        bool killSwitchTripped = _appSettings.KillSwitch;
-        var (desired, dropped) = GlobalHotkeyPolicy.ResolveDesired(killSwitchTripped, candidates);
-        if (!killSwitchTripped)
-        {
-            // The kill-switch veto drops every candidate by design (not a
-            // duplicate) - the duplicate log lines apply to the
-            // profile-order conflicts only, one line per conflict per
-            // session.
-            foreach (DesiredGlobalHotkey duplicate in dropped)
-            {
-                if (!_duplicateLogged.Add((duplicate.ModFlags, duplicate.VirtualKey)))
-                    continue;
-                _hotkeyLog.Write(() => $"Global hotkey {duplicate.Chord} is claimed by an earlier widget; the later one stays tap-only");
-            }
-        }
-        manager.Refresh(_hotkeyHwnd, desired);
+        manager.RefreshPass(_hotkeyHwnd, GlobalHotkeyPolicy.CollectCandidates(_profile), _appSettings.KillSwitch);
     }
 
     #endregion

@@ -4,16 +4,19 @@ namespace ModernWigiDash.App.Hotkey;
 
 /// <summary>
 /// The window's global-hotkey registration owner (the <see cref="HotkeyApi"/>
-/// delegate bag over the RegisterHotKey surface): the id allocation, the
-/// register/unregister diff against the OS on every idempotent refresh, and
-/// the WM_HOTKEY routing to the owning widget's fire path. A refresh is a
-/// no-op for the cells it already holds (the ids are stable across refreshes,
-/// so the OS state is not churned); a changed set unregisters the removed
-/// cells and registers the added ones. A cell the OS refuses (owned by
-/// another program) stays untracked - that widget's hotkey is inert, tapping
-/// still works - and logs one line (once per cell per session). Every member
-/// runs on the window's UI thread (the context seam marshals off-thread calls
-/// to the dispatcher), so the dictionaries stay unsynchronized by design.
+/// delegate bag over the RegisterHotKey surface): the pass entry (the
+/// <see cref="RefreshPass"/> resolve → duplicate-log → diff sequence), the
+/// id allocation, the register/unregister diff against the OS on every
+/// idempotent refresh, and the WM_HOTKEY routing to the owning widget's fire
+/// path. A refresh is a no-op for the cells it already holds (the ids are
+/// stable across refreshes, so the OS state is not churned); a changed set
+/// unregisters the removed cells and registers the added ones. A cell the OS
+/// refuses (owned by another program) stays untracked - that widget's
+/// hotkey is inert, tapping still works - and logs one line (once per cell
+/// per session), the same per-session dedup the pass applies to the
+/// profile-order duplicate conflicts. Every member runs on the window's UI
+/// thread (the context seam marshals off-thread calls to the dispatcher),
+/// so the dictionaries stay unsynchronized by design.
 /// </summary>
 internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposable
 {
@@ -28,8 +31,36 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
     private readonly Dictionary<(int Flags, ushort Vk), int> _idByCell = new();
     private readonly Dictionary<int, (ushort Vk, IGlobalHotkeyProvider Owner)> _registered = new();
     private readonly HashSet<(int Flags, ushort Vk)> _foreignLogged = new();
+    // The duplicate-chord conflicts already logged this session (the
+    // foreign-logged mirror for the profile-order conflicts, which the OS
+    // never sees): one line per conflict per session, not one per pass.
+    private readonly HashSet<(int Flags, ushort Vk)> _duplicateLogged = new();
     private IntPtr _handle;
     private int _nextId = FirstId;
+
+    /// <summary>
+    /// The idempotent global-hotkey registration pass (ADR-0019): resolves
+    /// the desired set from the profile-order candidates (the kill-switch
+    /// veto, the first-in-profile-order-wins duplicate rule), logs one line
+    /// per duplicate cell per session (the tripped kill switch's drops are
+    /// not duplicates, so nothing is logged while it is tripped), and runs
+    /// the register/unregister diff. The window's trigger keeps only the
+    /// handle and the candidate/kill-switch reads.
+    /// </summary>
+    public void RefreshPass(IntPtr handle, IReadOnlyList<DesiredGlobalHotkey> candidates, bool killSwitchTripped)
+    {
+        var (desired, dropped) = GlobalHotkeyPolicy.ResolveDesired(killSwitchTripped, candidates);
+        if (!killSwitchTripped)
+        {
+            foreach (DesiredGlobalHotkey duplicate in dropped)
+            {
+                if (!_duplicateLogged.Add((duplicate.ModFlags, duplicate.VirtualKey)))
+                    continue;
+                log.Write(() => $"Global hotkey {duplicate.Chord} is claimed by an earlier widget; the later one stays tap-only");
+            }
+        }
+        Refresh(handle, desired);
+    }
 
     /// <summary>
     /// The idempotent refresh pass: diffs the desired set against the current

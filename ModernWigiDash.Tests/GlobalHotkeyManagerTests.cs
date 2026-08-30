@@ -196,4 +196,39 @@ public class GlobalHotkeyManagerTests
         Assert.IsFalse(manager.Fire(0x574D0001));
         Assert.AreEqual(0, owner.Fires);
     }
+
+    [TestMethod]
+    public void RefreshPass_DuplicateCell_LogsOneLinePerCellPerSession()
+    {
+        var (manager, fake, logLines) = CreateManager();
+        var first = Candidate(new FakeProvider(), 0x2, (ushort)'A', "Ctrl+A");
+        var duplicate = Candidate(new FakeProvider(), 0x2, (ushort)'A', "ctrl+a"); // the same cell, later profile order
+
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
+
+        Assert.AreEqual(1, fake.Registered.Count, "the first widget's cell registers; the duplicate does not");
+        Assert.AreEqual(0x4002, fake.Registered.Single().Mod);
+        CollectionAssert.AreEqual(
+            new[] { "[HOTKEY] Global hotkey ctrl+a is claimed by an earlier widget; the later one stays tap-only" },
+            logLines,
+            "one line per duplicate cell per session, not one per pass");
+    }
+
+    [TestMethod]
+    public void RefreshPass_KillSwitchTripped_UnregistersTheHeldCellsAndLogsNoDuplicates()
+    {
+        var (manager, fake, logLines) = CreateManager();
+        var first = Candidate(new FakeProvider(), 0x2, (ushort)'A', "Ctrl+A");
+        var duplicate = Candidate(new FakeProvider(), 0x2, (ushort)'A', "ctrl+a");
+
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
+        logLines.Clear();
+        manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: true);
+
+        Assert.AreEqual(1, fake.Registered.Count, "the tripped pass registers nothing (the diff runs against the empty desired set)");
+        Assert.AreEqual(1, fake.Unregistered.Count, "the held cell is released while tripped");
+        CollectionAssert.AreEqual(Array.Empty<string>(), logLines,
+            "the kill-switch veto's drops are not duplicates: no duplicate line while tripped");
+    }
 }
