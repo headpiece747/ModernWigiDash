@@ -538,7 +538,7 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     /// </summary>
     private void EnsureIconPaths(NowPlayingGeometry layout)
     {
-        if (_shuffleCurves is not null && SameRect(_iconPathKeyRect, layout.ShuffleButton))
+        if (_shuffleCurves is not null && NowPlayingLayout.SameRect(_iconPathKeyRect, layout.ShuffleButton))
         {
             return;
         }
@@ -546,13 +546,13 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _iconPathKeyRect = layout.ShuffleButton;
         DisposeIconPaths();
 
-        _shuffleCurves = BuildShuffleCurves(layout.ShuffleButton);
-        _shuffleTopArrow = BuildShuffleArrow(layout.ShuffleButton, top: true);
-        _shuffleBottomArrow = BuildShuffleArrow(layout.ShuffleButton, top: false);
-        _prevTriangle = BuildPrevTriangle(layout.PreviousButton);
-        _playTriangle = BuildPlayTriangle(layout.PlayPauseButton);
-        _nextTriangle = BuildNextTriangle(layout.NextButton);
-        _repeatArrow = BuildRepeatArrow(layout.RepeatButton);
+        _shuffleCurves = NowPlayingLayout.BuildShuffleCurves(layout.ShuffleButton);
+        _shuffleTopArrow = NowPlayingLayout.BuildShuffleArrow(layout.ShuffleButton, top: true);
+        _shuffleBottomArrow = NowPlayingLayout.BuildShuffleArrow(layout.ShuffleButton, top: false);
+        _prevTriangle = NowPlayingLayout.BuildPrevTriangle(layout.PreviousButton);
+        _playTriangle = NowPlayingLayout.BuildPlayTriangle(layout.PlayPauseButton);
+        _nextTriangle = NowPlayingLayout.BuildNextTriangle(layout.NextButton);
+        _repeatArrow = NowPlayingLayout.BuildRepeatArrow(layout.RepeatButton);
     }
 
     private void DisposeIconPaths()
@@ -571,113 +571,6 @@ public sealed class NowPlayingWidget : ModernWidgetBase
         _playTriangle = null;
         _nextTriangle = null;
         _repeatArrow = null;
-    }
-
-    private static bool SameRect(SKRect a, SKRect b)
-        => BitConverter.SingleToInt32Bits(a.Left) == BitConverter.SingleToInt32Bits(b.Left)
-        && BitConverter.SingleToInt32Bits(a.Top) == BitConverter.SingleToInt32Bits(b.Top)
-        && BitConverter.SingleToInt32Bits(a.Right) == BitConverter.SingleToInt32Bits(b.Right)
-        && BitConverter.SingleToInt32Bits(a.Bottom) == BitConverter.SingleToInt32Bits(b.Bottom);
-
-    private static SKPath BuildPrevTriangle(SKRect r)
-    {
-        float cx = r.MidX, cy = r.MidY;
-        float h = r.Height * 0.32f;
-        float barW = r.Width * 0.08f;
-        float gap = r.Width * 0.06f;
-
-        using var tri = new SKPathBuilder();
-        tri.MoveTo(cx + r.Width * 0.20f, cy - h);
-        tri.LineTo(cx - r.Width * 0.22f + barW + gap, cy);
-        tri.LineTo(cx + r.Width * 0.20f, cy + h);
-        tri.Close();
-        return tri.Detach();
-    }
-
-    private static SKPath BuildPlayTriangle(SKRect r)
-    {
-        float cx = r.MidX + r.Width * 0.03f, cy = r.MidY;
-        float h = r.Height * 0.32f;
-        float w = r.Width * 0.28f;
-
-        using var path = new SKPathBuilder();
-        path.MoveTo(cx - w * 0.7f, cy - h);
-        path.LineTo(cx + w, cy);
-        path.LineTo(cx - w * 0.7f, cy + h);
-        path.Close();
-        return path.Detach();
-    }
-
-    private static SKPath BuildNextTriangle(SKRect r)
-    {
-        float cx = r.MidX, cy = r.MidY;
-        float h = r.Height * 0.32f;
-        float barW = r.Width * 0.08f;
-        float gap = r.Width * 0.06f;
-
-        using var tri = new SKPathBuilder();
-        tri.MoveTo(cx - r.Width * 0.20f, cy - h);
-        tri.LineTo(cx + r.Width * 0.22f - barW - gap, cy);
-        tri.LineTo(cx - r.Width * 0.20f, cy + h);
-        tri.Close();
-        return tri.Detach();
-    }
-
-    private static SKPath BuildShuffleCurves(SKRect r)
-    {
-        float cx = r.MidX, cy = r.MidY;
-        float w = r.Width * 0.20f;
-        float h = r.Height * 0.20f;
-
-        using var p = new SKPathBuilder();
-        p.MoveTo(cx - w, cy - h);
-        p.CubicTo(cx - w * 0.2f, cy - h, cx + w * 0.2f, cy + h, cx + w, cy + h);
-        p.MoveTo(cx - w, cy + h);
-        p.CubicTo(cx - w * 0.2f, cy + h, cx + w * 0.2f, cy - h, cx + w, cy - h);
-        return p.Detach();
-    }
-
-    private static SKPath BuildShuffleArrow(SKRect r, bool top)
-    {
-        float cx = r.MidX, cy = r.MidY;
-        float w = r.Width * 0.20f;
-        float h = r.Height * 0.20f;
-        float ah = r.Height * 0.12f;
-
-        using var arr = new SKPathBuilder();
-        if (top)
-        {
-            arr.MoveTo(cx + w, cy - h);
-            arr.LineTo(cx + w - ah, cy - h - ah * 0.7f);
-            arr.LineTo(cx + w - ah, cy - h + ah * 0.7f);
-        }
-        else
-        {
-            arr.MoveTo(cx + w, cy + h);
-            arr.LineTo(cx + w - ah, cy + h - ah * 0.7f);
-            arr.LineTo(cx + w - ah, cy + h + ah * 0.7f);
-        }
-        arr.Close();
-        return arr.Detach();
-    }
-
-    private static SKPath BuildRepeatArrow(SKRect r)
-    {
-        float cx = r.MidX, cy = r.MidY;
-        float outer = r.Width * 0.22f;
-        float endDeg = 305f * MathF.PI / 180f;
-        float tipX = cx + outer * MathF.Cos(endDeg);
-        float tipY = cy + outer * MathF.Sin(endDeg);
-        float tx = -MathF.Sin(endDeg);
-        float ty = MathF.Cos(endDeg);
-        float s = r.Width * 0.09f;
-
-        using var tri = new SKPathBuilder();
-        tri.MoveTo(tipX + tx * s, tipY + ty * s);
-        tri.LineTo(tipX - tx * s * 0.35f - ty * s * 0.6f, tipY - ty * s * 0.35f + tx * s * 0.6f);
-        tri.LineTo(tipX - tx * s * 0.35f + ty * s * 0.6f, tipY - ty * s * 0.35f - tx * s * 0.6f);
-        tri.Close();
-        return tri.Detach();
     }
 
     /// <summary>

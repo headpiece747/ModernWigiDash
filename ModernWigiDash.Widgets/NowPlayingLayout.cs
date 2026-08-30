@@ -170,4 +170,118 @@ public static class NowPlayingLayout
             (byte)(from.Blue + (to.Blue - from.Blue) * amount),
             from.Alpha);
     }
+
+    // The control-icon path geometry: each icon's SKPath is a pure function of
+    // its button rect, so the drawing math lives with the layout (the widget
+    // owns only the native-handle lifecycle — when to rebuild and dispose).
+    // The shuffle rect alone keys a rebuild, so SameRect compares bit-exact
+    // (a float drift of one ulp must not force a needless rebuild).
+
+    /// <summary>Bit-exact rect equality (the icon-path rebuild key).</summary>
+    internal static bool SameRect(SKRect a, SKRect b)
+        => BitConverter.SingleToInt32Bits(a.Left) == BitConverter.SingleToInt32Bits(b.Left)
+        && BitConverter.SingleToInt32Bits(a.Top) == BitConverter.SingleToInt32Bits(b.Top)
+        && BitConverter.SingleToInt32Bits(a.Right) == BitConverter.SingleToInt32Bits(b.Right)
+        && BitConverter.SingleToInt32Bits(a.Bottom) == BitConverter.SingleToInt32Bits(b.Bottom);
+
+    internal static SKPath BuildPrevTriangle(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float barW = r.Width * 0.08f;
+        float gap = r.Width * 0.06f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(cx + r.Width * 0.20f, cy - h);
+        tri.LineTo(cx - r.Width * 0.22f + barW + gap, cy);
+        tri.LineTo(cx + r.Width * 0.20f, cy + h);
+        tri.Close();
+        return tri.Detach();
+    }
+
+    internal static SKPath BuildPlayTriangle(SKRect r)
+    {
+        float cx = r.MidX + r.Width * 0.03f, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float w = r.Width * 0.28f;
+
+        using var path = new SKPathBuilder();
+        path.MoveTo(cx - w * 0.7f, cy - h);
+        path.LineTo(cx + w, cy);
+        path.LineTo(cx - w * 0.7f, cy + h);
+        path.Close();
+        return path.Detach();
+    }
+
+    internal static SKPath BuildNextTriangle(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float h = r.Height * 0.32f;
+        float barW = r.Width * 0.08f;
+        float gap = r.Width * 0.06f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(cx - r.Width * 0.20f, cy - h);
+        tri.LineTo(cx + r.Width * 0.22f - barW - gap, cy);
+        tri.LineTo(cx - r.Width * 0.20f, cy + h);
+        tri.Close();
+        return tri.Detach();
+    }
+
+    internal static SKPath BuildShuffleCurves(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float w = r.Width * 0.20f;
+        float h = r.Height * 0.20f;
+
+        using var p = new SKPathBuilder();
+        p.MoveTo(cx - w, cy - h);
+        p.CubicTo(cx - w * 0.2f, cy - h, cx + w * 0.2f, cy + h, cx + w, cy + h);
+        p.MoveTo(cx - w, cy + h);
+        p.CubicTo(cx - w * 0.2f, cy + h, cx + w * 0.2f, cy - h, cx + w, cy - h);
+        return p.Detach();
+    }
+
+    internal static SKPath BuildShuffleArrow(SKRect r, bool top)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float w = r.Width * 0.20f;
+        float h = r.Height * 0.20f;
+        float ah = r.Height * 0.12f;
+
+        using var arr = new SKPathBuilder();
+        if (top)
+        {
+            arr.MoveTo(cx + w, cy - h);
+            arr.LineTo(cx + w - ah, cy - h - ah * 0.7f);
+            arr.LineTo(cx + w - ah, cy - h + ah * 0.7f);
+        }
+        else
+        {
+            arr.MoveTo(cx + w, cy + h);
+            arr.LineTo(cx + w - ah, cy + h - ah * 0.7f);
+            arr.LineTo(cx + w - ah, cy + h + ah * 0.7f);
+        }
+        arr.Close();
+        return arr.Detach();
+    }
+
+    internal static SKPath BuildRepeatArrow(SKRect r)
+    {
+        float cx = r.MidX, cy = r.MidY;
+        float outer = r.Width * 0.22f;
+        float endDeg = 305f * MathF.PI / 180f;
+        float tipX = cx + outer * MathF.Cos(endDeg);
+        float tipY = cy + outer * MathF.Sin(endDeg);
+        float tx = -MathF.Sin(endDeg);
+        float ty = MathF.Cos(endDeg);
+        float s = r.Width * 0.09f;
+
+        using var tri = new SKPathBuilder();
+        tri.MoveTo(tipX + tx * s, tipY + ty * s);
+        tri.LineTo(tipX - tx * s * 0.35f - ty * s * 0.6f, tipY - ty * s * 0.35f + tx * s * 0.6f);
+        tri.LineTo(tipX - tx * s * 0.35f + ty * s * 0.6f, tipY - ty * s * 0.35f - tx * s * 0.6f);
+        tri.Close();
+        return tri.Detach();
+    }
 }
