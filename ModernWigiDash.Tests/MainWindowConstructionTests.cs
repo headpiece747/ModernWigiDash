@@ -19,7 +19,7 @@ public class MainWindowConstructionTests
     {
         var (title, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), UsbEngine: FakeTransport.InertEngine()));
             string title = window.Title;
             try
             {
@@ -41,7 +41,7 @@ public class MainWindowConstructionTests
     {
         var (_, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Close();
@@ -74,12 +74,12 @@ public class MainWindowConstructionTests
                 ConnectedAfterConnect = true,
                 GoToStandbyResult = true
             };
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowTestOptions(
                 new StubPresentMonNative(),
                 ProfilePersistence.DefaultProfilePath(),
                 new NoopPowerModeSource(),
                 new FakeTraySurface(),
-                null, null, null, null, new DisplayDeviceEngine(fake, ConnectionState.Connected));
+                UsbEngine: new DisplayDeviceEngine(fake, ConnectionState.Connected)));
             try
             {
                 return (object)window.RunSessionEndStandby();

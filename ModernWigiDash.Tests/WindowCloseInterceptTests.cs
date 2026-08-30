@@ -39,7 +39,7 @@ public class WindowCloseInterceptTests
         Host.Run<object?>(() =>
         {
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Show();
@@ -74,7 +74,7 @@ public class WindowCloseInterceptTests
         Host.Run<object?>(() =>
         {
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Show();
@@ -100,7 +100,7 @@ public class WindowCloseInterceptTests
         string profilePath = SeedProfile(null); // absent: the default quit
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), UsbEngine: FakeTransport.InertEngine()));
             window.Show();
             window.Closed += (_, _) => closedFired = true;
             try
@@ -128,13 +128,13 @@ public class WindowCloseInterceptTests
         string profilePath = SeedProfile(null);
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(
+            var window = new MainWindow(new MainWindowTestOptions(
                 new StubPresentMonNative(),
                 profilePath,
                 new NoopPowerModeSource(),
                 new FakeTraySurface(),
-                () => { calls++; return true; },
-                null, null, null, FakeTransport.InertEngine());
+                SessionEndStandby: () => { calls++; return true; },
+                UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 Assert.IsTrue(window.RunSessionEndStandby(), "the probe's verdict rides back through the seam");
@@ -161,7 +161,7 @@ public class WindowCloseInterceptTests
             // of hiding into a void - a hidden window with no tray is
             // unreachable.
             var deadTray = new FakeTraySurface(showBringsUp: false);
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), deadTray, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), deadTray, UsbEngine: FakeTransport.InertEngine()));
             window.Show();
             window.Closed += (_, _) => closedFired = true;
             try
@@ -189,7 +189,7 @@ public class WindowCloseInterceptTests
         Host.Run<object?>(() =>
         {
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Show();
@@ -223,7 +223,7 @@ public class WindowCloseInterceptTests
         Host.Run<object?>(() =>
         {
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Show();
@@ -256,7 +256,7 @@ public class WindowCloseInterceptTests
         Host.Run<object?>(() =>
         {
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.Show();

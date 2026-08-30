@@ -38,7 +38,7 @@ public class WindowAhkScriptTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = Path.Combine(logDir, "display_device.log");
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), HotkeyApi: new FakeHotkeyApi().Api, AhkApi: ahkApi, AppSettingsStore: store, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.LaunchAutoHotkeyScript(ScriptPath);
@@ -68,7 +68,7 @@ public class WindowAhkScriptTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = Path.Combine(logDir, "display_device.log");
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), HotkeyApi: new FakeHotkeyApi().Api, AhkApi: ahkApi, AppSettingsStore: store, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.LaunchAutoHotkeyScript(ScriptPath);
@@ -99,7 +99,7 @@ public class WindowAhkScriptTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = Path.Combine(logDir, "display_device.log");
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), HotkeyApi: new FakeHotkeyApi().Api, AhkApi: ahkApi, AppSettingsStore: store, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.LaunchAutoHotkeyScript(ScriptPath);
@@ -134,7 +134,7 @@ public class WindowAhkScriptTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = Path.Combine(logDir, "display_device.log");
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), HotkeyApi: new FakeHotkeyApi().Api, AhkApi: ahkApi, AppSettingsStore: store, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.LaunchAutoHotkeyScript("   ");
@@ -168,7 +168,7 @@ public class WindowAhkScriptTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = Path.Combine(logDir, "display_device.log");
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, new FakeHotkeyApi().Api, ahkApi, store, FakeTransport.InertEngine());
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), HotkeyApi: new FakeHotkeyApi().Api, AhkApi: ahkApi, AppSettingsStore: store, UsbEngine: FakeTransport.InertEngine()));
             try
             {
                 window.LaunchAutoHotkeyScript(ScriptPath);

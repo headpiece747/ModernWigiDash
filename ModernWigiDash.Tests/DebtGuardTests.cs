@@ -384,12 +384,12 @@ public sealed class DebtGuardTests
         // the 16 ms touch poll, the 5 s reconnect timer, the teardown
         // standby), so a bare new MainWindow(...) in the test host would
         // wake, init, and put to sleep the user's attached display. The
-        // constructor's usbEngine argument must be the fake-transport engine
-        // (FakeTransport.InertEngine or an explicit DisplayDeviceEngine). The
-        // pin scans every spelled construction site; the target-typed new(
-        // form is invisible to a raw scan, so the window test sites spell
-        // `new MainWindow(` explicitly (the deleted short test ctors turn a
-        // short target-typed call into a compile error).
+        // test options record's UsbEngine must be the fake-transport engine
+        // (FakeTransport.InertEngine or an explicit DisplayDeviceEngine).
+        // The pin scans every spelled construction site; the target-typed
+        // new( form is invisible to a raw scan, so the window test sites
+        // spell `new MainWindow(` explicitly (the deleted positional test
+        // ctor turns a short target-typed call into a compile error).
         var root = RepoScan.GetRepoRoot();
         var files = new SortedSet<string>();
         foreach (var hit in RepoScan.ScanTests(new Regex(@"new\s+MainWindow\s*\(")))
@@ -410,7 +410,7 @@ public sealed class DebtGuardTests
         violations = violations.OrderBy(v => v).ToList();
         Assert.AreEqual(0, violations.Count,
             "window test construction must bind an inert USB engine: " + string.Join("; ", violations)
-            + ". The window's constructor starts its USB engine (the connect probe, the touch poll, the reconnect timer, the teardown standby), so a bare construction would wake, init, and put to sleep the user's attached display on every test run. Pass FakeTransport.InertEngine() (or an explicit DisplayDeviceEngine bound to a FakeTransport) as the constructor's usbEngine argument.");
+            + ". The window's constructor starts its USB engine (the connect probe, the touch poll, the reconnect timer, the teardown standby), so a bare construction would wake, init, and put to sleep the user's attached display on every test run. Pass FakeTransport.InertEngine() (or an explicit DisplayDeviceEngine bound to a FakeTransport) as the test options record's UsbEngine property.");
     }
 
     [TestMethod]
@@ -421,10 +421,10 @@ public sealed class DebtGuardTests
         // construction - a scan that loses it lets a real-engine test host
         // through the pin.
         var snippet = RepoScan.StripCode("""
-            var bare = new MainWindow(pm, path, power, tray);
-            var inert = new MainWindow(pm, path, power, tray, null, null, null, null, FakeTransport.InertEngine());
-            var explicitEngine = new MainWindow(pm, path, power, tray, null, null, null, null, new DisplayDeviceEngine(fake, ConnectionState.Connected));
-            // var commented = new MainWindow(pm, path, power, tray); must stay invisible.
+            var bare = new MainWindow(new MainWindowTestOptions(pm, path, power, tray));
+            var inert = new MainWindow(new MainWindowTestOptions(pm, path, power, tray, UsbEngine: FakeTransport.InertEngine()));
+            var explicitEngine = new MainWindow(new MainWindowTestOptions(pm, path, power, tray, UsbEngine: new DisplayDeviceEngine(fake, ConnectionState.Connected)));
+            // var commented = new MainWindow(new MainWindowTestOptions(pm, path, power, tray)); must stay invisible.
             """);
         var refs = RepoScan.FindMainWindowCtors(snippet);
         Assert.AreEqual(3, refs.Count,

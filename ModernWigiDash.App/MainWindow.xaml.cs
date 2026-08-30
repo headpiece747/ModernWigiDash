@@ -190,36 +190,37 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// <summary>Production constructor: the real PresentMon interop, the
     /// default profile path, and the live system power-mode source.</summary>
     public MainWindow()
-        : this(new PresentMonNative(), ProfilePersistence.DefaultProfilePath(), new SystemPowerModeSource())
+        : this(new MainWindowTestOptions(new PresentMonNative(), ProfilePersistence.DefaultProfilePath(), new SystemPowerModeSource()))
     {
     }
 
-    /// <summary>Full seam: the power-mode source is injectable so production
-    /// subscribes to SystemEvents and test hosts pass a no-op; the tray
-    /// surface is injectable so the window's close-intercept tests drive a
-    /// live fake; the session-end standby probe is injectable so the
-    /// routing pin never drives a standby ritual at the user's attached
-    /// display; the hotkey API is injectable so the window's hotkey pin
+    /// <summary>Full seam: every seam the window needs from outside is
+    /// injectable through the <see cref="MainWindowTestOptions"/> record —
+    /// the power-mode source so production subscribes to SystemEvents and
+    /// test hosts pass a no-op; the tray surface so the window's
+    /// close-intercept tests drive a live fake; the session-end standby
+    /// probe so the routing pin never drives a standby ritual at the
+    /// user's attached display; the hotkey API so the window's hotkey pin
     /// registers against a fake instead of the OS (a real RegisterHotKey
     /// can lose to another program and flap the pin); the AHK spawn and the
-    /// app-settings store are injectable so the spawn policy (the
-    /// kill-switch veto, the interpreter checks) pins against a temp file
-    /// and a recorder instead of the user's machine-local settings; the USB
-    /// engine is injectable so a window-level test's connect, reconnect
-    /// timer, touch poll, and standby route through a fake transport
-    /// instead of the user's attached display (the test host's window must
-    /// never wake, init, or sleep the physical device).</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null, AhkLaunchApi? ahkApi = null, AppSettingsStore? appSettingsStore = null, DisplayDeviceEngine? usbEngine = null)
+    /// app-settings store so the spawn policy (the kill-switch veto, the
+    /// interpreter checks) pins against a temp file and a recorder instead
+    /// of the user's machine-local settings; the USB engine so a
+    /// window-level test's connect, reconnect timer, touch poll, and
+    /// standby route through a fake transport instead of the user's
+    /// attached display (the test host's window must never wake, init, or
+    /// sleep the physical device).</summary>
+    internal MainWindow(MainWindowTestOptions options)
     {
-        _traySurface = traySurface;
-        _sessionEndStandby = sessionEndStandby;
-        _hotkeyApi = hotkeyApi ?? HotkeyApi.Default;
-        _ahkApi = ahkApi ?? AhkLaunchApi.Default;
-        // The constructor-argument fallback rides the constructor body (a
-        // field initializer cannot see the arguments), like the api seams
-        // above; the store's log seam references the window's hotkey DiagLog.
-        _appSettingsStore = appSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
-        _usbDevice = usbEngine ?? new DisplayDeviceEngine();
+        _traySurface = options.TraySurface;
+        _sessionEndStandby = options.SessionEndStandby;
+        _hotkeyApi = options.HotkeyApi ?? HotkeyApi.Default;
+        _ahkApi = options.AhkApi ?? AhkLaunchApi.Default;
+        // The record-argument fallback rides the constructor body (a field
+        // initializer cannot see the arguments), like the api seams above.
+        // The store's log seam references the window's hotkey DiagLog.
+        _appSettingsStore = options.AppSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
+        _usbDevice = options.UsbEngine ?? new DisplayDeviceEngine();
         // The engine is inert until Start: construction never probes USB,
         // the window only allocates (or adopts the injected) engine here.
         // Start the background connect + touch poll explicitly. Start
@@ -242,7 +243,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // into the historical startup NRE (and the context's null-tolerant
         // module derefs keep even a missed reorder a benign no-op, not a
         // crash).
-        foreach (WiringStep step in BuildStartupWiring(presentMonNative, profilePath, powerModeSource).OrderedSteps)
+        foreach (WiringStep step in BuildStartupWiring(options.PresentMonNative, options.ProfilePath, options.PowerModeSource).OrderedSteps)
         {
             step.Run();
         }
