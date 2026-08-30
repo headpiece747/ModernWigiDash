@@ -11,6 +11,14 @@ internal sealed record WeatherSnapshotState
 {
     public int DataVersion { get; init; }
 
+    /// <summary>Whether a real snapshot has been committed to this state.
+    /// The placeholder defaults below are display seeds for the no-data
+    /// view, never real readings: while this is false the pane draws its
+    /// no-data view instead of the placeholder scalars (a tie reset and a
+    /// fresh state both land here; the apply policy's merge is the one
+    /// writer that flips it).</summary>
+    public bool HasData { get; init; }
+
     public double CurrentTempC { get; init; } = 25.0;
 
     public double FeelsLikeC { get; init; } = 22.2;

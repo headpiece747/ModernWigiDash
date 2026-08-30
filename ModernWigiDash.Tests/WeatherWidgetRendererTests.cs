@@ -18,11 +18,12 @@ public class WeatherWidgetRendererTests
     // InternalsVisibleTo) so the renderer's branches are drivable without the
     // widget's orchestration.
     private static WeatherRenderModel CreateModel(
-        string mainTemp = "22.5°C",
+        string mainTemp = "22.5A°C",
         int weatherCode = 2,
         IReadOnlyList<string>? metrics = null,
         int dailyCount = 0,
-        int hourlyCount = 0)
+        int hourlyCount = 0,
+        bool hasData = true)
     {
         string[] metricList = metrics?.ToArray() ?? [];
         var ranges = new string[dailyCount];
@@ -43,9 +44,10 @@ public class WeatherWidgetRendererTests
             // The key is the model's single identity — the renderer reads the
             // property snapshot (ShowForecast) from it.
             Key = new WeatherRenderModelKey(
-                1, new SKRect(), "Detailed", "Fahrenheit (°F, mph)", "", "",
-                true, true, true, true, dailyCount > 0, false, 0),
+                1, new SKRect(), "Detailed", "Fahrenheit (A°F, mph)", "", "",
+                true, true, true, true, dailyCount > 0, false, 0, hasData),
             WeatherCode = weatherCode,
+            HasData = hasData,
             Daily = Enumerable.Range(0, dailyCount).Select(i => new DailyForecastItem($"Day{i}", 20 + i, 10 + i, 1)).ToArray(),
             Hourly = Enumerable.Range(0, hourlyCount).Select(i => new HourlyForecastItem($"{i}:00", 15 + i, 1)).ToArray(),
             Display = new WeatherDisplay(mainTemp, metricList, ranges, highLows, hourlyTemps),
@@ -327,6 +329,30 @@ public class WeatherWidgetRendererTests
         AssertRegionHas(surface, new SKRect(0, 170, 406, 210), IsWhite, "the metric pills must be drawn in the pill band");
         AssertRegionHas(surface, new SKRect(0, 216, 406, 296), IsWhite, "the forecast strip must draw its day names/ranges");
         AssertRegionHas(surface, new SKRect(0, 216, 406, 296), IsAccent, "the first strip day name must be drawn in the accent color");
+    }
+
+    [TestMethod]
+    public void RenderDetailed_NoData_DrawsTheCenteredGlyphAndNoDataChrome()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        surface.Canvas.Clear(Background);
+        var model = CreateModel(hasData: false, dailyCount: 3);
+
+        using (var renderer = new WeatherWidgetRenderer())
+        {
+            renderer.RenderDetailed(surface.Canvas, new SKRect(0, 0, 406, 296), Accent, SKColors.White, SKColors.White, 1f, 1f, model);
+        }
+
+        // The no-data view (the never-fetched and the tied states,
+        // ADR-0009's follow-up): one centered glyph and nothing else —
+        // no hero condition line, no pills, no forecast strip. The
+        // placeholder scalars must never render as weather.
+        Assert.AreEqual(0, CountPixels(surface, new SKRect(0, 0, 406, 296), IsAccent),
+            "no accent may draw: the condition line and the strip are data, not no-data chrome");
+        var span = DrawnSpan(surface, IsWhite);
+        Assert.IsFalse(SKRect.Empty == span, "the no-data glyph must draw");
+        Assert.AreEqual(203f, (span.Left + span.Right) / 2f, 30f, "the glyph must be horizontally centered on the pane");
+        Assert.AreEqual(148f, (span.Top + span.Bottom) / 2f, 30f, "the glyph must sit at the pane's vertical center");
     }
 
     [TestMethod]

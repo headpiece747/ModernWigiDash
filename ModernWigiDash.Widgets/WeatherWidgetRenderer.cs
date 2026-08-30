@@ -49,6 +49,26 @@ internal sealed class WeatherWidgetRenderer : IDisposable
     private readonly record struct HeroTextElement(string Text, SKFont Font, SKPaint Paint);
 
     /// <summary>
+    /// The no-data view: one centered glyph where the hero block (or the
+    /// forecast strips) would draw. The placeholder scalars and the condition
+    /// icon/description must never render while no real snapshot is
+    /// committed (the never-fetched and the tied states, ADR-0009's
+    /// follow-up) — the pane reads as "no weather for this place", and the
+    /// subtitle's guidance line (the tie's spelling) explains it.
+    /// </summary>
+    private void DrawNoDataView(SKCanvas canvas, SKRect bounds, float s, SKColor textColor)
+    {
+        string glyph = WeatherPresentation.NoDataTempGlyph;
+        float size = WeatherLayout.NoDataGlyphSize(s);
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, size);
+        _heroTempPaint.Color = textColor;
+        canvas.DrawTextWithFallback(glyph,
+            bounds.MidX - font.MeasureText(glyph) / 2f,
+            bounds.MidY + size * 0.35f,
+            font, _heroTempPaint);
+    }
+
+    /// <summary>
     /// Draws the hero block shared by Detailed and CurrentOnly: the icon left
     /// of the temp/condition stack, both vertically centered on
     /// <paramref name="midY"/>. The callers own their sizing policies, gap,
@@ -112,6 +132,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderDetailed(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
+        if (!model.HasData) { DrawNoDataView(canvas, bounds, Math.Min(sx, sy), textPrimary); return; }
         var (icon, desc) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
         float w = bounds.Width;
@@ -349,6 +370,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderDailyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
+        if (!model.HasData) { DrawNoDataView(canvas, bounds, Math.Min(sx, sy), textPrimary); return; }
         int count = Math.Min(model.Daily.Length, WeatherForecastLimits.MaxStripDays);
         if (count == 0) return;
 
@@ -392,6 +414,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderHourlyForecast(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textSecondary, float sx, float sy, WeatherRenderModel model)
     {
+        if (!model.HasData) { DrawNoDataView(canvas, bounds, Math.Min(sx, sy), textSecondary); return; }
         int count = Math.Min(model.Hourly.Length, WeatherForecastLimits.MaxStripHours);
         if (count == 0) return;
 
@@ -431,6 +454,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderCurrentOnly(SKCanvas canvas, SKRect bounds, SKColor accentColor, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
+        if (!model.HasData) { DrawNoDataView(canvas, bounds, Math.Min(sx, sy), textPrimary); return; }
         var (icon, desc) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
         float midY = bounds.MidY;
@@ -468,6 +492,7 @@ internal sealed class WeatherWidgetRenderer : IDisposable
 
     public void RenderCompact(SKCanvas canvas, SKRect bounds, SKColor textPrimary, float sx, float sy, WeatherRenderModel model)
     {
+        if (!model.HasData) { DrawNoDataView(canvas, bounds, Math.Min(sx, sy), textPrimary); return; }
         var (icon, _) = WeatherPresentation.MapWmoIcon(model.WeatherCode, model.IsDay);
         float s = Math.Min(sx, sy);
 

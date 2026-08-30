@@ -11,8 +11,11 @@ namespace ModernWigiDash.Widgets;
 /// still rebuild. HideLocation rides here too: it changes the header title
 /// (the resolved city, the unknown-location placeholder, and the neutral
 /// fallback alike render nothing while a custom label still shows) without
-/// any fetch or data bump. Built once per build; the cache hit test is a
-/// single record comparison.
+/// any fetch or data bump. The data fact rides here too: the no-data view
+/// (the placeholder scalars never render while no real snapshot is
+/// committed) changes the pane without any string of its own, so the
+/// flag must be part of the identity. Built once per build; the cache hit
+/// test is a single record comparison.
 /// </summary>
 internal sealed record WeatherRenderModelKey(
     int DataVersion,
@@ -28,6 +31,7 @@ internal sealed record WeatherRenderModelKey(
     bool ShowForecast,
     bool HideLocation,
     int CandidateCount,
+    bool HasData,
     bool LocationSet = false);
 
 /// <summary>
@@ -50,6 +54,13 @@ internal sealed class WeatherRenderModel
 
     public int WeatherCode;
     public bool IsDay = true;
+
+    /// <summary>The data fact the draw paths gate on: when false the pane
+    /// draws its no-data view (the placeholder scalars and the condition
+    /// icon/description never render — the tied and never-fetched states
+    /// read as "no weather for this place", not as fake readings).</summary>
+    public bool HasData;
+
     public DailyForecastItem[] Daily = [];
     public HourlyForecastItem[] Hourly = [];
     public WeatherDisplay Display = new("", [], [], [], []);

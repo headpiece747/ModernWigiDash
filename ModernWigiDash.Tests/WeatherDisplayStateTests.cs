@@ -47,6 +47,7 @@ public class WeatherDisplayStateTests
 
         Assert.IsTrue(applied);
         Assert.AreEqual(1, state.DataVersion);
+        Assert.IsTrue(state.State.HasData, "the apply is a snapshot's commit — from here the pane renders the data, not its no-data view");
         Assert.AreEqual(23.4, state.State.CurrentTempC);
         Assert.AreEqual("Miami, Florida, United States of America", state.Identity.ResolvedName);
         Assert.AreEqual(444_000.0, state.Identity.Population);
@@ -115,6 +116,8 @@ public class WeatherDisplayStateTests
 
         Assert.IsTrue(applied);
         Assert.AreEqual(2, state.DataVersion, "the placeholder reset bumps the version so the render model rebuilds");
+        Assert.IsFalse(state.State.HasData,
+            "a tie has no data — the reset lands on the no-data view, never a previous city's scalars under the tie's header");
         Assert.AreEqual(new WeatherSnapshotState().CurrentTempC, state.State.CurrentTempC,
             "a tie has no data — the placeholder scalar (the record's default), never a previous city's");
         Assert.AreEqual(1, state.Identity.Candidates.Count);
@@ -355,6 +358,23 @@ public class WeatherDisplayStateTests
         Assert.IsFalse(v1.Key.HideLocation);
         Assert.IsTrue(v2.Key.HideLocation,
             "the hide-location flag must ride the render-model key — the header title is a key-owned display fact");
+    }
+
+    [TestMethod]
+    public void CaptureRenderView_TheDataFact_RidesTheKeyAndInputs()
+    {
+        var state = NewState();
+
+        var (before, _) = View(state);
+        Assert.IsFalse(before.Key.HasData);
+        Assert.IsFalse(before.HasData,
+            "a fresh state has no committed snapshot — the no-data view is what the pane draws");
+
+        state.TryApply(ApplyRequest(FullSnapshot));
+        var (after, _) = View(state);
+        Assert.IsTrue(after.Key.HasData);
+        Assert.IsTrue(after.HasData,
+            "the apply's commit must reach the render-model inputs — the pane switches to the data view");
     }
 
     [TestMethod]

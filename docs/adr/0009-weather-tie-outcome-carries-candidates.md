@@ -114,6 +114,20 @@ fetches its weather.
    without them only by a null check, exactly the shape the union exists
    to make unrepresentable.
 
+## Revisit notes
+
+2026-08-30 (follow-up resolved): the presentation follow-up in the
+Negative section landed. The pane now owns a no-data view: the snapshot
+state carries a `HasData` fact (false on a fresh state and after a tie
+reset; the apply policy's merge is the one writer that flips it), it
+rides the render-model key identity, and the draw paths gate the hero
+block and the forecast strips on it, so the placeholder scalars and the
+condition icon/description never render while no real snapshot is
+committed. The never-fetched and the tied states draw one centered
+glyph (the em dash, the FrameTimePresentation no-reading precedent)
+under the header's guidance line instead. Pinned at the presentation,
+apply-policy, display-state, factory, key-identity, and pixel levels.
+
 ## Date
 
 2026-08-19

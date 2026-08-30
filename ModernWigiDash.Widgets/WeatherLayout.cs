@@ -304,6 +304,13 @@ internal static class WeatherLayout
     /// <summary>The Compact hero temp font size at scale <paramref name="s"/>.</summary>
     public static float CompactTempFontSize(float s) => Math.Clamp(20f * s, 12f, 26f);
 
+    /// <summary>The no-data hero glyph size at scale <paramref name="s"/>:
+    /// one centered glyph the pane draws instead of the hero block (or the
+    /// forecast strips) while no real snapshot is committed — the no-data
+    /// view's single layout fact, shared by all five modes so a mode switch
+    /// never changes it.</summary>
+    public static float NoDataGlyphSize(float s) => Math.Clamp(96f * s, 32f, 140f);
+
     // -- Header badge / title --------------------------------------------------------
 
     /// <summary>The unit-toggle badge font size at scale <paramref name="s"/>.</summary>

@@ -214,6 +214,21 @@ internal static class WeatherPresentation
     /// resolution, and the subtitle's unresolved verdict recognizes it.</summary>
     internal const string UnknownLocationLabel = "Unknown location";
 
+    /// <summary>The no-data hero glyph: the display's no-reading fact (the
+    /// FrameTimePresentation "present mode renders '—'" precedent). The
+    /// pane draws it in place of the hero temperature while no real
+    /// snapshot is committed — the placeholder scalars are display seeds
+    /// and must never render as weather (the never-fetched state and the
+    /// tied state, ADR-0009's follow-up).</summary>
+    internal const string NoDataTempGlyph = "—";
+
+    /// <summary>The no-data display composition: the glyph in place of the
+    /// hero temperature and no pills or forecast strings at all (the draw
+    /// paths gate the condition icon and description on the model's data
+    /// fact, not on these strings).</summary>
+    internal static WeatherDisplay NoDataDisplay()
+        => new(NoDataTempGlyph, [], [], [], []);
+
     /// <summary>
     /// The subtitle guidance line below the header: the ONE spelling of the
     /// guidance text. The priority order ensures the most actionable message

@@ -1,7 +1,7 @@
 # ADR-0003: PresentMon Service as Frame-Time Source
 
 **Date:** 2026-08-08  
-**Status:** Accepted  
+**Status:** Accepted (2026-08-30: the `ModernWigiDashService` "isolated, preserved in the repo" notes below are stale — ADR-0005 removed the Service entirely; the PresentMon decision itself is unchanged)  
 **Deciders:** Project owner
 
 ## Context

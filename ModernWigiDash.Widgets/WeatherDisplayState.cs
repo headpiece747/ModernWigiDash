@@ -280,13 +280,15 @@ new WeatherRenderModelKey(
                     showFeelsLike, showHumidity, showWind, showHighLow, showForecast,
                     hideLocation,
                     _identity.Candidates.Count,
+                    state.HasData,
                     LocationSet: !string.IsNullOrWhiteSpace(location)),
                 state.WeatherCode, state.IsDay, state.CurrentTempC, state.FeelsLikeC, state.Humidity,
                 state.WindSpeedKmH, state.HighTempC, state.LowTempC,
 _dailySnapshot, _hourlySnapshot,
                 header, scale,
                 location, _identity.Candidates.Count,
-                _neutralLabel);
+                _neutralLabel,
+                state.HasData);
             return (inputs, _lastSuccessFetchTime);
         }
     }

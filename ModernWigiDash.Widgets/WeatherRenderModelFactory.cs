@@ -25,7 +25,8 @@ internal sealed record WeatherRenderModelInputs(
     float Scale,
     string LocationText,
     int CandidateCount,
-    string NeutralLabel);
+    string NeutralLabel,
+    bool HasData);
 
 /// <summary>
 /// The render-model build module: the ONE place the weather render model is
@@ -55,17 +56,21 @@ internal static class WeatherRenderModelFactory
 
         // The display facts (hero temp, pills, daily/hourly strings) compose
         // in WeatherPresentation; the model caches them alongside the data
-        // slices the draw paths need.
-        var display = WeatherPresentation.Build(new WeatherDisplayInput(
-            inputs.CurrentTempC,
-            new WeatherMetricsInput(
-                inputs.Key.ShowFeelsLike, inputs.FeelsLikeC,
-                inputs.Key.ShowHumidity, inputs.Humidity,
-                inputs.Key.ShowWind, inputs.WindSpeedKmH,
-                inputs.Key.ShowHighLow, inputs.HighTempC, inputs.LowTempC,
-                tempUnit, speedUnit),
-            inputs.Daily,
-            inputs.Hourly));
+        // slices the draw paths need. The no-data state composes its own
+        // named display instead: the placeholder scalars are display seeds,
+        // never real readings, and must not render as weather.
+        var display = inputs.HasData
+            ? WeatherPresentation.Build(new WeatherDisplayInput(
+                inputs.CurrentTempC,
+                new WeatherMetricsInput(
+                    inputs.Key.ShowFeelsLike, inputs.FeelsLikeC,
+                    inputs.Key.ShowHumidity, inputs.Humidity,
+                    inputs.Key.ShowWind, inputs.WindSpeedKmH,
+                    inputs.Key.ShowHighLow, inputs.HighTempC, inputs.LowTempC,
+                    tempUnit, speedUnit),
+                inputs.Daily,
+                inputs.Hourly))
+            : WeatherPresentation.NoDataDisplay();
 
         var model = new WeatherRenderModel
         {
@@ -75,6 +80,7 @@ internal static class WeatherRenderModelFactory
             Key = inputs.Key,
             WeatherCode = inputs.WeatherCode,
             IsDay = inputs.IsDay,
+            HasData = inputs.HasData,
             Daily = inputs.Daily.ToArray(),
             Hourly = inputs.Hourly.ToArray(),
             Display = display,

@@ -33,7 +33,7 @@ internal static class WeatherSnapshotApplyPolicy
     /// </summary>
     public static WeatherSnapshotState Merge(WeatherSnapshot snapshot, WeatherSnapshotState current)
     {
-        var next = current with { DataVersion = current.DataVersion + 1 };
+        var next = current with { DataVersion = current.DataVersion + 1, HasData = true };
         if (snapshot.CurrentTempC is not null) next = next with { CurrentTempC = snapshot.CurrentTempC.Value };
         if (snapshot.FeelsLikeC is not null) next = next with { FeelsLikeC = snapshot.FeelsLikeC.Value };
         if (snapshot.Humidity is not null) next = next with { Humidity = snapshot.Humidity.Value };

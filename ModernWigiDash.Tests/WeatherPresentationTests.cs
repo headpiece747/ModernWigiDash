@@ -352,4 +352,17 @@ public class WeatherPresentationTests
         Assert.AreEqual("Updated 1d ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromDays(1)));
         Assert.AreEqual("Updated 5d ago", WeatherPresentation.FormatTimeAgo(TimeSpan.FromDays(5)));
     }
+
+    [TestMethod]
+    public void NoDataDisplay_TheGlyphAndNoDisplayStrings()
+    {
+        var display = WeatherPresentation.NoDataDisplay();
+
+        Assert.AreEqual("—", display.MainTemp,
+            "the hero temperature is the em dash glyph — the FrameTimePresentation no-reading precedent, never a placeholder scalar");
+        Assert.AreEqual(0, display.Metrics.Count, "no pills: the placeholder scalars must not compose as display strings");
+        Assert.AreEqual(0, display.ForecastRanges.Count);
+        Assert.AreEqual(0, display.DailyHighLows.Count);
+        Assert.AreEqual(0, display.HourlyTemps.Count);
+    }
 }

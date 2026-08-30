@@ -23,11 +23,12 @@ public class WeatherRenderModelFactoryTests
             string? customLabel = null,
             string resolvedCity = "Berlin, Berlin, Germany",
             int candidateCount = 0,
+            bool hasData = true,
             bool locationSet = false,
             bool hideLocation = false)
         => new(dataVersion, DesignBounds, WeatherLayout.DefaultLayoutMode,
             WeatherPresentation.DefaultUnitSystem, customLabel ?? "", resolvedCity,
-            true, true, true, true, true, hideLocation, candidateCount, locationSet);
+            true, true, true, true, true, hideLocation, candidateCount, hasData, locationSet);
 
     private static WeatherRenderModelInputs Inputs(
         WeatherRenderModelKey key,
@@ -43,7 +44,8 @@ public class WeatherRenderModelFactoryTests
         int candidateCount = 0,
         IReadOnlyList<DailyForecastItem>? daily = null,
         IReadOnlyList<HourlyForecastItem>? hourly = null,
-        string neutralLabel = "Default Location")
+        string neutralLabel = "Default Location",
+        bool hasData = true)
     {
         var (header, s) = Geometry();
         return new WeatherRenderModelInputs(
@@ -54,7 +56,43 @@ public class WeatherRenderModelFactoryTests
             daily ?? [new DailyForecastItem("Mon", 25.0, 15.0, 61)],
             hourly ?? [new HourlyForecastItem("13:00", 21.5, 61)],
             header, s,
-            locationText, candidateCount, neutralLabel);
+            locationText, candidateCount, neutralLabel,
+            hasData);
+    }
+
+    [TestMethod]
+    public void Resolve_NoData_ComposesTheNoDataDisplay()
+    {
+        var inputs = Inputs(Key(hasData: false), locationText: "New Yrok", hasData: false);
+
+        var model = WeatherRenderModelFactory.Resolve(null, inputs);
+
+        Assert.IsFalse(model.HasData);
+        Assert.AreEqual(WeatherPresentation.NoDataTempGlyph, model.Display.MainTemp,
+            "the no-data view composes its own display — the placeholder scalars never reach the model");
+        Assert.AreEqual(0, model.Display.Metrics.Count);
+        Assert.AreEqual(0, model.MetricWidths.Length,
+            "no pills to measure: the draw path gets an empty width array, not a stale one");
+    }
+
+    [TestMethod]
+    public void Resolve_HasDataDrift_RebuildsAndSwapsTheView()
+    {
+        var withData = Inputs(Key(), hasData: true);
+        var model1 = WeatherRenderModelFactory.Resolve(null, withData);
+
+        var model2 = WeatherRenderModelFactory.Resolve(model1, Inputs(Key(hasData: false), hasData: false));
+
+        Assert.AreNotSame(model1, model2,
+            "the no-data transition must rebuild — the flag rides the key identity (a cache hit would keep the data view)");
+        Assert.IsFalse(model2.HasData);
+        Assert.AreEqual(WeatherPresentation.NoDataTempGlyph, model2.Display.MainTemp);
+
+        var model3 = WeatherRenderModelFactory.Resolve(model2, withData);
+        Assert.AreNotSame(model2, model3, "the committed snapshot must replace the glyph view");
+        Assert.IsTrue(model3.HasData);
+        Assert.AreNotEqual(WeatherPresentation.NoDataTempGlyph, model3.Display.MainTemp);
+        Assert.IsTrue(model3.Display.Metrics.Count > 0);
     }
 
     [TestMethod]

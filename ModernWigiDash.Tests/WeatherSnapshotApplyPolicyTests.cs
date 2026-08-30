@@ -87,6 +87,28 @@ public class WeatherSnapshotApplyPolicyTests
     }
 
     [TestMethod]
+    public void Merge_CommitsTheDataFact_FullOrEmptySnapshot()
+    {
+        var fromFresh = WeatherSnapshotApplyPolicy.Merge(FullSnapshot, new WeatherSnapshotState());
+        var fromPrior = WeatherSnapshotApplyPolicy.Merge(FullSnapshot, FullState());
+        var emptySnapshot = WeatherSnapshotApplyPolicy.Merge(
+            new WeatherSnapshot(null, null, null, null, null, null, null, null, null, "", 0.0, 0.0),
+            FullState());
+
+        Assert.IsTrue(fromFresh.HasData, "the merge is a snapshot's commit — the placeholder scalars become real readings");
+        Assert.IsTrue(fromPrior.HasData);
+        Assert.IsTrue(emptySnapshot.HasData,
+            "even an all-null section merge commits the fetch's verdict for the place — the data view stays, the null-keeps rule holds the previous values");
+    }
+
+    [TestMethod]
+    public void FreshState_ReadsAsNoData()
+    {
+        Assert.IsFalse(new WeatherSnapshotState().HasData,
+            "before any apply (and after a tie reset) the pane draws its no-data view, never the placeholder scalars as weather");
+    }
+
+    [TestMethod]
     public void Merge_ProvidedSections_ReplaceThePreviousValues()
     {
         var next = WeatherSnapshotApplyPolicy.Merge(FullSnapshot, FullState());
