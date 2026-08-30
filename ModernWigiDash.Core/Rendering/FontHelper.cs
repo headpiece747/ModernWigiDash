@@ -80,7 +80,7 @@ public static class FontHelper
         }
         catch
         {
-            System.Diagnostics.Debug.WriteLine("Geist font load failed, using clean fallback");
+            FileLog.Write("Geist font load failed, using clean fallback");
         }
 
         return SKTypeface.FromFamilyName(DefaultFontName) ?? SKTypeface.FromFamilyName("Segoe UI") ?? SKTypeface.Default;
@@ -121,7 +121,7 @@ public static class FontHelper
                 {
                     // Broken font store — never crash the inspector; Geist alone
                     // still renders (the typeface caches fall back to Default).
-                    System.Diagnostics.Debug.WriteLine("Font family enumeration failed, falling back to Geist only");
+                    FileLog.Write("Font family enumeration failed, falling back to Geist only");
                     _families = [DefaultFontName];
                 }
             }
@@ -230,7 +230,7 @@ public static class FontHelper
         catch
         {
             // Silently fall through to default typeface
-            System.Diagnostics.Debug.WriteLine("Font match failed, using default typeface");
+            FileLog.Write("Font match failed, using default typeface");
         }
 
         return SKTypeface.Default;
@@ -434,7 +434,7 @@ public static class FontHelper
         }
         catch
         {
-            System.Diagnostics.Debug.WriteLine("Typeface lookup failed, falling back to app font");
+            FileLog.Write("Typeface lookup failed, falling back to app font");
         }
 
         return GeistTypeface;

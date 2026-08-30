@@ -205,6 +205,49 @@ public class PictureAndGifWidgetTests
         }
     }
 
+    [TestMethod]
+    public async Task PictureAndGifWidget_GifAdvance_RidesTheInjectedClock()
+    {
+        // The GIF frame advance reads the injected Clock seam (the same
+        // provider the folder-rescan throttle uses), so a fake clock drives
+        // the animation: the index holds until the first frame's duration
+        // elapses, then the next render advances.
+        string tempDir = Path.Combine(Path.GetTempPath(), "wigidash_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string gifPath = Path.Combine(tempDir, "delta.gif");
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "media-fixtures", "delta.gif"), gifPath, true);
+
+            var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero));
+            using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+            var canvas = surface.Canvas;
+            var bounds = new SKRect(0, 0, 406, 296);
+
+            var widget = new PictureAndGifWidget
+            {
+                ImagePath = gifPath,
+                SourceMode = "Single Image",
+                Clock = clock
+            };
+            widget.Render(canvas, bounds);
+            await AwaitDecodeTask(widget);
+            Assert.AreEqual(0, widget.GifFrameIndexForTest, "a fresh publish must start at frame 0");
+
+            widget.Render(canvas, bounds);
+            Assert.AreEqual(0, widget.GifFrameIndexForTest, "the index must hold before the first frame's duration");
+
+            // delta.gif: frame 0 is 100 ms.
+            clock.Advance(TimeSpan.FromMilliseconds(100));
+            widget.Render(canvas, bounds);
+            Assert.AreEqual(1, widget.GifFrameIndexForTest, "the render must advance the frame once the clock passes the duration");
+        }
+        finally
+        {
+            DeleteTempDirWithRetry(tempDir);
+        }
+    }
+
     private static void DeleteTempDirWithRetry(string tempDir)
     {
         for (int attempt = 0; attempt < 10; attempt++)

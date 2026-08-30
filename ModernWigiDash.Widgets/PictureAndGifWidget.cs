@@ -122,6 +122,19 @@ public class PictureAndGifWidget : ModernWidgetBase
         }
     }
 
+    // The current GIF frame index under the media lock, so the Clock-driven
+    // advance is assertable without pixel sampling.
+    internal int GifFrameIndexForTest
+    {
+        get
+        {
+            lock (_mediaLock)
+            {
+                return _gifFrameIndex;
+            }
+        }
+    }
+
     /// <summary>Resets the installed media when the path or the source mode changes.</summary>
     /// <param name="propertyName">The property that changed.</param>
     /// <param name="newValue">The property's new value.</param>
@@ -163,11 +176,11 @@ public class PictureAndGifWidget : ModernWidgetBase
                 staticBitmap = _staticBitmap;
                 frameIndex = _gifFrameIndex;
 
-                if (frames is { Length: > 1 } && Environment.TickCount64 >= _gifNextFrameTick)
+                if (frames is { Length: > 1 } && Clock.GetTimestamp() >= _gifNextFrameTick)
                 {
                     frameIndex = (_gifFrameIndex + 1) % frames.Length;
                     _gifFrameIndex = frameIndex;
-                    _gifNextFrameTick = Environment.TickCount64 + FrameDurationMs(_gifFrameDurationsMs, frameIndex);
+                    _gifNextFrameTick = Clock.GetTimestamp() + TimeSpan.FromMilliseconds(FrameDurationMs(_gifFrameDurationsMs, frameIndex)).Ticks;
                 }
             }
 
@@ -242,7 +255,7 @@ public class PictureAndGifWidget : ModernWidgetBase
             _gifFrameDurationsMs = durations;
             _staticBitmap = staticBitmap;
             _gifFrameIndex = 0;
-            _gifNextFrameTick = Environment.TickCount64 + FrameDurationMs(durations, 0);
+            _gifNextFrameTick = Clock.GetTimestamp() + TimeSpan.FromMilliseconds(FrameDurationMs(durations, 0)).Ticks;
         }
 
         Context?.RequestRender();

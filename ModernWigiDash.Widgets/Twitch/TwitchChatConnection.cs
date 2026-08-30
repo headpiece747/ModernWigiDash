@@ -209,7 +209,7 @@ internal sealed class TwitchChatConnection : IAsyncDisposable
                             try { await SendIrcLineAsync(sock, "PONG :" + message.PingPayload, token).ConfigureAwait(false); }
                             catch
                             {
-                                System.Diagnostics.Debug.WriteLine("Failed to send PONG during shutdown (socket closed/cancelled)");
+                                _logInfo?.Invoke("Failed to send PONG during shutdown (socket closed/cancelled)");
                             }
                         }, token);
                     }

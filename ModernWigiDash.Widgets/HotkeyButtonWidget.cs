@@ -349,7 +349,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         }
         catch (OperationCanceledException)
         {
-            System.Diagnostics.Debug.WriteLine("Hotkey action cancelled (30s timeout or shutdown)");
+            Context?.LogInfo("Hotkey action cancelled (30s timeout or shutdown)");
         }
         catch (Exception ex)
         {
