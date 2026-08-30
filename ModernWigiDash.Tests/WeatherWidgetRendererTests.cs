@@ -358,6 +358,28 @@ public class WeatherWidgetRendererTests
     }
 
     [TestMethod]
+    public void RenderDailyForecast_NoData_DrawsTheGlyphAndNoStrip()
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(406, 296));
+        surface.Canvas.Clear(Background);
+        var model = CreateModel(hasData: false, dailyCount: 3);
+
+        using (var renderer = new WeatherWidgetRenderer())
+        {
+            renderer.RenderDailyForecast(surface.Canvas, new SKRect(0, 0, 406, 296), Accent, SKColors.White, SKColors.White, 1f, 1f, model);
+        }
+
+        // The strip mode is the one where forecast data (the three daily rows)
+        // exists yet must not draw: zero accent (no row names, no temps), and
+        // the centered glyph stands in for the strip.
+        Assert.AreEqual(0, CountPixels(surface, new SKRect(0, 0, 406, 296), IsAccent),
+            "no accent may draw: the strip's day names and temperatures are data, not no-data chrome");
+        var span = DrawnSpan(surface, IsWhite);
+        Assert.IsFalse(SKRect.Empty == span, "the no-data glyph must draw");
+        Assert.AreEqual(203f, (span.Left + span.Right) / 2f, 30f, "the glyph must be horizontally centered on the pane");
+    }
+
+    [TestMethod]
     public void RenderDailyForecast_DrawsRows_WithAccentFirstRow()
     {
         using var surface = SKSurface.Create(new SKImageInfo(406, 296));

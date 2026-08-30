@@ -115,12 +115,20 @@ public class WeatherSnapshotApplyPolicyTests
         var empty = new WeatherSnapshot(null, null, null, null, null, null, null, null, null, "", 0.0, 0.0);
         var dailyOnly = new WeatherSnapshot(null, null, null, null, null, null, null,
             [new DailyForecastItem("Mon", 25.0, 15.0, 2)], null, "", 0.0, 0.0);
+        var hourlyOnly = new WeatherSnapshot(null, null, null, null, null, null, null,
+            null, [new HourlyForecastItem("13:00", 26.0, 3)], "", 0.0, 0.0);
+        var emptyLists = new WeatherSnapshot(null, null, null, null, null, null, null,
+            [], [], "", 0.0, 0.0);
 
         Assert.IsTrue(WeatherSnapshotApplyPolicy.SnapshotHasData(FullSnapshot));
         Assert.IsFalse(WeatherSnapshotApplyPolicy.SnapshotHasData(empty),
             "an all-null snapshot carries no reading — the merge must not commit the data view");
         Assert.IsTrue(WeatherSnapshotApplyPolicy.SnapshotHasData(dailyOnly),
             "a forecast-only response still carries real data — the strip renders, so the data view is honest");
+        Assert.IsTrue(WeatherSnapshotApplyPolicy.SnapshotHasData(hourlyOnly),
+            "an hourly-only response still carries real data — the strip renders, so the data view is honest");
+        Assert.IsFalse(WeatherSnapshotApplyPolicy.SnapshotHasData(emptyLists),
+            "an empty (but provided) list commits no reading — only a non-empty list flips the data fact");
     }
 
     [TestMethod]
