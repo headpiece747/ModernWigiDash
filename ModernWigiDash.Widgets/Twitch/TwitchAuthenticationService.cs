@@ -257,21 +257,73 @@ internal sealed class TwitchSession
         lock (_stateGate) current = _tokens;
         if (current == null) return false;
 
-        try
+        RefreshVerdict verdict = await RefreshVerdictAsync(api, current, context, cancellationToken).ConfigureAwait(false);
+        if (verdict is not RotatedToken rotated)
         {
-            TwitchTokenSet refreshed = await api.RefreshAsync(current.RefreshToken, cancellationToken).ConfigureAwait(false);
-            TwitchTokenValidation validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
-            refreshed = StampFromValidation(refreshed, validation, current.ClientId);
-            CommitValidatedToken(refreshed, validation, context);
-            return true;
-        }
-        catch (TwitchApiException ex) when (ex.StatusCode is 400 or 401)
-        {
-            System.Diagnostics.Debug.WriteLine($"Twitch token refresh rejected (HTTP {ex.StatusCode}): {ex.Message}");
+            // The rejection's one log line already landed in the verdict
+            // routine; the user path runs under the user gate, so the clear
+            // is immediate — no session operation can land between the
+            // verdict and the clear.
             ClearState(deleteStoredToken: true);
             context.RequestInspectorRefresh();
             return false;
         }
+        CommitValidatedToken(rotated.Token, rotated.Validation, context);
+        return true;
+    }
+
+    /// <summary>
+    /// The one refresh verdict: what spending the refresh token produced —
+    /// the rotated token, validated and stamped, or the 400/401 rejection
+    /// that voids the session. The rotation rule (which codes count) and the
+    /// rejection's one log line live in the verdict's producer
+    /// (<see cref="RefreshVerdictAsync"/>), so a changed rejection policy
+    /// lands in one place; the commit/clear strategy stays with the caller.
+    /// </summary>
+    private abstract record RefreshVerdict
+    {
+        public static RefreshVerdict Rotated(TwitchTokenSet token, TwitchTokenValidation validation)
+            => new RotatedToken(token, validation);
+
+        public static RefreshVerdict Rejected(int status)
+            => new RejectedRefresh(status);
+    }
+
+    /// <summary>The rotated token: the refresh token was spent, the rotated
+    /// access token validated, and the validation stamped onto it.</summary>
+    private sealed record RotatedToken(TwitchTokenSet Token, TwitchTokenValidation Validation) : RefreshVerdict;
+
+    /// <summary>The rejection: Twitch refused the refresh token (400/401) —
+    /// the session is void and the caller clears through its strategy.</summary>
+    private sealed record RejectedRefresh(int Status) : RefreshVerdict;
+
+    /// <summary>
+    /// Produces the one refresh verdict: spend the refresh token (Twitch
+    /// rotates refresh tokens; spending a stale one would void a newer
+    /// login's), validate the rotated access token, and stamp the validation
+    /// onto it. A 400/401 rejection returns the named
+    /// <see cref="RejectedRefresh"/> arm with its one log line — the rotation
+    /// rule's single owner. Other API/network failures propagate (the
+    /// caller's existing policy for transient errors).
+    /// </summary>
+    private async Task<RefreshVerdict> RefreshVerdictAsync(
+        TwitchApiClient api,
+        TwitchTokenSet source,
+        IModernWigiDashContext context,
+        CancellationToken cancellationToken)
+    {
+        TwitchTokenSet refreshed;
+        try
+        {
+            refreshed = await api.RefreshAsync(source.RefreshToken, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TwitchApiException ex) when (ex.StatusCode is 400 or 401)
+        {
+            context.LogError($"Twitch token refresh rejected (HTTP {ex.StatusCode}): {ex.Message}");
+            return RefreshVerdict.Rejected(ex.StatusCode);
+        }
+        TwitchTokenValidation validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
+        return RefreshVerdict.Rotated(StampFromValidation(refreshed, validation, source.ClientId), validation);
     }
 
     private void ApplyValidatedState(TwitchTokenSet token, TwitchTokenValidation validation)
@@ -396,21 +448,15 @@ internal sealed class TwitchSession
             // a stale one would void a newer login's).
             if (!TokenSnapshotIsCurrent(snapshot)) return true;
 
-            TwitchTokenSet refreshed;
-            try
+            RefreshVerdict verdict = await RefreshVerdictAsync(api, snapshot, context, cancellationToken).ConfigureAwait(false);
+            if (verdict is not RotatedToken rotated)
             {
-                refreshed = await api.RefreshAsync(snapshot.RefreshToken, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TwitchApiException refreshEx) when (refreshEx.StatusCode is 400 or 401)
-            {
-                System.Diagnostics.Debug.WriteLine($"Twitch token refresh rejected (HTTP {refreshEx.StatusCode}): {refreshEx.Message}");
+                // The rejection's one log line already landed in the verdict
+                // routine; the clear takes the still-current re-check.
                 await ClearStaleTokenAsync(snapshot, context, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-
-            validation = await api.ValidateAsync(refreshed.AccessToken, cancellationToken).ConfigureAwait(false);
-            refreshed = StampFromValidation(refreshed, validation, snapshot.ClientId);
-            await ApplyIfStillCurrentAsync(snapshot, refreshed, validation, context, cancellationToken).ConfigureAwait(false);
+            await ApplyIfStillCurrentAsync(snapshot, rotated.Token, rotated.Validation, context, cancellationToken).ConfigureAwait(false);
             return true;
         }
 

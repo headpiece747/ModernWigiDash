@@ -148,6 +148,25 @@ public class TwitchSessionTests
     }
 
     [TestMethod]
+    public async Task Restore_RefreshRejected_LogsTheRejectionThroughTheContextSeam()
+    {
+        // The rejection's one log line lands through the context's error seam
+        // (the house log seam, not Debug.WriteLine) — the single spelling
+        // owned by the refresh-verdict routine.
+        var (session, client, store, _, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token());
+        client.ValidationUnauthorized = true;
+        client.RefreshRejected = true;
+
+        bool ok = await session.RestoreAsync(TestClientId, context, CancellationToken.None);
+
+        Assert.IsFalse(ok);
+        Assert.AreEqual(1, context.Errors.Count(e => e.Contains("Twitch token refresh rejected (HTTP 400)")),
+            "the rejection's one log line must land exactly once, through the context seam");
+    }
+
+    [TestMethod]
     public async Task Login_DeviceFlow_AuthenticatesAndClosesAuthDialog()
     {
         var (session, client, _, _, opened) = CreateSession();
@@ -294,6 +313,25 @@ public class TwitchSessionTests
         Assert.IsFalse(kept, "A rejected refresh ends the monitor");
         Assert.IsFalse(session.IsAuthenticated);
         Assert.IsNull(store.Load(), "A rejected refresh must delete the stored token");
+    }
+
+    [TestMethod]
+    public async Task ValidateTick_RefreshRejected_LogsTheRejectionThroughTheContextSeam()
+    {
+        // The SAME one log line as the user path: the tick's branch routes
+        // through the same refresh-verdict routine, so the two spellings
+        // cannot drift.
+        var (session, client, store, _, _) = CreateSession();
+        var context = new TestContext();
+        store.Save(Token(clientId: MachineClientId()));
+        client.ValidationUnauthorized = true;
+        client.RefreshRejected = true;
+
+        bool kept = await session.ValidateTickAsync(context, CancellationToken.None);
+
+        Assert.IsFalse(kept);
+        Assert.AreEqual(1, context.Errors.Count(e => e.Contains("Twitch token refresh rejected (HTTP 400)")),
+            "the rejection's one log line must land exactly once, through the context seam");
     }
 
     [TestMethod]
