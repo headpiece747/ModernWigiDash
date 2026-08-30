@@ -87,18 +87,40 @@ public class WeatherSnapshotApplyPolicyTests
     }
 
     [TestMethod]
-    public void Merge_CommitsTheDataFact_FullOrEmptySnapshot()
+    public void Merge_CommitsTheDataFact_WhenTheSnapshotCarriesData()
     {
         var fromFresh = WeatherSnapshotApplyPolicy.Merge(FullSnapshot, new WeatherSnapshotState());
         var fromPrior = WeatherSnapshotApplyPolicy.Merge(FullSnapshot, FullState());
-        var emptySnapshot = WeatherSnapshotApplyPolicy.Merge(
-            new WeatherSnapshot(null, null, null, null, null, null, null, null, null, "", 0.0, 0.0),
-            FullState());
 
         Assert.IsTrue(fromFresh.HasData, "the merge is a snapshot's commit — the placeholder scalars become real readings");
         Assert.IsTrue(fromPrior.HasData);
-        Assert.IsTrue(emptySnapshot.HasData,
-            "even an all-null section merge commits the fetch's verdict for the place — the data view stays, the null-keeps rule holds the previous values");
+    }
+
+    [TestMethod]
+    public void Merge_AllNullSnapshot_KeepsThePreviousDataFact()
+    {
+        var emptySnapshot = new WeatherSnapshot(null, null, null, null, null, null, null, null, null, "", 0.0, 0.0);
+        var fromFresh = WeatherSnapshotApplyPolicy.Merge(emptySnapshot, new WeatherSnapshotState());
+        var fromData = WeatherSnapshotApplyPolicy.Merge(emptySnapshot, FullState() with { HasData = true });
+
+        Assert.IsFalse(fromFresh.HasData,
+            "a merge that commits nothing real keeps the pane on its no-data view — the placeholder scalars must not flip into rendered weather");
+        Assert.IsTrue(fromData.HasData,
+            "from a state with real data the all-null merge keeps the data view — the null-keeps rule holds the previous readings");
+    }
+
+    [TestMethod]
+    public void SnapshotHasData_AnyScalarOrNonEmptyList()
+    {
+        var empty = new WeatherSnapshot(null, null, null, null, null, null, null, null, null, "", 0.0, 0.0);
+        var dailyOnly = new WeatherSnapshot(null, null, null, null, null, null, null,
+            [new DailyForecastItem("Mon", 25.0, 15.0, 2)], null, "", 0.0, 0.0);
+
+        Assert.IsTrue(WeatherSnapshotApplyPolicy.SnapshotHasData(FullSnapshot));
+        Assert.IsFalse(WeatherSnapshotApplyPolicy.SnapshotHasData(empty),
+            "an all-null snapshot carries no reading — the merge must not commit the data view");
+        Assert.IsTrue(WeatherSnapshotApplyPolicy.SnapshotHasData(dailyOnly),
+            "a forecast-only response still carries real data — the strip renders, so the data view is honest");
     }
 
     [TestMethod]

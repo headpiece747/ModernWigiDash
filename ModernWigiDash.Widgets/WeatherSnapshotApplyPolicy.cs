@@ -24,16 +24,39 @@ internal static class WeatherSnapshotApplyPolicy
            && (identityGuard is null || identityGuard());
 
     /// <summary>
+    /// Whether the snapshot carries at least one real reading: any current
+    /// scalar or a non-empty forecast list. The no-data fact's merge rule —
+    /// a merge commits the data view only when it commits something real.
+    /// An all-null section merge (a 200 response lacking every block, or a
+    /// hand-edited cache file) from a fresh state keeps the pane on its
+    /// no-data view: committing nothing real must not flip the placeholder
+    /// scalars into rendered weather.
+    /// </summary>
+    public static bool SnapshotHasData(WeatherSnapshot snapshot)
+        => snapshot.CurrentTempC is not null
+           || snapshot.FeelsLikeC is not null
+           || snapshot.Humidity is not null
+           || snapshot.WindSpeedKmH is not null
+           || snapshot.WeatherCode is not null
+           || snapshot.HighTempC is not null
+           || snapshot.LowTempC is not null
+           || (snapshot.DailyForecasts is { Count: > 0 })
+           || (snapshot.HourlyForecasts is { Count: > 0 });
+
+    /// <summary>
     /// Merges <paramref name="snapshot"/> into <paramref name="current"/> and
     /// returns the new state. The data version always bumps — the merge is
     /// the snapshot's commit. Null snapshot sections keep the previous value
     /// (a response that omitted a section must not blank the display), a
     /// provided forecast list replaces its slice and bumps the forecast
     /// version, and the two lists bump separately (both provided = two bumps).
+    /// The no-data fact follows <see cref="SnapshotHasData"/>: a merge with
+    /// at least one real reading commits the data view, and an all-null merge
+    /// keeps whatever the previous state said.
     /// </summary>
     public static WeatherSnapshotState Merge(WeatherSnapshot snapshot, WeatherSnapshotState current)
     {
-        var next = current with { DataVersion = current.DataVersion + 1, HasData = true };
+        var next = current with { DataVersion = current.DataVersion + 1, HasData = current.HasData || SnapshotHasData(snapshot) };
         if (snapshot.CurrentTempC is not null) next = next with { CurrentTempC = snapshot.CurrentTempC.Value };
         if (snapshot.FeelsLikeC is not null) next = next with { FeelsLikeC = snapshot.FeelsLikeC.Value };
         if (snapshot.Humidity is not null) next = next with { Humidity = snapshot.Humidity.Value };

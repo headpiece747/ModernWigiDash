@@ -25,8 +25,7 @@ internal sealed record WeatherRenderModelInputs(
     float Scale,
     string LocationText,
     int CandidateCount,
-    string NeutralLabel,
-    bool HasData);
+    string NeutralLabel);
 
 /// <summary>
 /// The render-model build module: the ONE place the weather render model is
@@ -58,8 +57,10 @@ internal static class WeatherRenderModelFactory
         // in WeatherPresentation; the model caches them alongside the data
         // slices the draw paths need. The no-data state composes its own
         // named display instead: the placeholder scalars are display seeds,
-        // never real readings, and must not render as weather.
-        var display = inputs.HasData
+        // never real readings, and must not render as weather. The data fact
+        // is read from the key (the model's single identity) — a separate
+        // inputs parameter could drift from it, and the key cannot.
+        var display = inputs.Key.HasData
             ? WeatherPresentation.Build(new WeatherDisplayInput(
                 inputs.CurrentTempC,
                 new WeatherMetricsInput(
@@ -80,7 +81,7 @@ internal static class WeatherRenderModelFactory
             Key = inputs.Key,
             WeatherCode = inputs.WeatherCode,
             IsDay = inputs.IsDay,
-            HasData = inputs.HasData,
+            HasData = inputs.Key.HasData,
             Daily = inputs.Daily.ToArray(),
             Hourly = inputs.Hourly.ToArray(),
             Display = display,

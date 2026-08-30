@@ -287,8 +287,7 @@ new WeatherRenderModelKey(
 _dailySnapshot, _hourlySnapshot,
                 header, scale,
                 location, _identity.Candidates.Count,
-                _neutralLabel,
-                state.HasData);
+                _neutralLabel);
             return (inputs, _lastSuccessFetchTime);
         }
     }

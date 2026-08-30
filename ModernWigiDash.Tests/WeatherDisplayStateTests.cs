@@ -361,20 +361,18 @@ public class WeatherDisplayStateTests
     }
 
     [TestMethod]
-    public void CaptureRenderView_TheDataFact_RidesTheKeyAndInputs()
+    public void CaptureRenderView_TheDataFact_RidesTheKey()
     {
         var state = NewState();
 
         var (before, _) = View(state);
-        Assert.IsFalse(before.Key.HasData);
-        Assert.IsFalse(before.HasData,
+        Assert.IsFalse(before.Key.HasData,
             "a fresh state has no committed snapshot — the no-data view is what the pane draws");
 
         state.TryApply(ApplyRequest(FullSnapshot));
         var (after, _) = View(state);
-        Assert.IsTrue(after.Key.HasData);
-        Assert.IsTrue(after.HasData,
-            "the apply's commit must reach the render-model inputs — the pane switches to the data view");
+        Assert.IsTrue(after.Key.HasData,
+            "the apply's commit must ride the render-model key — the pane switches to the data view");
     }
 
     [TestMethod]

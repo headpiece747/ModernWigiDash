@@ -44,8 +44,7 @@ public class WeatherRenderModelFactoryTests
         int candidateCount = 0,
         IReadOnlyList<DailyForecastItem>? daily = null,
         IReadOnlyList<HourlyForecastItem>? hourly = null,
-        string neutralLabel = "Default Location",
-        bool hasData = true)
+        string neutralLabel = "Default Location")
     {
         var (header, s) = Geometry();
         return new WeatherRenderModelInputs(
@@ -56,14 +55,13 @@ public class WeatherRenderModelFactoryTests
             daily ?? [new DailyForecastItem("Mon", 25.0, 15.0, 61)],
             hourly ?? [new HourlyForecastItem("13:00", 21.5, 61)],
             header, s,
-            locationText, candidateCount, neutralLabel,
-            hasData);
+            locationText, candidateCount, neutralLabel);
     }
 
     [TestMethod]
     public void Resolve_NoData_ComposesTheNoDataDisplay()
     {
-        var inputs = Inputs(Key(hasData: false), locationText: "New Yrok", hasData: false);
+        var inputs = Inputs(Key(hasData: false), locationText: "New Yrok");
 
         var model = WeatherRenderModelFactory.Resolve(null, inputs);
 
@@ -78,10 +76,10 @@ public class WeatherRenderModelFactoryTests
     [TestMethod]
     public void Resolve_HasDataDrift_RebuildsAndSwapsTheView()
     {
-        var withData = Inputs(Key(), hasData: true);
+        var withData = Inputs(Key());
         var model1 = WeatherRenderModelFactory.Resolve(null, withData);
 
-        var model2 = WeatherRenderModelFactory.Resolve(model1, Inputs(Key(hasData: false), hasData: false));
+        var model2 = WeatherRenderModelFactory.Resolve(model1, Inputs(Key(hasData: false)));
 
         Assert.AreNotSame(model1, model2,
             "the no-data transition must rebuild — the flag rides the key identity (a cache hit would keep the data view)");

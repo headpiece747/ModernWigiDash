@@ -18,7 +18,7 @@ public class WeatherWidgetRendererTests
     // InternalsVisibleTo) so the renderer's branches are drivable without the
     // widget's orchestration.
     private static WeatherRenderModel CreateModel(
-        string mainTemp = "22.5A°C",
+        string mainTemp = "22.5°C",
         int weatherCode = 2,
         IReadOnlyList<string>? metrics = null,
         int dailyCount = 0,
@@ -44,7 +44,7 @@ public class WeatherWidgetRendererTests
             // The key is the model's single identity — the renderer reads the
             // property snapshot (ShowForecast) from it.
             Key = new WeatherRenderModelKey(
-                1, new SKRect(), "Detailed", "Fahrenheit (A°F, mph)", "", "",
+                1, new SKRect(), "Detailed", "Fahrenheit (°F, mph)", "", "",
                 true, true, true, true, dailyCount > 0, false, 0, hasData),
             WeatherCode = weatherCode,
             HasData = hasData,
@@ -353,6 +353,8 @@ public class WeatherWidgetRendererTests
         Assert.IsFalse(SKRect.Empty == span, "the no-data glyph must draw");
         Assert.AreEqual(203f, (span.Left + span.Right) / 2f, 30f, "the glyph must be horizontally centered on the pane");
         Assert.AreEqual(148f, (span.Top + span.Bottom) / 2f, 30f, "the glyph must sit at the pane's vertical center");
+        Assert.IsTrue(span.Height < 24f,
+            "the no-data glyph is a thin bar (the em dash at 96 px) — a centered hero temp string would span 30+ px");
     }
 
     [TestMethod]
