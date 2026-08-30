@@ -99,7 +99,7 @@ public class TeardownPlanTests
             Path.GetTempPath(), "wmd-teardown-" + Guid.NewGuid().ToString("N"), "profile.json");
         return Host.Run(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 return window.BuildTeardownPlan();

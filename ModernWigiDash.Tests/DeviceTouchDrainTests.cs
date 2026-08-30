@@ -128,6 +128,6 @@ public class DeviceTouchDrainTests
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "profile.json");
         File.WriteAllText(path, ProfileOps.ExportJson(profile));
-        return new MainWindow(new StubPresentMonNative(), path, new NoopPowerModeSource(), new FakeTraySurface());
+        return new MainWindow(new StubPresentMonNative(), path, new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
     }
 }

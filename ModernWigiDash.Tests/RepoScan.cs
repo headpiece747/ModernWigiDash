@@ -26,6 +26,10 @@ internal static class RepoScan
         "ModernWigiDash.App",
     ];
 
+    /// <summary>The test project (the window test-constructor pin scans its
+    /// construction sites; the src pins never apply there).</summary>
+    internal const string TestsProject = "ModernWigiDash.Tests";
+
     /// <summary>
     /// The repo root, embedded at build time (Tests csproj AssemblyMetadata)
     /// because the house test command runs from a temp BaseOutputPath, so the
@@ -52,10 +56,21 @@ internal static class RepoScan
     /// because a documented catch comment must keep the body non-empty).
     /// </summary>
     internal static List<string> ScanSrc(Regex pattern, bool raw = false)
+        => ScanProjects(SrcProjects, pattern, raw);
+
+    /// <summary>
+    /// The <see cref="ScanSrc"/> shape over the test project: the window
+    /// test-constructor pin scans the test construction sites, which the src
+    /// pins (the fakes legitimately use what src may not) must not police.
+    /// </summary>
+    internal static List<string> ScanTests(Regex pattern, bool raw = false)
+        => ScanProjects([TestsProject], pattern, raw);
+
+    private static List<string> ScanProjects(string[] projects, Regex pattern, bool raw)
     {
         var root = GetRepoRoot();
         var violations = new List<string>();
-        foreach (var project in SrcProjects)
+        foreach (var project in projects)
         {
             var dir = Path.Combine(root, project);
             foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
@@ -229,6 +244,50 @@ internal static class RepoScan
                 attr.Index,
                 dll.Success ? dll.Groups["expr"].Value : string.Empty,
                 entry.Success ? entry.Groups["ep"].Value : null));
+        }
+
+        return refs;
+    }
+
+    /// <summary>
+    /// One <c>new MainWindow(</c> construction found in Tests source: the
+    /// call's index (for line mapping) and its argument text (for the
+    /// inert-USB-engine rule, which checks the binding inside the argument
+    /// list).
+    /// </summary>
+    internal sealed record MainWindowCtorRef(int Index, string Args);
+
+    /// <summary>
+    /// Finds every <c>new MainWindow(</c> call in fully stripped code (a
+    /// comment that names the construction is documentation, not a site) and
+    /// captures its argument list by balanced parens, so the window
+    /// test-constructor pin can check each construction for the inert USB
+    /// engine binding.
+    /// </summary>
+    internal static List<MainWindowCtorRef> FindMainWindowCtors(string code)
+    {
+        var refs = new List<MainWindowCtorRef>();
+        foreach (Match match in new Regex(@"new\s+MainWindow\s*\(").Matches(code))
+        {
+            var open = match.Index + match.Length - 1;
+            var depth = 0;
+            var end = open;
+            for (var i = open; i < code.Length; i++)
+            {
+                if (code[i] == '(')
+                    depth++;
+                else if (code[i] == ')')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        end = i;
+                        break;
+                    }
+                }
+            }
+
+            refs.Add(new MainWindowCtorRef(match.Index, code[(open + 1)..Math.Min(end, code.Length - 1)]));
         }
 
         return refs;

@@ -23,7 +23,7 @@ public partial class MainWindow : Window, IModernWigiDashContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
-    private readonly DisplayDeviceEngine _usbDevice = new();
+    private readonly DisplayDeviceEngine _usbDevice;
 
     /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
     private FramePump _framePump = null!;
@@ -194,22 +194,6 @@ public partial class MainWindow : Window, IModernWigiDashContext
     {
     }
 
-    /// <summary>Test seam: the native PresentMon interop is injected so window
-    /// construction never loads the real DLL in the test host. Power events
-    /// stay inert (a test host must never subscribe to real SystemEvents).</summary>
-    internal MainWindow(IPresentMonNative presentMonNative)
-        : this(presentMonNative, ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource())
-    {
-    }
-
-    /// <summary>Test seam: injects the native PresentMon interop AND the
-    /// persisted-profile path so window-level tests never read/write the real
-    /// LocalAppData profile file. Power events stay inert.</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath)
-        : this(presentMonNative, profilePath, new NoopPowerModeSource())
-    {
-    }
-
     /// <summary>Full seam: the power-mode source is injectable so production
     /// subscribes to SystemEvents and test hosts pass a no-op; the tray
     /// surface is injectable so the window's close-intercept tests drive a
@@ -220,8 +204,12 @@ public partial class MainWindow : Window, IModernWigiDashContext
     /// can lose to another program and flap the pin); the AHK spawn and the
     /// app-settings store are injectable so the spawn policy (the
     /// kill-switch veto, the interpreter checks) pins against a temp file
-    /// and a recorder instead of the user's machine-local settings.</summary>
-    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null, AhkLaunchApi? ahkApi = null, AppSettingsStore? appSettingsStore = null)
+    /// and a recorder instead of the user's machine-local settings; the USB
+    /// engine is injectable so a window-level test's connect, reconnect
+    /// timer, touch poll, and standby route through a fake transport
+    /// instead of the user's attached display (the test host's window must
+    /// never wake, init, or sleep the physical device).</summary>
+    internal MainWindow(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource, ITrayIconSurface? traySurface = null, Func<bool>? sessionEndStandby = null, HotkeyApi? hotkeyApi = null, AhkLaunchApi? ahkApi = null, AppSettingsStore? appSettingsStore = null, DisplayDeviceEngine? usbEngine = null)
     {
         _traySurface = traySurface;
         _sessionEndStandby = sessionEndStandby;
@@ -231,9 +219,11 @@ public partial class MainWindow : Window, IModernWigiDashContext
         // field initializer cannot see the arguments), like the api seams
         // above; the store's log seam references the window's hotkey DiagLog.
         _appSettingsStore = appSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
-        // The engine is inert until Start: construction never probes USB, the
-        // window's field initializer only allocates. Start the background
-        // connect + touch poll explicitly. Start precedes InitializeComponent:
+        _usbDevice = usbEngine ?? new DisplayDeviceEngine();
+        // The engine is inert until Start: construction never probes USB,
+        // the window only allocates (or adopts the injected) engine here.
+        // Start the background connect + touch poll explicitly. Start
+        // precedes InitializeComponent:
         // the engine's events hop to the dispatcher (Hop), and the initial
         // connect is in flight before the XAML tree exists, so the first paint
         // reflects the real connection state.

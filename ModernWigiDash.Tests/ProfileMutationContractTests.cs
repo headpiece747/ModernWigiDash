@@ -120,7 +120,7 @@ public class ProfileMutationContractTests
         string profilePath = Path.Combine(Path.GetTempPath(), "wmd-mutant-" + Guid.NewGuid().ToString("N"), "profile.json");
         var (buildResult, buildError) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             // The window's constructor persisted the starter profile
             // (snap ON) on first launch.
             Assert.IsTrue(File.ReadAllText(profilePath).Contains("\"SnapToGrid\": true"),
@@ -178,6 +178,9 @@ public class ProfileMutationContractTests
     }
 
     private static MainWindow NewWindow()
-        => new(new StubPresentMonNative(),
-            Path.Combine(Path.GetTempPath(), "wmd-mutant-" + Guid.NewGuid().ToString("N"), "profile.json"));
+        => new MainWindow(new StubPresentMonNative(),
+            Path.Combine(Path.GetTempPath(), "wmd-mutant-" + Guid.NewGuid().ToString("N"), "profile.json"),
+            new NoopPowerModeSource(),
+            new FakeTraySurface(),
+            null, null, null, null, FakeTransport.InertEngine());
 }

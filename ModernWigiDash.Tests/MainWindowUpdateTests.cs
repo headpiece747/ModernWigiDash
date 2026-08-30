@@ -17,7 +17,7 @@ public class MainWindowUpdateTests
     {
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 Assert.IsNotNull(window.UpdateButton, "the update button must exist in the header");
@@ -37,7 +37,7 @@ public class MainWindowUpdateTests
     {
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 window.ApplyUpdateState(new UpdateUiState(UpdateState.Available, "Update v0.5.0 available"));

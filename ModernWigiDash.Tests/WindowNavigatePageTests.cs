@@ -35,7 +35,7 @@ public class WindowNavigatePageTests
         string profilePath = SeedProfile("""{"ProfileId":"test","Pages":[{"PageName":"A"},{"PageName":"B"},{"PageName":"C"}]}""");
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 window.NavigatePage(1);
@@ -79,7 +79,7 @@ public class WindowNavigatePageTests
         var fake = new FakeHotkeyApi();
         Host.Run<object?>(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, fake.Api);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, fake.Api, null, null, FakeTransport.InertEngine());
             try
             {
                 window.Show();
@@ -142,7 +142,7 @@ public class WindowNavigatePageTests
         Host.Run<object?>(() =>
         {
             FileLog.LogPath = logPath;
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, fake.Api);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), new FakeTraySurface(), null, fake.Api, null, null, FakeTransport.InertEngine());
             try
             {
                 window.Show();

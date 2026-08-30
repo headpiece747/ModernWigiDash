@@ -392,56 +392,6 @@ public class DisplayDeviceEngineTests
         return reader.ReadToEnd();
     }
 
-    /// <summary>
-    /// Minimal <see cref="IDisplayTransport"/> fake: returns the canned
-    /// <see cref="NextReport"/> from <see cref="ReadTouch"/>, and answers the
-    /// connect and standby outcomes per test (default: never connects, standby
-    /// never confirms).
-    /// </summary>
-    private sealed class FakeTransport : IDisplayTransport
-    {
-        public TouchReport? NextReport { get; set; }
-        public bool ConnectResult { get; set; }
-        public bool ConnectedAfterConnect { get; set; }
-        public bool GoToStandbyResult { get; set; }
-        public bool Disposed { get; private set; }
-        public Action? OnConnect { get; set; }
-
-        public bool IsConnected => ConnectResult && ConnectedAfterConnect;
-
-        public bool Connect()
-        {
-            OnConnect?.Invoke();
-            return ConnectResult;
-        }
-        /// <summary>What the last <see cref="SendFrame"/> call actually
-        /// received — pins that the engine forwards buffers untouched (the
-        /// size contract is the transport's to enforce).</summary>
-        public int LastFrameLength { get; private set; } = -1;
-        public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer)
-        {
-            LastFrameLength = frameBuffer.Length;
-            return IsConnected ? FrameSendResult.Sent : FrameSendResult.Refused;
-        }
-        public TouchReport? ReadTouch() => NextReport;
-        /// <summary>Simulates a standby that wedges past the engine's
-        /// StandbyCloseBudget (the wedged bulk-pipe scenario).</summary>
-        public int GoToStandbyBlockMs { get; set; }
-        public bool GoToStandby()
-        {
-            if (GoToStandbyBlockMs > 0) Thread.Sleep(GoToStandbyBlockMs);
-            return GoToStandbyResult;
-        }
-        /// <summary>Simulates a device whose Dispose hangs behind an in-flight
-        /// frame write (the bulk-write timeout path).</summary>
-        public int DisposeBlockMs { get; set; }
-        public void Dispose()
-        {
-            if (DisposeBlockMs > 0) Thread.Sleep(DisposeBlockMs);
-            Disposed = true;
-        }
-    }
-
     // ── the connect state machine, driven through the factory seam ──
 
     [TestMethod]

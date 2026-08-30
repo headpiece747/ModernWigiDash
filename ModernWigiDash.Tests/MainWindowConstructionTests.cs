@@ -1,4 +1,5 @@
 using ModernWigiDash.App.Power;
+using ModernWigiDash.Hardware.Transport;
 
 namespace ModernWigiDash.Tests;
 
@@ -18,7 +19,7 @@ public class MainWindowConstructionTests
     {
         var (title, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             string title = window.Title;
             try
             {
@@ -40,7 +41,7 @@ public class MainWindowConstructionTests
     {
         var (_, error) = Host.Invoke(() =>
         {
-            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface());
+            var window = new MainWindow(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 window.Close();
@@ -53,6 +54,45 @@ public class MainWindowConstructionTests
         });
 
         Assert.IsNull(error, error?.ToString());
+    }
+
+    /// <summary>
+    /// The window's USB engine seam (the test host's window must never wake,
+    /// init, or sleep the user's attached display): the injected engine is
+    /// the one the window drives, so with no standby probe the session-end
+    /// verdict comes back from the injected fake transport's canned answer
+    /// (a real engine here would put the physical device to sleep).
+    /// </summary>
+    [TestMethod]
+    public void Construct_WithInjectedEngine_StandbyRoutesThroughTheInjectedTransport()
+    {
+        var (confirmed, error) = Host.Invoke(() =>
+        {
+            var fake = new FakeTransport
+            {
+                ConnectResult = true,
+                ConnectedAfterConnect = true,
+                GoToStandbyResult = true
+            };
+            var window = new MainWindow(
+                new StubPresentMonNative(),
+                ProfilePersistence.DefaultProfilePath(),
+                new NoopPowerModeSource(),
+                new FakeTraySurface(),
+                null, null, null, null, new DisplayDeviceEngine(fake, ConnectionState.Connected));
+            try
+            {
+                return (object)window.RunSessionEndStandby();
+            }
+            finally
+            {
+                window.QuitClose();
+            }
+        });
+
+        Assert.IsNull(error, error?.ToString());
+        Assert.IsNotNull(confirmed, "the verdict must be a boxed bool");
+        Assert.IsTrue((bool)confirmed, "the standby verdict rides back from the injected fake transport");
     }
 
     /// <summary>

@@ -375,6 +375,68 @@ public sealed class DebtGuardTests
             + ". Without EntryPoint the binding resolves to the method name, so a rename silently re-targets the call and a never-existing export crashes the first real call (the 2026-08-26 hotkey crash). Add EntryPoint = \"<export>\" to the attribute; PInvokeBindingTests probes the spelled export against the real DLL (ADR-0020).");
     }
 
+    // --- window test construction must not reach the hardware ---
+
+    [TestMethod]
+    public void HouseRules_WindowTestCtors_BindAnInertUsbEngine()
+    {
+        // The window's constructor starts its USB engine (the connect probe,
+        // the 16 ms touch poll, the 5 s reconnect timer, the teardown
+        // standby), so a bare new MainWindow(...) in the test host would
+        // wake, init, and put to sleep the user's attached display. The
+        // constructor's usbEngine argument must be the fake-transport engine
+        // (FakeTransport.InertEngine or an explicit DisplayDeviceEngine). The
+        // pin scans every spelled construction site; the target-typed new(
+        // form is invisible to a raw scan, so the window test sites spell
+        // `new MainWindow(` explicitly (the deleted short test ctors turn a
+        // short target-typed call into a compile error).
+        var root = RepoScan.GetRepoRoot();
+        var violations = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, RepoScan.TestsProject), "*.cs", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+            if (rel.Contains("/obj/") || rel.Contains("/bin/"))
+                continue; // generated code is not house text
+
+            var code = RepoScan.StripCode(File.ReadAllText(file));
+            foreach (var ctor in RepoScan.FindMainWindowCtors(code))
+            {
+                if (ctor.Args.Contains("InertEngine") || ctor.Args.Contains("DisplayDeviceEngine("))
+                    continue;
+                violations.Add($"{rel}:{RepoScan.LineAt(code, ctor.Index)}: new MainWindow without an inert USB engine");
+            }
+        }
+
+        violations = violations.OrderBy(v => v).ToList();
+        Assert.AreEqual(0, violations.Count,
+            "window test construction must bind an inert USB engine: " + string.Join("; ", violations)
+            + ". The window's constructor starts its USB engine (the connect probe, the touch poll, the reconnect timer, the teardown standby), so a bare construction would wake, init, and put to sleep the user's attached display on every test run. Pass FakeTransport.InertEngine() (or an explicit DisplayDeviceEngine bound to a FakeTransport) as the constructor's usbEngine argument.");
+    }
+
+    [TestMethod]
+    public void FindMainWindowCtors_InjectedViolations_StayVisibleToTheRule()
+    {
+        // Negative verification (the house shape): the extractor the window
+        // constructor pin runs must keep seeing an injected bare
+        // construction - a scan that loses it lets a real-engine test host
+        // through the pin.
+        var snippet = RepoScan.StripCode("""
+            var bare = new MainWindow(pm, path, power, tray);
+            var inert = new MainWindow(pm, path, power, tray, null, null, null, null, FakeTransport.InertEngine());
+            var explicitEngine = new MainWindow(pm, path, power, tray, null, null, null, null, new DisplayDeviceEngine(fake, ConnectionState.Connected));
+            // var commented = new MainWindow(pm, path, power, tray); must stay invisible.
+            """);
+        var refs = RepoScan.FindMainWindowCtors(snippet);
+        Assert.AreEqual(3, refs.Count,
+            "the extractor must find exactly the three real constructions (the comment is stripped): " + string.Join("; ", refs.Select(r => r.Args)));
+        Assert.IsFalse(refs[0].Args.Contains("InertEngine") || refs[0].Args.Contains("DisplayDeviceEngine("),
+            "an injected bare construction must stay visible to the rule (negative verification)");
+        Assert.IsTrue(refs[1].Args.Contains("InertEngine"),
+            "the InertEngine binding of an injected construction must be captured");
+        Assert.IsTrue(refs[2].Args.Contains("DisplayDeviceEngine("),
+            "the explicit DisplayDeviceEngine binding of an injected construction must be captured");
+    }
+
     // --- shared helpers ---
 
     private sealed class Candidate

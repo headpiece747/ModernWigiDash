@@ -36,7 +36,7 @@ public class WindowAutostartTests
         {
             AppClass.StartMinimized = true;
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 window.Show();
@@ -72,7 +72,7 @@ public class WindowAutostartTests
         {
             AppClass.StartMinimized = false;
             var fake = new FakeTraySurface();
-            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake);
+            var window = new MainWindow(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, null, null, null, null, FakeTransport.InertEngine());
             try
             {
                 window.Show();
