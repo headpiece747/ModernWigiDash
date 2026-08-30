@@ -265,6 +265,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
     internal int FetchCompletedCount => _client.FetchCompletedCount;
 
+    /// <summary>The one in-flight fact the display's staleness line reads — the
+    /// client's single-flight claim, forwarded alongside the other client seams
+    /// (a test seam: pins that "Updating…" is the claim, so a fetch that did not
+    /// go through <see cref="RequestRefresh"/> still reports in-flight).</summary>
+    internal bool IsFetchInFlight => _client.IsFetchInFlight;
+
     /// <summary>The snapshot display state (forwarded from the display-state
     /// module, whose gate owns the swap): the widget tests read the forecast
     /// lists and the version through it.</summary>
@@ -282,7 +288,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private readonly SKPaint _stalePaint = new() { IsAntialias = true };
 
     private SKRect _lastBounds;
-    private volatile bool _isFetching;
 
     // The staleness line changes at most once per second (the time-ago
     // buckets); the render recomputes it once per second, not once per frame.
@@ -371,7 +376,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     private void RequestRefresh(bool force = false)
     {
         if (!_flow.CanFetch(force)) return;
-        _isFetching = true;
         _ = TrackFetchAsync(force);
     }
 
@@ -383,7 +387,6 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
         finally
         {
-            _isFetching = false;
             Context?.RequestRender();
         }
     }
@@ -532,7 +535,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // in the presentation module; the string itself is memoized per second
         // (the time-ago buckets change at most once per second).
         string? staleText = BuildStalenessLine(
-            _isFetching, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime);
+            IsFetchInFlight, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime);
         float staleH = 0f;
         if (staleText is { Length: > 0 })
         {

@@ -40,6 +40,44 @@ public class WeatherForecastWidgetTests
     }
 
     [TestMethod]
+    public async Task StalenessFetching_IsTheClientClaim_NotAWidgetFlag()
+    {
+        // The display's "Updating…" fact is the client's single-flight claim,
+        // not a widget-local flag. The old flag was only set around
+        // RequestRefresh-initiated fetches, so it was blind to the boot fetch
+        // (this direct path) and the flow's nested re-fetches. Reading the
+        // claim makes the indicator track every fetch the client owns. The
+        // gate parks the fetch mid-flight (the claim is held) and releases it
+        // on completion. No Location in the initializer, so the default
+        // location is used and the explicit fetch below is the only fetch
+        // (the Location setter would itself start a fetch through the
+        // invalidation path).
+        const string sampleMiami = """
+        {
+          "results": [ { "name": "Miami", "latitude": 25.7617, "longitude": -80.1918, "country": "US", "admin1": "Florida" } ]
+        }
+        """;
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stub = new StubHttpHandler(request =>
+        {
+            string url = request.RequestUri?.AbsoluteUri ?? "";
+            return StubHttpHandler.Ok(url.Contains("/v1/search", StringComparison.Ordinal)
+                ? sampleMiami
+                : WeatherTestData.SampleForecastLegacy);
+        }, gate);
+        var widget = new WeatherForecastWidget { TestHttpClient = new HttpClient(stub) };
+
+        Task fetch = widget.FetchLiveWeatherAsync(force: true); // the boot/direct path, not RequestRefresh
+        await TestWait.WaitUntilAsync(() => widget.IsFetchInFlight, TimeSpan.FromSeconds(5));
+        Assert.IsTrue(widget.IsFetchInFlight,
+            "a fetch that did not go through RequestRefresh still reports in-flight: the fact is the client's claim");
+
+        gate.SetResult(); // complete the parked geocode + forecast
+        await fetch;
+        Assert.IsFalse(widget.IsFetchInFlight, "the claim releases when the fetch completes");
+    }
+
+    [TestMethod]
     public async Task LocationMatchOptions_AfterGeocode_ExposeCandidatesWithAutomaticEntry()
     {
         const string multi = """

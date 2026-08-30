@@ -119,6 +119,17 @@ internal sealed class WeatherClient
     internal bool IsFetchWindowElapsed() => _fetchControl.IsWindowElapsed();
 
     /// <summary>
+    /// Whether a fetch is in flight (the single-flight claim is held). The ONE
+    /// in-flight fact the display's staleness line reads: the claim brackets the
+    /// whole fetch — including the flow's fire-and-forget nested re-fetches and
+    /// the boot fetch, which never set a widget-local flag — so the "Updating…"
+    /// indicator can no longer drift from the fetch the client actually owns.
+    /// Read without the gate, the same tolerance as <see cref="IsFetchWindowElapsed"/>:
+    /// a flag read is a benign boolean for the display.
+    /// </summary>
+    internal bool IsFetchInFlight => _fetchControl.IsClaimHeld;
+
+    /// <summary>
     /// The single edit-path invalidation, per drop kind: resets the resolved
     /// coordinates and the throttle so the next fetch re-resolves and runs
     /// immediately, and drops the shared identity through the single rule —
