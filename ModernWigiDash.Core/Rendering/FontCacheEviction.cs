@@ -22,8 +22,16 @@ public static class FontCacheEviction
     /// <summary>The text → run-splits cache cap.</summary>
     public const int TextRunsLimit = 2048;
 
-    /// <summary>The (typeface handle, size) → SKFont cache cap.</summary>
-    public const int CachedFontLimit = 2048;
+    /// <summary>
+    /// The (typeface handle, size) → SKFont cache cap. A dashboard renders a
+    /// small fixed set of (family, style, size) pairs (~15-20 across every
+    /// built-in widget), so 256 is ample headroom while still letting the
+    /// whole-reset eviction actually engage: at 2048 the branch essentially
+    /// never fired, leaving the native-font set effectively unbounded for a
+    /// long session. An evicted entry costs one recompute (every entry is a
+    /// pure recompute), so the lower cap only trims idle native handles.
+    /// </summary>
+    public const int CachedFontLimit = 256;
 
     /// <summary>The font-handle → (typeface handle, style) resolution cache cap.</summary>
     public const int FontMetaLimit = 2048;
