@@ -106,6 +106,12 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     private PageTabsView _pageTabs = null!;
     private PageManagement _pageManagement = null!;
 
+    /// <summary>The profile-mutation funnel: the ONE post-mutation contract as
+    /// a module (shape→bundle table, selection re-application, single dirty
+    /// mark). The window's forwarding handlers cross its interface; the
+    /// ordering fact is pinned by StartupWiringTests.</summary>
+    private ProfileMutationFunnel _mutationFunnel = null!;
+
     /// <summary>The notification-area icon (ADR-0018): the show/quit routing
     /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
     /// reads (a dead tray falls the close through to a normal exit). Wired by
@@ -322,6 +328,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
         new WiringStep("ProfileLoad", WireProfileLoad),
 
+        new WiringStep("ProfileMutationFunnel", WireProfileMutationFunnel),
+
         new WiringStep("AppSettings", WireAppSettings),
 
         new WiringStep("GlobalHotkeys", WireGlobalHotkeys),
@@ -506,6 +514,19 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             _profilePersistence.Save();
         }
         _pageTabs.Rebuild(_profile);
+    }
+
+    /// <summary>The profile-mutation funnel: the ONE post-mutation contract as a module. Wired after ProfileLoad so the live profile, tab strip, inspector, and persistence exist; its bindings forward to the window's elements and modules.</summary>
+    private void WireProfileMutationFunnel()
+    {
+        _mutationFunnel = new ProfileMutationFunnel(new ProfileMutationBindings(
+            RebuildPageTabs: p => _pageTabs.Rebuild(p),
+            SetSnapToGridFromHandler: v => ChkSnapToGrid.IsChecked = v,
+            WriteActiveCountText: () => TxtActiveCount.Text = $"Active Widgets: {_profile.ActivePage.Widgets.Count}",
+            RequestCanvasRepaint: () => SkiaCanvas.InvalidateVisual(),
+            MarkDirty: () => _profilePersistence.MarkDirty(),
+            RefreshGlobalHotkeys: RefreshGlobalHotkeys,
+            ApplySelection: SelectWidget));
     }
 
     /// <summary>Machine-local settings (ADR-0019): the kill switch + AHK interpreter path, deliberately outside the profile.</summary>
@@ -860,37 +881,12 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// (transform text, opacity, property values) are the one path that marks
     /// through the inspector's onProfileChanged callback instead — exactly one
     /// invocation per landed write-back, and the window's forwarding handlers
-    /// add none.
+    /// add none. The policy itself lives in the <c>ProfileMutationFunnel</c>
+    /// module; this method is the window's forward into it.
     /// </summary>
     internal void ApplyProfileMutation(ProfileMutationShape shape, PlacedWidgetInstance? selection)
     {
-        if (shape is ProfileMutationShape.Structural or ProfileMutationShape.RawWrite)
-        {
-            _pageTabs.Rebuild(_profile);
-        }
-
-        if (shape is ProfileMutationShape.RawWrite)
-        {
-            // A raw write replaces the whole profile state, so the imported page's
-            // snap-to-grid may differ from the checkbox's old page's: the resync
-            // routes through the checkbox's own handler, which re-derives the
-            // profile value from the control and thus keeps one source of truth
-            // (no bypass of the write-back loop). On import the handler is wired
-            // and idempotently re-enters this same contract with the unchanged
-            // value; on the startup resync it is still guarded off by _wired.
-            ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-        }
-
-        SelectWidget(selection);
-        UpdateActiveCount();
-        SkiaCanvas.InvalidateVisual();
-        _profilePersistence.MarkDirty();
-
-        // A profile mutation can change the hotkey-provider set (a widget
-        // placed or removed, a page added): re-run the idempotent
-        // registration pass (ADR-0019). A pre-Show window is a benign
-        // no-op (the pass guards on the handle).
-        RefreshGlobalHotkeys();
+        _mutationFunnel.Apply(shape, _profile, selection);
     }
 
     /// <summary>Page-background write-through from the settings hub: writes
