@@ -572,7 +572,15 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
                 _compositor.Compose(_profile.ActivePage);
                 _delivery.Push(_compositor.FrameBuffer);
             },
-            requestRepaint: () => SkiaCanvas.InvalidateVisual(),
+            requestRepaint: () =>
+            {
+                // The display keeps streaming while the window is hidden to the
+                // tray; only the desktop preview needs the WPF invalidation.
+                // Skipping it when invisible stops 30 FPS of layout/render work
+                // in the background. A repaint fires on the next visible tick,
+                // so a restored window never shows a stale frame.
+                if (IsVisible) SkiaCanvas.InvalidateVisual();
+            },
             onTick: UpdateUsbBadge,
             composeGate: () => !_delivery.IsSendInFlight);
         _framePump.Start();
