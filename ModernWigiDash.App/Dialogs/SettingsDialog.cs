@@ -56,7 +56,7 @@ internal sealed class SettingsDialog : Window
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
-        Content = BuildUi(seed.CloseBehavior, seed.Autostart, seed.KillSwitch, seed.AhkInterpreterPath, seed.PageBackground);
+        Content = BuildUi(seed.CloseBehavior, seed.Autostart, seed.KillSwitch, seed.AhkInterpreterPath, seed.PageBackground, seed.MinimizeToTrayOnStartup);
 
         PreviewKeyDown += (_, e) =>
         {
@@ -68,7 +68,7 @@ internal sealed class SettingsDialog : Window
         };
     }
 
-    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, string currentPageBackground)
+    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, string currentPageBackground, bool currentMinimizeToTray)
     {
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
@@ -94,7 +94,7 @@ internal sealed class SettingsDialog : Window
         var sections = new (SettingsModel.Group Group, UIElement Content)[]
         {
             (SettingsModel.Groups[0], BuildAppearanceGroup(currentPageBackground)),
-            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath)),
+            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath, currentMinimizeToTray)),
             (SettingsModel.Groups[2], BuildProfileGroup())
         };
         foreach (var (group, content) in sections)
@@ -160,8 +160,14 @@ internal sealed class SettingsDialog : Window
         return row;
     }
 
-    private UIElement BuildBehaviorGroup(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath)
+    private UIElement BuildBehaviorGroup(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, bool currentMinimizeToTray)
     {
+#pragma warning disable S125 // layout-vs-routing split documentation, not commented-out code
+        // The Behavior group's rows are pure layout over SettingsModel facts;
+        // each control's commit wiring is a separate concern (the WireBehaviorRow
+        // overloads), so "what the group looks like" and "what each control
+        // writes" read as two short units instead of one interleaved block.
+#pragma warning restore S125
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
         row.Children.Add(BuildRowLabel("Close the window"));
         row.Children.Add(BuildRowHint("Applies to the X button, Alt+F4, and minimize."));
@@ -184,29 +190,15 @@ internal sealed class SettingsDialog : Window
             row.Children.Add(radio);
             row.Children.Add(BuildRowHint(option.Description, leftIndent: 20));
             radio.IsChecked = string.Equals(option.Value, checkedValue, StringComparison.Ordinal);
-            radio.Checked += (_, _) => _host.CommitCloseBehavior(option.Value);
+            WireBehaviorRow(radio, () => _host.CommitCloseBehavior(option.Value));
         }
 
-        // The Start with Windows row (ADR-0019): the checkbox's check is the
-        // change, like the radios - the Run entry is written or deleted
-        // through the seam with no Apply step. The seed precedes the
-        // subscription, so opening the hub with the entry present commits
-        // nothing.
         row.Children.Add(BuildRowLabel("Start with Windows", topMargin: 12));
         row.Children.Add(BuildRowHint(
             "Launches the app at sign-in with the window minimized; the display streams either way."));
-        var autostart = new CheckBox
-        {
-            Content = "Start with Windows",
-            FontSize = 11,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 6, 0, 0),
-            IsChecked = currentAutostart
-        };
-        autostart.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
+        var autostart = BuildBehaviorCheckBox("Start with Windows", currentAutostart);
         row.Children.Add(autostart);
-        autostart.Checked += (_, _) => _host.CommitAutostart(true);
-        autostart.Unchecked += (_, _) => _host.CommitAutostart(false);
+        WireBehaviorRow(autostart, enabled => _host.CommitAutostart(enabled));
 
         // The kill-switch row (ADR-0019): like the autostart checkbox, the
         // check is the change - the window persists the machine-local
@@ -218,18 +210,22 @@ internal sealed class SettingsDialog : Window
         row.Children.Add(BuildRowLabel("Kill Switch", topMargin: 12));
         row.Children.Add(BuildRowHint(
             "Kills the global-hotkey integration (hotkey registration + AHK script spawning) for games that flag background input as cheat software. Every other action keeps running from a tap."));
-        var killSwitch = new CheckBox
-        {
-            Content = "Kill Switch",
-            FontSize = 11,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 6, 0, 0),
-            IsChecked = currentKillSwitch
-        };
-        killSwitch.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
+        var killSwitch = BuildBehaviorCheckBox("Kill Switch", currentKillSwitch);
         row.Children.Add(killSwitch);
-        killSwitch.Checked += (_, _) => _host.CommitKillSwitch(true);
-        killSwitch.Unchecked += (_, _) => _host.CommitKillSwitch(false);
+        WireBehaviorRow(killSwitch, tripped => _host.CommitKillSwitch(tripped));
+
+        // The minimize-to-tray-on-startup row (ADR-0019): like the autostart
+        // checkbox, the check is the change - the window persists the
+        // machine-local flag and the next launch opens hidden behind the
+        // tray icon. Off (the default) opens the window normally. The seed
+        // precedes the subscription, so opening the hub with the flag set
+        // commits nothing.
+        row.Children.Add(BuildRowLabel("Minimize to tray on startup", topMargin: 12));
+        row.Children.Add(BuildRowHint(
+            "The app opens hidden behind the tray icon; the display streams either way. Use the tray icon to show or quit."));
+        var minimizeToTray = BuildBehaviorCheckBox("Minimize to tray on startup", currentMinimizeToTray);
+        row.Children.Add(minimizeToTray);
+        WireBehaviorRow(minimizeToTray, enabled => _host.CommitMinimizeToTrayOnStartup(enabled));
 
         // The AutoHotkey row (ADR-0019): the interpreter the Run AHK Script
         // action spawns - a machine-local path (app_settings.json, never
@@ -247,24 +243,77 @@ internal sealed class SettingsDialog : Window
             Margin = new Thickness(0, 6, 0, 0)
         };
         var ahkPath = new TextBox { Text = currentAhkPath, Width = 260 };
-        ahkPath.LostFocus += (_, _) => _host.CommitAhkInterpreter(ahkPath.Text?.Trim() ?? "");
         var browse = new Button
         {
             Content = "Browse...",
             Padding = new Thickness(8, 2, 8, 2),
             Margin = new Thickness(4, 0, 0, 0)
         };
-        browse.Click += (_, _) =>
-        {
-            string? chosen = _host.BrowseAhkInterpreter();
-            if (chosen is null) return; // a cancel leaves the box (and the setting) untouched
-            ahkPath.Text = chosen; // the committed path rides back into the box
-        };
         ahkRow.Children.Add(ahkPath);
         ahkRow.Children.Add(browse);
         row.Children.Add(ahkRow);
+        WireBehaviorRow(ahkPath, browse, _host);
 
         return row;
+    }
+
+    /// <summary>
+    /// One Behavior-group checkbox row: the label/hint-free control only (the
+    /// label and hint are added by the caller around it). The seed value is
+    /// applied before any commit handler attaches, so opening the hub with
+    /// the setting already set commits nothing.
+    /// </summary>
+    private static CheckBox BuildBehaviorCheckBox(string content, bool seeded)
+    {
+        var box = new CheckBox
+        {
+            Content = content,
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 6, 0, 0),
+            IsChecked = seeded
+        };
+        box.SetResourceReference(CheckBox.ForegroundProperty, "TextPrimary");
+        return box;
+    }
+
+    /// <summary>
+    /// Wires a close-behavior radio to its single host commit: the seed
+    /// (IsChecked) is applied by the caller BEFORE this runs, so a radio
+    /// checked on open fires its Checked event with no handler attached yet
+    /// and commits nothing.
+    /// </summary>
+    private static void WireBehaviorRow(RadioButton radio, Action commit)
+    {
+        radio.Checked += (_, _) => commit();
+    }
+
+    /// <summary>
+    /// Wires a Behavior checkbox to its single host commit (both edges: a
+    /// check commits true, an uncheck commits false). The seed (IsChecked)
+    /// is applied by the caller BEFORE this runs, so opening the hub with
+    /// the setting already set commits nothing.
+    /// </summary>
+    private static void WireBehaviorRow(CheckBox box, Action<bool> commit)
+    {
+        box.Checked += (_, _) => commit(true);
+        box.Unchecked += (_, _) => commit(false);
+    }
+
+    /// <summary>
+    /// Wires the AutoHotkey row: the box commits its trimmed text on focus
+    /// loss; Browse routes to the host's file dialog and a chosen path rides
+    /// back into the box (a cancel leaves the box untouched).
+    /// </summary>
+    private static void WireBehaviorRow(TextBox ahkPath, Button browse, ISettingsHubHost host)
+    {
+        ahkPath.LostFocus += (_, _) => host.CommitAhkInterpreter(ahkPath.Text?.Trim() ?? "");
+        browse.Click += (_, _) =>
+        {
+            string? chosen = host.BrowseAhkInterpreter();
+            if (chosen is null) return; // a cancel leaves the box (and the setting) untouched
+            ahkPath.Text = chosen; // the committed path rides back into the box
+        };
     }
 
     private UIElement BuildProfileGroup()

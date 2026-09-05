@@ -58,23 +58,10 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // ctor statement.
     private bool _wired;
 
-    /// <summary>The explicit-quit flag (ADR-0018): set by the tray's Quit
-    /// (<see cref="QuitClose"/>) before the close, so the close intercept -
-    /// which hides to the tray when the close behavior is on - vetoes itself
-    /// and the tray's Quit always exits. The tray's Quit is the only exit
-    /// when the behavior is on.</summary>
-    private bool _quitting;
-
-    /// <summary>
-    /// The one-shot autostart-minimize latch (ADR-0019): armed around the
-    /// startup WindowState write so the minimize-to-tray intercept
-    /// (ADR-0018, M2) cannot hide the window the autostart path deliberately
-    /// opened minimized. The startup state change's own event consumes it
-    /// (the handler check-clears before its other guards), and the explicit
-    /// clear after the write keeps it one-shot if no event fires for the
-    /// change - so the first real user minimize is never swallowed.
-    /// </summary>
-    private bool _startupMinimizeLatch;
+    /// <summary>The window's lifecycle module (ADR-0018/0019): owns the
+    /// hide-to-tray intercepts, the restore-from-tray state rule, the explicit-quit
+    /// latch, and the session-end standby. The WPF event handlers forward into it.</summary>
+    private WindowLifecycle _lifecycle;
 
 #pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
@@ -117,6 +104,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     private Inspector.InspectorController _inspector = null!;
     private DialogHost _dialogHost = null!;
     private PageTabsView _pageTabs = null!;
+    private PageManagement _pageManagement = null!;
 
     /// <summary>The notification-area icon (ADR-0018): the show/quit routing
     /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
@@ -152,6 +140,10 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // AppSettings wiring step loads the settings.
     private readonly AppSettingsStore _appSettingsStore;
     private AppSettings _appSettings = new();
+    // The settings hub's commit module (ADR-0018/0019): owns the five write-throughs
+    // behind the ISettingsHubHost seam. Built at construction with live providers,
+    // so it reads whatever the AppSettings / ProfileLoad wiring steps have loaded.
+    private SettingsCommitModule _settingsCommits;
     // The AHK spawn seam (ADR-0019): production is Process.Start, tests
     // inject a recorder the way they swap the hotkey API.
     private readonly AhkLaunchApi _ahkApi;
@@ -215,6 +207,35 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // initializer cannot see the arguments), like the api seams above.
         // The store's log seam references the window's hotkey DiagLog.
         _appSettingsStore = options.AppSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
+        // The settings hub's commit module (ADR-0018/0019): the five write-throughs
+        // behind ISettingsHubHost, owned here instead of scattered across the window.
+        // Live providers read whatever ProfileLoad / AppSettings have loaded.
+        _settingsCommits = new SettingsCommitModule(
+            profileProvider: () => _profile,
+            markDirty: () => _profilePersistence.MarkDirty(),
+            appSettingsProvider: () => _appSettings,
+            saveAppSettings: s => { _appSettings = s; _appSettingsStore.Save(s); },
+            autostartStore: AutostartStore,
+            refreshGlobalHotkeys: RefreshGlobalHotkeys,
+            startupLog: _startupLog,
+            hotkeyLog: _hotkeyLog);
+        // The window's lifecycle module (ADR-0018/0019): owns the hide-to-tray
+        // intercepts, the restore-from-tray state rule, the explicit-quit latch,
+        // and the session-end standby. Live providers read the window's WPF state.
+        _lifecycle = new WindowLifecycle(
+            wiredProvider: () => _wired,
+            closeBehaviorProvider: () => _profile.CloseBehavior,
+            trayLiveProvider: () => _tray.IsLive,
+            isEnabledProvider: () => IsEnabled,
+            isVisibleProvider: () => IsVisible,
+            windowStateProvider: () => WindowState,
+            hide: Hide,
+            show: Show,
+            activate: () => { _ = Activate(); },
+            forceNormal: () => WindowState = WindowState.Normal,
+            close: Close,
+            shutdown: () => Application.Current?.Shutdown(),
+            runSessionEndStandby: () => _sessionEndStandby is { } probe ? probe() : _usbDevice!.TryGoToStandby());
         _usbDevice = options.UsbEngine ?? new DisplayDeviceEngine();
         // The engine is inert until Start: construction never probes USB,
         // the window only allocates (or adopts the injected) engine here.
@@ -252,9 +273,28 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // change for the startup write.
         if (App.StartMinimized)
         {
-            _startupMinimizeLatch = true;
+            _lifecycle.ArmStartupMinimizeLatch();
             WindowState = WindowState.Minimized;
-            _startupMinimizeLatch = false;
+            _lifecycle.ClearStartupMinimizeLatch();
+        }
+
+        // The minimize-to-tray-on-startup path (machine-local, ADR-0019): a
+        // launch with the flag opens the window hidden behind the tray icon -
+        // the display streams either way, and the user's only exits are the
+        // tray icon's show/quit. Hide() must run after Show (the StartupUri
+        // window is shown by WPF after the ctor returns), so the Loaded
+        // handler carries it. The latch vetoes the minimize-to-tray intercept
+        // for the startup state change; the explicit clear keeps the latch
+        // one-shot. This composes with the autostart minimize: --startup +
+        // the flag hides instead of minimizing (Hide wins over Minimized).
+        if (_appSettings.MinimizeToTrayOnStartup && _tray.IsLive)
+        {
+            Loaded += (_, _) =>
+            {
+                _lifecycle.ArmStartupMinimizeLatch();
+                Hide();
+                _lifecycle.ClearStartupMinimizeLatch();
+            };
         }
     }
 
@@ -270,312 +310,382 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// </summary>
     internal StartupWiring BuildStartupWiring(IPresentMonNative presentMonNative, string profilePath, IPowerModeSource powerModeSource) => new(
     [
-        new WiringStep("FrameDelivery", () => _delivery = FrameDelivery.Create(
+        new WiringStep("FrameDelivery", WireFrameDelivery),
+
+        new WiringStep("Telemetry", () => WireTelemetry(presentMonNative)),
+
+        new WiringStep("WidgetCatalog", WireWidgetCatalog),
+
+        new WiringStep("ProfilePersistence", () => WireProfilePersistence(profilePath)),
+
+        new WiringStep("HostModules", WireHostModules),
+
+        new WiringStep("ProfileLoad", WireProfileLoad),
+
+        new WiringStep("AppSettings", WireAppSettings),
+
+        new WiringStep("GlobalHotkeys", WireGlobalHotkeys),
+
+        new WiringStep("SnapToGridResync", WireSnapToGridResync),
+
+        new WiringStep("DeviceTouchRoute", WireDeviceTouchRoute),
+
+        new WiringStep("FramePump", WireFramePump),
+
+        new WiringStep("PowerLifecycle", () => WirePowerLifecycle(powerModeSource)),
+
+        new WiringStep("TeardownHook", WireTeardownHook),
+
+        new WiringStep("InitialRefresh", WireInitialRefresh),
+
+        new WiringStep("EditModeResync", WireEditModeResync),
+
+        new WiringStep("Tray", WireTray),
+
+        new WiringStep("CloseIntercept", WireCloseIntercept),
+
+        new WiringStep("Wired", WireWired)
+    ]);
+
+    // -- Startup wiring sub-steps (one named unit per logical group) --------
+    // The order is the load-bearing fact and is pinned by StartupWiringTests
+    // against the names above; these bodies are the executable half of that
+    // artifact. Each is a private method so a reorder moves a named unit
+    // instead of editing prose in place inside a 300-line block.
+
+    /// <summary>Frame delivery: the encode + pool + pace pipeline bound to the USB engine's send seam.</summary>
+    private void WireFrameDelivery()
+    {
+        _delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
             send: _usbDevice.SendFrameBytes,
             isReady: () => _usbDevice.CanSendFrames,
-            log: _hwLog.Write)),
+            log: _hwLog.Write);
+    }
 
-        new WiringStep("Telemetry", () =>
-        {
-            // One poll loop per direct producer, owned by the telemetry
-            // module: SENSOR (LHS shared memory, ADR-0004) and FRAMETIME
-            // (PresentMon, ADR-0003) start immediately and stop on close.
-            _telemetry = new TelemetryProducers(presentMonNative, Log);
-            _telemetry.Start();
+    /// <summary>Telemetry producers: the two direct poll loops (sensor + frame-time) start immediately and stop on close.</summary>
+    private void WireTelemetry(IPresentMonNative presentMonNative)
+    {
+        // One poll loop per direct producer, owned by the telemetry
+        // module: SENSOR (LHS shared memory, ADR-0004) and FRAMETIME
+        // (PresentMon, ADR-0003) start immediately and stop on close.
+        _telemetry = new TelemetryProducers(presentMonNative, Log);
+        _telemetry.Start();
 
-            // The engine's Start() above fires the initial connect. Do NOT
-            // block the UI thread waiting for USB — the render timer will
-            // start sending frames as soon as the connection succeeds.
-        }),
+        // The engine's Start() above fires the initial connect. Do NOT
+        // block the UI thread waiting for USB — the render timer will
+        // start sending frames as soon as the connection succeeds.
+    }
 
-        new WiringStep("WidgetCatalog", () =>
-        {
-            // Attribute-driven catalog: adding a widget to the Widgets
-            // assembly needs no registration here.
-            _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
-            // Populate the catalog UI (sorted alphabetically by display name).
-            RefreshCatalog();
-        }),
+    /// <summary>Widget catalog: attribute-driven registration plus the catalog UI refresh.</summary>
+    private void WireWidgetCatalog()
+    {
+        // Attribute-driven catalog: adding a widget to the Widgets
+        // assembly needs no registration here.
+        _loader.RegisterBuiltInAssembly(typeof(DigitalAnalogClockWidget).Assembly);
+        // Populate the catalog UI (sorted alphabetically by display name).
+        RefreshCatalog();
+    }
 
-        new WiringStep("ProfilePersistence", () =>
-        {
-            // Profile persistence: owns the LocalAppData path and the
-            // debounced save. Wired before the host modules so the
-            // inspector's onProfileChanged hook can reference it; the
-            // provider lambda only dereferences _profile at save time
-            // (import swaps the reference).
-            _profilePersistence = new ProfilePersistence(
-                profilePath,
-                () => _profile,
-                log: _profileLog.Write);
-        }),
+    /// <summary>Profile persistence: owns the LocalAppData path and the debounced save, wired before the host modules.</summary>
+    private void WireProfilePersistence(string profilePath)
+    {
+        // Profile persistence: owns the LocalAppData path and the
+        // debounced save. Wired before the host modules so the
+        // inspector's onProfileChanged hook can reference it; the
+        // provider lambda only dereferences _profile at save time
+        // (import swaps the reference).
+        _profilePersistence = new ProfilePersistence(
+            profilePath,
+            () => _profile,
+            log: _profileLog.Write);
+    }
 
-        new WiringStep("HostModules", () =>
-        {
-            // Build the host modules (input, inspector, dialog host) BEFORE
-            // the profile load. Widget InitializeAsync runs synchronously
-            // inside the load and may call back into the context (e.g.
-            // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
-            // ShowDeviceAuthorization). This step's position removes the
-            // startup NRE when those callbacks arrive before the modules
-            // exist; the context's null-tolerant module derefs are the
-            // backstop.
-            //
-            // Single input module: gesture machine + outcome application +
-            // edit-mode manipulation + the press orchestration. All input
-            // sources cross its source-aware surface; page-switch UI work
-            // stays here.
-            _inputController = new Input.InputController(
-                // _profile is assigned by the ProfileLoad step below, before
-                // any input event can run — the lambda only dereferences it
-                // at invoke time.
-                () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
-                // The desktop's live edit-mode read: the controller derives
-                // the manipulation/routing veto from the source, so the call
-                // sites pass coordinates and the source only.
-                () => _compositor.IsEditMode,
-                navigateTo: SwitchToPage,
-                requestRender: () => SkiaCanvas.InvalidateVisual(),
-                select: SelectWidget,
-                onManipulation: HandleManipulationChange);
+    /// <summary>Host modules (input, dialog host, inspector, page tabs): built BEFORE the profile load so a widget's init-time context callback finds them.</summary>
+    private void WireHostModules()
+    {
+        // Build the host modules (input, inspector, dialog host) BEFORE
+        // the profile load. Widget InitializeAsync runs synchronously
+        // inside the load and may call back into the context (e.g.
+        // Twitch's RestoreTwitchSessionAsync -> RequestInspectorRefresh /
+        // ShowDeviceAuthorization). This step's position removes the
+        // startup NRE when those callbacks arrive before the modules
+        // exist; the context's null-tolerant module derefs are the
+        // backstop.
+        //
+        // Single input module: gesture machine + outcome application +
+        // edit-mode manipulation + the press orchestration. All input
+        // sources cross its source-aware surface; page-switch UI work
+        // stays here.
+        _inputController = new Input.InputController(
+            // _profile is assigned by the ProfileLoad step below, before
+            // any input event can run — the lambda only dereferences it
+            // at invoke time.
+            () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
+            // The desktop's live edit-mode read: the controller derives
+            // the manipulation/routing veto from the source, so the call
+            // sites pass coordinates and the source only.
+            () => _compositor.IsEditMode,
+            navigateTo: SwitchToPage,
+            requestRender: () => SkiaCanvas.InvalidateVisual(),
+            select: SelectWidget,
+            onManipulation: HandleManipulationChange);
 
-            // The drain callback is a cached delegate (a method group would be
-            // converted on every enqueue; the field holds one instance).
-            _deviceTouchDrain = DrainDeviceTouchQueue;
+        // The drain callback is a cached delegate (a method group would be
+        // converted on every enqueue; the field holds one instance).
+        _deviceTouchDrain = DrainDeviceTouchQueue;
 
-            // One stateful DialogHost for the whole window: the inspector
-            // receives this instance (it must never build its own — a second
-            // instance could never show the device-authorization window it
-            // owns).
-            _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
+        // One stateful DialogHost for the whole window: the inspector
+        // receives this instance (it must never build its own — a second
+        // instance could never show the device-authorization window it
+        // owns).
+        _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
 
-            _inspector = new Inspector.InspectorController(
-                new Inspector.TransformFieldBindings(
-                    PosX: TxtPosX,
-                    PosY: TxtPosY,
-                    WidthText: TxtWidth,
-                    HeightText: TxtHeight,
-                    ZIndexText: TxtZIndex,
-                    RotationText: TxtRotation,
-                    OpacitySlider: SliderOpacity,
-                    OpacityValueText: TxtOpacityVal,
-                    RequestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
-                new Inspector.CustomPropertyPanel(
-                    emptyPanel: PanelEmptyInspector,
-                    activePanel: PanelActiveInspector,
-                    nameText: TxtInspName,
-                    customProperties: PanelCustomProperties,
-                    tryFindResource: TryFindResource),
-                () => _selectedWidget,
-                _dialogHost,
-                this,
-                onProfileChanged: () => _profilePersistence.MarkDirty(),
-                commitLocationPick: candidate =>
-                {
-                    if (_selectedWidget?.ActiveInstance is IWidgetLocationSearch search)
-                    {
-                        search.CommitPick(candidate);
-                    }
-                });
-
-            // Page-tabs strip module: owns tab construction, the wheel scroll,
-            // and scroll-into-view; the window keeps only the page-action
-            // seams.
-            _pageTabs = new PageTabsView(
-                PanelPageTabs,
-                ScrollerPageTabs,
-                key => FindResource(key),
-                SwitchToPage,
-                RenamePage,
-                DeletePage);
-        }),
-
-        new WiringStep("ProfileLoad", () =>
-        {
-            // Load the persisted profile, or build the starter profile on
-            // first launch. A first launch persists the starter immediately
-            // so the file exists before any mutation. Runs AFTER HostModules:
-            // the rehydrated/starter widgets' InitializeAsync runs
-            // synchronously here and may call back into the context — the
-            // modules must exist (the ordering fact this step's position
-            // pins).
-            var loaded = _profilePersistence.Load(_loader, this);
-            _profile = loaded ?? new StarterProfile(_loader, this).Create();
-            if (loaded is null)
+        _inspector = new Inspector.InspectorController(
+            new Inspector.TransformFieldBindings(
+                PosX: TxtPosX,
+                PosY: TxtPosY,
+                WidthText: TxtWidth,
+                HeightText: TxtHeight,
+                ZIndexText: TxtZIndex,
+                RotationText: TxtRotation,
+                OpacitySlider: SliderOpacity,
+                OpacityValueText: TxtOpacityVal,
+                RequestCanvasRender: () => SkiaCanvas.InvalidateVisual()),
+            new Inspector.CustomPropertyPanel(
+                emptyPanel: PanelEmptyInspector,
+                activePanel: PanelActiveInspector,
+                nameText: TxtInspName,
+                customProperties: PanelCustomProperties,
+                tryFindResource: TryFindResource),
+            () => _selectedWidget,
+            _dialogHost,
+            this,
+            onProfileChanged: () => _profilePersistence.MarkDirty(),
+            commitLocationPick: candidate =>
             {
-                _profilePersistence.Save();
-            }
-            _pageTabs.Rebuild(_profile);
-        }),
-
-        new WiringStep("AppSettings", () =>
-        {
-            // The machine-local settings (ADR-0019): the kill switch + the
-            // AHK interpreter path, deliberately outside the profile so a
-            // profile import can never overwrite them. AFTER ProfileLoad:
-            // the settings are app-scoped (the order is a reading
-            // convenience, not a dependency); the global-hotkey wiring
-            // below reads them.
-            _appSettings = _appSettingsStore.Load();
-        }),
-
-        new WiringStep("GlobalHotkeys", () =>
-        {
-            // The global-hotkey registration owner (ADR-0019): inert until
-            // the window's SourceInitialized hands it the HWND (the handle
-            // exists only after Show; the wiring runs in the constructor).
-            // The first idempotent refresh runs there; every later trigger
-            // (a profile mutation, a chord edit, the kill switch, the
-            // interpreter path) re-runs the same pass.
-            _globalHotkeyManager = new GlobalHotkeyManager(_hotkeyApi, _hotkeyLog);
-        }),
-
-        new WiringStep("SnapToGridResync", () =>
-        {
-            // Resync the page-level toggle from the loaded profile the same
-            // way the mutation funnel does after an import (the XAML default
-            // is true; a persisted page may differ). _wired is still off, so
-            // the checkbox event this resync fires is guarded: a startup
-            // state resync is not a mutation and must not arm a save.
-            ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
-        }),
-
-        new WiringStep("DeviceTouchRoute", () =>
-        {
-            // Route device touch input through the single input module.
-            // Display touches are runtime input: Press/Move/Release cross the
-            // controller's source-aware surface, so hotkeys fire on the device
-            // even while the desktop is in edit mode — only the mouse path
-            // carries the desktop edit-mode veto.
-            _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
-        }),
-
-        new WiringStep("FramePump", () =>
-        {
-            // Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The
-            // pump composes + sends once per tick, then repaints so the
-            // window draws the same buffer it sent; the badge refresh rides
-            // the tick. The compose gate skips the tick while the delivery is
-            // still writing the previous frame (~55ms bulk write vs 33ms
-            // tick) — the display can't take another frame anyway, so
-            // composing during the write is dead CPU. AFTER ProfileLoad: the
-            // compose reads _profile; AFTER FrameDelivery: it pushes into
-            // _delivery.
-            _framePump = new FramePump(
-                composeAndSend: () =>
+                if (_selectedWidget?.ActiveInstance is IWidgetLocationSearch search)
                 {
-                    _compositor.Compose(_profile.ActivePage);
-                    _delivery.Push(_compositor.FrameBuffer);
-                },
-                requestRepaint: () => SkiaCanvas.InvalidateVisual(),
-                onTick: UpdateUsbBadge,
-                composeGate: () => !_delivery.IsSendInFlight);
-            _framePump.Start();
-        }),
+                    search.CommitPick(candidate);
+                }
+            });
 
-        new WiringStep("PowerLifecycle", () =>
-        {
-            // Power lifecycle: SystemEvents fires on a system thread, so both
-            // actions hop to the dispatcher via the single Hop helper.
-            // Suspend stops the pump (no dead compose ticks while the display
-            // is powered down); resume restarts it and forces the USB engine
-            // to reconnect — Start() is guarded, so the extra call is
-            // harmless when the transport never dropped.
-            _powerLifecycle = new Power.PowerLifecycle(
-                powerModeSource,
-                onSuspend: () => Hop(() => _framePump.Stop()),
-                onResume: () => Hop(() =>
-                {
-                    _framePump.Start();
-                    _usbDevice.Start();
-                }));
-        }),
+        // Page-tabs strip module: owns tab construction, the wheel scroll,
+        // and scroll-into-view; the window keeps only the page-action
+        // seams.
+        _pageTabs = new PageTabsView(
+            PanelPageTabs,
+            ScrollerPageTabs,
+            key => FindResource(key),
+            SwitchToPage,
+            RenamePage,
+            DeletePage);
 
-        new WiringStep("TeardownHook", () =>
+        // The page-management module: owns the add/delete/rename/switch gate +
+        // mutation sequence and returns a verdict; the window keeps only the
+        // confirm dialogs' presentation (the injected DialogHost) and the one
+        // ApplyProfileMutation funnel call. Wired here with the host modules so
+        // its dialog seam exists before any page action can run.
+        _pageManagement = new PageManagement(() => _profile, new PageManagement.DialogHostAdapter(_dialogHost));
+    }
+
+    /// <summary>Profile load: the persisted profile or the starter on first launch; runs AFTER HostModules so init-time callbacks find the modules.</summary>
+    private void WireProfileLoad()
+    {
+        // Load the persisted profile, or build the starter profile on
+        // first launch. A first launch persists the starter immediately
+        // so the file exists before any mutation. Runs AFTER HostModules:
+        // the rehydrated/starter widgets' InitializeAsync runs
+        // synchronously here and may call back into the context — the
+        // modules must exist (the ordering fact this step's position
+        // pins).
+        var loaded = _profilePersistence.Load(_loader, this);
+        _profile = loaded ?? new StarterProfile(_loader, this).Create();
+        if (loaded is null)
         {
-            // Clean lifecycle shutdown on window close / debugging stop. The
-            // plan is a named artifact (BuildTeardownPlan) the orchestrator
-            // runs — the sequence is assertable against the real list.
-            Closed += (s, e) =>
+            _profilePersistence.Save();
+        }
+        _pageTabs.Rebuild(_profile);
+    }
+
+    /// <summary>Machine-local settings (ADR-0019): the kill switch + AHK interpreter path, deliberately outside the profile.</summary>
+    private void WireAppSettings()
+    {
+        // The machine-local settings (ADR-0019): the kill switch + the
+        // AHK interpreter path, deliberately outside the profile so a
+        // profile import can never overwrite them. AFTER ProfileLoad:
+        // the settings are app-scoped (the order is a reading
+        // convenience, not a dependency); the global-hotkey wiring
+        // below reads them.
+        _appSettings = _appSettingsStore.Load();
+    }
+
+    /// <summary>Global-hotkey registration owner (ADR-0019): inert until SourceInitialized hands it the HWND.</summary>
+    private void WireGlobalHotkeys()
+    {
+        // The global-hotkey registration owner (ADR-0019): inert until
+        // the window's SourceInitialized hands it the HWND (the handle
+        // exists only after Show; the wiring runs in the constructor).
+        // The first idempotent refresh runs there; every later trigger
+        // (a profile mutation, a chord edit, the kill switch, the
+        // interpreter path) re-runs the same pass.
+        _globalHotkeyManager = new GlobalHotkeyManager(_hotkeyApi, _hotkeyLog);
+    }
+
+    /// <summary>Snap-to-grid resync from the loaded profile; guarded because _wired is still off.</summary>
+    private void WireSnapToGridResync()
+    {
+        // Resync the page-level toggle from the loaded profile the same
+        // way the mutation funnel does after an import (the XAML default
+        // is true; a persisted page may differ). _wired is still off, so
+        // the checkbox event this resync fires is guarded: a startup
+        // state resync is not a mutation and must not arm a save.
+        ChkSnapToGrid.IsChecked = _profile.ActivePage.SnapToGrid;
+    }
+
+    /// <summary>Device touch route: routes display touches through the single input module as runtime input.</summary>
+    private void WireDeviceTouchRoute()
+    {
+        // Route device touch input through the single input module.
+        // Display touches are runtime input: Press/Move/Release cross the
+        // controller's source-aware surface, so hotkeys fire on the device
+        // even while the desktop is in edit mode — only the mouse path
+        // carries the desktop edit-mode veto.
+        _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
+    }
+
+    /// <summary>Frame pump: the 30 FPS compose + send loop, started after ProfileLoad and FrameDelivery.</summary>
+    private void WireFramePump()
+    {
+        // Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The
+        // pump composes + sends once per tick, then repaints so the
+        // window draws the same buffer it sent; the badge refresh rides
+        // the tick. The compose gate skips the tick while the delivery is
+        // still writing the previous frame (~55ms bulk write vs 33ms
+        // tick) — the display can't take another frame anyway, so
+        // composing during the write is dead CPU. AFTER ProfileLoad: the
+        // compose reads _profile; AFTER FrameDelivery: it pushes into
+        // _delivery.
+        _framePump = new FramePump(
+            composeAndSend: () =>
             {
-                // The teardown sequence begins: a throwing step is isolated
-                // (one [TEARDOWN] line, the plan continues), so a long-lived
-                // host never inherits the modules the aborted tail would
-                // have disposed, and the display-standby last resort runs
-                // no matter what.
-                App.IsClosing = true;
-                new ShutdownOrchestrator(BuildTeardownPlan(), Log).Run();
-            };
-        }),
+                _compositor.Compose(_profile.ActivePage);
+                _delivery.Push(_compositor.FrameBuffer);
+            },
+            requestRepaint: () => SkiaCanvas.InvalidateVisual(),
+            onTick: UpdateUsbBadge,
+            composeGate: () => !_delivery.IsSendInFlight);
+        _framePump.Start();
+    }
 
-        new WiringStep("InitialRefresh", () =>
-        {
-            UpdateUsbBadge();
-            UpdateActiveCount();
-            // The final inspector refresh re-establishes the panel after the
-            // profile load — and it is the repair that makes a pre-module
-            // RequestInspectorRefresh a benign no-op (the context's
-            // null-tolerant facade): whatever a callback lost before the
-            // modules existed, this step re-requests.
-            _inspector.Refresh();
-        }),
+    /// <summary>Power lifecycle: suspend stops the pump, resume restarts it and forces a USB reconnect.</summary>
+    private void WirePowerLifecycle(IPowerModeSource powerModeSource)
+    {
+        // Power lifecycle: SystemEvents fires on a system thread, so both
+        // actions hop to the dispatcher via the single Hop helper.
+        // Suspend stops the pump (no dead compose ticks while the display
+        // is powered down); resume restarts it and forces the USB engine
+        // to reconnect — Start() is guarded, so the extra call is
+        // harmless when the transport never dropped.
+        _powerLifecycle = new Power.PowerLifecycle(
+            powerModeSource,
+            onSuspend: () => Hop(() => _framePump.Stop()),
+            onResume: () => Hop(() =>
+            {
+                _framePump.Start();
+                _usbDevice.Start();
+            }));
+    }
 
-        new WiringStep("EditModeResync", () =>
+    /// <summary>Teardown hook: runs the named teardown plan on close, isolating any throwing step.</summary>
+    private void WireTeardownHook()
+    {
+        // Clean lifecycle shutdown on window close / debugging stop. The
+        // plan is a named artifact (BuildTeardownPlan) the orchestrator
+        // runs — the sequence is assertable against the real list.
+        Closed += (s, e) =>
         {
-            // The compositor defaults to runtime mode (no edit chrome); the
-            // Edit Mode checkbox defaults to checked, and its Checked event
-            // fires during InitializeComponent while the _wired guard is still
-            // off — so re-assert the checkbox state onto the compositor here
-            // explicitly, before the wired arm below.
-            _compositor.IsEditMode = ChkEditMode.IsChecked == true;
-        }),
+            // The teardown sequence begins: a throwing step is isolated
+            // (one [TEARDOWN] line, the plan continues), so a long-lived
+            // host never inherits the modules the aborted tail would
+            // have disposed, and the display-standby last resort runs
+            // no matter what.
+            App.IsClosing = true;
+            new ShutdownOrchestrator(BuildTeardownPlan(), Log).Run();
+        };
+    }
 
-        new WiringStep("Tray", () =>
-        {
-            // The notification-area icon (ADR-0018): always present, the
-            // single-click and the menu's show item route to ShowFromTray,
-            // the menu's Quit closes through the normal close sequence
-            // (teardown + standby) and then shuts the app down explicitly -
-            // a hidden window's Close does not trip OnLastWindowClose.
-            // BEFORE the wired arm: its handlers forward to the window like
-            // every other module.
-            _tray = new TrayIconController(
-                onShow: ShowFromTray,
-                onQuit: QuitFromTray,
-                log: _trayLog,
-                surface: _traySurface);
-            _tray.Start();
-        }),
+    /// <summary>Initial refresh: badge, active count, and the inspector panel re-establishment after the profile load.</summary>
+    private void WireInitialRefresh()
+    {
+        UpdateUsbBadge();
+        UpdateActiveCount();
+        // The final inspector refresh re-establishes the panel after the
+        // profile load — and it is the repair that makes a pre-module
+        // RequestInspectorRefresh a benign no-op (the context's
+        // null-tolerant facade): whatever a callback lost before the
+        // modules existed, this step re-requests.
+        _inspector.Refresh();
+    }
 
-        new WiringStep("CloseIntercept", () =>
-        {
-            // The close behavior (ADR-0018): X, Alt+F4, and minimize hide to
-            // the tray instead of closing or minimizing when the profile's
-            // close behavior is the tray keep-alive AND the tray icon is
-            // live (N1: a dead tray falls the action through to the normal
-            // behavior, because a hidden window with no tray is
-            // unreachable). The decision routes through
-            // CloseInterceptPolicy so a hand-edited profile can never
-            // smuggle in a hide. SessionEnding runs the non-disposing
-            // standby seam: a system shutdown while the display is live is
-            // the documented wedge case (the display has no auto-sleep),
-            // and the session end is the one chance to run the ritual
-            // before the process dies.
-            Closing += OnWindowClosing;
-            StateChanged += OnWindowStateChanged;
-            Application.Current.SessionEnding += (_, _) => RunSessionEndStandby();
-        }),
+    /// <summary>Edit-mode resync: re-asserts the checkbox state onto the compositor before the wired arm.</summary>
+    private void WireEditModeResync()
+    {
+        // The compositor defaults to runtime mode (no edit chrome); the
+        // Edit Mode checkbox defaults to checked, and its Checked event
+        // fires during InitializeComponent while the _wired guard is still
+        // off — so re-assert the checkbox state onto the compositor here
+        // explicitly, before the wired arm below.
+        _compositor.IsEditMode = ChkEditMode.IsChecked == true;
+    }
 
-        new WiringStep("Wired", () =>
-        {
-            // The wired arm is the LAST step: the guarded XAML handlers (the
-            // edit-mode checkbox, the snap toggle, the transform boxes, the
-            // opacity slider) arm only after every module the handlers
-            // forward to exists.
-            _wired = true;
-        })
-    ]);
+    /// <summary>Tray icon (ADR-0018): always present, show/quit route to the window seams; BEFORE the wired arm.</summary>
+    private void WireTray()
+    {
+        // The notification-area icon (ADR-0018): always present, the
+        // single-click and the menu's show item route to ShowFromTray,
+        // the menu's Quit closes through the normal close sequence
+        // (teardown + standby) and then shuts the app down explicitly -
+        // a hidden window's Close does not trip OnLastWindowClose.
+        // BEFORE the wired arm: its handlers forward to the window like
+        // every other module.
+        _tray = new TrayIconController(
+            onShow: ShowFromTray,
+            onQuit: QuitFromTray,
+            log: _trayLog,
+            surface: _traySurface);
+        _tray.Start();
+    }
+
+    /// <summary>Close intercept (ADR-0018): X/Alt+F4/minimize hide to the tray when opted in and the tray is live.</summary>
+    private void WireCloseIntercept()
+    {
+        // The close behavior (ADR-0018): X, Alt+F4, and minimize hide to
+        // the tray instead of closing or minimizing when the profile's
+        // close behavior is the tray keep-alive AND the tray icon is
+        // live (N1: a dead tray falls the action through to the normal
+        // behavior, because a hidden window with no tray is
+        // unreachable). The decision routes through
+        // CloseInterceptPolicy so a hand-edited profile can never
+        // smuggle in a hide. SessionEnding runs the non-disposing
+        // standby seam: a system shutdown while the display is live is
+        // the documented wedge case (the display has no auto-sleep),
+        // and the session end is the one chance to run the ritual
+        // before the process dies.
+        Closing += OnWindowClosing;
+        StateChanged += OnWindowStateChanged;
+        Application.Current.SessionEnding += (_, _) => RunSessionEndStandby();
+    }
+
+    /// <summary>The wired arm: LAST step, arms the guarded XAML handlers only after every module exists.</summary>
+    private void WireWired()
+    {
+        // The wired arm is the LAST step: the guarded XAML handlers (the
+        // edit-mode checkbox, the snap toggle, the transform boxes, the
+        // opacity slider) arm only after every module the handlers
+        // forward to exists.
+        _wired = true;
+    }
 
     /// <summary>
     /// The window's teardown plan as one named artifact: the ordered steps +
@@ -963,21 +1073,20 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         }
     }
 
+    /// <summary>The rename seam: the module's gate + prompt + rename; a
+    /// structural refresh only when it lands.</summary>
     private void RenamePage(int index)
     {
-        if (index < 0 || index >= _profile.Pages.Count) return;
-        var page = _profile.Pages[index];
-
-        string? newName = _dialogHost.PromptForText($"Rename Page", $"New name for '{page.PageName}':", page.PageName);
-        if (string.IsNullOrWhiteSpace(newName)) return;
-
-        ProfileOps.RenamePage(page, newName);
+        if (_pageManagement.Rename(index) != PageOpVerdict.Applied) return;
         ApplyProfileMutation(ProfileMutationShape.Structural, _selectedWidget);
     }
 
+    /// <summary>The switch seam: the module's SetActivePageIndex gate; a
+    /// structural refresh only when it lands (an out-of-range step is a no-op,
+    /// never a wrap).</summary>
     private void SwitchToPage(int index)
     {
-        if (!ProfileOps.SetActivePageIndex(_profile, index)) return;
+        if (_pageManagement.Switch(index) != PageOpVerdict.Applied) return;
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
@@ -1029,31 +1138,21 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     #endregion
 
     /// <summary>
-    /// The window's page-delete seam: the single UI gate (the module's
-    /// last-page rule), a bounds-safe read of the confirm facts, and the
-    /// delete + structural refresh. Internal so tests can pin that a stale
-    /// index degrades to a no-op instead of throwing in the window.
+    /// The window's page-delete seam: the module owns the last-page veto, the
+    /// bounds-safe confirm-facts read (a stale index is a silent no-op here,
+    /// never a throw ahead of the delete), and the delete; the window refreshes
+    /// only when it lands. Internal so tests can pin that a stale index
+    /// degrades to a no-op instead of throwing in the window.
     /// </summary>
     internal void DeletePage(int index)
     {
-        // One delete gate: the module's rule, the same predicate the tab
-        // strip's button-enablement consults. The page's facts for the
-        // confirm read through the module's bounds-safe accessor, so a stale
-        // index is a silent no-op here, not a throw ahead of DeletePage's
-        // own validation.
-        if (!ProfileOps.CanDeletePage(_profile)) return;
-
-        if (ProfileOps.TryGetPage(_profile, index) is not { } targetPage) return;
-        if (targetPage.Widgets.Count > 0 && !_dialogHost.Confirm("Delete Page", $"Are you sure you want to delete '{targetPage.PageName}' containing {targetPage.Widgets.Count} widget(s)?"))
-            return;
-
-        if (!ProfileOps.DeletePage(_profile, index)) return;
+        if (_pageManagement.Delete(index) != PageOpVerdict.Applied) return;
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
     private void BtnAddPage_Click(object _, RoutedEventArgs e)
     {
-        ProfileOps.AddPage(_profile);
+        _pageManagement.Add();
         ApplyProfileMutation(ProfileMutationShape.Structural, null);
     }
 
@@ -1188,128 +1287,20 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         ShowSettingsDialog();
     }
 
-    /// <summary>
-    /// The tray/second-launch activation: shows a hidden window (restoring
-    /// it from the tray hide) and brings it forward. Both callers arrive on
-    /// the UI thread (the tray icon's events are WPF-routed; the
-    /// single-instance guard hops through the App's dispatcher).
-    /// </summary>
-    internal void ShowFromTray()
-    {
-        if (!IsVisible)
-        {
-            // The minimize-intercept leg leaves the window Minimized: force
-            // Normal so the restore does not re-show minimized. The
-            // close-intercept leg preserves the window's own state (a
-            // maximized window comes back maximized), so only the Minimized
-            // state needs the repair.
-            if (WindowState == WindowState.Minimized)
-            {
-                WindowState = WindowState.Normal;
-            }
-            Show();
-        }
-        Activate();
-    }
+    // The window's lifecycle (ADR-0018/0019) forwards to the lifecycle module,
+    // which owns the hide-to-tray intercepts, the restore-from-tray state rule,
+    // the explicit-quit latch, and the session-end standby.
+    internal void ShowFromTray() => _lifecycle.ShowFromTray();
 
-    /// <summary>
-    /// The tray menu's "Quit" (ADR-0018): the explicit-quit path through the
-    /// normal close sequence (OnClosing, the teardown plan, the display
-    /// standby), then an explicit Shutdown. A hidden window's Close does not
-    /// trip OnLastWindowClose, so without the Shutdown the process would
-    /// linger with its icon already gone; WPF's Shutdown is idempotent, so
-    /// the visible-window case (where OnLastWindowClose already scheduled
-    /// the shutdown) stays a single shutdown.
-    /// </summary>
-    internal void QuitFromTray()
-    {
-        QuitClose();
-        // Close() on the visible window already scheduled the shutdown
-        // through OnLastWindowClose, and WPF's Shutdown is idempotent when
-        // the shutdown is in flight - so the call below is safe either way.
-        // It is the ONLY thing that ends a process whose only window was
-        // hidden: a hidden window's Close does not trip OnLastWindowClose.
-        Application.Current?.Shutdown();
-    }
+    internal void QuitFromTray() => _lifecycle.QuitFromTray();
 
-    /// <summary>
-    /// The explicit-quit close (ADR-0018): the veto flag lands before the
-    /// close so the close intercept (which hides to the tray when the
-    /// behavior is on) vetoes itself and the tray's Quit always exits. Named
-    /// apart from the tray caller so the test host - whose own Application
-    /// must survive - can drive the veto + close without the shutdown.
-    /// </summary>
-    internal void QuitClose()
-    {
-        _quitting = true;
-        Close();
-    }
+    internal void QuitClose() => _lifecycle.QuitClose();
 
-    /// <summary>
-    /// The close intercept (ADR-0018): a window close (X, Alt+F4) hides to
-    /// the tray instead of closing when the resolved close behavior is the
-    /// tray keep-alive and the tray icon is live. With the behavior on and
-    /// the tray dead (N1) the close falls through to the normal exit: a
-    /// hidden window with no tray is unreachable, and losing the app is
-    /// worse than leaving it.
-    /// </summary>
-    private void OnWindowClosing(object? sender, CancelEventArgs e)
-    {
-        if (!_wired || _quitting)
-        {
-            return;
-        }
-        if (CloseInterceptPolicy.ShouldHide(_profile.CloseBehavior, _tray.IsLive))
-        {
-            e.Cancel = true;
-            Hide();
-        }
-    }
+    private void OnWindowClosing(object? sender, CancelEventArgs e) => _lifecycle.OnWindowClosing(e);
 
-    /// <summary>
-    /// The minimize intercept (ADR-0018, M2): a minimize hides to the tray
-    /// under the same policy as a close, so the window never lingers as a
-    /// minimized taskbar entry the user would have to restore. Two vetoes
-    /// keep the hide from swallowing the app: a disabled owner is behind a
-    /// modal dialog (WPF disables the owner for ShowDialog), and a system-
-    /// wide minimize (Win+D) with the dialog open would hide the owner and
-    /// cascade the hide to the dialog, so the app disappears mid-dialog;
-    /// the _quitting mirror of the close intercept keeps a state change
-    /// mid-quit from hiding (harmless today, a future trap otherwise).
-    /// </summary>
-    private void OnWindowStateChanged(object? sender, EventArgs e)
-    {
-        // The autostart minimize (ADR-0019) is deliberate, not a user
-        // minimize: the one-shot latch vetoes the hide for the startup state
-        // change only, and it is cleared here before the other guards (the
-        // explicit clear in the ctor covers the no-event path), so the first
-        // real user minimize still intercepts.
-        if (_startupMinimizeLatch)
-        {
-            _startupMinimizeLatch = false;
-            return;
-        }
-        if (!_wired || _quitting || !IsEnabled || WindowState != WindowState.Minimized)
-        {
-            return;
-        }
-        if (CloseInterceptPolicy.ShouldHide(_profile.CloseBehavior, _tray.IsLive))
-        {
-            Hide();
-        }
-    }
+    private void OnWindowStateChanged(object? sender, EventArgs e) => _lifecycle.OnWindowStateChanged();
 
-    /// <summary>
-    /// The session-end standby (ADR-0018): the production caller is the
-    /// App's SessionEnding event (wired by the CloseIntercept step). A
-    /// system shutdown or logoff kills the process mid-frame-stream, and
-    /// this is the one chance to run the display's standby ritual before
-    /// the process dies. Routes through the injectable seam (the test
-    /// probe) or the engine's real non-disposing seam, and returns the
-    /// truthful verdict.
-    /// </summary>
-    internal bool RunSessionEndStandby()
-        => _sessionEndStandby is { } probe ? probe() : _usbDevice.TryGoToStandby();
+    internal bool RunSessionEndStandby() => _lifecycle.RunSessionEndStandby();
 
     /// <summary>
     /// Opens the settings hub (ADR-0018): the close-behavior radios read the
@@ -1323,78 +1314,17 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         new Dialogs.SettingsDialog(this, _themeApplicator, this).ShowDialog();
     }
 
-    /// <summary>
-    /// The close-behavior write-through from the settings hub (ADR-0018):
-    /// the radio's check is the change, so the profile is committed and
-    /// marked dirty in place - no Apply step to forget. The canvas is
-    /// untouched (the setting is not a page/widget mutation), so no
-    /// mutation-shape refresh runs.
-    /// </summary>
-    private void CommitCloseBehavior(string value)
-    {
-        _profile.CloseBehavior = value;
-        _profilePersistence.MarkDirty();
-    }
+    // The settings hub's write-throughs (ADR-0018/0019) forward to the commit
+    // module, which owns the read-mutate-save-log shape and the hotkey re-run.
+    private void CommitCloseBehavior(string value) => _settingsCommits.CommitCloseBehavior(value);
 
-    /// <summary>
-    /// The Start-with-Windows write-through from the settings hub (ADR-0019):
-    /// the checkbox's check is the change, so the Run entry is written or
-    /// deleted in place - no Apply step to forget, and the profile is
-    /// untouched (the entry is deliberately outside it, so an imported
-    /// profile cannot overwrite it). The command line points at the
-    /// currently running exe with the --startup flag; an unresolvable exe
-    /// path is a refusal log line, never a throw into the dialog.
-    /// </summary>
-    private void CommitAutostart(bool enabled)
-    {
-        if (!enabled)
-        {
-            AutostartStore.SetCommandLine(null);
-            _startupLog.Write("Run entry removed (Start with Windows off)");
-            return;
-        }
-        string? exePath = Environment.ProcessPath;
-        if (exePath is null)
-        {
-            _startupLog.Write("Run entry not written: the running exe path could not be resolved");
-            return;
-        }
-        string commandLine = AutostartPolicy.BuildCommandLine(exePath);
-        AutostartStore.SetCommandLine(commandLine);
-        _startupLog.Write(() => $"Run entry written ({commandLine})");
-    }
+    private void CommitAutostart(bool enabled) => _settingsCommits.CommitAutostart(enabled);
 
-    /// <summary>
-    /// The kill-switch write-through from the settings hub (ADR-0019): the
-    /// checkbox's check is the change, so the machine-local setting commits
-    /// in place (the profile is untouched - the switch lives beside it) and
-    /// the idempotent registration pass re-runs: a tripped switch vetoes
-    /// every registration, a released one re-registers the profile's
-    /// chords.
-    /// </summary>
-    private void CommitKillSwitch(bool killSwitch)
-    {
-        _appSettings = _appSettings with { KillSwitch = killSwitch };
-        _appSettingsStore.Save(_appSettings);
-        _hotkeyLog.Write(() => killSwitch
-            ? "Kill switch tripped: global hotkeys unregistered, AHK spawning disabled"
-            : "Kill switch released: re-registering the profile's global hotkeys");
-        RefreshGlobalHotkeys();
-    }
+    private void CommitKillSwitch(bool killSwitch) => _settingsCommits.CommitKillSwitch(killSwitch);
 
-    /// <summary>
-    /// The AHK interpreter write-through from the settings hub (ADR-0019):
-    /// the machine-local path commits in place (the Run AHK Script action
-    /// resolves it at spawn time) and the registration pass re-runs (the
-    /// interpreter path is one of the documented triggers, so the pass is
-    /// idempotently safe).
-    /// </summary>
-    private void CommitAhkInterpreter(string path)
-    {
-        _appSettings = _appSettings with { AhkInterpreterPath = path.Trim() };
-        _appSettingsStore.Save(_appSettings);
-        RefreshGlobalHotkeys();
-    }
+    private void CommitAhkInterpreter(string path) => _settingsCommits.CommitAhkInterpreter(path);
+
+    private void CommitMinimizeToTrayOnStartup(bool enabled) => _settingsCommits.CommitMinimizeToTrayOnStartup(enabled);
 
     /// <summary>
     /// The AHK interpreter Browse from the settings hub: the window owns
@@ -1426,7 +1356,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         AutostartStore.TryGetCommandLine() is not null,
         _appSettings.KillSwitch,
         _appSettings.AhkInterpreterPath,
-        _profile.ActivePage.BackgroundHexColor);
+        _profile.ActivePage.BackgroundHexColor,
+        _appSettings.MinimizeToTrayOnStartup);
 
     void ISettingsHubHost.CommitCloseBehavior(string value) => CommitCloseBehavior(value);
 
@@ -1443,6 +1374,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     void ISettingsHubHost.ImportProfile() => ImportProfile();
 
     void ISettingsHubHost.CommitPageBackground(string hex) => CommitPageBackground(hex);
+
+    void ISettingsHubHost.CommitMinimizeToTrayOnStartup(bool enabled) => CommitMinimizeToTrayOnStartup(enabled);
 
     private static void Log(string msg) => FileLog.Write(msg);
 }

@@ -428,6 +428,10 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// <summary>Fires the configured action - the same entry point as a touch-up.</summary>
     void IGlobalHotkeyProvider.FireGlobalHotkey() => _ = ExecuteActionsAsync();
 
+    /// <summary>Only the chord property changes the registered hotkey; every other property write leaves the OS registration untouched.</summary>
+    bool IGlobalHotkeyProvider.AffectsGlobalHotkey(string propertyName)
+        => string.Equals(propertyName, nameof(GlobalHotkey), StringComparison.Ordinal);
+
 
     /// <summary>Cancels any in-flight action and disposes the hoisted paints and the action gate.</summary>
     public override async ValueTask DisposeAsync()

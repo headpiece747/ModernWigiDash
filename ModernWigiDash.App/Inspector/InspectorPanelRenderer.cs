@@ -442,14 +442,14 @@ internal static class InspectorPanelRenderer
         box.PreviewKeyDown += (_, e) =>
         {
             if (!model.IsCapturing) return;
-            Key key = ResolvePressKey(e.Key, e.SystemKey);
+            Key key = KeyCaptureModel.ResolvePressKey(e.Key, e.SystemKey);
             if (key == Key.Escape)
             {
                 e.Handled = true;
                 model.CancelCapture();
                 return;
             }
-            string? name = ChordKeyName(key);
+            string? name = KeyCaptureModel.ChordKeyName(key);
             if (name is null)
             {
                 // A symbol, modifier, or numpad press: swallowed (the
@@ -475,33 +475,6 @@ internal static class InspectorPanelRenderer
         row.Children.Add(box);
         return (row, model);
     }
-
-    /// <summary>
-    /// The capture's press-key resolution: Alt (and Win) combo presses
-    /// arrive as <c>Key.System</c> carrying the real key in the event's
-    /// system key, so the press routes to that key when the primary is
-    /// System (without the resolution an Alt chord is unrecordable, the
-    /// System key mapping to no name); every other primary key passes
-    /// through untouched.
-    /// </summary>
-    internal static Key ResolvePressKey(Key key, Key systemKey) =>
-        key == Key.System ? systemKey : key;
-
-    /// <summary>
-    /// The capture's key-name mapping: the chord vocabulary's main keys only
-    /// (letters, digits, F1-F24) map to a name; everything else (a symbol,
-    /// a modifier, a numpad key) is null, so the capture cannot record a
-    /// chord the vocabulary would refuse or that would spell one key while
-    /// registering another (the numpad digits share the number row's names
-    /// but carry distinct virtual keys).
-    /// </summary>
-    internal static string? ChordKeyName(Key key) => key switch
-    {
-        >= Key.A and <= Key.Z => ((char)('A' + (key - Key.A))).ToString(),
-        >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
-        >= Key.F1 and <= Key.F24 => key.ToString(),
-        _ => null
-    };
 
     /// <summary>
     /// The search-as-you-type Location editor: a TextBox with a results popup,

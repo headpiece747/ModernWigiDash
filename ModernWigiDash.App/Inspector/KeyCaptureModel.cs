@@ -1,3 +1,5 @@
+using System.Windows.Input;
+
 namespace ModernWigiDash.App.Inspector;
 
 /// <summary>
@@ -96,4 +98,29 @@ internal sealed class KeyCaptureModel(string chord = "")
         "Shift", "LShift", "RShift",
         "Win", "LWin", "RWin"
     ];
+
+    /// <summary>
+    /// Resolves the pressed key: a System press routes to the event's system
+    /// key (the real key held alongside AltGr/Win), every other primary passes
+    /// through untouched. Display-free: the WPF mapper drives this from the
+    /// key event's operands.
+    /// </summary>
+    internal static Key ResolvePressKey(Key key, Key systemKey) =>
+        key == Key.System ? systemKey : key;
+
+    /// <summary>
+    /// The capture's key-name mapping: the chord vocabulary's main keys only
+    /// (letters, digits, F1-F24) map to a name; everything else (a symbol,
+    /// a modifier, a numpad key) is null, so the capture cannot record a
+    /// chord the vocabulary would refuse or that would spell one key while
+    /// registering another (the numpad digits share the number row's names
+    /// but carry distinct virtual keys).
+    /// </summary>
+    internal static string? ChordKeyName(Key key) => key switch
+    {
+        >= Key.A and <= Key.Z => ((char)('A' + (key - Key.A))).ToString(),
+        >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
+        >= Key.F1 and <= Key.F24 => key.ToString(),
+        _ => null
+    };
 }

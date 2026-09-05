@@ -401,6 +401,22 @@ public class HotkeyButtonWidgetTests
     }
 
     [TestMethod]
+    public void AffectsGlobalHotkey_OnlyTheChordPropertyIsChordAffecting()
+    {
+        // The registration-trigger decision lives with the provider: only the
+        // chord property re-runs the OS pass, every other property write does not.
+        // This is what lets the host's commit owner stay free of widget names.
+        IGlobalHotkeyProvider provider = new HotkeyButtonWidget();
+
+        Assert.IsTrue(provider.AffectsGlobalHotkey(nameof(HotkeyButtonWidget.GlobalHotkey)),
+            "a GlobalHotkey write must report chord-affecting");
+        Assert.IsFalse(provider.AffectsGlobalHotkey(nameof(HotkeyButtonWidget.ButtonLabel)),
+            "a ButtonLabel write must not report chord-affecting");
+        Assert.IsFalse(provider.AffectsGlobalHotkey(nameof(HotkeyButtonWidget.ActionType)),
+            "an ActionType write must not report chord-affecting");
+    }
+
+    [TestMethod]
     public async Task FireGlobalHotkey_UsesTheSameFirePathAsATap()
     {
         var executor = new FakeExecutor();

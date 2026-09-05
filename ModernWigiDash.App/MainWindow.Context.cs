@@ -97,9 +97,11 @@ public partial class MainWindow
 
         // A global-hotkey chord edit is one of the registration triggers
         // (ADR-0019): re-run the idempotent pass so the OS state follows the
-        // edit. (A pre-profile window is a benign no-op - the pass guards on
-        // the handle, which exists only after Show.)
-        if (string.Equals(propertyName, nameof(HotkeyButtonWidget.GlobalHotkey), StringComparison.Ordinal))
+        // edit. The decision lives with the provider (only it knows which of
+        // its properties is the chord), so this commit owner stays free of
+        // per-widget property names. (A pre-profile window is a benign no-op -
+        // the pass guards on the handle, which exists only after Show.)
+        if (widget is IGlobalHotkeyProvider { } provider && provider.AffectsGlobalHotkey(propertyName))
             RefreshGlobalHotkeys();
     }
 

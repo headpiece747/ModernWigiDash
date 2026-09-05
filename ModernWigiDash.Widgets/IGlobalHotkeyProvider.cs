@@ -31,4 +31,15 @@ public interface IGlobalHotkeyProvider
     /// logging apply to both triggers.
     /// </summary>
     void FireGlobalHotkey();
+
+    /// <summary>
+    /// Whether writing the named property changes this widget's registered
+    /// global-hotkey chord (so the host should re-run its idempotent
+    /// registration pass). The decision lives with the provider because only
+    /// it knows which of its properties is the chord; the host's commit owner
+    /// stays free of per-widget property names. Default false: a provider that
+    /// does not override it has no chord-affecting property.
+    /// </summary>
+    /// <param name="propertyName">The property being committed.</param>
+    bool AffectsGlobalHotkey(string propertyName) => false;
 }

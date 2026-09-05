@@ -36,15 +36,15 @@ public class KeyCaptureEditorTests
     [TestMethod]
     public void ChordKeyName_LettersDigitsAndFunctionKeys_MapToChordNames()
     {
-        Assert.AreEqual("A", InspectorPanelRenderer.ChordKeyName(Key.A));
-        Assert.AreEqual("M", InspectorPanelRenderer.ChordKeyName(Key.M));
-        Assert.AreEqual("Z", InspectorPanelRenderer.ChordKeyName(Key.Z));
-        Assert.AreEqual("0", InspectorPanelRenderer.ChordKeyName(Key.D0));
-        Assert.AreEqual("7", InspectorPanelRenderer.ChordKeyName(Key.D7));
-        Assert.AreEqual("9", InspectorPanelRenderer.ChordKeyName(Key.D9));
-        Assert.AreEqual("F1", InspectorPanelRenderer.ChordKeyName(Key.F1));
-        Assert.AreEqual("F12", InspectorPanelRenderer.ChordKeyName(Key.F12));
-        Assert.AreEqual("F24", InspectorPanelRenderer.ChordKeyName(Key.F24));
+        Assert.AreEqual("A", KeyCaptureModel.ChordKeyName(Key.A));
+        Assert.AreEqual("M", KeyCaptureModel.ChordKeyName(Key.M));
+        Assert.AreEqual("Z", KeyCaptureModel.ChordKeyName(Key.Z));
+        Assert.AreEqual("0", KeyCaptureModel.ChordKeyName(Key.D0));
+        Assert.AreEqual("7", KeyCaptureModel.ChordKeyName(Key.D7));
+        Assert.AreEqual("9", KeyCaptureModel.ChordKeyName(Key.D9));
+        Assert.AreEqual("F1", KeyCaptureModel.ChordKeyName(Key.F1));
+        Assert.AreEqual("F12", KeyCaptureModel.ChordKeyName(Key.F12));
+        Assert.AreEqual("F24", KeyCaptureModel.ChordKeyName(Key.F24));
     }
 
     [TestMethod]
@@ -54,16 +54,16 @@ public class KeyCaptureEditorTests
         // virtual keys: mapping them would compose a chord that spells one
         // key while registering another.
         foreach (Key numpad in new[] { Key.NumPad0, Key.NumPad5, Key.NumPad9 })
-            Assert.IsNull(InspectorPanelRenderer.ChordKeyName(numpad), $"{numpad} must map to null");
+            Assert.IsNull(KeyCaptureModel.ChordKeyName(numpad), $"{numpad} must map to null");
     }
 
     [TestMethod]
     public void ChordKeyName_ModifiersSymbolsAndTheSystemKey_MapToNull()
     {
         foreach (Key modifier in new[] { Key.LeftShift, Key.LeftCtrl, Key.LeftAlt, Key.LWin, Key.RWin, Key.CapsLock, Key.NumLock, Key.Scroll })
-            Assert.IsNull(InspectorPanelRenderer.ChordKeyName(modifier), $"{modifier} must map to null");
+            Assert.IsNull(KeyCaptureModel.ChordKeyName(modifier), $"{modifier} must map to null");
         foreach (Key other in new[] { Key.OemSemicolon, Key.OemPlus, Key.OemMinus, Key.Space, Key.Enter, Key.Tab, Key.None, Key.System, Key.Escape })
-            Assert.IsNull(InspectorPanelRenderer.ChordKeyName(other), $"{other} must map to null");
+            Assert.IsNull(KeyCaptureModel.ChordKeyName(other), $"{other} must map to null");
     }
 
     // --- The editor glue, driven on a live STA window ---
@@ -122,12 +122,12 @@ public class KeyCaptureEditorTests
         // Alt chord is unrecordable (the System key maps to no name).
         // The press's Key/SystemKey pair is read-only in WPF (no public
         // synthesis), so the policy is pinned pure against its inputs.
-        Assert.AreEqual(Key.C, InspectorPanelRenderer.ResolvePressKey(Key.System, Key.C));
-        Assert.AreEqual(Key.F1, InspectorPanelRenderer.ResolvePressKey(Key.System, Key.F1));
+        Assert.AreEqual(Key.C, KeyCaptureModel.ResolvePressKey(Key.System, Key.C));
+        Assert.AreEqual(Key.F1, KeyCaptureModel.ResolvePressKey(Key.System, Key.F1));
         // A non-System primary passes through untouched: the system key
         // is the alternate source only.
-        Assert.AreEqual(Key.C, InspectorPanelRenderer.ResolvePressKey(Key.C, Key.System));
-        Assert.AreEqual(Key.None, InspectorPanelRenderer.ResolvePressKey(Key.System, Key.None));
+        Assert.AreEqual(Key.C, KeyCaptureModel.ResolvePressKey(Key.C, Key.System));
+        Assert.AreEqual(Key.None, KeyCaptureModel.ResolvePressKey(Key.System, Key.None));
     }
 
     [TestMethod]
