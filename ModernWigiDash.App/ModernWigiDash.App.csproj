@@ -55,14 +55,21 @@
   </PropertyGroup>
 
   <!-- Memory-conservation runtime tuning (works identically on small and large
-       RAM machines):
-       - HighMemoryPercent=30: GC compacts and returns memory once load passes
-         30% of physical RAM (default 90% means it never does on big machines).
-       - RegionSize=1MB: .NET 10 regions sized for this app's small heap,
-         cutting GC bookkeeping and reserved virtual memory. -->
+        RAM machines):
+        - HighMemoryPercent=30: GC compacts and returns memory once load passes
+          30% of physical RAM (default 90% means it never does on big machines).
+        - RegionSize=1MB: .NET 10 regions sized for this app's small heap,
+          cutting GC bookkeeping and reserved virtual memory.
+        - ConserveMemory=5: keep the managed heap compact at the cost of more
+          frequent collections, and auto-compact the LOH when it fragments.
+          The steady-state heap is small (~32 MB) with a stable ~11 MB LOH
+          (frame pool + telemetry buffers), so a tighter heap beats a larger
+          one here; the extra collection activity is negligible at this
+          allocation rate. -->
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HighMemoryPercent" Value="30" />
     <RuntimeHostConfigurationOption Include="System.GC.RegionSize" Value="1048576" />
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
   </ItemGroup>
 
   <ItemGroup>
