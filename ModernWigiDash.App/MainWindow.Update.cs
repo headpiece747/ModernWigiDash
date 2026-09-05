@@ -43,7 +43,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[UPDATE] startup recovery failed: {ex.Message}");
+            _updateService.Log.Write($"startup recovery failed: {ex.Message}");
         }
 
         try
@@ -57,7 +57,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[UPDATE] check failed: {ex.Message}");
+            _updateService.Log.Write($"check failed: {ex.Message}");
         }
     }
 

@@ -11,6 +11,10 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal static class SymbolCatalog
 {
+    /// <summary>The price-feed config log (tag baked once): invalid-symbol
+    /// diagnostics that must be visible in the field, not Debug-only.</summary>
+    private static readonly ModernWigiDash.Sdk.DiagLog Log = new("PRICE-FEED", 1);
+
     /// <summary>Canonical base coin for a crypto alias plus its CoinGecko API id.</summary>
     internal sealed record CryptoAlias(string Symbol, string CoinGeckoId);
 
@@ -154,7 +158,7 @@ internal static class SymbolCatalog
         // null spelling for diagnosis but routes through the ONE sanitization
         // rule (flatten + bound) so this line can never drift from the rest of
         // the price-feed logging.
-        FileLog.Write($"[PRICE-FEED] Skipping invalid feed symbol '{LogSanitizer.Sanitize(symbol ?? "<null>")}'");
+        Log.Write(() => $"Skipping invalid feed symbol '{LogSanitizer.Sanitize(symbol ?? "<null>")}'");
     }
 
     internal static bool IsCrypto(string symbol) => KnownCryptos.Contains(symbol);

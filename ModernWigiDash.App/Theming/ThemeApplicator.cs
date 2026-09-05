@@ -22,6 +22,9 @@ internal sealed class ThemeApplicator
     /// resources; null until the first application.</summary>
     private string? _appliedFingerprint;
 
+    /// <summary>The theme-category log (tag baked once).</summary>
+    private readonly ModernWigiDash.Sdk.DiagLog _log = new("THEME", 1);
+
     /// <summary>
     /// Applies the current theme to <paramref name="window"/>. The app
     /// resources and the preview shadow are re-applied only when the theme
@@ -44,7 +47,7 @@ internal sealed class ThemeApplicator
         if (themeChanged)
         {
             var t = ThemeSettings.Theme;
-            FileLog.Write($"[THEME] Applied: TitleBar={t.TitleBar} AccentRed={t.AccentRed}");
+            _log.Write($"Applied: TitleBar={t.TitleBar} AccentRed={t.AccentRed}");
         }
     }
 

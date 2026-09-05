@@ -162,7 +162,7 @@ public sealed class PriceFeedManager : IDisposable
         _finnhubKey = finnhubApiKey ?? Environment.GetEnvironmentVariable("FINNHUB_API_KEY") ?? "";
         if (string.IsNullOrEmpty(_finnhubKey))
         {
-            FileLog.Write("[PRICE-FEED] FINNHUB_API_KEY not configured — stock WebSocket/REST feeds disabled. Set the FINNHUB_API_KEY environment variable or pass the key to the constructor. Yahoo Finance fallback still works.");
+            _configLog.Write("FINNHUB_API_KEY not configured — stock WebSocket/REST feeds disabled. Set the FINNHUB_API_KEY environment variable or pass the key to the constructor. Yahoo Finance fallback still works.");
         }
         // Idempotent across instances that share a client (the static default).
         httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd("ModernWigiDash/2.0");
@@ -346,7 +346,7 @@ public sealed class PriceFeedManager : IDisposable
         {
             // Incremental subscribe is best-effort; the connect-time payload
             // covers the symbols known at that point.
-            FileLog.Write($"[PRICE-FEED] Incremental feed subscribe failed for {symbol}");
+            _failLog.Write(() => $"Incremental feed subscribe failed for {symbol}");
         }
     }
 
@@ -518,10 +518,13 @@ public sealed class PriceFeedManager : IDisposable
     }
 
     /// <summary>Diagnostic log with cadence dedup for the per-tick feed
-    /// failures — the module's runtime surface (configuration paths use
-    /// FileLog directly). Every Nth failure writes, so a dead feed is
-    /// diagnosable in the field without a per-tick log storm.</summary>
+    /// failures — the module's runtime surface. Every Nth failure writes, so a
+    /// dead feed is diagnosable in the field without a per-tick log storm.</summary>
     private readonly DiagLog _failLog = new("PRICE-FEED", 20, logFirst: true);
+
+    /// <summary>The configuration-path log (tag baked once, cadence 1): the
+    /// one-shot setup warnings that are not per-tick failures.</summary>
+    private readonly DiagLog _configLog = new("PRICE-FEED", 1);
 
     private FeedLoop CreateBinanceLoop() => new(
         new Uri("wss://stream.binance.us:9443/ws"),

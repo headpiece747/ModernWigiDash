@@ -27,6 +27,7 @@ internal sealed class InspectorController
     private readonly IModernWigiDashContext _context;
     private readonly Action? _onProfileChanged;
     private readonly Action<GeocodeCandidate>? _commitLocationPick;
+    private readonly ModernWigiDash.Sdk.DiagLog _log = new("INSPECTOR", 1);
     private bool _isUpdatingInspector = false;
 
     /// <param name="transform">The window's transform-face bindings (the six
@@ -70,7 +71,7 @@ internal sealed class InspectorController
         // The policy's default warning sink is Debug.WriteLine; the controller
         // routes warnings into the shared file log so conversion failures
         // surface in the field, not only in a debugger.
-        _policy.LogWarning = msg => FileLog.Write("[INSPECTOR] " + msg);
+        _policy.LogWarning = msg => _log.Write(msg);
     }
 
     /// <summary>Rebuilds the panel for the currently selected widget (or the empty state).</summary>

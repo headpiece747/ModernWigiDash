@@ -31,6 +31,7 @@ internal sealed class UpdateService
     private readonly Func<ProcessStartInfo, Process?> _startProcess;
     private readonly string _updatesRoot;
     private readonly Version? _currentVersion;
+    private readonly ModernWigiDash.Sdk.DiagLog _log;
 
     public UpdateService(
         Func<string, string?, Task<string?>>? downloadText = null,
@@ -38,7 +39,8 @@ internal sealed class UpdateService
         Func<string, string, bool>? sha256Matches = null,
         Func<ProcessStartInfo, Process?>? startProcess = null,
         string? updatesRoot = null,
-        Version? currentVersion = null)
+        Version? currentVersion = null,
+        ModernWigiDash.Sdk.DiagLog? log = null)
     {
         _updatesRoot = updatesRoot ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -50,7 +52,13 @@ internal sealed class UpdateService
         _sha256Matches = sha256Matches ?? DigestMatches;
         _startProcess = startProcess ?? StartProcess;
         _currentVersion = currentVersion;
+        _log = log ?? new ModernWigiDash.Sdk.DiagLog("UPDATE", 1);
     }
+
+    /// <summary>The update-category log (tag baked once). Exposed so the
+    /// window's startup-check guards log through the same owner instead of
+    /// hand-baking the [UPDATE] prefix.</summary>
+    internal ModernWigiDash.Sdk.DiagLog Log => _log;
 
     // Compares the decoded raw digest bytes: Convert.FromHexString is
     // case-insensitive, so a digest in any case of the same value matches
@@ -117,7 +125,7 @@ internal sealed class UpdateService
             if (!_sha256Matches(actual, info.Sha256))
             {
                 TryDeleteDirectory(downloadDir);
-                FileLog.Write($"[UPDATE] download digest mismatch for v{info.Version}; download deleted");
+                _log.Write($"download digest mismatch for v{info.Version}; download deleted");
                 return false;
             }
 
@@ -128,7 +136,7 @@ internal sealed class UpdateService
         catch (Exception ex)
         {
             TryDeleteDirectory(downloadDir);
-            FileLog.Write($"[UPDATE] download/stage failed for v{info.Version}: {ex.Message}");
+            _log.Write($"download/stage failed for v{info.Version}: {ex.Message}");
             return false;
         }
     }
@@ -187,12 +195,12 @@ internal sealed class UpdateService
             if (!File.Exists(hashPath)
                 || !DigestMatches(ComputeSha256(stagedCmd), File.ReadAllText(hashPath).Trim()))
             {
-                FileLog.Write("[UPDATE] staged cmd failed the integrity check (missing or mismatched sha256 stamp); launch refused");
+                _log.Write("staged cmd failed the integrity check (missing or mismatched sha256 stamp); launch refused");
                 return false;
             }
             string substituted = body.Replace("{{RELAUNCH}}", relaunch);
             if (substituted.Length == body.Length)
-                FileLog.Write("[UPDATE] relaunch marker missing in staged cmd; the updater will not relaunch the app");
+                _log.Write("relaunch marker missing in staged cmd; the updater will not relaunch the app");
             string liveCmd = Path.Combine(_updatesRoot, "apply-update-live.cmd");
             File.WriteAllText(liveCmd, substituted);
 
@@ -212,7 +220,7 @@ internal sealed class UpdateService
         }
         catch (Exception ex)
         {
-            FileLog.Write($"[UPDATE] launch failed: {ex.Message}");
+            _log.Write($"launch failed: {ex.Message}");
             return false;
         }
     }
