@@ -44,4 +44,23 @@ jobs:
           $version = $tag.TrimStart("v")
           # Both artifacts are load-bearing: the full bundle is the fresh
           # install, the app-only zip is the in-app updater's payload.
-          gh release create $tag "ModernWigiDash-v$version-win-x64.zip" "ModernWigiDash-v$version-app-only.zip" --generate-notes
+          $fullZip = "ModernWigiDash-v$version-win-x64.zip"
+          $slimZip = "ModernWigiDash-v$version-app-only.zip"
+          # Idempotent publish: a release may already exist (created by hand,
+          # or by an earlier trigger of this same tag). gh release create fails
+          # on an existing tag, which turned a re-trigger into a false-failure
+          # (the v0.6.9 run). So check first: when the release exists, delete
+          # the release object (keeping the tag, so the tag can be re-pushed)
+          # and upload the freshly built zips; only create the release when it
+          # is absent. Deleting then uploading replaces stale assets rather
+          # than appending duplicates.
+          $existing = $null
+          try { $existing = gh release view $tag --json tagName -q .tagName 2>$null } catch { $existing = $null }
+          if ($existing) {
+            Write-Host "Release $tag already exists; updating its assets in place."
+            gh release delete $tag
+            gh release upload $tag $fullZip $slimZip --clobber
+          } else {
+            Write-Host "Creating release $tag."
+            gh release create $tag $fullZip $slimZip --generate-notes
+          }
