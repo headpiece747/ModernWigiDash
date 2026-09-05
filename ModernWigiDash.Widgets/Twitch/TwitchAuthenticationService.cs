@@ -285,8 +285,8 @@ internal sealed class TwitchSession
         public static RefreshVerdict Rotated(TwitchTokenSet token, TwitchTokenValidation validation)
             => new RotatedToken(token, validation);
 
-        public static RefreshVerdict Rejected(int status)
-            => new RejectedRefresh(status);
+        public static RefreshVerdict Rejected()
+            => new RejectedRefresh();
     }
 
     /// <summary>The rotated token: the refresh token was spent, the rotated
@@ -295,7 +295,7 @@ internal sealed class TwitchSession
 
     /// <summary>The rejection: Twitch refused the refresh token (400/401) —
     /// the session is void and the caller clears through its strategy.</summary>
-    private sealed record RejectedRefresh(int Status) : RefreshVerdict;
+    private sealed record RejectedRefresh() : RefreshVerdict;
 
     /// <summary>
     /// Produces the one refresh verdict: spend the refresh token (Twitch
@@ -324,7 +324,7 @@ internal sealed class TwitchSession
         catch (TwitchApiException ex) when (ex.StatusCode is 400 or 401)
         {
             context.LogError($"Twitch token refresh rejected (HTTP {ex.StatusCode}): {ex.Message}");
-            return RefreshVerdict.Rejected(ex.StatusCode);
+            return RefreshVerdict.Rejected();
         }
         return RefreshVerdict.Rotated(StampFromValidation(refreshed, validation, source.ClientId), validation);
     }
