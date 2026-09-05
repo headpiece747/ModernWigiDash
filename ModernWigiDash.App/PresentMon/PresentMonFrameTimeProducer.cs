@@ -95,7 +95,8 @@ internal sealed class PresentMonFrameTimeProducer : IDisposable
         {
             // Desktop/own-window idle must never count toward a dead capture —
             // the grace window belongs to a specific target, not to the gaps
-            // between targets.
+            // between targets. Returned before the trust decision: Decide reads
+            // candidates[0] on adoption, so an empty set must not reach it.
             _emptyDataPolls = 0;
             return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.NoCandidates);
         }
@@ -103,7 +104,8 @@ internal sealed class PresentMonFrameTimeProducer : IDisposable
         // Target-trust decision (the policy owns the settling window, the
         // adoption, and the frozen-data guard — see TargetTrustPolicy).
         // TrackOnly carries the ordering contract: apply tracking, never poll.
-        if (_trust.Decide(candidates) == TargetVerdict.TrackOnly)
+        TargetVerdict trustVerdict = _trust.Decide(candidates);
+        if (trustVerdict == TargetVerdict.TrackOnly)
         {
             TrackOnly(candidates);
             return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.Settling);
@@ -125,62 +127,61 @@ internal sealed class PresentMonFrameTimeProducer : IDisposable
             return Result(FrameTimeSnapshotFactory.Unavailable("PresentMon Service connection lost; reconnecting.", now), FrameTimeDiagOutcome.SessionLost);
         }
 
-        if (outcome.Sample is not null)
+        // The after-poll frozen-data guard mutates the trust policy, so it is
+        // applied here (before the facts are handed in) rather than inside the
+        // pure decision.
+        bool frozenHold = outcome.Sample is not null && _trust.IsFrozenSample(outcome.Sample);
+
+        var decision = FrameTimePollDecision.Decide(new FrameTimePollDecision.PollFacts(
+            Sample: outcome.Sample,
+            FrozenHold: frozenHold,
+            AnyTracked: outcome.AnyTracked,
+            EmptyDataStreak: _emptyDataPolls));
+
+        ApplyStreak(decision);
+        return Result(BuildSnapshot(decision, outcome, now), decision.Outcome);
+    }
+
+    /// <summary>Applies the decision's empty-data-streak update: reset to zero,
+    /// or increment toward the capture-dead threshold.</summary>
+    private void ApplyStreak(FrameTimePollDecision.Decision decision)
+    {
+        if (decision.ResetStreak)
         {
-            if (outcome.Sample.DisplayedFps <= 0)
-            {
-                // The target presents but nothing of it reaches the display — a
-                // backgrounded/minimized fullscreen game that keeps rendering.
-                // PresentMon's DISPLAYED_FPS is the "is it actually on screen"
-                // signal: the widget must read the idle zero state ("nothing to
-                // display"), never the hidden present rate. The capture is
-                // healthy — never a dead-capture count.
-                _emptyDataPolls = 0;
-                return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.NotDisplayed);
-            }
-
-            if (_trust.IsFrozenSample(outcome.Sample))
-            {
-                // Still the departed target's frozen data — the new target has
-                // not presented yet. Keep the zero state; the guard clears on
-                // the first differing sample.
-                _emptyDataPolls = 0;
-                return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.FrozenHold);
-            }
-
             _emptyDataPolls = 0;
-            _trust.NoteLive(outcome.ProcessId, outcome.Sample);
-            AppendFrameTimes(_native.DrainFrameTimes(outcome.ProcessId));
-            return Result(FrameTimeSnapshotFactory.Live(
-                outcome.ProcessId,
-                _processNameProvider(outcome.ProcessId) ?? string.Empty,
-                outcome.Sample,
-                _recentFrameTimes,
-                now), FrameTimeDiagOutcome.Live);
         }
-
-        if (!outcome.AnyTracked)
+        else if (decision.IncrementStreak)
         {
-            // Every candidate's track attempt was rejected — nothing is being
-            // watched this poll. That is an idle-style outcome: a healthy
-            // service that refuses tracking must never surface "capture
-            // inactive". It neither counts toward a dead capture nor preserves
-            // a partially spent grace window — the tracked-empty streak broke.
-            _emptyDataPolls = 0;
-            return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.Idle);
+            _emptyDataPolls++;
         }
+    }
 
-        // At least one candidate tracked successfully but no present data
-        // arrived this poll. The session is up and a target exists, so after a
-        // grace period this means the service's ETW capture is not producing
-        // present events — surface it instead of silently presenting
-        // fabricated values as real FPS.
-        if (++_emptyDataPolls >= CaptureHealthGracePolls)
+    /// <summary>Builds the snapshot DTO from the decision's kind, routing
+    /// through <see cref="FrameTimeSnapshotFactory"/>. The live arm also records
+    /// the trusted target and drains the frame times (side effects the pure
+    /// decision cannot own). Unavailability is handled by the producer's early
+    /// returns, so only the post-poll kinds reach here.</summary>
+    private FrameTimeSnapshotDto BuildSnapshot(
+        FrameTimePollDecision.Decision decision,
+        PollOutcome outcome,
+        DateTime now)
+    {
+        switch (decision.Snapshot)
         {
-            return Result(FrameTimeSnapshotFactory.CaptureDead(now), FrameTimeDiagOutcome.CaptureDead);
+            case FrameTimePollDecision.SnapshotKind.Live:
+                _trust.NoteLive(outcome.ProcessId, outcome.Sample!);
+                AppendFrameTimes(_native.DrainFrameTimes(outcome.ProcessId));
+                return FrameTimeSnapshotFactory.Live(
+                    outcome.ProcessId,
+                    _processNameProvider(outcome.ProcessId) ?? string.Empty,
+                    outcome.Sample!,
+                    _recentFrameTimes,
+                    now);
+            case FrameTimePollDecision.SnapshotKind.CaptureDead:
+                return FrameTimeSnapshotFactory.CaptureDead(now);
+            default:
+                return FrameTimeSnapshotFactory.Idle(now);
         }
-
-        return Result(FrameTimeSnapshotFactory.Idle(now), FrameTimeDiagOutcome.Idle);
     }
 
     /// <summary>Records the outcome on the diagnostics and returns the DTO —
