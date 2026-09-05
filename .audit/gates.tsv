@@ -207,3 +207,6 @@
 2026-09-05T18:55:28Z	b9f0be5	manual	ok	0	0	ok	2079	0	ok
 2026-09-05T19:05:10Z	72ff69f	manual	ok	0	0	ok	2079	0	ok
 2026-09-05T19:06:11Z	a5fa3e2	manual	ok	0	0	ok	2079	0	ok
+2026-09-05T19:09:16Z	b304898	manual	ok	0	0	ok	2086	0	ok
+2026-09-05T19:11:03Z	6cb30e1	manual	ok	0	0	FAIL	2085	1	SKIP
+2026-09-05T19:12:40Z	6cb30e1	manual	ok	0	0	ok	2086	0	ok
