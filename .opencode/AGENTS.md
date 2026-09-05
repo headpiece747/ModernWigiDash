@@ -37,8 +37,17 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   `scripts/gate-guard.ps1` (testable via `-GatesFile`); the hook then runs
   `scripts/scan-staged-cr.ps1`, which refuses a commit when a staged text file
   carries a lone CR (the git `text=auto` binary-classification trap). Escape per
-  invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
-  CR scan still runs).
+   invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
+   CR scan still runs).
+- Commit messages from the agent shell: write the message to a temp file with
+  `Set-Content -Encoding ascii` (or `utf8NoBOM`) and commit with
+  `git commit -F <file>`. Do NOT use `-Encoding UTF8`: Windows PowerShell 5.1
+  writes a BOM (U+FEFF) that lands in the stored subject, and do NOT pipe a
+  here-string through `git commit -F -` (the agent shell can drop the body,
+  leaving an empty commit). After committing, verify the subject is clean
+  ASCII (`git log -1 --format=%s | ForEach-Object { [int][char]$_[0] }` must be
+  < 128); a BOM-prefixed subject shows first-char code 65279/8745. The lone-CR
+  guard covers line endings but not a leading BOM, so this check is the catch.
 - Branch review: incoming PRs and feature branches go through the
   `code-reviewer` agent backed by `.opencode/rules/dotnet-rules.md`. The agent
   covers the judgment layer the pins cannot see: is an allow-list reason true,
