@@ -4,6 +4,31 @@
 **Scope:** `ModernWigiDash.Hardware/Transport/`, `ModernWigiDash.Core/Rendering/` (SkiaFrameCompositor + companions), `ModernWigiDash.App/FramePump.cs` + the MainWindow tick wiring.
 **Question:** where does debt compound fastest, and what is the cheapest next move at each hot spot?
 
+## Resolution status (2026-09-04)
+
+This is a point-in-time snapshot; the findings below are frozen as written.
+Status of the triage items against the current source, verified 2026-09-04:
+
+| Item | Status |
+|------|--------|
+| T1 (USB lock contention) | **Done** — `_inFlightTransfers` Interlocked counter in `DisplayHidTransport`; steady-state `SendFrame`/`ReadTouch` go lock-free. The proposed contention pin landed (`DisplayHidTransportTests` drives a held bulk write through the `RecordingBackend` seam). |
+| T2 (encode on UI thread) | **Accepted-and-documented** — the bitmap-ring overlap was declined by ADR-0012 (revisit only when the measured write falls below ~2× cadence or the timing canary fails). The encode cost is pinned by `FrameEncoderPixelTests`'s timing canary. Re-checked 2026-08-27, no trigger fired. |
+| T3 (pump ticks at 30 FPS, device ceiling ~15-18 FPS) | **Accepted** — documented as the ADR-0012 decision. `FramePump.Tick` keeps its 30 FPS contract; repaint and badge still fire on a vetoed tick. |
+| T4 (edit-mode per-tick SKFont) | **Done** — `EditOverlay` hoists the 12px badge font through `FontHelper.GetCachedFont` and memoizes `badgeText` per `(Name, ZIndex)`. |
+| T5 (readiness predicate at wrong layer) | **Done** — `DisplayDeviceEngine.CanSendFrames` owns the predicate; the App bind site reads it. |
+| T6 (per-tick badge string) | **Done** — `UpdateUsbBadge` keys detection on the `ConnectionState` enum and builds the string only when it changes. |
+| T7 (per-frame GCHandle) | **Done** — `WinUsbBulkDevice.BulkWrite` uses `fixed (byte* pinned = data)` instead of `GCHandle.Alloc`. |
+| T8 (touch drain holds lock across gesture apply) | **Done** — `DrainDeviceTouchQueue` snapshots the burst under the lock, releases, then feeds (the comment marks "the old deliberate trade, retired"). |
+| T9 (Open handle cleanup on mid-open exception) | **Done** — `WinUsbBulkDevice.Open` closes `_deviceHandle` when `WinUsb_Initialize` fails. |
+| T10 (Sdk tests import Hardware encoder) | **Done** — `FrameDeliveryTests` uses the `FixedSizeEncoder` fake; the real-encoder pins moved to `FrameEncoderPixelTests`. |
+| T11 (surface narrowing) | **Mostly done** — `TryConnect` and `IsReady` are `internal`, no `IAsyncDisposable` on the seam, the send chain is `ReadOnlyMemory<byte>` end to end. `ITransferBackend.BulkWrite` still takes `byte[]` (the backend-level seam, not the delivery/engine chain). |
+| T12 (CONTEXT.md doc drift) | **Done** — CONTEXT.md's layering line corrected to "Hardware → Sdk". |
+
+Both proposed encoding pins landed: the tick-budget allocation pin
+(`FramePipelineAllocationTests`) and the touch-contention pin
+(`DisplayHidTransportTests`). No open engineering work remains from this
+triage; T2/T3 are accepted-and-documented under ADR-0012's triggers.
+
 ## Method
 
 1. **Churn measurement** (git, all history): the repo is 33 days old (first commit 2026-07-21, 494 commits, 492 of them in August), so all-time churn and recent churn are the same signal.
