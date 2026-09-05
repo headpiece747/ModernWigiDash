@@ -3,10 +3,10 @@ namespace ModernWigiDash.App;
 /// <summary>
 /// The settings hub's named host seam (App, the ADR-0008 image): the one
 /// contract between the <see cref="Dialogs.SettingsDialog"/> and the window
-/// that hosts it. The hub reads its five open-time seeds once from
+/// that hosts it. The hub reads its six open-time seeds once from
 /// <see cref="Seed"/> (the host's persisted state at open time) and routes
 /// every write-through and file flow through the commit members, so the
-/// dialog crosses one typed seam instead of a 13-argument positional delegate
+/// dialog crosses one typed seam instead of a 14-argument positional delegate
 /// bag, and the tests bind an in-memory fake host. The window is the
 /// production host; each commit member is the window's existing write-through
 /// seam (the control write is the change, there is no Apply step).
@@ -46,6 +46,10 @@ internal interface ISettingsHubHost
     void ImportProfile();
 
     /// <summary>The page-background write-through (the host writes the
-    /// active page's background and marks the profile dirty).</summary>
+    /// active page's background and marks it dirty).</summary>
     void CommitPageBackground(string hex);
+
+    /// <summary>The minimize-to-tray-on-startup write-through (the host
+    /// persists the machine-local setting; the next launch opens hidden).</summary>
+    void CommitMinimizeToTrayOnStartup(bool enabled);
 }

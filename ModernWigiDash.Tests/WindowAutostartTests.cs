@@ -90,6 +90,129 @@ public class WindowAutostartTests
         });
     }
 
+    [TestMethod]
+    public void MinimizeToTrayOnStartup_WithLiveTray_OpensHidden()
+    {
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        string settingsDir = Path.Combine(Path.GetTempPath(), "wmd-mtts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "app_settings.json");
+        File.WriteAllText(settingsPath, "{\"MinimizeToTrayOnStartup\":true}");
+        try
+        {
+            Host.Run<object?>(() =>
+            {
+                AppClass.StartMinimized = false;
+                var fake = new FakeTraySurface();
+                var store = new AppSettingsStore(settingsPath);
+                var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine(), AppSettingsStore: store));
+                try
+                {
+                    window.Show();
+                    window.UpdateLayout();
+                    // Pump the dispatcher so the Loaded handler (which calls Hide)
+                    // runs: the StartupUri window is shown by WPF after the ctor,
+                    // and the Loaded event fires on the first render pass.
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Loaded);
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                    Assert.IsFalse(window.IsVisible, "the minimize-to-tray-on-startup flag opens the window hidden behind the tray icon");
+                }
+                finally
+                {
+                    window.QuitClose();
+                }
+                return null;
+            });
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void MinimizeToTrayOnStartup_False_OpensNormally()
+    {
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        string settingsDir = Path.Combine(Path.GetTempPath(), "wmd-mtts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "app_settings.json");
+        File.WriteAllText(settingsPath, "{\"MinimizeToTrayOnStartup\":false}");
+        try
+        {
+            Host.Run<object?>(() =>
+            {
+                AppClass.StartMinimized = false;
+                var fake = new FakeTraySurface();
+                var store = new AppSettingsStore(settingsPath);
+                var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine(), AppSettingsStore: store));
+                try
+                {
+                    window.Show();
+                    window.UpdateLayout();
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                    Assert.IsTrue(window.IsVisible, "without the flag the window opens normally (visible)");
+                    Assert.AreEqual(WindowState.Normal, window.WindowState);
+                }
+                finally
+                {
+                    window.QuitClose();
+                }
+                return null;
+            });
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void MinimizeToTrayOnStartup_WithDeadTray_OpensNormally()
+    {
+        // The N1 guard: a hidden window with no live tray is unreachable, so
+        // the flag must NOT hide when the tray is dead. The ctor skips the
+        // Loaded handler entirely (the _tray.IsLive gate), so the window
+        // opens normally regardless of the flag.
+        string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
+        string settingsDir = Path.Combine(Path.GetTempPath(), "wmd-mtts-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(settingsDir);
+        string settingsPath = Path.Combine(settingsDir, "app_settings.json");
+        File.WriteAllText(settingsPath, "{\"MinimizeToTrayOnStartup\":true}");
+        try
+        {
+            Host.Run<object?>(() =>
+            {
+                AppClass.StartMinimized = false;
+                // A dead tray surface: IsLive is false before Start.
+                var deadTray = new FakeTraySurface(showBringsUp: false);
+                var store = new AppSettingsStore(settingsPath);
+                var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), deadTray, UsbEngine: FakeTransport.InertEngine(), AppSettingsStore: store));
+                try
+                {
+                    window.Show();
+                    window.UpdateLayout();
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Loaded);
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                    Assert.IsTrue(window.IsVisible, "with a dead tray the flag must not hide the window (the N1 guard: a hidden window with no tray is unreachable)");
+                    Assert.AreEqual(WindowState.Normal, window.WindowState);
+                }
+                finally
+                {
+                    window.QuitClose();
+                }
+                return null;
+            });
+        }
+        finally
+        {
+            Directory.Delete(settingsDir, recursive: true);
+        }
+    }
+
     /// <summary>Seeds a one-page profile with the given raw close-behavior
     /// value so the window's profile load picks it up the production way
     /// (the WindowCloseInterceptTests pattern).</summary>

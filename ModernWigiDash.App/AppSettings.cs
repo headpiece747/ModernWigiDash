@@ -26,6 +26,15 @@ internal sealed record AppSettings
     /// auto-detected).
     /// </summary>
     public string AhkInterpreterPath { get; init; } = "";
+
+    /// <summary>
+    /// Whether the app should minimize to the tray on startup (hidden, not
+    /// minimized): true means the window opens hidden behind the tray icon
+    /// (the display streams either way); false (the default) means the window
+    /// opens normally. Machine-local, deliberately outside the profile: an
+    /// imported profile can never change how this machine launches.
+    /// </summary>
+    public bool MinimizeToTrayOnStartup { get; init; }
 }
 
 /// <summary>
