@@ -42,7 +42,11 @@ public static class PriceFeedMessages
     /// <summary>
     /// Binance WS ticker: accepts both the nested <c>data</c> payload and the
     /// flat <c>e</c> shape; only USDT pairs parse. The coin is the symbol
-    /// minus the USDT suffix, upper-cased.
+    /// minus the USDT suffix, upper-cased. Parsed with a streaming reader over
+    /// the UTF-8 bytes so the per-message path allocates no DOM tree (the
+    /// high-frequency WebSocket leg): every root property is collected into one
+    /// small dictionary, then the fields are read from whichever shape is
+    /// present. Property order does not matter (a field may precede <c>e</c>).
     /// </summary>
     public static bool TryParseBinanceTicker(string json, out string coin, out decimal price, out decimal changePercent)
     {
@@ -51,28 +55,33 @@ public static class PriceFeedMessages
         changePercent = 0m;
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            string s, c, P;
-            if (root.TryGetProperty("data", out var data))
+            var props = ReadObjectProperties(json);
+            if (props is null)
             {
-                s = data.GetProperty("s").GetString() ?? "";
-                c = data.GetProperty("c").GetString() ?? "";
-                P = data.GetProperty("P").GetString() ?? "";
+                return false;
             }
-            else if (root.TryGetProperty("e", out _))
+
+            // Nested shape reads s/c/P from the "data" object; the flat shape
+            // reads them from the root. A message is one or the other.
+            Dictionary<string, object?>? source;
+            if (props.TryGetValue("data", out var dataObj) && dataObj is Dictionary<string, object?> nested)
             {
-                s = root.GetProperty("s").GetString() ?? "";
-                c = root.GetProperty("c").GetString() ?? "";
-                P = root.GetProperty("P").GetString() ?? "";
+                source = nested;
+            }
+            else if (props.ContainsKey("e"))
+            {
+                source = props;
             }
             else
             {
                 return false;
             }
 
-            if (!s.EndsWith("USDT", StringComparison.Ordinal)
+            string? s = source.GetValueOrDefault("s") as string;
+            string? c = source.GetValueOrDefault("c") as string;
+            string? P = source.GetValueOrDefault("P") as string;
+            if (s is null || !s.EndsWith("USDT", StringComparison.Ordinal)
+                || c is null || P is null
                 || !decimal.TryParse(c, NumberStyles.Any, CultureInfo.InvariantCulture, out price)
                 || !decimal.TryParse(P, NumberStyles.Any, CultureInfo.InvariantCulture, out changePercent))
             {
@@ -89,28 +98,115 @@ public static class PriceFeedMessages
     }
 
     /// <summary>
+    /// Streams a top-level JSON object into a property map without building a
+    /// DOM tree. Object-valued properties are themselves collected as nested
+    /// maps (one level deep, which is all the price payloads need); scalar
+    /// values are kept as strings. Returns null when the input is not a JSON
+    /// object. This is the allocation-light replacement for building a DOM
+    /// tree on the per-message hot path.
+    /// </summary>
+    private static Dictionary<string, object?>? ReadObjectProperties(string json)
+    {
+        ReadOnlySpan<byte> utf8 = System.Text.Encoding.UTF8.GetBytes(json);
+        var reader = new Utf8JsonReader(utf8);
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+            {
+                break;
+            }
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+            string name = reader.GetString()!;
+            reader.Read();
+            result[name] = reader.TokenType switch
+            {
+                JsonTokenType.StartObject => ReadNestedStringMap(ref reader),
+                _ => reader.GetString(),
+            };
+        }
+        return result;
+    }
+
+    /// <summary>Reads one nested object of string properties, skipping deeper nesting.</summary>
+    private static Dictionary<string, object?> ReadNestedStringMap(ref Utf8JsonReader reader)
+    {
+        var map = new Dictionary<string, object?>(StringComparer.Ordinal);
+        int depth = 1;
+        while (depth > 0 && reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                depth++;
+            }
+            else if (reader.TokenType == JsonTokenType.EndObject)
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    break;
+                }
+            }
+            else if (depth == 1 && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                string key = reader.GetString()!;
+                reader.Read();
+                map[key] = reader.TokenType == JsonTokenType.StartObject ? null : reader.GetString();
+            }
+        }
+        return map;
+    }
+
+    /// <summary>
     /// Finnhub WS <c>trade</c> message: the <c>data</c> array's symbol/price
-    /// pairs. Non-trade messages parse as empty.
+    /// pairs. Non-trade messages parse as empty. Parsed with a streaming reader
+    /// over the UTF-8 bytes so the per-message path allocates no DOM tree (the
+    /// high-frequency WebSocket leg).
     /// </summary>
     public static bool TryParseFinnhubTrades(string json, out IReadOnlyList<PriceFeedTrade> trades)
     {
         trades = [];
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (!string.Equals(root.GetProperty("type").GetString(), "trade", StringComparison.Ordinal) || !root.TryGetProperty("data", out var data))
+            ReadOnlySpan<byte> utf8 = System.Text.Encoding.UTF8.GetBytes(json);
+            var reader = new Utf8JsonReader(utf8);
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            {
+                return false;
+            }
+
+            string? type = null;
+            List<PriceFeedTrade>? parsed = null;
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName)
+                {
+                    string prop = reader.GetString()!;
+                    reader.Read();
+                    if (string.Equals(prop, "type", StringComparison.Ordinal))
+                    {
+                        type = reader.GetString();
+                    }
+                    else if (string.Equals(prop, "data", StringComparison.Ordinal) && reader.TokenType == JsonTokenType.StartArray)
+                    {
+                        parsed = ReadFinnhubTradesArray(ref reader);
+                    }
+                }
+            }
+
+            if (!string.Equals(type, "trade", StringComparison.Ordinal) || parsed is null)
             {
                 return true; // a well-formed non-trade message is not an error
             }
 
-            List<PriceFeedTrade> parsed = [];
-            foreach (var trade in data.EnumerateArray())
-            {
-                parsed.Add(new PriceFeedTrade(
-                    trade.GetProperty("s").GetString() ?? "",
-                    trade.GetProperty("p").GetDecimal()));
-            }
             trades = parsed;
             return true;
         }
@@ -118,6 +214,49 @@ public static class PriceFeedMessages
         {
             return false;
         }
+    }
+
+    /// <summary>Reads the <c>data</c> array of <c>{s, p}</c> trade objects into records.</summary>
+    private static List<PriceFeedTrade> ReadFinnhubTradesArray(ref Utf8JsonReader reader)
+    {
+        var list = new List<PriceFeedTrade>();
+        int depth = 0; // 0 = inside the data array, 1 = inside a trade object.
+        string? symbol = null;
+        decimal price = 0m;
+        while (reader.Read())
+        {
+            switch (reader.TokenType)
+            {
+                case JsonTokenType.StartObject:
+                    depth++;
+                    break;
+                case JsonTokenType.EndObject:
+                    depth--;
+                    if (depth == 0)
+                    {
+                        // Finished one trade object: emit it and reset.
+                        list.Add(new PriceFeedTrade(symbol ?? "", price));
+                        symbol = null;
+                        price = 0m;
+                    }
+                    break;
+                case JsonTokenType.EndArray:
+                    return list;
+                case JsonTokenType.PropertyName when depth == 1:
+                    string name = reader.GetString()!;
+                    reader.Read();
+                    if (string.Equals(name, "s", StringComparison.Ordinal))
+                    {
+                        symbol = reader.GetString() ?? "";
+                    }
+                    else if (string.Equals(name, "p", StringComparison.Ordinal))
+                    {
+                        price = reader.GetDecimal();
+                    }
+                    break;
+            }
+        }
+        return list;
     }
 
     /// <summary>Binance REST 24hr ticker: <c>lastPrice</c> / <c>priceChangePercent</c> as strings.</summary>
