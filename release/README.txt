@@ -40,33 +40,20 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
-== What's new in v0.6.8 ==
+== What's new in v0.6.10 ==
 
-  - Settings hub: the title-bar gear opens one hub with three groups:
-    Appearance (theme colors, page background), Behavior (close behavior,
-    Start with Windows, hotkey kill switch), and Profile (export / import).
-  - Hide to tray: opt in per profile (Behavior group). Close and minimize
-    then hide instead of exit; the tray icon brings the window back and
-    only the tray's  Quit  exits. A second launch activates the first
-    window instead of opening a duplicate.
-  - Start with Windows: per-user autostart (no admin needed). The
-    autostarted instance opens minimized and keeps streaming frames.
-  - Global hotkeys: the Hotkey widget can bind an OS-level chord
-    (Ctrl/Alt/Shift/Win + key) that fires even while the app is hidden
-    to the tray, including a  Flip page  action and a  Run AHK Script
-    action that spawns your own AutoHotkey script (interpreter path set
-    in the hub). The Behavior group's kill switch disables the global
-    registration and the AHK spawn without touching any other action.
-  - Theme: app_theme.json now lives in %LOCALAPPDATA%\ModernWigiDash; a
-    copy next to the exe from older releases migrates automatically,
-    one time. Profile exports carry the theme, and importing one offers
-    a one-click  Restore Theme  (declining leaves your theme untouched).
-  - Clock: optional seconds display (hh:mm:ss / HH:mm:ss).
-  - Weather: optional Hide Location (the city name hides; the custom
-    label and the guidance lines keep rendering).
-  - Fixes: the global-hotkey startup crash (a P/Invoke binding miss),
-    the audio-capture retry after a failed start, updater digest-case
-    hardening, and the exit standby verdict line.
+  - Minimize to tray on startup: a machine-local opt-in in the settings hub
+    (Behavior group). When enabled, the next launch opens hidden to the tray
+    instead of showing the window, while the display keeps streaming frames.
+    It composes with Start with Windows: launching autostarted with the flag
+    set hides the window rather than minimizing it.
+  - Reliability and internals: the refresh-token rejection is now covered on
+    either leg of the refresh sequence (a rotated access token that fails
+    validation clears the session exactly as a refresh-side refusal does),
+    the bounded standby-wait failure lines carry the vendor's own wording,
+    and the weather pane renders its no-data view instead of placeholder
+    numbers. The settings, lifecycle, page-management, and widget modules
+    were deepened so each rule has one owner and the window stays thin.
 
 
 == Data locations & reset ==
