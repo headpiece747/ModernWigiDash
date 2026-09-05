@@ -8,7 +8,7 @@ public class DisplayProtocolTests
     [TestMethod]
     public void BuildWidgetConfig_Layout_MatchesProtocolSpec()
     {
-        byte[] config = DisplayHidTransport.BuildWidgetConfig(10, 20, 1016, 592);
+        byte[] config = DisplayProtocolConstants.BuildWidgetConfig(10, 20, 1016, 592);
 
         // 20-byte fixed layout: x(2) y(2) w(2) h(2) baseClr(2) pad(2) addr(4) lock(1) inval(1) cache(1) pad(1)
         Assert.AreEqual(20, config.Length);
@@ -26,7 +26,7 @@ public class DisplayProtocolTests
     [TestMethod]
     public void BuildWidgetConfig_NegativeCoordinates_ArePreserved()
     {
-        byte[] config = DisplayHidTransport.BuildWidgetConfig(-5, -10, 100, 50);
+        byte[] config = DisplayProtocolConstants.BuildWidgetConfig(-5, -10, 100, 50);
 
         Assert.AreEqual(-5, BitConverter.ToInt16(config, 0));
         Assert.AreEqual(-10, BitConverter.ToInt16(config, 2));

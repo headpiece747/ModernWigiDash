@@ -219,4 +219,48 @@ internal static class DisplayProtocolConstants
     /// Intermediate touch points during a swipe are sent as Type=1 (Down).
     /// </summary>
     public const byte TouchTypeUp = 2;
+
+    // Wire-format builders: the pure functions that own the on-the-wire byte
+    // layout for the two struct payloads the device expects. They live with
+    // the constants they document so a protocol change edits one file.
+
+    /// <summary>
+    /// Builds the 20-byte WidgetConfig struct for the display protocol.
+    /// StructLayout(Pack=4): short X(2), short Y(2), short Width(2), short Height(2),
+    ///   ushort BaseClr(2), pad(2), uint DrawAddr(4), byte DrawLock(1), byte InvalidateFlag(1),
+    ///   byte UpdateFromCache(1), pad(1) = 20 bytes total.
+    /// </summary>
+    public static byte[] BuildWidgetConfig(short x, short y, short width, short height)
+    {
+        byte[] config = new byte[20];
+        BitConverter.GetBytes(x).CopyTo(config, 0);
+        BitConverter.GetBytes(y).CopyTo(config, 2);
+        BitConverter.GetBytes(width).CopyTo(config, 4);
+        BitConverter.GetBytes(height).CopyTo(config, 6);
+        // BaseClr at offset 8 = 0 (ushort)
+        // Padding at offset 10 (2 bytes)
+        // DrawAddr at offset 12 = 0 (uint)
+        // DrawLock at offset 16 = 0 (byte)
+        // InvalidateFlag at offset 17 = 0 (byte)
+        // UpdateFromCache at offset 18 = 0 (byte)
+        // Padding at offset 19 (1 byte)
+        return config;
+    }
+
+    /// <summary>Writes the 8-byte frame-header wire format [offset(4 LE),
+    /// length(4 LE)] into <paramref name="dest"/> — the single owner of the
+    /// layout, shared by the cold blank-framebuffer path and the 30 FPS send
+    /// path (the layout is documented in this class; a protocol change edits
+    /// one method).</summary>
+    public static void BuildFrameHeader(byte[] dest, int length)
+    {
+        dest[0] = 0;
+        dest[1] = 0;
+        dest[2] = 0;
+        dest[3] = 0;
+        dest[4] = (byte)length;
+        dest[5] = (byte)(length >> 8);
+        dest[6] = (byte)(length >> 16);
+        dest[7] = (byte)(length >> 24);
+    }
 }

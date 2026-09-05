@@ -306,7 +306,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
             // AddWidget: CMD_SCREENCFG_WIDGET_ADD (0x91) wValue = (page << 8) | widgetId
             // Registers a full-screen widget (1016x592) at (0,0)
-            byte[] widgetConfig = BuildWidgetConfig(
+            byte[] widgetConfig = DisplayProtocolConstants.BuildWidgetConfig(
                 x: 0, y: 0,
                 width: DisplayProtocolConstants.FramebufferWidth,
                 height: DisplayProtocolConstants.FramebufferHeight);
@@ -330,29 +330,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         return initOk;
     }
 
-    /// <summary>
-    /// Builds the 20-byte WidgetConfig struct for the display protocol.
-    /// StructLayout(Pack=4): short X(2), short Y(2), short Width(2), short Height(2),
-    ///   ushort BaseClr(2), pad(2), uint DrawAddr(4), byte DrawLock(1), byte InvalidateFlag(1),
-    ///   byte UpdateFromCache(1), pad(1) = 20 bytes total.
-    /// </summary>
-    internal static byte[] BuildWidgetConfig(short x, short y, short width, short height)
-    {
-        byte[] config = new byte[20];
-        BitConverter.GetBytes(x).CopyTo(config, 0);
-        BitConverter.GetBytes(y).CopyTo(config, 2);
-        BitConverter.GetBytes(width).CopyTo(config, 4);
-        BitConverter.GetBytes(height).CopyTo(config, 6);
-        // BaseClr at offset 8 = 0 (ushort)
-        // Padding at offset 10 (2 bytes)
-        // DrawAddr at offset 12 = 0 (uint)
-        // DrawLock at offset 16 = 0 (byte)
-        // InvalidateFlag at offset 17 = 0 (byte)
-        // UpdateFromCache at offset 18 = 0 (byte)
-        // Padding at offset 19 (1 byte)
-        return config;
-    }
-
     /// <returns>True when the blank frame fully arrived (the header control
     /// write plus the full bulk write) — <see cref="SendInitCommands"/> folds
     /// this into the init verdict like the control writes.</returns>
@@ -373,7 +350,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             // Control transfer header: offset=0, length=FrameBufferSize (the
             // single wire-format owner, shared with the 30 FPS send path).
             byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-            BuildFrameHeader(header, blankFrame.Length);
+            DisplayProtocolConstants.BuildFrameHeader(header, blankFrame.Length);
 
             ushort wValue = (ushort)((page << 8) | widgetId);
             bool headerOk = ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header);
@@ -392,23 +369,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             hwInitLog.Write($"Blank framebuffer write exception: {ex.Message}");
             return false;
         }
-    }
-
-    /// <summary>Writes the 8-byte frame-header wire format [offset(4 LE),
-    /// length(4 LE)] into <paramref name="dest"/> — the single owner of the
-    /// layout, shared by the cold blank-framebuffer path and the 30 FPS send
-    /// path (the layout is documented in <see cref="DisplayProtocolConstants"/>;
-    /// a protocol change edits one method).</summary>
-    internal static void BuildFrameHeader(byte[] dest, int length)
-    {
-        dest[0] = 0;
-        dest[1] = 0;
-        dest[2] = 0;
-        dest[3] = 0;
-        dest[4] = (byte)length;
-        dest[5] = (byte)(length >> 8);
-        dest[6] = (byte)(length >> 16);
-        dest[7] = (byte)(length >> 24);
     }
 
     /// <summary>
@@ -639,10 +599,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             // Reused header buffer: the header belongs to the one sender thread
             // (the touch buffer is the poll thread's, a distinct array), so no
             // per-frame allocation on the 30 FPS path and no lock to hold. The
-            // wire format is owned once by BuildFrameHeader (the cold
-            // blank-framebuffer path shares it); the in-place byte writes avoid
-            // BitConverter's per-field byte[4] allocations.
-            BuildFrameHeader(_frameHeader, frameArray.Length);
+            // wire format is owned once by DisplayProtocolConstants.BuildFrameHeader
+            // (the cold blank-framebuffer path shares it); the in-place byte writes
+            // avoid BitConverter's per-field byte[4] allocations.
+            DisplayProtocolConstants.BuildFrameHeader(_frameHeader, frameArray.Length);
 
             if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue: 0, _frameHeader))
             {

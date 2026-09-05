@@ -560,10 +560,10 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
     public void BuildFrameHeader_WritesLittleEndianOffsetAndLength()
     {
         // The wire format is owned once (the cold blank-framebuffer path and
-        // the 30 FPS send path share BuildFrameHeader) — pin the layout here.
+        // the 30 FPS send path share DisplayProtocolConstants.BuildFrameHeader) — pin the layout here.
         byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
 
-        DisplayHidTransport.BuildFrameHeader(header, 0x01020304);
+        DisplayProtocolConstants.BuildFrameHeader(header, 0x01020304);
 
         CollectionAssert.AreEqual(new byte[] { 0, 0, 0, 0, 0x04, 0x03, 0x02, 0x01 }, header,
             "the header is [offset(4 LE), length(4 LE)] with a zero offset");
