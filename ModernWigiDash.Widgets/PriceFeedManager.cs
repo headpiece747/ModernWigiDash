@@ -257,39 +257,6 @@ public sealed class PriceFeedManager : IDisposable
         };
     }
 
-    /// <summary>
-    /// One asset kind's feed wiring — the per-kind half that
-    /// <see cref="Subscribe"/>, <see cref="Unsubscribe"/>, and
-    /// <see cref="SeedFallbackAsync"/> differ on: the validation guard, the
-    /// ref-counted subscription map, what the first claim starts (WS loop
-    /// and/or REST cycle, in the kind's own order), the WS subscribe frame
-    /// builder (null when the kind has no socket), and the one-shot seed leg
-    /// (null when the kind's cycle already serves it — FX, the Frankfurter
-    /// cycle). The row also owns the WS loop it starts (<see cref="Loop"/>,
-    /// created lazily on the first claim and disposed at shutdown), so the
-    /// loop is keyed by the row, not a parallel feed-kind enum. The shared
-    /// routines own their sequences (validate → claim → start → subscribe;
-    /// the seed's fetch → apply), so a fourth asset kind is one table row,
-    /// not a fourth copy of the steps.
-    /// </summary>
-    private sealed class FeedKindWiring
-    {
-        public required Func<string, bool> IsValid { get; init; }
-        public required ConcurrentDictionary<string, int> Subscriptions { get; init; }
-        public required Action OnFirstClaim { get; init; }
-        public required Func<string, string>? WsSubscribeFrame { get; init; }
-        public required SeedLeg? Seed { get; init; }
-        // The WS loop this row starts: created lazily on the first claim and
-        // disposed at shutdown. Null while no claim has started it.
-        public FeedLoop? Loop { get; set; }
-    }
-
-    /// <summary>The kind's one-shot seed leg: the source label the seeded
-    /// record is stored under, its currency symbol, and the fetch (the leg's
-    /// own validation guard rides along — the seed path has no subscription
-    /// boundary to validate at).</summary>
-    private sealed record SeedLeg(string SourceLabel, string CurrencySymbol, Func<string, CancellationToken, Task<QuoteSample?>> Fetch);
-
     private readonly FeedKindWiring _cryptoWiring;
     private readonly FeedKindWiring _stockWiring;
     private readonly FeedKindWiring _fxWiring;

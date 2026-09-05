@@ -324,71 +324,12 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         MediaPropertiesData? props,
         PlaybackInfoData? info,
         TimelinePropertiesData? timeline)
-    {
-        var (title, artist, album, albumArtist, trackNumber, albumTrackCount, genres) = ExtractMeta(props);
-        var (canPlay, canPause, canStop, canNext, canPrev, canSeek, canShuffle, canRepeat) = ExtractControls(info);
-
-        return new MediaSnapshot
-        {
-            SourceAppId = session.SourceAppUserModelId ?? "",
-            Title = title,
-            Artist = artist,
-            Album = album,
-            AlbumArtist = albumArtist,
-            TrackNumber = trackNumber,
-            AlbumTrackCount = albumTrackCount,
-            Genres = genres,
-            Status = info?.PlaybackStatus ?? MediaPlaybackStatus.Closed,
-            Position = timeline?.Position ?? TimeSpan.Zero,
-            Duration = timeline?.EndTime ?? TimeSpan.Zero,
-            LastUpdated = timeline?.LastUpdatedTime ?? Clock.GetUtcNow(),
-            Shuffle = info?.IsShuffleActive ?? false,
-            Repeat = info?.AutoRepeatMode ?? MediaRepeatMode.None,
-            PlaybackRate = info?.PlaybackRate is > 0 ? info.PlaybackRate.Value : 1.0,
-            CanPlay = canPlay,
-            CanPause = canPause,
-            CanStop = canStop,
-            CanNext = canNext,
-            CanPrev = canPrev,
-            CanSeek = canSeek,
-            CanShuffle = canShuffle,
-            CanRepeat = canRepeat
-        };
-    }
-
-    /// <summary>The metadata group of the snapshot, sanitized and defaulted in
-    /// one place.</summary>
-    private static (string Title, string Artist, string Album, string AlbumArtist, int TrackNumber, int AlbumTrackCount, string[] Genres) ExtractMeta(MediaPropertiesData? props)
-        => (
-            Sanitize(props?.Title, ""),
-            Sanitize(props?.Artist, ""),
-            Sanitize(props?.AlbumTitle, ""),
-            Sanitize(props?.AlbumArtist, ""),
-            props?.TrackNumber ?? 0,
-            props?.AlbumTrackCount ?? 0,
-            props?.Genres?.ToArray() ?? []);
-
-    /// <summary>The transport-control capability group, defaulted to disabled
-    /// when the session reports no controls.</summary>
-    private static (bool Play, bool Pause, bool Stop, bool Next, bool Prev, bool Seek, bool Shuffle, bool Repeat) ExtractControls(PlaybackInfoData? info)
-        => (
-            info?.Controls.IsPlayEnabled ?? false,
-            info?.Controls.IsPauseEnabled ?? false,
-            info?.Controls.IsStopEnabled ?? false,
-            info?.Controls.IsNextEnabled ?? false,
-            info?.Controls.IsPreviousEnabled ?? false,
-            info?.Controls.IsPlaybackPositionEnabled ?? false,
-            info?.Controls.IsShuffleEnabled ?? false,
-            info?.Controls.IsRepeatEnabled ?? false);
+        => MediaSnapshotBuilder.Build(session.SourceAppUserModelId, props, info, timeline, Clock);
 
     /// <summary>Strips control characters (space kept) and caps at 256 chars;
     /// falls back when nothing survives. Internal so the rule is testable.</summary>
-    internal static string Sanitize(string? input, string fallback)
-    {
-        if (string.IsNullOrEmpty(input)) return fallback;
-        string clean = new string(input.Where(c => !char.IsControl(c) || c == ' ').Take(256).ToArray());
-        return string.IsNullOrWhiteSpace(clean) ? fallback : clean;
-    }
+    internal static string Sanitize(string? value, string fallback)
+        => MediaSnapshotBuilder.Sanitize(value, fallback);
 }
 
 /// <summary>
