@@ -367,7 +367,7 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
-    public void RecoverAtStartup_HealsInterruptedSwapAndCleansStale()
+    public void RunStartupPhase_HealsInterruptedSwapAndCleansStale()
     {
         string dir = NewDir();
         string installDir = Path.Combine(dir, "install");
@@ -377,7 +377,7 @@ public class UpdateServiceTests
         Directory.CreateDirectory(staged);
         var service = new UpdateService(updatesRoot: dir);
 
-        service.RecoverAtStartup(installDir);
+        service.RunStartupPhase(installDir);
 
         Assert.IsTrue(File.Exists(Path.Combine(installDir, "ModernWigiDash.App.exe")),
             "an interrupted swap must be restored at startup");

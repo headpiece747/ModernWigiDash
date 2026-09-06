@@ -39,7 +39,7 @@ public partial class MainWindow
         // owned by the service.
         try
         {
-            _updateService.RecoverAtStartup(AppContext.BaseDirectory);
+            _updateService.RunStartupPhase(AppContext.BaseDirectory);
         }
         catch (Exception ex)
         {
@@ -48,7 +48,7 @@ public partial class MainWindow
 
         try
         {
-            var info = await _updateService.CheckForUpdateAsync();
+            var info = await _updateService.RunCheckPhase();
             // The flow owns the transition + tooltip spelling; a null result
             // (up-to-date/offline/failed) is silent — no render.
             var render = _updateFlow.CheckResult(info);
@@ -88,7 +88,7 @@ public partial class MainWindow
         ApplyUpdateState(_updateFlow.BeginDownload(info));
         var progress = new Progress<double>(p =>
             UpdateButton.ToolTip = UpdateFlow.DownloadingTooltip(info, p));
-        bool ok = await _updateService.DownloadAndStageAsync(info, progress);
+        bool ok = await _updateService.RunInstallPhase(info, progress, AppContext.BaseDirectory);
         ApplyUpdateState(_updateFlow.DownloadComplete(info, ok));
     }
 

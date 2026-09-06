@@ -155,11 +155,30 @@ internal sealed class UpdateService
     }
 
     /// <summary>One startup recovery call: heal an interrupted swap and clear
-    /// stale stages/downloads.</summary>
-    public void RecoverAtStartup(string installDir)
+    /// stale stages/downloads. The protocol orders itself: cleanup before
+    /// recovery, so a stale stage never masks an interrupted swap.</summary>
+    public void RunStartupPhase(string installDir)
     {
         CleanupStale();
         RecoverInterruptedSwap(installDir);
+    }
+
+    /// <summary>One check phase: downloads the latest-release metadata and
+    /// parses it against the current version. The protocol orders itself:
+    /// the network read precedes the parse, so a null result is unambiguous
+    /// (offline or up-to-date).</summary>
+    public Task<UpdateInfo?> RunCheckPhase(CancellationToken ct = default) => CheckForUpdateAsync(ct);
+
+    /// <summary>One install phase: downloads the slim zip, verifies SHA-256,
+    /// extracts to staged/{version}, writes the cmd, and launches the updater.
+    /// The protocol orders itself: stage-before-launch, so a failed launch
+    /// never leaves a half-staged update that the next startup would treat as
+    /// stale and delete.</summary>
+    public async Task<bool> RunInstallPhase(UpdateInfo info, IProgress<double> progress, string installDir, CancellationToken ct = default)
+    {
+        bool staged = await DownloadAndStageAsync(info, progress, ct).ConfigureAwait(false);
+        if (!staged) return false;
+        return LaunchUpdater(info, installDir);
     }
 
     /// <summary>
