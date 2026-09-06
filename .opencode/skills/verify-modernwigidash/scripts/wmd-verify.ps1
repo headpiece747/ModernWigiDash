@@ -23,14 +23,20 @@ find <needle>                     List controls whose Name or AutomationId conta
    click <needle>                    Click the first matching control (Invoke pattern; mouse fallback only when
                                      the control has no Invoke, and the fallback verifies cursor placement and
                                      refuses when the synthetic mouse cannot move - e.g. headless agent sessions).
-   click-nth <needle> <n>            Click the Nth BUTTON match (1-based, tree order) via the same rules.
-                                     Disambiguates repeated glyph buttons (e.g. the per-tab close X).
-value <needle>                    Print the Value or Name of the first matching control.
-   set <needle> <value>              Set ValuePattern text on the first matching control.
-   set-in <windowTitle> <value>      Set the ValuePattern text of the FIRST writable text control inside the window
-                                     whose title contains <windowTitle> (read-back is printed). For dialogs whose
-                                     input carries no UIA Name - the themed prompts (e.g. the `Rename Page` window).
-                                     Refuses the main app window (its boxes are addressed by name with set).
+    click-nth <needle> <n>            Click the Nth BUTTON match (1-based, tree order) via the same rules.
+                                      Disambiguates repeated glyph buttons (e.g. the per-tab close X).
+    click-id <automationId>           Click the control whose AutomationId EXACTLY equals <automationId>
+                                      (case-sensitive, no Name contains-match). Use when a button's Name is
+                                      shadowed by nearby description text or ambiguous.
+ value <needle>                    Print the Value or Name of the first matching control.
+    set <needle> <value>              Set ValuePattern text on the first matching control.
+    set-in <windowTitle...> <value>   Set the ValuePattern text of the FIRST writable text control inside the window
+                                      whose title contains <windowTitle> (read-back is printed). For dialogs whose
+                                      input carries no UIA Name - the themed prompts (e.g. the `Rename Page` window).
+                                      Refuses the main app window (its boxes are addressed by name with set).
+                                      NOTE: the shell splits args on whitespace, so the LAST token is the value
+                                      and all preceding tokens (joined) form the window title. Multi-word values
+                                      must be single-token or use set <needle> <value> on a named control instead.
   click-at <needle> <x> <y>         Click x,y client-pixels inside the first matching control (canvas pointing).
    click-screen <x> <y>              Click absolute screen coordinates. For Skia-drawn surfaces that expose no
                                       UIA peer at all (the preview canvas is invisible to UIA by design):
@@ -878,6 +884,37 @@ switch ($Command) {
         $how = Do-Click $el
         Write-Output ('clicked match #' + $n + ' of "' + $Rest[0] + '" (name="' + [WmdUia.Core]::Name($el) + '") via ' + $how)
     }
+    'click-id' {
+        # Exact-match on AutomationId only (no Name contains-match), so a
+        # control with a unique id is reachable even when its Name or a
+        # sibling's text shadows the needle. Use this for buttons that carry
+        # an AutomationId but whose Name is ambiguous or shadowed by nearby
+        # description text (e.g. the hub's Export/Import buttons).
+        if ($Rest.Count -lt 1) { Fail "usage: click-id <automationId>   (exact match on AutomationId)" }
+        $id = $Rest[0]
+        Init-Uia
+        $root = [WmdUia.Core]::RootElement()
+        $st = Read-State
+        $appPid = if ($st -and $st.pid) { [int]$st.pid } else { 0 }
+        $tops = New-Object System.Collections.Generic.List[object]
+        $tw = [WmdUia.Core]::FirstChild($root)
+        while ($null -ne $tw) { $tops.Add($tw); $tw = [WmdUia.Core]::NextSibling($tw) }
+        $stack = New-Object System.Collections.Stack
+        for ($i = $tops.Count - 1; $i -ge 0; $i--) {
+            if ($appPid -ne 0 -and [WmdUia.Core]::ProcessId($tops[$i]) -ne $appPid) { continue }
+            $stack.Push($tops[$i])
+        }
+        $hit = $null
+        while ($stack.Count -gt 0 -and $null -eq $hit) {
+            $el = $stack.Pop()
+            $aid = [WmdUia.Core]::AutomationId($el)
+            if ($aid -and $aid -ceq $id) { $hit = $el }
+            Queue-Children $stack $el
+        }
+        if ($null -eq $hit) { Fail ('no control with AutomationId exactly "' + $id + '"') }
+        $how = Do-Click $hit
+        Write-Output ('clicked id="' + $id + '" (name="' + [WmdUia.Core]::Name($hit) + '") via ' + $how)
+    }
     'list' {
         # Read-only: numbered matches in tree order with positions - run it
         # before click-nth to prove which #N is which (e.g. the per-tab close
@@ -931,18 +968,29 @@ switch ($Command) {
         # The main window is refused outright - its named boxes are addressed
         # with set <needle> <value>, and an unnamed-target write there would
         # be a wrong-box risk (the catalog filter sits first in tree order).
-        if ($Rest.Count -lt 2) { Fail "usage: set-in <windowTitle> <value>" }
-        $win = Get-DialogWindow $Rest[0]
-        if (-not $win) { Fail ('no window with title containing "' + $Rest[0] + '"') }
+        #
+        # Value handling: the shell splits args on whitespace before they reach
+        # this script, so a multi-word value like "Sweep Test Page" arrives as
+        # three separate tokens. Convention: the LAST token is the value, and
+        # all preceding tokens (joined with spaces) form the window title.
+        # This means single-word values work as before; multi-word values must
+        # be passed unquoted (or the caller accepts that only the last word
+        # lands). For reliable multi-word writes, use set <needle> <value> on
+        # a named control instead.
+        if ($Rest.Count -lt 2) { Fail "usage: set-in <windowTitle...> <value>   (value = last token; title = all preceding tokens joined)" }
+        $value = $Rest[$Rest.Count - 1]
+        $titlePart = ($Rest[0..($Rest.Count - 2)] -join ' ')
+        $win = Get-DialogWindow $titlePart
+        if (-not $win) { Fail ('no window with title containing "' + $titlePart + '"') }
         $s = Read-State
         if ($s -and $s.pid -and [string][WmdUia.Core]::Name($win) -eq "ModernWigiDash") {
             Fail 'that is the main app window - set-in needs the dialog title (e.g. Rename Page); main-window boxes are addressed by name with: set <needle> <value>'
         }
-        $readBack = Set-FirstWritableText $win $Rest[1]
+        $readBack = Set-FirstWritableText $win $value
         if ($null -eq $readBack) {
             Fail ('window "' + [WmdUia.Core]::Name($win) + '" has no writable text control')
         }
-        Write-Output ('set the unnamed text control of window "' + [WmdUia.Core]::Name($win) + '" = "' + $Rest[1] + '" (read-back: "' + $readBack + '")')
+        Write-Output ('set the unnamed text control of window "' + [WmdUia.Core]::Name($win) + '" = "' + $value + '" (read-back: "' + $readBack + '")')
     }
     'click-at' {
         if ($Rest.Count -lt 3) { Fail "usage: click-at <needle> <x> <y>" }
@@ -1109,7 +1157,7 @@ switch ($Command) {
         Write-Output "clean: app stopped, profile restored, state dropped (evidence artifacts untouched)"
     }
     default {
-        Fail ('unknown command "' + $Command + '" (launch|doctor|dump|find|list|click|click-nth|value|set|set-in|click-at|shot|wait|backup-profile|restore-profile|stop|clean)')
+        Fail ('unknown command "' + $Command + '" (launch|doctor|dump|find|list|click|click-nth|click-id|value|set|set-in|click-at|shot|wait|backup-profile|restore-profile|stop|clean)')
     }
 }
 exit 0
