@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -29,10 +31,10 @@ public class WeatherDisplayStateTests
 
     private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
 
-    private static (WeatherResolution Resolution, WeatherDisplayState State) NewOwner(Func<DateTime>? now = null)
+    private static (WeatherClient Client, WeatherDisplayState State) NewOwner(Func<DateTime>? now = null)
     {
-        var resolution = new WeatherResolution(FixedClock(), "Default Location");
-        return (resolution, new WeatherDisplayState(resolution, "Default Location", now ?? (() => Stamp)));
+        var client = new WeatherClient(Path.Combine(Path.GetTempPath(), "wmd-weather-display-state-tests"), () => "weather_test.json", timeProvider: FixedClock(), neutralLocationLabel: "Default Location");
+        return (client, new WeatherDisplayState(client, "Default Location", now ?? (() => Stamp)));
     }
 
     private static WeatherApplyRequest ApplyRequest(WeatherSnapshot snapshot, int? expectedVersion = null,
@@ -153,10 +155,10 @@ public class WeatherDisplayStateTests
     {
         var (_, state) = NewOwner();
 
-        state.Resolution.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
+        state.Client.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
 
         Assert.IsNull(state.PendingLabelWriteback);
-        Assert.IsNull(state.Resolution.TakePendingWriteback(BareLocation(), () => false),
+        Assert.IsNull(state.Client.TakePendingWriteback(BareLocation(), () => false),
             "a never-queued write-back takes back null ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â not an empty string");
     }
 
@@ -164,12 +166,12 @@ public class WeatherDisplayStateTests
     public void TakePendingWriteback_ReturnsAndClears_EveryQueuedValueSurvivesItsOwnTake()
     {
         var (_, state) = NewOwner();
-        state.Resolution.QueueLabelWriteback(() => true, "First");
+        state.Client.QueueLabelWriteback(() => true, "First");
 
-        string? first = state.Resolution.TakePendingWriteback(BareLocation(), () => false);
-        state.Resolution.QueueLabelWriteback(() => true, "Second");
+        string? first = state.Client.TakePendingWriteback(BareLocation(), () => false);
+        state.Client.QueueLabelWriteback(() => true, "Second");
 
-        string? second = state.Resolution.TakePendingWriteback(BareLocation(), () => false);
+        string? second = state.Client.TakePendingWriteback(BareLocation(), () => false);
 
         Assert.AreEqual("First", first);
         Assert.AreEqual("Second", second,
@@ -185,15 +187,15 @@ public class WeatherDisplayStateTests
         // take ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and a veto is a "not yet", never a "never" (the value stays
         // queued; removing the label lets the next take through).
         var (_, state) = NewOwner();
-        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        state.Client.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        string? taken = state.Resolution.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
+        string? taken = state.Client.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
 
         Assert.IsNull(taken, "a CustomLabel set after the queue must veto the write at the take");
         Assert.AreEqual("Miami, Florida, United States of America", state.PendingLabelWriteback,
             "the vetoed write-back stays queued ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a veto must never silently lose the resolved label");
         Assert.AreEqual("Miami, Florida, United States of America",
-            state.Resolution.TakePendingWriteback(BareLocation(), () => false),
+            state.Client.TakePendingWriteback(BareLocation(), () => false),
             "removing the label re-opens the take on the next frame");
         Assert.IsNull(state.PendingLabelWriteback);
     }
@@ -202,9 +204,9 @@ public class WeatherDisplayStateTests
     public void TakePendingWriteback_NameEqualsLocation_RefusesAndKeepsQueued()
     {
         var (_, state) = NewOwner();
-        state.Resolution.QueueLabelWriteback(() => true, "Berlin");
+        state.Client.QueueLabelWriteback(() => true, "Berlin");
 
-        string? taken = state.Resolution.TakePendingWriteback(BareLocation("Berlin"), () => false);
+        string? taken = state.Client.TakePendingWriteback(BareLocation("Berlin"), () => false);
 
         Assert.IsNull(taken, "writing the location onto itself is a no-op churn ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the take refuses");
         Assert.AreEqual("Berlin", state.PendingLabelWriteback, "the refused write-back stays queued");
@@ -214,9 +216,9 @@ public class WeatherDisplayStateTests
     public void TakePendingWriteback_Suppressed_RefusesAndKeepsQueued()
     {
         var (_, state) = NewOwner();
-        state.Resolution.QueueLabelWriteback(() => true, "Berlin");
+        state.Client.QueueLabelWriteback(() => true, "Berlin");
 
-        string? taken = state.Resolution.TakePendingWriteback(BareLocation(), () => true);
+        string? taken = state.Client.TakePendingWriteback(BareLocation(), () => true);
 
         Assert.IsNull(taken, "the suppression flag's veto runs at the take, under the gate");
         Assert.AreEqual("Berlin", state.PendingLabelWriteback);
@@ -227,14 +229,14 @@ public class WeatherDisplayStateTests
     {
         var bare = BareLocation("New York");
 
-        Assert.IsTrue(WeatherResolution.WritebackEligible("New York, New York, United States", bare),
+        Assert.IsTrue(WeatherClient.WritebackEligible("New York, New York, United States", bare),
             "a non-empty name with no CustomLabel and a differing Location is eligible");
-        Assert.IsFalse(WeatherResolution.WritebackEligible("", bare), "a blank name has nothing to write");
-        Assert.IsFalse(WeatherResolution.WritebackEligible("   ", bare), "whitespace-only is blank");
-        Assert.IsFalse(WeatherResolution.WritebackEligible("New York, New York, United States",
+        Assert.IsFalse(WeatherClient.WritebackEligible("", bare), "a blank name has nothing to write");
+        Assert.IsFalse(WeatherClient.WritebackEligible("   ", bare), "whitespace-only is blank");
+        Assert.IsFalse(WeatherClient.WritebackEligible("New York, New York, United States",
                 BareLocation("New York") with { CustomLabel = "Home" }),
             "a CustomLabel claims the title ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the label is display-only");
-        Assert.IsFalse(WeatherResolution.WritebackEligible("New York", bare),
+        Assert.IsFalse(WeatherClient.WritebackEligible("New York", bare),
             "a name that equals the Location is a no-op write");
     }
 
@@ -246,7 +248,7 @@ public class WeatherDisplayStateTests
         var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
-        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        state.Client.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
         state.Invalidate(WeatherInvalidationKind.Coordinates);
 
@@ -263,7 +265,7 @@ public class WeatherDisplayStateTests
         var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
-        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        state.Client.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
         state.Invalidate(WeatherInvalidationKind.Location);
 

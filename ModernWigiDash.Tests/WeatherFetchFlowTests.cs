@@ -69,8 +69,8 @@ public class WeatherFetchFlowTests
 
     private FlowHost NewHost(StubHttpHandler stub, FakeTimeProvider? clock = null)
     {
-        var host = new FlowHost();
-        host.Client = new WeatherClient(NewCacheDir(), "weather_flow.json", timeProvider: clock, http: new HttpClient(stub));
+        var client = new WeatherClient(NewCacheDir(), "weather_flow.json", timeProvider: clock, http: new HttpClient(stub));
+        var host = new FlowHost(client);
         host.Flow = new WeatherFetchFlow(host.Client, host);
         return host;
     }
@@ -438,7 +438,7 @@ public class WeatherFetchFlowTests
         Assert.IsFalse(host.Flow.CanFetch(force: false), "A fresh fetch stamp must cool the non-forced cadence.");
         Assert.IsTrue(host.Flow.CanFetch(force: true), "Force is always eligible.");
 
-        clock.Advance(WeatherResolution.FetchWindow);
+        clock.Advance(WeatherClient.FetchWindow);
         Assert.IsTrue(host.Flow.CanFetch(force: false), "The elapsed window re-opens the non-forced cadence.");
     }
 
@@ -453,7 +453,7 @@ public class WeatherFetchFlowTests
             "Without a fetch stamp a static snapshot has nothing to protect Ã¢â‚¬â€ the window decides.");
 
         Assert.AreEqual(WeatherFetchFlowOutcome.Applied, await host.Flow.RunFetchAsync());
-        clock.Advance(WeatherResolution.FetchWindow);
+        clock.Advance(WeatherClient.FetchWindow);
 
         Assert.IsFalse(host.Flow.CanFetch(force: false),
             "A stamped static snapshot must veto the non-forced cadence even after the window elapses.");
@@ -565,10 +565,10 @@ public class WeatherFetchFlowTests
     {
         private readonly WeatherDisplayState _displayState;
 
-        public FlowHost()
+        public FlowHost(WeatherClient client)
         {
-            var resolution = new WeatherResolution(TimeProvider.System, "Default Location");
-            _displayState = new WeatherDisplayState(resolution, "Default Location", () => DateTime.UtcNow);
+            Client = client;
+            _displayState = new WeatherDisplayState(client, "Default Location", () => DateTime.UtcNow);
         }
 
         /// <summary>The module's one gate (test lock: stamp pre-await state
@@ -589,7 +589,7 @@ public class WeatherFetchFlowTests
         public CancellationTokenSource? RunCts { get; set; }
         public int RenderRequests { get; set; }
         public int InspectorRefreshes { get; set; }
-        public WeatherClient Client = null!;
+        public WeatherClient Client { get; }
         public WeatherFetchFlow Flow = null!;
 
         // -- IWeatherFetchHost: the seam the flow carries its host concerns across --
@@ -609,6 +609,6 @@ public class WeatherFetchFlowTests
             => _displayState.TryApplyTie(candidates, identityGuard, () => Location.Location);
 
         void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-            => _displayState.Resolution.QueueLabelWriteback(identityGuard, value);
+            => Client.QueueLabelWriteback(identityGuard, value);
     }
 }

@@ -156,7 +156,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // the edit-side clears use: either the gated set lands before the
             // edit's gated clear (the clear erases it) or after (the guard
             // re-reads the new location and the set never happens).
-            if (WeatherResolution.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
+            if (WeatherClient.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
             {
                 host.QueueLabelWriteback(window.StillCurrent, snapshot.ResolvedCityName);
             }
@@ -229,7 +229,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // The shared resolved-identity value BEFORE the load commits its
             // own: if the load is later discarded, this is what the rollback
             // restores (the "keeps the previous resolution" fact).
-            WeatherResolutionState preLoadIdentity = client.Resolution.Identity;
+            WeatherResolutionState preLoadIdentity = client.Identity;
 
             // The cache is identity-checked against the CURRENT location by
             // the client itself (a cache saved for a different resolution

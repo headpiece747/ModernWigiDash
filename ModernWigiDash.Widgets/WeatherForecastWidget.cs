@@ -202,7 +202,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// module applies the identity guard's check + set under its gate — one
     /// critical section).</summary>
     void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-        => _displayState.Resolution.QueueLabelWriteback(identityGuard, value);
+        => _client.QueueLabelWriteback(identityGuard, value);
 
     /// <summary>Requests a canvas repaint.</summary>
     void IWeatherFetchHost.RequestRender() => Context?.RequestRender();
@@ -230,7 +230,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // observed by the last-success stamp. The display state and the client
         // share the cluster's ONE identity owner (the client's resolution
         // module), so the two sides cannot drift.
-        _displayState = new(_client.Resolution, WeatherPresentation.UnknownLocationLabel, () => Clock.GetUtcNow().UtcDateTime);
+        _displayState = new(_client, WeatherPresentation.UnknownLocationLabel, () => Clock.GetUtcNow().UtcDateTime);
         // The fetch flow owns the sequence; the host concerns travel across
         // the IWeatherFetchHost seam. This widget IS the production host
         // adapter: the display-state module carries the gate discipline
@@ -348,7 +348,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // driven by the render kick at the same window; the loop is the sole
         // driver for hidden pages, whose reveal-kick then refreshes anyway).
         _refreshPoll = new PollLoop(
-            "WEATHER", WeatherResolution.FetchWindow, () => true,
+            "WEATHER", WeatherClient.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
         // The boot fetch: InitializeAsync runs BEFORE the profile applies
@@ -644,7 +644,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// </summary>
     internal void ApplyPendingLocationWriteback()
     {
-        if (_displayState.Resolution.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
+        if (_client.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
 
         _locationWritebackSuppressed = true;
         try

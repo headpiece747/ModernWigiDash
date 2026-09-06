@@ -6,16 +6,16 @@ namespace ModernWigiDash.Widgets;
 /// mutation runs under the same lock, so the "one consistent view" is a type,
 /// not a discipline repeated at every call site. The resolved identity and
 /// the pending label write-back live in the cluster's one identity owner
-/// (<see cref="WeatherResolution"/>), which this module composes with its own
+/// (<see cref="WeatherClient"/>), which this module composes with its own
 /// snapshot state under its own gate — the flow's apply/tie seams commit both
-/// halves atomically (the identity half under the resolution's gate, the
+/// halves atomically (the identity half under the client's gate, the
 /// snapshot half under this gate). The widget's
 /// <see cref="IWeatherFetchHost"/> seam bodies and the render tick's lock
 /// region are forwards over this module, and the flow's test host wraps the
 /// same module — the flow's guarantees are pinned against the production gate
 /// shape, not a mirror of it.
 /// </summary>
-internal sealed class WeatherDisplayState(WeatherResolution resolution, string neutralLocationLabel, Func<DateTime> now)
+internal sealed class WeatherDisplayState(WeatherClient client, string neutralLocationLabel, Func<DateTime> now)
 {
     /// <summary>
     /// The resolution inputs that force a re-fetch on change — an alias of
@@ -37,7 +37,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
 
     /// <summary>The cluster's one resolved-identity owner (the shared
     /// identity value, the fetch-side fields, the pending write-back).</summary>
-    internal WeatherResolution Resolution => resolution;
+    internal WeatherClient Client => client;
 
     /// <summary>The one gate (test seam: the flow's test host locks it to
     /// stamp a pre-await state directly).</summary>
@@ -53,11 +53,11 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
     /// <summary>The shared resolved-identity value (the candidates, the
     /// header city name, the population) — forwarded from the identity
     /// owner's gated read.</summary>
-    internal WeatherResolutionState Identity => resolution.Identity;
+    internal WeatherResolutionState Identity => client.Identity;
 
     /// <summary>The pending resolved-label write-back awaiting the
     /// UI-thread flush — forwarded from the identity owner's gated read.</summary>
-    internal string? PendingLabelWriteback => resolution.PendingLabelWriteback;
+    internal string? PendingLabelWriteback => client.PendingLabelWriteback;
 
     /// <summary>The last successful fetch's timestamp (the staleness
     /// display's input) — read under the gate, since the apply stamps it
@@ -77,7 +77,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
     /// <summary>
     /// The flow's apply seam: the policy's version-then-identity guard first,
     /// then the merge and the resolved-identity copies — the snapshot half
-    /// under THIS gate, the identity half under the resolution's gate (the
+    /// under THIS gate, the identity half under the client's gate (the
     /// two gates are taken in one sequence; an edit landing between them wins
     /// on whichever side it touches, and the guard re-reads the live location
     /// so the other side's copy is vetoed there). The last-success stamp rides
@@ -93,7 +93,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
             // section — keep the previous value" rule shared with the
             // snapshot merge (a provided population of 0 is the client's
             // no-data sentinel: it clears, it does not keep).
-            resolution.ApplyIdentity(request.ResolvedName, request.Population, request.Candidates);
+            client.ApplyIdentity(request.ResolvedName, request.Population, request.Candidates);
             _lastSuccessFetchTime = _now();
             return true;
         }
@@ -130,7 +130,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
                 ForecastVersion = _state.ForecastVersion + 1,
             };
             string? location = queriedLocation();
-            resolution.ApplyTieIdentity(location, candidates);
+            client.ApplyTieIdentity(location, candidates);
             return true;
         }
     }
@@ -145,7 +145,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
     /// render-model cache key turns and the header drops the old city
     /// immediately. One application site, by construction.
     /// </summary>
-    internal void Invalidate(WeatherInvalidationKind kind) => resolution.Invalidate(kind);
+    internal void Invalidate(WeatherInvalidationKind kind) => client.Invalidate(kind);
 
     /// <summary>
     /// Test seam: replaces the state wholesale under the gate (the
@@ -183,7 +183,7 @@ internal sealed class WeatherDisplayState(WeatherResolution resolution, string n
                 _hourlySnapshot = _state.HourlyForecasts.ToArray();
             }
             WeatherSnapshotState state = _state;
-            WeatherResolutionState identity = resolution.Identity;
+            WeatherResolutionState identity = client.Identity;
             WeatherRenderModelInputs inputs = new(
  new WeatherRenderModelKey(
                     state.DataVersion, bounds,
