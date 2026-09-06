@@ -73,14 +73,9 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
     // Device touch events arrive on the engine's 16 ms poll thread and must
     // reach the gesture machine on the UI thread IN ORDER (the Down/Move/Up
-    // sequence is one gesture). The per-event work is a lock + a struct
-    // enqueue (Queue<T> over a value tuple never boxes); one drain callback
-    // per burst feeds the input module instead of one closure +
-    // DispatcherOperation per event.
-    private readonly Queue<(float X, float Y, TouchEventType Type)> _deviceTouchQueue = new();
-    private readonly Lock _deviceTouchLock = new();
-    private bool _deviceTouchDrainScheduled;
-    private Action _deviceTouchDrain = null!;
+    // sequence is one gesture). The bridge owns the queue, lock, drain
+    // scheduling, and rejection unpoison; the window forwards one call.
+    private Input.DeviceTouchBridge _deviceTouchBridge = null!;
 
     // Frame presentation — decouple the UI render timer from transport
     // round-trips: one FrameDelivery bound to the direct-USB engine (ADR-0005)
@@ -439,10 +434,6 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             select: SelectWidget,
             onManipulation: HandleManipulationChange);
 
-        // The drain callback is a cached delegate (a method group would be
-        // converted on every enqueue; the field holds one instance).
-        _deviceTouchDrain = DrainDeviceTouchQueue;
-
         // One stateful DialogHost for the whole window: the inspector
         // receives this instance (it must never build its own — a second
         // instance could never show the device-authorization window it
@@ -567,11 +558,19 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>Device touch route: routes display touches through the single input module as runtime input.</summary>
     private void WireDeviceTouchRoute()
     {
-        // Route device touch input through the single input module.
-        // Display touches are runtime input: Press/Move/Release cross the
-        // controller's source-aware surface, so hotkeys fire on the device
-        // even while the desktop is in edit mode — only the mouse path
-        // carries the desktop edit-mode veto.
+        // The bridge owns the queue, lock, drain scheduling, and rejection
+        // unpoison. The feed sink routes each event to the input controller's
+        // source-aware surface (runtime input: hotkeys fire on the device even
+        // while the desktop is in edit mode).
+        _deviceTouchBridge = new Input.DeviceTouchBridge(Dispatcher, (x, y, type) =>
+        {
+            if (type == TouchEventType.TouchDown)
+                _inputController.Press(x, y, Input.InputSource.Device);
+            else if (type == TouchEventType.TouchMove)
+                _inputController.Move(x, y, Input.InputSource.Device, out _);
+            else
+                _inputController.Release(x, y, Input.InputSource.Device, out _);
+        });
         _usbDevice.OnTouchEvent += EnqueueDeviceTouch;
     }
 
@@ -770,75 +769,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// </summary>
     internal void EnqueueDeviceTouch(SKPoint point, TouchEventType touchType)
     {
-        bool schedule;
-        lock (_deviceTouchLock)
-        {
-            _deviceTouchQueue.Enqueue((point.X, point.Y, touchType));
-            schedule = !_deviceTouchDrainScheduled;
-            _deviceTouchDrainScheduled = true;
-        }
-        if (schedule)
-        {
-            try
-            {
-                _ = Dispatcher.BeginInvoke(_deviceTouchDrain);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
-            {
-                // A shutting-down dispatcher rejects the post: unpoison the
-                // flag so the next event schedules a fresh drain (a redundant
-                // second drain is harmless — it runs to empty).
-                lock (_deviceTouchLock)
-                {
-                    _deviceTouchDrainScheduled = false;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Drains the queued device-touch events on the UI thread, in order, into
-    /// the input controller (the gesture machine's Down/Move/Up vocabulary).
-    /// The whole burst is dequeued under the queue lock, then fed to the
-    /// controller OUTSIDE it: the engine's 16 ms poll thread (the enqueue
-    /// side) contends on the queue only, never on the input pass itself.
-    /// Ordering survives the split: the batch is fed in dequeue order, and
-    /// the dispatcher serializes drains (one at a time via the scheduled
-    /// flag), so a later burst's events can never land ahead of an earlier
-    /// one's. Internal so the test host can drive one deterministic drain on
-    /// the UI thread and pin the in-order feed against the gesture machine.
-    /// </summary>
-    internal void DrainDeviceTouchQueue()
-    {
-        // Snapshot the burst under the lock, release, then feed: an input
-        // pass that held the lock would make the poll thread's next Enqueue
-        // wait out the whole gesture feed (the old deliberate trade, retired).
-        List<(float, float, TouchEventType)> batch;
-        lock (_deviceTouchLock)
-        {
-            _deviceTouchDrainScheduled = false;
-            batch = new List<(float, float, TouchEventType)>(_deviceTouchQueue.Count);
-            while (_deviceTouchQueue.Count > 0)
-                batch.Add(_deviceTouchQueue.Dequeue());
-        }
-
-        foreach (var (x, y, type) in batch)
-        {
-            if (type == TouchEventType.TouchDown)
-            {
-                // Device samples are runtime input: the controller derives
-                // "never suppressed" from the source itself.
-                _inputController.Press(x, y, Input.InputSource.Device);
-            }
-            else if (type == TouchEventType.TouchMove)
-            {
-                _inputController.Move(x, y, Input.InputSource.Device, out _);
-            }
-            else
-            {
-                _inputController.Release(x, y, Input.InputSource.Device, out _);
-            }
-        }
+        _deviceTouchBridge.Enqueue(point.X, point.Y, touchType);
     }
 
     private void SelectWidget(PlacedWidgetInstance? widget)
