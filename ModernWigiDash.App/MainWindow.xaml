@@ -272,7 +272,7 @@
                                 <StackPanel x:Name="PanelCustomProperties" Margin="0,0,0,20"/>
 
                                 <!-- Delete Button -->
-                                <Button Content="🗑️ Remove Widget from Canvas" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Foreground="White" FontWeight="Bold" Margin="0,10,0,0" Click="BtnDeleteWidget_Click"/>
+                                <Button x:Name="BtnDeleteWidget" Content="🗑️ Remove Widget from Canvas" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Foreground="White" FontWeight="Bold" Margin="0,10,0,0" Click="BtnDeleteWidget_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
@@ -293,7 +293,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="🧹 Clear Canvas" Width="120" Height="26" Margin="4,0" FontSize="11" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Click="BtnClear_Click"/>
+                    <Button x:Name="BtnClearCanvas" Content="🧹 Clear Canvas" Width="120" Height="26" Margin="4,0" FontSize="11" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Click="BtnClear_Click"/>
                 </StackPanel>
             </Grid>
         </Border>

@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows.Input;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.App.Theming;
@@ -329,12 +330,14 @@ internal sealed class SettingsDialog : Window
             Width = 150,
             Margin = new Thickness(0, 0, 8, 0)
         };
+        AutomationProperties.SetAutomationId(export, "BtnExportProfile");
         export.Click += (_, _) => _host.ExportProfile();
         var import = new Button
         {
             Content = "Import profile...",
             Width = 150
         };
+        AutomationProperties.SetAutomationId(import, "BtnImportProfile");
         import.Click += (_, _) => _host.ImportProfile();
         buttons.Children.Add(export);
         buttons.Children.Add(import);

@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows.Input;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.App.Theming;
@@ -117,8 +118,11 @@ internal sealed class ThemeDialog : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         Grid.SetRow(buttons, 2);
         var btnReset = new Button { Content = "Reset", Margin = new Thickness(0, 0, 8, 0) };
+        AutomationProperties.SetAutomationId(btnReset, "BtnThemeReset");
         var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0) };
+        AutomationProperties.SetAutomationId(btnCancel, "BtnThemeCancel");
         _btnApply = new Button { Content = "Apply", Style = Application.Current.Resources["AccentButton"] as Style };
+        AutomationProperties.SetAutomationId(_btnApply, "BtnThemeApply");
 
         btnReset.Click += (_, _) =>
         {

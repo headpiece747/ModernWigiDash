@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows.Shapes;
 using Microsoft.Win32;
 using ModernWigiDash.App.Theming;
@@ -66,7 +67,9 @@ internal sealed class DialogHost
         };
         Grid.SetRow(buttons, 2);
         var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        AutomationProperties.SetAutomationId(btnCancel, "BtnPromptCancel");
         var btnOk = new Button { Content = "OK", Style = _tryFindResource("AccentButton") as Style, IsDefault = true };
+        AutomationProperties.SetAutomationId(btnOk, "BtnPromptOk");
         buttons.Children.Add(btnCancel);
         buttons.Children.Add(btnOk);
         root.Children.Add(buttons);
@@ -150,11 +153,13 @@ internal sealed class DialogHost
         if (isConfirm)
         {
             var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+            AutomationProperties.SetAutomationId(btnCancel, "BtnPromptCancel");
             btnCancel.Click += (_, _) => dialog.DialogResult = false;
             buttons.Children.Add(btnCancel);
         }
 
         var btnOk = new Button { Content = "OK", Style = _tryFindResource("AccentButton") as Style, IsDefault = true };
+        AutomationProperties.SetAutomationId(btnOk, "BtnPromptOk");
         btnOk.Click += (_, _) => dialog.DialogResult = true;
         buttons.Children.Add(btnOk);
         root.Children.Add(buttons);

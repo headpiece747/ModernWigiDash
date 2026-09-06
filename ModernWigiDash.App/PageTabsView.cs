@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows.Input;
 
 namespace ModernWigiDash.App;
@@ -88,6 +89,7 @@ internal sealed class PageTabsView
             Padding = visual.TabPadding,
             Style = visual.IsActive ? (Style)_findResource("AccentButton")! : (Style)_findResource(typeof(Button))!,
         };
+        AutomationProperties.SetAutomationId(pageButton, $"PageTab_{tab.Index}");
         pageButton.Click += (_, _) => _switchToPage(tab.Index);
         container.Children.Add(pageButton);
 
@@ -96,6 +98,7 @@ internal sealed class PageTabsView
             toolTip: "Rename page",
             margin: visual.RenameIconMargin,
             isActive: visual.IsActive,
+            automationId: $"PageTabRename_{tab.Index}",
             onClick: (_, _) => _renamePage(tab.Index)));
 
         if (visual.CanDelete)
@@ -105,6 +108,7 @@ internal sealed class PageTabsView
                 toolTip: null,
                 margin: visual.CloseIconMargin,
                 isActive: visual.IsActive,
+                automationId: $"PageTabDelete_{tab.Index}",
                 onClick: (_, _) => _deletePage(tab.Index)));
         }
 
@@ -119,7 +123,8 @@ internal sealed class PageTabsView
         string? toolTip,
         Thickness margin,
         bool isActive,
-        RoutedEventHandler onClick)
+        string? automationId = null,
+        RoutedEventHandler onClick = null!)
     {
         var button = new Button
         {
@@ -137,6 +142,8 @@ internal sealed class PageTabsView
             Margin = margin,
             Cursor = Cursors.Hand,
         };
+        if (automationId is not null)
+            AutomationProperties.SetAutomationId(button, automationId);
         button.Click += onClick;
         return button;
     }
