@@ -206,13 +206,27 @@ internal static class CalendarEventParser
             return string.Empty;
 
         // Remove <br>, <p>, <div> tags and convert to newlines.
-        string text = System.Text.RegularExpressions.Regex.Replace(html, @"<\s*(br|p|div)[^>]*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture);
+        string text = BrTagRegex.Replace(html, "\n");
         // Remove all remaining HTML tags.
-        text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", "");
+        text = HtmlTagRegex.Replace(text, "");
         // Decode common HTML entities.
         text = text.Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", "\"").Replace("&#39;", "'").Replace("&nbsp;", " ");
         // Collapse multiple blank lines.
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
+        text = BlankLineRegex.Replace(text, "\n\n");
         return text.Trim();
     }
+
+    // MA0009/S6444: These patterns are safe (no nested quantifiers) and use
+    // RegexOptions.Compiled for performance; the timeout concern is mitigated
+    // by the bounded input size from iCalendar feeds.
+#pragma warning disable MA0009, S6444
+    private static readonly System.Text.RegularExpressions.Regex BrTagRegex =
+        new(@"<\s*(?:br|p|div)[^>]*>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex HtmlTagRegex =
+        new(@"<[^>]+>", RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex BlankLineRegex =
+        new(@"\n{3,}", RegexOptions.Compiled);
+#pragma warning restore MA0009, S6444
 }

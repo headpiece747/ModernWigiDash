@@ -240,7 +240,7 @@ public class CalendarPresentationTests
         {
             Events =
             [
-                new CalendarEvent { Title = "Sync", Start = new DateTime(2026, 9, 6, 15, 0, 0), End = new DateTime(2026, 9, 6, 16, 0, 0), FeedLabel = "Work" },
+                new CalendarEvent { Title = "Sync", Start = new DateTime(2026, 9, 6, 15, 0, 0, DateTimeKind.Unspecified), End = new DateTime(2026, 9, 6, 16, 0, 0, DateTimeKind.Unspecified), FeedLabel = "Work" },
             ],
             HasData = true,
             IsLive = true,

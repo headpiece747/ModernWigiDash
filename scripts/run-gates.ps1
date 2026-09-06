@@ -109,14 +109,12 @@ if (-not $testOk) {
     exit 1
 }
 
-# --- 3. format (whitespace + style only; analyzer warnings are code quality
-# suggestions, not formatting violations) ---
-$rWs = Get-NativeOutput { dotnet format whitespace $sln --verify-no-changes }
-$rSt = Get-NativeOutput { dotnet format style $sln --verify-no-changes }
-$fmtOk  = ($rWs.ExitCode -eq 0 -and $rSt.ExitCode -eq 0)
+# --- 3. format ---
+$r = Get-NativeOutput { dotnet format $sln --verify-no-changes --verbosity quiet }
+$fmtOut = $r.Output
+$fmtOk  = ($r.ExitCode -eq 0)
 if (-not $fmtOk) {
-    Write-Output $rWs.Output
-    Write-Output $rSt.Output
+    Write-Output $fmtOut
     Add-GateRow -l $Label -build ok -warn $bw -err $be -test ok -passed $tp -failed $tf -fmt FAIL
     Write-Output 'GATE FAILED at format.'
     exit 1

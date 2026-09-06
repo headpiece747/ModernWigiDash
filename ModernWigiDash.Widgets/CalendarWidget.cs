@@ -321,7 +321,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             DateTime viewDate = now.Date.AddDays(_viewDateOffset);
             if (targetDay >= 1 && targetDay <= DateTime.DaysInMonth(viewDate.Year, viewDate.Month))
             {
-                DateTime targetDate = new(viewDate.Year, viewDate.Month, targetDay);
+                DateTime targetDate = new(viewDate.Year, viewDate.Month, targetDay, 0, 0, 0, DateTimeKind.Unspecified);
                 _viewDateOffset = (targetDate.Date - now.Date).Days;
                 _viewDateOffset = Math.Clamp(_viewDateOffset, -30, 30);
             }
@@ -507,7 +507,13 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             }
 
             // Day number.
-            SKColor numColor = cell.IsViewed ? SKColors.White : cell.IsToday ? accent : text.WithAlpha(180);
+            SKColor numColor;
+            if (cell.IsViewed)
+                numColor = SKColors.White;
+            else if (cell.IsToday)
+                numColor = accent;
+            else
+                numColor = text.WithAlpha(180);
             var numPaint = new SKPaint { Color = numColor, IsAntialias = true };
             string dayStr = cell.Day.ToString(System.Globalization.CultureInfo.InvariantCulture);
             float dayW = FontHelper.MeasureTextWithFallback(dayStr, font);
@@ -546,7 +552,13 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             }
 
             // Time column (fixed gutter width): "HH:mm" centered vertically.
-            SKColor timeColor = row.IsLive ? new SKColor(239, 68, 68) : row.IsUrgent ? new SKColor(245, 158, 11) : text;
+            SKColor timeColor;
+            if (row.IsLive)
+                timeColor = new SKColor(239, 68, 68);
+            else if (row.IsUrgent)
+                timeColor = new SKColor(245, 158, 11);
+            else
+                timeColor = text;
             var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
             var timePaint = new SKPaint { Color = timeColor, IsAntialias = true };
             float timeX = rect.Left + 10f * scale;

@@ -166,7 +166,7 @@ internal static class CalendarPresentation
         string title = $"{months[viewDate.Month - 1]} {viewDate.Year}";
 
         int daysInMonth = DateTime.DaysInMonth(viewDate.Year, viewDate.Month);
-        int firstDayOfWeek = new DateTime(viewDate.Year, viewDate.Month, 1).DayOfWeek switch
+        int firstDayOfWeek = new DateTime(viewDate.Year, viewDate.Month, 1, 0, 0, 0, DateTimeKind.Unspecified).DayOfWeek switch
         {
             DayOfWeek.Sunday => 0,
             DayOfWeek.Monday => 1,
@@ -193,7 +193,7 @@ internal static class CalendarPresentation
             }
             else
             {
-                DateTime cellDate = new(viewDate.Year, viewDate.Month, dayNum);
+                DateTime cellDate = new(viewDate.Year, viewDate.Month, dayNum, 0, 0, 0, DateTimeKind.Unspecified);
                 bool hasEvents = eventDates.Contains(cellDate);
                 bool isToday = cellDate.Date == now.Date;
                 bool isViewed = cellDate.Date == viewDate.Date;
