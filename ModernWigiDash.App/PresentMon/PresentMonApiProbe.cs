@@ -25,12 +25,7 @@ internal sealed class PresentMonApiProbe
     public PmCloseSession? CloseSessionFn { get; }
     public PmStartTrackingProcess? StartTrackingFn { get; }
     public PmStopTrackingProcess? StopTrackingFn { get; }
-    public PmRegisterDynamicQuery? RegisterDynamicQueryFn { get; }
-    public PmFreeDynamicQuery? FreeDynamicQueryFn { get; }
-    public PmPollDynamicQuery? PollDynamicQueryFn { get; }
-    public PmRegisterFrameQuery? RegisterFrameQueryFn { get; }
-    public PmConsumeFrames? ConsumeFramesFn { get; }
-    public PmFreeFrameQuery? FreeFrameQueryFn { get; }
+    public PresentMonQueryCapability? QueryCapability { get; }
     public PmGetApiVersion? GetApiVersionFn { get; }
     public PmGetIntrospectionRoot? GetIntrospectionRootFn { get; }
     public PmFreeIntrospectionRoot? FreeIntrospectionRootFn { get; }
@@ -48,20 +43,29 @@ internal sealed class PresentMonApiProbe
         CloseSessionFn = Resolve<PmCloseSession>(loader, lib, "pmCloseSession");
         StartTrackingFn = Resolve<PmStartTrackingProcess>(loader, lib, "pmStartTrackingProcess");
         StopTrackingFn = Resolve<PmStopTrackingProcess>(loader, lib, "pmStopTrackingProcess");
-        RegisterDynamicQueryFn = Resolve<PmRegisterDynamicQuery>(loader, lib, "pmRegisterDynamicQuery");
-        FreeDynamicQueryFn = Resolve<PmFreeDynamicQuery>(loader, lib, "pmFreeDynamicQuery");
-        PollDynamicQueryFn = Resolve<PmPollDynamicQuery>(loader, lib, "pmPollDynamicQuery");
-        RegisterFrameQueryFn = Resolve<PmRegisterFrameQuery>(loader, lib, "pmRegisterFrameQuery");
-        ConsumeFramesFn = Resolve<PmConsumeFrames>(loader, lib, "pmConsumeFrames");
-        FreeFrameQueryFn = Resolve<PmFreeFrameQuery>(loader, lib, "pmFreeFrameQuery");
         GetApiVersionFn = Resolve<PmGetApiVersion>(loader, lib, "pmGetApiVersion");
         GetIntrospectionRootFn = Resolve<PmGetIntrospectionRoot>(loader, lib, "pmGetIntrospectionRoot");
         FreeIntrospectionRootFn = Resolve<PmFreeIntrospectionRoot>(loader, lib, "pmFreeIntrospectionRoot");
 
+        // The query surface is one non-null capability: either every pointer
+        // resolved or the probe reports a failure reason. A half-loaded state
+        // is unrepresentable.
+        var registerDynamic = Resolve<PmRegisterDynamicQuery>(loader, lib, "pmRegisterDynamicQuery");
+        var freeDynamic = Resolve<PmFreeDynamicQuery>(loader, lib, "pmFreeDynamicQuery");
+        var pollDynamic = Resolve<PmPollDynamicQuery>(loader, lib, "pmPollDynamicQuery");
+        var registerFrame = Resolve<PmRegisterFrameQuery>(loader, lib, "pmRegisterFrameQuery");
+        var consumeFrames = Resolve<PmConsumeFrames>(loader, lib, "pmConsumeFrames");
+        var freeFrame = Resolve<PmFreeFrameQuery>(loader, lib, "pmFreeFrameQuery");
+        if (registerDynamic is not null && freeDynamic is not null && pollDynamic is not null
+            && registerFrame is not null && consumeFrames is not null && freeFrame is not null)
+        {
+            QueryCapability = new PresentMonQueryCapability(
+                registerDynamic, freeDynamic, pollDynamic, registerFrame, consumeFrames, freeFrame);
+        }
+
         bool anyMissing = OpenSessionFn is null || CloseSessionFn is null || StartTrackingFn is null
             || StopTrackingFn is null
-            || RegisterDynamicQueryFn is null || FreeDynamicQueryFn is null || PollDynamicQueryFn is null
-            || RegisterFrameQueryFn is null || ConsumeFramesFn is null || FreeFrameQueryFn is null
+            || QueryCapability is null
             || GetApiVersionFn is null || GetIntrospectionRootFn is null || FreeIntrospectionRootFn is null;
         if (anyMissing)
         {

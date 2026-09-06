@@ -54,7 +54,7 @@ public class PresentMonQueryRegistryTests
 
         public PresentMonQueryRegistry CreateRegistry()
         {
-            return new PresentMonQueryRegistry(
+            var capability = new PresentMonQueryCapability(
                 registerDynamic: (IntPtr session, out IntPtr handle, PresentMonQueryElement[] elements, ulong count, double window, double offset) =>
                 {
                     // The real service mutates the passed array in place
@@ -105,8 +105,9 @@ public class PresentMonQueryRegistryTests
                     ConsumeBatches = 0;
                     return PmStatus.Success;
                 },
-                freeFrame: (IntPtr handle) => PmStatus.Success,
-                readCatalog: (IntPtr session) => Catalog);
+                freeFrame: (IntPtr handle) => PmStatus.Success);
+
+            return new PresentMonQueryRegistry(capability, readCatalog: (IntPtr session) => Catalog);
         }
     }
 

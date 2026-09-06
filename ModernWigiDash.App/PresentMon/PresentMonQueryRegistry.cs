@@ -30,12 +30,7 @@ internal sealed class PresentMonQueryRegistry
         new(DynamicField.PresentModeId, PresentMonProtocol.MetricPresentMode, PresentMonProtocol.StatNewestPoint),
     ];
 
-    private readonly PmRegisterDynamicQuery _registerDynamic;
-    private readonly PmFreeDynamicQuery _freeDynamic;
-    private readonly PmPollDynamicQuery _pollDynamic;
-    private readonly PmRegisterFrameQuery _registerFrame;
-    private readonly PmConsumeFrames _consumeFrames;
-    private readonly PmFreeFrameQuery _freeFrame;
+    private readonly PresentMonQueryCapability _capability;
     private readonly Func<IntPtr, PresentMonMetricCatalog?> _readCatalog;
 
     private IntPtr _dynamicQuery;
@@ -56,20 +51,10 @@ internal sealed class PresentMonQueryRegistry
     private readonly List<double> _frameTimes = [];
 
     public PresentMonQueryRegistry(
-        PmRegisterDynamicQuery registerDynamic,
-        PmFreeDynamicQuery freeDynamic,
-        PmPollDynamicQuery pollDynamic,
-        PmRegisterFrameQuery registerFrame,
-        PmConsumeFrames consumeFrames,
-        PmFreeFrameQuery freeFrame,
+        PresentMonQueryCapability capability,
         Func<IntPtr, PresentMonMetricCatalog?> readCatalog)
     {
-        _registerDynamic = registerDynamic;
-        _freeDynamic = freeDynamic;
-        _pollDynamic = pollDynamic;
-        _registerFrame = registerFrame;
-        _consumeFrames = consumeFrames;
-        _freeFrame = freeFrame;
+        _capability = capability;
         _readCatalog = readCatalog;
     }
 
@@ -98,7 +83,7 @@ internal sealed class PresentMonQueryRegistry
 
         // dataOffset/dataSize are filled in by the service during registration
         // — that is why the element array must be the same one used for parsing.
-        PmStatus dynamicStatus = _registerDynamic(
+        PmStatus dynamicStatus = _capability.RegisterDynamic(
             session, out _dynamicQuery, build.Elements, (ulong)build.Elements.Length,
             PresentMonProtocol.DynamicQueryWindowMs, PresentMonProtocol.DynamicQueryOffsetMs);
         if (dynamicStatus != PmStatus.Success)
@@ -119,7 +104,7 @@ internal sealed class PresentMonQueryRegistry
             // only and cannot be registered on a frame query.
             new PresentMonQueryElement(PresentMonProtocol.MetricBetweenPresents, PresentMonProtocol.StatNone, 0, 0, 0, 0),
         };
-        PmStatus frameStatus = _registerFrame(session, out _frameQuery, frameElements, (ulong)frameElements.Length, out uint blobSize);
+        PmStatus frameStatus = _capability.RegisterFrame(session, out _frameQuery, frameElements, (ulong)frameElements.Length, out uint blobSize);
         if (frameStatus != PmStatus.Success || blobSize == 0)
         {
             unavailableReason = $"Failed to register the PresentMon frame query (status {frameStatus}, blobSize {blobSize}).";
@@ -136,12 +121,12 @@ internal sealed class PresentMonQueryRegistry
     {
         if (_frameQuery != IntPtr.Zero)
         {
-            _freeFrame(_frameQuery);
+            _capability.FreeFrame(_frameQuery);
             _frameQuery = IntPtr.Zero;
         }
         if (_dynamicQuery != IntPtr.Zero)
         {
-            _freeDynamic(_dynamicQuery);
+            _capability.FreeDynamic(_dynamicQuery);
             _dynamicQuery = IntPtr.Zero;
         }
     }
@@ -170,7 +155,7 @@ internal sealed class PresentMonQueryRegistry
                 blob = _dynamicBlob = new byte[_chainStride * capacity];
             }
             uint numSwapChains = (uint)capacity;
-            PmStatus status = _pollDynamic(_dynamicQuery, (uint)processId, blob, ref numSwapChains);
+            PmStatus status = _capability.PollDynamic(_dynamicQuery, (uint)processId, blob, ref numSwapChains);
 
             if (status == PmStatus.InsufficientBuffer)
             {
@@ -239,7 +224,7 @@ internal sealed class PresentMonQueryRegistry
         while (true)
         {
             uint framesToRead = MaxFramesPerCall;
-            PmStatus status = _consumeFrames(_frameQuery, (uint)processId, buffer, ref framesToRead);
+            PmStatus status = _capability.ConsumeFrames(_frameQuery, (uint)processId, buffer, ref framesToRead);
             if (status != PmStatus.Success || framesToRead == 0)
             {
                 break;

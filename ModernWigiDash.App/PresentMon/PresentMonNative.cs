@@ -41,12 +41,7 @@ internal sealed class PresentMonNative : IPresentMonNative
         _getIntrospectionRootFn = probe.GetIntrospectionRootFn;
         _freeIntrospectionRootFn = probe.FreeIntrospectionRootFn;
         _queryRegistry = new PresentMonQueryRegistry(
-            probe.RegisterDynamicQueryFn!,
-            probe.FreeDynamicQueryFn!,
-            probe.PollDynamicQueryFn!,
-            probe.RegisterFrameQueryFn!,
-            probe.ConsumeFramesFn!,
-            probe.FreeFrameQueryFn!,
+            probe.QueryCapability!,
             ReadCatalog);
         _loadFailureReason = probe.FailureReason;
     }
