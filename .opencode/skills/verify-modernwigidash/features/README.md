@@ -13,10 +13,12 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 - Start every recipe from the baseline state unless its preconditions say otherwise.
 - Prefer AutomationId/Name handles from the skill's handle table over coordinates; the canvas is the exception (`click-screen` with absolute screen pixels. The preview has no UIA peer).
+- **Prefer `click-id <automationId>` over `click <needle>`** when the control has an AutomationId: it is an exact case-sensitive match on the id only (no Name contains-match), so a button whose Name is shadowed by nearby description text is still reachable. Use `click <needle>` only when the control has no id or you need the first-of-many matches.
 - Treat every command as literal. Keep quoted names and flags unchanged.
 - Run every action through `scripts/wmd-verify.ps1` (one invocation per action).
 - Wait for observable results (re-read `value` until it changes), not fixed sleeps.
 - Restore the seeded data after a mutation (`restore-profile` via `clean`). Do not remove proof artifacts during cleanup.
+- **`set-in` value convention:** the shell splits args on whitespace before they reach the script, so `set-in` treats the LAST token as the value and all preceding tokens (joined) as the window title. Multi-word values must be single-token (e.g. `SweepPage`, not `Sweep Test Page`). For multi-word or special-character values into named controls, use `set <needle> <value>` instead. For hex values that start with `#`, omit the `#` prefix (the app's `ParseColor` accepts bare `RRGGBB`; the shell treats `#` as a comment character).
 
 ## Proof and skip reporting
 
