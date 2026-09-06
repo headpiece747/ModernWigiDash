@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows.Controls.Primitives;
 using ModernWigiDash.Core.Theming;
 
@@ -40,7 +41,6 @@ internal sealed class ColorPickerEditor : UserControl
         SwatchButton.Content = _swatch;
 
         HexBox = new TextBox { VerticalContentAlignment = VerticalAlignment.Center };
-
         row.Children.Add(SwatchButton);
         row.Children.Add(HexBox);
 
@@ -124,6 +124,19 @@ internal sealed class ColorPickerEditor : UserControl
 
     /// <summary>Raised on every hex-box text change (validation hook).</summary>
     public event Action? Changed;
+
+    /// <summary>Optional AutomationId for the hex box (set by the consumer for UIA addressing).</summary>
+    public string? HexBoxAutomationId
+    {
+        get => _hexBoxAutomationId;
+        set
+        {
+            _hexBoxAutomationId = value;
+            if (value is not null)
+                AutomationProperties.SetAutomationId(HexBox, value);
+        }
+    }
+    private string? _hexBoxAutomationId;
 
     private void SetHexSilently(string hex)
     {

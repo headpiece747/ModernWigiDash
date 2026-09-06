@@ -101,6 +101,7 @@ internal sealed class ThemeDialog : Window
             };
             hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
             var editor = new ColorPickerEditor { Hex = entry.Hex };
+            editor.HexBoxAutomationId = $"ThemeHex_{entry.Name}";
             editor.Changed += () =>
             {
                 _draft.UpdateHex(entry.Name, editor.Hex);
