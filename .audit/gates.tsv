@@ -230,3 +230,6 @@
 2026-09-06T15:55:00Z	e76582c	manual	ok	0	0	ok	2144	0	ok
 2026-09-06T16:12:55Z	53e048c	manual	ok	0	0	ok	2146	0	FAIL
 2026-09-06T16:14:11Z	53e048c	manual	ok	0	0	ok	2146	0	ok
+2026-09-06T16:15:40Z	4eb7f04	manual	ok	0	0	ok	2146	0	ok
+2026-09-06T16:17:29Z	98c9cdd	manual	ok	0	0	FAIL	2145	1	SKIP
+2026-09-06T16:20:08Z	98c9cdd	manual	ok	0	0	ok	2146	0	ok
