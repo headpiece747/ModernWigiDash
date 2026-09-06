@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Ical.Net" />
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="NAudio.Wasapi" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
