@@ -76,7 +76,32 @@ public class CloseBudgetPolicyTests
     {
         // The engine's close waits are the transport's policy values, not a
         // second spelling: one value across the seam.
-        Assert.AreEqual(DisplayHidTransport.CloseBudgets.StandbyCloseBudget, DisplayDeviceEngine.StandbyCloseBudget);
-        Assert.AreEqual(DisplayHidTransport.CloseBudgets.DisposeAbandonBudget, DisplayDeviceEngine.DisposeAbandonBudget);
+        var hid = new DisplayHidTransport();
+        var engine = new DisplayDeviceEngine(() => hid);
+
+        Assert.AreEqual(hid.CloseBudgets.StandbyCloseBudget, engine.StandbyCloseBudget);
+        Assert.AreEqual(hid.CloseBudgets.DisposeAbandonBudget, engine.DisposeAbandonBudget);
+    }
+
+    [TestMethod]
+    public void FakeTransport_CarriesItsOwnBound()
+    {
+        // A fake transport carries its own bound; the engine reads it from
+        // whatever adapter it holds. The test injects the transport directly
+        // through the test seam so the budget reads are deterministic.
+        var fake = new FakeTransport
+        {
+            CloseBudgets = CloseBudgetPolicy.Create(TimeSpan.FromSeconds(10))
+        };
+        var engine = new DisplayDeviceEngine(() => fake);
+
+        // Use reflection to set the private _transport field directly
+        var field = typeof(DisplayDeviceEngine).GetField("_transport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(engine, fake);
+
+        Assert.AreEqual(fake.CloseBudgets.StandbyCloseBudget, engine.StandbyCloseBudget,
+            "the engine must read the fake's standby budget");
+        Assert.AreEqual(fake.CloseBudgets.DisposeAbandonBudget, engine.DisposeAbandonBudget,
+            "the engine must read the fake's dispose budget");
     }
 }

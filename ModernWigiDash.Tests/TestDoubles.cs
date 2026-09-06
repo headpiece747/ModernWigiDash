@@ -1067,6 +1067,13 @@ internal sealed class FakeTransport : IDisplayTransport
 
     public bool IsConnected => ConnectResult && ConnectedAfterConnect;
 
+    /// <summary>
+    /// The close-budget policy this fake transport carries: derived from a
+    /// configurable bound so tests can drive the engine's bounded-wait paths
+    /// deterministically. Defaults to the HID transport's bound.
+    /// </summary>
+    public CloseBudgetPolicy CloseBudgets { get; set; } = CloseBudgetPolicy.Create(TimeSpan.FromSeconds(2));
+
     public bool Connect()
     {
         OnConnect?.Invoke();

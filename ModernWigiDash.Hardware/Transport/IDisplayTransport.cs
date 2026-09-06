@@ -55,4 +55,14 @@ internal interface IDisplayTransport : IDisposable
     /// Returns false when not connected or when a standby write fails.
     /// </summary>
     bool GoToStandby();
+
+    /// <summary>
+    /// The close-budget policy this transport hands to the engine: the
+    /// worst-case teardown bound and the engine's two bounded close waits,
+    /// derived together, so the never-stall-on-close relation (waits strictly
+    /// shorter than the worst case) holds by construction. Every adapter
+    /// carries its own bound; the engine reads it from whatever transport it
+    /// holds.
+    /// </summary>
+    CloseBudgetPolicy CloseBudgets { get; }
 }

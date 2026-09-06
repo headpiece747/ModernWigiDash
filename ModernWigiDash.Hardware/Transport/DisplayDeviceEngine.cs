@@ -53,13 +53,27 @@ public sealed class DisplayDeviceEngine : IDisposable
     internal TimeSpan ReconnectPeriod { get; set; } = TimeSpan.FromSeconds(5);
 
     // The never-stall-on-close budgets: read from the transport's close-budget
-    // policy (DisplayHidTransport.CloseBudgets), where they are derived
-    // strictly shorter than the worst-case teardown, so the relation holds by
+    // policy (IDisplayTransport.CloseBudgets), where they are derived strictly
+    // shorter than the worst-case teardown, so the relation holds by
     // construction instead of by a cross-file pin. A healthy close completes
     // in well under a second, so the bounds only ever bite for a hung device
-    // (a leaked handle at exit beats a frozen window).
-    internal static TimeSpan StandbyCloseBudget => DisplayHidTransport.CloseBudgets.StandbyCloseBudget;
-    internal static TimeSpan DisposeAbandonBudget => DisplayHidTransport.CloseBudgets.DisposeAbandonBudget;
+    // (a leaked handle at exit beats a frozen window). Before the first
+    // connect, the engine uses the HID transport's bound as the default.
+    internal TimeSpan StandbyCloseBudget => (_transport ?? new DisplayHidTransport()).CloseBudgets.StandbyCloseBudget;
+    internal TimeSpan DisposeAbandonBudget => (_transport ?? new DisplayHidTransport()).CloseBudgets.DisposeAbandonBudget;
+
+    /// <summary>
+    /// Test seam: inject a transport directly without going through the
+    /// factory (for tests that need to verify the budget reads before a
+    /// connect attempt).
+    /// </summary>
+    internal void SetTransportForTest(IDisplayTransport transport)
+    {
+        lock (_lock)
+        {
+            _transport = transport;
+        }
+    }
 
     // Direct-USB touch polling: the engine owns the transport, reads the touch
     // report at a 16ms cadence, and normalizes it once via

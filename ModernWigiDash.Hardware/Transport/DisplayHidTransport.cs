@@ -81,7 +81,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// shorter than the worst case) holds by construction. The engine reads
     /// these values; it never hard-codes a second spelling.
     /// </summary>
-    internal static CloseBudgetPolicy CloseBudgets => CloseBudgetPolicy.Create(CloseBound);
+    public CloseBudgetPolicy CloseBudgets => CloseBudgetPolicy.Create(CloseBound);
 
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {
