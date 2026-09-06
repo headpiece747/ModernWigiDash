@@ -136,13 +136,14 @@ internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
             return buffer;
         }
 
-        int metaDataSize = BitConverter.ToInt32(buffer, LhmSharedMemoryReader.OffsetMetaDataSize);
-        long msb = 4L + metaDataSize;
-        int fieldsEnd = (int)(msb + LhmSharedMemoryReader.FieldsBlockSize);
-        if (msb < 0 || fieldsEnd > capacity)
+        // Parse the header once: the wire-format fact (where the data block
+        // starts) is encoded exactly here, not re-derived in the reader.
+        if (!LhmSharedMemoryReader.TryParseHeader(buffer, out LhsHeader header))
         {
             return buffer;
         }
+
+        int fieldsEnd = header.Msb + LhmSharedMemoryReader.FieldsBlockSize;
         if (fieldsEnd > MaxCopyBytes)
         {
             return buffer; // claimed metadata block unreachable within the copy cap — malformed
@@ -153,10 +154,7 @@ internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
             buffer = CopyRange(map, buffer, fieldsEnd);
         }
 
-        int dataLength = BitConverter.ToInt32(buffer, (int)msb + 12);
-        int dataOffset = BitConverter.ToInt32(buffer, (int)msb + 16);
-
-        long total = (long)dataOffset + dataLength;
+        long total = (long)header.DataOffset + header.DataLength;
         if (total <= buffer.Length)
         {
             return buffer;

@@ -102,23 +102,23 @@ internal sealed class LhmSharedMemoryReader
     {
         try
         {
-            if (!TryReadHeader(mapBytes, out long lastUpdate, out int msb))
+            if (!TryParseHeader(mapBytes, out LhsHeader header))
                 return DisconnectedSnapshot();
-            if (!TryReadFields(mapBytes, msb, out int indexLength, out int indexOffset, out int indexFormat, out int dataLength, out int dataOffset))
+            if (!TryReadFields(header, mapBytes))
                 return DisconnectedSnapshot();
 
-            List<IndexEntry>? entries = ParseIndex(mapBytes, indexFormat, indexOffset, indexLength);
+            List<IndexEntry>? entries = ParseIndex(mapBytes, header.IndexFormat, header.IndexOffset, header.IndexLength);
             if (entries is null || entries.Count > MaxSensorEntries)
                 return DisconnectedSnapshot();
 
-            List<SensorReadingDto>? readings = MapReadings(mapBytes, dataOffset, dataLength, entries);
+            List<SensorReadingDto>? readings = MapReadings(mapBytes, header.DataOffset, header.DataLength, entries);
             if (readings is null)
                 return DisconnectedSnapshot();
 
             return new SensorSnapshotDto
             {
                 IsConnected = true,
-                LastUpdate = DateTimeOffset.FromUnixTimeSeconds(lastUpdate).UtcDateTime,
+                LastUpdate = DateTimeOffset.FromUnixTimeSeconds(header.LastUpdate).UtcDateTime,
                 Readings = readings,
             };
         }
@@ -130,34 +130,41 @@ internal sealed class LhmSharedMemoryReader
 
     /// <summary>The fixed header block: metadata size and last-update stamp,
     /// both validated before the variable metadata block is addressed.</summary>
-    private static bool TryReadHeader(byte[] mapBytes, out long lastUpdate, out int msb)
+    internal static bool TryParseHeader(byte[] mapBytes, out LhsHeader header)
     {
-        lastUpdate = 0;
-        msb = 0;
+        header = default!;
         if (mapBytes.Length < FixedHeaderSize) return false;
 
         int metaDataSize = BitConverter.ToInt32(mapBytes, OffsetMetaDataSize);
-        lastUpdate = BitConverter.ToInt64(mapBytes, OffsetLastUpdate);
+        long lastUpdate = BitConverter.ToInt64(mapBytes, OffsetLastUpdate);
         if (lastUpdate <= 0 || metaDataSize < 0) return false;
 
-        msb = 4 + metaDataSize;
-        return msb + FieldsBlockSize <= mapBytes.Length;
+        int msb = 4 + metaDataSize;
+        if (msb + FieldsBlockSize > mapBytes.Length) return false;
+
+        int indexLength = BitConverter.ToInt32(mapBytes, msb + 0);
+        int indexOffset = BitConverter.ToInt32(mapBytes, msb + 4);
+        int indexFormat = BitConverter.ToInt32(mapBytes, msb + 8);
+        int dataLength = BitConverter.ToInt32(mapBytes, msb + 12);
+        int dataOffset = BitConverter.ToInt32(mapBytes, msb + 16);
+
+        // The copy side needs the raw offsets even when they escape the buffer
+        // (it clamps to capacity); the parse side rejects them. So this method
+        // validates only the structural facts (metadata size, last-update, msb
+        // within bounds) and returns the raw field values; the caller decides
+        // whether to accept or clamp.
+        header = new LhsHeader(metaDataSize, lastUpdate, msb, indexLength, indexOffset, indexFormat, dataLength, dataOffset);
+        return true;
     }
 
     /// <summary>The 20-byte index/data descriptor block, bounds-checked against
     /// the map length — declared sizes from an untrusted map never address past
     /// the copy.</summary>
-    private static bool TryReadFields(byte[] mapBytes, int msb, out int indexLength, out int indexOffset, out int indexFormat, out int dataLength, out int dataOffset)
+    private static bool TryReadFields(LhsHeader header, byte[] mapBytes)
     {
-        indexLength = BitConverter.ToInt32(mapBytes, msb + 0);
-        indexOffset = BitConverter.ToInt32(mapBytes, msb + 4);
-        indexFormat = BitConverter.ToInt32(mapBytes, msb + 8);
-        dataLength = BitConverter.ToInt32(mapBytes, msb + 12);
-        dataOffset = BitConverter.ToInt32(mapBytes, msb + 16);
-
-        if (indexLength < 0 || indexOffset < 0 || dataLength < 0 || dataOffset < 0) return false;
-        if ((long)indexOffset + indexLength > mapBytes.Length) return false;
-        if ((long)dataOffset + dataLength > mapBytes.Length) return false;
+        if (header.IndexLength < 0 || header.IndexOffset < 0 || header.DataLength < 0 || header.DataOffset < 0) return false;
+        if ((long)header.IndexOffset + header.IndexLength > mapBytes.Length) return false;
+        if ((long)header.DataOffset + header.DataLength > mapBytes.Length) return false;
         return true;
     }
 
