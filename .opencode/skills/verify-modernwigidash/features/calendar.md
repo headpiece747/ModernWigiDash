@@ -50,8 +50,19 @@ inspector controls.
   (`[{"kind":"ics","url":"...","label":"...",...}]`). This is the load-bearing
   assertion: before the PROPFIND-template fix, this read stayed `[]` because
   the commit aborted before persistence.
+- **Swap to CalDAV.** Open the kind combo's dropdown and pick `caldav` (see the
+  kind-combo gotcha for the exact steps). Proof (swap): `list CalFeedServer_0`,
+  `CalFeedPrincipal_0`, `CalFeedUsername_0`, and `CalFeedPassword_0` each report
+  one Edit, and `list CalFeedUrl_0` reports no match (the ics box was replaced).
+  Then fill the triple (`set CalFeedServer_0 <https-server>`,
+  `set CalFeedPrincipal_0 <path>`, `set CalFeedUsername_0 <user>`) and re-read the
+  profile: `FeedsJson` now carries `[{"kind":"caldav","server":"...","principalPath":"...","username":"...",...}]`.
+  Proof (secret separation): the raw profile JSON contains no `password` string
+  (the CalDAV password is machine-local in the DPAPI credential store, never the
+  traveling profile).
 - **Evidence.** Save the `value` read-backs, the persist-read JSON, and a
-  `shot <evidence>/calendar-live/feed-editor/feed-row-populated.png`.
+  `shot <evidence>/calendar-live/feed-editor/feed-row-populated.png` (and
+  `caldav-row.png` for the swapped row).
 
 ## Gotchas
 
@@ -63,9 +74,14 @@ inspector controls.
   retry.
 - **The kind combo's items are virtualized.** WPF realizes a ComboBox's items
   only when the dropdown opens, so a UIA `SelectionItemPattern.Select` on a
-  `caldav` child fails with item-not-found until the dropdown is opened. The
-  field-swap is proven by the unit tests + the ics end-to-end; driving the swap
-  live needs a dropdown-open step the harness does not yet script.
+  `caldav` child fails (item-not-found, or no selection pattern) until the
+  dropdown is open. To drive the swap: expand the combo via its
+  `ExpandCollapsePattern` (the harness does not script this; a small ad-hoc
+  UIA script does), wait ~700 ms for the items to realize, then find the
+  realized item named `caldav` and click it at its bounding-rect center (a
+  direct mouse click selects; the item exposes no `SelectionItemPattern`).
+  Verify the swap by the field-swap proof above, not by the combo's reported
+  selected value.
 - **Persistence is debounced.** Read `profile.json` ~2 s after the last edit;
   reading immediately can show the pre-edit value.
 - **A bad feed host degrades, it does not crash.** An unresolvable URL logs a
