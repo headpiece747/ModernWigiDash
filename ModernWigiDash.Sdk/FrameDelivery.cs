@@ -35,8 +35,7 @@ public sealed class FrameDelivery : IDisposable
     private readonly TimeSpan _minInterval;
     private readonly Func<bool>? _isReady;
     private readonly TimeProvider _timeProvider;
-    private readonly CancellationTokenSource _cts;
-    private readonly Task _senderTask;
+    private readonly LoopLifetime _lifetime = new(TimeSpan.FromSeconds(1));
 
     private readonly Func<ReadOnlyMemory<byte>, FrameSendResult>? _send;
 
@@ -125,8 +124,7 @@ public sealed class FrameDelivery : IDisposable
             SingleReader = true,
             FullMode = BoundedChannelFullMode.DropOldest
         });
-        _cts = new CancellationTokenSource();
-        _senderTask = Task.Run(() => SenderLoop(_cts.Token), _cts.Token);
+        _lifetime.Start(async token => await SenderLoop(token).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -385,7 +383,7 @@ public sealed class FrameDelivery : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _cts.Cancel();
+        _lifetime.Stop();
         _channel.Writer.TryComplete();
 
         // Return any pooled buffers still queued in the channel before the
@@ -398,33 +396,6 @@ public sealed class FrameDelivery : IDisposable
             }
         }
 
-        // Join the sender loop with a bounded wait: a send is a synchronous
-        // USB write with up to a 30s timeout, so never block close on it â€”
-        // but do give a clean loop exit the chance to release its in-flight
-        // slot before the transport is disposed underneath it. The token is
-        // already cancelled above, so passing it would abort the join
-        // immediately â€” the bounded wait is the whole point.
-        try
-        {
-            _senderTask.Wait(TimeSpan.FromSeconds(1), CancellationToken.None);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected: the loop exited via cancellation.
-        }
-        catch (AggregateException)
-        {
-            // The loop faulted after cancellation; nothing left to join.
-        }
-
-        // Dispose the token source only once the sender loop has exited â€” a
-        // send still in flight (up to 30s USB timeout) may hold the token, and
-        // disposing a source a running task still references can fault its
-        // cancellation registration. When the bounded join above timed out,
-        // the source is deliberately dropped with the object instead.
-        if (_senderTask.IsCompleted)
-        {
-            _cts.Dispose();
-        }
+        _lifetime.Dispose();
     }
 }

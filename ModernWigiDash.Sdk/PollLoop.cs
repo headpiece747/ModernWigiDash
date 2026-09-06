@@ -18,15 +18,7 @@ public sealed class PollLoop : IDisposable
     private readonly Action _tick;
     private readonly Action _onTickFailure;
     private readonly Action<string> _log;
-    private CancellationTokenSource? _cts;
-    private CancellationTokenSource? _stoppedCts;
-    private Task? _loopTask;
-    // Start/Stop/Dispose serialize on one gate: ungated, a Start that passed
-    // the _cts-is-null check could run its Task.Run after Dispose returned
-    // (a leaked loop nobody cancels), and a direct Dispose (without Stop)
-    // dropped the live CTS undisposed.
-    private readonly Lock _gate = new();
-    private int _disposed;
+    private readonly LoopLifetime _lifetime = new(TimeSpan.FromSeconds(5));
     // The failure-message dedup rule, owned once (the LogOnChange module).
     private readonly LogOnChange _failureDedup = new();
 
@@ -50,31 +42,17 @@ public sealed class PollLoop : IDisposable
     /// <summary>Starts the loop (idempotent).</summary>
     public void Start()
     {
-        lock (_gate)
+        var ct = _lifetime.Start(async token => await Loop(token).ConfigureAwait(false));
+        if (ct.CanBeCanceled)
         {
-            if (_disposed != 0 || _cts != null) return;
-
-            _cts = new CancellationTokenSource();
-            var ct = _cts.Token;
             _log($"[{_name}] polling started ({(int)_interval.TotalMilliseconds}ms, background thread)");
-            _loopTask = Task.Run(() => Loop(ct), ct);
         }
     }
 
-    /// <summary>Stops the loop (idempotent). Cancels but deliberately does NOT
-    /// dispose the token source here: the loop task may still be draining when
-    /// Stop runs, and disposing a CTS a running task still holds can fault the
-    /// task's cancellation registration. The stopped source is handed to
-    /// <see cref="Dispose"/>, which owns its disposal.</summary>
+    /// <summary>Stops the loop (idempotent).</summary>
     public void Stop()
     {
-        lock (_gate)
-        {
-            if (_cts is null) return;
-            _cts.Cancel();
-            _stoppedCts = _cts;
-            _cts = null;
-        }
+        _lifetime.Stop();
     }
 
     /// <summary>
@@ -86,36 +64,7 @@ public sealed class PollLoop : IDisposable
     /// </summary>
     public void Dispose()
     {
-        CancellationTokenSource? live = null;
-        CancellationTokenSource? stopped = null;
-        Task? task;
-        lock (_gate)
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-
-            if (_cts != null)
-            {
-                _cts.Cancel();
-                live = _cts;
-                _cts = null;
-            }
-            stopped = _stoppedCts;
-            _stoppedCts = null;
-            task = _loopTask;
-        }
-        try
-        {
-            // Bounded wait for the loop task to unwind; the timeout is the
-            // cancellation, so opt out of token-based cancellation explicitly.
-            // Normally fast: a cancelled loop exits at the next await point.
-            task?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
-        }
-        catch
-        {
-            // Loop task already faulted/cancelled — teardown is best-effort
-        }
-        live?.Dispose();
-        stopped?.Dispose();
+        _lifetime.Dispose();
     }
 
     private async Task Loop(CancellationToken ct)

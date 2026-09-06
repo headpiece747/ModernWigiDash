@@ -59,15 +59,7 @@ internal sealed class FeedLoop : IDisposable
     private readonly Func<bool>? _continueAfterCycle;
     private readonly Action<Exception>? _onError;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
-    private readonly CancellationTokenSource _cts = new();
-    // Start and Dispose race on the same key (a balanced subscribe/unsubscribe
-    // pair on racing threads): the gate serializes the task publication
-    // against the dispose, so Start can never read _cts.Token after Dispose
-    // has disposed the source, and a Start landing after the dispose is a
-    // no-op instead of a leaked loop.
-    private readonly Lock _gate = new();
-    private Task? _task;
-    private int _disposed;
+    private readonly LoopLifetime _lifetime = new(TimeSpan.FromSeconds(5));
 
     private IWebSocketFeed? _current;
 
@@ -111,11 +103,7 @@ internal sealed class FeedLoop : IDisposable
     /// sockets.</summary>
     public void Start()
     {
-        lock (_gate)
-        {
-            if (_disposed != 0 || _task != null) return;
-            _task = Task.Run(() => RunAsync(_cts.Token), _cts.Token);
-        }
+        _lifetime.Start(async token => await RunAsync(token).ConfigureAwait(false));
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -169,26 +157,7 @@ internal sealed class FeedLoop : IDisposable
 
     public void Dispose()
     {
-        Task? task;
-        lock (_gate)
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-
-            _cts.Cancel();
-            task = _task;
-        }
         Current?.Abort();
-        try
-        {
-            // Bounded wait for the loop task to unwind; the timeout is the
-            // cancellation, so opt out of token-based cancellation explicitly.
-            // Normally fast: Abort unblocks the in-flight receive immediately.
-            task?.Wait(TimeSpan.FromSeconds(5), CancellationToken.None);
-        }
-        catch
-        {
-            // Loop task already faulted/cancelled — teardown is best-effort
-        }
-        _cts.Dispose();
+        _lifetime.Dispose();
     }
 }
