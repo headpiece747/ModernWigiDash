@@ -35,10 +35,6 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
 {
     private string _lastInspectorCandidatesStamp = "";
 
-    /// <summary>Test seam: replaces the client's cache-load leg so the boot
-    /// race (version + identity guards) is drivable without a file.</summary>
-    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride { get; set; }
-
     /// <summary>
     /// The single "fetch if due" gate for every cadence source (the refresh
     /// PollLoop, the render kick, the touch refresh, the edit-time force):
@@ -160,7 +156,7 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // the edit-side clears use: either the gated set lands before the
             // edit's gated clear (the clear erases it) or after (the guard
             // re-reads the new location and the set never happens).
-            if (WeatherDisplayState.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
+            if (WeatherResolution.WritebackEligible(snapshot.ResolvedCityName, host.CurrentLocation))
             {
                 host.QueueLabelWriteback(window.StillCurrent, snapshot.ResolvedCityName);
             }
@@ -230,11 +226,17 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             string locationKeyBefore = WeatherQueryKey.Build(location);
             var window = new CaptureWindowGuard(locationKeyBefore, () => WeatherQueryKey.Build(host.CurrentLocation));
 
+            // The shared resolved-identity value BEFORE the load commits its
+            // own: if the load is later discarded, this is what the rollback
+            // restores (the "keeps the previous resolution" fact).
+            WeatherResolutionState preLoadIdentity = client.Resolution.Identity;
+
             // The cache is identity-checked against the CURRENT location by
             // the client itself (a cache saved for a different resolution
-            // must not surface as fresh weather).
-            var load = CacheLoadOverride ?? client.LoadCacheAsync;
-            var cached = await load(location, cancellationToken).ConfigureAwait(false);
+            // must not surface as fresh weather). The test seam rides the
+            // client's own CacheLoadOverride, so the state-commitment
+            // contract still applies to the returned snapshot's identity.
+            var cached = await client.LoadCacheAsync(location, cancellationToken).ConfigureAwait(false);
             if (cached is null) return;
 
             // The version + identity guards run inside the apply seam's lock:
@@ -246,14 +248,18 @@ internal sealed class WeatherFetchFlow(WeatherClient client, IWeatherFetchHost h
             // load state).
             bool applied = host.TryApply(new WeatherApplyRequest(cached, versionBefore, window.StillCurrent,
                 null, null, cached.ResolvedCityName));
-            if (!applied && window.Dropped)
+            if (!applied)
             {
-                // The load already committed its resolution state (name/lat/
-                // lon/throttle) — an identity change means the discard must
-                // roll that back so the next resolution starts clean. A
-                // version-only skip means a fresh fetch already landed: the
-                // identity still matches, so there is nothing to undo.
-                client.Invalidate(WeatherInvalidationKind.Coordinates);
+                // The load committed its client-side state (throttle stamp +
+                // identity query) AND overwrote the shared resolved-identity
+                // value before the caller could decide what to do with the
+                // snapshot — a discard must withdraw that commitment: restore
+                // the pre-load identity (the widget's header name survives a
+                // rejected load), reset the throttle (the next fetch runs
+                // immediately), and clear the identity query. A version-only
+                // skip (a fresh fetch already landed) leaves nothing to undo
+                // either way; the rollback is harmless.
+                client.RollbackCacheLoad(cached.Lat, cached.Lon, preLoadIdentity);
             }
         }
         catch (OperationCanceledException)

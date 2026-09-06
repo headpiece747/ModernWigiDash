@@ -2,12 +2,12 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// Pins the weather widget's gated display-state module: the apply and the
-/// tie apply under the one gate (guard → merge → identity copies → stamp as
+/// tie apply under the one gate (guard ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ merge ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ identity copies ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ stamp as
 /// one critical section), the write-back queue/take serialization (a queued
 /// value can never be lost to a take), the folded resolved-identity value's
 /// apply rules (the null-keeps and the population's no-data sentinel), the
 /// invalidation routing, and the render tick's version-gated consistent view
-/// — drivable without a widget instance, a fetch, or an HTTP stub.
+/// ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â drivable without a widget instance, a fetch, or an HTTP stub.
 /// </summary>
 [TestClass]
 public class WeatherDisplayStateTests
@@ -27,8 +27,13 @@ public class WeatherDisplayStateTests
         HourlyForecasts: [new("12:00", 24.0, 3), new("13:00", 25.0, 3)],
         ResolvedCityName: "Miami, Florida, United States of America", Lat: 25.76, Lon: -80.19);
 
-    private static WeatherDisplayState NewState(Func<DateTime>? now = null)
-        => new("Default Location", now ?? (() => Stamp));
+    private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
+
+    private static (WeatherResolution Resolution, WeatherDisplayState State) NewOwner(Func<DateTime>? now = null)
+    {
+        var resolution = new WeatherResolution(FixedClock(), "Default Location");
+        return (resolution, new WeatherDisplayState(resolution, "Default Location", now ?? (() => Stamp)));
+    }
 
     private static WeatherApplyRequest ApplyRequest(WeatherSnapshot snapshot, int? expectedVersion = null,
         Func<bool>? identityGuard = null, IReadOnlyList<GeocodeCandidate>? candidates = null,
@@ -40,14 +45,14 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void TryApply_Fresh_SucceedsMergesIdentityAndStampsLastSuccess()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
 
         bool applied = state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
 
         Assert.IsTrue(applied);
         Assert.AreEqual(1, state.DataVersion);
-        Assert.IsTrue(state.State.HasData, "the apply is a snapshot's commit — from here the pane renders the data, not its no-data view");
+        Assert.IsTrue(state.State.HasData, "the apply is a snapshot's commit ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â from here the pane renders the data, not its no-data view");
         Assert.AreEqual(23.4, state.State.CurrentTempC);
         Assert.AreEqual("Miami, Florida, United States of America", state.Identity.ResolvedName);
         Assert.AreEqual(444_000.0, state.Identity.Population);
@@ -59,7 +64,7 @@ public class WeatherDisplayStateTests
     public void TryApply_StaleExpectedVersion_RejectsLeavesStateAndStampUntouched()
     {
         int tick = 0;
-        var state = NewState(() => new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(tick++));
+        var (_, state) = NewOwner(() => new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(tick++));
         state.TryApply(ApplyRequest(FullSnapshot));
 
         bool applied = state.TryApply(ApplyRequest(FullSnapshot, expectedVersion: 0));
@@ -74,7 +79,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void TryApply_IdentityGuardFails_RejectsLeavesIdentityUntouched()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates,
             resolvedName: "Miami, Florida, United States of America"));
 
@@ -92,7 +97,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void TryApplyTie_GuardFails_LeavesStateAndIdentityUntouched()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, resolvedName: "Miami, Florida, United States of America"));
 
         bool applied = state.TryApplyTie(Candidates, () => false, () => "Berlin");
@@ -106,7 +111,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void TryApplyTie_Success_ResetsToPlaceholderAppliesTiedCandidatesAndQueriedHeader()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
 
@@ -117,25 +122,25 @@ public class WeatherDisplayStateTests
         Assert.IsTrue(applied);
         Assert.AreEqual(2, state.DataVersion, "the placeholder reset bumps the version so the render model rebuilds");
         Assert.IsFalse(state.State.HasData,
-            "a tie has no data — the reset lands on the no-data view, never a previous city's scalars under the tie's header");
+            "a tie has no data ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the reset lands on the no-data view, never a previous city's scalars under the tie's header");
         Assert.AreEqual(new WeatherSnapshotState().CurrentTempC, state.State.CurrentTempC,
-            "a tie has no data — the placeholder scalar (the record's default), never a previous city's");
+            "a tie has no data ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the placeholder scalar (the record's default), never a previous city's");
         Assert.AreEqual(1, state.Identity.Candidates.Count);
         Assert.AreEqual("Berlin, Germany", state.Identity.Candidates[0].Label);
-        Assert.AreEqual("Berlin", state.Identity.ResolvedName, "the queried name is the honest header — there is no winner to name");
+        Assert.AreEqual("Berlin", state.Identity.ResolvedName, "the queried name is the honest header ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â there is no winner to name");
         Assert.AreEqual(0, state.Identity.Population);
     }
 
     [TestMethod]
     public void TryApplyTie_BlankQueriedLocation_HeaderIsNeutralLabel()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
 
         bool applied = state.TryApplyTie(Candidates, () => true, () => "  ");
 
         Assert.IsTrue(applied);
         Assert.AreEqual("Default Location", state.Identity.ResolvedName,
-                    "a blank query has no name to show — the INJECTED neutral label (the seam is parameterized, not a hardcoded client const)");
+                    "a blank query has no name to show ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the INJECTED neutral label (the seam is parameterized, not a hardcoded client const)");
     }
 
     // -- Write-back queue / take ----------------------------------------------
@@ -146,29 +151,29 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void QueueLabelWriteback_GuardFails_LeavesQueueEmpty()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
 
-        state.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
+        state.Resolution.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
 
         Assert.IsNull(state.PendingLabelWriteback);
-        Assert.IsNull(state.TakePendingWriteback(BareLocation(), () => false),
-            "a never-queued write-back takes back null — not an empty string");
+        Assert.IsNull(state.Resolution.TakePendingWriteback(BareLocation(), () => false),
+            "a never-queued write-back takes back null ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â not an empty string");
     }
 
     [TestMethod]
     public void TakePendingWriteback_ReturnsAndClears_EveryQueuedValueSurvivesItsOwnTake()
     {
-        var state = NewState();
-        state.QueueLabelWriteback(() => true, "First");
+        var (_, state) = NewOwner();
+        state.Resolution.QueueLabelWriteback(() => true, "First");
 
-        string? first = state.TakePendingWriteback(BareLocation(), () => false);
-        state.QueueLabelWriteback(() => true, "Second");
+        string? first = state.Resolution.TakePendingWriteback(BareLocation(), () => false);
+        state.Resolution.QueueLabelWriteback(() => true, "Second");
 
-        string? second = state.TakePendingWriteback(BareLocation(), () => false);
+        string? second = state.Resolution.TakePendingWriteback(BareLocation(), () => false);
 
         Assert.AreEqual("First", first);
         Assert.AreEqual("Second", second,
-            "the queue and the take serialize on the one gate — a queued value can never be lost to a take");
+            "the queue and the take serialize on the one gate ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a queued value can never be lost to a take");
         Assert.IsNull(state.PendingLabelWriteback);
     }
 
@@ -177,18 +182,18 @@ public class WeatherDisplayStateTests
     {
         // The gap the old ungated flush check sailed through: a CustomLabel
         // landing between the queue and the flush must veto the write at the
-        // take — and a veto is a "not yet", never a "never" (the value stays
+        // take ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â and a veto is a "not yet", never a "never" (the value stays
         // queued; removing the label lets the next take through).
-        var state = NewState();
-        state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        var (_, state) = NewOwner();
+        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        string? taken = state.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
+        string? taken = state.Resolution.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
 
         Assert.IsNull(taken, "a CustomLabel set after the queue must veto the write at the take");
         Assert.AreEqual("Miami, Florida, United States of America", state.PendingLabelWriteback,
-            "the vetoed write-back stays queued — a veto must never silently lose the resolved label");
+            "the vetoed write-back stays queued ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a veto must never silently lose the resolved label");
         Assert.AreEqual("Miami, Florida, United States of America",
-            state.TakePendingWriteback(BareLocation(), () => false),
+            state.Resolution.TakePendingWriteback(BareLocation(), () => false),
             "removing the label re-opens the take on the next frame");
         Assert.IsNull(state.PendingLabelWriteback);
     }
@@ -196,22 +201,22 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void TakePendingWriteback_NameEqualsLocation_RefusesAndKeepsQueued()
     {
-        var state = NewState();
-        state.QueueLabelWriteback(() => true, "Berlin");
+        var (_, state) = NewOwner();
+        state.Resolution.QueueLabelWriteback(() => true, "Berlin");
 
-        string? taken = state.TakePendingWriteback(BareLocation("Berlin"), () => false);
+        string? taken = state.Resolution.TakePendingWriteback(BareLocation("Berlin"), () => false);
 
-        Assert.IsNull(taken, "writing the location onto itself is a no-op churn — the take refuses");
+        Assert.IsNull(taken, "writing the location onto itself is a no-op churn ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the take refuses");
         Assert.AreEqual("Berlin", state.PendingLabelWriteback, "the refused write-back stays queued");
     }
 
     [TestMethod]
     public void TakePendingWriteback_Suppressed_RefusesAndKeepsQueued()
     {
-        var state = NewState();
-        state.QueueLabelWriteback(() => true, "Berlin");
+        var (_, state) = NewOwner();
+        state.Resolution.QueueLabelWriteback(() => true, "Berlin");
 
-        string? taken = state.TakePendingWriteback(BareLocation(), () => true);
+        string? taken = state.Resolution.TakePendingWriteback(BareLocation(), () => true);
 
         Assert.IsNull(taken, "the suppression flag's veto runs at the take, under the gate");
         Assert.AreEqual("Berlin", state.PendingLabelWriteback);
@@ -222,14 +227,14 @@ public class WeatherDisplayStateTests
     {
         var bare = BareLocation("New York");
 
-        Assert.IsTrue(WeatherDisplayState.WritebackEligible("New York, New York, United States", bare),
+        Assert.IsTrue(WeatherResolution.WritebackEligible("New York, New York, United States", bare),
             "a non-empty name with no CustomLabel and a differing Location is eligible");
-        Assert.IsFalse(WeatherDisplayState.WritebackEligible("", bare), "a blank name has nothing to write");
-        Assert.IsFalse(WeatherDisplayState.WritebackEligible("   ", bare), "whitespace-only is blank");
-        Assert.IsFalse(WeatherDisplayState.WritebackEligible("New York, New York, United States",
+        Assert.IsFalse(WeatherResolution.WritebackEligible("", bare), "a blank name has nothing to write");
+        Assert.IsFalse(WeatherResolution.WritebackEligible("   ", bare), "whitespace-only is blank");
+        Assert.IsFalse(WeatherResolution.WritebackEligible("New York, New York, United States",
                 BareLocation("New York") with { CustomLabel = "Home" }),
-            "a CustomLabel claims the title — the label is display-only");
-        Assert.IsFalse(WeatherDisplayState.WritebackEligible("New York", bare),
+            "a CustomLabel claims the title ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the label is display-only");
+        Assert.IsFalse(WeatherResolution.WritebackEligible("New York", bare),
             "a name that equals the Location is a no-op write");
     }
 
@@ -238,10 +243,10 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void Invalidate_Coordinates_DropsNamePopulationAndWriteback_KeepsCandidates()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
-        state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
         state.Invalidate(WeatherInvalidationKind.Coordinates);
 
@@ -255,10 +260,10 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void Invalidate_Location_DropsWholeIdentityIncludingCandidates()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
-        state.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
+        state.Resolution.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
         state.Invalidate(WeatherInvalidationKind.Location);
 
@@ -276,7 +281,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void Ctor_NeutralLabel_IsTheInitialHeader()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
 
         Assert.AreEqual("Default Location", state.Identity.ResolvedName,
             "the header must show the neutral label until a resolution sets a real identity");
@@ -288,12 +293,12 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void Apply_NullArguments_KeepPreviousValues()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
 
         // The fetch reported none of the three identity sections: nothing may
-        // change (the "response omitted this section — keep the previous
+        // change (the "response omitted this section ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â keep the previous
         // value" rule).
         state.TryApply(ApplyRequest(FullSnapshot, expectedVersion: 1));
 
@@ -305,7 +310,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void Apply_ZeroPopulation_ClearsTheResolvedPopulation()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot, candidates: Candidates, population: 444_000.0,
             resolvedName: "Miami, Florida, United States of America"));
 
@@ -323,20 +328,20 @@ public class WeatherDisplayStateTests
     private static readonly WeatherHeaderLayout Header = WeatherLayout.ComputeHeader(Bounds, 1f, 1f);
 
     private static (WeatherRenderModelInputs, DateTime) View(WeatherDisplayState state, bool hideLocation = false)
-            => state.CaptureRenderView(Bounds, Header, 1f, "Detailed", "Fahrenheit (°F, mph)", "", hideLocation,
+            => state.CaptureRenderView(Bounds, Header, 1f, "Detailed", "Fahrenheit (Ãƒâ€šÃ‚Â°F, mph)", "", hideLocation,
                 true, true, true, true, true, "Miami, Florida"); // all five display options on
 
     [TestMethod]
     public void CaptureRenderView_VersionUnchanged_CopiesAreStableAcrossCaptures()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot));
 
         var (v1, t1) = View(state);
         var (v2, _) = View(state);
 
         Assert.AreSame(v1.Daily, v2.Daily,
-            "the forecast copies refresh only when the version changes — the per-frame path allocates nothing");
+            "the forecast copies refresh only when the version changes ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the per-frame path allocates nothing");
         Assert.AreSame(v1.Hourly, v2.Hourly);
         Assert.AreEqual(2, v1.Daily.Count);
         Assert.AreEqual(2, v1.Hourly.Count);
@@ -349,7 +354,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void CaptureRenderView_HideLocation_RidesTheKey()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot));
 
         var (v1, _) = View(state);
@@ -357,34 +362,34 @@ public class WeatherDisplayStateTests
 
         Assert.IsFalse(v1.Key.HideLocation);
         Assert.IsTrue(v2.Key.HideLocation,
-            "the hide-location flag must ride the render-model key — the header title is a key-owned display fact");
+            "the hide-location flag must ride the render-model key ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the header title is a key-owned display fact");
     }
 
     [TestMethod]
     public void CaptureRenderView_TheDataFact_RidesTheKey()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
 
         var (before, _) = View(state);
         Assert.IsFalse(before.Key.HasData,
-            "a fresh state has no committed snapshot — the no-data view is what the pane draws");
+            "a fresh state has no committed snapshot ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the no-data view is what the pane draws");
 
         state.TryApply(ApplyRequest(FullSnapshot));
         var (after, _) = View(state);
         Assert.IsTrue(after.Key.HasData,
-            "the apply's commit must ride the render-model key — the pane switches to the data view");
+            "the apply's commit must ride the render-model key ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the pane switches to the data view");
     }
 
     [TestMethod]
     public void CaptureRenderView_TieThenReapplyWithoutCapture_RefreshesCopiesNeverThePreviousCitysList()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot));
         var (v1, _) = View(state);
 
         // A tie and a re-apply with NO capture in between: the placeholder
         // reset must not reset the forecast version onto the already-rendered
-        // one — a version collision would make the copy-skip reuse the
+        // one ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a version collision would make the copy-skip reuse the
         // previous city's list under the new city's header.
         state.TryApplyTie(
             [new GeocodeCandidate("Berlin, Germany", "Berlin, Germany", 52.52, 13.405)],
@@ -398,7 +403,7 @@ public class WeatherDisplayStateTests
         var (v2, _) = View(state);
 
         Assert.AreNotSame(v1.Daily, v2.Daily,
-            "the re-apply after a tie must refresh the copies — the placeholder reset must not reset the forecast version onto a previously rendered one");
+            "the re-apply after a tie must refresh the copies ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the placeholder reset must not reset the forecast version onto a previously rendered one");
         Assert.AreEqual(1, v2.Daily.Count, "the new city's forecast list, never the previous city's stale copy");
         Assert.AreEqual(1, v2.Hourly.Count);
     }
@@ -406,7 +411,7 @@ public class WeatherDisplayStateTests
     [TestMethod]
     public void CaptureRenderView_AfterTie_RefreshesCopiesToTheEmptyPlaceholder()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot));
 
         state.TryApplyTie(
@@ -414,14 +419,14 @@ public class WeatherDisplayStateTests
             () => true, () => "Berlin");
         var (v1, _) = View(state);
 
-        Assert.AreEqual(0, v1.Daily.Count, "a tie has no forecast data — the placeholder's empty lists, never a previous city's");
+        Assert.AreEqual(0, v1.Daily.Count, "a tie has no forecast data ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the placeholder's empty lists, never a previous city's");
         Assert.AreEqual(0, v1.Hourly.Count);
     }
 
     [TestMethod]
     public void CaptureRenderView_VersionChanged_RefreshesCopies()
     {
-        var state = NewState();
+        var (_, state) = NewOwner();
         state.TryApply(ApplyRequest(FullSnapshot));
         var (v1, _) = View(state);
 

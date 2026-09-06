@@ -1,29 +1,32 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// The client-side fetch-control state machine: the 5-minute throttle window,
-/// the single-flight claim, and the resolved-identity stamp — the mutable twin
-/// of the widget's gated <see cref="WeatherDisplayState"/>. The resolved
-/// identity itself is the shared <see cref="WeatherResolutionState"/> value
-/// (candidates, name, population) — the widget's twin holds the same type,
-/// and both route their drops through
-/// <see cref="WeatherInvalidation.Drop"/>. Every state transition that carries
-/// a rule (compare + stamp under one gate, the advance-clears-old-coordinates
-/// rule, invalidation) is an atomic operation here; the client keeps only the
-/// orchestration. One gate owns the resolved identity fields (query,
-/// coordinates, the shared identity value) with the throttle, so no caller
-/// can tear the compare from the stamp or leave old coordinates under a new
-/// query.
+/// The weather cluster's ONE resolved-identity owner: the shared identity
+/// value (<see cref="WeatherResolutionState"/> — the dropdown candidates, the
+/// header city name, the population) plus the fetch-side fields (the throttle
+/// stamp, the single-flight claim, the identity query, the coordinates) and
+/// the display-side field (the pending label write-back), all under one gate.
+/// <para>
+/// The client and the display state hold a REFERENCE to this module instead
+/// of each holding a copy of the identity, so the "the two sides never drift"
+/// invariant is by construction, not a test pin: there is one storage, one
+/// drop application site (<see cref="Invalidate"/> routes through
+/// <see cref="WeatherInvalidation.Drop"/>), and no twin-equivalence ceremony.
+/// </para>
+/// <para>
+/// Every transition that carries a rule (compare + stamp under one gate, the
+/// advance-clears-old-coordinates rule, the cache-identity apply, the
+/// write-back queue/take serialization, invalidation) is an atomic operation
+/// here; the client keeps only the orchestration, and the display state keeps
+/// only the snapshot state and the render copies.
+/// </para>
 /// </summary>
-internal sealed class WeatherFetchControl
+internal sealed class WeatherResolution(TimeProvider clock, string neutralLocationLabel)
 {
     /// <summary>The fetch cool-down window — the one cadence constant the
     /// widget's refresh loop and every throttle check share (a change edits
     /// one value).</summary>
     internal static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(5);
-
-    /// <summary>Test seam: injectable clock for throttling.</summary>
-    internal TimeProvider Clock { get; set; }
 
     private readonly Lock _gate = new();
     private DateTime _lastFetchTime = DateTime.MinValue;
@@ -31,13 +34,12 @@ internal sealed class WeatherFetchControl
     private string _lastLocationQuery = "";
     private double? _lat;
     private double? _lon;
-    // The shared resolved-identity value — the ONE storage the client twin
-    // keeps for the candidates/name/population. The widget's resolved-identity
-    // twin holds the same value type, and both route their drops through
-    // WeatherInvalidation.Drop, so the two twins can never drift.
-    private WeatherResolutionState _resolution = WeatherResolutionState.Empty;
+    private WeatherResolutionState _identity = new(neutralLocationLabel, 0, []);
+    private string? _pendingWriteback;
 
-    internal WeatherFetchControl(TimeProvider clock) => Clock = clock;
+    /// <summary>Test seam: injectable clock for throttling (read at stamp
+    /// time, so a swap is observed by the next transition).</summary>
+    internal TimeProvider Clock { get; set; } = clock;
 
     /// <summary>Test seams: the current state, read without the gate (the
     /// rules are exercised through the atomic operations; these exist so
@@ -58,15 +60,26 @@ internal sealed class WeatherFetchControl
     /// observe the state after a transition.</summary>
     internal string LastLocationQuery => _lastLocationQuery;
 
-    /// <summary>The shared resolved-identity value (the same type the
-    /// widget's twin holds) — both twins route their drops through
-    /// <see cref="WeatherInvalidation.Drop"/>.</summary>
-    internal WeatherResolutionState ResolutionState => _resolution;
-    internal IReadOnlyList<GeocodeCandidate> Candidates => _resolution.Candidates;
-    internal double ResolvedPopulation => _resolution.Population;
+    /// <summary>The shared resolved-identity value — the ONE storage both the
+    /// client and the display state read; its transitions run only through
+    /// this module's gated members.</summary>
+    internal WeatherResolutionState Identity
+    {
+        get { lock (_gate) { return _identity; } }
+    }
+    internal IReadOnlyList<GeocodeCandidate> Candidates => _identity.Candidates;
+    internal double ResolvedPopulation => _identity.Population;
     internal double? Lat => _lat;
     internal double? Lon => _lon;
-    internal string ResolvedCityName => _resolution.ResolvedName;
+    internal string ResolvedCityName => _identity.ResolvedName;
+
+    /// <summary>The pending resolved-label write-back awaiting the
+    /// UI-thread flush — read under the gate (the queue and the take run
+    /// under it, so a read in between is consistent).</summary>
+    internal string? PendingLabelWriteback
+    {
+        get { lock (_gate) { return _pendingWriteback; } }
+    }
 
     /// <summary>Sync throttle pre-check for the render tick: true when the
     /// throttle window has elapsed since the last attempt. The first attempt
@@ -141,8 +154,8 @@ internal sealed class WeatherFetchControl
                 return false;
             }
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
-            candidates = _resolution.Candidates;
-            population = _resolution.Population;
+            candidates = _identity.Candidates;
+            population = _identity.Population;
             return true;
         }
     }
@@ -174,11 +187,11 @@ internal sealed class WeatherFetchControl
             {
                 _lat = null;
                 _lon = null;
-                _resolution = _resolution.With(resolvedName: "", population: 0);
+                _identity = _identity.With(resolvedName: "", population: 0);
             }
             else
             {
-                _resolution = _resolution.With(population: 0);
+                _identity = _identity.With(population: 0);
             }
         }
     }
@@ -188,7 +201,7 @@ internal sealed class WeatherFetchControl
     /// last list untouched).</summary>
     internal void SetCandidates(IReadOnlyList<GeocodeCandidate> candidates)
     {
-        lock (_gate) { _resolution = _resolution.With(candidates: candidates); }
+        lock (_gate) { _identity = _identity.With(candidates: candidates); }
     }
 
     /// <summary>Applies a winning resolution: the exact coordinates, the
@@ -199,7 +212,7 @@ internal sealed class WeatherFetchControl
         {
             _lat = lat;
             _lon = lon;
-            _resolution = _resolution.With(resolvedName: name, population: population);
+            _identity = _identity.With(resolvedName: name, population: population);
         }
     }
 
@@ -212,7 +225,7 @@ internal sealed class WeatherFetchControl
         {
             _lat = null;
             _lon = null;
-            _resolution = _resolution.With(resolvedName: "");
+            _identity = _identity.With(resolvedName: "");
         }
     }
 
@@ -248,7 +261,7 @@ internal sealed class WeatherFetchControl
             {
                 appliedName = WeatherPresentation.UnknownLocationLabel;
             }
-            _resolution = _resolution.With(resolvedName: appliedName);
+            _identity = _identity.With(resolvedName: appliedName);
             _lat = lat;
             _lon = lon;
             _lastFetchTime = Clock.GetUtcNow().UtcDateTime;
@@ -260,16 +273,16 @@ internal sealed class WeatherFetchControl
     /// The single edit-path invalidation, per drop kind (the boot-load's
     /// discarded-load rollback rides the Coordinates kind too): the resolved
     /// coordinates clear, the identity query + throttle reset (the next fetch
-    /// re-resolves and runs immediately), and the shared identity value drops
-    /// through the single rule (<see cref="WeatherInvalidation.Drop"/>) —
-    /// Coordinates keeps the offered candidates (a pick resolves against
+    /// re-resolves and runs immediately), the pending label write-back drops
+    /// (an edit landing after a completed fetch must not be overwritten by
+    /// the old identity's label on the next render), and the shared identity
+    /// value drops through the single rule (<see cref="WeatherInvalidation.Drop"/>)
+    /// — Coordinates keeps the offered candidates (a pick resolves against
     /// them), Location voids the whole identity into the one empty state.
-    /// The widget twin's <see cref="WeatherDisplayState.Invalidate"/> applies
-    /// the same kind under its own gate plus its own unique field (the
-    /// pending label write-back), so the twins can never disagree on what a
-    /// kind drops. Contrast <see cref="ClearCoordinates"/>, which serves an
-    /// ambiguous tie where the old resolution stays the current best and
-    /// keeps its population.
+    /// One module, one gate, one application site: the former twin
+    /// equivalence is unrepresentable-broken. Contrast
+    /// <see cref="ClearCoordinates"/>, which serves an ambiguous tie where
+    /// the old resolution stays the current best and keeps its population.
     /// </summary>
     internal void Invalidate(WeatherInvalidationKind kind)
     {
@@ -277,18 +290,135 @@ internal sealed class WeatherFetchControl
         {
             _lat = null;
             _lon = null;
-            _resolution = WeatherInvalidation.Drop(kind, _resolution);
+            _pendingWriteback = null;
+            _identity = WeatherInvalidation.Drop(kind, _identity);
             _lastFetchTime = DateTime.MinValue;
             _lastLocationQuery = "";
         }
     }
+
+    /// <summary>
+    /// The boot-load's discarded-load rollback: undoes the client-side
+    /// commitment a cache load made (the throttle stamp and the identity
+    /// query) AND restores the shared resolved-identity value to what it was
+    /// BEFORE the load — the widget's header name survives a rejected load
+    /// ("keeps the previous resolution"), while the next fetch still
+    /// re-resolves and runs immediately (the throttle is back to never-fetched).
+    /// This is distinct from <see cref="Invalidate"/>: that entry serves an
+    /// EDIT (a new place was chosen, so the old identity's name must go),
+    /// whereas here the identity never changed — only the load's own
+    /// commitment must be withdrawn. The coordinates are restored from the
+    /// committed payload (the load's applied lat/lon), so the follow-up fetch
+    /// starts from the same coordinates it would have had without the load.
+    /// </summary>
+    internal void RollbackCacheLoad(double? lat, double? lon, WeatherResolutionState preLoadIdentity)
+    {
+        lock (_gate)
+        {
+            _lat = lat;
+            _lon = lon;
+            _identity = preLoadIdentity;
+            _lastFetchTime = DateTime.MinValue;
+            _lastLocationQuery = "";
+        }
+    }
+
+    /// <summary>
+    /// The one spelling of "the resolved label may still be written into
+    /// Location": the name is non-empty, no CustomLabel claims the title (a
+    /// label is display-only — writing the resolved name into Location would
+    /// destroy the query), and the name is not already the Location (a
+    /// no-op write would only churn a persistence + property event). The
+    /// flow's queue and this take evaluate the SAME policy, and the take
+    /// evaluates it under the gate — so an edit (a CustomLabel or a Location
+    /// change) landing between the queue and the flush takes the same gate
+    /// and is seen at the take, never sailed through an ungated flush check.
+    /// </summary>
+    internal static bool WritebackEligible(string? name, WeatherLocation currentLocation)
+        => !string.IsNullOrWhiteSpace(name)
+            && string.IsNullOrWhiteSpace(currentLocation.CustomLabel)
+            && !string.Equals(name, currentLocation.Location, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Queues a resolved-label write-back for the UI thread, only when the
+    /// identity guard still passes — the check + set under the gate is one
+    /// critical section (the edit-side clears and the UI-thread take take the
+    /// same gate, so an edit either erases the queued value or is seen by the
+    /// guard, and the take can never drop a concurrent queue). The queue
+    /// carries only the name — the write-back eligibility decision is
+    /// <see cref="WritebackEligible"/>, re-evaluated under the gate at take.
+    /// </summary>
+    internal void QueueLabelWriteback(Func<bool> identityGuard, string value)
+    {
+        lock (_gate)
+        {
+            if (identityGuard())
+            {
+                _pendingWriteback = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns and clears the pending write-back (the UI-thread flush) —
+    /// under the gate, so a queue landing between the read and the clear can
+    /// never be lost: the queue and the take serialize on the same lock. The
+    /// take also decides whether the write may happen at all
+    /// (<see cref="WritebackEligible"/> + the host's suppression flag): a
+    /// vetoed take refuses AND KEEPS the value queued (a veto is a "not
+    /// yet", never a "never" — a no-op write or a CustomLabel set between
+    /// the queue and the flush must not silently lose the resolved label),
+    /// so the next frame re-decides against the current host facts.
+    /// </summary>
+    internal string? TakePendingWriteback(WeatherLocation currentLocation, Func<bool> suppressed)
+    {
+        lock (_gate)
+        {
+            if (suppressed()) return null;
+            if (!WritebackEligible(_pendingWriteback, currentLocation)) return null;
+            string? pending = _pendingWriteback;
+            _pendingWriteback = null;
+            return pending;
+        }
+    }
+
+    /// <summary>
+    /// The display-state apply seam's identity half: the null-keeps
+    /// replacement (the "response omitted this section — keep the previous
+    /// value" rule shared with the snapshot merge; a provided population of
+    /// 0 is the client's no-data sentinel: it clears, it does not keep) runs
+    /// under the gate, so the identity copies land atomically with whatever
+    /// the caller commits alongside them.
+    /// </summary>
+    internal void ApplyIdentity(string? resolvedName, double? population, IReadOnlyList<GeocodeCandidate>? candidates)
+    {
+        lock (_gate)
+        {
+            _identity = _identity.With(resolvedName, population, candidates);
+        }
+    }
+
+    /// <summary>
+    /// The display-state tie seam's identity half: the tied candidates become
+    /// the dropdown, the queried name becomes the honest header (there is no
+    /// winner to name; a blank query takes the neutral label), and the
+    /// population clears. Runs under the gate so the reset is atomic with
+    /// the state reset the caller commits alongside it.
+    /// </summary>
+    internal void ApplyTieIdentity(string? queriedLocation, IReadOnlyList<GeocodeCandidate> candidates)
+    {
+        lock (_gate)
+        {
+            _identity = _identity.With(string.IsNullOrWhiteSpace(queriedLocation) ? neutralLocationLabel : queriedLocation, 0, candidates);
+        }
+    }
 }
 
-/// <summary>The outcome of <see cref="WeatherFetchControl.Begin"/>.</summary>
+/// <summary>The outcome of <see cref="WeatherResolution.Begin"/>.</summary>
 internal enum BeginResult
 {
     /// <summary>The claim was acquired; the caller runs the fetch and must
-    /// call <see cref="WeatherFetchControl.End"/> in a finally.</summary>
+    /// call <see cref="WeatherResolution.End"/> in a finally.</summary>
     Started,
 
     /// <summary>Another fetch is already in flight — nothing to do.</summary>

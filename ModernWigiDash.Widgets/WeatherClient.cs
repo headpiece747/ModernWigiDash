@@ -7,8 +7,9 @@ namespace ModernWigiDash.Widgets;
 /// with an internal 5-minute fetch throttle. The geocoding HTTP + parse half
 /// lives in <see cref="WeatherGeocoder"/>; this class owns the fetch claim,
 /// cache, forecast parsing, and the resolved-state routing (lat/lon/city
-/// fields). The widget layer only renders snapshots returned by
-/// <see cref="FetchCurrentAsync"/>.
+/// fields) through the cluster's one identity owner
+/// (<see cref="WeatherResolution"/>). The widget layer only renders snapshots
+/// returned by <see cref="FetchCurrentAsync"/>.
 /// </summary>
 internal sealed class WeatherClient
 {
@@ -25,17 +26,23 @@ internal sealed class WeatherClient
     };
 
     private readonly WeatherGeocoder _geocoder;
-    private readonly WeatherFetchControl _fetchControl;
 
     private readonly WeatherCacheStore _cache;
     private readonly Action<string, Exception?>? _logError;
 
+    /// <summary>The cluster's one resolved-identity owner: the shared
+    /// identity value, the throttle stamp, the single-flight claim, the
+    /// identity query, the coordinates, and the pending label write-back.
+    /// The widget's display state holds a reference to the SAME instance, so
+    /// the two sides cannot drift (one storage, one drop application site).</summary>
+    internal WeatherResolution Resolution { get; }
+
     /// <summary>Test seam: injectable clock for fetch throttling (forwarded to
-    /// the fetch-control module, which owns the throttle state).</summary>
+    /// the resolution module, which owns the throttle state).</summary>
     internal TimeProvider Clock
     {
-        get => _fetchControl.Clock;
-        set => _fetchControl.Clock = value;
+        get => Resolution.Clock;
+        set => Resolution.Clock = value;
     }
 
     private HttpClient? _testHttpClient;
@@ -68,7 +75,7 @@ internal sealed class WeatherClient
     /// attempt (failures cool down like successes) or a cache load. The cadence
     /// gate reads this as a named client fact, never by comparing the raw
     /// timestamp against a sentinel.</summary>
-    internal bool HasFetched => _fetchControl.HasFetched;
+    internal bool HasFetched => Resolution.HasFetched;
 
     /// <param name="cacheDirectory">Directory for the disk cache (created on demand).</param>
     /// <param name="cacheFileName">Per-instance cache file name; defaults to a shared "weather_default.json".</param>
@@ -90,7 +97,7 @@ internal sealed class WeatherClient
     internal WeatherClient(string cacheDirectory, Func<string> cacheFileNameProvider, TimeProvider? timeProvider = null, HttpClient? http = null, Action<string, Exception?>? logError = null)
     {
         _cache = new WeatherCacheStore(cacheDirectory, cacheFileNameProvider, logError);
-        _fetchControl = new WeatherFetchControl(timeProvider ?? TimeProvider.System);
+        Resolution = new WeatherResolution(timeProvider ?? TimeProvider.System, WeatherPresentation.UnknownLocationLabel);
         _logError = logError;
         _geocoder = new WeatherGeocoder(() => Http, _logError);
         TestHttpClient = http;
@@ -113,10 +120,10 @@ internal sealed class WeatherClient
     /// window has elapsed since the last attempt. The first attempt
     /// (never-fetched) reads as elapsed; a failed attempt stamps the time,
     /// so failures cool down like successes. The window is the single
-    /// <see cref="WeatherFetchControl.FetchWindow"/> both this check and the
+    /// <see cref="WeatherResolution.FetchWindow"/> both this check and the
     /// atomic claim share — one spelling, drift impossible.
     /// </summary>
-    internal bool IsFetchWindowElapsed() => _fetchControl.IsWindowElapsed();
+    internal bool IsFetchWindowElapsed() => Resolution.IsWindowElapsed();
 
     /// <summary>
     /// Whether a fetch is in flight (the single-flight claim is held). The ONE
@@ -127,7 +134,7 @@ internal sealed class WeatherClient
     /// Read without the gate, the same tolerance as <see cref="IsFetchWindowElapsed"/>:
     /// a flag read is a benign boolean for the display.
     /// </summary>
-    internal bool IsFetchInFlight => _fetchControl.IsClaimHeld;
+    internal bool IsFetchInFlight => Resolution.IsClaimHeld;
 
     /// <summary>
     /// The single edit-path invalidation, per drop kind: resets the resolved
@@ -136,10 +143,24 @@ internal sealed class WeatherClient
     /// the Location Match pick (Coordinates kind) keeps the geocode candidates
     /// the pick resolves against; every other resolution input (Location kind)
     /// voids the whole identity, candidates included, so a stale pick can
-    /// never win. The widget's edit path and the boot-load's discarded-load
-    /// rollback both ride this one entry.
+    /// never win. The widget's edit path rides this one entry.
     /// </summary>
-    internal void Invalidate(WeatherInvalidationKind kind) => _fetchControl.Invalidate(kind);
+    internal void Invalidate(WeatherInvalidationKind kind) => Resolution.Invalidate(kind);
+
+    /// <summary>
+    /// The boot-load's discarded-load rollback: undoes the client-side
+    /// commitment a cache load made (the throttle stamp and the identity
+    /// query) AND restores the shared resolved-identity value to what it was
+    /// BEFORE the load — the widget's header name survives a rejected load,
+    /// while the next fetch still re-resolves and runs immediately. Distinct
+    /// from <see cref="Invalidate"/>: that entry serves an EDIT (a new place
+    /// was chosen, so the old identity's name must go); here the identity
+    /// never changed, only the load's own commitment is withdrawn. The
+    /// coordinates are restored from the committed payload (the load's applied
+    /// lat/lon).
+    /// </summary>
+    internal void RollbackCacheLoad(double? lat, double? lon, WeatherResolutionState preLoadIdentity)
+        => Resolution.RollbackCacheLoad(lat, lon, preLoadIdentity);
 
     /// <summary>
     /// Resolves the location (geocode or explicit coordinates), fetches current
@@ -157,37 +178,37 @@ internal sealed class WeatherClient
         string fetchQueryKey = WeatherQueryKey.Build(location);
 
         // The capture window (ADR-0006), named: this fetch's start key
-        // against the fetch-control's live identity state. The re-check sites
+        // against the resolution's live identity state. The re-check sites
         // below (the re-resolve condition, the no-coordinates stale check,
         // the post-save re-validation) all route through the guard — one
         // rule; the atomic stamp transitions (ConfirmAndStamp, Stamp) keep
         // their gate atomicity.
-        var window = new CaptureWindowGuard(fetchQueryKey, () => _fetchControl.LastLocationQuery);
+        var window = new CaptureWindowGuard(fetchQueryKey, () => Resolution.LastLocationQuery);
 
-        // The claim + throttle rules live in the fetch-control module: the
+        // The claim + throttle rules live in the resolution module: the
         // in-flight guard is Interlocked — the render tick, the refresh
         // timer, and OnTouch can race, and a check-then-set would let two of
         // them through. The claim's failure reason is reported so the caller
         // can tell "already being fetched" from "cooling down".
-        var begin = _fetchControl.Begin(force);
+        var begin = Resolution.Begin(force);
         if (begin == BeginResult.InFlight) return new WeatherFetchResult.InFlight();
         if (begin == BeginResult.Throttled) return new WeatherFetchResult.Throttled();
 
         try
         {
             WeatherResolutionOutcome? resolution = null;
-            if (!_fetchControl.Lat.HasValue || window.Dropped || force)
+            if (!Resolution.Lat.HasValue || window.Dropped || force)
                 resolution = await ResolveCoordinatesAsync(location, fetchQueryKey, cancellationToken).ConfigureAwait(false);
 
-            if (!_fetchControl.Lat.HasValue || !_fetchControl.Lon.HasValue)
+            if (!Resolution.Lat.HasValue || !Resolution.Lon.HasValue)
             {
                 return BuildNoCoordinatesVerdict(window, resolution, fetchQueryKey);
             }
 
-            double lat = _fetchControl.Lat.Value;
-            double lon = _fetchControl.Lon.Value;
+            double lat = Resolution.Lat.Value;
+            double lon = Resolution.Lon.Value;
 
-            var snapshot = await BuildSnapshotAsync(lat, lon, _fetchControl.ResolvedCityName, cancellationToken)
+            var snapshot = await BuildSnapshotAsync(lat, lon, Resolution.ResolvedCityName, cancellationToken)
                 .ConfigureAwait(false);
 
             // The stale check: the widget invalidates the client (clearing
@@ -198,7 +219,7 @@ internal sealed class WeatherClient
             // cool down) and no cache write. ConfirmAndStamp compares, stamps,
             // and captures the resolved-identity payload under ONE gate, so a
             // concurrent invalidation cannot tear the comparison.
-            if (!_fetchControl.ConfirmAndStamp(fetchQueryKey, out var candidates, out var population))
+            if (!Resolution.ConfirmAndStamp(fetchQueryKey, out var candidates, out var population))
             {
                 return new WeatherFetchResult.Stale(fetchQueryKey);
             }
@@ -232,13 +253,13 @@ internal sealed class WeatherClient
             // EXCEPT when the identity changed mid-flight: a stale failure is
             // like a stale success — it must not block the re-fetch of the
             // new identity, and the status must SAY so.
-            return _fetchControl.Stamp(fetchQueryKey)
+            return Resolution.Stamp(fetchQueryKey)
                 ? new WeatherFetchResult.Failed()
                 : new WeatherFetchResult.Stale(fetchQueryKey);
         }
         finally
         {
-            _fetchControl.End();
+            Resolution.End();
             FetchCompletedCount++;
         }
     }
@@ -300,20 +321,38 @@ internal sealed class WeatherClient
     /// as before.
     /// <para>
     /// STATE COMMITMENT: on success the load commits the cache's resolved
-    /// identity (coordinates + name) into the fetch-control state and stamps
+    /// identity (coordinates + name) into the resolution state and stamps
     /// the throttle to "now" — a freshly cached widget does not immediately
     /// re-fetch, matching the widget's boot semantics. The commit happens
     /// BEFORE the caller can decide what to do with the snapshot, so a caller
     /// that DISCARDS the result (a location change landing while the load was
     /// in flight) must roll the commitment back with
     /// <see cref="Invalidate(WeatherInvalidationKind)"/> (the Coordinates kind)
-    /// — the interface says what the load
-    /// did, so the rejection is the caller's job, never a silent side effect.
+    /// — the interface says what the load did, so the rejection is the
+    /// caller's job, never a silent side effect.
     /// </para>
     /// The token aborts the read on teardown, like every other fetch leg.
     /// </summary>
     public async Task<WeatherSnapshot?> LoadCacheAsync(WeatherLocation location, CancellationToken cancellationToken = default)
     {
+        // The test seam: a substituted load leg (the boot race's file-free
+        // drive). The state-commitment contract still applies to the
+        // returned snapshot's identity: the client commits the cache's
+        // resolved identity into the resolution state and stamps the throttle,
+        // so a caller that DISCARDS the result must roll the commitment back.
+        if (CacheLoadOverride is { } loadOverride)
+        {
+            WeatherSnapshot? snapshot = await loadOverride(location, cancellationToken).ConfigureAwait(false);
+            if (snapshot is not null && !Resolution.TryApplyCacheIdentity(
+                    WeatherQueryKey.Build(location), snapshot.Lat, snapshot.Lon, snapshot.ResolvedCityName, out _))
+            {
+                // The live identity no longer matches the payload's key — the
+                // payload must not surface as fresh weather.
+                return null;
+            }
+            return snapshot;
+        }
+
         try
         {
             // The file format + bounded read live in the cache store; this
@@ -330,7 +369,7 @@ internal sealed class WeatherClient
                 return null;
             }
             // A cache without a resolved name must not invent one — the naming
-            // and the boot/conflict guard are the fetch-control module's rules.
+            // and the boot/conflict guard are the resolution module's rules.
             // The identity fields are mutated UNDER the module's gate, and
             // only when no resolution for a DIFFERENT identity has started:
             // the boot load runs concurrently with the boot fetch, and a slow
@@ -338,7 +377,7 @@ internal sealed class WeatherClient
             // is producing (the fetch's guards validate the KEY — they cannot
             // see a state swap underneath it). Empty identity query = boot,
             // no resolution started yet — the legitimate load case.
-            if (!_fetchControl.TryApplyCacheIdentity(
+            if (!Resolution.TryApplyCacheIdentity(
                     WeatherQueryKey.Build(location), payload.Lat, payload.Lon, payload.ResolvedCityName, out string resolvedName))
             {
                 return null;
@@ -366,11 +405,20 @@ internal sealed class WeatherClient
     /// clears the cache at runtime).</summary>
     internal void ClearCache() => _cache.Clear();
 
+    /// <summary>
+    /// The test seam: substitutes the cache-load leg so the boot race
+    /// (version + identity guards) is drivable without a file. When set,
+    /// <see cref="LoadCacheAsync"/> routes through this delegate instead of
+    /// the disk store; the state-commitment contract still applies to the
+    /// returned snapshot's identity.
+    /// </summary>
+    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride { get; set; }
+
     private async Task<WeatherResolutionOutcome> ResolveCoordinatesAsync(WeatherLocation location, string currentQuery, CancellationToken cancellationToken)
     {
         // The identity advances BEFORE the outcome is known. If the key
         // changed (a silent reassignment — hydration, or a direct property
-        // write that bypasses OnPropertyChanged's invalidation — raced a
+        // write that bypassed OnPropertyChanged's invalidation — raced a
         // previous resolution), the module clears the OLD identity's
         // coordinates/name: a failed geocode for the new identity would
         // otherwise fall through with the previous place's lat/lon still set,
@@ -385,19 +433,19 @@ internal sealed class WeatherClient
         // resolution door; this method applies the verdict to module state,
         // never re-deriving the per-leg rules (the custom label's honor
         // rules, the dropdown refresh, never guessing a tie's coordinates).
-        _fetchControl.AdvanceResolution(currentQuery);
+        Resolution.AdvanceResolution(currentQuery);
 
-        var outcome = await _geocoder.ResolveAsync(location, _fetchControl.Candidates, cancellationToken).ConfigureAwait(false);
+        var outcome = await _geocoder.ResolveAsync(location, Resolution.Candidates, cancellationToken).ConfigureAwait(false);
         switch (outcome)
         {
             case WeatherResolutionOutcome.Resolved r:
-                _fetchControl.SetResolved(r.Lat, r.Lon, r.Label, r.Population);
+                Resolution.SetResolved(r.Lat, r.Lon, r.Label, r.Population);
                 // A geocode that produced candidates refreshes the dropdown; a
                 // fast path (explicit/pair/ZIP/pick) leaves the last dropdown
                 // untouched.
                 if (r.RefreshedCandidates is { Count: > 0 })
                 {
-                    _fetchControl.SetCandidates(r.RefreshedCandidates);
+                    Resolution.SetCandidates(r.RefreshedCandidates);
                 }
                 break;
             case WeatherResolutionOutcome.Ambiguous a:
@@ -406,9 +454,9 @@ internal sealed class WeatherClient
                 // trap the next editor with a place the fetch never reached.
                 if (a.Candidates.Count > 0)
                 {
-                    _fetchControl.SetCandidates(a.Candidates);
+                    Resolution.SetCandidates(a.Candidates);
                 }
-                _fetchControl.ClearCoordinates();
+                Resolution.ClearCoordinates();
                 break;
             case WeatherResolutionOutcome.Unresolved:
                 // A failed geocode leaves the previous resolution valid.
@@ -426,7 +474,7 @@ internal sealed class WeatherClient
         // the same condition).
         if (outcome is WeatherResolutionOutcome.Ambiguous or WeatherResolutionOutcome.Unresolved)
         {
-            _fetchControl.Stamp(currentQuery);
+            Resolution.Stamp(currentQuery);
         }
         return outcome;
     }

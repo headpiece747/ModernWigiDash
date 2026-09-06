@@ -5,11 +5,11 @@ namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// The fetch-flow module's interface-level pins (C1): the sequence the
-/// former <c>FetchLiveWeatherAsync</c> spelled across five widget methods —
+/// former <c>FetchLiveWeatherAsync</c> spelled across five widget methods Ã¢â‚¬â€
 /// the one location snapshot captured before the await (key and fetch from
 /// the same record), the post-await live re-check drop gate, the forced
 /// re-fetch routing, the write-back gating, the cadence gate, and the
-/// boot-load rollback — asserted through <see cref="WeatherFetchFlow"/>
+/// boot-load rollback Ã¢â‚¬â€ asserted through <see cref="WeatherFetchFlow"/>
 /// without a widget instance, a render tick, or the host's gate. The host
 /// harness wraps the SAME <see cref="WeatherDisplayState"/> module the
 /// widget uses (the same apply policy under the same gate, the same
@@ -106,7 +106,7 @@ public class WeatherFetchFlowTests
         Assert.IsFalse(string.IsNullOrEmpty(host.PendingLabelWriteback),
             "A resolved label that differs from the raw query must queue the write-back.");
         Assert.AreEqual(host.Identity.ResolvedName, host.PendingLabelWriteback,
-            "The write-back must carry the SAME label the header shows — one label source.");
+            "The write-back must carry the SAME label the header shows Ã¢â‚¬â€ one label source.");
         Assert.AreNotEqual("Berlin", host.PendingLabelWriteback);
     }
 
@@ -129,7 +129,7 @@ public class WeatherFetchFlowTests
     public async Task RunFetchAsync_PostAwaitIdentityChange_DropsResultAndForceRefetchesLiveLocation()
     {
         FlowHost? host = null;
-        // The edit lands in the return-to-apply gap — AFTER the client's own
+        // The edit lands in the return-to-apply gap Ã¢â‚¬â€ AFTER the client's own
         // capture window closed (the client's Stale verdict cannot see it,
         // so its outcome still comes back Fetched): the flow's post-await
         // live re-check is the gate that must drop the old identity's result.
@@ -151,11 +151,11 @@ public class WeatherFetchFlowTests
         // 22.2) carry different temperatures, but the re-fetch may land
         // before this continuation (a synchronous stub chain), so the sound
         // "the dropped result never applied" probe is the apply count:
-        // exactly one apply — the re-fetch's. A leaked dropped result would
+        // exactly one apply Ã¢â‚¬â€ the re-fetch's. A leaked dropped result would
         // add a second.
         // The forced re-fetch is fire-and-forget: wait for the NEW identity
         // to land together with the apply-count probe folded into the wait
-        // itself — the apply (temperature write) and its single
+        // itself Ã¢â‚¬â€ the apply (temperature write) and its single
         // RequestRender are adjacent on the re-fetch's continuation, so a
         // temp-only wait could observe the write in the microsecond gap
         // before the render request lands and read 0 renders.
@@ -163,7 +163,7 @@ public class WeatherFetchFlowTests
             () => Math.Abs(host.State.CurrentTempC - 22.2) < 1e-9 && host.RenderRequests == 1,
             TimeSpan.FromSeconds(5));
         Assert.AreEqual(1, host.RenderRequests,
-            "Exactly one apply — the forced re-fetch's. A leaked dropped result would add a second.");
+            "Exactly one apply Ã¢â‚¬â€ the forced re-fetch's. A leaked dropped result would add a second.");
         Assert.AreEqual(2, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
         StringAssert.StartsWith(host.Identity.ResolvedName, "Berlin");
     }
@@ -226,7 +226,7 @@ public class WeatherFetchFlowTests
     [TestMethod]
     public async Task RunFetchAsync_TieOutcome_AppliesTiedCandidatesAndPlaceholder()
     {
-        // A tie carries no snapshot — the flow applies the tied candidates
+        // A tie carries no snapshot Ã¢â‚¬â€ the flow applies the tied candidates
         // (the dropdown) through the host's tie seam, the queried name as the
         // honest header, and resets the data state to its placeholder.
         var stub = new StubHttpHandler(TieRespond);
@@ -237,15 +237,15 @@ public class WeatherFetchFlowTests
 
         Assert.AreEqual(WeatherFetchFlowOutcome.AppliedTie, outcome);
         Assert.AreEqual(4, host.Identity.Candidates.Count, "the four exact-name candidates must reach the widget's identity");
-        Assert.AreEqual("Berlin", host.Identity.ResolvedName, "the header is the queried name — there is no winner to name");
+        Assert.AreEqual("Berlin", host.Identity.ResolvedName, "the header is the queried name Ã¢â‚¬â€ there is no winner to name");
         Assert.AreEqual(0, host.Identity.Population);
         Assert.IsNull(host.PendingLabelWriteback, "a tie has no resolved label to write back");
         Assert.AreEqual(1, host.State.DataVersion, "the placeholder reset must bump the version so the render model rebuilds");
-        Assert.AreEqual(25.0, host.State.CurrentTempC, "the placeholder scalars — never a previous city's data");
+        Assert.AreEqual(25.0, host.State.CurrentTempC, "the placeholder scalars Ã¢â‚¬â€ never a previous city's data");
         Assert.AreEqual(1, host.RenderRequests);
         Assert.AreEqual(1, host.InspectorRefreshes, "the tied options are a candidate-set change");
         Assert.AreEqual(0, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
-            "a tie has no coordinates — no forecast leg may run");
+            "a tie has no coordinates Ã¢â‚¬â€ no forecast leg may run");
     }
 
     [TestMethod]
@@ -294,7 +294,7 @@ public class WeatherFetchFlowTests
     [TestMethod]
     public async Task RunFetchAsync_TieOutcome_PostAwaitIdentityChange_DropsTieAndForceRefetches()
     {
-        // The edit lands mid-geocode — inside the client's capture window the
+        // The edit lands mid-geocode Ã¢â‚¬â€ inside the client's capture window the
         // client's Stale verdict CANNOT see (the client still matches its own
         // captured key, so the outcome comes back as a live Tie): the flow's
         // post-await live re-check is the gate that must drop the old
@@ -317,23 +317,23 @@ public class WeatherFetchFlowTests
             "The post-await live re-check must drop the old identity's tie.");
         // The drop's forced re-fetch (fire-and-forget) resolves the NEW
         // identity (the London pair): wait for it to land and pin that the
-        // drop triggered the fetch — the re-fetch runs concurrently with the
+        // drop triggered the fetch Ã¢â‚¬â€ the re-fetch runs concurrently with the
         // dropped run's return, so no right-after-drop version snapshot is
         // asserted. The sound leak probe is the apply count: a leaked dropped
         // tie would apply (and request a render) in addition to the re-fetch.
         // The candidates are NOT asserted: this host's seam edit bypasses the
         // widget's invalidation routing, so the client twin carries its
         // surviving candidates (the geocoder's zero-HTTP pick path) into the
-        // re-fetch's apply by design — only the edit path's Location invalidation
+        // re-fetch's apply by design Ã¢â‚¬â€ only the edit path's Location invalidation
         // clears them. The apply-count probe is folded into the wait itself
         // (the apply and its single RequestRender are adjacent on the
-        // re-fetch's continuation — a temp-only wait could observe the
+        // re-fetch's continuation Ã¢â‚¬â€ a temp-only wait could observe the
         // write in the microsecond gap before the render request lands).
         await TestWait.WaitUntilAsync(
             () => Math.Abs(host.State.CurrentTempC - 33.3) < 1e-9 && host.RenderRequests == 1,
             TimeSpan.FromSeconds(5));
         Assert.AreEqual(1, host.RenderRequests,
-            "Exactly one apply — the forced re-fetch's. A leaked dropped tie would add a second.");
+            "Exactly one apply Ã¢â‚¬â€ the forced re-fetch's. A leaked dropped tie would add a second.");
         Assert.AreEqual("51.51, -0.13", host.Identity.ResolvedName,
             "the applied header is the NEW identity's label");
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)));
@@ -347,12 +347,12 @@ public class WeatherFetchFlowTests
         // An edit landing between the flow's snapshot (pre-await) and the
         // apply (post-await) drops the snapshot's result through the post-
         // await live re-check; the forced re-fetch then resolves the LIVE
-        // identity — and if that identity is a TIE, the re-fetch's tied
+        // identity Ã¢â‚¬â€ and if that identity is a TIE, the re-fetch's tied
         // candidates must populate the dropdown (the ADR-0009 escape route
         // from a drop, not just from a first fetch). The stub mutates the
-        // host's location mid-forecast — bypassing the widget's invalidation
+        // host's location mid-forecast Ã¢â‚¬â€ bypassing the widget's invalidation
         // routing, so the client's Stale verdict cannot see the edit and the
-        // live re-check is the gate — and serves the snapshot identity's
+        // live re-check is the gate Ã¢â‚¬â€ and serves the snapshot identity's
         // weather so the dropped result is a Fetched, not a failure.
         FlowHost? host = null;
         var springCity = new WeatherLocation("City", "Springfield", null, null, null);
@@ -378,19 +378,19 @@ public class WeatherFetchFlowTests
             "the post-await live re-check must drop the snapshot's result for the live identity");
         // The drop's forced re-fetch (fire-and-forget) re-geocodes the LIVE
         // identity (the Springfield tie): wait for the final applied state,
-        // then pin the drop and the re-fetch against it — the re-fetch runs
+        // then pin the drop and the re-fetch against it Ã¢â‚¬â€ the re-fetch runs
         // concurrently with the dropped run's return, so no right-after-drop
         // version snapshot is asserted.
         await TestWait.WaitUntilAsync(() => host.State.DataVersion == 1 && host.Identity.ResolvedName == "Springfield", TimeSpan.FromSeconds(5));
         Assert.AreEqual(2, host.Identity.Candidates.Count,
-            "the applied candidates are the LIVE identity's tie (2 Springfields) — the dropped result's snapshot never reached the state");
+            "the applied candidates are the LIVE identity's tie (2 Springfields) Ã¢â‚¬â€ the dropped result's snapshot never reached the state");
         Assert.AreEqual("Springfield", host.Identity.ResolvedName);
         Assert.AreEqual(25.0, host.State.CurrentTempC,
-            "the tie's placeholder scalars — the dropped snapshot's temperature must not render under the tie's header");
+            "the tie's placeholder scalars Ã¢â‚¬â€ the dropped snapshot's temperature must not render under the tie's header");
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/search", StringComparison.Ordinal)),
             "the drop triggered the re-geocode of the live identity; the snapshot's pair location geocoded nothing");
         Assert.AreEqual(1, stub.RequestUrls.Count(u => u.Contains("/v1/forecast", StringComparison.Ordinal)),
-            "the dropped run's own forecast leg — the tie fetches no weather");
+            "the dropped run's own forecast leg Ã¢â‚¬â€ the tie fetches no weather");
     }
 
     // -- The inspector-refresh stamp ------------------------------------------
@@ -438,7 +438,7 @@ public class WeatherFetchFlowTests
         Assert.IsFalse(host.Flow.CanFetch(force: false), "A fresh fetch stamp must cool the non-forced cadence.");
         Assert.IsTrue(host.Flow.CanFetch(force: true), "Force is always eligible.");
 
-        clock.Advance(WeatherFetchControl.FetchWindow);
+        clock.Advance(WeatherResolution.FetchWindow);
         Assert.IsTrue(host.Flow.CanFetch(force: false), "The elapsed window re-opens the non-forced cadence.");
     }
 
@@ -450,10 +450,10 @@ public class WeatherFetchFlowTests
         host.StaticSnapshotFlag = true;
 
         Assert.IsTrue(host.Flow.CanFetch(force: false),
-            "Without a fetch stamp a static snapshot has nothing to protect — the window decides.");
+            "Without a fetch stamp a static snapshot has nothing to protect Ã¢â‚¬â€ the window decides.");
 
         Assert.AreEqual(WeatherFetchFlowOutcome.Applied, await host.Flow.RunFetchAsync());
-        clock.Advance(WeatherFetchControl.FetchWindow);
+        clock.Advance(WeatherResolution.FetchWindow);
 
         Assert.IsFalse(host.Flow.CanFetch(force: false),
             "A stamped static snapshot must veto the non-forced cadence even after the window elapses.");
@@ -467,7 +467,7 @@ public class WeatherFetchFlowTests
     {
         var host = NewHost(new StubHttpHandler(FlowRespond));
         var cached = new WeatherSnapshot(33.3, 30.0, 45, 10, 1, 35.0, 30.0, null, null, "Paris", 48.85, 2.35);
-        host.Flow.CacheLoadOverride = (location, ct) => Task.FromResult<WeatherSnapshot?>(cached);
+        host.Client.CacheLoadOverride = (location, ct) => Task.FromResult<WeatherSnapshot?>(cached);
 
         await host.Flow.RunBootLoadAsync(CancellationToken.None);
 
@@ -482,7 +482,7 @@ public class WeatherFetchFlowTests
     {
         var host = NewHost(new StubHttpHandler(FlowRespond));
         var cached = new WeatherSnapshot(99.9, null, null, null, null, null, null, null, null, "Paris", 48.85, 2.35);
-        host.Flow.CacheLoadOverride = (location, ct) =>
+        host.Client.CacheLoadOverride = (location, ct) =>
         {
             // A fetch that completes while the load is in flight bumps the
             // data version (its apply ran under the same gate).
@@ -508,7 +508,7 @@ public class WeatherFetchFlowTests
         Assert.IsFalse(host.Client.IsFetchWindowElapsed(), "The applied fetch stamps the throttle.");
 
         var cached = new WeatherSnapshot(99.9, null, null, null, null, null, null, null, null, "Paris", 48.85, 2.35);
-        host.Flow.CacheLoadOverride = (location, ct) =>
+        host.Client.CacheLoadOverride = (location, ct) =>
         {
             // Profile hydration lands while the load is in flight: the
             // default-stamped cache must not surface under the hydrated
@@ -546,7 +546,7 @@ public class WeatherFetchFlowTests
         var host = NewHost(new StubHttpHandler(FlowRespond));
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
-        host.Flow.CacheLoadOverride = (location, token) => Task.FromCanceled<WeatherSnapshot?>(token);
+        host.Client.CacheLoadOverride = (location, token) => Task.FromCanceled<WeatherSnapshot?>(token);
 
         await host.Flow.RunBootLoadAsync(cts.Token); // must not throw
 
@@ -555,7 +555,7 @@ public class WeatherFetchFlowTests
 
     /// <summary>
     /// The test host: an adapter over the flow's host seam built on the SAME
-    /// <see cref="WeatherDisplayState"/> module the widget uses — the flow's
+    /// <see cref="WeatherDisplayState"/> module the widget uses Ã¢â‚¬â€ the flow's
     /// guarantees are pinned against the production gate shape, not a mirror
     /// of it. The host adds only the host concerns: the location read (one
     /// read per flow step, mirroring the widget's property coercion), the
@@ -563,7 +563,13 @@ public class WeatherFetchFlowTests
     /// </summary>
     private sealed class FlowHost : IWeatherFetchHost
     {
-        private readonly WeatherDisplayState _displayState = new("Default Location", () => DateTime.UtcNow);
+        private readonly WeatherDisplayState _displayState;
+
+        public FlowHost()
+        {
+            var resolution = new WeatherResolution(TimeProvider.System, "Default Location");
+            _displayState = new WeatherDisplayState(resolution, "Default Location", () => DateTime.UtcNow);
+        }
 
         /// <summary>The module's one gate (test lock: stamp pre-await state
         /// under it).</summary>
@@ -603,6 +609,6 @@ public class WeatherFetchFlowTests
             => _displayState.TryApplyTie(candidates, identityGuard, () => Location.Location);
 
         void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-            => _displayState.QueueLabelWriteback(identityGuard, value);
+            => _displayState.Resolution.QueueLabelWriteback(identityGuard, value);
     }
 }

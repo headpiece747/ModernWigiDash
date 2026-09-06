@@ -202,7 +202,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// module applies the identity guard's check + set under its gate — one
     /// critical section).</summary>
     void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-        => _displayState.QueueLabelWriteback(identityGuard, value);
+        => _displayState.Resolution.QueueLabelWriteback(identityGuard, value);
 
     /// <summary>Requests a canvas repaint.</summary>
     void IWeatherFetchHost.RequestRender() => Context?.RequestRender();
@@ -227,8 +227,10 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         _client = new WeatherClient(CacheDir, () => $"weather_{SafeCacheToken(InstanceId)}.json", logError: (message, exception) => Context?.LogError(message, exception));
         // The display-state module's clock seam is the CLIENT's clock, resolved
         // at stamp time (not captured at construction) — a test clock swap is
-        // observed by the last-success stamp.
-        _displayState = new(WeatherPresentation.UnknownLocationLabel, () => Clock.GetUtcNow().UtcDateTime);
+        // observed by the last-success stamp. The display state and the client
+        // share the cluster's ONE identity owner (the client's resolution
+        // module), so the two sides cannot drift.
+        _displayState = new(_client.Resolution, WeatherPresentation.UnknownLocationLabel, () => Clock.GetUtcNow().UtcDateTime);
         // The fetch flow owns the sequence; the host concerns travel across
         // the IWeatherFetchHost seam. This widget IS the production host
         // adapter: the display-state module carries the gate discipline
@@ -346,7 +348,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // driven by the render kick at the same window; the loop is the sole
         // driver for hidden pages, whose reveal-kick then refreshes anyway).
         _refreshPoll = new PollLoop(
-            "WEATHER", WeatherFetchControl.FetchWindow, () => true,
+            "WEATHER", WeatherResolution.FetchWindow, () => true,
             WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
         _refreshPoll.Start();
         // The boot fetch: InitializeAsync runs BEFORE the profile applies
@@ -642,7 +644,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     /// </summary>
     internal void ApplyPendingLocationWriteback()
     {
-        if (_displayState.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
+        if (_displayState.Resolution.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
 
         _locationWritebackSuppressed = true;
         try
@@ -698,12 +700,12 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         => _displayState.TryApplyTie(candidates, identityGuard, () => BuildLocation().Location);
 
     /// <summary>Test seam: replaces the client cache-load leg so the boot-race
-    /// version guard is drivable deterministically (forwards to the flow's
+    /// version guard is drivable deterministically (forwards to the client's
     /// seam; defaults to the client's identity-checked load).</summary>
     internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride
     {
-        get => _flow.CacheLoadOverride;
-        set => _flow.CacheLoadOverride = value;
+        get => _client.CacheLoadOverride;
+        set => _client.CacheLoadOverride = value;
     }
 
     /// <summary>

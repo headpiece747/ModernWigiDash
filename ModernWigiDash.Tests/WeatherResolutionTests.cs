@@ -1,25 +1,25 @@
 namespace ModernWigiDash.Tests;
 
 [TestClass]
-public class WeatherFetchControlTests
+public class WeatherResolutionTests
 {
     private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
 
-    private static WeatherFetchControl CreateControl(out FakeTimeProvider clock)
+    private static WeatherResolution CreateResolution(out FakeTimeProvider clock)
     {
         clock = FixedClock();
-        return new WeatherFetchControl(clock);
+        return new WeatherResolution(clock, "Default Location");
     }
 
     private static GeocodeCandidate Candidate(string label, double population = 1000)
         => new(label, "Paris", 48.85, 2.35) { Population = population };
 
-    // ── Begin / single-flight claim / throttle ──────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Begin / single-flight claim / throttle Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void Begin_FreshControl_ReturnsStarted()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         var result = control.Begin(force: false);
 
@@ -30,7 +30,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Begin_SecondCallBeforeEnd_ReturnsInFlightAndKeepsOthersClaim()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.Begin(force: false);
         var second = control.Begin(force: false);
@@ -42,7 +42,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Begin_WithinWindowWithoutStamp_ReturnsThrottledAndReleasesOwnClaim()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"), "the first attempt stamps the throttle");
@@ -57,7 +57,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Begin_WithinWindowForced_ReturnsStarted()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"));
@@ -71,7 +71,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Begin_AfterWindowElapsed_ReturnsStarted()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"));
@@ -85,7 +85,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void End_ReleasesTheClaim()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.Begin(force: false);
         control.End();
@@ -93,12 +93,12 @@ public class WeatherFetchControlTests
         Assert.IsFalse(control.IsClaimHeld, "the fetch's finally released the claim");
     }
 
-    // ── IsWindowElapsed ──────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ IsWindowElapsed Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void IsWindowElapsed_NeverStamped_ReturnsTrue()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         Assert.IsTrue(control.IsWindowElapsed(), "a never-fetched widget may fetch immediately");
     }
@@ -106,7 +106,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void IsWindowElapsed_WithinWindow_ReturnsFalse()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         Assert.IsTrue(control.Stamp("Paris"));
@@ -115,12 +115,12 @@ public class WeatherFetchControlTests
         Assert.IsFalse(control.IsWindowElapsed(), "4 minutes after a stamp the window has not elapsed");
     }
 
-    // ── Stamp (the failure-path identity guard) ──────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Stamp (the failure-path identity guard) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void Stamp_MatchingQuery_StampsTheThrottle()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         clock.Advance(TimeSpan.FromMinutes(2));
@@ -133,7 +133,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Stamp_DivergedQuery_ReturnsFalseWithoutStamping()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         control.AdvanceResolution("London"); // the identity changed mid-flight
@@ -144,12 +144,12 @@ public class WeatherFetchControlTests
         Assert.IsTrue(control.IsWindowElapsed(), "a diverged fetch must not cool down the NEW identity");
     }
 
-    // ── ConfirmAndStamp (the success-path compare + payload capture) ─────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ ConfirmAndStamp (the success-path compare + payload capture) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void ConfirmAndStamp_MatchingQuery_CapturesPayloadAndStamps()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
         IReadOnlyList<GeocodeCandidate> candidates = [Candidate("Paris, FR")];
 
         control.AdvanceResolution("Paris");
@@ -167,7 +167,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void ConfirmAndStamp_DivergedQuery_ReturnsFalseEmptyPayloadAndNoStamp()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.SetCandidates([Candidate("Paris, FR")]);
         control.AdvanceResolution("London");
@@ -180,12 +180,12 @@ public class WeatherFetchControlTests
         Assert.IsTrue(control.IsWindowElapsed(), "a rejected confirm must not stamp the throttle");
     }
 
-    // ── AdvanceResolution (key-change clears old identity) ───────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ AdvanceResolution (key-change clears old identity) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void AdvanceResolution_ChangedQuery_ClearsOldCoordinatesNameAndPopulation()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.SetCandidates([Candidate("Paris, FR")]);
         control.SetResolved(48.85, 2.35, "Paris", population: 2161000);
@@ -201,7 +201,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void AdvanceResolution_SameQuery_KeepsCoordinatesAndResetsPopulation()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.AdvanceResolution("Paris");
         control.SetResolved(48.85, 2.35, "Paris", population: 2161000);
@@ -213,12 +213,12 @@ public class WeatherFetchControlTests
         Assert.AreEqual(0.0, control.ResolvedPopulation, "the pending-fetch population is always reset to unknown");
     }
 
-    // ── coordinate / candidate maintenance ───────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ coordinate / candidate maintenance Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void ClearCoordinates_KeepsCandidatesAndPopulation()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.SetCandidates([Candidate("Paris, FR", population: 5000)]);
         control.SetResolved(48.85, 2.35, "Paris", population: 2161000);
@@ -234,7 +234,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void Invalidate_Location_DropsTheWholeIdentity()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.AdvanceResolution("Paris");
         control.SetCandidates([Candidate("Paris, FR", population: 5000)]);
@@ -243,16 +243,16 @@ public class WeatherFetchControlTests
 
         Assert.AreEqual(0, control.Candidates.Count, "a changed location must not pick against old candidates");
         Assert.AreEqual(0.0, control.ResolvedPopulation);
-        Assert.IsNull(control.Lat, "the whole identity voids — coordinates included");
+        Assert.IsNull(control.Lat, "the whole identity voids Ã¢â‚¬â€ coordinates included");
         Assert.AreEqual("", control.ResolvedCityName);
     }
 
-    // ── TryApplyCacheIdentity ────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ TryApplyCacheIdentity Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void TryApplyCacheIdentity_BootWithCachedName_AppliesNameAndPrimesThrottle()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         bool applied = control.TryApplyCacheIdentity("Paris", 48.85, 2.35, "Paris", out string appliedName);
 
@@ -265,7 +265,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void TryApplyCacheIdentity_BootWithoutName_FormatsTheCachedCoordinates()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         bool applied = control.TryApplyCacheIdentity("Coords:48.85,2.35", 48.85, 2.35, null, out string appliedName);
 
@@ -276,7 +276,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void TryApplyCacheIdentity_BootWithoutNameOrCoordinates_UsesTheNeutralLabel()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         bool applied = control.TryApplyCacheIdentity("Paris", null, null, null, out string appliedName);
 
@@ -287,7 +287,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void TryApplyCacheIdentity_DivergedQuery_RefusesAndLeavesStateUntouched()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.AdvanceResolution("London");
         control.SetResolved(51.5, -0.12, "London", population: 8982000);
@@ -303,7 +303,7 @@ public class WeatherFetchControlTests
     [TestMethod]
     public void TryApplyCacheIdentity_MatchingQuery_Applies()
     {
-        var control = CreateControl(out _);
+        var control = CreateResolution(out _);
 
         control.AdvanceResolution("Paris");
         bool applied = control.TryApplyCacheIdentity("Paris", 48.85, 2.35, "Paris", out string appliedName);
@@ -313,12 +313,12 @@ public class WeatherFetchControlTests
         Assert.AreEqual(48.85, control.Lat);
     }
 
-    // ── Invalidate ───────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Invalidate Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     [TestMethod]
     public void Invalidate_Coordinates_ResetsCoordinatesNameQueryAndThrottleButKeepsCandidates()
     {
-        var control = CreateControl(out var clock);
+        var control = CreateResolution(out var clock);
 
         control.AdvanceResolution("Paris");
         control.SetCandidates([Candidate("Paris, FR")]);
