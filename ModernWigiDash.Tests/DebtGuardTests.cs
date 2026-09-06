@@ -136,6 +136,8 @@ public sealed class DebtGuardTests
                 "the SendInput P/Invoke fires input events; the call acquires and owns no handle",
             ["ModernWigiDash.App/Hotkey/HotkeyApi.cs"] =
                 "the RegisterHotKey/UnregisterHotKey P/Invoke registers and releases message-loop hotkeys; the calls acquire and own no handle",
+            ["ModernWigiDash.App/PresentMon/TrackedTargetResolver.cs"] =
+                "the user32 GetForegroundWindow/GetWindowThreadProcessId/GetWindowText P/Invokes query window state; the calls acquire and own no handle (the toolhelp snapshot moved to ProcessTreeSource, which closes it in its finally)",
             ["ModernWigiDash.Hardware/Transport/WinUsbNative.cs"] =
                 "the WinUSB extern bag: the file declares the release APIs but never calls them - WinUsbBulkDevice acquires the interface handle and releases it through the bag in its Dispose",
             ["ModernWigiDash.Hardware/Transport/SetupApiNative.cs"] =

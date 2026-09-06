@@ -9,19 +9,16 @@ namespace ModernWigiDash.App.PresentMon;
 /// </summary>
 internal sealed class TrackedTargetResolver
 {
-    private const uint Th32csSnapprocess = 0x00000002;
-
     /// <summary>Bound on the process-tree walk: multi-process apps (Chrome,
     /// Edge, Electron) can fan out hundreds of processes, but the presenting
     /// descendants are near the root — 32 captures them without a per-tick
     /// enumeration cost.</summary>
     internal const int MaxCandidateProcesses = 32;
 
-    private static readonly IntPtr InvalidHandleValue = new(-1);
-
     private readonly Func<int> _foregroundPidProvider;
     private readonly Func<int, IReadOnlyList<int>>? _childrenProvider;
     private readonly Func<string?>? _titleProvider;
+    private readonly ProcessTreeSource _processTree;
 
     public TrackedTargetResolver()
         : this(GetForegroundPidFromUser32)
@@ -38,11 +35,13 @@ internal sealed class TrackedTargetResolver
     internal TrackedTargetResolver(
         Func<int> foregroundPidProvider,
         Func<int, IReadOnlyList<int>>? childrenProvider = null,
-        Func<string?>? titleProvider = null)
+        Func<string?>? titleProvider = null,
+        ProcessTreeSource? processTree = null)
     {
         _foregroundPidProvider = foregroundPidProvider;
         _childrenProvider = childrenProvider;
         _titleProvider = titleProvider;
+        _processTree = processTree ?? new ProcessTreeSource();
     }
 
     /// <summary>
@@ -62,7 +61,7 @@ internal sealed class TrackedTargetResolver
         // materialized into a parent map once, so BFS children lookups never
         // re-enumerate processes. Injected providers (tests) are called per
         // pid as before.
-        Dictionary<int, List<int>>? parentMap = _childrenProvider is null ? SnapshotParentMap() : null;
+        Dictionary<int, List<int>>? parentMap = _childrenProvider is null ? _processTree.SnapshotParentMap() : null;
 
         List<int> candidates = [rootPid];
         HashSet<int> seen = [rootPid];
@@ -105,6 +104,7 @@ internal sealed class TrackedTargetResolver
         }
         return [];
     }
+
     private static int GetForegroundPidFromUser32()
     {
         IntPtr hwnd = GetForegroundWindow();
@@ -134,77 +134,6 @@ internal sealed class TrackedTargetResolver
         GetWindowText(hwnd, sb, sb.Capacity);
         return sb.ToString();
     }
-
-    /// <summary>Parent → children map from ONE toolhelp snapshot of all
-    /// processes, taken per <see cref="ResolveCandidates"/> call.</summary>
-    private static Dictionary<int, List<int>> SnapshotParentMap()
-    {
-        var parentMap = new Dictionary<int, List<int>>();
-        IntPtr snapshot = CreateToolhelp32Snapshot(Th32csSnapprocess, 0);
-        if (snapshot == IntPtr.Zero || snapshot == InvalidHandleValue)
-        {
-            return parentMap;
-        }
-
-        try
-        {
-            var entry = new ProcessEntry32 { Size = (uint)Marshal.SizeOf<ProcessEntry32>() };
-            if (!Process32First(snapshot, ref entry))
-            {
-                return parentMap;
-            }
-
-            do
-            {
-                int parentPid = (int)entry.ParentProcessId;
-                if (!parentMap.TryGetValue(parentPid, out var children))
-                {
-                    children = [];
-                    parentMap[parentPid] = children;
-                }
-                children.Add((int)entry.ProcessId);
-            }
-            while (Process32Next(snapshot, ref entry));
-        }
-        finally
-        {
-            CloseHandle(snapshot);
-        }
-
-        return parentMap;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ProcessEntry32
-    {
-        public uint Size;
-        public uint CntUsage;
-        public uint ProcessId;
-        public IntPtr DefaultHeapId;
-        public uint ModuleId;
-        public uint CntThreads;
-        public uint ParentProcessId;
-        public int PriClassBase;
-        public uint Flags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string ExeFile;
-    }
-
-    // Entry points are spelled explicitly so the binding resolves to the
-    // spelled export and a method rename cannot silently change what is
-    // called (ADR-0020); PInvokeBindingTests probes each pair against the
-    // real DLL at the gate.
-    [DllImport("kernel32.dll", EntryPoint = "CreateToolhelp32Snapshot", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessId);
-
-    [DllImport("kernel32.dll", EntryPoint = "Process32First", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool Process32First(IntPtr hSnapshot, ref ProcessEntry32 lppe);
-
-    [DllImport("kernel32.dll", EntryPoint = "Process32Next", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool Process32Next(IntPtr hSnapshot, ref ProcessEntry32 lppe);
-
-    [DllImport("kernel32.dll", EntryPoint = "CloseHandle", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
     private static extern IntPtr GetForegroundWindow();
