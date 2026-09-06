@@ -1,3 +1,5 @@
+using System.Xml.Linq;
+
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -256,4 +258,36 @@ public class CalendarFeedTests
             Username = "alice@example.com",
             SelectedCalendars = selected ?? []
         };
+}
+
+/// <summary>
+/// Pins the CalDAV PROPFIND request bodies as well-formed XML. The two
+/// templates are <see cref="XDocument"/> fields initialized at
+/// <see cref="CalDavFetcher"/> type-init; a malformed body throws a
+/// <see cref="TypeInitializationException"/> the first time the fetcher type is
+/// touched, which in production surfaced as the inspector's feed-list commit
+/// aborting before persistence (the producer restart references the fetcher).
+/// Parsing each template here makes the malformation fail a test instead of the
+/// on-device loop.
+/// </summary>
+[TestClass]
+public class CalDavPropFindTemplateTests
+{
+    [TestMethod]
+    public void HomeSetPropFind_IsWellFormedXml()
+    {
+        // Accessing the field runs the static initializer; a malformed body
+        // throws here (and would throw at first use in production).
+        XDocument doc = CalDavFetcher.HomeSetPropFind;
+
+        Assert.IsTrue(doc.Root is { } root && root.Name.LocalName == "propfind");
+    }
+
+    [TestMethod]
+    public void CalendarListPropFind_IsWellFormedXml()
+    {
+        XDocument doc = CalDavFetcher.CalendarListPropFind;
+
+        Assert.IsTrue(doc.Root is { } root && root.Name.LocalName == "propfind");
+    }
 }

@@ -261,10 +261,10 @@ internal sealed class CalDavFetcher : IFeedFetcher
 
     internal static readonly XDocument CalendarListPropFind = XDocument.Parse("""
 <?xml version="1.0" encoding="utf-8" ?>
-<propfind xmlns="DAV:" xmlns="urn:ietf:params:xml:ns:caldav">
+<propfind xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <prop>
     <displayname />
-    <calendar-data />
+    <c:calendar-data />
   </prop>
 </propfind>
 """);
