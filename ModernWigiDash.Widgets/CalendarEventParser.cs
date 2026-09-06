@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Ical.Net;
 using Ical.Net.DataTypes;
 
@@ -111,6 +112,7 @@ internal static class CalendarEventParser
                     End = endLocal,
                     IsAllDay = allDay,
                     Location = evt.Location ?? string.Empty,
+                    Description = StripHtml(evt.Description ?? string.Empty),
                     Url = evt.Url?.ToString() ?? string.Empty,
                     SeriesId = evt.Uid ?? string.Empty,
                     FeedLabel = feedLabel,
@@ -195,4 +197,22 @@ internal static class CalendarEventParser
 
     private static CalDateTime ToCalDateTime(DateTime local)
         => new(local, CalDateTime.UtcTzId, hasTime: true);
+
+    /// <summary>Strips HTML tags from a DESCRIPTION value (many feeds embed
+    /// HTML in the body). Returns plain text with newlines preserved.</summary>
+    internal static string StripHtml(string html)
+    {
+        if (string.IsNullOrEmpty(html))
+            return string.Empty;
+
+        // Remove <br>, <p>, <div> tags and convert to newlines.
+        string text = System.Text.RegularExpressions.Regex.Replace(html, @"<\s*(br|p|div)[^>]*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture);
+        // Remove all remaining HTML tags.
+        text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", "");
+        // Decode common HTML entities.
+        text = text.Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", "\"").Replace("&#39;", "'").Replace("&nbsp;", " ");
+        // Collapse multiple blank lines.
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
+        return text.Trim();
+    }
 }

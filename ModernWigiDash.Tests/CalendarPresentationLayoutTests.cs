@@ -18,7 +18,7 @@ public class CalendarPresentationTests
         };
 
     [TestMethod]
-    public void Build_ActiveEvent_HeroIsLiveWithElapsedCountdown()
+    public void Build_ActiveEvent_RowIsLive()
     {
         var snap = new CalendarSnapshot
         {
@@ -28,78 +28,82 @@ public class CalendarPresentationTests
             LastUpdate = Now,
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
 
         Assert.IsTrue(d.HasData);
-        Assert.AreEqual("Standup", d.HeroTitle);
-        Assert.IsTrue(d.HeroIsLive);
-        // 14:30 now, started 14:00 -> +30m
-        Assert.AreEqual("+30m", d.HeroCountdown);
-        // The hero is also the first row.
+        // The date header shows today's day name + month + day.
+        Assert.AreEqual("Sunday, Sep 6", d.DateHeaderText);
+        // The active event is the first row, flagged live.
         Assert.AreEqual(1, d.Rows.Count);
+        Assert.AreEqual("Standup", d.Rows[0].Title);
+        Assert.IsTrue(d.Rows[0].IsLive);
+        Assert.IsFalse(d.Rows[0].IsUrgent);
         Assert.AreEqual("14:00", d.Rows[0].TimeText);
     }
 
     [TestMethod]
-    public void Build_NextEvent_HeroShowsRemainingCountdown()
+    public void Build_NextEvent_RowIsNotLiveOrUrgent()
     {
         var snap = new CalendarSnapshot
         {
-            Events = [Ev("Lunch", 15, 0, 16, 0)],
+            Events = [Ev("Lunch", 18, 0, 19, 0)],
             HasData = true,
             IsLive = true,
             LastUpdate = Now,
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
 
-        Assert.IsFalse(d.HeroIsLive);
-        Assert.AreEqual("in 30m", d.HeroCountdown);
+        Assert.AreEqual(1, d.Rows.Count);
+        Assert.IsFalse(d.Rows[0].IsLive);
+        Assert.IsFalse(d.Rows[0].IsUrgent);
+        Assert.AreEqual("Lunch", d.Rows[0].Title);
     }
 
     [TestMethod]
-    public void Build_MultiHour_RemainingUsesHoursAndMinutes()
+    public void Build_UrgentRow_FlaggedWithinThirtyMinutes()
     {
+        // Event at 14:45 (15 min from now=14:30) is urgent.
         var snap = new CalendarSnapshot
         {
-            Events = [Ev("Workshop", 18, 0, 20, 0)],
+            Events = [Ev("Soon", 14, 45, 15, 0)],
             HasData = true,
             IsLive = true,
             LastUpdate = Now,
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
 
-        // 14:30 -> 18:00 is 3h 30m
-        Assert.AreEqual("in 3h 30m", d.HeroCountdown);
+        Assert.AreEqual(1, d.Rows.Count);
+        Assert.IsTrue(d.Rows[0].IsUrgent);
+        Assert.IsFalse(d.Rows[0].IsLive);
+        Assert.AreEqual("Soon", d.Rows[0].Title);
     }
 
     [TestMethod]
-    public void Build_UrgentRow_TintsWithinThirtyMinutes()
+    public void Build_MultipleEvents_OrdersByStart()
     {
-        // Hero at 14:00-15:00 (active at 14:30), a second event at 14:45 (15 min away) is urgent.
         var snap = new CalendarSnapshot
         {
             Events =
             [
-                Ev("Active", 14, 0, 15, 0),
-                Ev("Soon", 14, 45, 15, 0),
+                Ev("Later", 17, 0, 18, 0),
+                Ev("Sooner", 15, 0, 16, 0),
             ],
             HasData = true,
             IsLive = true,
             LastUpdate = Now,
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 3);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
 
-        // Row 0 is the hero (active). Row 1 is "Soon" (urgent).
         Assert.AreEqual(2, d.Rows.Count);
-        Assert.IsTrue(d.Rows[1].IsUrgent);
-        Assert.AreEqual("Soon", d.Rows[1].Title);
+        Assert.AreEqual("Sooner", d.Rows[0].Title);
+        Assert.AreEqual("Later", d.Rows[1].Title);
     }
 
     [TestMethod]
-    public void Build_AllDayItems_AggregateIntoPill()
+    public void Build_AllDayItems_AppearInRows()
     {
         var snap = new CalendarSnapshot
         {
@@ -113,18 +117,20 @@ public class CalendarPresentationTests
             LastUpdate = Now,
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
 
-        Assert.AreEqual(2, d.AllDayPill.Count);
-        Assert.AreEqual("Birthday", d.AllDayPill.Label);
-        // No timed rows (both are all-day).
-        Assert.AreEqual(0, d.Rows.Count);
+        // All-day events appear as rows with "All day" time text.
+        Assert.AreEqual(2, d.Rows.Count);
+        Assert.AreEqual("All day", d.Rows[0].TimeText);
+        Assert.AreEqual("Birthday", d.Rows[0].Title);
+        Assert.AreEqual("All day", d.Rows[1].TimeText);
+        Assert.AreEqual("Holiday", d.Rows[1].Title);
     }
 
     [TestMethod]
     public void Build_NoData_NeverFetched_ShowsEmptyHint()
     {
-        CalendarDisplay d = CalendarPresentation.Build(null, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(null, Now, Now.Date, 2);
 
         Assert.IsFalse(d.HasData);
         Assert.AreEqual("No calendars configured", d.StalenessHint);
@@ -142,10 +148,109 @@ public class CalendarPresentationTests
             LastUpdate = Now.AddMinutes(-5),
         };
 
-        CalendarDisplay d = CalendarPresentation.Build(snap, Now, 2);
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
 
         Assert.IsFalse(d.HasData);
         Assert.AreEqual("Last known schedule", d.StalenessHint);
+    }
+
+    [TestMethod]
+    public void Build_ViewedDay_EventsFilteredToThatDay()
+    {
+        var tomorrow = new DateTime(2026, 9, 7, 9, 0, 0, DateTimeKind.Unspecified);
+        var snap = new CalendarSnapshot
+        {
+            Events =
+            [
+                new CalendarEvent { Title = "Meeting", Start = tomorrow, End = tomorrow.AddHours(1) },
+                Ev("TodayEvent", 15, 0, 16, 0),
+            ],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        };
+
+        // Viewing today: only today's events show.
+        CalendarDisplay dToday = CalendarPresentation.Build(snap, Now, Now.Date, 2);
+        Assert.AreEqual(1, dToday.Rows.Count);
+        Assert.AreEqual("TodayEvent", dToday.Rows[0].Title);
+
+        // Viewing tomorrow: only tomorrow's events show.
+        CalendarDisplay dTomorrow = CalendarPresentation.Build(snap, Now, tomorrow.Date, 2);
+        Assert.AreEqual(1, dTomorrow.Rows.Count);
+        Assert.AreEqual("Meeting", dTomorrow.Rows[0].Title);
+    }
+
+    [TestMethod]
+    public void Build_MonthGrid_Has35Cells()
+    {
+        var snap = new CalendarSnapshot
+        {
+            Events = [Ev("Today", 15, 0, 16, 0)],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        };
+
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
+
+        Assert.AreEqual(35, d.MonthGrid.Count);
+        Assert.AreEqual("September 2026", d.MonthTitle);
+    }
+
+    [TestMethod]
+    public void Build_MonthGrid_TodayIsMarked()
+    {
+        var snap = new CalendarSnapshot
+        {
+            Events = [],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        };
+
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
+
+        MonthCell today = d.MonthGrid.First(c => c.Day == 6);
+        Assert.IsTrue(today.IsToday);
+        Assert.IsTrue(today.IsViewed);
+    }
+
+    [TestMethod]
+    public void Build_MonthGrid_EventDotOnDayWithEvents()
+    {
+        var snap = new CalendarSnapshot
+        {
+            Events = [Ev("Event", 15, 0, 16, 0)],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        };
+
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
+
+        MonthCell cell6 = d.MonthGrid.First(c => c.Day == 6);
+        Assert.IsTrue(cell6.HasEvents);
+    }
+
+    [TestMethod]
+    public void Build_FeedLabel_CarriedOnRow()
+    {
+        var snap = new CalendarSnapshot
+        {
+            Events =
+            [
+                new CalendarEvent { Title = "Sync", Start = new DateTime(2026, 9, 6, 15, 0, 0), End = new DateTime(2026, 9, 6, 16, 0, 0), FeedLabel = "Work" },
+            ],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        };
+
+        CalendarDisplay d = CalendarPresentation.Build(snap, Now, Now.Date, 2);
+
+        Assert.AreEqual(1, d.Rows.Count);
+        Assert.AreEqual("Work", d.Rows[0].FeedLabel);
     }
 }
 
@@ -155,54 +260,66 @@ public class CalendarLayoutTests
     private static readonly SKRect Bounds = new(0, 0, 320, 240);
 
     [TestMethod]
-    public void Compute_StacksHeroRowsAndPill_TopAligned()
+    public void Compute_StacksHeaderRowsAndAllDay_TopAligned()
     {
-        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 2, hasHero: true, hasAllDay: true);
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 2, hasAllDay: true);
 
-        Assert.IsFalse(geo.HeroRect.IsEmpty);
+        Assert.IsFalse(geo.HeaderRect.IsEmpty);
         Assert.AreEqual(2, geo.RowRects.Count);
-        Assert.IsFalse(geo.AllDayPillRect.IsEmpty);
+        Assert.IsFalse(geo.AllDayRect.IsEmpty);
 
         // Each element starts below the previous one plus the gap.
-        Assert.IsTrue(geo.RowRects[0].Top > geo.HeroRect.Bottom);
+        Assert.IsTrue(geo.AllDayRect.Top > geo.HeaderRect.Bottom);
+        Assert.IsTrue(geo.RowRects[0].Top > geo.AllDayRect.Bottom);
         Assert.IsTrue(geo.RowRects[1].Top > geo.RowRects[0].Bottom);
-        Assert.IsTrue(geo.AllDayPillRect.Top > geo.RowRects[1].Bottom);
     }
 
     [TestMethod]
-    public void Compute_NoHero_RowsStartAtTop()
+    public void Compute_NoAllDay_RowsStartBelowHeader()
     {
-        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 1, hasHero: false, hasAllDay: false);
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 1, hasAllDay: false);
 
-        Assert.IsTrue(geo.HeroRect.IsEmpty);
+        Assert.IsTrue(geo.AllDayRect.IsEmpty);
         Assert.AreEqual(1, geo.RowRects.Count);
-        Assert.AreEqual(Bounds.Top + geo.Pad, geo.RowRects[0].Top, 0.01f);
+        // Rows start below the header + gap.
+        Assert.IsTrue(geo.RowRects[0].Top > geo.HeaderRect.Bottom);
     }
 
     [TestMethod]
-    public void GetAction_HeroBeatsRow_BeatsPill()
+    public void GetAction_RowHit_ReturnsIndex()
     {
-        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 1, hasHero: true, hasAllDay: true);
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 2, hasAllDay: true);
 
-        // A point on the hero returns -1 with onHero set.
-        Assert.AreEqual(-1, CalendarLayout.GetAction(geo, geo.HeroRect.MidX, geo.HeroRect.MidY, out bool hero, out _));
-        Assert.IsTrue(hero);
+        // A point on row 0 returns index 0.
+        Assert.AreEqual(0, CalendarLayout.GetAction(geo, geo.RowRects[0].MidX, geo.RowRects[0].MidY, out _));
 
-        // A point on the row returns its index.
-        Assert.AreEqual(0, CalendarLayout.GetAction(geo, geo.RowRects[0].MidX, geo.RowRects[0].MidY, out _, out _));
+        // A point on row 1 returns index 1.
+        Assert.AreEqual(1, CalendarLayout.GetAction(geo, geo.RowRects[1].MidX, geo.RowRects[1].MidY, out _));
+    }
 
-        // A point on the pill sets onPill.
-        Assert.AreEqual(-1, CalendarLayout.GetAction(geo, geo.AllDayPillRect.MidX, geo.AllDayPillRect.MidY, out _, out bool pill));
-        Assert.IsTrue(pill);
+    [TestMethod]
+    public void GetAction_AllDayHit_SetsFlag()
+    {
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 1, hasAllDay: true);
+
+        Assert.AreEqual(-1, CalendarLayout.GetAction(geo, geo.AllDayRect.MidX, geo.AllDayRect.MidY, out bool onAllDay));
+        Assert.IsTrue(onAllDay);
     }
 
     [TestMethod]
     public void GetAction_OffEverything_ReturnsMiss()
     {
-        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 0, hasHero: false, hasAllDay: false);
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 0, hasAllDay: false);
 
-        Assert.AreEqual(-1, CalendarLayout.GetAction(geo, 5f, 5f, out bool hero, out bool pill));
-        Assert.IsFalse(hero);
-        Assert.IsFalse(pill);
+        Assert.AreEqual(-1, CalendarLayout.GetAction(geo, 5f, 5f, out bool onAllDay));
+        Assert.IsFalse(onAllDay);
+    }
+
+    [TestMethod]
+    public void Compute_TimeGutterWidth_IsPositive()
+    {
+        var geo = CalendarLayout.Compute(Bounds, 1f, rowCount: 1, hasAllDay: false);
+
+        Assert.IsTrue(geo.TimeGutterWidth > 0);
     }
 }

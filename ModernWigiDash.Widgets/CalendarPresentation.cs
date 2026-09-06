@@ -1,25 +1,31 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>One timed agenda row's display facts: the time string, the title,
-/// the urgency tint (the accent the layout draws the row with), and the
-/// meeting link (empty when the feed carried none) the tap-to-open action
-/// routes through.</summary>
-internal sealed record CalendarRow(string TimeText, string Title, bool IsUrgent, string Url);
+/// the feed label (empty when the feed carried none), whether the event is
+/// currently live (started, not ended), whether it is approaching (within the
+/// urgency window), and the meeting link.</summary>
+internal sealed record CalendarRow(string TimeText, string Title, string FeedLabel, bool IsLive, bool IsUrgent, string Url);
 
-/// <summary>The all-day tray's display facts: the label and the count of all-day
-/// items in the window.</summary>
+/// <summary>The all-day strip's display facts: the label and the count of
+/// all-day items in the window.</summary>
 internal sealed record CalendarAllDayPill(string Label, int Count);
 
+/// <summary>One cell in the mini month grid: the day number (0 = blank/other
+/// month), whether it has events, whether it is today, and whether it is the
+/// currently-viewed day.</summary>
+internal readonly record struct MonthCell(int Day, bool HasEvents, bool IsToday, bool IsViewed);
+
 /// <summary>
-/// The calendar widget's complete display facts at one instant: the hero (title
-/// + countdown + live flag), the timed rows, the all-day pill, the staleness
-/// hint (empty when live), and the data fact. The render methods lay these out;
-/// the rules that produced them are assertable here without pixels.
+/// The calendar widget's complete display facts at one instant: the date header
+/// text, the mini month grid (5 rows × 7 cols), the timed rows, the all-day
+/// pill, the staleness hint (empty when live), and the data fact. The render
+/// methods lay these out; the rules that produced them are assertable here
+/// without pixels.
 /// </summary>
 internal sealed record CalendarDisplay(
-    string HeroTitle,
-    string HeroCountdown,
-    bool HeroIsLive,
+    string DateHeaderText,
+    IReadOnlyList<MonthCell> MonthGrid,
+    string MonthTitle,
     IReadOnlyList<CalendarRow> Rows,
     CalendarAllDayPill AllDayPill,
     string StalenessHint,
@@ -27,110 +33,97 @@ internal sealed record CalendarDisplay(
 
 /// <summary>
 /// Everything the calendar widget draws that is a *fact* about the snapshot at
-/// a given instant: the hero (the active or next event + its countdown), the
-/// timed rows, the all-day pill, and the unavailable-state hint. The render
-/// methods become thin adapters that lay these out -- the display rules are
-/// assertable without pixels. The "now" accuracy rule lives here: the hero and
-/// countdown are recomputed from the injected clock on every build, so a tick
-/// that runs a second late still shows the correct remaining time. All number
+/// a given instant: the date header (the viewed day's full name + month + day),
+/// the mini month grid (with event dots and today/viewed highlights), the timed
+/// rows for the viewed day, the all-day pill, and the unavailable-state hint.
+/// The render methods become thin adapters that lay these out -- the display
+/// rules are assertable without pixels. The "now" accuracy rule lives here: the
+/// live and urgent flags are recomputed from the injected clock on every build,
+/// so a tick that runs a second late still shows the correct state. All number
 /// formatting routes through <see cref="DisplayFormat"/> (the invariant-culture
 /// contract).
 /// </summary>
 internal static class CalendarPresentation
 {
     /// <summary>The urgency threshold: an event starting within this many
-    /// minutes reads as "approaching" (amber); one already started reads as
-    /// "live" (red).</summary>
+    /// minutes reads as "approaching" (amber).</summary>
     private const int UrgencyWindowMinutes = 30;
 
     /// <summary>
-    /// Builds the widget's display facts from one snapshot at the placement size
-    /// and the current instant. The hero is the currently-active event (started,
-    /// not yet ended) when one exists, else the next upcoming event; the
-    /// countdown is its remaining time (or elapsed, when live). The timed rows
-    /// are the next events after the hero (up to <paramref name="timedRows"/>,
-    /// excluding the hero itself and any all-day items). The all-day pill
-    /// aggregates the date-only items. A no-data snapshot yields the named
-    /// unavailable display (ADR-0017): a staleness hint when the last-good cache
-    /// is rendering during an outage, an empty-agenda hint otherwise.
+    /// Builds the widget's display facts from one snapshot for the viewed day
+    /// at the current instant. The date header is the viewed day's full name +
+    /// abbreviated month + day. The mini month grid shows the viewed day's
+    /// month with event dots. The timed rows are the events ON the viewed day
+    /// (up to <paramref name="timedRows"/>), each flagged live (started, not
+    /// ended relative to `now`) or urgent (starting within the urgency window
+    /// relative to `now`). A no-data snapshot yields the named unavailable
+    /// display (ADR-0017).
     /// </summary>
     /// <param name="snapshot">The merged calendar snapshot (may be null/empty).</param>
-    /// <param name="now">The current machine-local instant (the "now" accuracy
-    /// seam; the widget passes its per-tick clock read).</param>
+    /// <param name="now">The current machine-local instant (for live/urgent
+    /// flags and the "today" marker in the grid).</param>
+    /// <param name="viewDate">The day being displayed (the user may have swiped
+    /// away from today).</param>
     /// <param name="timedRows">How many timed rows to show (1-3, resolved
     /// through CalendarFeedPolicy).</param>
-    public static CalendarDisplay Build(CalendarSnapshot? snapshot, DateTime now, int timedRows)
+    public static CalendarDisplay Build(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate, int timedRows)
     {
         if (snapshot is null || !snapshot.HasData)
-            return UnavailableDisplay(snapshot);
+            return UnavailableDisplay(snapshot, now, viewDate);
 
-        List<CalendarEvent> timed = snapshot.Events
-            .Where(e => !e.IsAllDay)
+        // Filter events to the viewed day.
+        List<CalendarEvent> dayTimed = snapshot.Events
+            .Where(e => !e.IsAllDay && e.Start.Date == viewDate.Date)
             .OrderBy(e => e.Start)
             .ToList();
-        List<CalendarEvent> allDay = snapshot.Events
-            .Where(e => e.IsAllDay)
+        List<CalendarEvent> dayAllDay = snapshot.Events
+            .Where(e => e.IsAllDay && e.Start.Date == viewDate.Date)
             .OrderBy(e => e.Start)
             .ToList();
 
-        // The hero: the active event (started, not ended) when one exists, else
-        // the next upcoming event. Recomputed from `now` every build. CalendarEvent
-        // is a struct, so FirstOrDefault yields default(T) when absent; track
-        // presence with a flag instead of a nullable.
-        CalendarEvent hero = default;
-        bool hasHero = false;
-        foreach (CalendarEvent e in timed)
-        {
-            if (e.Start <= now && now < e.End)
-            {
-                hero = e;
-                hasHero = true;
-                break;
-            }
-        }
-        if (!hasHero)
-        {
-            foreach (CalendarEvent e in timed)
-            {
-                if (e.Start > now)
-                {
-                    hero = e;
-                    hasHero = true;
-                    break;
-                }
-            }
-        }
+        // The date header: full day name + abbreviated month + day.
+        string dateHeader = FormatDateHeader(viewDate);
 
-        string heroTitle = string.Empty;
-        string heroCountdown = string.Empty;
-        bool heroIsLive = false;
+        // Timed rows for the viewed day, followed by all-day rows. All-day
+        // events get "All day" as their time text so they render in the same
+        // row format and are individually tappable.
         var rows = new List<CalendarRow>();
-
-        if (hasHero)
-        {
-            heroIsLive = hero.Start <= now && now < hero.End;
-            heroTitle = HeroTitle(hero.Title);
-            heroCountdown = heroIsLive
-                ? ElapsedText(now - hero.Start)
-                : RemainingText(hero.Start - now);
-            rows.Add(new CalendarRow(FormatTime(hero.Start), heroTitle, heroIsLive, hero.Url));
-        }
-
         int slots = Math.Max(1, Math.Min(timedRows, CalendarFeedPolicy.MaxTimedRows));
-        foreach (CalendarEvent e in timed.Where(x => !hasHero || !x.Equals(hero)).Take(slots))
+        foreach (CalendarEvent e in dayTimed.Take(slots))
         {
-            bool urgent = (e.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
-            rows.Add(new CalendarRow(FormatTime(e.Start), Truncate(e.Title, 28), urgent, e.Url));
+            bool isLive = e.Start <= now && now < e.End;
+            bool isUrgent = !isLive && (e.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
+            rows.Add(new CalendarRow(
+                FormatTime(e.Start),
+                Truncate(e.Title, 32),
+                e.FeedLabel,
+                isLive,
+                isUrgent,
+                e.Url));
         }
 
-        CalendarAllDayPill pill = allDay.Count > 0
-            ? new CalendarAllDayPill(AllDayLabel(allDay[0]), allDay.Count)
-            : new CalendarAllDayPill(string.Empty, 0);
+        // All-day events ride the same row list so they are individually
+        // tappable and visible. They sort after timed events.
+        foreach (CalendarEvent e in dayAllDay.Take(2))
+        {
+            rows.Add(new CalendarRow(
+                "All day",
+                Truncate(e.Title, 32),
+                e.FeedLabel,
+                false,
+                false,
+                e.Url));
+        }
+
+        var pill = new CalendarAllDayPill(string.Empty, 0);
+
+        // The mini month grid for the viewed day's month.
+        var (grid, monthTitle) = BuildMonthGrid(viewDate, now, snapshot.Events);
 
         return new CalendarDisplay(
-            HeroTitle: heroTitle,
-            HeroCountdown: heroCountdown,
-            HeroIsLive: heroIsLive,
+            DateHeaderText: dateHeader,
+            MonthGrid: grid,
+            MonthTitle: monthTitle,
             Rows: rows,
             AllDayPill: pill,
             StalenessHint: string.Empty,
@@ -139,50 +132,80 @@ internal static class CalendarPresentation
 
     // --- helpers -------------------------------------------------------------
 
-    private static CalendarDisplay UnavailableDisplay(CalendarSnapshot? snapshot)
+    private static CalendarDisplay UnavailableDisplay(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate)
     {
-        // ADR-0017: a dropout renders the last-known agenda with a staleness
-        // hint; a never-fetched state renders the empty-agenda hint.
         string hint = snapshot is { HasData: false } && snapshot.LastUpdate != default
             ? "Last known schedule"
             : "No calendars configured";
+        var (grid, monthTitle) = BuildMonthGrid(viewDate, now, []);
         return new CalendarDisplay(
-            HeroTitle: string.Empty,
-            HeroCountdown: string.Empty,
-            HeroIsLive: false,
+            DateHeaderText: FormatDateHeader(viewDate),
+            MonthGrid: grid,
+            MonthTitle: monthTitle,
             Rows: [],
             AllDayPill: new CalendarAllDayPill(string.Empty, 0),
             StalenessHint: hint,
             HasData: false);
     }
 
-    private static string HeroTitle(string title) => string.IsNullOrWhiteSpace(title) ? "Untitled" : Truncate(title, 40);
+    /// <summary>Formats the date header: "Sunday, Sep 6" (full day name,
+    /// abbreviated month, day-of-month).</summary>
+    private static string FormatDateHeader(DateTime d)
+    {
+        string[] months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return $"{d.DayOfWeek}, {months[d.Month - 1]} {d.Day}";
+    }
+
+    /// <summary>Builds the 5×7 mini month grid for the viewed day's month.
+    /// Week starts on Sunday. Cells outside the month have Day=0. A cell has
+    /// HasEvents=true when any event falls on that date. IsToday marks the
+    /// actual today; IsViewed marks the currently-displayed day.</summary>
+    private static (IReadOnlyList<MonthCell> Grid, string Title) BuildMonthGrid(DateTime viewDate, DateTime now, IEnumerable<CalendarEvent> events)
+    {
+        string[] months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        string title = $"{months[viewDate.Month - 1]} {viewDate.Year}";
+
+        int daysInMonth = DateTime.DaysInMonth(viewDate.Year, viewDate.Month);
+        int firstDayOfWeek = new DateTime(viewDate.Year, viewDate.Month, 1).DayOfWeek switch
+        {
+            DayOfWeek.Sunday => 0,
+            DayOfWeek.Monday => 1,
+            DayOfWeek.Tuesday => 2,
+            DayOfWeek.Wednesday => 3,
+            DayOfWeek.Thursday => 4,
+            DayOfWeek.Friday => 5,
+            _ => 6,
+        };
+
+        // Collect the set of dates that have events (for dot markers).
+        HashSet<DateTime> eventDates = events
+            .Where(e => e.Start.Month == viewDate.Month && e.Start.Year == viewDate.Year)
+            .Select(e => e.Start.Date)
+            .ToHashSet();
+
+        var cells = new List<MonthCell>(35);
+        for (int i = 0; i < 35; i++)
+        {
+            int dayNum = i - firstDayOfWeek + 1;
+            if (dayNum < 1 || dayNum > daysInMonth)
+            {
+                cells.Add(new MonthCell(0, false, false, false));
+            }
+            else
+            {
+                DateTime cellDate = new(viewDate.Year, viewDate.Month, dayNum);
+                bool hasEvents = eventDates.Contains(cellDate);
+                bool isToday = cellDate.Date == now.Date;
+                bool isViewed = cellDate.Date == viewDate.Date;
+                cells.Add(new MonthCell(dayNum, hasEvents, isToday, isViewed));
+            }
+        }
+
+        return (cells.AsReadOnly(), title);
+    }
 
     private static string FormatTime(DateTime t)
         => $"{t.Hour:D2}:{t.Minute:D2}";
-
-    private static string RemainingText(TimeSpan span)
-    {
-        if (span.TotalHours >= 24)
-            return $"in {(int)span.TotalDays}d";
-        int hours = (int)span.TotalHours;
-        int minutes = span.Minutes;
-        if (hours >= 1)
-            return $"in {hours}h {minutes:D2}m";
-        return $"in {minutes}m";
-    }
-
-    private static string ElapsedText(TimeSpan span)
-    {
-        int hours = (int)span.TotalHours;
-        int minutes = span.Minutes;
-        if (hours >= 1)
-            return $"+{hours}h {minutes:D2}m";
-        return $"+{minutes}m";
-    }
-
-    private static string AllDayLabel(CalendarEvent e)
-        => string.IsNullOrWhiteSpace(e.Title) ? "All day" : Truncate(e.Title, 28);
 
     private static string Truncate(string value, int max)
         => value.Length <= max ? value : value[..(max - 1)] + "\u2026";

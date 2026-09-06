@@ -69,6 +69,9 @@ dotnet_diagnostic.MA0074.severity = suggestion
 dotnet_diagnostic.MA0025.severity = suggestion
 dotnet_diagnostic.MA0009.severity = suggestion
 dotnet_diagnostic.RCS1075.severity = suggestion
+dotnet_diagnostic.S6562.severity = suggestion
+dotnet_diagnostic.S3358.severity = suggestion
+dotnet_diagnostic.S6444.severity = suggestion
 
 # Re-open the project-wide scope: the style rules below must NOT be captured
 # by the test-only section above.

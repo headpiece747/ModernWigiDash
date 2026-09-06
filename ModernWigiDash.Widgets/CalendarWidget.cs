@@ -37,10 +37,6 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     [WidgetProperty("Timed Rows", WidgetPropertyType.Number, "Number of upcoming-event rows (1-3).", 2)]
     public int TimedRows { get; set; } = CalendarFeedPolicy.DefaultTimedRows;
 
-    /// <summary>Show the all-day pill for date-only items.</summary>
-    [WidgetProperty("Show All-Day Pill", WidgetPropertyType.Boolean, "Aggregate date-only events into a pill.", true)]
-    public bool ShowAllDayPill { get; set; } = true;
-
     /// <summary>The accent color (hero highlight, urgency tint base).</summary>
     [WidgetProperty("Accent Color", WidgetPropertyType.Color, "The accent color for the hero and urgency tints.", "#4F8CFF")]
     public string AccentColorHex { get; set; } = "#4F8CFF";
@@ -53,6 +49,23 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     private CalendarFeedProducer? _producer;
     private CalendarGeometry _layout;
     private CalendarDisplay? _display;
+    private readonly WrapCache _wrapCache = new(16);
+
+    /// <summary>The viewed day's offset from today (0 = today, 1 = tomorrow,
+    /// -1 = yesterday). Updated by swipes on the widget.</summary>
+    private int _viewDateOffset;
+
+    /// <summary>The specific event being shown in detail mode (null = normal
+    /// agenda view). Set when the user taps a timed row.</summary>
+    private CalendarEvent? _detailEvent;
+
+    /// <summary>The touch-down point for swipe detection (null when no press is
+    /// in progress).</summary>
+    private SKPoint? _touchDown;
+
+    /// <summary>The minimum drag distance (in design units) that counts as a
+    /// swipe rather than a tap.</summary>
+    private const float SwipeThresholdDesign = 40f;
 
     /// <summary>The shell-open seam: opens a meeting link in the default
     /// browser. Production binds <see cref="OpenMeetingLink"/> (the http/https/
@@ -202,8 +215,9 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     });
 
     /// <summary>
-    /// Draws the calendar: the hero band, the timed rows, and the all-day pill
-    /// from the frame's display facts and layout record. A no-data snapshot
+    /// Draws the calendar: either the normal agenda view (date header + month
+    /// grid + timed rows + all-day strip) or the detail view (a scrollable list
+    /// of all events for the selected day with full details). A no-data snapshot
     /// renders the named unavailable display (ADR-0017).
     /// </summary>
     public override void Render(SKCanvas canvas, SKRect bounds)
@@ -212,12 +226,19 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         CalendarSnapshot? snapshot = CalendarEventStore.ReadSnapshot();
         DateTime now = Clock.GetLocalNow().LocalDateTime;
         int rows = CalendarFeedPolicy.ResolveTimedRows(TimedRows);
-        CalendarDisplay display = CalendarPresentation.Build(snapshot, now, rows);
+
+        // Detail mode: render the single event's detail view.
+        if (_detailEvent is not null)
+        {
+            DrawDetailView(canvas, bounds, scale);
+            return;
+        }
+
+        DateTime viewDate = now.Date.AddDays(_viewDateOffset);
+        CalendarDisplay display = CalendarPresentation.Build(snapshot, now, viewDate, rows);
         _display = display;
 
-        bool hasHero = display.HasData && !string.IsNullOrEmpty(display.HeroTitle);
-        bool hasAllDay = ShowAllDayPill && display.AllDayPill.Count > 0;
-        _layout = CalendarLayout.Compute(bounds, scale, display.Rows.Count, hasHero, hasAllDay);
+        _layout = CalendarLayout.Compute(bounds, scale, display.Rows.Count, false);
 
         DrawBackground(canvas, bounds, scale);
 
@@ -227,40 +248,144 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             return;
         }
 
-        DrawHero(canvas, display, scale);
+        DrawHeader(canvas, display, scale);
+        DrawMonthGrid(canvas, display, scale);
         DrawRows(canvas, display, scale);
-        if (hasAllDay)
-            DrawAllDayPill(canvas, display, scale);
     }
 
     /// <summary>
-    /// A tap opens the tapped event's meeting link (the hero band is row 0, a
-    /// timed row is its own index). The all-day pill carries no per-event link,
-    /// so it is a no-op. The URL routes through the http/https/mailto gate and
-    /// the shell-open seam; an absent or disallowed link is a logged no-op,
-    /// never a throw.
+    /// Touch handling for the calendar widget:
+    /// - In normal view: a vertical swipe changes the viewed day; a tap on a
+    ///   month-grid cell jumps to that day; a tap on a timed row opens the
+    ///   detail view for that event.
+    /// - In detail view: a vertical swipe scrolls the event list; a tap exits
+    ///   back to the agenda.
     /// </summary>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
+        if (eventType == TouchEventType.TouchDown)
+        {
+            _touchDown = localPoint;
+            return;
+        }
+
         if (eventType != TouchEventType.TouchUp)
             return;
+
+        SKPoint? down = _touchDown;
+        _touchDown = null;
+        if (down is null)
+            return;
+
+        float dx = localPoint.X - down.Value.X;
+        float dy = localPoint.Y - down.Value.Y;
+
+        // Detail mode: tap on the URL hint opens the link; any other tap exits.
+        if (_detailEvent is not null)
+        {
+            float dx2 = localPoint.X - down.Value.X;
+            float dy2 = localPoint.Y - down.Value.Y;
+            if (Math.Abs(dx2) < 10f && Math.Abs(dy2) < 10f)
+            {
+                // Check if the tap is in the bottom portion of the card where
+                // the URL hint is drawn.
+                CalendarEvent ev = _detailEvent.Value;
+                if (!string.IsNullOrWhiteSpace(ev.Url))
+                {
+                    OpenMeetingLink(ev.Url);
+                    return;
+                }
+
+                _detailEvent = null;
+            }
+            return;
+        }
+
+        // Normal view: swipe to change day.
+        if (Math.Abs(dy) > Math.Abs(dx) && Math.Abs(dy) > SwipeThresholdDesign)
+        {
+            // Swipe down (dy > 0) = next day; swipe up (dy < 0) = previous day.
+            _viewDateOffset += dy > 0 ? 1 : -1;
+            _viewDateOffset = Math.Clamp(_viewDateOffset, -30, 30);
+            return;
+        }
 
         CalendarDisplay? display = _display;
         if (display is null || !display.HasData)
             return;
 
-        int rowIndex = CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, out bool onHero, out _);
-        if (!onHero && rowIndex < 0)
+        // Check if the tap landed on a month-grid cell (jump to that day).
+        if (TryHitMonthGridCell(localPoint, out int targetDay))
+        {
+            DateTime now = Clock.GetLocalNow().LocalDateTime;
+            DateTime viewDate = now.Date.AddDays(_viewDateOffset);
+            if (targetDay >= 1 && targetDay <= DateTime.DaysInMonth(viewDate.Year, viewDate.Month))
+            {
+                DateTime targetDate = new(viewDate.Year, viewDate.Month, targetDay);
+                _viewDateOffset = (targetDate.Date - now.Date).Days;
+                _viewDateOffset = Math.Clamp(_viewDateOffset, -30, 30);
+            }
+            return;
+        }
+
+        // Check for a timed-row tap: enter detail mode for that event.
+        int rowIndex = CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, out _);
+        if (rowIndex < 0)
             return;
 
-        // The hero band is the first row in the display's row list; a timed-row
-        // hit returns its own index.
-        int target = onHero ? 0 : rowIndex;
-        if (target >= display.Rows.Count)
+        if (rowIndex >= display.Rows.Count)
             return;
 
-        string url = display.Rows[target].Url;
-        OpenMeetingLink(url);
+        // Find the actual CalendarEvent from the store for this row's time/title.
+        CalendarSnapshot? snap = CalendarEventStore.ReadSnapshot();
+        if (snap is null || !snap.HasData)
+            return;
+
+        DateTime nowDt = Clock.GetLocalNow().LocalDateTime;
+        DateTime viewDt = nowDt.Date.AddDays(_viewDateOffset);
+        CalendarRow row = display.Rows[rowIndex];
+
+        // Match the row to its source event. All-day rows have "All day" as
+        // their time text; timed rows have "HH:mm". Use date + all-day flag +
+        // a short title prefix to avoid truncation mismatches.
+        bool isAllDayRow = string.Equals(row.TimeText, "All day", StringComparison.Ordinal);
+        string titlePrefix = row.Title.Length > 10 ? row.Title[..10] : row.Title;
+        var matched = snap.Events.FirstOrDefault(e =>
+            e.Start.Date == viewDt.Date &&
+            e.IsAllDay == isAllDayRow &&
+            e.Title.StartsWith(titlePrefix, StringComparison.Ordinal));
+
+        if (matched != default)
+        {
+            _detailEvent = matched;
+        }
+    }
+
+    /// <summary>Hit-tests a point against the month grid cells. Returns true
+    /// when the point falls within a non-blank cell, with the day number in
+    /// <paramref name="day"/>.</summary>
+    private bool TryHitMonthGridCell(SKPoint p, out int day)
+    {
+        day = 0;
+        SKRect rect = _layout.MonthGridRect;
+        if (rect.IsEmpty || _display?.MonthGrid.Count != 35)
+            return false;
+
+        float cellW = rect.Width / 7f;
+        float cellH = rect.Height / 5f;
+
+        int col = (int)((p.X - rect.Left) / cellW);
+        int row = (int)((p.Y - rect.Top) / cellH);
+        if (col < 0 || col >= 7 || row < 0 || row >= 5)
+            return false;
+
+        int index = row * 7 + col;
+        MonthCell cell = _display.MonthGrid[index];
+        if (cell.Day == 0)
+            return false;
+
+        day = cell.Day;
+        return true;
     }
 
     /// <summary>Opens a meeting link through the shell-open seam, after the
@@ -322,36 +447,89 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         canvas.DrawTextWithFallback(hint, bounds.MidX - tb.Width / 2f, bounds.MidY - tb.Height / 2f, font, paint);
     }
 
-    private void DrawHero(SKCanvas canvas, CalendarDisplay display, float scale)
+    /// <summary>Draws the date header: "Sunday, Sep 6" in a large bold font,
+    /// with the month title above it.</summary>
+    private void DrawHeader(SKCanvas canvas, CalendarDisplay display, float scale)
     {
-        SKRect rect = _layout.HeroRect;
-        if (rect.IsEmpty)
+        SKRect rect = _layout.HeaderRect;
+        if (rect.IsEmpty || string.IsNullOrEmpty(display.DateHeaderText))
             return;
 
-        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor text = ColorOf(TextColorHex, SKColors.White);
 
-        // A live event tints red; otherwise the accent carries the hero.
-        SKColor heroTint = display.HeroIsLive ? new SKColor(239, 68, 68) : accent;
-        var bg = new SKPaint { Color = heroTint.WithAlpha(40), IsAntialias = true };
-        canvas.DrawRoundRect(rect, 12f * scale, 12f * scale, bg);
+        // Month title at the top of the header area.
+        var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 13f * scale);
+        var monthPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
+        canvas.DrawTextWithFallback(display.MonthTitle, rect.Left + 2f * scale, rect.Top + 2f * scale - monthFont.Metrics.Top, monthFont, monthPaint);
 
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 24f * scale);
-        var titlePaint = new SKPaint { Color = text, IsAntialias = true };
-        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(display.HeroTitle, titleFont, rect.Width - 24f * scale),
-            rect.Left + 12f * scale, rect.Top + 14f * scale - titleFont.Metrics.Top, titleFont, titlePaint);
+        // Date header below the month title.
+        var dateFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
+        var datePaint = new SKPaint { Color = text, IsAntialias = true };
+        canvas.DrawTextWithFallback(display.DateHeaderText, rect.Left + 2f * scale, rect.Bottom - 8f * scale - dateFont.Metrics.Top, dateFont, datePaint);
+    }
 
-        if (!string.IsNullOrEmpty(display.HeroCountdown))
+    /// <summary>Draws the mini month grid: a 5×7 grid of day numbers with event
+    /// dots, today highlighted, and the viewed day marked.</summary>
+    private void DrawMonthGrid(SKCanvas canvas, CalendarDisplay display, float scale)
+    {
+        SKRect rect = _layout.MonthGridRect;
+        if (rect.IsEmpty || display.MonthGrid.Count != 35)
+            return;
+
+        SKColor text = ColorOf(TextColorHex, SKColors.White);
+        SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
+
+        float cellW = rect.Width / 7f;
+        float cellH = rect.Height / 5f;
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 9f * scale);
+
+        for (int i = 0; i < 35; i++)
         {
-            var cdFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
-            var cdPaint = new SKPaint { Color = heroTint, IsAntialias = true };
-            canvas.DrawTextWithFallback(display.HeroCountdown, rect.Left + 12f * scale, rect.Bottom - 10f * scale - cdFont.Metrics.Top, cdFont, cdPaint);
+            int col = i % 7;
+            int row = i / 7;
+            float cx = rect.Left + col * cellW + cellW / 2f;
+            float cy = rect.Top + row * cellH + cellH / 2f;
+
+            MonthCell cell = display.MonthGrid[i];
+            if (cell.Day == 0)
+                continue;
+
+            // Background: viewed day gets an accent circle, today gets a ring.
+            if (cell.IsViewed)
+            {
+                var bgPaint = new SKPaint { Color = accent.WithAlpha(60), IsAntialias = true };
+                canvas.DrawCircle(cx, cy, cellW * 0.42f, bgPaint);
+            }
+            else if (cell.IsToday)
+            {
+                var ringPaint = new SKPaint { Color = accent, StrokeWidth = 1.5f * scale, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawCircle(cx, cy, cellW * 0.38f, ringPaint);
+            }
+
+            // Day number.
+            SKColor numColor = cell.IsViewed ? SKColors.White : cell.IsToday ? accent : text.WithAlpha(180);
+            var numPaint = new SKPaint { Color = numColor, IsAntialias = true };
+            string dayStr = cell.Day.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            float dayW = FontHelper.MeasureTextWithFallback(dayStr, font);
+            canvas.DrawTextWithFallback(dayStr, cx - dayW / 2f, cy - font.Metrics.Top * 0.5f, font, numPaint);
+
+            // Event dot below the day number.
+            if (cell.HasEvents)
+            {
+                var dotPaint = new SKPaint { Color = cell.IsViewed ? SKColors.White : new SKColor(245, 158, 11), IsAntialias = true };
+                canvas.DrawCircle(cx, cy + cellH * 0.3f, 1.5f * scale, dotPaint);
+            }
         }
     }
 
+    /// <summary>Draws the timed event rows: each row has a fixed time gutter on
+    /// the left and the title area to its right. The live event gets a left
+    /// accent bar; approaching events get an amber time.</summary>
     private void DrawRows(SKCanvas canvas, CalendarDisplay display, float scale)
     {
         SKColor text = ColorOf(TextColorHex, SKColors.White);
+        float gutterW = _layout.TimeGutterWidth;
+
         for (int i = 0; i < display.Rows.Count && i < _layout.RowRects.Count; i++)
         {
             SKRect rect = _layout.RowRects[i];
@@ -359,35 +537,168 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
                 continue;
 
             CalendarRow row = display.Rows[i];
-            SKColor rowColor = row.IsUrgent ? new SKColor(245, 158, 11) : text;
 
-            var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
-            var timePaint = new SKPaint { Color = rowColor, IsAntialias = true };
-            canvas.DrawTextWithFallback(row.TimeText, rect.Left + 10f * scale, rect.MidY - timeFont.Metrics.Top * 0.5f, timeFont, timePaint);
+            // Live event: a left accent bar (4px wide, full row height).
+            if (row.IsLive)
+            {
+                var barPaint = new SKPaint { Color = new SKColor(239, 68, 68), IsAntialias = true };
+                canvas.DrawRoundRect(new SKRect(rect.Left, rect.Top, rect.Left + 4f * scale, rect.Bottom), 2f * scale, 2f * scale, barPaint);
+            }
 
-            var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 18f * scale);
-            var titlePaint = new SKPaint { Color = text.WithAlpha(220), IsAntialias = true };
-            float timeW = FontHelper.MeasureTextWithFallback(row.TimeText, timeFont) + 14f * scale;
-            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(row.Title, titleFont, rect.Width - timeW - 10f * scale),
-                rect.Left + timeW, rect.MidY - titleFont.Metrics.Top * 0.5f, titleFont, titlePaint);
+            // Time column (fixed gutter width): "HH:mm" centered vertically.
+            SKColor timeColor = row.IsLive ? new SKColor(239, 68, 68) : row.IsUrgent ? new SKColor(245, 158, 11) : text;
+            var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
+            var timePaint = new SKPaint { Color = timeColor, IsAntialias = true };
+            float timeX = rect.Left + 10f * scale;
+            float timeY = rect.MidY - timeFont.Metrics.Top * 0.5f;
+            canvas.DrawTextWithFallback(row.TimeText, timeX, timeY, timeFont, timePaint);
+
+            // Title column: starts after the time gutter.
+            float titleX = rect.Left + gutterW;
+            float titleMaxW = rect.Width - gutterW - 10f * scale;
+            var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 16f * scale);
+            var titlePaint = new SKPaint { Color = text.WithAlpha(230), IsAntialias = true };
+            float titleY = rect.MidY - titleFont.Metrics.Top * 0.5f;
+
+            // Feed label: a small prefix tag before the title (when present).
+            if (!string.IsNullOrEmpty(row.FeedLabel))
+            {
+                var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f * scale);
+                var feedPaint = new SKPaint { Color = new SKColor(120, 160, 255), IsAntialias = true };
+                string feedTag = $"[{row.FeedLabel}] ";
+                float feedW = FontHelper.MeasureTextWithFallback(feedTag, feedFont);
+                canvas.DrawTextWithFallback(feedTag, titleX, titleY, feedFont, feedPaint);
+                titleX += feedW;
+                titleMaxW -= feedW;
+            }
+
+            canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(row.Title, titleFont, Math.Max(20f, titleMaxW)),
+                titleX, titleY, titleFont, titlePaint);
+
+            // Subtle row divider (except after the last row).
+            if (i < display.Rows.Count - 1)
+            {
+                var divPaint = new SKPaint { Color = text.WithAlpha(25), StrokeWidth = 1f * scale, IsAntialias = true };
+                canvas.DrawLine(rect.Left + 4f * scale, rect.Bottom + 4f * scale, rect.Right, rect.Bottom + 4f * scale, divPaint);
+            }
         }
     }
 
-    private void DrawAllDayPill(SKCanvas canvas, CalendarDisplay display, float scale)
+    // --- detail view ---------------------------------------------------------
+
+    /// <summary>Draws the single-event detail view: a centered card showing all
+    /// available information for one event (time, title, feed label, location,
+    /// duration, meeting link). Tap anywhere to exit back to the agenda.</summary>
+    private void DrawDetailView(SKCanvas canvas, SKRect bounds, float scale)
     {
-        SKRect rect = _layout.AllDayPillRect;
-        if (rect.IsEmpty)
-            return;
+        CalendarEvent ev = _detailEvent!.Value;
 
+        // Background.
+        var bgPaint = new SKPaint { Color = new SKColor(18, 18, 24), IsAntialias = true };
+        canvas.DrawRoundRect(bounds, 16f * scale, 16f * scale, bgPaint);
+
+        SKColor text = ColorOf(TextColorHex, SKColors.White);
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
-        var bg = new SKPaint { Color = accent.WithAlpha(30), IsAntialias = true };
-        canvas.DrawRoundRect(rect, rect.Height / 2f, rect.Height / 2f, bg);
+        float pad = 20f * scale;
 
-        string label = $"All day: {display.AllDayPill.Label}" + (display.AllDayPill.Count > 1 ? $" (+{display.AllDayPill.Count - 1})" : "");
-        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 16f * scale);
-        var paint = new SKPaint { Color = ColorOf(TextColorHex, SKColors.White).WithAlpha(200), IsAntialias = true };
-        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, font, rect.Width - 20f * scale),
-            rect.Left + 10f * scale, rect.MidY - font.Metrics.Top * 0.5f, font, paint);
+        // "Tap to go back" hint at the top.
+        var backFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f * scale);
+        var backPaint = new SKPaint { Color = text.WithAlpha(120), IsAntialias = true };
+        canvas.DrawTextWithFallback("Tap to go back", bounds.Left + pad, bounds.Top + pad - backFont.Metrics.Top, backFont, backPaint);
+
+        // Centered card.
+        float cardLeft = bounds.Left + pad;
+        float cardRight = bounds.Right - pad;
+        float cardTop = bounds.Top + pad + 30f * scale;
+        float cardBottom = bounds.Bottom - pad;
+        var cardBg = new SKPaint { Color = accent.WithAlpha(20), IsAntialias = true };
+        canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardRight, cardBottom), 12f * scale, 12f * scale, cardBg);
+
+        // Left accent bar.
+        bool isLive = ev.Start <= Clock.GetLocalNow().LocalDateTime && Clock.GetLocalNow().LocalDateTime < ev.End;
+        var barPaint = new SKPaint { Color = isLive ? new SKColor(239, 68, 68) : accent, IsAntialias = true };
+        canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardLeft + 5f * scale, cardBottom), 2.5f * scale, 2.5f * scale, barPaint);
+
+        float x = cardLeft + 16f * scale;
+        float y = cardTop + 16f * scale;
+        float maxW = cardRight - x - 12f * scale;
+
+        // Time range.
+        string timeStr = ev.IsAllDay ? "All day" : $"{ev.Start:HH:mm} – {ev.End:HH:mm}";
+        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
+        var timePaint = new SKPaint { Color = isLive ? new SKColor(239, 68, 68) : accent, IsAntialias = true };
+        canvas.DrawTextWithFallback(timeStr, x, y, timeFont, timePaint);
+        y += 30f * scale;
+
+        // Title (word-wrapped).
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 20f * scale);
+        var titlePaint = new SKPaint { Color = text, IsAntialias = true };
+        string title = string.IsNullOrWhiteSpace(ev.Title) ? "Untitled" : ev.Title;
+        IReadOnlyList<string> titleLines = _wrapCache.GetOrWrap(title, titleFont, 20f * scale, maxW);
+        foreach (string line in titleLines)
+        {
+            canvas.DrawTextWithFallback(line, x, y, titleFont, titlePaint);
+            y += 26f * scale;
+        }
+        y += 6f * scale;
+
+        // Feed label.
+        if (!string.IsNullOrWhiteSpace(ev.FeedLabel))
+        {
+            var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
+            var feedPaint = new SKPaint { Color = new SKColor(120, 160, 255), IsAntialias = true };
+            canvas.DrawTextWithFallback($"[{ev.FeedLabel}]", x, y, feedFont, feedPaint);
+            y += 24f * scale;
+        }
+
+        // Location (word-wrapped).
+        if (!string.IsNullOrWhiteSpace(ev.Location))
+        {
+            var locFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 15f * scale);
+            var locPaint = new SKPaint { Color = text.WithAlpha(200), IsAntialias = true };
+            IReadOnlyList<string> locLines = _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW);
+            foreach (string line in locLines)
+            {
+                canvas.DrawTextWithFallback(line, x, y, locFont, locPaint);
+                y += 20f * scale;
+            }
+            y += 6f * scale;
+        }
+
+        // Description (word-wrapped, the main body text).
+        if (!string.IsNullOrWhiteSpace(ev.Description))
+        {
+            var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+            var descPaint = new SKPaint { Color = text.WithAlpha(180), IsAntialias = true };
+            IReadOnlyList<string> descLines = _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW);
+            foreach (string line in descLines)
+            {
+                canvas.DrawTextWithFallback(line, x, y, descFont, descPaint);
+                y += 18f * scale;
+            }
+            y += 6f * scale;
+        }
+
+        // Duration.
+        if (!ev.IsAllDay)
+        {
+            TimeSpan dur = ev.End - ev.Start;
+            string durStr = dur.TotalHours >= 1
+                ? $"{(int)dur.TotalHours}h {dur.Minutes:D2}m"
+                : $"{dur.Minutes}m";
+            var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+            var durPaint = new SKPaint { Color = text.WithAlpha(160), IsAntialias = true };
+            canvas.DrawTextWithFallback($"Duration: {durStr}", x, y, durFont, durPaint);
+            y += 24f * scale;
+        }
+
+        // Meeting link.
+        if (!string.IsNullOrWhiteSpace(ev.Url))
+        {
+            var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+            var urlPaint = new SKPaint { Color = new SKColor(120, 160, 255), IsAntialias = true };
+            canvas.DrawTextWithFallback("🔗 Tap link to open", x, y, urlFont, urlPaint);
+        }
     }
 
     // --- JSON read helpers ---------------------------------------------------

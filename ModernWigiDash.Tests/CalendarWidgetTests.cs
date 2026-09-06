@@ -116,7 +116,7 @@ public class CalendarWidgetTapToOpenTests
     {
         CalendarEventStore.Reset();
         List<CalendarEvent> evs = [];
-        // First event is active (the hero); the rest are upcoming rows.
+        // First event is active (live); the rest are upcoming rows.
         for (int i = 0; i < events.Length; i++)
         {
             if (i == 0)
@@ -137,12 +137,8 @@ public class CalendarWidgetTapToOpenTests
         using var surface = SKSurface.Create(new SKImageInfo(320, 240));
         w.Render(surface!.Canvas, bounds);
         float scale = Math.Min(bounds.Width / CalendarLayout.DesignWidth, bounds.Height / CalendarLayout.DesignHeight);
-        bool hasHero = evs.Count > 0;
-        // Mirror CalendarPresentation.Build's row count: the hero (row 0) plus up
-        // to `slots` upcoming events after it.
-        int slots = Math.Max(1, Math.Min(CalendarFeedPolicy.ResolveTimedRows(w.TimedRows), CalendarFeedPolicy.MaxTimedRows));
-        int rowCount = hasHero ? 1 + Math.Min(slots, evs.Count - 1) : Math.Min(slots, evs.Count);
-        var geo = CalendarLayout.Compute(bounds, scale, rowCount, hasHero, false);
+        int rowCount = Math.Min(CalendarFeedPolicy.ResolveTimedRows(w.TimedRows), evs.Count);
+        var geo = CalendarLayout.Compute(bounds, scale, rowCount, false);
         return (w, geo);
     }
 
@@ -150,21 +146,23 @@ public class CalendarWidgetTapToOpenTests
     public void Cleanup() => CalendarEventStore.Reset();
 
     [TestMethod]
-    public void OnTouch_Hero_OpensTheActiveEventUrl()
+    public void OnTouch_FirstRow_EntersDetailMode()
     {
         var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"), ("Lunch", "https://meet.example/lunch"));
         List<string> opened = [];
         w.OpenUrlSeam = opened.Add;
 
-        // Aim at the hero band's center.
-        var p = new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY);
+        // Aim at row 0's center: down then up (a tap).
+        var p = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
         w.OnTouch(p, TouchEventType.TouchUp);
 
-        CollectionAssert.AreEqual(new List<string> { "https://meet.example/standup" }, opened);
+        // No URL is opened on the first tap; detail mode is entered instead.
+        Assert.AreEqual(0, opened.Count, "tapping a row enters detail mode, not open a link");
     }
 
     [TestMethod]
-    public void OnTouch_TimedRow_OpensThatRowsUrl()
+    public void OnTouch_SecondRow_EntersDetailMode()
     {
         var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"), ("Lunch", "https://meet.example/lunch"));
         List<string> opened = [];
@@ -172,9 +170,10 @@ public class CalendarWidgetTapToOpenTests
 
         // Aim at the second row (index 1) center.
         var p = new SKPoint(geo.RowRects[1].MidX, geo.RowRects[1].MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
         w.OnTouch(p, TouchEventType.TouchUp);
 
-        CollectionAssert.AreEqual(new List<string> { "https://meet.example/lunch" }, opened);
+        Assert.AreEqual(0, opened.Count, "tapping a row enters detail mode, not open a link");
     }
 
     [TestMethod]
@@ -185,6 +184,7 @@ public class CalendarWidgetTapToOpenTests
         w.OpenUrlSeam = opened.Add;
 
         var p = new SKPoint(geo.RowRects[1].MidX, geo.RowRects[1].MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
         w.OnTouch(p, TouchEventType.TouchUp);
 
         Assert.AreEqual(0, opened.Count, "a blank link never reaches the shell-open seam");
@@ -197,7 +197,7 @@ public class CalendarWidgetTapToOpenTests
         List<string> opened = [];
         w.OpenUrlSeam = opened.Add;
 
-        var p = new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY);
+        var p = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
         w.OnTouch(p, TouchEventType.TouchDown);
 
         Assert.AreEqual(0, opened.Count, "only a release opens a link");
@@ -210,11 +210,29 @@ public class CalendarWidgetTapToOpenTests
         List<string> opened = [];
         w.OpenUrlSeam = opened.Add;
 
-        // The hero carries the file: link; a release on it must be refused before
+        // Row 0 carries the file: link; a release on it must be refused before
         // the seam runs (the widget has no context bound here, so the refusal log
         // is a null-tolerant no-op).
-        w.OnTouch(new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY), TouchEventType.TouchUp);
+        var p = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
+        w.OnTouch(p, TouchEventType.TouchUp);
 
         Assert.AreEqual(0, opened.Count, "a file: scheme is refused before the seam runs");
+    }
+
+    [TestMethod]
+    public void OnTouch_VerticalSwipe_ChangesViewedDay()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        // A downward swipe (dy > 0) advances to the next day.
+        var down = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+        var up = new SKPoint(down.X, down.Y + 60f);
+        w.OnTouch(down, TouchEventType.TouchDown);
+        w.OnTouch(up, TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, opened.Count, "a swipe does not open a link");
     }
 }

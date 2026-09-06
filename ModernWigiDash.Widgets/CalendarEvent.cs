@@ -30,6 +30,10 @@ internal readonly record struct CalendarEvent
     /// <summary>The location (LOCATION); empty when absent.</summary>
     public string Location { get; init; }
 
+    /// <summary>The description/body text (DESCRIPTION); empty when absent.
+    /// May contain HTML or plain text depending on the feed.</summary>
+    public string Description { get; init; }
+
     /// <summary>The meeting link (URL property / description link); empty when
     /// there is none. Carried for the glyph and the optional shell-open, never
     /// parsed further here.</summary>

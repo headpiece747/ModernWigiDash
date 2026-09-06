@@ -240,3 +240,7 @@
 2026-09-06T17:17:41Z	4c45d91	manual	ok	0	0	ok	2146	0	ok
 2026-09-06T17:24:25Z	b27bbee	manual	ok	0	0	ok	2146	0	ok
 2026-09-06T17:26:34Z	6184b07	manual	ok	0	0	ok	2146	0	ok
+2026-09-06T23:06:29Z	6df3f26	manual	ok	18	0	ok	2154	0	FAIL
+2026-09-06T23:08:03Z	6df3f26	manual	ok	15	0	ok	2154	0	FAIL
+2026-09-06T23:14:07Z	6df3f26	manual	ok	11	0	ok	2154	0	FAIL
+2026-09-06T23:15:17Z	6df3f26	manual	ok	11	0	ok	2154	0	ok

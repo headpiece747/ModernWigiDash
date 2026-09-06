@@ -2,27 +2,26 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// The calendar widget's hit geometry, computed once per frame from the
-/// placement bounds, the uniform scale, and the display-facts row count -- the
-/// same inputs the render path uses, so the drawn rows and the touch targets
-/// can never drift apart. Render draws from this record and OnTouch hit-tests
-/// the same record. The design-space constants (hero height, row height, gaps)
-/// live only in <see cref="CalendarLayout.Compute"/>, never re-derived at a
-/// draw site.
+/// placement bounds and the display-facts counts -- the same inputs the render
+/// path uses, so the drawn rows and the touch targets can never drift apart.
+/// Render draws from this record and OnTouch hit-tests the same record.
 /// </summary>
 public readonly record struct CalendarGeometry(
-    SKRect HeroRect,
+    SKRect HeaderRect,
+    SKRect MonthGridRect,
+    SKRect AllDayRect,
     IReadOnlyList<SKRect> RowRects,
-    SKRect AllDayPillRect,
-    float Pad,
-    float RowHeight);
+    float TimeGutterWidth,
+    float Pad);
 
 /// <summary>
-/// Pure layout rules for the calendar widget: the design-space scale base and
-/// the vertical stack (hero band, then up to three timed rows, then the all-day
-/// pill). The stack top-aligns inside the bounds with equal side padding; each
-/// element's height is a fixed design constant scaled by the frame's uniform
-/// scale. A missing element (no hero, fewer rows than slots, no all-day items)
-/// yields an empty rect that hit-testing treats as a miss.
+/// Pure layout rules for the calendar widget, modeled after a "Today" agenda
+/// view with a mini month grid: a top band holding the date header (left) and
+/// the 5×7 month grid (right), an optional all-day strip below it, then a
+/// stack of timed-event rows. Each row has a fixed-width time gutter on the
+/// left and the title area to its right. The active/now event is marked with a
+/// left accent bar (drawn by the render path), not a separate hero band, so
+/// rows stay evenly spaced and never overlap.
 /// </summary>
 public static class CalendarLayout
 {
@@ -32,20 +31,27 @@ public static class CalendarLayout
     /// <summary>The design-space height the scale is derived from.</summary>
     public const float DesignHeight = 240f;
 
-    /// <summary>The hero band's design height.</summary>
-    private const float HeroHeight = 76f;
+    /// <summary>The top band's design height (header + month grid).</summary>
+    private const float TopBandHeight = 80f;
 
     /// <summary>A timed row's design height.</summary>
-    private const float TimedRowHeight = 44f;
+    private const float RowHeight = 44f;
 
     /// <summary>The gap between stacked elements, in design units.</summary>
-    private const float StackGap = 12f;
+    private const float StackGap = 10f;
 
-    /// <summary>The all-day pill's design height.</summary>
-    private const float PillHeight = 34f;
+    /// <summary>The all-day strip's design height.</summary>
+    private const float AllDayHeight = 30f;
 
     /// <summary>The side/top padding, in design units.</summary>
-    private const float PadDesign = 18f;
+    private const float PadDesign = 14f;
+
+    /// <summary>The time gutter's design width (the fixed left column for HH:mm).</summary>
+    private const float TimeGutterDesign = 64f;
+
+    /// <summary>The fraction of the top band width allocated to the date header
+    /// (the rest goes to the month grid).</summary>
+    private const float HeaderFraction = 0.42f;
 
     /// <summary>
     /// Computes the calendar's hit geometry for one frame.
@@ -53,26 +59,40 @@ public static class CalendarLayout
     /// <param name="bounds">The widget's placement bounds.</param>
     /// <param name="scale">The frame's uniform scale factor.</param>
     /// <param name="rowCount">How many timed rows the display carries (0-3).</param>
-    /// <param name="hasHero">Whether a hero band is present.</param>
-    /// <param name="hasAllDay">Whether the all-day pill is present.</param>
-    public static CalendarGeometry Compute(SKRect bounds, float scale, int rowCount, bool hasHero, bool hasAllDay)
+    /// <param name="hasAllDay">Whether the all-day strip is present.</param>
+    public static CalendarGeometry Compute(SKRect bounds, float scale, int rowCount, bool hasAllDay)
     {
         float pad = PadDesign * scale;
-        float heroH = HeroHeight * scale;
-        float rowH = TimedRowHeight * scale;
+        float topH = TopBandHeight * scale;
+        float rowH = RowHeight * scale;
         float gap = StackGap * scale;
-        float pillH = PillHeight * scale;
+        float allDayH = AllDayHeight * scale;
+        float gutterW = TimeGutterDesign * scale;
 
         float left = bounds.Left + pad;
         float right = bounds.Right - pad;
+        float top = bounds.Top + pad;
 
-        var heroRect = hasHero
-            ? new SKRect(left, bounds.Top + pad, right, bounds.Top + pad + heroH)
+        // The top band spans the full content width.
+        var topBandRect = new SKRect(left, top, right, top + topH);
+
+        // The date header occupies the left portion of the top band.
+        float headerW = (right - left) * HeaderFraction;
+        var headerRect = new SKRect(left, top, left + headerW, top + topH);
+
+        // The month grid occupies the right portion of the top band.
+        float gridLeft = left + headerW + 6f * scale;
+        var monthGridRect = new SKRect(gridLeft, top, right, top + topH);
+
+        // The all-day strip sits one gap below the top band (when present).
+        float y = topBandRect.Bottom + gap;
+        var allDayRect = hasAllDay
+            ? new SKRect(left, y, right, y + allDayH)
             : SKRect.Empty;
+        if (hasAllDay)
+            y += allDayH + gap;
 
-        // The timed rows stack below the hero (or from the top when there is no
-        // hero), one gap between each.
-        float y = hasHero ? heroRect.Bottom + gap : bounds.Top + pad;
+        // The timed rows stack below, one gap between each.
         var rowRects = new List<SKRect>(Math.Max(0, rowCount));
         for (int i = 0; i < rowCount; i++)
         {
@@ -80,46 +100,30 @@ public static class CalendarLayout
             y += rowH + gap;
         }
 
-        // The all-day pill sits one gap below the last stacked element (`y`
-        // already points past the last element plus its trailing gap); when
-        // there is nothing above it, the pill starts at the top pad.
-        float pillTop = (hasHero || rowCount > 0) ? y : bounds.Top + pad;
-        var pillRect = hasAllDay
-            ? new SKRect(left, pillTop, right, pillTop + pillH)
-            : SKRect.Empty;
-
-        return new CalendarGeometry(heroRect, rowRects, pillRect, pad, rowH);
+        return new CalendarGeometry(headerRect, monthGridRect, allDayRect, rowRects, gutterW, pad);
     }
 
     /// <summary>
     /// Hit-tests a point against the geometry: returns the index of the timed
     /// row containing the point (-1 when none), or true via out when the point
-    /// is on the hero or the all-day pill. The precedence is hero &gt; row &gt;
-    /// pill (the hero band is the largest target and wins overlaps).
+    /// is on the all-day strip. The header and month grid are not tappable
+    /// (swipe gestures handle day navigation at the widget level).
     /// </summary>
     /// <param name="geo">The frame's geometry record.</param>
     /// <param name="x">The touch X in canvas coordinates.</param>
     /// <param name="y">The touch Y in canvas coordinates.</param>
-    /// <param name="onHero">Set true when the point is on the hero band.</param>
-    /// <param name="onPill">Set true when the point is on the all-day pill.</param>
+    /// <param name="onAllDay">Set true when the point is on the all-day strip.</param>
     /// <returns>The zero-based index of the contained timed row, or -1.</returns>
-    public static int GetAction(CalendarGeometry geo, float x, float y, out bool onHero, out bool onPill)
+    public static int GetAction(CalendarGeometry geo, float x, float y, out bool onAllDay)
     {
-        onHero = false;
-        onPill = false;
-        if (!geo.HeroRect.IsEmpty && geo.HeroRect.Contains(x, y))
-        {
-            onHero = true;
-            return -1;
-        }
-
+        onAllDay = false;
         for (int i = 0; i < geo.RowRects.Count; i++)
         {
             if (!geo.RowRects[i].IsEmpty && geo.RowRects[i].Contains(x, y))
                 return i;
         }
 
-        onPill = !geo.AllDayPillRect.IsEmpty && geo.AllDayPillRect.Contains(x, y);
+        onAllDay = !geo.AllDayRect.IsEmpty && geo.AllDayRect.Contains(x, y);
         return -1;
     }
 }
