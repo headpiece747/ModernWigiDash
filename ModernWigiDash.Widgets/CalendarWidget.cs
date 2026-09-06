@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 
@@ -51,6 +52,13 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     private readonly Lock _producerGate = new();
     private CalendarFeedProducer? _producer;
     private CalendarGeometry _layout;
+    private CalendarDisplay? _display;
+
+    /// <summary>The shell-open seam: opens a meeting link in the default
+    /// browser. Production binds <see cref="OpenMeetingLink"/> (the http/https/
+    /// mailto gate + Process.Start); tests bind a recorder so a tap is assertable
+    /// without spawning a browser.</summary>
+    internal Action<string>? OpenUrlSeam;
 
     /// <summary>The clock seam (test-injectable; production is the system
     /// clock). Used for both the render's "now" read and the producer's poll
@@ -205,6 +213,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         DateTime now = Clock.GetLocalNow().LocalDateTime;
         int rows = CalendarFeedPolicy.ResolveTimedRows(TimedRows);
         CalendarDisplay display = CalendarPresentation.Build(snapshot, now, rows);
+        _display = display;
 
         bool hasHero = display.HasData && !string.IsNullOrEmpty(display.HeroTitle);
         bool hasAllDay = ShowAllDayPill && display.AllDayPill.Count > 0;
@@ -225,17 +234,65 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     }
 
     /// <summary>
-    /// Hit-tests a touch against the frame's layout. v1 carries no per-event
-    /// action, so every zone is a no-op tap; the hit-test is wired now so a
-    /// future per-row action (open URL, snooze) slots in without touching the
-    /// render path.
+    /// A tap opens the tapped event's meeting link (the hero band is row 0, a
+    /// timed row is its own index). The all-day pill carries no per-event link,
+    /// so it is a no-op. The URL routes through the http/https/mailto gate and
+    /// the shell-open seam; an absent or disallowed link is a logged no-op,
+    /// never a throw.
     /// </summary>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp)
             return;
-        CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, out _, out _);
+
+        CalendarDisplay? display = _display;
+        if (display is null || !display.HasData)
+            return;
+
+        int rowIndex = CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, out bool onHero, out _);
+        if (!onHero && rowIndex < 0)
+            return;
+
+        // The hero band is the first row in the display's row list; a timed-row
+        // hit returns its own index.
+        int target = onHero ? 0 : rowIndex;
+        if (target >= display.Rows.Count)
+            return;
+
+        string url = display.Rows[target].Url;
+        OpenMeetingLink(url);
     }
+
+    /// <summary>Opens a meeting link through the shell-open seam, after the
+    /// http/https/mailto gate. A blank or disallowed link is a logged no-op; a
+    /// spawn failure is logged, never thrown.</summary>
+    private void OpenMeetingLink(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+
+        if (!HotkeyActionPolicy.IsAllowedUrl(url))
+        {
+            Context?.LogError($"Calendar: refusing to open a non-http(s)/mailto event link: {TruncateForLog(url)}");
+            return;
+        }
+
+        Action<string> open = OpenUrlSeam ?? OpenUrlProduction;
+        try
+        {
+            open(url);
+        }
+        catch (Exception ex)
+        {
+            Context?.LogError("Calendar: unable to open the event link", ex);
+        }
+    }
+
+    /// <summary>The production shell-open: hands the link to the OS default
+    /// handler. Thread-safe (Process.Start is thread-safe); the touch poll runs
+    /// off the dispatcher.</summary>
+    private static void OpenUrlProduction(string url)
+        => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
     /// <summary>
     /// The special inspector editor for this widget's properties: the calendar

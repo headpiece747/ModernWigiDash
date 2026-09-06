@@ -1,8 +1,10 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>One timed agenda row's display facts: the time string, the title,
-/// and the urgency tint (the accent the layout draws the row with).</summary>
-internal sealed record CalendarRow(string TimeText, string Title, bool IsUrgent);
+/// the urgency tint (the accent the layout draws the row with), and the
+/// meeting link (empty when the feed carried none) the tap-to-open action
+/// routes through.</summary>
+internal sealed record CalendarRow(string TimeText, string Title, bool IsUrgent, string Url);
 
 /// <summary>The all-day tray's display facts: the label and the count of all-day
 /// items in the window.</summary>
@@ -111,14 +113,14 @@ internal static class CalendarPresentation
             heroCountdown = heroIsLive
                 ? ElapsedText(now - hero.Start)
                 : RemainingText(hero.Start - now);
-            rows.Add(new CalendarRow(FormatTime(hero.Start), heroTitle, heroIsLive));
+            rows.Add(new CalendarRow(FormatTime(hero.Start), heroTitle, heroIsLive, hero.Url));
         }
 
         int slots = Math.Max(1, Math.Min(timedRows, CalendarFeedPolicy.MaxTimedRows));
         foreach (CalendarEvent e in timed.Where(x => !hasHero || !x.Equals(hero)).Take(slots))
         {
             bool urgent = (e.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
-            rows.Add(new CalendarRow(FormatTime(e.Start), Truncate(e.Title, 28), urgent));
+            rows.Add(new CalendarRow(FormatTime(e.Start), Truncate(e.Title, 28), urgent, e.Url));
         }
 
         CalendarAllDayPill pill = allDay.Count > 0

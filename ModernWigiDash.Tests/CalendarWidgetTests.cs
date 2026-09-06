@@ -94,3 +94,127 @@ public class CalendarWidgetTests
         Assert.IsTrue(feeds[1] is CalDavFeed { Port: 443, Enabled: true });
     }
 }
+
+[TestClass]
+public class CalendarWidgetTapToOpenTests
+{
+    private static readonly DateTime Now = new(2026, 9, 6, 14, 30, 0, DateTimeKind.Unspecified);
+
+    private static CalendarEvent Ev(string title, int sh, int sm, int eh, int em, string url)
+        => new()
+        {
+            Title = title,
+            Start = new DateTime(2026, 9, 6, sh, sm, 0, DateTimeKind.Unspecified),
+            End = new DateTime(2026, 9, 6, eh, em, 0, DateTimeKind.Unspecified),
+            Url = url,
+        };
+
+    /// <summary>Seeds the store, renders one frame (populating the widget's
+    /// per-frame display + layout), and returns the widget plus the geometry so
+    /// a test can aim a touch at a known zone.</summary>
+    private static (CalendarWidget Widget, CalendarGeometry Geo) RenderWithEvents(params (string Title, string Url)[] events)
+    {
+        CalendarEventStore.Reset();
+        List<CalendarEvent> evs = [];
+        // First event is active (the hero); the rest are upcoming rows.
+        for (int i = 0; i < events.Length; i++)
+        {
+            if (i == 0)
+                evs.Add(Ev(events[i].Title, 14, 0, 15, 0, events[i].Url));
+            else
+                evs.Add(Ev(events[i].Title, 15, 0 + i * 15, 16, 0, events[i].Url));
+        }
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events = evs,
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget();
+        var bounds = new SKRect(0, 0, 320, 240);
+        using var surface = SKSurface.Create(new SKImageInfo(320, 240));
+        w.Render(surface!.Canvas, bounds);
+        float scale = Math.Min(bounds.Width / CalendarLayout.DesignWidth, bounds.Height / CalendarLayout.DesignHeight);
+        bool hasHero = evs.Count > 0;
+        // Mirror CalendarPresentation.Build's row count: the hero (row 0) plus up
+        // to `slots` upcoming events after it.
+        int slots = Math.Max(1, Math.Min(CalendarFeedPolicy.ResolveTimedRows(w.TimedRows), CalendarFeedPolicy.MaxTimedRows));
+        int rowCount = hasHero ? 1 + Math.Min(slots, evs.Count - 1) : Math.Min(slots, evs.Count);
+        var geo = CalendarLayout.Compute(bounds, scale, rowCount, hasHero, false);
+        return (w, geo);
+    }
+
+    [TestCleanup]
+    public void Cleanup() => CalendarEventStore.Reset();
+
+    [TestMethod]
+    public void OnTouch_Hero_OpensTheActiveEventUrl()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"), ("Lunch", "https://meet.example/lunch"));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        // Aim at the hero band's center.
+        var p = new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY);
+        w.OnTouch(p, TouchEventType.TouchUp);
+
+        CollectionAssert.AreEqual(new List<string> { "https://meet.example/standup" }, opened);
+    }
+
+    [TestMethod]
+    public void OnTouch_TimedRow_OpensThatRowsUrl()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"), ("Lunch", "https://meet.example/lunch"));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        // Aim at the second row (index 1) center.
+        var p = new SKPoint(geo.RowRects[1].MidX, geo.RowRects[1].MidY);
+        w.OnTouch(p, TouchEventType.TouchUp);
+
+        CollectionAssert.AreEqual(new List<string> { "https://meet.example/lunch" }, opened);
+    }
+
+    [TestMethod]
+    public void OnTouch_RowWithoutUrl_IsANoOp()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", ""), ("Lunch", ""));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        var p = new SKPoint(geo.RowRects[1].MidX, geo.RowRects[1].MidY);
+        w.OnTouch(p, TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, opened.Count, "a blank link never reaches the shell-open seam");
+    }
+
+    [TestMethod]
+    public void OnTouch_DownEvent_IgnoresNonRelease()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", "https://meet.example/standup"));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        var p = new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
+
+        Assert.AreEqual(0, opened.Count, "only a release opens a link");
+    }
+
+    [TestMethod]
+    public void OpenMeetingLink_DisallowedScheme_IsRefusedNotThrown()
+    {
+        var (w, geo) = RenderWithEvents(("Standup", "file:///etc/passwd"));
+        List<string> opened = [];
+        w.OpenUrlSeam = opened.Add;
+
+        // The hero carries the file: link; a release on it must be refused before
+        // the seam runs (the widget has no context bound here, so the refusal log
+        // is a null-tolerant no-op).
+        w.OnTouch(new SKPoint(geo.HeroRect.MidX, geo.HeroRect.MidY), TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, opened.Count, "a file: scheme is refused before the seam runs");
+    }
+}
