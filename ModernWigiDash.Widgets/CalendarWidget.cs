@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 
 namespace ModernWigiDash.Widgets;
@@ -18,7 +19,7 @@ namespace ModernWigiDash.Widgets;
 /// profile).
 /// </summary>
 [WidgetMetadata("calendar", "Calendar", Category = "Productivity", DefaultGridSize = GridSizePreset.Size2x3)]
-public sealed class CalendarWidget : ModernWidgetBase
+public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
 {
     /// <summary>The feed list as a compact JSON array (each element a
     /// <see cref="CalendarFeed"/>-shaped object). Empty/null means no feeds --
@@ -235,6 +236,17 @@ public sealed class CalendarWidget : ModernWidgetBase
             return;
         CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, out _, out _);
     }
+
+    /// <summary>
+    /// The special inspector editor for this widget's properties: the calendar
+    /// feed list editor for <see cref="FeedsJson"/>, or null when the generic
+    /// editor suffices. The renderer discovers this through the interface
+    /// instead of branching on the widget type.
+    /// </summary>
+    public EditorKind? GetEditorKind(PropertyInfo property)
+        => string.Equals(property.Name, nameof(FeedsJson), StringComparison.Ordinal)
+            ? EditorKind.CalendarFeeds
+            : null;
 
     // --- draw helpers --------------------------------------------------------
 

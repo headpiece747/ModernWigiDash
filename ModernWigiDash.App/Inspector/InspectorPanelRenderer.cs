@@ -184,6 +184,9 @@ internal static class InspectorPanelRenderer
             case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.KeyCapture:
                 panel.Children.Add(BuildKeyCaptureEditor(desc, callbacks).Editor);
                 break;
+            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.CalendarFeeds:
+                panel.Children.Add(BuildCalendarFeedEditor(desc, callbacks));
+                break;
             default:
                 // Text or Number
                 panel.Children.Add(BuildTextEditor(desc, callbacks));
@@ -397,6 +400,144 @@ internal static class InspectorPanelRenderer
         var txt = new TextBox { Text = desc.CurrentValue?.ToString() ?? "" };
         txt.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, txt.Text);
         return txt;
+    }
+
+    /// <summary>
+    /// The calendar feed editor: one row per feed (kind toggle, label, the
+    /// kind's connection field(s), an enable checkbox, and a remove button) plus
+    /// an "Add feed" button. Every mutation updates the live draft list and
+    /// commits the whole list as a single <c>FeedsJson</c> string through the
+    /// write-back funnel -- the model owns the serialize rule (incomplete feeds
+    /// are dropped), so a half-entered row never persists a broken feed. The
+    /// rows are rebuilt from the persisted value on every inspector refresh, so
+    /// the editor is stateless across rebuilds.
+    /// </summary>
+    private static UIElement BuildCalendarFeedEditor(EditorDescription desc, InspectorCallbacks callbacks)
+    {
+        List<CalendarFeedDraft> drafts = CalendarFeedEditorModel.Parse(desc.CurrentValue?.ToString()).ToList();
+
+        void Commit() => callbacks.ApplyInspectorPropertyValue(desc.Property, CalendarFeedEditorModel.Serialize(drafts));
+
+        var addBtn = new Button
+        {
+            Content = "Add feed",
+            Padding = new Thickness(8, 4, 8, 4),
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+
+        var host = new StackPanel();
+
+        void RebuildRows()
+        {
+            // Drop every child (the rows AND the add button), then re-add the
+            // rows followed by the button. The button is re-created each pass so
+            // its handler always closes over the current draft list.
+            host.Children.Clear();
+            for (int i = 0; i < drafts.Count; i++)
+            {
+                int index = i;
+                host.Children.Add(BuildFeedRow(drafts[index], () =>
+                {
+                    drafts.RemoveAt(index);
+                    RebuildRows();
+                    Commit();
+                }, Commit));
+            }
+            host.Children.Add(addBtn);
+        }
+
+        addBtn.Click += (_, _) =>
+        {
+            drafts.Add(new CalendarFeedDraft());
+            RebuildRows();
+            Commit();
+        };
+
+        RebuildRows();
+        return host;
+    }
+
+    /// <summary>One feed row: the kind combo, the label box, the kind's
+    /// connection field(s), the enable checkbox, and the remove button. Field
+    /// edits update the bound draft and commit the whole list.</summary>
+    private static UIElement BuildFeedRow(CalendarFeedDraft draft, Action remove, Action commit)
+    {
+        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+
+        // Kind + remove on the first line.
+        var top = new DockPanel();
+        var removeBtn = new Button { Content = "Remove", Padding = new Thickness(8, 2, 8, 2) };
+        DockPanel.SetDock(removeBtn, Dock.Right);
+        removeBtn.Click += (_, _) => remove();
+        var kindCombo = new ComboBox
+        {
+            ItemsSource = new[] { "ics", "caldav" },
+            SelectedItem = draft.Kind,
+            Width = 110,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        kindCombo.SelectionChanged += (_, _) =>
+        {
+            if (kindCombo.SelectedItem is string kind)
+            {
+                draft.Kind = kind;
+                commit();
+            }
+        };
+        top.Children.Add(kindCombo);
+        top.Children.Add(removeBtn);
+        row.Children.Add(top);
+
+        // Label.
+        var labelBox = new TextBox { Margin = new Thickness(0, 4, 0, 0) };
+        labelBox.Text = draft.Label;
+        labelBox.TextChanged += (_, _) => { draft.Label = labelBox.Text; commit(); };
+        row.Children.Add(labelBox);
+
+        // Connection fields: swap between the .ics URL and the CalDAV triple as
+        // the kind changes. A single content host keeps the row stable.
+        var connHost = new ContentControl { Margin = new Thickness(0, 4, 0, 0) };
+        void RebuildConn()
+        {
+            if (string.Equals(draft.Kind, "caldav", StringComparison.Ordinal))
+            {
+                var grid = new StackPanel();
+                grid.Children.Add(BuildConnField("Server", draft.Server, v => { draft.Server = v; commit(); }));
+                grid.Children.Add(BuildConnField("Principal path", draft.PrincipalPath, v => { draft.PrincipalPath = v; commit(); }));
+                grid.Children.Add(BuildConnField("Username", draft.Username, v => { draft.Username = v; commit(); }));
+                connHost.Content = grid;
+            }
+            else
+            {
+                connHost.Content = BuildConnField(".ics URL", draft.Url, v => { draft.Url = v; commit(); });
+            }
+        }
+        RebuildConn();
+        kindCombo.SelectionChanged += (_, _) => RebuildConn();
+        row.Children.Add(connHost);
+
+        // Enable toggle.
+        var enable = new CheckBox { Content = "Enabled", IsChecked = draft.Enabled, Foreground = Brushes.White, Margin = new Thickness(0, 4, 0, 0) };
+        enable.Checked += (_, _) => { draft.Enabled = true; commit(); };
+        enable.Unchecked += (_, _) => { draft.Enabled = false; commit(); };
+        row.Children.Add(enable);
+
+        return row;
+    }
+
+    /// <summary>A labeled single-line field: a caption plus a text box that
+    /// pushes its text through <paramref name="onEdit"/> as it changes. The
+    /// handler is wired after the seed text is set, so the initial population
+    /// does not fire a spurious commit.</summary>
+    private static UIElement BuildConnField(string caption, string seed, Action<string> onEdit)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+        panel.Children.Add(new TextBlock { Text = caption, FontSize = 10, Foreground = Brushes.Gray, Margin = new Thickness(0, 0, 0, 2) });
+        var box = new TextBox();
+        box.Text = seed;
+        box.TextChanged += (_, _) => onEdit(box.Text);
+        panel.Children.Add(box);
+        return panel;
     }
 
     /// <summary>

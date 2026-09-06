@@ -14,7 +14,9 @@ public enum EditorKind
     /// <summary>The location-search editor (the weather widget's geocode pick list).</summary>
     LocationSearch,
     /// <summary>The key-capture editor (the hotkey widget's global-hotkey chord).</summary>
-    KeyCapture
+    KeyCapture,
+    /// <summary>The calendar-feed editor (the calendar widget's list of .ics / CalDAV feeds).</summary>
+    CalendarFeeds
 }
 
 /// <summary>
