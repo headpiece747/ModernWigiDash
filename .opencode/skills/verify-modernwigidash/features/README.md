@@ -45,5 +45,6 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Theme dialog](./theme.md) covers opening (from the settings hub's Appearance group), canceling, applying, and resetting the chrome theme, with the app_theme.json persistence proof.
 - [Pages](./pages.md) covers adding, switching, renaming, and deleting pages through the tab strip, with the tab-count and tab-name proofs.
 - [Place a widget](./place-widget.md) covers placing from the catalog, the Active Widgets count proof, the canvas preview snapshot, and deleting through the inspector.
+- [Calendar feed editor](./calendar.md) covers adding a feed row, editing its URL/label, and the on-disk FeedsJson persistence proof (the load-bearing second view), with the `Add feed` needle-collision and debounced-persist gotchas.
 - [Profile round trip](./profile-roundtrip.md) covers export and import of the profile file, with the on-disk JSON second-view proof.
 - [USB status badge](./usb-status.md) covers the badge's Simulated-mode state (UI side only; physical-display behavior routes to hardware-e2e-validation).
