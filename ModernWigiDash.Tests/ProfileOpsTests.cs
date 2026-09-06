@@ -807,6 +807,73 @@ public class ProfileOpsTests
     }
 
     [TestMethod]
+    public void ImportJson_ValidCalendarFeeds_ArePreserved()
+    {
+        string feeds = """[{"kind":"ics","feedId":"g","label":"Google","url":"https://calendar.google.com/calendar/ics/abc"},{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":443,"principalPath":"/calendars/me/","username":"me"}]""";
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["FeedsJson"] = feeds;
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
+
+        Assert.AreEqual(feeds, loaded!.Pages[1].Widgets[0].PropertyValues["FeedsJson"]!.ToString(),
+            "A valid http(s) feed list survives the import boundary");
+    }
+
+    [TestMethod]
+    public void ImportJson_FileSchemeCalendarFeed_IsCleared()
+    {
+        string feeds = """[{"kind":"ics","feedId":"x","label":"x","url":"file:///etc/passwd"}]""";
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["FeedsJson"] = feeds;
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
+
+        Assert.AreEqual("", loaded!.Pages[1].Widgets[0].PropertyValues["FeedsJson"]?.ToString() ?? "",
+            "A non-http(s) feed URL must be cleared on import");
+    }
+
+    [TestMethod]
+    public void ImportJson_NonArrayCalendarFeeds_IsCleared()
+    {
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["FeedsJson"] = """{"kind":"ics","url":"https://ok.example/ics"}""";
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
+
+        Assert.AreEqual("", loaded!.Pages[1].Widgets[0].PropertyValues["FeedsJson"]?.ToString() ?? "",
+            "A non-array feed value must be cleared on import");
+    }
+
+    [TestMethod]
+    public void ImportJson_CalDavTraversalPrincipal_IsCleared()
+    {
+        string feeds = """[{"kind":"caldav","feedId":"x","label":"x","server":"https://caldav.example.com","principalPath":"../../etc","username":"x"}]""";
+        var loader = CreateLoader();
+        var profile = new ProfileLayout();
+        ProfileOps.AddPage(profile, "Main");
+        var placed = ProfileOps.PlaceWidget(profile, loader, new TestContext(), "profile_test_widget", 0, 0);
+        placed!.PropertyValues["FeedsJson"] = feeds;
+        string json = ProfileOps.ExportJson(profile);
+
+        var loaded = ProfileOps.ImportJson(json, loader, new TestContext());
+
+        Assert.AreEqual("", loaded!.Pages[1].Widgets[0].PropertyValues["FeedsJson"]?.ToString() ?? "",
+            "A path-traversal CalDAV principal must be cleared on import");
+    }
+
+    [TestMethod]
     public void ImportJson_OversizedPage_IsCapped()
     {
         var loader = CreateLoader();

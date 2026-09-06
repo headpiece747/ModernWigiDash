@@ -241,8 +241,9 @@ public sealed class ArchitectureTests
     {
         // The only allowed HttpClient constructions in src are the named
         // static long-lived clients: the price feeds' shared process-wide
-        // client and the three singleton service clients (the updater, the
-        // weather fetcher, the Twitch API client). Ad-hoc construction
+        // client, the calendar widget's feed-fetch client, and the three
+        // singleton service clients (the updater, the weather fetcher, the
+        // Twitch API client). Ad-hoc construction
         // (per-request, per-method) is the socket-exhaustion trap this pin
         // catches; both the explicit form (new HttpClient()) and the
         // target-typed form (HttpClient f = new()) must match, so a new
@@ -253,6 +254,7 @@ public sealed class ArchitectureTests
             "ModernWigiDash.Widgets/PriceFeedManager.cs",
             "ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs",
             "ModernWigiDash.Widgets/WeatherClient.cs",
+            "ModernWigiDash.Widgets/CalendarWidget.cs",
         };
         var hits = RepoScan.ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
             .Concat(RepoScan.ScanSrc(new Regex(@"\bHttpClient\b[^;=\n]*=\s*new\s*\(")))

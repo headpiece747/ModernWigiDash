@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ModernWigiDash.Core.Models;
 
 /// <summary>
@@ -200,6 +202,22 @@ public static class ProfileImportSanitizer
             placed.PropertyValues["ChannelName"] = TwitchChannelRule.Sanitize(channel, "");
         }
 
+        // The calendar widget's feed list rides one Text property as a JSON
+        // array; each entry carries a URL (an .ics subscribe link) or a CalDAV
+        // server + principal path. A foreign profile could smuggle a hostile
+        // URL (file://, an internal host) or a path-traversal principal. The
+        // rule: the value must parse as a JSON array whose every entry names an
+        // absolute http(s) URL (or, for CalDAV, an absolute http(s) server and a
+        // safe relative principal); anything else clears to empty so the widget
+        // renders its unavailable display instead of fetching untrusted targets.
+        if (placed.PropertyValues.TryGetValue("FeedsJson", out var feedsRaw) &&
+            ProfileOps.ConvertPropertyValue(feedsRaw, typeof(string)) is string feedsJson &&
+            !string.IsNullOrWhiteSpace(feedsJson) &&
+            !IsValidCalendarFeedsJson(feedsJson))
+        {
+            placed.PropertyValues["FeedsJson"] = "";
+        }
+
         // InstanceId is placement identity, not user data — but a foreign
         // profile can dictate it, and widgets key cache FILE NAMES by it (the
         // weather widget: "weather_{InstanceId}.json" under the app dir). An
@@ -237,4 +255,65 @@ public static class ProfileImportSanitizer
         if (path.Split(['\\', '/'], StringSplitOptions.None).Any(segment => string.Equals(segment, "..", StringComparison.Ordinal))) return "";
         return path;
     }
+
+    /// <summary>
+    /// The calendar feed list's untrusted-import rule: the value must parse as a
+    /// JSON array whose every entry names an absolute http(s) URL for an .ics
+    /// feed, or (for a CalDAV feed) an absolute http(s) server with a safe
+    /// relative principal path. A malformed value, a non-array root, or any
+    /// entry with a non-http(s) / relative / traversal target fails the check so
+    /// the caller clears the property.
+    /// </summary>
+    private static bool IsValidCalendarFeedsJson(string feedsJson)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(feedsJson);
+            if (d.RootElement.ValueKind != JsonValueKind.Array)
+                return false;
+
+            foreach (JsonElement el in d.RootElement.EnumerateArray())
+            {
+                if (el.ValueKind != JsonValueKind.Object)
+                    return false;
+
+                string kind = GetString(el, "kind");
+                if (string.Equals(kind, "caldav", StringComparison.Ordinal))
+                {
+                    if (!IsAbsoluteHttpUrl(GetString(el, "server")))
+                        return false;
+                    // A CalDAV principal is an absolute path; only a traversal segment is disallowed.
+                    string principal = GetString(el, "principalPath");
+                    if (principal.Length > 0 && HasTraversalSegment(principal))
+                        return false;
+                }
+                else
+                {
+                    if (!IsAbsoluteHttpUrl(GetString(el, "url")))
+                        return false;
+                }
+            }
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string GetString(JsonElement obj, string name)
+        => obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() ?? "" : "";
+
+    private static bool IsAbsoluteHttpUrl(string value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+           && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
+               || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal));
+
+    /// <summary>True when a path carries a <c>..</c> segment (the traversal
+    /// shape that escapes its base directory). CalDAV principals are absolute
+    /// paths, so the rooted-path rejection in <see cref="SafeRelativePath"/> does
+    /// not apply; only the traversal segment is disallowed.</summary>
+    private static bool HasTraversalSegment(string path)
+        => path.Split(['\\', '/'], StringSplitOptions.None)
+               .Any(segment => string.Equals(segment, "..", StringComparison.Ordinal));
 }
