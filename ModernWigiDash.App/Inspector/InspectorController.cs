@@ -134,7 +134,8 @@ internal sealed class InspectorController
                             var dlg = new OpenFolderDialog { Title = title };
                             return dlg.ShowDialog() == true ? dlg.FolderName : null;
                         },
-                        CommitLocationPick = _commitLocationPick
+                        CommitLocationPick = _commitLocationPick,
+                        SaveCalendarCredential = (feedId, password) => _context.SaveCalendarCredential(feedId, password)
                     });
 
                 // Restore focus to the same property's editor so typing and

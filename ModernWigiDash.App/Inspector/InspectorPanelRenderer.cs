@@ -41,6 +41,11 @@ internal sealed class InspectorCallbacks
     /// <summary>Commits a location-search pick (the picked label) to the
     /// selected widget through its IWidgetLocationSearch contract.</summary>
     public Action<GeocodeCandidate>? CommitLocationPick { get; init; }
+
+    /// <summary>Saves a machine-local CalDAV password for a calendar feed (the
+    /// feed editor's credential field routes here; the host writes through its
+    /// DPAPI-backed store, never the profile).</summary>
+    public Action<string, string>? SaveCalendarCredential { get; init; }
 }
 
 /// <summary>
@@ -441,7 +446,7 @@ internal static class InspectorPanelRenderer
                     drafts.RemoveAt(index);
                     RebuildRows();
                     Commit();
-                }, Commit));
+                }, Commit, callbacks));
             }
             host.Children.Add(addBtn);
         }
@@ -458,9 +463,11 @@ internal static class InspectorPanelRenderer
     }
 
     /// <summary>One feed row: the kind combo, the label box, the kind's
-    /// connection field(s), the enable checkbox, and the remove button. Field
-    /// edits update the bound draft and commit the whole list.</summary>
-    private static UIElement BuildFeedRow(CalendarFeedDraft draft, Action remove, Action commit)
+    /// connection field(s), a masked password field (CalDAV only, machine-local),
+    /// the enable checkbox, and the remove button. Field edits update the bound
+    /// draft and commit the whole list; the password commits through the
+    /// credential seam, never into the persisted JSON.</summary>
+    private static UIElement BuildFeedRow(CalendarFeedDraft draft, Action remove, Action commit, InspectorCallbacks callbacks)
     {
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
 
@@ -505,6 +512,11 @@ internal static class InspectorPanelRenderer
                 grid.Children.Add(BuildConnField("Server", draft.Server, v => { draft.Server = v; commit(); }));
                 grid.Children.Add(BuildConnField("Principal path", draft.PrincipalPath, v => { draft.PrincipalPath = v; commit(); }));
                 grid.Children.Add(BuildConnField("Username", draft.Username, v => { draft.Username = v; commit(); }));
+                // The password is machine-local: it never rides the persisted JSON
+                // (the profile travels between machines), so it commits through
+                // the credential seam instead of the draft serialize. A blank
+                // feed id cannot be saved (the host refuses it).
+                grid.Children.Add(BuildPasswordField(draft.FeedId, callbacks));
                 connHost.Content = grid;
             }
             else
@@ -536,6 +548,25 @@ internal static class InspectorPanelRenderer
         var box = new TextBox();
         box.Text = seed;
         box.TextChanged += (_, _) => onEdit(box.Text);
+        panel.Children.Add(box);
+        return panel;
+    }
+
+    /// <summary>A masked CalDAV password field: a caption plus a
+    /// <see cref="PasswordBox"/> that commits its text through the credential
+    /// seam (machine-local, never the persisted JSON) as it changes. The box is
+    /// not seeded (the store holds the secret, not the editor), so typing saves
+    /// immediately and a rebuild shows an empty box with a "saved" hint.</summary>
+    private static UIElement BuildPasswordField(string feedId, InspectorCallbacks callbacks)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+        panel.Children.Add(new TextBlock { Text = "Password (stored on this machine)", FontSize = 10, Foreground = Brushes.Gray, Margin = new Thickness(0, 0, 0, 2) });
+        var box = new PasswordBox();
+        box.PasswordChanged += (_, _) =>
+        {
+            if (callbacks.SaveCalendarCredential is { } save && !string.IsNullOrEmpty(feedId))
+                save(feedId, box.Password);
+        };
         panel.Children.Add(box);
         return panel;
     }

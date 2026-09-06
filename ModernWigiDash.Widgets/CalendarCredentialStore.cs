@@ -30,7 +30,7 @@ internal sealed record CalendarCredential(string FeedId, string Password)
 /// one log line (the absent-service house pattern), never a throw: a missing
 /// password means the producer prompts again, not that the app crashes.
 /// </summary>
-internal sealed class CalendarCredentialStore
+public sealed class CalendarCredentialStore
 {
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("ModernWigiDash.CalendarCredential.v1");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -42,6 +42,8 @@ internal sealed class CalendarCredentialStore
 
     private readonly string _path;
 
+    /// <summary>Creates a store at the default machine-local path
+    /// (<c>%LOCALAPPDATA%\ModernWigiDash\calendar-credentials.bin</c>).</summary>
     public CalendarCredentialStore() : this(DefaultPath) { }
 
     /// <summary>Test seam: point the store at an isolated file path.</summary>

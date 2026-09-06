@@ -93,6 +93,11 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     private readonly DiagLog _startupLog = new("AUTOSTART", 1);
     private readonly DiagLog _hotkeyLog = new("HOTKEY", 1);
 
+    // The machine-local CalDAV credential store (the IModernWigiDashContext
+    // SaveCalendarCredential seam's write target): DPAPI-backed, one file, the
+    // secret never rides the profile.
+    private readonly ModernWigiDash.Widgets.CalendarCredentialStore CalendarCredentials = new();
+
     // Deep modules: the property inspector, the small host dialogs, the page
     // tabs strip, and the default profile builder own their logic; the window
     // keeps wiring (the startup artifact's HostModules step).

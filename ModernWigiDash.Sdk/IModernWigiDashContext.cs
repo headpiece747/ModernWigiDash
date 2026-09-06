@@ -83,6 +83,22 @@ public interface IModernWigiDashContext
     }
 
     /// <summary>
+    /// Stores (or replaces) the machine-local CalDAV password for a calendar
+    /// feed, keyed by the feed id. The secret lives in the host's DPAPI-backed
+    /// credential store, never in the profile (which travels between machines),
+    /// so a traveling profile re-resolves its password on another machine
+    /// instead of smuggling the secret across. The default is a no-op (the
+    /// <see cref="NavigatePage"/> precedent: test hosts and other embedders may
+    /// not track credentials); the App's context writes through its
+    /// <c>CalendarCredentialStore</c>. Safe from any thread.
+    /// </summary>
+    /// <param name="feedId">The stable feed slug the password is keyed by.</param>
+    /// <param name="password">The app-specific password to store.</param>
+    void SaveCalendarCredential(string feedId, string password)
+    {
+    }
+
+    /// <summary>
     /// The single commit owner for "set a property value on a placed widget":
     /// sets the instance property, raises
     /// <see cref="IModernWidget.OnPropertyChanged"/>, and persists into the

@@ -34,6 +34,8 @@ internal class TestContext : IModernWigiDashContext
     public List<int> NavigatePageCalls { get; } = [];
     /// <summary>The AHK script paths fired through the context seam (the hotkey widget's Run AHK Script routing pin).</summary>
     public List<string> AhkScriptCalls { get; } = [];
+    /// <summary>The (feedId, password) pairs saved through the context seam (the calendar feed editor's CalDAV credential routing pin).</summary>
+    public List<(string FeedId, string Password)> CalendarCredentialCalls { get; } = [];
 
     public void LogInfo(string message) => Infos.Add(LogLine.Sanitize(message));
     public void LogError(string message, Exception? ex = null)
@@ -48,6 +50,8 @@ internal class TestContext : IModernWigiDashContext
     public virtual void NavigatePage(int delta) => NavigatePageCalls.Add(delta);
 
     public virtual void LaunchAutoHotkeyScript(string scriptPath) => AhkScriptCalls.Add(scriptPath);
+
+    public virtual void SaveCalendarCredential(string feedId, string password) => CalendarCredentialCalls.Add((feedId, password));
 }
 
 /// <summary>

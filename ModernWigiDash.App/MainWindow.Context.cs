@@ -176,6 +176,33 @@ public partial class MainWindow
         _hotkeyLog.Write($"AHK launched: {scriptPath}");
     }
 
+    /// <summary>
+    /// Stores the machine-local CalDAV password for a feed through the host's
+    /// DPAPI-backed credential store (the IModernWigiDashContext seam the
+    /// inspector's feed editor routes through): the secret never rides the
+    /// profile, so a traveling profile re-resolves its password on another
+    /// machine instead of smuggling it across. Marshals to the dispatcher (the
+    /// context contract: safe from any thread); the store's atomic save is the
+    /// one write site. A blank feed id or password is a logged no-op (a
+    /// half-entered row must not overwrite a good credential with an empty one).
+    /// </summary>
+    public void SaveCalendarCredential(string feedId, string password)
+    {
+        if (string.IsNullOrWhiteSpace(feedId) || string.IsNullOrEmpty(password))
+        {
+            _hotkeyLog.Write("Calendar credential not saved: feed id or password is blank");
+            return;
+        }
+
+        void Save() => CalendarCredentials.SavePassword(feedId, password);
+        if (Dispatcher.CheckAccess())
+        {
+            Save();
+            return;
+        }
+        _ = Dispatcher.InvokeAsync(Save);
+    }
+
     #endregion
 }
 
