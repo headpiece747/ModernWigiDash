@@ -48,12 +48,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     // to hold, now scoped to teardown alone.
     private int _inFlightTransfers;
 
-    // 3-page initialization (Base screens 0x20..0x22 — ScreenBase0..2 in
-    // DisplayProtocolConstants; only Base0 is const'ed here). The app frames
-    // are always written to page 0; page navigation is compositor-side.
-    private const int NumPages = 3;
-    private const byte Base0 = DisplayProtocolConstants.ScreenBase0;
-
     /// <summary>
     /// The transport's connection truth — kept for test observability only.
     /// It is NOT on the <see cref="IDisplayTransport"/> seam: production
@@ -282,92 +276,31 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         _logger.LogInformation("Sending device initialization commands...");
         DiagLog initLog = new("USB-INIT", 1);
 
-        // PING (CMD_PING, Control IN) — the liveness probe, logged not gated.
-        byte[] pingBuf = new byte[4];
-        bool pingOk = ControlIn(DisplayProtocolConstants.CmdPing, 0, 0, pingBuf, out _);
-        initLog.Write($"PING: ok={pingOk}");
+        // The init sequence (PING → wake → brightness → pages → blank frame →
+        // GoToScreen) lives in its own module so the verdict is testable
+        // without the connect loop. The backend's transfer tracking
+        // (TrackTransferBegin/End) wraps each call here, so the teardown drain
+        // still waits out an in-flight init write.
+        var seq = new InitSequence(_backend!, initLog);
+        bool initOk = RunTracked(() => seq.Run());
 
-        // Explicit wake: a display left asleep by the previous session's standby
-        // (backlight off) is woken before the brightness/page/frame work — the
-        // vendor Manager's own wake ritual (WakeDevice = ClearScreenTimeout).
-        bool wakeOk = ControlOut(DisplayProtocolConstants.CmdWakeDevice, 0, null);
-        initLog.Write($"Wake: ok={wakeOk}");
-
-        // Set brightness to 100%
-        ControlOut(DisplayProtocolConstants.CmdSetBrightness, 0, [DisplayProtocolConstants.InitBrightnessLevel]);
-
-        // Initialize all 3 pages (3-page double-buffering)
-        // Each page gets: ClearPage → AddWidget(full-screen) → blank framebuffer
-        bool initOk = true;
-        for (int page = 0; page < NumPages; page++)
-        {
-            // ClearPage: CMD_SCREENCFG_CLEAR (0x90) wValue=page
-            bool clearOk = ControlOut(DisplayProtocolConstants.CmdClearPage, (ushort)page, null);
-
-            // AddWidget: CMD_SCREENCFG_WIDGET_ADD (0x91) wValue = (page << 8) | widgetId
-            // Registers a full-screen widget (1016x592) at (0,0)
-            byte[] widgetConfig = DisplayProtocolConstants.BuildWidgetConfig(
-                x: 0, y: 0,
-                width: DisplayProtocolConstants.FramebufferWidth,
-                height: DisplayProtocolConstants.FramebufferHeight);
-            bool widgetOk = ControlOut(DisplayProtocolConstants.CmdAddWidget, (ushort)((page << 8) | 0), widgetConfig);
-            initLog.Write($"Page {page}: ClearPage + AddWidget(0,0) sent ({widgetConfig.Length} bytes), ok={clearOk && widgetOk}");
-            initOk &= clearOk && widgetOk;
-        }
-
-        // Write blank framebuffer to page 0 only (first visible page). The
-        // verdict folds this in like the control writes: a blank frame that
-        // never arrives means the init sequence did not survive, and the
-        // connect result must say so.
-        initOk &= WriteBlankFramebuffer(page: 0, widgetId: 0);
-
-        // GoToScreen(Base0): CMD_SEND_UI_CMD (0x70) wValue=0x20
-        bool gotoOk = ControlOut(DisplayProtocolConstants.CmdGoToScreen, Base0, null);
-        initLog.Write($"GoToScreen(Base0) sent — all 3 pages initialized, ok={gotoOk}");
-
-        initOk &= gotoOk;
         _logger.LogInformation("Device initialization complete (3 pages), ok={InitOk}", initOk);
         return initOk;
     }
 
-    /// <returns>True when the blank frame fully arrived (the header control
-    /// write plus the full bulk write) — <see cref="SendInitCommands"/> folds
-    /// this into the init verdict like the control writes.</returns>
-    private bool WriteBlankFramebuffer(byte page, byte widgetId)
+    /// <summary>Runs the given action with transfer tracking (the teardown
+    /// drain waits it out). The init sequence routes through this so a hung
+    /// init write is visible to the close path.</summary>
+    private bool RunTracked(Func<bool> action)
     {
-        DiagLog hwInitLog = new("HW-INIT", 1);
-        if (_backend is not { IsOpen: true })
-        {
-            hwInitLog.Write("Blank framebuffer skipped: backend not open");
-            return false;
-        }
-
+        TrackTransferBegin();
         try
         {
-            byte[] blankFrame = new byte[DisplayProtocolConstants.FrameBufferSize];
-            hwInitLog.Write($"Writing blank framebuffer ({blankFrame.Length} bytes) to page={page} widget={widgetId}");
-
-            // Control transfer header: offset=0, length=FrameBufferSize (the
-            // single wire-format owner, shared with the 30 FPS send path).
-            byte[] header = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-            DisplayProtocolConstants.BuildFrameHeader(header, blankFrame.Length);
-
-            ushort wValue = (ushort)((page << 8) | widgetId);
-            bool headerOk = ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue, header);
-            hwInitLog.Write($"FrameHeader control write: ok={headerOk}");
-            if (!headerOk)
-            {
-                return false;
-            }
-
-            bool bulkOk = WriteBulkData(blankFrame);
-            hwInitLog.Write($"Blank framebuffer bulk write: ok={bulkOk}");
-            return bulkOk;
+            return action();
         }
-        catch (Exception ex)
+        finally
         {
-            hwInitLog.Write($"Blank framebuffer write exception: {ex.Message}");
-            return false;
+            TrackTransferEnd();
         }
     }
 
