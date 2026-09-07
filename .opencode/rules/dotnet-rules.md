@@ -56,6 +56,7 @@
 - Test behavior, not implementation details.
 - This project is desktop/USB, no WebApplicationFactory/Testcontainers. Hardware-bound tests use seam injection or null readers.
 - Test build must use temp output when the app is running: `dotnet test ModernWigiDash.slnx -c Release --nologo -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ -nodeReuse:false`.
+- **MSTest v3 assertion API** (learned 2026-09-07): the async exception assertions are `Assert.ThrowsAsync<T>(Func<Task>, string? message = null)` and `Assert.ThrowsExactlyAsync<T>(...)`. There is NO `Assert.ThrowsExceptionAsync` (that's xUnit). Sync form: `Assert.Throws<T>(Action, string?)` / `Assert.ThrowsExactly<T>(...)`. When in doubt, grep the existing tests for `ThrowsAsync` to see the house pattern.
 
 ## 5. Performance
 
