@@ -110,18 +110,18 @@ public class CalendarCredentialSeamTests
     }
 
     [TestMethod]
-    public void Context_Default_NoOpDoesNotThrow()
+    public void Context_CredentialFacet_NoOpDoesNotThrow()
     {
-        // The interface default is a no-op (the NavigatePage precedent): a host
-        // that does not override it must not throw when the editor saves. A
-        // sentinel written after the call proves execution continued past it.
-        IModernWigiDashContext ctx = new NoOpContext();
+        // The credential facet is optional (the NavigatePage precedent): a host
+        // that does not implement it degrades to a no-op when the editor saves.
+        // A sentinel written after the call proves execution continued past it.
+        IWidgetCredentialContext ctx = new NoOpContext();
         ctx.SaveCalendarCredential("x", "y"); // must be a benign no-op
         string reached = "past-the-call";
         Assert.AreEqual("past-the-call", reached);
     }
 
-    private sealed class NoOpContext : IModernWigiDashContext
+    private sealed class NoOpContext : IModernWigiDashContext, IWidgetCredentialContext
     {
         public void LogInfo(string message) { }
         public void LogError(string message, Exception? ex = null) { }
@@ -129,5 +129,6 @@ public class CalendarCredentialSeamTests
         public void RequestInspectorRefresh() { }
         public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) { }
         public void CloseDeviceAuthorization() { }
+        public void SaveCalendarCredential(string feedId, string password) { }
     }
 }

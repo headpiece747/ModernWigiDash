@@ -323,7 +323,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
                 // window's SwitchToPage, whose SetActivePageIndex gate clamps
                 // the boundary identically to a swipe), not the SendInput
                 // executor.
-                Context?.NavigatePage(delta);
+                NavigationContext?.NavigatePage(delta);
                 Context?.RequestRender();
                 return;
             }
@@ -339,7 +339,7 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
                 // settings and owns the kill-switch veto and the refusal
                 // lines. A blank script path is caught by the empty-command
                 // skip above (this type needs a command).
-                Context?.LaunchAutoHotkeyScript(action.Value);
+                ScriptLaunchContext?.LaunchAutoHotkeyScript(action.Value);
                 Context?.RequestRender();
                 return;
             }

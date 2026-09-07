@@ -48,6 +48,32 @@ public abstract class ModernWidgetBase : IModernWidget
     /// gone.</summary>
     protected IModernWigiDashContext Context { get; private set; } = null!;
 
+    /// <summary>The property-persistence facet of the host context (null when
+    /// the host does not track placed instances): the commit owner for
+    /// "set a property on a placed widget". A widget that persists properties
+    /// depends on this capability explicitly instead of seeing every host
+    /// service.</summary>
+    protected IWidgetPropertyPersistingContext? PersistingContext
+        => Context is { } context ? context as IWidgetPropertyPersistingContext : null;
+
+    /// <summary>The page-navigation facet of the host context (null when the
+    /// host does not track pages): the hotkey widget's page-flip actions route
+    /// through it.</summary>
+    protected IWidgetNavigationContext? NavigationContext
+        => Context is { } context ? context as IWidgetNavigationContext : null;
+
+    /// <summary>The script-launch facet of the host context (null when the host
+    /// has no interpreter): the hotkey widget's "Run AHK Script" action routes
+    /// through it.</summary>
+    protected IWidgetScriptLaunchContext? ScriptLaunchContext
+        => Context is { } context ? context as IWidgetScriptLaunchContext : null;
+
+    /// <summary>The credential facet of the host context (null when the host has
+    /// no credential store): the calendar feed editor's CalDAV password store
+    /// routes through it.</summary>
+    protected IWidgetCredentialContext? CredentialContext
+        => Context is { } context ? context as IWidgetCredentialContext : null;
+
     /// <summary>Stores the host context. Overrides must call this first
     /// (<c>await base.InitializeAsync(context, cancellationToken)</c>) before
     /// using <see cref="Context"/>.</summary>
@@ -112,12 +138,12 @@ public abstract class ModernWidgetBase : IModernWidget
     /// <summary>
     /// The single write path for widget properties that must survive
     /// Export→Import: resolves the property (cached, a missing name logs once
-    /// and writes nothing), then commits through the context's
-    /// <see cref="IModernWigiDashContext.SetWidgetProperty"/> owner — instance
-    /// set, change raised, and persistence into the owning placed instance's
-    /// PropertyValues in one spelling. The inspector's write-back funnel
-    /// commits through the same owner. Pre-initialization (the context not
-    /// handed yet, e.g. an uninit'd test widget's OnTouch): the instance
+    /// and writes nothing), then commits through the host's
+    /// <see cref="IWidgetPropertyPersistingContext.SetWidgetProperty"/> owner —
+    /// instance set, change raised, and persistence into the owning placed
+    /// instance's PropertyValues in one spelling. The inspector's write-back
+    /// funnel commits through the same owner. Pre-initialization (the context
+    /// not handed yet, e.g. an uninit'd test widget's OnTouch): the instance
     /// still gets the value and the change still fires — there is no placed
     /// instance to persist to yet.
     /// </summary>
@@ -134,14 +160,15 @@ public abstract class ModernWidgetBase : IModernWidget
             return;
         }
 
-        if (Context is { } context)
+        if (PersistingContext is { } persisting)
         {
-            context.SetWidgetProperty(this, property, value);
+            persisting.SetWidgetProperty(this, property, value);
         }
         else
         {
-            // Pre-initialization leg: the instance carries the value; the
-            // placed half has no owner yet.
+            // Pre-initialization leg (the context not handed yet) or a host
+            // without the persistence facet: the instance carries the value and
+            // the change still fires; the placed half has no owner.
             property.SetValue(this, value);
             OnPropertyChanged(propertyName, value);
         }

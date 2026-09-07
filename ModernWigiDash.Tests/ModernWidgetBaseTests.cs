@@ -18,14 +18,14 @@ public class ModernWidgetBaseTests
     [TestMethod]
     public async Task SetWidgetProperty_CommitsInstanceAndFiresAndPersists()
     {
-        // The commit owner is a default interface member: reachable through
-        // the interface reference, not the concrete test host.
+        // The commit owner lives on the property-persistence facet: reachable
+        // through the facet reference, not the core context.
         var testContext = new TestContext();
         IModernWigiDashContext context = testContext;
         var widget = new TestWidget();
         await widget.InitializeAsync(context);
 
-        context.SetWidgetProperty(widget, LabelProp, "committed");
+        (context as IWidgetPropertyPersistingContext)!.SetWidgetProperty(widget, LabelProp, "committed");
 
         Assert.AreEqual("committed", widget.Label);
         Assert.AreEqual(1, testContext.Renders, "the commit must raise the widget's change (the base default requests a repaint)");

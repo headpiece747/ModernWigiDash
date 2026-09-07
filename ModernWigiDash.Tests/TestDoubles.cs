@@ -23,7 +23,7 @@ namespace ModernWigiDash.Tests;
 /// the one-shot STA runner. One double per seam — new widget tests start
 /// from a one-line host.
 /// </summary>
-internal class TestContext : IModernWigiDashContext
+internal class TestContext : IModernWigiDashContext, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
 {
     public int Renders { get; private set; }
     public int AuthShown { get; private set; }
@@ -36,6 +36,8 @@ internal class TestContext : IModernWigiDashContext
     public List<string> AhkScriptCalls { get; } = [];
     /// <summary>The (feedId, password) pairs saved through the context seam (the calendar feed editor's CalDAV credential routing pin).</summary>
     public List<(string FeedId, string Password)> CalendarCredentialCalls { get; } = [];
+    /// <summary>The property commits made through the persistence facet (the commit-owner routing pin).</summary>
+    public List<(object Widget, string Property, object? Value)> PersistedProperties { get; } = [];
 
     public void LogInfo(string message) => Infos.Add(LogLine.Sanitize(message));
     public void LogError(string message, Exception? ex = null)
@@ -45,7 +47,15 @@ internal class TestContext : IModernWigiDashContext
     public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) => AuthShown++;
     public void CloseDeviceAuthorization() => AuthClosed++;
 
-    public virtual void PersistProperty(object widget, string propertyName, object? value) { }
+    public virtual void PersistProperty(object widget, string propertyName, object? value)
+        => PersistedProperties.Add((widget, propertyName, value));
+
+    public void SetWidgetProperty(object widget, System.Reflection.PropertyInfo property, object? value)
+    {
+        property.SetValue(widget, value);
+        (widget as IModernWidget)?.OnPropertyChanged(property.Name, value);
+        PersistProperty(widget, property.Name, value);
+    }
 
     public virtual void NavigatePage(int delta) => NavigatePageCalls.Add(delta);
 

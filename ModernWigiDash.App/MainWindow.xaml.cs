@@ -19,7 +19,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();

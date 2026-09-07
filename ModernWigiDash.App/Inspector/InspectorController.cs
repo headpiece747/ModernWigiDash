@@ -135,7 +135,7 @@ internal sealed class InspectorController
                             return dlg.ShowDialog() == true ? dlg.FolderName : null;
                         },
                         CommitLocationPick = _commitLocationPick,
-                        SaveCalendarCredential = (feedId, password) => _context.SaveCalendarCredential(feedId, password)
+                        SaveCalendarCredential = (feedId, password) => (_context as IWidgetCredentialContext)?.SaveCalendarCredential(feedId, password)
                     });
 
                 // Restore focus to the same property's editor so typing and
@@ -171,11 +171,11 @@ internal sealed class InspectorController
 
     /// <summary>
     /// Single write-back seam: converts a raw value (TextBox strings arrive as
-    /// text) to the property's CLR type, then commits through the context's
-    /// <see cref="IModernWigiDashContext.SetWidgetProperty"/> owner — the same
-    /// commit the widget's own <c>SetProperty</c> routes through (instance
-    /// set, change fire, placed-instance persistence, dirty mark). The
-    /// renderer never writes the model directly. The re-entrancy guard is
+    /// text) to the property's CLR type, then commits through the host's
+    /// <see cref="IWidgetPropertyPersistingContext.SetWidgetProperty"/> owner —
+    /// the same commit the widget's own <c>SetProperty</c> routes through
+    /// (instance set, change fire, placed-instance persistence, dirty mark).
+    /// The renderer never writes the model directly. The re-entrancy guard is
     /// enforced HERE, at the funnel: every editor write-back routes through
     /// this seam, so a programmatic set during a panel rebuild is suppressed
     /// for every editor type — an unguarded builder is unrepresentable.
@@ -197,7 +197,7 @@ internal sealed class InspectorController
             commit = converted;
         }
 
-        _context.SetWidgetProperty(selected.ActiveInstance, prop, commit);
+        (_context as IWidgetPropertyPersistingContext)?.SetWidgetProperty(selected.ActiveInstance, prop, commit);
     }
 
     /// <summary>XAML <c>Transform_Changed</c> handler: position/size/rotation write-backs.</summary>

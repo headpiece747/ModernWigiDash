@@ -3,13 +3,18 @@ using System.Reflection;
 namespace ModernWigiDash.Sdk;
 
 /// <summary>
-/// The host-services seam handed to every widget at
-/// <see cref="IModernWidget.InitializeAsync"/>: logging, repaint requests,
-/// inspector refresh, device-authorization dialogs, and property persistence.
-/// Widgets reach the host ONLY through this — never through the window or
-/// process. All members are safe to call from background threads (the host
-/// marshals to its UI thread); they are cheap and may be called at any point
-/// after initialization.
+/// The core host-services seam handed to every widget at
+/// <see cref="IModernWidget.InitializeAsync"/>: logging, repaint requests, and
+/// inspector refresh. Widgets reach the host ONLY through this and the optional
+/// capability facets (<see cref="IWidgetPropertyPersistingContext"/>,
+/// <see cref="IWidgetNavigationContext"/>, <see cref="IWidgetScriptLaunchContext"/>,
+/// <see cref="IWidgetCredentialContext"/>) — never through the window or process.
+/// All members are safe to call from background threads (the host marshals to
+/// its UI thread); they are cheap and may be called at any point after
+/// initialization. The former ten-member bag was segmented into these facets so
+/// a widget depends on only the capabilities it uses (the
+/// <c>IWidgetActionInvoker</c> / <c>IWidgetEditorProvider</c> optional-facet
+/// precedent).
 /// </summary>
 public interface IModernWigiDashContext
 {
@@ -44,76 +49,4 @@ public interface IModernWigiDashContext
     /// <summary>Closes the device-authorization dialog if one is showing
     /// (login finished or abandoned). Safe from any thread.</summary>
     void CloseDeviceAuthorization();
-
-    /// <summary>
-    /// Persists a widget property change into the owning placed instance's
-    /// PropertyValues, so the change survives Export→Import. The default is a
-    /// no-op (test hosts and other embedders may not track placed instances);
-    /// the App's context resolves the placed instance by identity.
-    /// </summary>
-    void PersistProperty(object widget, string propertyName, object? value)
-    {
-    }
-
-    /// <summary>
-    /// Navigates the profile's active page by the given delta (positive =
-    /// forward, negative = back). The page boundary clamps identically to a
-    /// swipe (the host's SetActivePageIndex gate); a zero or out-of-range
-    /// step is a no-op. The default is a no-op (the <see cref="PersistProperty"/>
-    /// precedent: test hosts and other embedders may not track pages); the
-    /// App's context routes it to its SwitchToPage seam.
-    /// </summary>
-    void NavigatePage(int delta)
-    {
-    }
-
-    /// <summary>
-    /// Launches the named AutoHotkey script with the user's own interpreter
-    /// (ADR-0019: the interpreter path is machine-local, user-supplied in the
-    /// settings; the app bundles nothing). The host owns the kill-switch
-    /// veto and the refusal lines (a checked kill switch, an unset or
-    /// missing interpreter). The default is a no-op (the <see cref="NavigatePage"/>
-    /// precedent: test hosts and other embedders may not have an
-    /// interpreter); the App's context resolves the interpreter from its
-    /// machine-local settings and spawns.
-    /// </summary>
-    /// <param name="scriptPath">The .ahk script path to launch.</param>
-    void LaunchAutoHotkeyScript(string scriptPath)
-    {
-    }
-
-    /// <summary>
-    /// Stores (or replaces) the machine-local CalDAV password for a calendar
-    /// feed, keyed by the feed id. The secret lives in the host's DPAPI-backed
-    /// credential store, never in the profile (which travels between machines),
-    /// so a traveling profile re-resolves its password on another machine
-    /// instead of smuggling the secret across. The default is a no-op (the
-    /// <see cref="NavigatePage"/> precedent: test hosts and other embedders may
-    /// not track credentials); the App's context writes through its
-    /// <c>CalendarCredentialStore</c>. Safe from any thread.
-    /// </summary>
-    /// <param name="feedId">The stable feed slug the password is keyed by.</param>
-    /// <param name="password">The app-specific password to store.</param>
-    void SaveCalendarCredential(string feedId, string password)
-    {
-    }
-
-    /// <summary>
-    /// The single commit owner for "set a property value on a placed widget":
-    /// sets the instance property, raises
-    /// <see cref="IModernWidget.OnPropertyChanged"/>, and persists into the
-    /// owning placed instance's PropertyValues through
-    /// <see cref="PersistProperty"/>. The inspector's write-back funnel and
-    /// <see cref="ModernWidgetBase.SetProperty"/> both commit through here, so
-    /// the instance ↔ PropertyValues invariant has one spelling: a write path
-    /// that forgets the PropertyValues half cannot exist, because there is no
-    /// other commit. The default performs the full commit (the persistence
-    /// half virtualizes to the embedder's PersistProperty).
-    /// </summary>
-    void SetWidgetProperty(object widget, PropertyInfo property, object? value)
-    {
-        property.SetValue(widget, value);
-        (widget as IModernWidget)?.OnPropertyChanged(property.Name, value);
-        PersistProperty(widget, property.Name, value);
-    }
 }
