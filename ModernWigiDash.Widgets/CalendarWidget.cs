@@ -89,63 +89,37 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     internal Func<IFeedFetcher>? FetchFactory;
     internal Func<CalendarCredentialStore>? CredentialFactory;
 
-    /// <summary>Parses the <see cref="FeedsJson"/> property into feed records.
-    /// A malformed or absent value yields an empty list (the unavailable
-    /// display), never a throw.</summary>
+    /// <summary>Parses the <see cref="FeedsJson"/> property into feed records
+    /// through the shared <see cref="CalendarFeedsCodec"/> owner (the one
+    /// spelling of the persisted shape). A malformed or absent value yields an
+    /// empty list (the unavailable display), never a throw; a malformed value
+    /// logs one line so the user knows why the feeds did not load.</summary>
     internal IReadOnlyList<CalendarFeed> ParseFeeds()
     {
-        if (string.IsNullOrWhiteSpace(FeedsJson))
-            return [];
+        IReadOnlyList<CalendarFeed> feeds = CalendarFeedsCodec.Parse(FeedsJson);
+        // The codec returns [] for both "no feeds" and "malformed"; only the
+        // latter deserves a log line (a blank or well-formed-empty value is the
+        // silent default state).
+        if (feeds.Count == 0 && !string.IsNullOrWhiteSpace(FeedsJson) && !IsWellFormedEmpty(FeedsJson))
+            Context?.LogError($"Calendar: feeds JSON is malformed; rendering the unavailable display. Value: {TruncateForLog(FeedsJson)}");
+        return feeds;
+    }
 
+    /// <summary>Whether the value is well-formed JSON that simply holds no feeds
+    /// (an empty array or a non-array root) as opposed to malformed JSON. Used
+    /// to decide whether a zero-feed parse is the silent default or a logged
+    /// error.</summary>
+    private static bool IsWellFormedEmpty(string feedsJson)
+    {
         try
         {
-            List<CalendarFeed> feeds = [];
-            using JsonDocument doc = JsonDocument.Parse(FeedsJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return [];
-
-            foreach (JsonElement el in doc.RootElement.EnumerateArray())
-            {
-                if (el.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                string kind = ReadString(el, "kind");
-                string feedId = ReadString(el, "feedId");
-                string label = ReadString(el, "label");
-                string color = ReadString(el, "color");
-                bool enabled = !el.TryGetProperty("enabled", out var en) || en.GetBoolean();
-
-                CalendarFeed feed = kind switch
-                {
-                    "caldav" => new CalDavFeed
-                    {
-                        FeedId = feedId,
-                        Label = label,
-                        ColorHex = color,
-                        Enabled = enabled,
-                        Server = ReadString(el, "server"),
-                        Port = ReadInt(el, "port", 443),
-                        PrincipalPath = ReadString(el, "principalPath"),
-                        Username = ReadString(el, "username"),
-                        SelectedCalendars = ReadStringList(el, "selectedCalendars"),
-                    },
-                    _ => new IcsUrlFeed
-                    {
-                        FeedId = feedId,
-                        Label = label,
-                        ColorHex = color,
-                        Enabled = enabled,
-                        Url = ReadString(el, "url"),
-                    },
-                };
-                feeds.Add(feed);
-            }
-            return feeds;
+            using JsonDocument doc = JsonDocument.Parse(feedsJson);
+            return doc.RootElement.ValueKind != JsonValueKind.Array
+                   || !doc.RootElement.EnumerateArray().Any();
         }
         catch (JsonException)
         {
-            Context?.LogError($"Calendar: feeds JSON is malformed; rendering the unavailable display. Value: {TruncateForLog(FeedsJson)}");
-            return [];
+            return false;
         }
     }
 
@@ -299,27 +273,6 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         => string.Equals(property.Name, nameof(FeedsJson), StringComparison.Ordinal)
             ? EditorKind.CalendarFeeds
             : null;
-
-    // --- JSON read helpers ---------------------------------------------------
-
-    private static string ReadString(JsonElement obj, string name, string fallback = "")
-        => obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() ?? fallback : fallback;
-
-    private static int ReadInt(JsonElement obj, string name, int fallback)
-        => obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out int v) ? v : fallback;
-
-    private static IReadOnlyList<string> ReadStringList(JsonElement obj, string name)
-    {
-        if (!obj.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Array)
-            return [];
-        var parts = new List<string>();
-        foreach (JsonElement item in el.EnumerateArray())
-        {
-            if (item.ValueKind == JsonValueKind.String)
-                parts.Add(item.GetString() ?? "");
-        }
-        return parts;
-    }
 
     private static string TruncateForLog(string value) => value.Length <= 80 ? value : value[..80] + "...";
 }

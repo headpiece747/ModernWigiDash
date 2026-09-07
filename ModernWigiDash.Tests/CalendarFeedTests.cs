@@ -535,3 +535,85 @@ public class CalDavFetcherTests
         </multistatus>
         """;
 }
+
+/// <summary>
+/// Pins the shared feed-list codec (<see cref="CalendarFeedsCodec"/>) -- the one
+/// owner of the persisted FeedsJson shape that both the widget's producer parse
+/// and the inspector's feed editor route through. The round-trip (parse ->
+/// serialize -> parse) keeps every field, the per-field defaults apply when a
+/// field is absent, and a malformed or absent value yields an empty list, never
+/// a throw.
+/// </summary>
+[TestClass]
+public class CalendarFeedsCodecTests
+{
+    [TestMethod]
+    public void Parse_EmptyOrMalformed_ReturnsNoFeeds()
+    {
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse(null).Count);
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("   ").Count);
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("{not json").Count);
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("""{"kind":"ics"}""").Count, "a non-array root yields no feeds");
+    }
+
+    [TestMethod]
+    public void Parse_IcsFeed_PopulatesTheRecord()
+    {
+        string json = """[{"kind":"ics","feedId":"g","label":"Google","color":"#FF0000","url":"https://cal.example/ics","enabled":false}]""";
+
+        IReadOnlyList<CalendarFeed> feeds = CalendarFeedsCodec.Parse(json);
+
+        Assert.AreEqual(1, feeds.Count);
+        var f = (IcsUrlFeed)feeds[0];
+        Assert.AreEqual("g", f.FeedId);
+        Assert.AreEqual("Google", f.Label);
+        Assert.AreEqual("#FF0000", f.ColorHex);
+        Assert.AreEqual("https://cal.example/ics", f.Url);
+        Assert.IsFalse(f.Enabled);
+    }
+
+    [TestMethod]
+    public void Parse_CalDavFeed_AppliesPortAndEnabledDefaults()
+    {
+        // port and enabled are absent: the codec applies its defaults (443, true).
+        string json = """[{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","principalPath":"/calendars/me/","username":"me"}]""";
+
+        CalDavFeed f = (CalDavFeed)CalendarFeedsCodec.Parse(json)[0];
+
+        Assert.AreEqual(443, f.Port, "an absent port defaults to 443");
+        Assert.IsTrue(f.Enabled, "an absent enabled defaults to true");
+        Assert.AreEqual("/calendars/me/", f.PrincipalPath);
+        Assert.AreEqual("me", f.Username);
+    }
+
+    [TestMethod]
+    public void Serialize_RoundTripsAValidList()
+    {
+        string original = """[{"kind":"ics","feedId":"g","label":"Google","color":"#FF0000","url":"https://cal.example/ics","enabled":true},{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":8443,"principalPath":"/p/","username":"me","enabled":false}]""";
+
+        IReadOnlyList<CalendarFeed> parsed = CalendarFeedsCodec.Parse(original);
+        string serialized = CalendarFeedsCodec.Serialize(parsed);
+        IReadOnlyList<CalendarFeed> reparsed = CalendarFeedsCodec.Parse(serialized);
+
+        Assert.AreEqual(parsed.Count, reparsed.Count, "parse -> serialize -> parse keeps the same feed count");
+        for (int i = 0; i < parsed.Count; i++)
+        {
+            Assert.AreEqual(parsed[i].Kind, reparsed[i].Kind, $"feed {i} kind");
+            Assert.AreEqual(parsed[i].FeedId, reparsed[i].FeedId, $"feed {i} id");
+            Assert.AreEqual(parsed[i].Label, reparsed[i].Label, $"feed {i} label");
+            Assert.AreEqual(parsed[i].ColorHex, reparsed[i].ColorHex, $"feed {i} color");
+            Assert.AreEqual(parsed[i].Enabled, reparsed[i].Enabled, $"feed {i} enabled");
+        }
+        var ics = (IcsUrlFeed)reparsed[0];
+        var dav = (CalDavFeed)reparsed[1];
+        Assert.AreEqual("https://cal.example/ics", ics.Url);
+        Assert.AreEqual(8443, dav.Port, "a non-default port survives the round-trip");
+        Assert.AreEqual("/p/", dav.PrincipalPath);
+    }
+
+    [TestMethod]
+    public void Serialize_EmptyList_YieldsEmptyArray()
+    {
+        Assert.AreEqual("[]", CalendarFeedsCodec.Serialize([]));
+    }
+}

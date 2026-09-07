@@ -1,6 +1,4 @@
-using System.IO;
-using System.Text;
-using System.Text.Json;
+using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App.Inspector;
 
@@ -55,46 +53,43 @@ internal sealed class CalendarFeedDraft
 internal static class CalendarFeedEditorModel
 {
     /// <summary>Parses the persisted <c>FeedsJson</c> value into editable
-    /// drafts. A malformed or absent value yields an empty list (the editor
-    /// starts blank), never a throw.</summary>
+    /// drafts by routing through the shared <see cref="CalendarFeedsCodec"/>
+    /// owner (the one spelling of the persisted shape) and mapping its typed
+    /// records to display drafts. A malformed or absent value yields an empty
+    /// list (the editor starts blank), never a throw.</summary>
     public static IReadOnlyList<CalendarFeedDraft> Parse(string? feedsJson)
     {
-        if (string.IsNullOrWhiteSpace(feedsJson))
-            return [];
-
-        try
+        List<CalendarFeedDraft> drafts = [];
+        foreach (CalendarFeed feed in CalendarFeedsCodec.Parse(feedsJson))
         {
-            using JsonDocument doc = JsonDocument.Parse(feedsJson);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return [];
-
-            List<CalendarFeedDraft> drafts = [];
-            foreach (JsonElement el in doc.RootElement.EnumerateArray())
+            switch (feed)
             {
-                if (el.ValueKind != JsonValueKind.Object)
-                    continue;
-
-                string kind = Str(el, "kind");
-                var draft = new CalendarFeedDraft
-                {
-                    Kind = string.Equals(kind, "caldav", StringComparison.Ordinal) ? "caldav" : "ics",
-                    FeedId = Str(el, "feedId"),
-                    Label = Str(el, "label"),
-                    Url = Str(el, "url"),
-                    Server = Str(el, "server"),
-                    Port = Int(el, "port", 443),
-                    PrincipalPath = Str(el, "principalPath"),
-                    Username = Str(el, "username"),
-                    Enabled = !el.TryGetProperty("enabled", out var en) || en.GetBoolean(),
-                };
-                drafts.Add(draft);
+                case CalDavFeed dav:
+                    drafts.Add(new CalendarFeedDraft
+                    {
+                        Kind = "caldav",
+                        FeedId = dav.FeedId,
+                        Label = dav.Label,
+                        Server = dav.Server,
+                        Port = dav.Port,
+                        PrincipalPath = dav.PrincipalPath,
+                        Username = dav.Username,
+                        Enabled = dav.Enabled,
+                    });
+                    break;
+                case IcsUrlFeed ics:
+                    drafts.Add(new CalendarFeedDraft
+                    {
+                        Kind = "ics",
+                        FeedId = ics.FeedId,
+                        Label = ics.Label,
+                        Url = ics.Url,
+                        Enabled = ics.Enabled,
+                    });
+                    break;
             }
-            return drafts;
         }
-        catch (JsonException)
-        {
-            return [];
-        }
+        return drafts;
     }
 
     /// <summary>Serializes the editable drafts back to the persisted
@@ -104,50 +99,35 @@ internal static class CalendarFeedEditorModel
     /// unavailable display).</summary>
     public static string Serialize(IReadOnlyList<CalendarFeedDraft> drafts)
     {
-        var kept = new List<object>();
+        // Map the complete drafts to typed feed records, then hand the whole
+        // list to the shared codec owner for the one spelling of the persisted
+        // shape (the kind discriminator and the arm-specific fields).
+        List<CalendarFeed> feeds = [];
         foreach (CalendarFeedDraft d in drafts)
         {
             if (!IsComplete(d))
                 continue;
 
-            if (string.Equals(d.Kind, "caldav", StringComparison.Ordinal))
-            {
-                kept.Add(new Dictionary<string, object?>
+            feeds.Add(string.Equals(d.Kind, "caldav", StringComparison.Ordinal)
+                ? new CalDavFeed
                 {
-                    ["kind"] = "caldav",
-                    ["feedId"] = d.FeedId,
-                    ["label"] = d.Label,
-                    ["server"] = d.Server,
-                    ["port"] = d.Port,
-                    ["principalPath"] = d.PrincipalPath,
-                    ["username"] = d.Username,
-                    ["enabled"] = d.Enabled,
-                });
-            }
-            else
-            {
-                kept.Add(new Dictionary<string, object?>
+                    FeedId = d.FeedId,
+                    Label = d.Label,
+                    Server = d.Server,
+                    Port = d.Port,
+                    PrincipalPath = d.PrincipalPath,
+                    Username = d.Username,
+                    Enabled = d.Enabled,
+                }
+                : new IcsUrlFeed
                 {
-                    ["kind"] = "ics",
-                    ["feedId"] = d.FeedId,
-                    ["label"] = d.Label,
-                    ["url"] = d.Url,
-                    ["enabled"] = d.Enabled,
+                    FeedId = d.FeedId,
+                    Label = d.Label,
+                    Url = d.Url,
+                    Enabled = d.Enabled,
                 });
-            }
         }
-
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartArray();
-            foreach (object? entry in kept)
-            {
-                writer.WriteRawValue(JsonSerializer.SerializeToUtf8Bytes(entry));
-            }
-            writer.WriteEndArray();
-        }
-        return Encoding.UTF8.GetString(stream.ToArray());
+        return CalendarFeedsCodec.Serialize(feeds);
     }
 
     /// <summary>Whether a draft carries every field its kind requires: an ics
@@ -158,12 +138,6 @@ internal static class CalendarFeedEditorModel
         => string.Equals(d.Kind, "caldav", StringComparison.Ordinal)
             ? IsAbsoluteHttpUrl(d.Server) && d.Username.Trim().Length > 0
             : IsAbsoluteHttpUrl(d.Url);
-
-    private static string Str(JsonElement obj, string name)
-        => obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() ?? "" : "";
-
-    private static int Int(JsonElement obj, string name, int fallback)
-        => obj.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out int v) ? v : fallback;
 
     private static bool IsAbsoluteHttpUrl(string value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)
