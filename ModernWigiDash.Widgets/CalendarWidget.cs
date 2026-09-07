@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 
@@ -56,48 +55,28 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     private readonly Lock _producerGate = new();
     private CalendarFeedProducer? _producer;
     private CalendarGeometry _layout;
-    private CalendarDisplay? _display;
 
     // The per-mode draw paths live in the renderer (CalendarWidgetRenderer),
     // which owns the hoisted paints and the detail view's word-wrap cache.
     private readonly CalendarWidgetRenderer _renderer = new();
 
-    /// <summary>The viewed day's offset from today (0 = today, 1 = tomorrow,
-    /// -1 = yesterday). Updated by swipes on the widget.</summary>
-    private int _viewDateOffset;
-
-    /// <summary>The specific event being shown in detail mode (null = normal
-    /// agenda view). Set when the user taps a timed row.</summary>
-    private CalendarEvent? _detailEvent;
-
-    /// <summary>The touch-down point for press detection (null when no press is
-    /// in progress).</summary>
-    private SKPoint? _touchDown;
-
-    /// <summary>The maximum drag distance (in design units) that still counts as a
-    /// tap rather than an intentional swipe.</summary>
-    private const float TapDragTolerance = 15f;
-
-    /// <summary>Vertical scroll offset in pixels for the agenda rows viewport.</summary>
-    private float _agendaScrollY;
-
-    /// <summary>The scroll position at the start of a drag.</summary>
-    private float _touchStartScrollY;
-
-    /// <summary>True when a touch drag started inside the scrollable agenda viewport.</summary>
-    private bool _isDraggingAgenda;
-
-    /// <summary>True if the agenda was dragged beyond the tap threshold.</summary>
-    private bool _isAgendaScrolled;
-
-    /// <summary>Maximum vertical scroll extent for the current agenda rows.</summary>
-    private float _maxAgendaScrollY;
+    // The touch-state module owns the viewed-day offset, the detail-view
+    // selection, the press point, and the agenda scroll position, and interprets
+    // each Down/Move/Up sample. The widget keeps only Render and the forward
+    // into Feed (the C1 extraction: "what does a tap do" has one owner).
+    private readonly CalendarGestureState _gesture = new();
 
     /// <summary>The shell-open seam: opens a meeting link in the default
-    /// browser. Production binds <see cref="OpenMeetingLink"/> (the http/https/
-    /// mailto gate + Process.Start); tests bind a recorder so a tap is assertable
-    /// without spawning a browser.</summary>
-    internal Action<string>? OpenUrlSeam;
+    /// browser. Production uses the OS default handler (the http/https/mailto
+    /// gate + Process.Start live in the gesture module); tests bind a recorder so
+    /// a tap is assertable without spawning a browser. The gesture module reads
+    /// this live at open time, so a test's post-construction swap is honored on
+    /// the next tap.</summary>
+    internal Action<string>? OpenUrlSeam
+    {
+        get => _gesture.OpenUrlSeam;
+        set => _gesture.OpenUrlSeam = value;
+    }
 
     /// <summary>The clock seam (test-injectable; production is the system
     /// clock). Used for both the render's "now" read and the producer's poll
@@ -177,6 +156,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
+        _gesture.Context = context;
         RestartProducer();
     }
 
@@ -251,23 +231,27 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     {
         float scale = Math.Min(bounds.Width / CalendarLayout.DesignWidth, bounds.Height / CalendarLayout.DesignHeight);
         DateTime now = Clock.GetLocalNow().LocalDateTime;
-        DateTime viewDate = now.Date.AddDays(_viewDateOffset);
+        DateTime viewDate = now.Date.AddDays(_gesture.ViewDateOffset);
         CalendarSeasonalPalette palette = CalendarSeasonalPalettes.Resolve(viewDate, ThemeMode, AccentColorHex, TextColorHex);
 
         var mode = CalendarLayout.ResolveViewMode(bounds.Width, bounds.Height, LayoutMode);
         if (mode == CalendarViewMode.MinimalDateCard1x1)
         {
             _layout = CalendarLayout.Compute(bounds, scale, 0, false, LayoutMode);
+            _gesture.SetFrameFacts(_layout, null, now);
             _renderer.RenderMinimalDateCard(canvas, bounds, palette, scale, viewDate);
             return;
         }
 
         CalendarSnapshot? snapshot = CalendarEventStore.ReadSnapshot();
 
-        // Detail mode: render the single event's detail view.
-        if (_detailEvent is not null)
+        // Detail mode: render the single event's detail view. The gesture module
+        // keeps its own layout (the one drawn last frame) so a tap can still hit
+        // the URL hint or exit; only the display and clock read are refreshed.
+        if (_gesture.DetailEvent is not null)
         {
-            _renderer.RenderDetailView(canvas, bounds, scale, _detailEvent.Value, ColorOf(TextColorHex, SKColors.White), ColorOf(AccentColorHex, WidgetPalette.Accent), now);
+            _gesture.SetFrameFacts(_layout, null, now);
+            _renderer.RenderDetailView(canvas, bounds, scale, _gesture.DetailEvent.Value, ColorOf(TextColorHex, SKColors.White), ColorOf(AccentColorHex, WidgetPalette.Accent), now);
             return;
         }
 
@@ -276,22 +260,14 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             : CalendarFeedPolicy.ResolveTimedRows(TimedRows);
 
         CalendarDisplay display = CalendarPresentation.Build(snapshot, now, viewDate, rows);
-        _display = display;
 
         _layout = CalendarLayout.Compute(bounds, scale, display.Rows.Count, false, LayoutMode);
 
-        // Compute max vertical scroll extent
-        if (!_layout.AgendaScrollAreaRect.IsEmpty && _layout.RowRects.Count > 0)
-        {
-            float totalH = _layout.RowRects.Count * (24f * scale) + Math.Max(0, _layout.RowRects.Count - 1) * (5f * scale);
-            _maxAgendaScrollY = Math.Max(0f, totalH - _layout.AgendaScrollAreaRect.Height);
-            _agendaScrollY = Math.Clamp(_agendaScrollY, 0f, _maxAgendaScrollY);
-        }
-        else
-        {
-            _maxAgendaScrollY = 0f;
-            _agendaScrollY = 0f;
-        }
+        // The gesture module owns the agenda scroll state: it computes the max
+        // extent from the frame's row rects and clamps the current offset, then
+        // hands back the values the renderer draws with.
+        _gesture.SetFrameFacts(_layout, display, now);
+        _gesture.UpdateScrollExtent(scale);
 
         if (_layout.Mode == CalendarViewMode.CompactPoster2x3 && bounds.Height < 280f)
         {
@@ -299,7 +275,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             return;
         }
 
-        _renderer.RenderAdaptiveView(canvas, bounds, _layout, display, palette, scale, viewDate, _agendaScrollY, _maxAgendaScrollY);
+        _renderer.RenderAdaptiveView(canvas, bounds, _layout, display, palette, scale, viewDate, _gesture.AgendaScrollY, _gesture.MaxAgendaScrollY);
     }
 
     /// <summary>
@@ -311,234 +287,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     /// - In detail view: tap on URL opens meeting link; tap elsewhere exits back.
     /// </summary>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-    {
-        if (eventType == TouchEventType.TouchDown)
-        {
-            _touchDown = localPoint;
-            _touchStartScrollY = _agendaScrollY;
-            _isDraggingAgenda = !_layout.AgendaScrollAreaRect.IsEmpty && _layout.AgendaScrollAreaRect.Contains(localPoint.X, localPoint.Y);
-            _isAgendaScrolled = false;
-            return;
-        }
-
-        if (eventType == TouchEventType.TouchMove)
-        {
-            if (_isDraggingAgenda && _touchDown.HasValue && _maxAgendaScrollY > 0f)
-            {
-                float moveDy = localPoint.Y - _touchDown.Value.Y;
-                if (Math.Abs(moveDy) > 4f)
-                {
-                    _isAgendaScrolled = true;
-                    _agendaScrollY = Math.Clamp(_touchStartScrollY - moveDy, 0f, _maxAgendaScrollY);
-                    Context?.RequestRender();
-                }
-            }
-            return;
-        }
-
-        if (eventType != TouchEventType.TouchUp)
-            return;
-
-        SKPoint? down = _touchDown;
-        _touchDown = null;
-        bool wasDragging = _isDraggingAgenda;
-        bool wasScrolled = _isAgendaScrolled;
-        _isDraggingAgenda = false;
-        _isAgendaScrolled = false;
-
-        if (down is null)
-            return;
-
-        if (wasDragging && wasScrolled)
-        {
-            // Drag-to-scroll gesture completed; do not trigger row selection
-            return;
-        }
-
-        float dx = localPoint.X - down.Value.X;
-        float dy = localPoint.Y - down.Value.Y;
-
-        // Detail mode: tap on the URL hint opens the link; any other tap exits.
-        if (_detailEvent is not null)
-        {
-            if (Math.Abs(dx) < 10f && Math.Abs(dy) < 10f)
-            {
-                CalendarEvent ev = _detailEvent.Value;
-                if (!string.IsNullOrWhiteSpace(ev.Url))
-                {
-                    OpenMeetingLink(ev.Url);
-                    return;
-                }
-
-                _detailEvent = null;
-                Context?.RequestRender();
-            }
-            return;
-        }
-
-        // Minimal date card tap: toggle between today and tomorrow
-        if (_layout.Mode == CalendarViewMode.MinimalDateCard1x1)
-        {
-            if (Math.Abs(dx) <= TapDragTolerance && Math.Abs(dy) <= TapDragTolerance)
-            {
-                _viewDateOffset = _viewDateOffset == 0 ? 1 : 0;
-                Context?.RequestRender();
-            }
-            return;
-        }
-
-        // Ignore intentional horizontal swipes/drags so global page navigation operates cleanly
-        if (Math.Abs(dx) > TapDragTolerance || Math.Abs(dy) > TapDragTolerance)
-        {
-            return;
-        }
-
-        // Check for chevron hit (< or >)
-        if (CalendarLayout.IsPrevChevronHit(_layout, localPoint.X, localPoint.Y))
-        {
-            _agendaScrollY = 0f;
-            DateTime nowDt = Clock.GetLocalNow().LocalDateTime;
-            DateTime currentView = nowDt.Date.AddDays(_viewDateOffset);
-            DateTime targetMonth = currentView.AddMonths(-1);
-            _viewDateOffset = (targetMonth.Date - nowDt.Date).Days;
-            _viewDateOffset = Math.Clamp(_viewDateOffset, -365, 365);
-            Context?.RequestRender();
-            return;
-        }
-
-        if (CalendarLayout.IsNextChevronHit(_layout, localPoint.X, localPoint.Y))
-        {
-            _agendaScrollY = 0f;
-            DateTime nowDt = Clock.GetLocalNow().LocalDateTime;
-            DateTime currentView = nowDt.Date.AddDays(_viewDateOffset);
-            DateTime targetMonth = currentView.AddMonths(1);
-            _viewDateOffset = (targetMonth.Date - nowDt.Date).Days;
-            _viewDateOffset = Math.Clamp(_viewDateOffset, -365, 365);
-            Context?.RequestRender();
-            return;
-        }
-
-        CalendarDisplay? display = _display;
-        if (display is null)
-            return;
-
-        // Check if the tap landed on a month-grid cell (jump to that day)
-        if (TryHitMonthGridCell(localPoint, out int targetDay))
-        {
-            _agendaScrollY = 0f;
-            DateTime nowDt = Clock.GetLocalNow().LocalDateTime;
-            DateTime viewDt = nowDt.Date.AddDays(_viewDateOffset);
-            if (targetDay >= 1 && targetDay <= DateTime.DaysInMonth(viewDt.Year, viewDt.Month))
-            {
-                DateTime targetDate = new(viewDt.Year, viewDt.Month, targetDay, 0, 0, 0, DateTimeKind.Unspecified);
-                _viewDateOffset = (targetDate.Date - nowDt.Date).Days;
-                _viewDateOffset = Math.Clamp(_viewDateOffset, -365, 365);
-                Context?.RequestRender();
-            }
-            return;
-        }
-
-        // Check hero event tap (in 5x4 layout)
-        if (!_layout.AllDayRect.IsEmpty && _layout.AllDayRect.Contains(localPoint.X, localPoint.Y) && display.NextUpcomingEvent != null)
-        {
-            CalendarEvent? matched = CalendarEventMatcher.Match(CalendarEventStore.ReadSnapshot(), display.NextUpcomingEvent);
-            if (matched is not null)
-            {
-                _detailEvent = matched;
-                Context?.RequestRender();
-                return;
-            }
-        }
-
-        // Check for a timed-row tap: enter detail mode for that event.
-        // In CompactPoster2x3 mode, the bottom row displays NextUpcomingEvent ?? Rows[0].
-        int rowIndex = CalendarLayout.GetAction(_layout, localPoint.X, localPoint.Y, _agendaScrollY, out _);
-        CalendarRow? selectedRow = null;
-        if (_layout.Mode == CalendarViewMode.CompactPoster2x3 && rowIndex == 0)
-        {
-            selectedRow = display.NextUpcomingEvent ?? (display.Rows.Count > 0 ? display.Rows[0] : null);
-        }
-        else if (rowIndex >= 0 && rowIndex < display.Rows.Count)
-        {
-            selectedRow = display.Rows[rowIndex];
-        }
-
-        if (selectedRow is null)
-            return;
-
-        CalendarEvent? foundEvent = CalendarEventMatcher.Match(CalendarEventStore.ReadSnapshot(), selectedRow);
-        if (foundEvent is not null)
-        {
-            _detailEvent = foundEvent;
-            Context?.RequestRender();
-        }
-    }
-
-    /// <summary>Hit-tests a point against the month grid cells. Returns true
-    /// when the point falls within a non-blank cell, with the day number in
-    /// <paramref name="day"/>.</summary>
-    private bool TryHitMonthGridCell(SKPoint p, out int day)
-    {
-        day = 0;
-        SKRect rect = _layout.MonthGridRect;
-        if (rect.IsEmpty || _display?.MonthGrid.Count != 35)
-            return false;
-
-        bool hasWeekdayHeader = !_layout.MonthCardRect.IsEmpty;
-        float weekdayH = hasWeekdayHeader ? 14f * (_layout.Pad / CalendarLayout.PadDesign) : 0f;
-        float gridTop = rect.Top + weekdayH;
-        float gridH = rect.Height - weekdayH;
-
-        if (p.Y < gridTop || p.Y > rect.Bottom || p.X < rect.Left || p.X > rect.Right)
-            return false;
-
-        float cellW = rect.Width / 7f;
-        float cellH = gridH / 5f;
-
-        int col = (int)((p.X - rect.Left) / cellW);
-        int row = (int)((p.Y - gridTop) / cellH);
-        if (col < 0 || col >= 7 || row < 0 || row >= 5)
-            return false;
-
-        int index = row * 7 + col;
-        MonthCell cell = _display.MonthGrid[index];
-        if (!cell.IsCurrentMonth || cell.Day <= 0)
-            return false;
-
-        day = cell.Day;
-        return true;
-    }
-
-    /// <summary>Opens a meeting link through the shell-open seam, after the
-    /// http/https/mailto gate. A blank or disallowed link is a logged no-op; a
-    /// spawn failure is logged, never thrown.</summary>
-    private void OpenMeetingLink(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return;
-
-        if (!HotkeyActionPolicy.IsAllowedUrl(url))
-        {
-            Context?.LogError($"Calendar: refusing to open a non-http(s)/mailto event link: {TruncateForLog(url)}");
-            return;
-        }
-
-        Action<string> open = OpenUrlSeam ?? OpenUrlProduction;
-        try
-        {
-            open(url);
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError("Calendar: unable to open the event link", ex);
-        }
-    }
-
-    /// <summary>The production shell-open: hands the link to the OS default
-    /// handler. Thread-safe (Process.Start is thread-safe); the touch poll runs
-    /// off the dispatcher.</summary>
-    private static void OpenUrlProduction(string url)
-        => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        => _gesture.Feed(localPoint, eventType);
 
     /// <summary>
     /// The special inspector editor for this widget's properties: the calendar
