@@ -144,37 +144,7 @@ public partial class MainWindow
     /// reference read of the record the settings commits swap).
     /// </summary>
     public void LaunchAutoHotkeyScript(string scriptPath)
-    {
-        AppSettings settings = _appSettings;
-        if (settings.KillSwitch)
-        {
-            _hotkeyLog.Write("AHK spawn refused: the kill switch is checked (Settings)");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(scriptPath))
-        {
-            _hotkeyLog.Write("AHK spawn refused: no script path set (the widget's command is blank)");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(settings.AhkInterpreterPath))
-        {
-            _hotkeyLog.Write("AHK spawn refused: no AutoHotkey interpreter path set (Settings)");
-            return;
-        }
-
-        string interpreter = settings.AhkInterpreterPath;
-        if (!File.Exists(interpreter))
-        {
-            _hotkeyLog.Write($"AHK spawn refused: interpreter not found: {interpreter}");
-            return;
-        }
-        if (!_ahkApi.Launch(interpreter, scriptPath))
-        {
-            _hotkeyLog.Write($"AHK spawn failed: {interpreter}");
-            return;
-        }
-        _hotkeyLog.Write($"AHK launched: {scriptPath}");
-    }
+        => _ahkSpawnPolicy.TryLaunch(scriptPath, _appSettings);
 
     /// <summary>
     /// Stores the machine-local CalDAV password for a feed through the host's

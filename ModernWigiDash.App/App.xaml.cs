@@ -7,21 +7,6 @@ namespace ModernWigiDash.App;
 
 public partial class App : Application
 {
-    /// <summary>True once the window's close/teardown sequence begins. Teardown
-    /// cancels in-flight work, so OperationCanceledExceptions raised while
-    /// closing are expected; an OCE at any other time is benign only when its
-    /// own token is cancelled (see <see cref="CrashSuppression"/>). Set by
-    /// MainWindow's Closed handler before any teardown dispose runs.</summary>
-    internal static volatile bool IsClosing;
-
-    /// <summary>The autostart-minimized start flag (ADR-0019): set from the
-    /// launch args (<see cref="StartupLaunchPolicy.StartupMinimizedArg"/>, the
-    /// flag the HKCU Run entry appends to the exe path) before the StartupUri
-    /// window is constructed, and read once by MainWindow's ctor, which opens
-    /// the window minimized under it. Under a test host the flag is set
-    /// directly (the host's launch args never carry it).</summary>
-    internal static volatile bool StartMinimized;
-
     /// <summary>The single-instance guard (the primary owns the named
     /// handles; the kernel releases them on process death, so a force-killed
     /// instance can never wedge the next launch). Null on the secondary
@@ -74,7 +59,7 @@ public partial class App : Application
             // is cancelled (the operation was cancelled by design, wherever
             // it lands) or any OCE raised during the close/teardown sequence.
             // Everything else propagates so a real crash is visible.
-            bool benign = CrashSuppression.ShouldSuppress(e.Exception, IsClosing);
+            bool benign = CrashSuppression.ShouldSuppress(e.Exception, ProcessLifecycle.IsClosing);
             CrashLog.Append(e.Exception, handled: benign);
             e.Handled = benign;
         };
@@ -115,7 +100,7 @@ public partial class App : Application
         // The autostart flag (ADR-0019) is read before anything else: the
         // StartupUri window is constructed after OnStartup returns, and the
         // window's ctor consumes the flag to open minimized.
-        StartMinimized = StartupLaunchPolicy.RequestsMinimizedStart(e.Args);
+        ProcessLifecycle.StartMinimized = StartupLaunchPolicy.RequestsMinimizedStart(e.Args);
 
         // The guard is production-only: under a test host the entry assembly
         // is the test runner, and the guard's second-launch path (signal the

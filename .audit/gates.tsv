@@ -253,3 +253,13 @@
 2026-09-07T01:34:56Z	8bd84ae	Fix calendar duplicate texts negative dates overlapping and screen fit	FAIL	57	8	SKIP	n/a	n/a	SKIP
 2026-09-07T01:36:22Z	8bd84ae	Fix calendar duplicate texts negative dates overlapping and screen fit	ok	0	0	ok	2171	0	ok
 2026-09-07T02:02:36Z	8bd84ae	Agenda scroll 1x1 date card and left sidebar polish	ok	0	0	ok	2177	0	ok
+2026-09-07T11:33:31Z	9be0002	manual	ok	0	0	ok	2177	0	ok
+2026-09-07T11:36:44Z	af0d4f6	manual	ok	0	0	FAIL	2176	1	SKIP
+2026-09-07T11:40:28Z	af0d4f6	manual	ok	0	0	ok	2177	0	ok
+2026-09-07T11:46:49Z	b9b880b	manual	ok	0	0	FAIL	2176	1	SKIP
+2026-09-07T11:50:05Z	b9b880b	manual	ok	0	0	ok	2177	0	FAIL
+2026-09-07T11:51:58Z	b9b880b	manual	ok	0	0	ok	2177	0	ok
+2026-09-07T11:57:27Z	51cd8b5	manual	ok	2	0	ok	2187	0	FAIL
+2026-09-07T11:57:36Z	51cd8b5	manual	FAIL	0	2	SKIP	n/a	n/a	SKIP
+2026-09-07T11:58:38Z	51cd8b5	manual	ok	0	0	ok	2187	0	FAIL
+2026-09-07T12:00:12Z	51cd8b5	manual	ok	0	0	ok	2187	0	ok

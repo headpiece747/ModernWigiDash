@@ -153,9 +153,9 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // The AHK spawn seam (ADR-0019): production is Process.Start, tests
     // inject a recorder the way they swap the hotkey API.
     private readonly AhkLaunchApi _ahkApi;
+    private Hotkey.AhkSpawnPolicy _ahkSpawnPolicy;
 
     // The global-hotkey integration (ADR-0019): the P/Invoke seam (the test
-    // host injects a fake the way it swaps the tray surface), the
     // registration owner (wired by the GlobalHotkeys step; inert until the
     // window's SourceInitialized hands it the HWND), and the window handle
     // the registrations ride on (zero until Show creates it).
@@ -209,6 +209,9 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         _sessionEndStandby = options.SessionEndStandby;
         _hotkeyApi = options.HotkeyApi ?? HotkeyApi.Default;
         _ahkApi = options.AhkApi ?? AhkLaunchApi.Default;
+        // The AHK spawn policy (ADR-0019): the refusal ladder + log lines, driving
+        // the launch seam. Read live at call time through the settings provider.
+        _ahkSpawnPolicy = new Hotkey.AhkSpawnPolicy(_ahkApi, _hotkeyLog);
         // The record-argument fallback rides the constructor body (a field
         // initializer cannot see the arguments), like the api seams above.
         // The store's log seam references the window's hotkey DiagLog.
@@ -277,7 +280,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // the minimize-to-tray intercept from hiding it at sign-in; the
         // explicit clear keeps the latch one-shot if WPF raises no state
         // change for the startup write.
-        if (App.StartMinimized)
+        if (ProcessLifecycle.StartMinimized)
         {
             _lifecycle.ArmStartupMinimizeLatch();
             WindowState = WindowState.Minimized;
@@ -643,7 +646,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             // host never inherits the modules the aborted tail would
             // have disposed, and the display-standby last resort runs
             // no matter what.
-            App.IsClosing = true;
+            ProcessLifecycle.IsClosing = true;
             new ShutdownOrchestrator(BuildTeardownPlan(), Log).Run();
         };
     }
@@ -908,7 +911,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         _ = Dispatcher.BeginInvoke(() =>
         {
-            if (guardClose && App.IsClosing) return;
+            if (guardClose && ProcessLifecycle.IsClosing) return;
             action();
         });
     }

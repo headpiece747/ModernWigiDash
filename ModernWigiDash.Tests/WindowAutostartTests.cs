@@ -2,7 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using ModernWigiDash.App.Power;
-using AppClass = ModernWigiDash.App.App;
+using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
 
@@ -12,7 +12,7 @@ namespace ModernWigiDash.Tests;
 /// minimized (visible, never hidden - the one-shot latch vetoes the
 /// minimize-to-tray intercept for the startup state change only), and the
 /// first real user minimize after the startup still hides. The flag is the
-/// static <c>App.StartMinimized</c> the App's OnStartup sets from the launch
+/// static <c>ProcessLifecycle.StartMinimized</c> the App's OnStartup sets from the launch
 /// args; the test sets it directly around the window's construction (the
 /// test host's launch args never carry the flag).
 /// </summary>
@@ -24,7 +24,7 @@ public class WindowAutostartTests
     [TestCleanup]
     public void Cleanup()
     {
-        AppClass.StartMinimized = false;
+        ProcessLifecycle.StartMinimized = false;
         Host.DetachApplication();
     }
 
@@ -34,7 +34,7 @@ public class WindowAutostartTests
         string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
         Host.Run<object?>(() =>
         {
-            AppClass.StartMinimized = true;
+            ProcessLifecycle.StartMinimized = true;
             var fake = new FakeTraySurface();
             var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
@@ -70,7 +70,7 @@ public class WindowAutostartTests
         string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
         Host.Run<object?>(() =>
         {
-            AppClass.StartMinimized = false;
+            ProcessLifecycle.StartMinimized = false;
             var fake = new FakeTraySurface();
             var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
             try
@@ -102,7 +102,7 @@ public class WindowAutostartTests
         {
             Host.Run<object?>(() =>
             {
-                AppClass.StartMinimized = false;
+                ProcessLifecycle.StartMinimized = false;
                 var fake = new FakeTraySurface();
                 var store = new AppSettingsStore(settingsPath);
                 var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine(), AppSettingsStore: store));
@@ -143,7 +143,7 @@ public class WindowAutostartTests
         {
             Host.Run<object?>(() =>
             {
-                AppClass.StartMinimized = false;
+                ProcessLifecycle.StartMinimized = false;
                 var fake = new FakeTraySurface();
                 var store = new AppSettingsStore(settingsPath);
                 var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine(), AppSettingsStore: store));
@@ -185,7 +185,7 @@ public class WindowAutostartTests
         {
             Host.Run<object?>(() =>
             {
-                AppClass.StartMinimized = false;
+                ProcessLifecycle.StartMinimized = false;
                 // A dead tray surface: IsLive is false before Start.
                 var deadTray = new FakeTraySurface(showBringsUp: false);
                 var store = new AppSettingsStore(settingsPath);
