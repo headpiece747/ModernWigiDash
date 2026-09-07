@@ -19,7 +19,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -1121,20 +1121,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
-        {
-            try
-            {
-                // The theme rides the export bundle (ADR-0021) as a per-item
-                // restore item; the persisted profile.json stays bare.
-                string json = ProfileExportTheme.WithTheme(ProfileOps.ExportJson(_profile), ThemeStore.Current);
-                File.WriteAllText(dlg.FileName, json);
-                _dialogHost.Info("Export Complete", "Profile exported successfully!");
-            }
-            catch (Exception ex)
-            {
-                _dialogHost.Error("Export Error", $"Error exporting profile: {ex.Message}");
-            }
-        }
+            ProfileExportFlow.Run(dlg.FileName, this);
     }
 
     private void ImportProfile()
@@ -1196,6 +1183,16 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     }
 
     void IProfileImportHost.ShowError(string title, string message) => _dialogHost.Error(title, message);
+
+    // The export flow's host seam (the ADR-0008 image): the window is the
+    // production host, a thin adapter over its profile, theme, and dialog host.
+    ProfileLayout IProfileExportHost.Profile => _profile;
+
+    ThemeSettings IProfileExportHost.CurrentTheme => ThemeStore.Current;
+
+    void IProfileExportHost.ShowSuccess(string title, string message) => _dialogHost.Info(title, message);
+
+    void IProfileExportHost.ShowError(string title, string message) => _dialogHost.Error(title, message);
 
     private void BtnClear_Click(object _, RoutedEventArgs e)
     {
