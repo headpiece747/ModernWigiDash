@@ -23,6 +23,25 @@ public partial class MainWindow
 {
     #region IModernWigiDashContext Implementation for Telemetry & Host Services
 
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread: synchronously when the
+    /// caller is already there, otherwise posted to the dispatcher (fire-and-
+    /// forget). The context contract is "safe from any thread", and this is the
+    /// one spelling of that hop -- the context facade's marshal-to-dispatcher
+    /// sites (page navigation, credential save, inspector refresh) all route
+    /// through it instead of each re-spelling the CheckAccess/InvokeAsync pair,
+    /// so the hop cannot drift between them.
+    /// </summary>
+    private void OnUiThread(Action action)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+        _ = Dispatcher.InvokeAsync(action);
+    }
+
     // The line policy (flatten + bound + redact) is owned by FileLog.Write; the
     // sink only adds the component tag, so the rule has one enforcement point.
     /// <summary>Widget log sink: the component-tagged INFO line, written
@@ -50,13 +69,7 @@ public partial class MainWindow
         // artifact's final InitialRefresh step re-establishes the panel.
         Inspector.InspectorController? inspector = _inspector;
         if (inspector is null) return;
-        if (Dispatcher.CheckAccess())
-        {
-            inspector.Refresh();
-            return;
-        }
-
-        _ = Dispatcher.InvokeAsync(inspector.Refresh);
+        OnUiThread(inspector.Refresh);
     }
 
     /// <summary>Shows the device-authorization dialog; forwards to the dialog
@@ -121,12 +134,7 @@ public partial class MainWindow
             if (_profile is { } profile)
                 SwitchToPage(profile.ActivePageIndex + delta);
         }
-        if (Dispatcher.CheckAccess())
-        {
-            Navigate();
-            return;
-        }
-        _ = Dispatcher.InvokeAsync(Navigate);
+        OnUiThread(Navigate);
     }
 
     /// <summary>
@@ -164,12 +172,7 @@ public partial class MainWindow
         }
 
         void Save() => CalendarCredentials.SavePassword(feedId, password);
-        if (Dispatcher.CheckAccess())
-        {
-            Save();
-            return;
-        }
-        _ = Dispatcher.InvokeAsync(Save);
+        OnUiThread(Save);
     }
 
     #endregion
