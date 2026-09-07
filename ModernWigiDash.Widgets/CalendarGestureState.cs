@@ -20,12 +20,16 @@ internal sealed class CalendarGestureState
     private const float TapDragTolerance = 15f;
 
     // The frame's facts, handed in by the widget at render time: the geometry
-    // the draw path used, the display it drew, and the clock read for the frame.
-    // A touch sample arriving before any render (or after a mode change) sees
-    // nulls and degrades to a no-op, exactly as the old field defaults did.
+    // the draw path used, the display it drew, the clock read for the frame, and
+    // the event list the display was built from. A touch sample arriving before
+    // any render (or after a mode change) sees nulls and degrades to a no-op,
+    // exactly as the old field defaults did. Matching a tapped row against the
+    // handed-in event list (instead of re-reading the global store mid-tap) keeps
+    // the module's claim that a tap interprets the same record the canvas drew.
     private CalendarGeometry _layout;
     private CalendarDisplay? _display;
     private DateTime _now;
+    private IReadOnlyList<CalendarEvent> _events = [];
 
     // The mutable touch state this module owns.
     private int _viewDateOffset;
@@ -67,24 +71,33 @@ internal sealed class CalendarGestureState
     public float MaxAgendaScrollY => _maxAgendaScrollY;
 
     /// <summary>Receives the frame's facts after the widget composes them: the
-    /// geometry, the display, and the clock read. Called once per render, so a
-    /// touch sample always interprets the same record the canvas drew.</summary>
-    public void SetFrameFacts(CalendarGeometry layout, CalendarDisplay? display, DateTime now)
+    /// geometry, the display, the clock read, and the event list the display was
+    /// built from. Called once per render, so a touch sample always interprets
+    /// the same record the canvas drew (a row resolves against the events that
+    /// produced it, not a store re-read that may have moved on).</summary>
+    public void SetFrameFacts(CalendarGeometry layout, CalendarDisplay? display, DateTime now, IReadOnlyList<CalendarEvent>? events = null)
     {
         _layout = layout;
         _display = display;
         _now = now;
+        _events = events ?? [];
     }
 
     /// <summary>Recomputes the agenda's max scroll extent from the frame's row
     /// rects and clamps the current offset into range. Called once per render
     /// (after <see cref="SetFrameFacts"/>) so a resize or a row-count change
-    /// re-derives the extent the renderer draws with.</summary>
-    public void UpdateScrollExtent(float scale)
+    /// re-derives the extent the renderer draws with. The content height is the
+    /// span from the first row's top to the last row's bottom -- read from the
+    /// rects the layout actually emitted, not a re-derived row pitch -- so the
+    /// extent tracks whatever mode drew the rows.</summary>
+    public void UpdateScrollExtent()
     {
         if (!_layout.AgendaScrollAreaRect.IsEmpty && _layout.RowRects.Count > 0)
         {
-            float totalH = _layout.RowRects.Count * (24f * scale) + Math.Max(0, _layout.RowRects.Count - 1) * (5f * scale);
+            IReadOnlyList<SKRect> rows = _layout.RowRects;
+            float contentTop = rows[0].Top;
+            float contentBottom = rows[^1].Bottom;
+            float totalH = contentBottom - contentTop;
             _maxAgendaScrollY = Math.Max(0f, totalH - _layout.AgendaScrollAreaRect.Height);
             _agendaScrollY = Math.Clamp(_agendaScrollY, 0f, _maxAgendaScrollY);
         }
@@ -219,7 +232,7 @@ internal sealed class CalendarGestureState
         // Check hero event tap (in 5x4 layout).
         if (!_layout.AllDayRect.IsEmpty && _layout.AllDayRect.Contains(localPoint.X, localPoint.Y) && display.NextUpcomingEvent != null)
         {
-            CalendarEvent? matched = CalendarEventMatcher.Match(CalendarEventStore.ReadSnapshot(), display.NextUpcomingEvent);
+            CalendarEvent? matched = CalendarEventMatcher.Match(_displaySnapshot(), display.NextUpcomingEvent);
             if (matched is not null)
             {
                 _detailEvent = matched;
@@ -244,7 +257,7 @@ internal sealed class CalendarGestureState
         if (selectedRow is null)
             return;
 
-        CalendarEvent? foundEvent = CalendarEventMatcher.Match(CalendarEventStore.ReadSnapshot(), selectedRow);
+        CalendarEvent? foundEvent = CalendarEventMatcher.Match(_displaySnapshot(), selectedRow);
         if (foundEvent is not null)
         {
             _detailEvent = foundEvent;
@@ -263,6 +276,13 @@ internal sealed class CalendarGestureState
         _viewDateOffset = (targetMonth.Date - nowDt.Date).Days;
         _viewDateOffset = Math.Clamp(_viewDateOffset, -365, 365);
     }
+
+    /// <summary>Builds the snapshot the row-to-event match runs against: the
+    /// event list handed in at render time (the same data the canvas drew), not
+    /// a fresh store read. When no events were handed in (a mode without a
+    /// display), the match has nothing to resolve and returns null.</summary>
+    private CalendarSnapshot? _displaySnapshot()
+        => _events.Count > 0 ? new CalendarSnapshot { Events = _events, HasData = true } : null;
 
     /// <summary>Hit-tests a point against the month grid cells. Returns true
     /// when the point falls within a non-blank cell, with the day number in

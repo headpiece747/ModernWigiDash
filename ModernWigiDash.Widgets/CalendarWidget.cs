@@ -240,8 +240,8 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         // The gesture module owns the agenda scroll state: it computes the max
         // extent from the frame's row rects and clamps the current offset, then
         // hands back the values the renderer draws with.
-        _gesture.SetFrameFacts(_layout, display, now);
-        _gesture.UpdateScrollExtent(scale);
+        _gesture.SetFrameFacts(_layout, display, now, snapshot?.Events);
+        _gesture.UpdateScrollExtent();
 
         if (_layout.Mode == CalendarViewMode.CompactPoster2x3 && bounds.Height < 280f)
         {
