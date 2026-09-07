@@ -40,9 +40,9 @@ public class InspectorPanelRendererTests
             // in the popup's Child, which is not in the visual tree while the
             // popup is closed — reach it through the Popup, then select a
             // candidate and assert the commit callback ran.
-            var popup = FindVisualChildren<Popup>(target).First();
-            var listBox = FindVisualChildren<ListBox>((DependencyObject)popup.Child!).First();
-            var box = FindVisualChildren<TextBox>(target).First();
+            var popup = VisualTree.FindDescendants<Popup>(target).First();
+            var listBox = VisualTree.FindDescendants<ListBox>((DependencyObject)popup.Child!).First();
+            var box = VisualTree.FindDescendants<TextBox>(target).First();
             listBox.ItemsSource = new[] { new GeocodeCandidate("Berlin, New Hampshire, United States", "Berlin, New Hampshire, United States", 44.46867, -71.18508) };
             listBox.SelectedItem = listBox.Items[0];
 
@@ -73,8 +73,8 @@ public class InspectorPanelRendererTests
             var target = new StackPanel();
             InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
-            var popup = FindVisualChildren<Popup>(target).First();
-            var results = FindVisualChildren<ListBox>((DependencyObject)popup.Child!).First();
+            var popup = VisualTree.FindDescendants<Popup>(target).First();
+            var results = VisualTree.FindDescendants<ListBox>((DependencyObject)popup.Child!).First();
             Assert.AreEqual(Visibility.Collapsed, results.Visibility, "the results list starts hidden");
 
             // Drive the tick decision through the extracted seam, then apply it
@@ -115,8 +115,8 @@ public class InspectorPanelRendererTests
             var target = new StackPanel();
             InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
-            var popup = FindVisualChildren<Popup>(target).First();
-            var box = FindVisualChildren<TextBox>(target).First();
+            var popup = VisualTree.FindDescendants<Popup>(target).First();
+            var box = VisualTree.FindDescendants<TextBox>(target).First();
             box.Text = "Berlin";
 
             // A mouse press inside the popup (a pick gesture) precedes the box's
@@ -178,7 +178,7 @@ public class InspectorPanelRendererTests
 
             InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
-            var box = FindVisualChildren<TextBox>(target).First();
+            var box = VisualTree.FindDescendants<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains("Berlin, New Hampshire, United States"), "the box must seed from the Location label");
             Assert.IsTrue(box.Text.Contains("9.4k"), "the box must append the population suffix from CurrentPopulation (shared formatter: 9367 → 9.4k)");
         });
@@ -221,7 +221,7 @@ public class InspectorPanelRendererTests
 
             InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
-            var box = FindVisualChildren<TextBox>(target).First();
+            var box = VisualTree.FindDescendants<TextBox>(target).First();
             Assert.IsTrue(box.Text.Contains(" · 9.4k"), "precondition: the box must seed with the population suffix");
             box.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
 
@@ -277,7 +277,7 @@ public class InspectorPanelRendererTests
             // (the results ListBox lives in the closed popup's Child).
             var locationRow = target.Children.OfType<StackPanel>().First(sp =>
                 sp.Children.OfType<TextBlock>().FirstOrDefault()?.Text == "Location");
-            var box = FindVisualChildren<TextBox>(locationRow).Single();
+            var box = VisualTree.FindDescendants<TextBox>(locationRow).Single();
             box.Text = "Berlin, NH";
             box.RaiseEvent(new RoutedEventArgs(UIElement.LostFocusEvent));
 
@@ -337,7 +337,7 @@ public class InspectorPanelRendererTests
 
             InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
 
-            var chk = FindVisualChildren<CheckBox>(target).Single();
+            var chk = VisualTree.FindDescendants<CheckBox>(target).Single();
             Assert.IsTrue(chk.IsChecked == true, "precondition: the editor seeds from the property's current value");
             chk.IsChecked = false;
 
@@ -353,15 +353,5 @@ public class InspectorPanelRendererTests
         public bool Flag { get; set; } = true;
 
         public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
-    }
-
-    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
-    {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typed) yield return typed;
-            foreach (var nested in FindVisualChildren<T>(child)) yield return nested;
-        }
     }
 }

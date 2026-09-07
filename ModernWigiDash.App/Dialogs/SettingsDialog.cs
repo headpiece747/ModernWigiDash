@@ -370,19 +370,4 @@ internal sealed class SettingsDialog : Window
         hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
         return hint;
     }
-
-    internal IEnumerable<T> FindVisualChildren<T>() where T : DependencyObject
-        => FindVisualChildren<T>(this);
-
-    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
-    {
-        int count = VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T match) yield return match;
-            foreach (var nested in FindVisualChildren<T>(child))
-                yield return nested;
-        }
-    }
 }

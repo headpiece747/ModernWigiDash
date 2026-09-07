@@ -307,22 +307,10 @@ internal sealed class InspectorController
             double available = Math.Max(120, Math.Max(below, above) - 10);
 
             if (popup.Child is FrameworkElement popupContent &&
-                FindVisualChild<ScrollViewer>(popupContent) is ScrollViewer scroll)
+                VisualTree.FindFirst<ScrollViewer>(popupContent) is ScrollViewer scroll)
             {
                 scroll.MaxHeight = available;
             }
         };
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
-    {
-        int count = VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
-        {
-            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T match) return match;
-            if (FindVisualChild<T>(child) is { } inner) return inner;
-        }
-        return null;
     }
 }

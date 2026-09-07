@@ -29,7 +29,7 @@ public class ThemeDialogTests
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-            var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();
+            var editors = VisualTree.FindDescendants<ColorPickerEditor>(dialog).ToList();
             Assert.AreEqual(ThemeSettings.StringProperties.Count, editors.Count);
             // AccentGreen is the first entry in group-then-name display order,
             // so the seed must have reached its editor.
@@ -47,7 +47,7 @@ public class ThemeDialogTests
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-            var editor = dialog.FindVisualChildren<ColorPickerEditor>().First();
+            var editor = VisualTree.FindDescendants<ColorPickerEditor>(dialog).First();
             editor.HexBox.Text = "zzz";
             Assert.IsFalse(dialog.ApplyIsEnabledForTest);
             editor.HexBox.Text = "#F59E0B";
@@ -65,9 +65,9 @@ public class ThemeDialogTests
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
             dialog.Show(); // a Window's visual tree exists only after it is shown
             dialog.UpdateLayout(); // force the synchronous layout pass before walking the tree
-            var editors = dialog.FindVisualChildren<ColorPickerEditor>().ToList();
+            var editors = VisualTree.FindDescendants<ColorPickerEditor>(dialog).ToList();
             editors[0].HexBox.Text = "zzz";
-            var reset = dialog.FindVisualChildren<Button>().First(b => b.Content as string == "Reset");
+            var reset = VisualTree.FindDescendants<Button>(dialog).First(b => b.Content as string == "Reset");
             reset.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             for (int i = 0; i < editors.Count; i++)
                 Assert.AreEqual(dialog.DraftForTest.Entries[i].Hex, editors[i].Hex);

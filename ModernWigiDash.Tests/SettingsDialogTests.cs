@@ -88,7 +88,7 @@ public class SettingsDialogTests
     }
 
     private static RadioButton RadioFor(SettingsDialog dialog, string value)
-        => dialog.FindVisualChildren<RadioButton>()
+        => VisualTree.FindDescendants<RadioButton>(dialog)
             .Single(r => string.Equals(r.Content as string, LabelFor(value), StringComparison.Ordinal));
 
     private static string LabelFor(string value)
@@ -146,9 +146,9 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, clicked, _, _) = Build(null, false, false, "");
-            var export = dialog.FindVisualChildren<Button>().First(b => string.Equals(b.Content as string, "Export profile...", StringComparison.Ordinal));
+            var export = VisualTree.FindDescendants<Button>(dialog).First(b => string.Equals(b.Content as string, "Export profile...", StringComparison.Ordinal));
             export.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            var import = dialog.FindVisualChildren<Button>().First(b => string.Equals(b.Content as string, "Import profile...", StringComparison.Ordinal));
+            var import = VisualTree.FindDescendants<Button>(dialog).First(b => string.Equals(b.Content as string, "Import profile...", StringComparison.Ordinal));
             import.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CollectionAssert.AreEqual(new[] { "export", "import" }, clicked);
             dialog.Close();
@@ -160,14 +160,14 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, _, _, _) = Build(null, false, false, "");
-            var buttons = dialog.FindVisualChildren<Button>().ToList();
+            var buttons = VisualTree.FindDescendants<Button>(dialog).ToList();
             Assert.IsTrue(buttons.Any(b => string.Equals(b.Content as string, "Customize theme colors...", StringComparison.Ordinal)));
             dialog.Close();
             return null;
         });
 
     private static ColorPickerEditor PageBackgroundEditor(SettingsDialog dialog)
-        => dialog.FindVisualChildren<ColorPickerEditor>().Single();
+        => VisualTree.FindDescendants<ColorPickerEditor>(dialog).Single();
 
     [TestMethod]
     public void Ctor_SeedsThePageBackgroundPickerFromTheActivePage_WithoutCommitting()
@@ -194,7 +194,7 @@ public class SettingsDialogTests
         });
 
     private static CheckBox AutostartCheckBox(SettingsDialog dialog)
-        => dialog.FindVisualChildren<CheckBox>()
+        => VisualTree.FindDescendants<CheckBox>(dialog)
             .Single(c => string.Equals(c.Content as string, "Start with Windows", StringComparison.Ordinal));
 
     [TestMethod]
@@ -223,14 +223,14 @@ public class SettingsDialogTests
         });
 
     private static CheckBox KillSwitchCheckBox(SettingsDialog dialog)
-            => dialog.FindVisualChildren<CheckBox>()
+            => VisualTree.FindDescendants<CheckBox>(dialog)
                 .Single(c => string.Equals(c.Content as string, "Kill Switch", StringComparison.Ordinal));
 
     /// <summary>The AHK interpreter path box. The Appearance group's
     /// page-background picker hosts a hex box of its own, so the picker's
     /// descendant TextBoxes are excluded by the ancestor check.</summary>
     private static TextBox AhkPathTextBox(SettingsDialog dialog)
-        => dialog.FindVisualChildren<TextBox>()
+        => VisualTree.FindDescendants<TextBox>(dialog)
             .Single(tb => !HasAncestor<ColorPickerEditor>(tb));
 
     private static bool HasAncestor<T>(DependencyObject node)
@@ -299,7 +299,7 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, clicked, _, _) = Build(null, false, false, "");
-            var browse = dialog.FindVisualChildren<Button>()
+            var browse = VisualTree.FindDescendants<Button>(dialog)
                 .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
             browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CollectionAssert.AreEqual(new[] { "browse" }, clicked, "Browse routes to the window's file-dialog seam");
@@ -314,7 +314,7 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, clicked, _, _) = Build(null, false, false, @"C:\Seeded\autohotkey.exe", browseResult: null);
-            var browse = dialog.FindVisualChildren<Button>()
+            var browse = VisualTree.FindDescendants<Button>(dialog)
                 .Single(b => string.Equals(b.Content as string, "Browse...", StringComparison.Ordinal));
             browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CollectionAssert.AreEqual(new[] { "browse" }, clicked);
@@ -329,7 +329,7 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, _, _, minimizeCommits) = Build(null, false, false, "", seededMinimizeToTray: true);
-            var cb = dialog.FindVisualChildren<CheckBox>()
+            var cb = VisualTree.FindDescendants<CheckBox>(dialog)
                 .Single(c => string.Equals(c.Content as string, "Minimize to tray on startup", StringComparison.Ordinal));
             Assert.IsTrue(cb.IsChecked == true, "the checkbox seeds checked from the persisted flag");
             cb.IsChecked = false;
@@ -344,7 +344,7 @@ public class SettingsDialogTests
         => Host.Run<object?>(() =>
         {
             var (dialog, _, _, _, _, _, _, minimizeCommits) = Build(null, false, false, "");
-            var cb = dialog.FindVisualChildren<CheckBox>()
+            var cb = VisualTree.FindDescendants<CheckBox>(dialog)
                 .Single(c => string.Equals(c.Content as string, "Minimize to tray on startup", StringComparison.Ordinal));
             Assert.IsFalse(cb.IsChecked == true, "the checkbox seeds unchecked by default");
             cb.IsChecked = true;
