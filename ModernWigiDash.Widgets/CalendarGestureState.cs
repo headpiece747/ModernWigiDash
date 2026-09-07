@@ -307,7 +307,7 @@ internal sealed class CalendarGestureState
         if (string.IsNullOrWhiteSpace(url))
             return;
 
-        if (!HotkeyActionPolicy.IsAllowedUrl(url))
+        if (!ShellOpenPolicy.IsAllowedUrl(url))
         {
             ContextLogError($"Calendar: refusing to open a non-http(s)/mailto event link: {TruncateForLog(url)}");
             return;

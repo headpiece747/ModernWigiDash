@@ -27,17 +27,6 @@ public class HotkeyActionPolicyTests
     }
 
     [TestMethod]
-    public void IsAllowedUrl_OnlyHttpHttpsMailto()
-    {
-        Assert.IsTrue(HotkeyActionPolicy.IsAllowedUrl("https://example.com"));
-        Assert.IsTrue(HotkeyActionPolicy.IsAllowedUrl("http://example.com"));
-        Assert.IsTrue(HotkeyActionPolicy.IsAllowedUrl("mailto:someone@example.com"));
-        Assert.IsFalse(HotkeyActionPolicy.IsAllowedUrl("ftp://example.com"));
-        Assert.IsFalse(HotkeyActionPolicy.IsAllowedUrl("javascript:alert(1)"));
-        Assert.IsFalse(HotkeyActionPolicy.IsAllowedUrl("not a url"));
-    }
-
-    [TestMethod]
     public void MouseButtonFlags_NamedButtons_ReturnFlagPairs()
     {
         Assert.AreEqual((0x0008u, 0x0010u), HotkeyActionPolicy.MouseButtonFlags("right"));

@@ -186,7 +186,7 @@ internal static class HotkeyActionExecutor
 
     private static void OpenUrl(string url)
     {
-        if (!HotkeyActionPolicy.IsAllowedUrl(url))
+        if (!ShellOpenPolicy.IsAllowedUrl(url))
             throw new ArgumentException("Only http, https, and mailto URLs are allowed.", nameof(url));
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }

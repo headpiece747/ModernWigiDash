@@ -26,11 +26,6 @@ internal static class HotkeyActionPolicy
 
     public static int ClampDelayMs(int delayMs) => Math.Clamp(delayMs, 0, MaxDelayMs);
 
-    /// <summary>Only http, https, and mailto URLs may be shell-opened.</summary>
-    public static bool IsAllowedUrl(string url)
-        => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
-           && uri.Scheme is "http" or "https" or "mailto";
-
     /// <summary>The SendInput down/up flag pair for a named mouse button
     /// (left is the default for unknown names).</summary>
     public static (uint Down, uint Up) MouseButtonFlags(string button)
