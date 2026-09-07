@@ -21,16 +21,23 @@ internal static class CalendarEventMatcher
         if (snapshot is null || !snapshot.HasData)
             return null;
 
-        // An all-day row carries "All day" as its time text and no start; a timed
-        // row carries "HH:mm" and its start. Match on date + all-day flag + a
-        // short title prefix to avoid truncation mismatches in the row list.
+        // An all-day row carries "All day" as its time text; a timed row carries
+        // "HH:mm". Every production CalendarRow carries a real Start (the
+        // presentation layer always passes e.Start), so the default-Start case
+        // is unreachable; guard against it by skipping the date-shape match and
+        // falling through to the title-only match below.
         bool isAllDayRow = string.Equals(row.TimeText, "All day", StringComparison.Ordinal);
-        DateTime targetDate = row.Start != default ? row.Start.Date : DateTime.Today;
+        bool hasStart = row.Start != default;
+        DateTime targetDate = row.Start.Date;
 
-        var byShape = snapshot.Events.FirstOrDefault(e =>
-            e.Start.Date == targetDate &&
-            e.IsAllDay == isAllDayRow &&
-            e.Title.StartsWith(TitlePrefix(row.Title), StringComparison.Ordinal));
+        CalendarEvent? byShape = null;
+        if (hasStart)
+        {
+            byShape = snapshot.Events.FirstOrDefault(e =>
+                e.Start.Date == targetDate &&
+                e.IsAllDay == isAllDayRow &&
+                e.Title.StartsWith(TitlePrefix(row.Title), StringComparison.Ordinal));
+        }
         if (byShape != default)
             return byShape;
 

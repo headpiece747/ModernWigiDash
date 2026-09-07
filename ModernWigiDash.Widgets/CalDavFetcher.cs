@@ -188,9 +188,20 @@ internal sealed class CalDavFetcher : IFeedFetcher
 
     private static void ApplyBasicAuth(HttpRequestMessage request, string username, string credential)
     {
-        // The username rides the feed (names the account); the password is the injected credential.
-        // Basic auth is base64(user:pass) -- the value is opaque to the server.
-        string userPass = $"{username}:{credential}";
+        // Refuse to send credentials over cleartext HTTP: a Basic-auth header is
+        // base64(user:pass), readable by any on-path observer. CalDAV is https
+        // in practice; http is only for an explicit local test server that has
+        // no credential to protect.
+        if (request.RequestUri is { } uri && string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && !string.IsNullOrEmpty(credential))
+            throw new HttpRequestException("Refusing to send CalDAV credentials over cleartext HTTP; use an HTTPS endpoint.");
+
+        // Trim the username so a whitespace-padded value from a hand-edited
+        // profile cannot produce a degenerate Basic-auth header.
+        string trimmedUser = username.Trim();
+        if (trimmedUser.Length == 0)
+            throw new ArgumentException("CalDAV username must not be blank.", nameof(username));
+
+        string userPass = $"{trimmedUser}:{credential}";
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(userPass)));
     }
@@ -213,7 +224,20 @@ internal sealed class CalDavFetcher : IFeedFetcher
     }
 
     private static Uri MakeAbsolute(Uri baseUri, string href)
-        => Uri.TryCreate(baseUri, href, out var abs) ? abs : new Uri(href, UriKind.Absolute);
+    {
+        Uri abs = Uri.TryCreate(baseUri, href, out var resolved) ? resolved : new Uri(href, UriKind.Absolute);
+
+        // A server-controlled href must not redirect the request to a different
+        // origin: an attacker CalDAV server could return an href pointing at an
+        // arbitrary host, turning the client into an SSRF oracle and replaying
+        // the user's Basic-auth header to a third party. Verify the resolved URL
+        // stays within the base URI's scheme + authority.
+        if (!string.Equals(abs.Scheme, baseUri.Scheme, StringComparison.Ordinal) ||
+            !string.Equals(abs.Authority, baseUri.Authority, StringComparison.Ordinal))
+            throw new HttpRequestException($"CalDAV href resolves to a different origin ({abs.Authority}); refusing to fetch.");
+
+        return abs;
+    }
 
     private static string? FirstElementText(IEnumerable<XElement> responses, string propName, string childName)
     {

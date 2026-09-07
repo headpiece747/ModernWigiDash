@@ -441,4 +441,97 @@ public class CalDavFetcherTests
         string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(req.Headers.Authorization.Parameter!));
         Assert.AreEqual("alice:alice_secret", decoded, "Basic auth header must contain username:password");
     }
+
+    [TestMethod]
+    public async Task DiscoverAsync_OverHttp_WithCredential_RefusesToSendCredentials()
+    {
+        var handler = new RecordingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("<multistatus xmlns=\"DAV:\"></multistatus>", Encoding.UTF8, "text/xml")
+            });
+
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+
+        var feed = new CalDavFeed
+        {
+            FeedId = "f-http",
+            Label = "HTTP test",
+            ColorHex = "#ff0000",
+            Server = "caldav.example.com",
+            Port = 80,
+            PrincipalPath = "/calendars/john/",
+            Username = "john"
+        };
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => fetcher.DiscoverAsync(feed, "secret", CancellationToken.None),
+            "CalDAV credentials must not be sent over cleartext HTTP.");
+    }
+
+    [TestMethod]
+    public async Task FetchAsync_HrefResolvingToDifferentOrigin_RefusesToFetch()
+    {
+        // A malicious server returns an href pointing at a different host.
+        string maliciousPropFind = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <multistatus xmlns="DAV:">
+                <response>
+                    <href>http://evil.example.com/steal</href>
+                    <propstat>
+                        <prop>
+                            <displayname>Evil</displayname>
+                        </prop>
+                        <status>HTTP/1.1 200 OK</status>
+                    </propstat>
+                </response>
+            </multistatus>
+            """;
+
+        int callIndex = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            string content = callIndex++ == 0 ? HomeSetResponse : maliciousPropFind;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "text/xml")
+            };
+        });
+
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+
+        var feed = new CalDavFeed
+        {
+            FeedId = "f-ssrf",
+            Label = "SSRF test",
+            ColorHex = "#ff0000",
+            Server = "caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/calendars/john/",
+            Username = "john"
+        };
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => fetcher.DiscoverAsync(feed, "secret", CancellationToken.None),
+            "A server-supplied href resolving to a different origin must be refused.");
+    }
+
+    private const string HomeSetResponse = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <multistatus xmlns="DAV:">
+            <response>
+                <href>/calendars/user/home/</href>
+                <propstat>
+                    <prop>
+                        <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">
+                            <href>/calendars/user/home/</href>
+                        </calendar-home-set>
+                    </prop>
+                    <status>HTTP/1.1 200 OK</status>
+                </propstat>
+            </response>
+        </multistatus>
+        """;
 }

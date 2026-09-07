@@ -46,10 +46,12 @@ internal static class CalendarEventParser
             foreach (var calendar in calendars)
                 CollectOccurrences(calendar, windowStart, windowEnd, feedLabel, feedColorHex, results);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A hostile or truncated feed must not take down the poll tick; the
             // caller treats an empty result as "nothing new" and keeps the cache.
+            // One log line so a reliably-failing feed is observable, not silent.
+            FileLog.Write($"[Calendar] Parse failed for feed '{feedLabel}': {ex.GetType().Name}: {ex.Message}");
             return [];
         }
 
@@ -199,18 +201,28 @@ internal static class CalendarEventParser
         => new(local, CalDateTime.UtcTzId, hasTime: true);
 
     /// <summary>Strips HTML tags from a DESCRIPTION value (many feeds embed
-    /// HTML in the body). Returns plain text with newlines preserved.</summary>
+    /// HTML in the body). Returns plain text with newlines preserved. Entities
+    /// are decoded BEFORE tag stripping (and repeated to a fixed point) so an
+    /// encoded tag like &amp;lt;img&amp;gt; cannot survive the strip.</summary>
     internal static string StripHtml(string html)
     {
         if (string.IsNullOrEmpty(html))
             return string.Empty;
 
-        // Remove <br>, <p>, <div> tags and convert to newlines.
-        string text = BrTagRegex.Replace(html, "\n");
-        // Remove all remaining HTML tags.
-        text = HtmlTagRegex.Replace(text, "");
-        // Decode common HTML entities.
-        text = text.Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">").Replace("&quot;", "\"").Replace("&#39;", "'").Replace("&nbsp;", " ");
+        // Decode entities first, then strip tags; repeat until stable so an
+        // encoded tag (&amp;lt;script&amp;gt;) that decodes into a live tag is
+        // caught on the next pass.
+        string text = html;
+        for (int i = 0; i < 3; i++)
+        {
+            string decoded = System.Net.WebUtility.HtmlDecode(text);
+            string stripped = BrTagRegex.Replace(decoded, "\n");
+            stripped = HtmlTagRegex.Replace(stripped, "");
+            if (string.Equals(stripped, text, StringComparison.Ordinal))
+                break;
+            text = stripped;
+        }
+
         // Collapse multiple blank lines.
         text = BlankLineRegex.Replace(text, "\n\n");
         return text.Trim();
