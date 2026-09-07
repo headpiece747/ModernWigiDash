@@ -49,6 +49,18 @@
         <SolidColorBrush x:Key="SuccessBackground" Color="{DynamicResource SuccessBackgroundColor}"/>
         <SolidColorBrush x:Key="SuccessBorder" Color="{DynamicResource SuccessBorderColor}"/>
 
+        <!-- Vector Icon Geometries (Lucide / Griddy) -->
+        <Geometry x:Key="IconSettings">M9.995 21.8c.655.13 1.33.2 2.005.2v-.005c.67 0 1.35-.065 2.005-.2.58-.115.995-.63.995-1.225v-1.155a7.777 7.777 0 0 0 1.925-1.11l1 .575c.515.295 1.17.195 1.555-.245a9.956 9.956 0 0 0 2.01-3.48 1.247 1.247 0 0 0-.565-1.47l-1-.575a8.224 8.224 0 0 0 0-2.22l1-.58c.51-.295.75-.915.565-1.47a9.956 9.956 0 0 0-2.01-3.48c-.39-.44-1.04-.54-1.555-.245l-1 .575a7.907 7.907 0 0 0-1.92-1.11V3.425c0-.59-.42-1.11-.995-1.225-1.31-.27-2.7-.27-4.015 0-.58.115-.995.63-.995 1.225V4.58a7.777 7.777 0 0 0-1.925 1.11l-1-.575a1.248 1.248 0 0 0-1.555.245 9.956 9.956 0 0 0-2.01 3.48c-.185.555.05 1.175.565 1.47l1 .58a8.224 8.224 0 0 0 0 2.22l-1 .58c-.51.295-.75.915-.565 1.47a9.88 9.88 0 0 0 2.01 3.48c.39.44 1.04.54 1.555.245l1-.575c.59.46 1.235.83 1.925 1.11v1.155c0 .59.42 1.11.995 1.225Zm3.505-1.43a8.637 8.637 0 0 1-3 0v-2.02l-.52-.17a6.501 6.501 0 0 1-2.325-1.345l-.405-.365-1.75 1.01A8.421 8.421 0 0 1 4 14.885l1.75-1.01-.11-.53c-.095-.44-.14-.89-.14-1.345 0-.455.05-.905.14-1.345l.11-.53L4 9.115A8.38 8.38 0 0 1 5.5 6.52l1.75 1.01.405-.365A6.428 6.428 0 0 1 9.98 5.82l.52-.17V3.63a8.637 8.637 0 0 1 3 0v2.015l.52.17c.865.28 1.645.735 2.325 1.345l.405.365 1.75-1.01A8.38 8.38 0 0 1 20 9.11l-1.75 1.01.11.53c.095.44.14.89.14 1.345 0 .455-.05.905-.14 1.345l-.11.53L20 14.88a8.346 8.346 0 0 1-1.5 2.6l-1.75-1.01-.405.365a6.428 6.428 0 0 1-2.325 1.345l-.52.17v2.02ZM8 12c0 2.205 1.795 4 4 4s4-1.795 4-4-1.795-4-4-4-4 1.795-4 4Zm1.5 0a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1-5 0Z</Geometry>
+        <Geometry x:Key="IconGrid">M21 11h-8V3h6.75c.69 0 1.25.56 1.25 1.25V11Zm-6.5-1.5h5v-5h-5v5ZM4.25 21H11v-8H3v6.75c0 .69.56 1.25 1.25 1.25Zm5.25-1.5h-5v-5h5v5ZM13 21h6.75c.69 0 1.25-.56 1.25-1.25V13h-8v8Zm6.5-1.5h-5v-5h5v5ZM3 11h8V3H4.25C3.56 3 3 3.56 3 4.25V11Zm6.5-1.5h-5v-5h5v5Z</Geometry>
+        <Geometry x:Key="IconEdit">M20.975 3.025A3.48 3.48 0 0 0 18.5 2a3.48 3.48 0 0 0-2.475 1.025l-13.17 13.17-.845 4.93a.74.74 0 0 0 .21.655c.14.14.335.22.53.22.04 0 .085 0 .125-.01l4.93-.845 13.17-13.17A3.48 3.48 0 0 0 22 5.5a3.48 3.48 0 0 0-1.025-2.475Zm-13.89 16.72-3.415.585.585-3.415 9.3-9.3 2.83 2.83-9.3 9.3Zm10.36-10.36-2.83-2.83 2.47-2.47c.755-.755 2.07-.755 2.83 0a2.002 2.002 0 0 1 0 2.83l-2.47 2.47Z</Geometry>
+        <Geometry x:Key="IconTrash">M21 5h-5v-.25A2.755 2.755 0 0 0 13.25 2h-2.5A2.755 2.755 0 0 0 8 4.75V5H3v1.5h1v12.75A2.755 2.755 0 0 0 6.75 22h10.5A2.755 2.755 0 0 0 20 19.25V6.5h1V5ZM9.5 4.75c0-.69.56-1.25 1.25-1.25h2.5c.69 0 1.25.56 1.25 1.25V5h-5v-.25Zm9 14.5c0 .69-.56 1.25-1.25 1.25H6.75c-.69 0-1.25-.56-1.25-1.25V6.5h13v12.75Z</Geometry>
+        <Geometry x:Key="IconSearch">m21.78 20.72-5.62-5.62A7.96 7.96 0 0 0 18 10c0-4.41-3.59-8-8-8s-8 3.59-8 8 3.59 8 8 8a7.96 7.96 0 0 0 5.1-1.84l5.62 5.62 1.06-1.06ZM10 16.5A6.506 6.506 0 0 1 3.5 10c0-3.585 2.915-6.5 6.5-6.5s6.5 2.915 6.5 6.5-2.915 6.5-6.5 6.5Z</Geometry>
+        <Geometry x:Key="IconInfo">M12 22C6.485 22 2 17.515 2 12S6.485 2 12 2s10 4.485 10 10-4.485 10-10 10Zm0-18.5c-4.685 0-8.5 3.815-8.5 8.5 0 4.685 3.815 8.5 8.5 8.5 4.685 0 8.5-3.815 8.5-8.5 0-4.685-3.815-8.5-8.5-8.5Zm.75 12.5v-5.5h-1.5V16h1.5ZM13 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z</Geometry>
+        <Geometry x:Key="IconLayers">M10.82 13.02a2.8 2.8 0 0 0 1.18.265 2.71 2.71 0 0 0 1.18-.265l8.19-3.89c.44-.21.715-.64.715-1.13 0-.49-.275-.92-.715-1.13l-8.19-3.89a2.748 2.748 0 0 0-2.36 0L2.63 6.87c-.44.21-.715.64-.715 1.13 0 .49.275.92.715 1.13l8.19 3.89Zm1.715-1.355c-.34.16-.73.16-1.07 0L3.75 8l7.715-3.665c.34-.16.73-.16 1.07 0L20.25 8l-7.715 3.665ZM10.82 17.02c.375.18.78.27 1.18.27.4 0 .805-.09 1.18-.27L22 12.83v-1.66l-9.465 4.495c-.34.16-.73.16-1.07 0L2 11.17v1.66l8.82 4.19Zm.645 2.645L2 15.17v1.66l8.82 4.19c.375.18.775.265 1.18.265.405 0 .805-.09 1.18-.265L22 16.83v-1.66l-9.465 4.495c-.34.16-.73.16-1.07 0Z</Geometry>
+        <Geometry x:Key="IconPlus">M20 11.25h-7.25V4h-1.5v7.25H4v1.5h7.25V20h1.5v-7.25H20v-1.5Z</Geometry>
+        <Geometry x:Key="IconClose">M18.3 5.71a.996.996 0 0 0-1.41 0L12 10.59 7.11 5.7A.996.996 0 1 0 5.7 7.11L10.59 12 5.7 16.89a.996.996 0 1 0 1.41 1.41L12 13.41l4.89 4.89a.996.996 0 1 0 1.41-1.41L13.41 12l4.89-4.89c.38-.38.38-1.02 0-1.4Z</Geometry>
+        <Geometry x:Key="IconChevronDown">M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z</Geometry>
+
         <!-- Geist Variable Font Resource -->
         <FontFamily x:Key="PrimaryFont">pack://application:,,,/Resources/Fonts/#Geist, Segoe UI</FontFamily>
 
@@ -96,6 +108,105 @@
             <Setter Property="Foreground" Value="White"/>
         </Style>
 
+        <!-- Secondary Ghost Button Style -->
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+        </Style>
+
+        <!-- Destructive Button Style -->
+        <Style x:Key="DestructiveButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource DangerBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <!-- Modern iOS/Tailwind-style Toggle Switch CheckBox -->
+        <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="FontFamily" Value="{StaticResource PrimaryFont}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ContentPresenter Margin="0,0,10,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                            <Grid VerticalAlignment="Center">
+                                <Border x:Name="Track" Width="36" Height="20" CornerRadius="10"
+                                        Background="{DynamicResource ControlHover}"
+                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                                </Border>
+                                <Border x:Name="Thumb" Width="14" Height="14" CornerRadius="7"
+                                        Background="White" HorizontalAlignment="Left" Margin="3,0,0,0">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="4" ShadowDepth="1" Direction="270" Opacity="0.3"/>
+                                    </Border.Effect>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentRed}"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource M3Primary}"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="0,0,3,0"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource M3Primary}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern Slider Style -->
+        <Style TargetType="Slider">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentRed}"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="6" CornerRadius="3" Background="{DynamicResource ControlHover}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="6" CornerRadius="3,0,0,3" Background="{DynamicResource AccentRed}"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="16" Height="16" Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="White" Stroke="{DynamicResource AccentRed}" StrokeThickness="2">
+                                                    <Ellipse.Effect>
+                                                        <DropShadowEffect BlurRadius="4" ShadowDepth="1" Direction="270" Opacity="0.3"/>
+                                                    </Ellipse.Effect>
+                                                </Ellipse>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Dark ComboBox Style -->
         <Style TargetType="ComboBox">
             <Setter Property="Background" Value="{DynamicResource BgCard}"/>
@@ -121,7 +232,7 @@
                                     <ToggleButton x:Name="toggleButton" Background="Transparent" BorderThickness="0" Width="20"
                                                   IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                                                   Focusable="False" ClickMode="Press" HorizontalAlignment="Right">
-                                        <TextBlock Text="▼" FontSize="8" Foreground="{DynamicResource AccentBlue}" VerticalAlignment="Center"/>
+                                        <Path Data="{StaticResource IconChevronDown}" Width="8" Height="8" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                                     </ToggleButton>
                                 </Grid>
                             </Border>

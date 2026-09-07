@@ -266,3 +266,9 @@
 2026-09-07T12:02:39Z	20ffad8	manual	ok	0	0	ok	2183	0	ok
 2026-09-07T12:05:35Z	e547844	manual	ok	0	0	ok	2183	0	ok
 2026-09-07T12:07:25Z	5786c86	manual	ok	0	0	ok	2183	0	ok
+2026-09-07T12:55:55Z	70707ca	Modern dashboard UI redesign	ok	0	0	ok	2183	0	ok
+2026-09-07T13:11:34Z	70707ca	Clean studio subbar and pills polish	FAIL	57	8	SKIP	n/a	n/a	SKIP
+2026-09-07T13:12:57Z	70707ca	Clean studio subbar and pills polish	ok	0	0	ok	2183	0	ok
+2026-09-07T13:24:36Z	70707ca	Vector stroke icons polish	ok	0	0	ok	2183	0	ok
+2026-09-07T13:34:41Z	70707ca	All dashboard icons modernized to vector paths	ok	0	0	ok	2183	0	ok
+2026-09-07T14:06:46Z	70707ca	fix-tray-hide-and-start-minimized	ok	0	0	ok	2186	0	ok

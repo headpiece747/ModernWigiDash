@@ -142,6 +142,8 @@ public sealed class DebtGuardTests
                 "the WinUSB extern bag: the file declares the release APIs but never calls them - WinUsbBulkDevice acquires the interface handle and releases it through the bag in its Dispose",
             ["ModernWigiDash.Hardware/Transport/SetupApiNative.cs"] =
                 "the SetupAPI extern bag: the file declares CloseHandle but never calls it - WinUsbBulkDevice acquires the device handle and releases it through the bag in its Dispose",
+            ["ModernWigiDash.App/StartupLaunchPolicy.cs"] =
+                "the kernel32 GetStartupInfoW call reads the process STARTUPINFO structure; no handle is acquired or owned",
         };
 
         var root = RepoScan.GetRepoRoot();

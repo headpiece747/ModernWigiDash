@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -131,7 +132,7 @@ public class PageTabsViewTests
             var h = Create(profile);
 
             var tabContainer = (Grid)h.Panel.Children[1];
-            var renameButton = tabContainer.Children.OfType<Button>().Single(b => Equals(b.Content, "✏️"));
+            var renameButton = tabContainer.Children.OfType<Button>().Single(b => AutomationProperties.GetAutomationId(b) == "PageTabRename_1");
             renameButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
             CollectionAssert.AreEqual(new[] { 1 }, h.Renamed);
@@ -148,7 +149,7 @@ public class PageTabsViewTests
             var h = Create(profile);
 
             var tabContainer = (Grid)h.Panel.Children[1];
-            var deleteButton = tabContainer.Children.OfType<Button>().Single(b => Equals(b.Content, "✕"));
+            var deleteButton = tabContainer.Children.OfType<Button>().Single(b => AutomationProperties.GetAutomationId(b) == "PageTabDelete_1");
             deleteButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
             CollectionAssert.AreEqual(new[] { 1 }, h.Deleted);
@@ -164,9 +165,9 @@ public class PageTabsViewTests
             var h = Create(profile);
 
             var tabContainer = (Grid)h.Panel.Children[0];
-            object[] contents = tabContainer.Children.OfType<Button>().Select(b => b.Content).ToArray();
-            Assert.AreEqual(2, contents.Length, "a non-deletable tab shows the page and rename buttons only");
-            Assert.IsFalse(contents.Contains("✕"), "the close button must not exist when deletion is not allowed");
+            var buttons = tabContainer.Children.OfType<Button>().ToArray();
+            Assert.AreEqual(2, buttons.Length, "a non-deletable tab shows the page and rename buttons only");
+            Assert.IsFalse(buttons.Any(b => AutomationProperties.GetAutomationId(b) == "PageTabDelete_0"), "the close button must not exist when deletion is not allowed");
         });
     }
 
@@ -180,7 +181,7 @@ public class PageTabsViewTests
             var h = Create(profile);
 
             var tabContainer = (Grid)h.Panel.Children[1];
-            Assert.IsTrue(tabContainer.Children.OfType<Button>().Any(b => Equals(b.Content, "✕")));
+            Assert.IsTrue(tabContainer.Children.OfType<Button>().Any(b => AutomationProperties.GetAutomationId(b) == "PageTabDelete_1"));
         });
     }
 

@@ -40,6 +40,33 @@ public class StartupLaunchPolicyTests
         => Assert.IsFalse(StartupLaunchPolicy.RequestsMinimizedStart(["--startup-extras", "startup", "x --startup"]));
 
     [TestMethod]
+    public void RequestsMinimizedStart_StandardMinimizedFlags_Match()
+    {
+        string[] recognizedFlags =
+        [
+            "--minimized", "-minimized", "/minimized",
+            "--minimize", "-minimize", "/minimize",
+            "-m", "/m",
+            "--tray", "-tray", "/tray",
+            "--hidden", "-hidden", "/hidden",
+            "-startup", "/startup"
+        ];
+
+        foreach (string flag in recognizedFlags)
+        {
+            Assert.IsTrue(StartupLaunchPolicy.RequestsMinimizedStart([flag]), $"Flag {flag} must be recognized");
+            Assert.IsTrue(StartupLaunchPolicy.RequestsMinimizedStart([flag.ToUpperInvariant()]), $"Flag {flag} must be case-insensitive");
+        }
+    }
+
+    [TestMethod]
+    public void RequestsMinimizedFromEnvironment_WithArgs_MatchesFlag()
+    {
+        Assert.IsTrue(StartupLaunchPolicy.RequestsMinimizedFromEnvironment(["--minimized"]));
+        Assert.IsTrue(StartupLaunchPolicy.RequestsMinimizedFromEnvironment(["--startup"]));
+    }
+
+    [TestMethod]
     public void StartupMinimizedArg_IsTheDocumentedSpelling()
         => Assert.AreEqual("--startup", ConstValue(nameof(StartupLaunchPolicy.StartupMinimizedArg)));
 

@@ -59,18 +59,61 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
     /// fall through to a normal exit) instead of a startup throw.</summary>
     public static NotifyIconTraySurface Create(TrayMenu menu) => new(LoadIcon(), menu);
 
-    private static Icon? LoadIcon()
+    internal static Icon? LoadIcon()
     {
-        string path = Path.Combine(AppContext.BaseDirectory, "Resources", "Logo", "logo.ico");
+        // 1. Loose file next to executable (standard directory layout)
         try
         {
-            return File.Exists(path) ? new Icon(path) : null;
+            string path = Path.Combine(AppContext.BaseDirectory, "Resources", "Logo", "logo.ico");
+            if (File.Exists(path))
+            {
+                return new Icon(path);
+            }
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            // Best-effort icon: a broken ico must not kill the tray.
-            return null;
+            // Fall through to embedded / exe resource
         }
+
+        // 2. WPF pack URI embedded resource
+        try
+        {
+            var uri = new Uri("pack://application:,,,/Resources/Logo/logo.ico", UriKind.Absolute);
+            var streamInfo = System.Windows.Application.GetResourceStream(uri)
+                ?? System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/ModernWigiDash.App;component/Resources/Logo/logo.ico", UriKind.Absolute));
+            if (streamInfo?.Stream is { } stream)
+            {
+                using (stream)
+                {
+                    return new Icon(stream);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        {
+            // Fall through to associated executable icon
+        }
+
+        // 3. Current executable associated icon (ApplicationIcon in PE header)
+        try
+        {
+            string? exePath = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                var icon = Icon.ExtractAssociatedIcon(exePath);
+                if (icon is not null)
+                {
+                    return icon;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // Fall through to system default
+        }
+
+        // 4. System default application icon (never null)
+        return System.Drawing.SystemIcons.Application;
     }
 
     private void OnMouseClick(object? sender, MouseEventArgs e)

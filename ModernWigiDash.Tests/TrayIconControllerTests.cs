@@ -146,4 +146,11 @@ public class TrayIconControllerTests
         Assert.IsFalse(fake.HideCalled);
         Assert.IsFalse(fake.Disposed, "a never-started controller holds no surface to release");
     }
+
+    [TestMethod]
+    public void NotifyIconTraySurface_LoadIcon_AlwaysReturnsNonNullIcon()
+    {
+        var icon = NotifyIconTraySurface.LoadIcon();
+        Assert.IsNotNull(icon, "LoadIcon must never return null due to robust fallbacks (disk -> pack URI -> exe icon -> system default)");
+    }
 }

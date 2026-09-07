@@ -100,7 +100,7 @@ public partial class App : Application
         // The autostart flag (ADR-0019) is read before anything else: the
         // StartupUri window is constructed after OnStartup returns, and the
         // window's ctor consumes the flag to open minimized.
-        ProcessLifecycle.StartMinimized = StartupLaunchPolicy.RequestsMinimizedStart(e.Args);
+        ProcessLifecycle.StartMinimized = StartupLaunchPolicy.RequestsMinimizedFromEnvironment(e.Args);
 
         // The guard is production-only: under a test host the entry assembly
         // is the test runner, and the guard's second-launch path (signal the

@@ -20,13 +20,13 @@
         Background="{DynamicResource BgDark}">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="60"/>
+            <RowDefinition Height="64"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="38"/>
         </Grid.RowDefinitions>
 
-        <!-- TOP BAR (HEADER) -->
-        <Border Grid.Row="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,0">
+        <!-- TOP BAR (HEADER) - Modern Volt / TailAdmin Header -->
+        <Border Grid.Row="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -36,32 +36,55 @@
 
                 <!-- Left Title & Logo -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Source="Resources/Logo/logo.png" Width="38" Height="38" Stretch="Uniform"
-                           VerticalAlignment="Top" Margin="0,0,24,0"/>
-                    <StackPanel VerticalAlignment="Top">
-                        <TextBlock Text="MODERN WIGIDASH" FontSize="16" FontWeight="Bold" Foreground="White"/>
-                        <TextBlock Text="Free-Form Canvas" FontSize="11" Foreground="{DynamicResource AccentBlue}"/>
+                    <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,14,0">
+                        <Image Source="Resources/Logo/logo.png" Width="28" Height="28" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="MODERN WIGIDASH" FontSize="15" FontWeight="ExtraBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+                            <Border CornerRadius="5" Background="{DynamicResource M3PrimaryContainer}" BorderBrush="{DynamicResource M3Primary}" BorderThickness="1" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="v0.7.0" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource M3OnPrimaryContainer}"/>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="Hardware Canvas Studio" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0"/>
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Right Mode Toggles & USB Badge -->
+                <!-- Right Mode Toggles, Updates & Settings -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="1" Height="24" Background="{DynamicResource BorderBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                     <!-- Update button: hidden until an update is available (UpdateService) -->
-                    <Button x:Name="UpdateButton" Visibility="Collapsed" Margin="0,0,16,0" Padding="6"
+                    <Button x:Name="UpdateButton" Visibility="Collapsed" Margin="0,0,14,0" Padding="8,6"
                             ToolTip="Check for updates" Click="UpdateButton_Click"
-                            Background="Transparent" BorderThickness="0"
-                            Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
-                        <Path x:Name="UpdateIconPath" Width="18" Height="18" Stretch="Uniform"
+                            Style="{StaticResource SecondaryButton}">
+                        <Path x:Name="UpdateIconPath" Width="16" Height="16" Stretch="Uniform"
                               Fill="{DynamicResource M3Primary}"/>
                     </Button>
-                    <CheckBox x:Name="ChkSnapToGrid" Content="⚡ Snap to Grid" FontSize="13" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed"/>
-                    <CheckBox x:Name="ChkEditMode" Content="🎨 Edit Mode" FontSize="13" IsChecked="True" Foreground="White" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed"/>
-                    <Button x:Name="BtnSettings" Content="⚙️ Settings" FontSize="13" Padding="12,6" Margin="0,0,16,0" Click="BtnSettings_Click"/>
-                    <Border x:Name="UsbBadgeBorder" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,6">
-                        <StackPanel Orientation="Horizontal">
+
+                    <CheckBox x:Name="ChkSnapToGrid" Style="{StaticResource ToggleSwitchStyle}" IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,0" Checked="ChkSnapToGrid_Changed" Unchecked="ChkSnapToGrid_Changed">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Path Data="{StaticResource IconGrid}" Width="13" Height="13" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Snap to Grid" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+                    <CheckBox x:Name="ChkEditMode" Style="{StaticResource ToggleSwitchStyle}" IsChecked="True" VerticalAlignment="Center" Margin="0,0,20,0" Checked="ChkEditMode_Changed" Unchecked="ChkEditMode_Changed">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Path Data="{StaticResource IconEdit}" Width="13" Height="13" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Edit Mode" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </CheckBox>
+
+                    <Button x:Name="BtnSettings" Style="{StaticResource SecondaryButton}" Padding="14,7" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0" Click="BtnSettings_Click">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Path Data="{StaticResource IconSettings}" Width="13" Height="13" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- USB Connection Pill (Matches Settings Pill) -->
+                    <Border x:Name="UsbBadgeBorder" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="14,7" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse x:Name="UsbStatusDot" Width="8" Height="8" Fill="{DynamicResource DangerBorder}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource M3Primary}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="TxtUsbStatus" Text="WigiDash" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -71,28 +94,30 @@
         <!-- MAIN 3-COLUMN WORKSPACE -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="300"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="340"/>
             </Grid.ColumnDefinitions>
 
             <!-- LEFT COLUMN: WIDGET CATALOG / DRAWER -->
             <Border Grid.Column="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
-                <Grid Margin="14">
+                <Grid Margin="16,14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="🗂️ WIDGET CATALOG" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,10"/>
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <TextBlock Text="WIDGET CATALOG" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                        <Border HorizontalAlignment="Right" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="8,2">
+                            <TextBlock Text="Ready" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}"/>
+                        </Border>
+                    </Grid>
                     
-                    <TextBox x:Name="TxtSearchCatalog" Grid.Row="1" Margin="0,0,0,12" TextChanged="TxtSearchCatalog_TextChanged"/>
+                    <TextBox x:Name="TxtSearchCatalog" Grid.Row="1" Margin="0,0,0,14" TextChanged="TxtSearchCatalog_TextChanged"/>
 
-                    <!-- ListBox, not ItemsControl: a plain ItemsControl exposes each data item as a
-                         leaf DataItem UIA peer that never bridges to the template's children, so the
-                         row's button is invisible to automation; a ListBoxItem container peer does
-                         expose them. The no-op item template keeps the rows visually unchanged. -->
+                    <!-- ListBox container for widget catalog items -->
                     <ListBox x:Name="ListCatalog" Grid.Row="2" Background="Transparent" BorderThickness="0"
                              VirtualizingStackPanel.IsVirtualizing="False"
                              ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -112,7 +137,7 @@
                         </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,10" Padding="12">
+                                <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Margin="0,0,0,10" Padding="14,12">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -121,15 +146,20 @@
                                         </Grid.RowDefinitions>
 
                                         <!-- Header: Name -->
-                                        <TextBlock Grid.Row="0" Text="{Binding DisplayName}" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Row="0" Text="{Binding DisplayName}" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
 
-                                        <!-- Category / Author -->
-                                        <TextBlock Grid.Row="1" Text="{Binding Category}" FontSize="11" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,8"/>
+                                        <!-- Category / Author Tag -->
+                                        <Border Grid.Row="1" Background="{DynamicResource ControlHover}" CornerRadius="4" Padding="6,2" HorizontalAlignment="Left" Margin="0,6,0,10">
+                                            <TextBlock Text="{Binding Category}" FontSize="10" FontWeight="Medium" Foreground="{DynamicResource TextSecondary}"/>
+                                        </Border>
 
-                                        <!-- Action Button: the unique per-row AutomationId lets automation
-                                             address the button directly (a display-name needle can no
-                                             longer hit a page tab instead) -->
-                                        <Button Grid.Row="2" Content="+ Place on Canvas" AutomationProperties.AutomationId="{Binding PluginId, StringFormat=BtnPlace_{0}}" Click="BtnPlaceWidget_Click" Tag="{Binding PluginId}"/>
+                                        <!-- Action Button: unique per-row AutomationId -->
+                                        <Button Grid.Row="2" Style="{StaticResource AccentButton}" AutomationProperties.AutomationId="{Binding PluginId, StringFormat=BtnPlace_{0}}" Click="BtnPlaceWidget_Click" Tag="{Binding PluginId}" HorizontalAlignment="Stretch" Padding="8,5" FontSize="11">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Path Data="{StaticResource IconPlus}" Width="11" Height="11" Stretch="Uniform" Fill="White" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Place on Canvas" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -141,25 +171,23 @@
             <!-- CENTER COLUMN: SKIA CANVAS PREVIEW -->
             <Grid Grid.Column="1" Background="{DynamicResource BgDark}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="40"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,0">
-                    <Grid>
-                        <TextBlock Text="🖥️ LIVE WIGIDASH PREVIEW (1016 x 592)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
-                        <TextBlock Text="💡 Tip: Drag widgets freely or toggle Snap to Grid!" FontSize="11" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                    </Grid>
+                <!-- Studio Canvas Header Sub-bar -->
+                <Border Grid.Row="0" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Path Data="{StaticResource IconInfo}" Width="13" Height="13" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Tip: Drag widgets freely or toggle Snap to Grid" FontSize="11" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                    </StackPanel>
                 </Border>
 
                 <!-- 1:1 preview of the exact 1016x592 hardware screen resolution (no scaling => crisp text) -->
                 <Border x:Name="PreviewFrame" Grid.Row="1" Width="1016" Height="592" Margin="24"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Background="{DynamicResource BgDark}" BorderThickness="0" CornerRadius="6">
-                    <Border.Effect>
-                        <DropShadowEffect Color="#870000" BlurRadius="25" ShadowDepth="0" Opacity="0.45"/>
-                    </Border.Effect>
+                        Background="{DynamicResource BgDark}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8">
                     <skia:SKElement x:Name="SkiaCanvas" PaintSurface="SkiaCanvas_PaintSurface"
                                     MouseDown="SkiaCanvas_MouseDown"
                                     MouseMove="SkiaCanvas_MouseMove"
@@ -167,7 +195,7 @@
                 </Border>
 
                 <!-- Page tabs: relocated from the top header to under the canvas -->
-                <Border Grid.Row="2" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8">
+                <Border Grid.Row="2" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -178,28 +206,35 @@
                                       HorizontalAlignment="Center">
                             <StackPanel x:Name="PanelPageTabs" Orientation="Horizontal"/>
                         </ScrollViewer>
-                        <Button x:Name="BtnAddPage" Grid.Column="1" Content="+ Add Page" Margin="12,0,0,0" Padding="12,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click"/>
+                        <Button x:Name="BtnAddPage" Grid.Column="1" Style="{StaticResource SecondaryButton}" Margin="14,0,0,0" Padding="14,6" FontSize="12" VerticalAlignment="Center" Click="BtnAddPage_Click">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Path Data="{StaticResource IconPlus}" Width="12" Height="12" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Add Page" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </Border>
             </Grid>
 
             <!-- RIGHT COLUMN: PROPERTY INSPECTOR -->
             <Border x:Name="InspectorPanel" Grid.Column="2" Background="{DynamicResource BgPanel}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,0,0,0">
-                <Grid Margin="14">
+                <Grid Margin="16,14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="⚙️ WIDGET PROPERTIES" FontSize="13" FontWeight="Bold" Foreground="White" Margin="0,0,0,12"/>
+                    <TextBlock Grid.Row="0" Text="WIDGET PROPERTIES" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,14"/>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="PanelProperties">
                             <!-- Empty State -->
-                            <Border x:Name="PanelEmptyInspector" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="20" Margin="0,20,0,0">
+                            <Border x:Name="PanelEmptyInspector" Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="24" Margin="0,20,0,0">
                                 <StackPanel HorizontalAlignment="Center">
-                                    <TextBlock Text="🔍" FontSize="36" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-                                    <TextBlock Text="No Widget Selected" FontSize="14" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                                    <Border Width="56" Height="56" CornerRadius="28" Background="{DynamicResource ControlHover}" HorizontalAlignment="Center" Margin="0,0,0,14">
+                                        <Path Data="{StaticResource IconSearch}" Width="22" Height="22" Stretch="Uniform" Fill="{DynamicResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <TextBlock Text="No Widget Selected" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" HorizontalAlignment="Center" Margin="0,0,0,6"/>
                                     <TextBlock Text="Click or tap any widget on the center canvas to inspect and customize its settings in real time." FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
                                 </StackPanel>
                             </Border>
@@ -207,15 +242,25 @@
                             <!-- Active Inspector (Hidden when empty) -->
                             <StackPanel x:Name="PanelActiveInspector" Visibility="Collapsed">
                                 <!-- Selected Widget Header -->
-                                <Border Background="{DynamicResource M3PrimaryContainer}" BorderBrush="{DynamicResource AccentRed}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtInspName" Text="Widget Name" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource M3OnPrimaryContainer}"/>
-                                    </StackPanel>
+                                <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="0,0,0,16">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="34" Height="34" CornerRadius="8" Background="{DynamicResource M3PrimaryContainer}" Margin="0,0,10,0" VerticalAlignment="Center">
+                                            <Path Data="{StaticResource IconLayers}" Width="16" Height="16" Stretch="Uniform" Fill="{DynamicResource M3OnPrimaryContainer}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="SELECTED WIDGET" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}"/>
+                                            <TextBlock x:Name="TxtInspName" Text="Widget Name" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                    </Grid>
                                 </Border>
 
                                 <!-- Transform Properties -->
-                                <TextBlock Text="📐 POSITION &amp; TRANSFORM" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource M3Primary}" Margin="0,0,0,8"/>
-                                <Grid Margin="0,0,0,12">
+                                <TextBlock Text="POSITION &amp; TRANSFORM" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,10"/>
+                                <Grid Margin="0,0,0,14">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
@@ -229,50 +274,55 @@
 
                                     <!-- X / Y -->
                                     <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,4,8">
-                                        <TextBlock Text="X Position (px)" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="X Position (px)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtPosX" TextChanged="Transform_Changed"/>
                                     </StackPanel>
                                     <StackPanel Grid.Row="0" Grid.Column="1" Margin="4,0,0,8">
-                                        <TextBlock Text="Y Position (px)" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Y Position (px)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtPosY" TextChanged="Transform_Changed"/>
                                     </StackPanel>
 
                                     <!-- Width / Height -->
                                     <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,4,8">
-                                        <TextBlock Text="Width (px)" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Width (px)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtWidth" TextChanged="Transform_Changed"/>
                                     </StackPanel>
                                     <StackPanel Grid.Row="1" Grid.Column="1" Margin="4,0,0,8">
-                                        <TextBlock Text="Height (px)" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Height (px)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtHeight" TextChanged="Transform_Changed"/>
                                     </StackPanel>
 
                                     <!-- ZIndex / Rotation -->
                                     <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,4,8">
-                                        <TextBlock Text="Z-Index Layer" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Z-Index Layer" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtZIndex" TextChanged="Transform_Changed"/>
                                     </StackPanel>
                                     <StackPanel Grid.Row="2" Grid.Column="1" Margin="4,0,0,8">
-                                        <TextBlock Text="Rotation (°)" FontSize="11" Foreground="White" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Rotation (°)" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
                                         <TextBox x:Name="TxtRotation" TextChanged="Transform_Changed"/>
                                     </StackPanel>
 
                                     <!-- Opacity Slider -->
-                                    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,8">
-                                        <Grid>
-                                            <TextBlock Text="Layer Opacity" FontSize="11" Foreground="White"/>
-                                            <TextBlock x:Name="TxtOpacityVal" Text="100%" FontSize="11" Foreground="{DynamicResource M3Primary}" HorizontalAlignment="Right"/>
+                                    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Margin="0,4,0,8">
+                                        <Grid Margin="0,0,0,4">
+                                            <TextBlock Text="Layer Opacity" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}"/>
+                                            <TextBlock x:Name="TxtOpacityVal" Text="100%" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource M3Primary}" HorizontalAlignment="Right"/>
                                         </Grid>
-                                        <Slider x:Name="SliderOpacity" Minimum="0" Maximum="1.0" Value="1.0" ValueChanged="SliderOpacity_ValueChanged" Margin="0,6,0,0"/>
+                                        <Slider x:Name="SliderOpacity" Minimum="0" Maximum="1.0" Value="1.0" ValueChanged="SliderOpacity_ValueChanged" Margin="0,2,0,0"/>
                                     </StackPanel>
                                 </Grid>
 
                                 <!-- Custom Properties Container -->
-                                <TextBlock Text="🛠️ WIDGET SETTINGS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource M3Primary}" Margin="0,8,0,8"/>
+                                <TextBlock Text="WIDGET SETTINGS" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource TextSecondary}" Margin="0,8,0,10"/>
                                 <StackPanel x:Name="PanelCustomProperties" Margin="0,0,0,20"/>
 
                                 <!-- Delete Button -->
-                                <Button x:Name="BtnDeleteWidget" Content="🗑️ Remove Widget from Canvas" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Foreground="White" FontWeight="Bold" Margin="0,10,0,0" Click="BtnDeleteWidget_Click"/>
+                                <Button x:Name="BtnDeleteWidget" Style="{StaticResource DestructiveButton}" Margin="0,10,0,0" Click="BtnDeleteWidget_Click">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Path Data="{StaticResource IconTrash}" Width="13" Height="13" Stretch="Uniform" Fill="White" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Remove Widget from Canvas" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
@@ -281,7 +331,7 @@
         </Grid>
 
         <!-- BOTTOM STATUS BAR -->
-        <Border Grid.Row="2" Background="{DynamicResource StatusBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+        <Border Grid.Row="2" Background="{DynamicResource StatusBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="20,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -289,11 +339,22 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="TxtActiveCount" Text="Active Widgets: 0" FontSize="11" Foreground="{DynamicResource AccentGreen}"/>
+                    <!-- Active Widgets Pill (Matches Settings Pill) -->
+                    <Border Background="{DynamicResource BgCard}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,5" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource AccentGreen}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="TxtActiveCount" Text="Active Widgets: 0" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="BtnClearCanvas" Content="🧹 Clear Canvas" Width="120" Height="26" Margin="4,0" FontSize="11" Background="{DynamicResource DangerBackground}" BorderBrush="{DynamicResource DangerBorder}" Click="BtnClear_Click"/>
+                    <Button x:Name="BtnClearCanvas" Style="{StaticResource DestructiveButton}" Height="28" Padding="12,4" FontSize="11" Click="BtnClear_Click">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Path Data="{StaticResource IconTrash}" Width="12" Height="12" Stretch="Uniform" Fill="White" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Clear Canvas" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

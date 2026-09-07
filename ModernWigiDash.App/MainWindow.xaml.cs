@@ -215,7 +215,11 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // The record-argument fallback rides the constructor body (a field
         // initializer cannot see the arguments), like the api seams above.
         // The store's log seam references the window's hotkey DiagLog.
-        _appSettingsStore = options.AppSettingsStore ?? new AppSettingsStore(log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
+        string? settingsDir = Path.GetDirectoryName(options.ProfilePath);
+        string settingsPath = !string.IsNullOrEmpty(settingsDir)
+            ? Path.Combine(settingsDir, AppSettingsStore.FileName)
+            : AppSettingsStore.DefaultPath();
+        _appSettingsStore = options.AppSettingsStore ?? new AppSettingsStore(settingsPath, log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
         // The settings hub's commit module (ADR-0018/0019): the five write-throughs
         // behind ISettingsHubHost, owned here instead of scattered across the window.
         // Live providers read whatever ProfileLoad / AppSettings have loaded.

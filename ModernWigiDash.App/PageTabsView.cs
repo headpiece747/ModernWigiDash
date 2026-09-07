@@ -80,6 +80,12 @@ internal sealed class PageTabsView
         _scrollViewer.ScrollToHorizontalOffset(_scrollViewer.HorizontalOffset - e.Delta);
     }
 
+    private static readonly Geometry FallbackEdit =
+        Geometry.Parse("M20.975 3.025A3.48 3.48 0 0 0 18.5 2a3.48 3.48 0 0 0-2.475 1.025l-13.17 13.17-.845 4.93a.74.74 0 0 0 .21.655c.14.14.335.22.53.22.04 0 .085 0 .125-.01l4.93-.845 13.17-13.17A3.48 3.48 0 0 0 22 5.5a3.48 3.48 0 0 0-1.025-2.475Zm-13.89 16.72-3.415.585.585-3.415 9.3-9.3 2.83 2.83-9.3 9.3Zm10.36-10.36-2.83-2.83 2.47-2.47c.755-.755 2.07-.755 2.83 0a2.002 2.002 0 0 1 0 2.83l-2.47 2.47Z");
+
+    private static readonly Geometry FallbackClose =
+        Geometry.Parse("M18.3 5.71a.996.996 0 0 0-1.41 0L12 10.59 7.11 5.7A.996.996 0 1 0 5.7 7.11L10.59 12 5.7 16.89a.996.996 0 1 0 1.41 1.41L12 13.41l4.89 4.89a.996.996 0 1 0 1.41-1.41L13.41 12l4.89-4.89c.38-.38.38-1.02 0-1.4Z");
+
     /// <summary>One tab: the page button (accent when active) plus the rename
     /// icon button, and the close icon button when deletion is allowed.</summary>
     private Grid BuildTabContainer(PageTabItem tab, PageTabVisual visual)
@@ -88,7 +94,7 @@ internal sealed class PageTabsView
 
         var pageButton = new Button
         {
-            Content = $"📄 {tab.PageName}",
+            Content = tab.PageName,
             FontSize = PageTabVisual.TabFontSize,
             Padding = visual.TabPadding,
             Style = visual.IsActive ? (Style)_findResource("AccentButton")! : (Style)_findResource(typeof(Button))!,
@@ -98,7 +104,7 @@ internal sealed class PageTabsView
         container.Children.Add(pageButton);
 
         container.Children.Add(BuildIconButton(
-            content: "✏️",
+            geometryKey: "IconEdit",
             toolTip: "Rename page",
             margin: visual.RenameIconMargin,
             isActive: visual.IsActive,
@@ -108,8 +114,8 @@ internal sealed class PageTabsView
         if (visual.CanDelete)
         {
             container.Children.Add(BuildIconButton(
-                content: "✕",
-                toolTip: null,
+                geometryKey: "IconClose",
+                toolTip: "Delete page",
                 margin: visual.CloseIconMargin,
                 isActive: visual.IsActive,
                 automationId: $"PageTabDelete_{tab.Index}",
@@ -121,21 +127,33 @@ internal sealed class PageTabsView
 
     /// <summary>The one icon-button builder shared by the rename and close
     /// buttons: identical 20×20 right-aligned geometry, differing only in
-    /// content, tooltip, margin, and click action.</summary>
+    /// geometry, tooltip, margin, and click action.</summary>
     private Button BuildIconButton(
-        string content,
+        string geometryKey,
         string? toolTip,
         Thickness margin,
         bool isActive,
         string? automationId = null,
         RoutedEventHandler onClick = null!)
     {
+        Geometry geom = (_findResource(geometryKey) as Geometry)
+            ?? (string.Equals(geometryKey, "IconClose", StringComparison.Ordinal) ? FallbackClose : FallbackEdit);
+
+        var path = new System.Windows.Shapes.Path
+        {
+            Data = geom,
+            Width = 9,
+            Height = 9,
+            Stretch = Stretch.Uniform,
+            Fill = isActive ? Brushes.White : ((Brush?)_findResource("TextSecondary") ?? Brushes.Gray),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
         var button = new Button
         {
-            Content = content,
-            FontSize = PageTabVisual.IconFontSize,
+            Content = path,
             ToolTip = toolTip,
-            Foreground = isActive ? Brushes.White : (Brush)_findResource("TextSecondary")!,
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Width = PageTabVisual.IconSize,
