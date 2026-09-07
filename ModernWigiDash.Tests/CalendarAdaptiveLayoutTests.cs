@@ -155,4 +155,60 @@ public class CalendarAdaptiveLayoutTests
         int hitIndex = CalendarLayout.GetAction(geo, row3.MidX, geo.AgendaScrollAreaRect.Top + 5f, scrollOffset, out _);
         Assert.AreEqual(3, hitIndex);
     }
+
+    [TestMethod]
+    public void Compute_FullEditorial5x4_MonthGridGeometry_ThirtyFiveCells()
+    {
+        var bounds = new SKRect(0, 0, 1016, 592);
+        var geo = CalendarLayout.Compute(bounds, 2.46f, rowCount: 3, hasAllDay: true);
+
+        // The month-grid geometry is the one source of truth for the intra-panel
+        // cell math: 35 cells (7 columns x 5 rows), each with a center and an
+        // event-dot center, plus the weekday-header height the renderer and the
+        // touch path both read instead of re-deriving.
+        Assert.AreEqual(35, geo.MonthGrid.Cells.Count);
+        Assert.IsTrue(geo.MonthGrid.WeekdayHeaderHeight > 0f, "a weekday header is drawn above the cells");
+
+        foreach (MonthGridCell cell in geo.MonthGrid.Cells)
+        {
+            // Every cell sits inside the month grid rect.
+            Assert.IsTrue(geo.MonthGridRect.Contains(cell.Rect));
+            // The day-number center is inside its own cell.
+            Assert.IsTrue(cell.Rect.Contains(cell.Center.X, cell.Center.Y));
+            // The event dot sits below the day number (the marker's offset).
+            Assert.IsTrue(cell.DotCenter.Y > cell.Center.Y);
+        }
+    }
+
+    [TestMethod]
+    public void MonthGridGeometry_CellCenters_TileTheGridInSevenColumns()
+    {
+        var bounds = new SKRect(0, 0, 1016, 592);
+        var geo = CalendarLayout.Compute(bounds, 2.46f, rowCount: 3, hasAllDay: true);
+
+        IReadOnlyList<MonthGridCell> cells = geo.MonthGrid.Cells;
+        // Cells in the same column share an X; consecutive columns step right by
+        // the cell width (gridWidth / 7). This pins the tiling the renderer used
+        // to compute on its own.
+        float colStep = geo.MonthGridRect.Width / 7f;
+        for (int col = 0; col < 7; col++)
+        {
+            float expectedX = geo.MonthGridRect.Left + col * colStep + colStep / 2f;
+            for (int row = 0; row < 5; row++)
+            {
+                MonthGridCell cell = cells[row * 7 + col];
+                Assert.AreEqual(expectedX, cell.Center.X, 0.5f, $"cell ({row},{col}) center X tiles the grid");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void MonthGridGeometry_EmptyWhenNoGridRect()
+    {
+        // A mode without a month grid emits an empty geometry (no cells).
+        var bounds = new SKRect(0, 0, 203f, 148f);
+        var geo = CalendarLayout.Compute(bounds, 1.0f, rowCount: 0, hasAllDay: false);
+
+        Assert.AreEqual(0, geo.MonthGrid.Cells.Count);
+    }
 }

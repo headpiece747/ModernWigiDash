@@ -181,31 +181,30 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             DrawChevron(canvas, layout.NextChevronRect, ">", palette.Text, scale);
         }
 
-        // Weekday header & Month grid
+        // Weekday header & Month grid -- the cell geometry comes from the layout
+        // record (the one source of truth shared with the touch path), so the
+        // drawn cells and the hit-test cells can never drift apart.
         SKRect gridRect = layout.MonthGridRect;
-        if (!gridRect.IsEmpty && display.MonthGrid.Count == 35)
+        IReadOnlyList<MonthGridCell>? cells = layout.MonthGrid.Cells;
+        if (!gridRect.IsEmpty && display.MonthGrid.Count == 35 && cells is not null && cells.Count == 35)
         {
-            float weekdayH = 14f * scale;
-            float cellW = gridRect.Width / 7f;
             var wdFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 9f * scale);
             _textPaint.Color = palette.Text.WithAlpha(160);
             for (int c = 0; c < 7; c++)
             {
-                float cx = gridRect.Left + c * cellW + cellW / 2f;
+                SKPoint center = cells[c].Center;
                 float tw = FontHelper.MeasureTextWithFallback(WeekdayLabels[c], wdFont);
-                canvas.DrawTextWithFallback(WeekdayLabels[c], cx - tw / 2f, gridRect.Top + 10f * scale, wdFont, _textPaint);
+                canvas.DrawTextWithFallback(WeekdayLabels[c], center.X - tw / 2f, gridRect.Top + 10f * scale, wdFont, _textPaint);
             }
 
-            float gridY = gridRect.Top + weekdayH;
-            float cellH = (gridRect.Height - weekdayH) / 5f;
             var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 10f * scale);
 
             for (int i = 0; i < 35; i++)
             {
-                int col = i % 7;
-                int row = i / 7;
-                float cx = gridRect.Left + col * cellW + cellW / 2f;
-                float cy = gridY + row * cellH + cellH / 2f;
+                MonthGridCell cellGeo = cells[i];
+                float cx = cellGeo.Center.X;
+                float cy = cellGeo.Center.Y;
+                float cellH = cellGeo.Rect.Height;
                 MonthCell cell = display.MonthGrid[i];
 
                 if (!cell.IsCurrentMonth)
@@ -221,20 +220,20 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 if (cell.IsToday)
                 {
                     _fillPaint.Color = palette.Accent;
-                    canvas.DrawCircle(cx, cy, Math.Min(cellW, cellH) * 0.42f, _fillPaint);
+                    canvas.DrawCircle(cx, cy, Math.Min(cellGeo.Rect.Width, cellH) * 0.42f, _fillPaint);
                     _textPaint.Color = (palette.Accent.Red * 0.299 + palette.Accent.Green * 0.587 + palette.Accent.Blue * 0.114) > 160 ? new SKColor(20, 20, 25) : SKColors.White;
                 }
                 else if (cell.IsViewed)
                 {
                     _strokePaint.Color = palette.Accent;
                     _strokePaint.StrokeWidth = 1.5f * scale;
-                    canvas.DrawCircle(cx, cy, Math.Min(cellW, cellH) * 0.40f, _strokePaint);
+                    canvas.DrawCircle(cx, cy, Math.Min(cellGeo.Rect.Width, cellH) * 0.40f, _strokePaint);
                     _textPaint.Color = palette.Text;
                 }
                 else if (cell.HasEvents)
                 {
                     _fillPaint.Color = palette.Text.WithAlpha(35);
-                    canvas.DrawCircle(cx, cy, Math.Min(cellW, cellH) * 0.38f, _fillPaint);
+                    canvas.DrawCircle(cx, cy, Math.Min(cellGeo.Rect.Width, cellH) * 0.38f, _fillPaint);
                     _textPaint.Color = palette.Text;
                 }
                 else
@@ -249,12 +248,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 if (cell.HasEvents)
                 {
                     _fillPaint.Color = cell.IsToday ? _textPaint.Color : palette.Accent;
-                    canvas.DrawCircle(cx, cy + cellH * 0.32f, 1.5f * scale, _fillPaint);
+                    canvas.DrawCircle(cellGeo.DotCenter.X, cellGeo.DotCenter.Y, 1.5f * scale, _fillPaint);
                 }
                 else if (cell.IsNotable)
                 {
                     _fillPaint.Color = palette.Text.WithAlpha(140);
-                    canvas.DrawCircle(cx, cy + cellH * 0.32f, 1.2f * scale, _fillPaint);
+                    canvas.DrawCircle(cellGeo.DotCenter.X, cellGeo.DotCenter.Y, 1.2f * scale, _fillPaint);
                 }
             }
         }

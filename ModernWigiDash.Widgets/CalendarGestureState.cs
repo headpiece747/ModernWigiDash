@@ -274,29 +274,29 @@ internal sealed class CalendarGestureState
         if (rect.IsEmpty || _display?.MonthGrid.Count != 35)
             return false;
 
-        bool hasWeekdayHeader = !_layout.MonthCardRect.IsEmpty;
-        float weekdayH = hasWeekdayHeader ? 14f * (_layout.Pad / CalendarLayout.PadDesign) : 0f;
-        float gridTop = rect.Top + weekdayH;
-        float gridH = rect.Height - weekdayH;
-
-        if (p.Y < gridTop || p.Y > rect.Bottom || p.X < rect.Left || p.X > rect.Right)
+        // The cell geometry comes from the layout record (the one source of truth
+        // shared with the render path), so a tap resolves against the same cells
+        // the canvas drew -- no re-derived weekday-header height or cell pitch. A
+        // null or short cell list means the grid was not drawn (a mode without a
+        // month grid), so the hit-test is a no-op.
+        IReadOnlyList<MonthGridCell>? cells = _layout.MonthGrid.Cells;
+        if (cells is null || cells.Count != 35)
             return false;
 
-        float cellW = rect.Width / 7f;
-        float cellH = gridH / 5f;
+        for (int i = 0; i < 35; i++)
+        {
+            MonthGridCell cellGeo = cells[i];
+            if (!cellGeo.Rect.Contains(p.X, p.Y))
+                continue;
 
-        int col = (int)((p.X - rect.Left) / cellW);
-        int row = (int)((p.Y - gridTop) / cellH);
-        if (col < 0 || col >= 7 || row < 0 || row >= 5)
-            return false;
+            MonthCell cell = _display.MonthGrid[i];
+            if (!cell.IsCurrentMonth || cell.Day <= 0)
+                return false;
 
-        int index = row * 7 + col;
-        MonthCell cell = _display.MonthGrid[index];
-        if (!cell.IsCurrentMonth || cell.Day <= 0)
-            return false;
-
-        day = cell.Day;
-        return true;
+            day = cell.Day;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>Opens a meeting link through the shell-open seam, after the

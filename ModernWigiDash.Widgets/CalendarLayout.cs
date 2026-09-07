@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -19,6 +21,25 @@ public enum CalendarViewMode
 }
 
 /// <summary>
+/// The month-grid's intra-panel geometry, computed once per frame by
+/// <see cref="CalendarLayout"/> so the draw path and the touch path share one
+/// source of truth. Carries the weekday-header height and, for each of the 35
+/// grid cells, its center (the day number's anchor), its event-dot center (the
+/// small marker below the number), and its full rect. Before this record, the
+/// renderer re-derived cell size, weekday-header height, circle radii, and dot
+/// offsets on its own while the gesture state re-derived them again for
+/// hit-testing -- three copies of the same numbers with no pin keeping them in
+/// agreement. Now both consumers read the record the layout emitted.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct MonthGridCell(SKPoint Center, SKPoint DotCenter, SKRect Rect);
+
+/// <summary>The month-grid's per-frame geometry: the weekday-header height plus
+/// the 35 cell records (empty when the grid is not drawn).</summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct MonthGridGeometry(float WeekdayHeaderHeight, IReadOnlyList<MonthGridCell> Cells);
+
+/// <summary>
 /// The calendar widget's hit geometry, computed once per frame from the
 /// placement bounds and the display-facts counts -- the same inputs the render
 /// path uses, so the drawn rows and the touch targets can never drift apart.
@@ -38,7 +59,8 @@ public readonly record struct CalendarGeometry(
     SKRect NotableDatesRect = default,
     SKRect PrevChevronRect = default,
     SKRect NextChevronRect = default,
-    SKRect AgendaScrollAreaRect = default);
+    SKRect AgendaScrollAreaRect = default,
+    MonthGridGeometry MonthGrid = default);
 
 /// <summary>
 /// Pure layout rules for the calendar widget, supporting an adaptive multi-view
@@ -144,6 +166,39 @@ public static class CalendarLayout
         };
     }
 
+    /// <summary>
+    /// Builds the month-grid's intra-panel geometry from the grid rect and
+    /// whether a weekday header row is drawn above the cells. This is the one
+    /// spelling of the cell math (7 columns x 5 rows, the weekday-header height,
+    /// the per-cell center and event-dot offset) that both the render path and
+    /// the touch path read, so the numbers cannot drift between them. Returns an
+    /// empty record when the grid rect is empty.
+    /// </summary>
+    private static MonthGridGeometry BuildMonthGrid(SKRect gridRect, float scale, bool hasWeekdayHeader)
+    {
+        if (gridRect.IsEmpty)
+            return new MonthGridGeometry(0f, []);
+
+        float weekdayH = hasWeekdayHeader ? 14f * scale : 0f;
+        float cellW = gridRect.Width / 7f;
+        float gridTop = gridRect.Top + weekdayH;
+        float cellH = (gridRect.Height - weekdayH) / 5f;
+
+        var cells = new List<MonthGridCell>(35);
+        for (int i = 0; i < 35; i++)
+        {
+            int col = i % 7;
+            int row = i / 7;
+            SKPoint center = new(gridRect.Left + col * cellW + cellW / 2f, gridTop + row * cellH + cellH / 2f);
+            // The event/notable dot sits below the day number (the renderer's
+            // former cy + cellH * 0.32f offset), centered on the cell.
+            SKPoint dotCenter = new(center.X, center.Y + cellH * 0.32f);
+            SKRect cellRect = new(gridRect.Left + col * cellW, gridTop + row * cellH, gridRect.Left + (col + 1) * cellW, gridTop + (row + 1) * cellH);
+            cells.Add(new MonthGridCell(center, dotCenter, cellRect));
+        }
+        return new MonthGridGeometry(weekdayH, cells);
+    }
+
     private static CalendarGeometry ComputeMinimalDateCard1x1(SKRect bounds, float scale)
     {
         float pad = 8f * scale;
@@ -167,7 +222,8 @@ public static class CalendarLayout
             SKRect.Empty,
             SKRect.Empty,
             SKRect.Empty,
-            SKRect.Empty);
+            SKRect.Empty,
+            new MonthGridGeometry(0f, []));
     }
 
     private static CalendarGeometry ComputeClassic(SKRect bounds, float scale, int rowCount, bool hasAllDay)
@@ -219,7 +275,15 @@ public static class CalendarLayout
             rowRects,
             gutterW,
             pad,
-            CalendarViewMode.CompactPoster2x3);
+            CalendarViewMode.CompactPoster2x3,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            BuildMonthGrid(monthGridRect, scale, false));
     }
 
     private static CalendarGeometry ComputeFullEditorial(SKRect bounds, float scale, int rowCount)
@@ -308,7 +372,8 @@ public static class CalendarLayout
             notableDatesRect,
             prevChevronRect,
             nextChevronRect,
-            agendaScrollAreaRect);
+            agendaScrollAreaRect,
+            BuildMonthGrid(monthGridRect, scale, true));
     }
 
     private static CalendarGeometry ComputeSplitBanner(SKRect bounds, float scale, int rowCount)
@@ -380,7 +445,8 @@ public static class CalendarLayout
             notableDatesRect,
             prevChevronRect,
             nextChevronRect,
-            agendaScrollAreaRect);
+            agendaScrollAreaRect,
+            BuildMonthGrid(monthGridRect, scale, true));
     }
 
     private static CalendarGeometry ComputeCompactPoster(SKRect bounds, float scale, int rowCount)
@@ -434,7 +500,8 @@ public static class CalendarLayout
             notableDatesRect,
             prevChevronRect,
             nextChevronRect,
-            SKRect.Empty);
+            SKRect.Empty,
+            BuildMonthGrid(monthGridRect, scale, true));
     }
 
     /// <summary>
