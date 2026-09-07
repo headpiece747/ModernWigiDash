@@ -163,12 +163,6 @@ internal sealed class UpdateService
         RecoverInterruptedSwap(installDir);
     }
 
-    /// <summary>One check phase: downloads the latest-release metadata and
-    /// parses it against the current version. The protocol orders itself:
-    /// the network read precedes the parse, so a null result is unambiguous
-    /// (offline or up-to-date).</summary>
-    public Task<UpdateInfo?> RunCheckPhase(CancellationToken ct = default) => CheckForUpdateAsync(ct);
-
     /// <summary>One install phase: downloads the slim zip, verifies SHA-256,
     /// extracts to staged/{version}, writes the cmd, and launches the updater.
     /// The protocol orders itself: stage-before-launch, so a failed launch

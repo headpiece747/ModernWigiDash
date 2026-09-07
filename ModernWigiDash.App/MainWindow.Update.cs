@@ -48,7 +48,7 @@ public partial class MainWindow
 
         try
         {
-            var info = await _updateService.RunCheckPhase();
+            var info = await _updateService.CheckForUpdateAsync();
             // The flow owns the transition + tooltip spelling; a null result
             // (up-to-date/offline/failed) is silent — no render.
             var render = _updateFlow.CheckResult(info);

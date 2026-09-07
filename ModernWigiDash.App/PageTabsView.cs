@@ -46,12 +46,16 @@ internal sealed class PageTabsView
     }
 
     /// <summary>Rebuilds the whole tab strip from the profile and brings the
-    /// active tab into view.</summary>
+    /// active tab into view. The per-tab facts (active index, delete-only-when-
+    /// more-than-one-page via <see cref="ProfileOps.CanDeletePage"/>) are derived
+    /// here so the tab strip and the delete operation can never drift.</summary>
     public void Rebuild(ProfileLayout profile)
     {
         _panel.Children.Clear();
-        foreach (var tab in PageTabsViewModel.Build(profile))
+        bool canDelete = ProfileOps.CanDeletePage(profile);
+        for (int i = 0; i < profile.Pages.Count; i++)
         {
+            var tab = new PageTabItem(profile.Pages[i].PageName, i, i == profile.ActivePageIndex, canDelete);
             _panel.Children.Add(BuildTabContainer(tab, new PageTabVisual(tab)));
         }
 
