@@ -248,3 +248,8 @@
 2026-09-06T23:23:26Z	73c0c3d	manual	ok	0	0	ok	2154	0	ok
 2026-09-06T23:24:30Z	31dd918	manual	ok	0	0	ok	2154	0	ok
 2026-09-07T00:17:12Z	43d7cea	manual	ok	0	0	ok	2154	0	ok
+2026-09-07T00:48:18Z	8bd84ae	Adaptive calendar redesign	ok	0	0	ok	2170	0	ok
+2026-09-07T01:01:16Z	8bd84ae	Adaptive calendar production hardening	ok	0	0	ok	2170	0	ok
+2026-09-07T01:34:56Z	8bd84ae	Fix calendar duplicate texts negative dates overlapping and screen fit	FAIL	57	8	SKIP	n/a	n/a	SKIP
+2026-09-07T01:36:22Z	8bd84ae	Fix calendar duplicate texts negative dates overlapping and screen fit	ok	0	0	ok	2171	0	ok
+2026-09-07T02:02:36Z	8bd84ae	Agenda scroll 1x1 date card and left sidebar polish	ok	0	0	ok	2177	0	ok

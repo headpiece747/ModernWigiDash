@@ -1,6 +1,24 @@
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
+/// The visual layout mode for the adaptive calendar widget.
+/// </summary>
+public enum CalendarViewMode
+{
+    /// <summary>Full canvas editorial layout (5x4, 1016x592): left vertical typographic strip, center poster month card, right live agenda panel.</summary>
+    FullEditorial5x4,
+
+    /// <summary>Wide split banner layout (4x2, 812x296): poster month card on left, upcoming agenda on right.</summary>
+    SplitBanner4x2,
+
+    /// <summary>Compact poster layout (2x3, 406x444): single-month poster card with high-contrast matrix and bottom upcoming event summary.</summary>
+    CompactPoster2x3,
+
+    /// <summary>Minimal 1x1 date card: color block with year, month, and day currently selected.</summary>
+    MinimalDateCard1x1,
+}
+
+/// <summary>
 /// The calendar widget's hit geometry, computed once per frame from the
 /// placement bounds and the display-facts counts -- the same inputs the render
 /// path uses, so the drawn rows and the touch targets can never drift apart.
@@ -12,16 +30,20 @@ public readonly record struct CalendarGeometry(
     SKRect AllDayRect,
     IReadOnlyList<SKRect> RowRects,
     float TimeGutterWidth,
-    float Pad);
+    float Pad,
+    CalendarViewMode Mode = CalendarViewMode.CompactPoster2x3,
+    SKRect LeftStripRect = default,
+    SKRect MonthCardRect = default,
+    SKRect AgendaRect = default,
+    SKRect NotableDatesRect = default,
+    SKRect PrevChevronRect = default,
+    SKRect NextChevronRect = default,
+    SKRect AgendaScrollAreaRect = default);
 
 /// <summary>
-/// Pure layout rules for the calendar widget, modeled after a "Today" agenda
-/// view with a mini month grid: a top band holding the date header (left) and
-/// the 5×7 month grid (right), an optional all-day strip below it, then a
-/// stack of timed-event rows. Each row has a fixed-width time gutter on the
-/// left and the title area to its right. The active/now event is marked with a
-/// left accent bar (drawn by the render path), not a separate hero band, so
-/// rows stay evenly spaced and never overlap.
+/// Pure layout rules for the calendar widget, supporting an adaptive multi-view
+/// architecture (5x4 Full Editorial, 4x2 Split Banner, 2x3 Compact Poster)
+/// derived from widget bounds and canvas constraints.
 /// </summary>
 public static class CalendarLayout
 {
@@ -31,20 +53,20 @@ public static class CalendarLayout
     /// <summary>The design-space height the scale is derived from.</summary>
     public const float DesignHeight = 240f;
 
-    /// <summary>The top band's design height (header + month grid).</summary>
+    /// <summary>The top band's design height (header + month grid) in classic mode.</summary>
     private const float TopBandHeight = 80f;
 
-    /// <summary>A timed row's design height.</summary>
+    /// <summary>A timed row's design height in classic mode.</summary>
     private const float RowHeight = 44f;
 
     /// <summary>The gap between stacked elements, in design units.</summary>
     private const float StackGap = 10f;
 
-    /// <summary>The all-day strip's design height.</summary>
+    /// <summary>The all-day strip's design height in classic mode.</summary>
     private const float AllDayHeight = 30f;
 
     /// <summary>The side/top padding, in design units.</summary>
-    private const float PadDesign = 14f;
+    public const float PadDesign = 14f;
 
     /// <summary>The time gutter's design width (the fixed left column for HH:mm).</summary>
     private const float TimeGutterDesign = 64f;
@@ -54,13 +76,101 @@ public static class CalendarLayout
     private const float HeaderFraction = 0.42f;
 
     /// <summary>
+    /// Resolves the adaptive view mode based on widget dimensions and user preference.
+    /// </summary>
+    /// <param name="width">The widget pixel width.</param>
+    /// <param name="height">The widget pixel height.</param>
+    /// <param name="layoutMode">Optional layout mode override ("Auto", "Poster Month", "Agenda", "Minimal Card").</param>
+    /// <returns>The resolved view mode.</returns>
+    public static CalendarViewMode ResolveViewMode(float width, float height, string? layoutMode = null)
+    {
+        if (width <= 260f && height <= 180f)
+            return CalendarViewMode.MinimalDateCard1x1;
+
+        if (string.Equals(layoutMode, "Minimal Card", StringComparison.OrdinalIgnoreCase))
+            return CalendarViewMode.MinimalDateCard1x1;
+
+        if (string.Equals(layoutMode, "Poster Month", StringComparison.OrdinalIgnoreCase))
+            return CalendarViewMode.CompactPoster2x3;
+
+        if (string.Equals(layoutMode, "Agenda", StringComparison.OrdinalIgnoreCase))
+            return CalendarViewMode.SplitBanner4x2;
+
+        if (width >= 880f && height >= 460f)
+            return CalendarViewMode.FullEditorial5x4;
+
+        if (width >= 560f)
+            return CalendarViewMode.SplitBanner4x2;
+
+        return CalendarViewMode.CompactPoster2x3;
+    }
+
+    /// <summary>
     /// Computes the calendar's hit geometry for one frame.
     /// </summary>
     /// <param name="bounds">The widget's placement bounds.</param>
     /// <param name="scale">The frame's uniform scale factor.</param>
     /// <param name="rowCount">How many timed rows the display carries (0-3).</param>
     /// <param name="hasAllDay">Whether the all-day strip is present.</param>
+    /// <returns>The computed calendar geometry.</returns>
     public static CalendarGeometry Compute(SKRect bounds, float scale, int rowCount, bool hasAllDay)
+        => Compute(bounds, scale, rowCount, hasAllDay, null);
+
+    /// <summary>
+    /// Computes the calendar's hit geometry for one frame with an optional layout override.
+    /// </summary>
+    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <param name="scale">The frame's uniform scale factor.</param>
+    /// <param name="rowCount">How many timed rows the display carries (0-3).</param>
+    /// <param name="hasAllDay">Whether the all-day strip is present.</param>
+    /// <param name="layoutMode">Optional layout override.</param>
+    /// <returns>The computed calendar geometry.</returns>
+    public static CalendarGeometry Compute(SKRect bounds, float scale, int rowCount, bool hasAllDay, string? layoutMode)
+    {
+        CalendarViewMode mode = ResolveViewMode(bounds.Width, bounds.Height, layoutMode);
+
+        // Classic mode fallback for small test harnesses or compact classic bounds (width < 560 and height < 280)
+        if (mode == CalendarViewMode.CompactPoster2x3 && bounds.Height < 280f)
+        {
+            return ComputeClassic(bounds, scale, rowCount, hasAllDay);
+        }
+
+        return mode switch
+        {
+            CalendarViewMode.MinimalDateCard1x1 => ComputeMinimalDateCard1x1(bounds, scale),
+            CalendarViewMode.FullEditorial5x4 => ComputeFullEditorial(bounds, scale, rowCount),
+            CalendarViewMode.SplitBanner4x2 => ComputeSplitBanner(bounds, scale, rowCount),
+            _ => ComputeCompactPoster(bounds, scale, rowCount),
+        };
+    }
+
+    private static CalendarGeometry ComputeMinimalDateCard1x1(SKRect bounds, float scale)
+    {
+        float pad = 8f * scale;
+        float left = bounds.Left + pad;
+        float right = bounds.Right - pad;
+        float top = bounds.Top + pad;
+        float bottom = bounds.Bottom - pad;
+
+        var cardRect = new SKRect(left, top, right, bottom);
+        return new CalendarGeometry(
+            SKRect.Empty,
+            SKRect.Empty,
+            SKRect.Empty,
+            [],
+            0f,
+            pad,
+            CalendarViewMode.MinimalDateCard1x1,
+            SKRect.Empty,
+            cardRect,
+            SKRect.Empty,
+            SKRect.Empty,
+            SKRect.Empty,
+            SKRect.Empty,
+            SKRect.Empty);
+    }
+
+    private static CalendarGeometry ComputeClassic(SKRect bounds, float scale, int rowCount, bool hasAllDay)
     {
         float pad = PadDesign * scale;
         float topH = TopBandHeight * scale;
@@ -73,18 +183,12 @@ public static class CalendarLayout
         float right = bounds.Right - pad;
         float top = bounds.Top + pad;
 
-        // The top band spans the full content width.
         var topBandRect = new SKRect(left, top, right, top + topH);
-
-        // The date header occupies the left portion of the top band.
         float headerW = (right - left) * HeaderFraction;
         var headerRect = new SKRect(left, top, left + headerW, top + topH);
-
-        // The month grid occupies the right portion of the top band.
         float gridLeft = left + headerW + 6f * scale;
         var monthGridRect = new SKRect(gridLeft, top, right, top + topH);
 
-        // The all-day strip sits one gap below the top band (when present).
         float y = topBandRect.Bottom + gap;
         var allDayRect = hasAllDay
             ? new SKRect(left, y, right, y + allDayH)
@@ -92,22 +196,251 @@ public static class CalendarLayout
         if (hasAllDay)
             y += allDayH + gap;
 
-        // The timed rows stack below, one gap between each.
-        var rowRects = new List<SKRect>(Math.Max(0, rowCount));
-        for (int i = 0; i < rowCount; i++)
+        IReadOnlyList<SKRect> rowRects;
+        if (rowCount > 0)
         {
-            rowRects.Add(new SKRect(left, y, right, y + rowH));
-            y += rowH + gap;
+            var list = new List<SKRect>(rowCount);
+            for (int i = 0; i < rowCount; i++)
+            {
+                list.Add(new SKRect(left, y, right, y + rowH));
+                y += rowH + gap;
+            }
+            rowRects = list;
+        }
+        else
+        {
+            rowRects = [];
         }
 
-        return new CalendarGeometry(headerRect, monthGridRect, allDayRect, rowRects, gutterW, pad);
+        return new CalendarGeometry(
+            headerRect,
+            monthGridRect,
+            allDayRect,
+            rowRects,
+            gutterW,
+            pad,
+            CalendarViewMode.CompactPoster2x3);
+    }
+
+    private static CalendarGeometry ComputeFullEditorial(SKRect bounds, float scale, int rowCount)
+    {
+        float pad = 16f * scale;
+        float gap = 12f * scale;
+        float gutterW = TimeGutterDesign * scale;
+
+        float left = bounds.Left + pad;
+        float right = bounds.Right - pad;
+        float top = bounds.Top + pad;
+        float bottom = bounds.Bottom - pad;
+        float availW = right - left;
+
+        // Left vertical typography sidebar
+        float stripW = Math.Max(70f, availW * 0.085f);
+        var leftStripRect = new SKRect(left, top, left + stripW, bottom);
+
+        // Remaining width split between center month card and right agenda
+        float remW = right - (leftStripRect.Right + gap);
+        float monthW = remW * 0.52f;
+        var monthCardRect = new SKRect(leftStripRect.Right + gap, top, leftStripRect.Right + gap + monthW, bottom);
+        var agendaRect = new SKRect(monthCardRect.Right + gap, top, right, bottom);
+
+        // Center Month Card breakdown
+        float cardPad = 12f * scale;
+        float headerH = 36f * scale;
+        var headerRect = new SKRect(monthCardRect.Left + cardPad, monthCardRect.Top + cardPad, monthCardRect.Right - cardPad, monthCardRect.Top + cardPad + headerH);
+
+        // Chevrons inside header (right-aligned touch targets, vertically centered)
+        float chevW = 22f * scale;
+        float chevH = 22f * scale;
+        float chevY = headerRect.Top + (headerH - chevH) / 2f;
+        var nextChevronRect = new SKRect(headerRect.Right - chevW, chevY, headerRect.Right, chevY + chevH);
+        var prevChevronRect = new SKRect(nextChevronRect.Left - chevW - 6f * scale, chevY, nextChevronRect.Left - 6f * scale, chevY + chevH);
+
+        // Month Grid
+        float gridTop = headerRect.Bottom + 6f * scale;
+        float gridH = 115f * scale;
+        var monthGridRect = new SKRect(monthCardRect.Left + cardPad, gridTop, monthCardRect.Right - cardPad, gridTop + gridH);
+
+        // Notable Dates footer
+        var notableDatesRect = new SKRect(monthCardRect.Left + cardPad, monthGridRect.Bottom + 6f * scale, monthCardRect.Right - cardPad, monthCardRect.Bottom - cardPad);
+
+        // Right Agenda Panel breakdown: clear header height so hero card does not overlap title
+        float agendaPad = 12f * scale;
+        float agendaHeaderH = 32f * scale;
+        float heroTop = agendaRect.Top + agendaPad + agendaHeaderH + 6f * scale;
+        float heroH = 38f * scale;
+        var allDayRect = new SKRect(agendaRect.Left + agendaPad, heroTop, agendaRect.Right - agendaPad, heroTop + heroH);
+
+        // Scrollable agenda viewport
+        float scrollAreaTop = allDayRect.Bottom + 6f * scale;
+        var agendaScrollAreaRect = new SKRect(agendaRect.Left + agendaPad, scrollAreaTop, agendaRect.Right - agendaPad, agendaRect.Bottom - agendaPad);
+
+        float rowY = scrollAreaTop + 2f * scale;
+        float rowH = 24f * scale;
+        float rowGap = 5f * scale;
+        IReadOnlyList<SKRect> rowRects;
+        if (rowCount > 0)
+        {
+            var list = new List<SKRect>(rowCount);
+            for (int i = 0; i < rowCount; i++)
+            {
+                list.Add(new SKRect(agendaRect.Left + agendaPad, rowY, agendaRect.Right - agendaPad, rowY + rowH));
+                rowY += rowH + rowGap;
+            }
+            rowRects = list;
+        }
+        else
+        {
+            rowRects = [];
+        }
+
+        return new CalendarGeometry(
+            headerRect,
+            monthGridRect,
+            allDayRect,
+            rowRects,
+            gutterW,
+            pad,
+            CalendarViewMode.FullEditorial5x4,
+            leftStripRect,
+            monthCardRect,
+            agendaRect,
+            notableDatesRect,
+            prevChevronRect,
+            nextChevronRect,
+            agendaScrollAreaRect);
+    }
+
+    private static CalendarGeometry ComputeSplitBanner(SKRect bounds, float scale, int rowCount)
+    {
+        float pad = 12f * scale;
+        float gap = 10f * scale;
+        float gutterW = TimeGutterDesign * scale;
+
+        float left = bounds.Left + pad;
+        float right = bounds.Right - pad;
+        float top = bounds.Top + pad;
+        float bottom = bounds.Bottom - pad;
+
+        float availW = right - left;
+        float monthW = availW * 0.44f;
+        var monthCardRect = new SKRect(left, top, left + monthW, bottom);
+        var agendaRect = new SKRect(monthCardRect.Right + gap, top, right, bottom);
+
+        float cardPad = 10f * scale;
+        float headerH = 36f * scale;
+        var headerRect = new SKRect(monthCardRect.Left + cardPad, monthCardRect.Top + cardPad, monthCardRect.Right - cardPad, monthCardRect.Top + cardPad + headerH);
+
+        float chevW = 18f * scale;
+        float chevH = 18f * scale;
+        var nextChevronRect = new SKRect(headerRect.Right - chevW, headerRect.Top + 6f * scale, headerRect.Right, headerRect.Top + 6f * scale + chevH);
+        var prevChevronRect = new SKRect(nextChevronRect.Left - chevW - 4f * scale, headerRect.Top + 6f * scale, nextChevronRect.Left - 4f * scale, headerRect.Top + 6f * scale + chevH);
+
+        float gridTop = headerRect.Bottom + 4f * scale;
+        float gridH = 80f * scale;
+        var monthGridRect = new SKRect(monthCardRect.Left + cardPad, gridTop, monthCardRect.Right - cardPad, gridTop + gridH);
+
+        var notableDatesRect = new SKRect(monthCardRect.Left + cardPad, monthGridRect.Bottom + 4f * scale, monthCardRect.Right - cardPad, monthCardRect.Bottom - cardPad);
+
+        float agendaPad = 10f * scale;
+        float agendaHeaderH = 32f * scale;
+        float scrollAreaTop = agendaRect.Top + agendaPad + agendaHeaderH + 2f * scale;
+        var agendaScrollAreaRect = new SKRect(agendaRect.Left + agendaPad, scrollAreaTop, agendaRect.Right - agendaPad, agendaRect.Bottom - agendaPad);
+
+        float rowY = scrollAreaTop + 2f * scale;
+        float rowH = 34f * scale;
+        float rowGap = 5f * scale;
+        IReadOnlyList<SKRect> rowRects;
+        if (rowCount > 0)
+        {
+            var list = new List<SKRect>(rowCount);
+            for (int i = 0; i < rowCount; i++)
+            {
+                list.Add(new SKRect(agendaRect.Left + agendaPad, rowY, agendaRect.Right - agendaPad, rowY + rowH));
+                rowY += rowH + rowGap;
+            }
+            rowRects = list;
+        }
+        else
+        {
+            rowRects = [];
+        }
+
+        return new CalendarGeometry(
+            headerRect,
+            monthGridRect,
+            SKRect.Empty,
+            rowRects,
+            gutterW,
+            pad,
+            CalendarViewMode.SplitBanner4x2,
+            SKRect.Empty,
+            monthCardRect,
+            agendaRect,
+            notableDatesRect,
+            prevChevronRect,
+            nextChevronRect,
+            agendaScrollAreaRect);
+    }
+
+    private static CalendarGeometry ComputeCompactPoster(SKRect bounds, float scale, int rowCount)
+    {
+        float pad = 12f * scale;
+        float gutterW = TimeGutterDesign * scale;
+
+        float left = bounds.Left + pad;
+        float right = bounds.Right - pad;
+        float top = bounds.Top + pad;
+        float bottom = bounds.Bottom - pad;
+
+        var monthCardRect = new SKRect(left, top, right, bottom);
+        float cardPad = 10f * scale;
+        float headerH = 40f * scale;
+        var headerRect = new SKRect(monthCardRect.Left + cardPad, monthCardRect.Top + cardPad, monthCardRect.Right - cardPad, monthCardRect.Top + cardPad + headerH);
+
+        var prevChevronRect = new SKRect(headerRect.Right - 32f * scale, headerRect.Top + 4f * scale, headerRect.Right - 18f * scale, headerRect.Top + 20f * scale);
+        var nextChevronRect = new SKRect(headerRect.Right - 16f * scale, headerRect.Top + 4f * scale, headerRect.Right - 2f * scale, headerRect.Top + 20f * scale);
+
+        float gridTop = headerRect.Bottom + 4f * scale;
+        float gridH = 105f * scale;
+        var monthGridRect = new SKRect(monthCardRect.Left + cardPad, gridTop, monthCardRect.Right - cardPad, gridTop + gridH);
+
+        float footerBottom = bottom - cardPad;
+        IReadOnlyList<SKRect> rowRects;
+        if (rowCount > 0)
+        {
+            float rowH = 30f * scale;
+            rowRects = [new SKRect(monthCardRect.Left + cardPad, footerBottom - rowH, monthCardRect.Right - cardPad, footerBottom)];
+            footerBottom -= rowH + 4f * scale;
+        }
+        else
+        {
+            rowRects = [];
+        }
+
+        var notableDatesRect = new SKRect(monthCardRect.Left + cardPad, monthGridRect.Bottom + 4f * scale, monthCardRect.Right - cardPad, footerBottom);
+
+        return new CalendarGeometry(
+            headerRect,
+            monthGridRect,
+            SKRect.Empty,
+            rowRects,
+            gutterW,
+            pad,
+            CalendarViewMode.CompactPoster2x3,
+            SKRect.Empty,
+            monthCardRect,
+            SKRect.Empty,
+            notableDatesRect,
+            prevChevronRect,
+            nextChevronRect,
+            SKRect.Empty);
     }
 
     /// <summary>
     /// Hit-tests a point against the geometry: returns the index of the timed
     /// row containing the point (-1 when none), or true via out when the point
-    /// is on the all-day strip. The header and month grid are not tappable
-    /// (swipe gestures handle day navigation at the widget level).
+    /// is on the all-day strip.
     /// </summary>
     /// <param name="geo">The frame's geometry record.</param>
     /// <param name="x">The touch X in canvas coordinates.</param>
@@ -115,8 +448,36 @@ public static class CalendarLayout
     /// <param name="onAllDay">Set true when the point is on the all-day strip.</param>
     /// <returns>The zero-based index of the contained timed row, or -1.</returns>
     public static int GetAction(CalendarGeometry geo, float x, float y, out bool onAllDay)
+        => GetAction(geo, x, y, 0f, out onAllDay);
+
+    /// <summary>
+    /// Hit-tests a point against the geometry with an optional vertical scroll offset.
+    /// </summary>
+    /// <param name="geo">The frame's geometry record.</param>
+    /// <param name="x">The touch X in canvas coordinates.</param>
+    /// <param name="y">The touch Y in canvas coordinates.</param>
+    /// <param name="scrollY">The vertical scroll offset of the agenda section.</param>
+    /// <param name="onAllDay">Set true when the point is on the all-day strip.</param>
+    /// <returns>The zero-based index of the contained timed row, or -1.</returns>
+    public static int GetAction(CalendarGeometry geo, float x, float y, float scrollY, out bool onAllDay)
     {
         onAllDay = false;
+        if (!geo.AgendaScrollAreaRect.IsEmpty)
+        {
+            if (geo.AgendaScrollAreaRect.Contains(x, y))
+            {
+                float scrolledY = y + scrollY;
+                for (int i = 0; i < geo.RowRects.Count; i++)
+                {
+                    if (!geo.RowRects[i].IsEmpty && geo.RowRects[i].Contains(x, scrolledY))
+                        return i;
+                }
+            }
+
+            onAllDay = !geo.AllDayRect.IsEmpty && geo.AllDayRect.Contains(x, y);
+            return -1;
+        }
+
         for (int i = 0; i < geo.RowRects.Count; i++)
         {
             if (!geo.RowRects[i].IsEmpty && geo.RowRects[i].Contains(x, y))
@@ -126,4 +487,17 @@ public static class CalendarLayout
         onAllDay = !geo.AllDayRect.IsEmpty && geo.AllDayRect.Contains(x, y);
         return -1;
     }
+
+    /// <summary>
+    /// Returns true if the point is within the previous month chevron touch target.
+    /// </summary>
+    public static bool IsPrevChevronHit(CalendarGeometry geo, float x, float y)
+        => !geo.PrevChevronRect.IsEmpty && geo.PrevChevronRect.Contains(x, y);
+
+    /// <summary>
+    /// Returns true if the point is within the next month chevron touch target.
+    /// </summary>
+    public static bool IsNextChevronHit(CalendarGeometry geo, float x, float y)
+        => !geo.NextChevronRect.IsEmpty && geo.NextChevronRect.Contains(x, y);
 }
+
