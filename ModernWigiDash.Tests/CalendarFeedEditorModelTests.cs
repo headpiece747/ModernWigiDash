@@ -48,7 +48,7 @@ public class CalendarFeedEditorModelTests
     [TestMethod]
     public void Serialize_RoundTripsAValidList()
     {
-        string original = """[{"kind":"ics","feedId":"g","label":"Google","url":"https://cal.example/ics","enabled":true},{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":443,"principalPath":"/p/","username":"me","enabled":true}]""";
+        string original = """[{"kind":"ics","feedId":"g","label":"Google","color":"#4F8CFF","url":"https://cal.example/ics","enabled":true},{"kind":"caldav","feedId":"icloud","label":"iCloud","color":"#22C55E","server":"https://caldav.icloud.com","port":443,"principalPath":"/p/","username":"me","selectedCalendars":["/calendars/me/work/"],"enabled":true}]""";
 
         string serialized = CalendarFeedEditorModel.Serialize(CalendarFeedEditorModel.Parse(original));
         IReadOnlyList<CalendarFeedDraft> reparsed = CalendarFeedEditorModel.Parse(serialized);
@@ -60,11 +60,13 @@ public class CalendarFeedEditorModelTests
             Assert.AreEqual(originalParsed[i].Kind, reparsed[i].Kind, $"feed {i} kind");
             Assert.AreEqual(originalParsed[i].FeedId, reparsed[i].FeedId, $"feed {i} id");
             Assert.AreEqual(originalParsed[i].Label, reparsed[i].Label, $"feed {i} label");
+            Assert.AreEqual(originalParsed[i].ColorHex, reparsed[i].ColorHex, $"feed {i} color survives the round-trip");
             Assert.AreEqual(originalParsed[i].Url, reparsed[i].Url, $"feed {i} url");
             Assert.AreEqual(originalParsed[i].Server, reparsed[i].Server, $"feed {i} server");
             Assert.AreEqual(originalParsed[i].Port, reparsed[i].Port, $"feed {i} port");
             Assert.AreEqual(originalParsed[i].PrincipalPath, reparsed[i].PrincipalPath, $"feed {i} principal");
             Assert.AreEqual(originalParsed[i].Username, reparsed[i].Username, $"feed {i} username");
+            CollectionAssert.AreEqual(new List<string>(originalParsed[i].SelectedCalendars), new List<string>(reparsed[i].SelectedCalendars), $"feed {i} selected calendars survive the round-trip");
             Assert.AreEqual(originalParsed[i].Enabled, reparsed[i].Enabled, $"feed {i} enabled");
         }
     }

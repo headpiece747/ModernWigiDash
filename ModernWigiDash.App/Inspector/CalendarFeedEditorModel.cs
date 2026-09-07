@@ -36,6 +36,16 @@ internal sealed class CalendarFeedDraft
     /// <summary>The CalDAV account username (caldav feeds).</summary>
     public string Username { get; set; } = "";
 
+    /// <summary>The per-feed color hex (the accent the layout tints its rows
+    /// with), or empty when the feed declared none. Carried losslessly so an
+    /// inspector edit never wipes a feed's accent color on commit.</summary>
+    public string ColorHex { get; set; } = "";
+
+    /// <summary>The selected CalDAV calendar home-set paths (caldav feeds; empty
+    /// = all discovered calendars). Carried losslessly so an inspector edit
+    /// never drops a feed's selected-calendar filter.</summary>
+    public IReadOnlyList<string> SelectedCalendars { get; set; } = [];
+
     /// <summary>Whether the feed is enabled.</summary>
     public bool Enabled { get; set; } = true;
 }
@@ -70,10 +80,12 @@ internal static class CalendarFeedEditorModel
                         Kind = "caldav",
                         FeedId = dav.FeedId,
                         Label = dav.Label,
+                        ColorHex = dav.ColorHex,
                         Server = dav.Server,
                         Port = dav.Port,
                         PrincipalPath = dav.PrincipalPath,
                         Username = dav.Username,
+                        SelectedCalendars = dav.SelectedCalendars,
                         Enabled = dav.Enabled,
                     });
                     break;
@@ -83,6 +95,7 @@ internal static class CalendarFeedEditorModel
                         Kind = "ics",
                         FeedId = ics.FeedId,
                         Label = ics.Label,
+                        ColorHex = ics.ColorHex,
                         Url = ics.Url,
                         Enabled = ics.Enabled,
                     });
@@ -108,21 +121,24 @@ internal static class CalendarFeedEditorModel
             if (!IsComplete(d))
                 continue;
 
-            feeds.Add(string.Equals(d.Kind, "caldav", StringComparison.Ordinal)
+            feeds.Add(string.Equals(d.Kind, CalendarFeedCompleteness.CalDavKind, StringComparison.Ordinal)
                 ? new CalDavFeed
                 {
                     FeedId = d.FeedId,
                     Label = d.Label,
+                    ColorHex = d.ColorHex,
                     Server = d.Server,
                     Port = d.Port,
                     PrincipalPath = d.PrincipalPath,
                     Username = d.Username,
+                    SelectedCalendars = d.SelectedCalendars,
                     Enabled = d.Enabled,
                 }
                 : new IcsUrlFeed
                 {
                     FeedId = d.FeedId,
                     Label = d.Label,
+                    ColorHex = d.ColorHex,
                     Url = d.Url,
                     Enabled = d.Enabled,
                 });
@@ -130,17 +146,24 @@ internal static class CalendarFeedEditorModel
         return CalendarFeedsCodec.Serialize(feeds);
     }
 
-    /// <summary>Whether a draft carries every field its kind requires: an ics
-    /// feed needs a non-empty http(s) URL; a caldav feed needs a non-empty
-    /// http(s) server and a username. The label and feed id may be empty (they
-    /// default at fetch time).</summary>
+    /// <summary>Whether a draft carries every field its kind requires, routed
+    /// through the shared <see cref="CalendarFeedCompleteness"/> owner (the one
+    /// spelling of the validity rule beside the field definitions).</summary>
     public static bool IsComplete(CalendarFeedDraft d)
-        => string.Equals(d.Kind, "caldav", StringComparison.Ordinal)
-            ? IsAbsoluteHttpUrl(d.Server) && d.Username.Trim().Length > 0
-            : IsAbsoluteHttpUrl(d.Url);
-
-    private static bool IsAbsoluteHttpUrl(string value)
-        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
-           && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
-               || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal));
+        => string.Equals(d.Kind, CalendarFeedCompleteness.CalDavKind, StringComparison.Ordinal)
+            ? CalendarFeedCompleteness.IsComplete(new CalDavFeed
+            {
+                FeedId = d.FeedId,
+                Label = d.Label,
+                Server = d.Server,
+                Port = d.Port,
+                PrincipalPath = d.PrincipalPath,
+                Username = d.Username,
+            })
+            : CalendarFeedCompleteness.IsComplete(new IcsUrlFeed
+            {
+                FeedId = d.FeedId,
+                Label = d.Label,
+                Url = d.Url,
+            });
 }

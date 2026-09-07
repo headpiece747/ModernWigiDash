@@ -42,7 +42,7 @@ internal static class CalendarFeedsCodec
                 string color = ReadString(el, "color");
                 bool enabled = !el.TryGetProperty("enabled", out var en) || en.GetBoolean();
 
-                CalendarFeed feed = string.Equals(kind, "caldav", StringComparison.Ordinal)
+                CalendarFeed feed = string.Equals(kind, CalendarFeedCompleteness.CalDavKind, StringComparison.Ordinal)
                     ? new CalDavFeed
                     {
                         FeedId = feedId,
@@ -88,7 +88,7 @@ internal static class CalendarFeedsCodec
                 {
                     case CalDavFeed dav:
                         WriteObject(writer, [
-                            ("kind", "caldav"),
+                            ("kind", CalendarFeedCompleteness.CalDavKind),
                             ("feedId", dav.FeedId),
                             ("label", dav.Label),
                             ("color", dav.ColorHex),
@@ -97,7 +97,7 @@ internal static class CalendarFeedsCodec
                             ("principalPath", dav.PrincipalPath),
                             ("username", dav.Username),
                             ("enabled", dav.Enabled),
-                        ]);
+                        ], "selectedCalendars", dav.SelectedCalendars);
                         break;
                     case IcsUrlFeed ics:
                         WriteObject(writer, [
@@ -116,7 +116,7 @@ internal static class CalendarFeedsCodec
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static void WriteObject(Utf8JsonWriter writer, (string Name, object Value)[] fields)
+    private static void WriteObject(Utf8JsonWriter writer, (string Name, object Value)[] fields, string? listName = null, IReadOnlyList<string>? listValue = null)
     {
         writer.WriteStartObject();
         foreach ((string name, object value) in fields)
@@ -133,6 +133,14 @@ internal static class CalendarFeedsCodec
                     writer.WriteString(name, (string)value);
                     break;
             }
+        }
+        if (listName is not null && listValue is not null)
+        {
+            writer.WritePropertyName(listName);
+            writer.WriteStartArray();
+            foreach (string item in listValue)
+                writer.WriteStringValue(item);
+            writer.WriteEndArray();
         }
         writer.WriteEndObject();
     }
