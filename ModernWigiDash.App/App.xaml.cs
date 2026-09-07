@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;
@@ -134,7 +135,7 @@ public partial class App : Application
             }
         }
 
-        ThemeSettings.Theme = ThemeSettings.Load();
+        _ = ThemeStore.Current; // loads + migrates the live theme (the one load site)
         ThemeManager.ApplyToApplication();
         base.OnStartup(e);
     }

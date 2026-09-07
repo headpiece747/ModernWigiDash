@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;
@@ -35,7 +36,7 @@ internal static class ThemeManager
 
         foreach (var prop in ThemeSettings.StringProperties)
         {
-            string? hex = (string?)prop.GetValue(ThemeSettings.Theme);
+            string? hex = (string?)prop.GetValue(ThemeStore.Current);
             if (string.IsNullOrWhiteSpace(hex)) continue;
 
             var rgba = ThemeSettings.ParseColor(hex);

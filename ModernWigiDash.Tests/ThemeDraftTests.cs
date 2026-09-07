@@ -16,7 +16,7 @@ public class ThemeDraftTests
     [TestMethod]
     public void Ctor_Seeding_ReflectsTheActiveThemeValuesInDisplayOrder()
     {
-        ThemeSettings.Theme = new ThemeSettings { AccentRed = "#FF0000", TextPrimary = "#111111" };
+        ThemeStore.Replace(new ThemeSettings { AccentRed = "#FF0000", TextPrimary = "#111111" });
         var draft = new ThemeDraft();
 
         Assert.AreEqual(ThemeSettings.StringProperties.Count, draft.Entries.Count);
@@ -41,7 +41,7 @@ public class ThemeDraftTests
     [TestMethod]
     public void UpdateHex_InvalidHex_InvalidatesAndNamesTheEntry()
     {
-        ThemeSettings.Theme = new ThemeSettings();
+        ThemeStore.Replace(new ThemeSettings());
         var draft = new ThemeDraft();
         Assert.IsTrue(draft.IsValid);
         Assert.IsNull(draft.InvalidEntryName);
@@ -55,7 +55,7 @@ public class ThemeDraftTests
     [TestMethod]
     public void UpdateHex_ValidHexAfterInvalid_RevalidatesTheDraft()
     {
-        ThemeSettings.Theme = new ThemeSettings();
+        ThemeStore.Replace(new ThemeSettings());
         var draft = new ThemeDraft();
         draft.UpdateHex("BgDark", "zzz");
         Assert.IsFalse(draft.IsValid);
@@ -70,7 +70,7 @@ public class ThemeDraftTests
     public void ApplyToSettings_WritesOnlyTheParseableValues()
     {
         var theme = new ThemeSettings();
-        ThemeSettings.Theme = theme;
+        ThemeStore.Replace(theme);
         var draft = new ThemeDraft();
         string bgDarkBefore = theme.BgDark;
 
@@ -85,7 +85,7 @@ public class ThemeDraftTests
     [TestMethod]
     public void ResetToDefaults_RestoresEveryEntryToTheDefaults()
     {
-        ThemeSettings.Theme = new ThemeSettings { AccentRed = "#FF0000", Border = "#111111" };
+        ThemeStore.Replace(new ThemeSettings { AccentRed = "#FF0000", Border = "#111111" });
         var draft = new ThemeDraft();
         var defaults = new ThemeSettings();
 

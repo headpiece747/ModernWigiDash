@@ -33,7 +33,7 @@ internal sealed class ThemeApplicator
     /// </summary>
     public void Apply(Window window)
     {
-        string fingerprint = Fingerprint(ThemeSettings.Theme);
+        string fingerprint = Fingerprint(ThemeStore.Current);
         bool themeChanged = !string.Equals(fingerprint, _appliedFingerprint, StringComparison.Ordinal);
         if (themeChanged)
         {
@@ -42,11 +42,11 @@ internal sealed class ThemeApplicator
             _appliedFingerprint = fingerprint;
         }
 
-        WindowChrome.ApplyDarkTitleBar(window, ThemeSettings.Theme.TitleBar);
+        WindowChrome.ApplyDarkTitleBar(window, ThemeStore.Current.TitleBar);
 
         if (themeChanged)
         {
-            var t = ThemeSettings.Theme;
+            var t = ThemeStore.Current;
             _log.Write($"Applied: TitleBar={t.TitleBar} AccentRed={t.AccentRed}");
         }
     }
@@ -82,7 +82,7 @@ internal sealed class ThemeApplicator
         if (window.FindName(PreviewFrameName) is FrameworkElement preview &&
             preview.Effect is DropShadowEffect shadow)
         {
-            RgbaColor? accent = PreviewShadowAccent(ThemeSettings.Theme);
+            RgbaColor? accent = PreviewShadowAccent(ThemeStore.Current);
             if (accent != null) shadow.Color = ThemeManager.ToMediaColor(accent.Value);
         }
     }

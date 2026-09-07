@@ -45,7 +45,7 @@ internal sealed class ThemeDraft
 
     public ThemeDraft()
     {
-        var theme = ThemeSettings.Theme;
+        var theme = ThemeStore.Current;
         _entries = ThemeSettings.StringProperties
             .Select(p => new Entry(
                 p.Name,
@@ -78,7 +78,7 @@ internal sealed class ThemeDraft
     /// </summary>
     public void ApplyToSettings()
     {
-        var theme = ThemeSettings.Theme;
+        var theme = ThemeStore.Current;
 #pragma warning disable S3267 // one write per parseable entry (a conditional SetValue), not a LINQ filter
         foreach (var entry in _entries)
         {

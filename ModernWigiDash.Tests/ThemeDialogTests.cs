@@ -23,7 +23,7 @@ public class ThemeDialogTests
     public void Ctor_BuildsOneEditorPerEntry_SeededFromTheActiveTheme()
         => Host.Run<object?>(() =>
         {
-            ThemeSettings.Theme = new ThemeSettings { AccentGreen = "#123456" };
+            ThemeStore.Replace(new ThemeSettings { AccentGreen = "#123456" });
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
@@ -41,7 +41,7 @@ public class ThemeDialogTests
     public void EditorTextChange_ForwardsTheValidityVerdictToTheApplyButton()
         => Host.Run<object?>(() =>
         {
-            ThemeSettings.Theme = new ThemeSettings();
+            ThemeStore.Replace(new ThemeSettings());
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());
@@ -59,7 +59,7 @@ public class ThemeDialogTests
     public void ResetClick_SyncsEveryEditorToTheDraftsDefaults()
         => Host.Run<object?>(() =>
         {
-            ThemeSettings.Theme = new ThemeSettings();
+            ThemeStore.Replace(new ThemeSettings());
             var owner = new Window();
             WpfWindow.ShowOwner(owner);
             var dialog = new ThemeDialog(owner, new ThemeApplicator());

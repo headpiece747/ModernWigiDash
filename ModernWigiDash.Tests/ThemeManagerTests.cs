@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using ModernWigiDash.App.Theming;
 using ModernWigiDash.Core.Theming;
 using AppClass = ModernWigiDash.App.App;
 
@@ -32,7 +33,7 @@ public class ThemeManagerTests
         var resources = Application.Current.Resources;
         resources.Clear();
 
-        ThemeSettings.Theme = new ThemeSettings { BgDark = "#010203" };
+        ThemeStore.Replace(new ThemeSettings { BgDark = "#010203" });
         ThemeManager.ApplyToApplication();
 
         Assert.IsTrue(resources.Contains("BgDarkColor"));
@@ -47,7 +48,7 @@ public class ThemeManagerTests
         resources.Clear();
 
         var theme = new ThemeSettings();
-        ThemeSettings.Theme = theme;
+        ThemeStore.Replace(theme);
         ThemeManager.ApplyToApplication();
 
         string[] props =
@@ -74,13 +75,13 @@ public class ThemeManagerTests
         var resources = Application.Current.Resources;
         resources.Clear();
 
-        ThemeSettings.Theme = new ThemeSettings();
+        ThemeStore.Replace(new ThemeSettings());
         ThemeManager.ApplyToApplication();
 
         // "Border" maps to "BorderBrush" (not "Border")
         Assert.IsFalse(resources.Contains("Border"));
         Assert.IsTrue(resources.Contains("BorderBrush"));
-        // "TextPrimary" maps to "TextPrimary" only — the AccentBlue alias is
+        // "TextPrimary" maps to "TextPrimary" only â€” the AccentBlue alias is
         // App.xaml's job, not the theme manager's
         Assert.IsTrue(resources.Contains("TextPrimary"));
         Assert.IsFalse(resources.Contains("AccentBlue"));
@@ -98,7 +99,7 @@ public class ThemeManagerTests
         var resources = Application.Current.Resources;
         resources.Clear();
 
-        ThemeSettings.Theme = new ThemeSettings { BgDark = "not-a-color" };
+        ThemeStore.Replace(new ThemeSettings { BgDark = "not-a-color" });
         ThemeManager.ApplyToApplication();
 
         Assert.IsFalse(resources.Contains("BgDarkColor"));

@@ -164,7 +164,7 @@ internal sealed class ThemeDialog : Window
     private void ApplyFromDialog()
     {
         _draft.ApplyToSettings();
-        if (!ThemeSettings.Save())
+        if (!ThemeStore.SaveCurrent())
         {
             MessageBox.Show("Could not write app_theme.json to the user state directory (%LOCALAPPDATA%\\ModernWigiDash). The colors will apply for this session only.",
                             "Theme Save Failed", MessageBoxButton.OK, MessageBoxImage.Warning);

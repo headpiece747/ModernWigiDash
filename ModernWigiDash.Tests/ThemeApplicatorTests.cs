@@ -64,15 +64,15 @@ public class ThemeApplicatorTests
             scope.RegisterName("PreviewFrame", preview);
 
             var applicator = new ThemeApplicator();
-            ThemeSettings.Theme = new ThemeSettings { AccentRed = "#010203" };
+            ThemeStore.Replace(new ThemeSettings { AccentRed = "#010203" });
 
             applicator.Apply(window);
             Assert.AreEqual(Color.FromArgb(255, 0x01, 0x02, 0x03), ((DropShadowEffect)preview.Effect).Color);
 
-            ThemeSettings.Theme = new ThemeSettings { AccentRed = "#FF0000" };
+            ThemeStore.Replace(new ThemeSettings { AccentRed = "#FF0000" });
             applicator.Apply(window);
             Assert.AreEqual(Color.FromRgb(0xFF, 0, 0), ((DropShadowEffect)preview.Effect).Color,
-                "DropShadowEffect does not track DynamicResource — the applicator must re-derive the accent on theme change");
+                "DropShadowEffect does not track DynamicResource â€” the applicator must re-derive the accent on theme change");
         });
     }
 }

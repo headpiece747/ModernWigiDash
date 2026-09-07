@@ -75,7 +75,7 @@ public class SettingsDialogTests
         string? browseResult = ChosenBrowsePath,
         bool seededMinimizeToTray = false)
     {
-        ThemeSettings.Theme = new ThemeSettings();
+        ThemeStore.Replace(new ThemeSettings());
         var owner = new Window();
         WpfWindow.ShowOwner(owner);
         var host = new FakeHubHost(

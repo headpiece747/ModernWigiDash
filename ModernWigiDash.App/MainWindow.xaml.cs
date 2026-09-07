@@ -1119,7 +1119,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             {
                 // The theme rides the export bundle (ADR-0021) as a per-item
                 // restore item; the persisted profile.json stays bare.
-                string json = ProfileExportTheme.WithTheme(ProfileOps.ExportJson(_profile), ThemeSettings.Theme);
+                string json = ProfileExportTheme.WithTheme(ProfileOps.ExportJson(_profile), ThemeStore.Current);
                 File.WriteAllText(dlg.FileName, json);
                 _dialogHost.Info("Export Complete", "Profile exported successfully!");
             }
@@ -1150,7 +1150,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // implementation the flow drives.
     string? IProfileImportHost.LocalCloseBehavior => _profile.CloseBehavior;
 
-    ThemeSettings IProfileImportHost.CurrentTheme => ThemeSettings.Theme;
+    ThemeSettings IProfileImportHost.CurrentTheme => ThemeStore.Current;
 
     bool IProfileImportHost.SwapProfile(ProfileLayout imported)
     {
@@ -1178,8 +1178,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
     void IProfileImportHost.ApplyTheme(ThemeSettings theme)
     {
-        ThemeSettings.Theme = theme;
-        if (!ThemeSettings.Save())
+        ThemeStore.Replace(theme);
+        if (!ThemeStore.SaveCurrent())
         {
             _dialogHost.Error(
                 "Theme Save Failed",

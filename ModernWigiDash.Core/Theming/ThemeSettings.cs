@@ -88,13 +88,15 @@ public class ThemeSettings
             .ToArray();
 
     /// <summary>
-    /// The active theme. Lazily loaded on first access so consumers never
-    /// observe the default unloaded state, regardless of when they touch it
-    /// relative to App startup.
+    /// The active theme. A plain mutable value: the App's <c>ThemeStore</c> is
+    /// the one owner that loads it from disk on first access and persists it, so
+    /// this property carries no load side-effect (the Core model stays a pure
+    /// serializable value). Consumers in the App read through
+    /// <c>ThemeStore.Current</c>, which routes here.
     /// </summary>
     public static ThemeSettings Theme
     {
-        get => field ??= Load();
+        get => field ??= new();
         set => field = value;
     }
 
@@ -244,8 +246,9 @@ public class ThemeSettings
         => Save(Theme, DefaultPath());
 
     /// <summary>Persists <paramref name="theme"/> to an explicit path (the write
-    /// half of the test seam; production binds <see cref="DefaultPath"/>).</summary>
-    internal static bool Save(ThemeSettings theme, string path)
+    /// half of the test seam; production binds <see cref="DefaultPath"/>). Public
+    /// so the App's <c>ThemeStore</c> can persist through it.</summary>
+    public static bool Save(ThemeSettings theme, string path)
     {
         try
         {
