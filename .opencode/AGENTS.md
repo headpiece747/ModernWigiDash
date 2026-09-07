@@ -34,11 +34,21 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   the run is at most 60 min old. Install once per clone with
   `git config core.hooksPath scripts/hooks` (the hook `scripts/hooks/pre-commit`
   is committed; activation is local config). Logic lives in
-  `scripts/gate-guard.ps1` (testable via `-GatesFile`); the hook then runs
-  `scripts/scan-staged-cr.ps1`, which refuses a commit when a staged text file
-  carries a lone CR (the git `text=auto` binary-classification trap). Escape per
-   invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
-   CR scan still runs).
+   `scripts/gate-guard.ps1` (testable via `-GatesFile`); the hook then runs
+   `scripts/scan-staged-cr.ps1`, which refuses a commit when a staged text file
+   carries a lone CR (the git `text=auto` binary-classification trap), and then
+   `scripts/scan-staged-userdata.ps1`, which refuses a commit that stages a
+   personal/user-data file by basename (`profile.json`, `app_theme.json`,
+   `app_settings.json`, `calendar-credentials.bin`, `media_artwork.bin`, and the
+   `display_device.log*` family). The app's per-user state lives in
+   `%LOCALAPPDATA%\ModernWigiDash` and is machine-local by design: `profile.json`
+   carries the widget layout AND the ICS/CalDAV feed config, and the credential
+   bin holds the DPAPI-wrapped CalDAV password, so none of it may reach the repo
+   or GitHub. Basename matching catches a copy dropped anywhere in the tree;
+   legit repo files (source, synthetic test fixtures, the per-instance weather
+   cache) pass. Pinned by `scripts/tests/ScanStagedUserData.Tests.ps1`. Escape per
+    invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
+    CR + user-data scans still run).
 - Commit messages from the agent shell: write the message to a temp file with
   `Set-Content -Encoding ascii` (or `utf8NoBOM`) and commit with
   `git commit -F <file>`. Do NOT use `-Encoding UTF8`: Windows PowerShell 5.1
@@ -88,6 +98,58 @@ site is a deliberate allow-list edit with a reason. Hygiene sweeps:
 `desloppify` is the periodic deep sweep for redundant abstractions; its
 mechanical residue stays pinned in `DebtGuardTests` so it cannot regress
 between sweeps. `unslop` is the prose pass, not a code sweep.
+
+## Subagent Discipline (learned 2026-09-07)
+
+NInfer runs with `--max-concurrency 1`: only one inference request at a time.
+Launching multiple subagents in parallel floods the queue (HTTP 429 "queue is
+full") and/or triggers client disconnects (HTTP 499) when the wait exceeds the
+provider timeout. **Launch subagents one at a time, sequentially**: issue a
+single `task` call, wait for its result, then issue the next. The provider
+timeout (`"timeout": 600000` in `opencode.json`) prevents premature aborts
+while a subagent waits in the queue, but it does not make parallel launches
+safe. This applies to all specialist agents (code-reviewer, security-auditor,
+test-engineer, etc.) and to OCR review runs.
+
+## Security Rules (learned 2026-09-07 CalDAV audit)
+
+These rules came from a real security audit that found two HIGH-severity
+vulnerabilities in the CalDAV fetcher. They apply to ANY network-facing code
+that sends user credentials or processes server-supplied URLs:
+
+1. **Never send credentials over cleartext HTTP.** Any code path that attaches
+   an auth header (Basic, Bearer, custom) must verify the resolved URI scheme
+   is `https` before sending. A port-based scheme selection (`port == 80 ? http
+   : https`) is NOT sufficient: the check must be on the actual `Uri.Scheme` of
+   the request being sent, because redirects and server-controlled hrefs can
+   change the effective scheme. The CalDAV fix: `ApplyBasicAuth` throws when
+   `request.RequestUri.Scheme == "http"` and a non-empty credential is present.
+
+2. **Server-supplied URLs must stay within the expected origin.** When parsing
+   XML/JSON from a remote server and extracting a URL (href, link, redirect),
+   verify the resolved URL's `Scheme` AND `Authority` match the base URI before
+   fetching it with the user's auth header. A malicious server can return an
+   href pointing at an arbitrary host, turning the client into an SSRF oracle
+   and replaying credentials to a third party. The CalDAV fix: `MakeAbsolute`
+   throws when `abs.Scheme != baseUri.Scheme || abs.Authority != baseUri.Authority`.
+
+3. **Trim and validate user-supplied identifiers before embedding them in
+   protocol headers.** A whitespace-padded username from a hand-edited profile
+   produces a degenerate Basic-auth header. Trim at the fetch boundary and
+   reject blank values with a clear error message.
+
+4. **Decode HTML entities BEFORE stripping tags, and loop to a fixed point.**
+   If you strip tags first and decode entities after, an encoded tag like
+   `&lt;img src=x onerror=...&gt;` survives the strip (the regex sees no `<`)
+   and the subsequent decode turns it into a live tag. Decode first, strip
+   second, repeat until stable (max 3 passes). Use `System.Net.WebUtility.HtmlDecode`
+   (handles all named + numeric entities) instead of a hand-rolled six-entity
+   replace chain.
+
+5. **Bare `catch {}` is never acceptable for untrusted-input parsers.** Catch
+   `Exception` (not bare), exclude `OperationCanceledException`, and emit one
+   log line naming the input source and exception type/message. A hostile feed
+   that reliably triggers a parse fault must be observable, not silent.
 
 ## Tool Mapping
 

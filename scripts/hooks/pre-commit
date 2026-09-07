@@ -1,11 +1,14 @@
 #!/bin/sh
-# Gate guard + lone-CR guard: refuse the commit unless (a) the last gate run
-# (scripts/run-gates.ps1) is green and current, and (b) no staged text file
-# carries a lone CR (the git 2.55 text=auto binary-classification trap).
+# Gate guard + lone-CR guard + user-data guard: refuse the commit unless (a) the
+# last gate run (scripts/run-gates.ps1) is green and current, (b) no staged text
+# file carries a lone CR (the git 2.55 text=auto binary-classification trap),
+# and (c) no personal/user-data file (profile.json, theme/settings JSON, the
+# CalDAV credential bin, logs) is staged - those live in %LOCALAPPDATA% and must
+# never reach the repo or GitHub.
 # Activated once per clone with:
 #   git config core.hooksPath scripts/hooks
-# The guard logic lives in scripts/gate-guard.ps1 (testable via -GatesFile)
-# and scripts/scan-staged-cr.ps1 (both ASCII-only).
+# The guard logic lives in scripts/gate-guard.ps1 (testable via -GatesFile),
+# scripts/scan-staged-cr.ps1, and scripts/scan-staged-userdata.ps1 (all ASCII-only).
 git_root=$(git rev-parse --show-toplevel)
 if command -v powershell.exe >/dev/null 2>&1; then
     ps=powershell.exe
@@ -17,4 +20,8 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 "$ps" -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/scan-staged-cr.ps1"
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+"$ps" -NoProfile -ExecutionPolicy Bypass -File "$git_root/scripts/scan-staged-userdata.ps1"
 exit $?
