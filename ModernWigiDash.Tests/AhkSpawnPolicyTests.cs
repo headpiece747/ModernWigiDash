@@ -1,5 +1,4 @@
 using ModernWigiDash.App.Hotkey;
-using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Tests;
 

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Windows;
 
 namespace ModernWigiDash.App;
 
@@ -62,17 +61,21 @@ internal sealed class WindowLifecycle(
     {
         if (!isVisibleProvider())
         {
-            // The minimize-intercept leg leaves the window Minimized: force
-            // Normal so the restore does not re-show minimized. The
-            // close-intercept leg preserves the window's own state (a maximized
-            // window comes back maximized), so only the Minimized state needs
-            // the repair.
-            if (windowStateProvider() == WindowState.Minimized)
-            {
-                forceNormal();
-            }
             show();
         }
+
+        // The minimize-intercept leg leaves the window Minimized: force
+        // Normal so the restore does not re-show minimized. A visible window
+        // that was minimized (e.g. autostarted minimized or user-minimized to taskbar)
+        // must also be restored to Normal so Activate brings it to the foreground.
+        // The close-intercept leg preserves the window's own state (a maximized
+        // window comes back maximized), so only the Minimized state needs
+        // the repair.
+        if (windowStateProvider() == WindowState.Minimized)
+        {
+            forceNormal();
+        }
+
         activate();
     }
 

@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using System.Xml.Linq;
 
 namespace ModernWigiDash.Tests;
@@ -289,5 +292,153 @@ public class CalDavPropFindTemplateTests
         XDocument doc = CalDavFetcher.CalendarListPropFind;
 
         Assert.IsTrue(doc.Root is { } root && root.Name.LocalName == "propfind");
+    }
+}
+
+/// <summary>
+/// CalDAV fetcher tests: pins HTTP Basic authentication header formatting
+/// (RFC 7617 username:password base64) and PROPFIND XML methods.
+/// </summary>
+[TestClass]
+public class CalDavFetcherTests
+{
+    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
+    {
+        public List<HttpRequestMessage> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(responder(request));
+        }
+    }
+
+    [TestMethod]
+    public async Task DiscoverAsync_SendsBasicAuthWithUsernameAndPassword_AndPropFindMethod()
+    {
+        string propFindResponse = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <multistatus xmlns="DAV:">
+                <response>
+                    <href>/calendars/user/home/</href>
+                    <propstat>
+                        <prop>
+                            <calendar-home-set xmlns="urn:ietf:params:xml:ns:caldav">
+                                <href>/calendars/user/home/</href>
+                            </calendar-home-set>
+                        </prop>
+                        <status>HTTP/1.1 200 OK</status>
+                    </propstat>
+                </response>
+            </multistatus>
+            """;
+
+        string calendarListResponse = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <multistatus xmlns="DAV:">
+                <response>
+                    <href>/calendars/user/home/work/</href>
+                    <propstat>
+                        <prop>
+                            <displayname>Work</displayname>
+                        </prop>
+                        <status>HTTP/1.1 200 OK</status>
+                    </propstat>
+                </response>
+            </multistatus>
+            """;
+
+        int callIndex = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            string content = callIndex++ == 0 ? propFindResponse : calendarListResponse;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "text/xml")
+            };
+        });
+
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+
+        var feed = new CalDavFeed
+        {
+            FeedId = "f1",
+            Label = "Personal",
+            ColorHex = "#ff0000",
+            Server = "caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/calendars/john_doe/",
+            Username = "john_doe"
+        };
+
+        var calendars = await fetcher.DiscoverAsync(feed, "secret_pass", CancellationToken.None);
+
+        Assert.AreEqual(1, calendars.Count);
+        Assert.AreEqual("Work", calendars[0].DisplayName);
+        Assert.AreEqual(2, handler.Requests.Count);
+
+        foreach (var req in handler.Requests)
+        {
+            Assert.AreEqual("PROPFIND", req.Method.Method);
+            Assert.IsNotNull(req.Headers.Authorization);
+            Assert.AreEqual("Basic", req.Headers.Authorization.Scheme);
+            string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(req.Headers.Authorization.Parameter!));
+            Assert.AreEqual("john_doe:secret_pass", decoded, "Basic auth header must contain username:password per RFC 7617");
+        }
+    }
+
+    [TestMethod]
+    public async Task FetchAsync_WithSelectedCalendar_SendsBasicAuthWithUsernameAndPassword()
+    {
+        string icsContent = """
+            BEGIN:VCALENDAR
+            VERSION:2.0
+            PRODID:-//Example Corp.//EN
+            BEGIN:VEVENT
+            UID:event1@example.com
+            DTSTAMP:20260907T120000Z
+            DTSTART:20260907T140000Z
+            DTEND:20260907T150000Z
+            SUMMARY:Team Meeting
+            END:VEVENT
+            END:VCALENDAR
+            """;
+
+        var handler = new RecordingHandler(_ =>
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(icsContent, Encoding.UTF8, "text/calendar")
+            };
+        });
+
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+
+        var feed = new CalDavFeed
+        {
+            FeedId = "f2",
+            Label = "Team",
+            ColorHex = "#00ff00",
+            Server = "caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/calendars/alice/",
+            Username = "alice",
+            SelectedCalendars = ["https://caldav.example.com/calendars/alice/team.ics"]
+        };
+
+        var result = await fetcher.FetchAsync(feed, "alice_secret", null, CancellationToken.None);
+
+        Assert.IsNotNull(result.Body);
+        Assert.IsTrue(result.Body.Contains("Team Meeting", StringComparison.Ordinal));
+        Assert.AreEqual(1, handler.Requests.Count);
+
+        var req = handler.Requests[0];
+        Assert.AreEqual(HttpMethod.Get, req.Method);
+        Assert.IsNotNull(req.Headers.Authorization);
+        Assert.AreEqual("Basic", req.Headers.Authorization.Scheme);
+        string decoded = Encoding.UTF8.GetString(Convert.FromBase64String(req.Headers.Authorization.Parameter!));
+        Assert.AreEqual("alice:alice_secret", decoded, "Basic auth header must contain username:password");
     }
 }

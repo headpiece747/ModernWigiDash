@@ -1,6 +1,3 @@
-using ModernWigiDash.Core.Models;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-
 namespace ModernWigiDash.Tests;
 
 [TestClass]

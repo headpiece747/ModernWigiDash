@@ -1,4 +1,3 @@
-using SkiaSharp;
 using System.Windows.Threading;
 
 namespace ModernWigiDash.App.Input;

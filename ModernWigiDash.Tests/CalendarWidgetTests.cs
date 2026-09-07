@@ -1,6 +1,4 @@
 using System.Reflection;
-using ModernWigiDash.Sdk;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace ModernWigiDash.Tests;
 

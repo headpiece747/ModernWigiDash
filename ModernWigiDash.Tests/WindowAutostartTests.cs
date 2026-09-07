@@ -2,7 +2,6 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using ModernWigiDash.App.Power;
-using ModernWigiDash.App;
 
 namespace ModernWigiDash.Tests;
 

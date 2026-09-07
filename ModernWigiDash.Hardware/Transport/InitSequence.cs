@@ -1,5 +1,3 @@
-using ModernWigiDash.Sdk;
-
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>

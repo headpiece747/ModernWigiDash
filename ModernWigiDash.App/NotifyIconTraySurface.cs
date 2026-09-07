@@ -22,6 +22,7 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
 {
     private readonly NotifyIcon _notifyIcon = new();
     private readonly ContextMenuStrip _menuStrip = new();
+    private readonly bool _ownsIcon;
     private bool _live;
 
     private NotifyIconTraySurface(Icon? icon, TrayMenu menu)
@@ -29,6 +30,9 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
         // A null icon is legal here: Show() then refuses to bring the icon
         // up and IsLive stays false, so the close path's N1 guard falls the
         // close through to a normal exit instead of hiding into a void.
+        // Track whether this surface owns the icon handle (SystemIcons.Application
+        // is a shared static instance that must not be disposed).
+        _ownsIcon = icon is not null && !ReferenceEquals(icon, System.Drawing.SystemIcons.Application);
         _notifyIcon.Icon = icon;
         _notifyIcon.Text = "ModernWigiDash";
         _notifyIcon.Visible = false;
@@ -70,7 +74,7 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
                 return new Icon(path);
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
         {
             // Fall through to embedded / exe resource
         }
@@ -89,7 +93,7 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
         {
             // Fall through to associated executable icon
         }
@@ -107,13 +111,20 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
         {
             // Fall through to system default
         }
 
         // 4. System default application icon (never null)
-        return System.Drawing.SystemIcons.Application;
+        try
+        {
+            return System.Drawing.SystemIcons.Application;
+        }
+        catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
+        {
+            return null;
+        }
     }
 
     private void OnMouseClick(object? sender, MouseEventArgs e)
@@ -157,10 +168,16 @@ internal sealed class NotifyIconTraySurface : ITrayIconSurface
 
     public void Dispose()
     {
-        // The NotifyIcon owns the icon handle (its DestroyIcon releases the
-        // HICON); the menu strip owns its own GDI surface.
+        // The NotifyIcon removes the icon from the notification area;
+        // explicitly dispose the created Icon handle if owned.
         _live = false;
         _notifyIcon.Visible = false;
+        if (_ownsIcon)
+        {
+            var icon = _notifyIcon.Icon;
+            _notifyIcon.Icon = null;
+            icon?.Dispose();
+        }
         _notifyIcon.Dispose();
         _menuStrip.Dispose();
     }

@@ -250,6 +250,39 @@ public class WindowCloseInterceptTests
     }
 
     [TestMethod]
+    public void ShowFromTray_WhenVisibleAndMinimized_RestoresToNormalState()
+    {
+        string profilePath = SeedProfile(null);
+        Host.Run<object?>(() =>
+        {
+            var fake = new FakeTraySurface();
+            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), profilePath, new NoopPowerModeSource(), fake, UsbEngine: FakeTransport.InertEngine()));
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+
+                // Window minimized on taskbar (e.g. autostart or normal minimize when CloseBehavior is not HideToTray)
+                window.WindowState = WindowState.Minimized;
+                window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                Assert.IsTrue(window.IsVisible, "without hide-to-tray, a minimized window remains visible in WPF");
+
+                window.ShowFromTray();
+
+                Assert.AreEqual(
+                    WindowState.Normal,
+                    window.WindowState,
+                    "ShowFromTray must unminimize a visible minimized window so Activate brings it to the foreground");
+            }
+            finally
+            {
+                window.QuitClose();
+            }
+            return null;
+        });
+    }
+
+    [TestMethod]
     public void Minimize_WithADisabledOwner_VetoesTheHide()
     {
         string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);

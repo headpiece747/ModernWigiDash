@@ -1,5 +1,3 @@
-using ModernWigiDash.Core.Models;
-
 namespace ModernWigiDash.App;
 
 /// <summary>

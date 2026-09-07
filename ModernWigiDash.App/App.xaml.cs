@@ -1,7 +1,6 @@
 using System.IO;
 using System.Reflection;
 using ModernWigiDash.App.Theming;
-using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App;
 

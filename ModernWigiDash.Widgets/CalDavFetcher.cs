@@ -19,12 +19,6 @@ internal sealed class CalDavFetcher : IFeedFetcher
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
-    // The RFC 4791 / WebDAV namespaces used in the PROPFIND bodies and responses.
-    private const string DavNs = "DAV:";
-#pragma warning disable S5332 // a namespace URI, not a transport scheme
-    private const string CalDavNs = "http://apple.com/ns/ical/";
-#pragma warning restore S5332
-
     private readonly Func<HttpClient> _http;
     private readonly TimeSpan _timeout;
 
@@ -44,17 +38,17 @@ internal sealed class CalDavFetcher : IFeedFetcher
         CalDavFeed feed, string credential, CancellationToken cancellationToken)
     {
         Uri homeSet = await FindHomeSetAsync(feed, credential, cancellationToken).ConfigureAwait(false);
-        XDocument propfind = await SendPropFindAsync(homeSet.ToString(), CalendarListPropFind, credential, cancellationToken).ConfigureAwait(false);
+        XDocument propfind = await SendPropFindAsync(homeSet.ToString(), CalendarListPropFind, feed.Username, credential, cancellationToken).ConfigureAwait(false);
 
         var results = new List<CalDavCalendarInfo>();
-        foreach (XElement response in propfind.Descendants(XName.Get("response", DavNs)))
+        foreach (XElement response in propfind.Descendants().Where(e => string.Equals(e.Name.LocalName, "response", StringComparison.Ordinal)))
         {
-            string? href = ElementText(response, "href");
+            string? href = response.Descendants().FirstOrDefault(e => string.Equals(e.Name.LocalName, "href", StringComparison.Ordinal))?.Value;
             if (string.IsNullOrEmpty(href))
                 continue;
 
-            string displayName = ElementText(ElementChild(response, "propstat"), "displayname")
-                ?? ElementText(ElementChild(response, "propstat"), "cn")
+            string displayName = response.Descendants().FirstOrDefault(e => string.Equals(e.Name.LocalName, "displayname", StringComparison.Ordinal))?.Value
+                ?? response.Descendants().FirstOrDefault(e => string.Equals(e.Name.LocalName, "cn", StringComparison.Ordinal))?.Value
                 ?? Path.GetFileName(href.TrimEnd('/'));
             string url = MakeAbsolute(homeSet, href).ToString();
             results.Add(new CalDavCalendarInfo(displayName, url));
@@ -91,7 +85,7 @@ internal sealed class CalDavFetcher : IFeedFetcher
         bool anyModified = false;
         foreach (string url in urls)
         {
-            FeedFetchResult one = await FetchOneCalendarAsync(url, credential, previousEtag, cancellationToken).ConfigureAwait(false);
+            FeedFetchResult one = await FetchOneCalendarAsync(url, cal.Username, credential, previousEtag, cancellationToken).ConfigureAwait(false);
             if (one.Body is not null)
             {
                 bodies.Add(one.Body);
@@ -115,9 +109,9 @@ internal sealed class CalDavFetcher : IFeedFetcher
     private async Task<Uri> FindHomeSetAsync(CalDavFeed feed, string credential, CancellationToken ct)
     {
         Uri principal = BuildUri(feed, feed.PrincipalPath);
-        XDocument doc = await SendPropFindAsync(principal.ToString(), HomeSetPropFind, credential, ct).ConfigureAwait(false);
+        XDocument doc = await SendPropFindAsync(principal.ToString(), HomeSetPropFind, feed.Username, credential, ct).ConfigureAwait(false);
 
-        string? homeHref = FirstElementText(doc.Descendants(XName.Get("response", DavNs)),
+        string? homeHref = FirstElementText(doc.Descendants().Where(e => string.Equals(e.Name.LocalName, "response", StringComparison.Ordinal)),
             "calendar-home-set", "href");
         if (homeHref is null)
             throw new HttpRequestException("CalDAV principal did not report a calendar-home-set");
@@ -126,10 +120,10 @@ internal sealed class CalDavFetcher : IFeedFetcher
     }
 
     private async Task<FeedFetchResult> FetchOneCalendarAsync(
-        string url, string credential, string? previousEtag, CancellationToken ct)
+        string url, string username, string credential, string? previousEtag, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        ApplyBasicAuth(request, credential);
+        ApplyBasicAuth(request, username, credential);
         if (!string.IsNullOrEmpty(previousEtag))
             request.Headers.TryAddWithoutValidation("If-None-Match", previousEtag);
 
@@ -160,10 +154,10 @@ internal sealed class CalDavFetcher : IFeedFetcher
     }
 
     private async Task<XDocument> SendPropFindAsync(
-        string url, XDocument body, string credential, CancellationToken ct)
+        string url, XDocument body, string username, string credential, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
-        ApplyBasicAuth(request, credential);
+        ApplyBasicAuth(request, username, credential);
         request.Content = new StringContent(body.ToString(), Encoding.UTF8, "text/xml");
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -192,11 +186,11 @@ internal sealed class CalDavFetcher : IFeedFetcher
 
     // --- helpers -------------------------------------------------------------
 
-    private static void ApplyBasicAuth(HttpRequestMessage request, string credential)
+    private static void ApplyBasicAuth(HttpRequestMessage request, string username, string credential)
     {
-        // The username rides the feed; the password is the injected credential.
+        // The username rides the feed (names the account); the password is the injected credential.
         // Basic auth is base64(user:pass) -- the value is opaque to the server.
-        string userPass = $"{request.Headers.Host}:{credential}";
+        string userPass = $"{username}:{credential}";
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(userPass)));
     }
@@ -221,28 +215,23 @@ internal sealed class CalDavFetcher : IFeedFetcher
     private static Uri MakeAbsolute(Uri baseUri, string href)
         => Uri.TryCreate(baseUri, href, out var abs) ? abs : new Uri(href, UriKind.Absolute);
 
-    private static XElement? ElementChild(XElement parent, string localName)
-        => parent?.Element(XName.Get(localName, DavNs));
-
-    private static string? ElementText(XElement? element, string localName)
-        => element?.Element(XName.Get(localName, DavNs))?.Value;
-
     private static string? FirstElementText(IEnumerable<XElement> responses, string propName, string childName)
     {
         foreach (XElement response in responses)
         {
-            string? value = ElementText(ElementChild(response, "propstat"), propName);
-            if (value is null)
-                value = ElementText(response, propName);
-            if (value is null)
+            // The property element may be in CalDavNs (urn:ietf:params:xml:ns:caldav)
+            // or DavNs (DAV:), and sits inside <prop> under <propstat>.
+            XElement? propEl = response.Descendants().FirstOrDefault(e => string.Equals(e.Name.LocalName, propName, StringComparison.Ordinal));
+            if (propEl is null)
                 continue;
 
-            // The property's value may sit in a nested child element (the href
-            // inside the prop); prefer that direct child text, else the value.
-            XElement? propEl = response.Descendants(XName.Get(propName, DavNs)).FirstOrDefault()
-                ?? response.Descendants(XName.Get(propName, CalDavNs)).FirstOrDefault();
-            string? child = propEl?.Element(XName.Get(childName, DavNs))?.Value;
-            return child ?? value;
+            // Prefer the nested child element (e.g. <href> inside <calendar-home-set>)
+            string? child = propEl.Descendants().FirstOrDefault(e => string.Equals(e.Name.LocalName, childName, StringComparison.Ordinal))?.Value;
+            if (!string.IsNullOrEmpty(child))
+                return child;
+
+            if (!string.IsNullOrEmpty(propEl.Value))
+                return propEl.Value;
         }
         return null;
     }
