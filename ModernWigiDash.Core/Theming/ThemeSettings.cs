@@ -239,12 +239,6 @@ public class ThemeSettings
         }
     }
 
-    /// <summary>Persists the active <see cref="Theme"/> to the state dir (creating
-    /// the directory when missing).</summary>
-    /// <returns>True when the write succeeded, false on a write failure (the caller surfaces it).</returns>
-    public static bool Save()
-        => Save(Theme, DefaultPath());
-
     /// <summary>Persists <paramref name="theme"/> to an explicit path (the write
     /// half of the test seam; production binds <see cref="DefaultPath"/>). Public
     /// so the App's <c>ThemeStore</c> can persist through it.</summary>

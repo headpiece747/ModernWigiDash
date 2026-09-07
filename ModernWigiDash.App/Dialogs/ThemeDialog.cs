@@ -21,8 +21,7 @@ internal sealed class ThemeDialog : Window
     private Button _btnApply = null!;
 
     /// <param name="owner">Owner window for modal centering.</param>
-    /// <param name="themeApplicator">Applies the current <see cref="ThemeSettings.Theme"/>
-    /// (resources, preview shadow, title bar, log).</param>
+    /// <param name="themeApplicator">Applies the current theme (resources, preview shadow, title bar, log).</param>
     public ThemeDialog(Window owner, ThemeApplicator themeApplicator)
     {
         _themeApplicator = themeApplicator;

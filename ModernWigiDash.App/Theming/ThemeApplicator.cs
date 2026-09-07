@@ -5,8 +5,7 @@ using ModernWigiDash.Core.Theming;
 namespace ModernWigiDash.App.Theming;
 
 /// <summary>
-/// The theme-application module: one class that turns the current
-/// <see cref="ThemeSettings.Theme"/> into (a) the application resources,
+/// The theme-application module: one class that turns the current theme into (a) the application resources,
 /// (b) the preview-shadow accent, (c) the per-window dark DWM title bar, and
 /// (d) the applied-log line. Windows (main + dialogs) call <see cref="Apply"/>
 /// and own none of that themselves. One implementation, no interface: a
