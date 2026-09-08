@@ -193,4 +193,64 @@ public class CalendarAdaptiveRenderingTests
         w.Render(surface.Canvas, bounds);
         Assert.IsNotNull(surface);
     }
+
+    [TestMethod]
+    public void RenderDetailView_LongUrlInLocation_RendersWithoutException()
+    {
+        CalendarEventStore.Reset();
+        const string longUrl = "https://www.my.va.gov/VAVERA/s/flow/VERA_Start?appointmentId=001t000000AbCdEfGhIjKlMnOpQrStUvWxYz";
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events =
+            [
+                new CalendarEvent
+                {
+                    Title = "Toby's VERA Virtual Appointment",
+                    Start = new DateTime(2026, 9, 6, 10, 0, 0, DateTimeKind.Unspecified),
+                    End = new DateTime(2026, 9, 6, 10, 15, 0, DateTimeKind.Unspecified),
+                    Location = longUrl,
+                    Description = "Important appointment with VERA representative.",
+                    FeedLabel = "VA",
+                },
+            ],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget();
+        var bounds = new SKRect(0, 0, 1016, 592);
+        using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
+        w.Render(surface!.Canvas, bounds);
+
+        var geo = CalendarLayout.Compute(bounds, 2.46f, 1, false);
+        var rowPoint = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+        w.OnTouch(rowPoint, TouchEventType.TouchDown);
+        w.OnTouch(rowPoint, TouchEventType.TouchUp);
+
+        w.Render(surface.Canvas, bounds);
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void RenderDetailView_DirectRendererCall_WithLongUrlAndRunOnSentence_RendersSuccessfully()
+    {
+        using var renderer = new CalendarWidgetRenderer();
+        var bounds = new SKRect(0, 0, 500, 400);
+        using var surface = SKSurface.Create(new SKImageInfo(500, 400));
+
+        var ev = new CalendarEvent
+        {
+            Title = "VeryLongRunOnSentenceWithoutSpacesTitleExceedingTheCardWidth1234567890",
+            Start = new DateTime(2026, 9, 6, 10, 0, 0, DateTimeKind.Unspecified),
+            End = new DateTime(2026, 9, 6, 10, 15, 0, DateTimeKind.Unspecified),
+            Location = "https://www.my.va.gov/VAVERA/s/flow/VERA_Start?appointmentId=001t000000AbCdEfGhIjKlMnOpQrStUvWxYz",
+            Description = "VeryLongRunOnDescriptionWithoutAnyWhitespaceCharactersAtAllToEnsureNoClippingOccurs",
+            Url = "https://meet.example.com/long/unbroken/path/to/meeting/with/query?param1=value1&param2=value2",
+            FeedLabel = "Work",
+        };
+
+        renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now);
+        Assert.IsNotNull(surface);
+    }
 }

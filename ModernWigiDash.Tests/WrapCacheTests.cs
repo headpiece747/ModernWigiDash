@@ -129,4 +129,83 @@ public class WrapCacheTests
         Assert.AreSame(third, cache.GetOrWrap("third text", font, 24f, 100f), "the live entries must still hit");
         Assert.AreNotSame(first, cache.GetOrWrap("first text", font, 24f, 100f), "the evicted entry must re-wrap");
     }
+
+    [TestMethod]
+    public void WrapCache_LongUrlWithoutSpaces_WrapsIntoMultipleLinesEachFittingMaxWidth()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f);
+        const string url = "https://www.my.va.gov/VAVERA/s/flow/VERA_Start?appointmentId=001t000000AbCdEfGhIjKlMnOpQrStUvWxYz";
+        const float maxWidth = 180f;
+
+        float fullWidth = FontHelper.MeasureTextWithFallback(url, font);
+        Assert.IsTrue(fullWidth > maxWidth, "test precondition: URL must be wider than maxWidth");
+
+        var lines = cache.GetOrWrap(url, font, 14f, maxWidth);
+
+        Assert.IsTrue(lines.Count >= 2, "overlong URL must wrap onto multiple lines");
+        foreach (string line in lines)
+        {
+            float w = FontHelper.MeasureTextWithFallback(line, font);
+            Assert.IsTrue(w <= maxWidth + 0.1f, $"line '{line}' width {w} must not exceed maxWidth {maxWidth}");
+        }
+        Assert.AreEqual(url, string.Concat(lines), "reconstructing wrapped lines must perfectly preserve the URL");
+    }
+
+    [TestMethod]
+    public void WrapCache_RunOnSentenceWithoutSpaces_WrapsIntoMultipleLinesEachFittingMaxWidth()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f);
+        const string runOn = "ThisIsAVeryLongRunOnSentenceWithoutAnySpacesAtAllThatExceedsTheAvailableCardWidthOnTheDashboardCanvas";
+        const float maxWidth = 150f;
+
+        float fullWidth = FontHelper.MeasureTextWithFallback(runOn, font);
+        Assert.IsTrue(fullWidth > maxWidth, "test precondition: text must be wider than maxWidth");
+
+        var lines = cache.GetOrWrap(runOn, font, 14f, maxWidth);
+
+        Assert.IsTrue(lines.Count >= 2, "run-on sentence must wrap onto multiple lines");
+        foreach (string line in lines)
+        {
+            float w = FontHelper.MeasureTextWithFallback(line, font);
+            Assert.IsTrue(w <= maxWidth + 0.1f, $"line '{line}' width {w} must not exceed maxWidth {maxWidth}");
+        }
+        Assert.AreEqual(runOn, string.Concat(lines), "reconstructing wrapped lines must perfectly preserve the run-on text");
+    }
+
+    [TestMethod]
+    public void WrapCache_NormalWordsWithLongUrl_WrapsCorrectly()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f);
+        const string text = "Join meeting at https://www.my.va.gov/VAVERA/s/flow/VERA_Start?id=12345 please join on time";
+        const float maxWidth = 200f;
+
+        var lines = cache.GetOrWrap(text, font, 14f, maxWidth);
+
+        Assert.IsTrue(lines.Count >= 2, "mixed text with URL must wrap");
+        foreach (string line in lines)
+        {
+            float w = FontHelper.MeasureTextWithFallback(line, font);
+            Assert.IsTrue(w <= maxWidth + 0.1f, $"line '{line}' width {w} must not exceed maxWidth {maxWidth}");
+        }
+    }
+
+    [TestMethod]
+    public void WrapCache_NonPositiveMaxWidth_PreservesOneWordPerLine()
+    {
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f);
+        const string text = "alpha beta gamma";
+
+        var zeroLines = cache.GetOrWrap(text, font, 14f, 0f);
+        Assert.AreEqual(3, zeroLines.Count);
+        Assert.AreEqual("alpha", zeroLines[0]);
+        Assert.AreEqual("beta", zeroLines[1]);
+        Assert.AreEqual("gamma", zeroLines[2]);
+
+        var negLines = cache.GetOrWrap(text, font, 14f, -50f);
+        Assert.AreEqual(3, negLines.Count);
+    }
 }

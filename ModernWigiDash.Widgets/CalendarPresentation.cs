@@ -130,7 +130,7 @@ internal static class CalendarPresentation
         // The mini month grid for the viewed day's month.
         var (grid, monthTitle) = BuildMonthGrid(viewDate, now, snapshot.Events, notableDays);
 
-        // Next upcoming event across the entire schedule (row + its countdown).
+        // Next upcoming event: the first upcoming event from now (not filtered by viewed day).
         (CalendarRow? nextEvent, string nextCountdown) = BuildNextUpcoming(snapshot.Events, now);
 
         // Tomorrow's events.

@@ -279,7 +279,7 @@ public class CalendarPresentationTests
     [TestMethod]
     public void Build_NextUpcoming_Tomorrow_ReadsTomorrow()
     {
-        // An event on the next calendar day reads "Tomorrow".
+        // An event on the next calendar day reads "Tomorrow" when viewing today.
         var tomorrow = new CalendarEvent
         {
             Title = "Tmrw",
@@ -287,6 +287,7 @@ public class CalendarPresentationTests
             End = new DateTime(2026, 9, 7, 10, 0, 0, DateTimeKind.Unspecified),
         };
         var snap = SnapWith(tomorrow);
+        // View today (the day before the event)
         var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
 
         Assert.AreEqual("Tomorrow", d.NextUpcomingCountdown);

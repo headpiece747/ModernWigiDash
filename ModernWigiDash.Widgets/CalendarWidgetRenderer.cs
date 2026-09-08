@@ -694,21 +694,37 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
         var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
 
+        IReadOnlyList<string>? locLines = !string.IsNullOrWhiteSpace(ev.Location)
+            ? _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW)
+            : null;
+        IReadOnlyList<string>? descLines = !string.IsNullOrWhiteSpace(ev.Description)
+            ? _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW)
+            : null;
+        IReadOnlyList<string>? urlLines = !string.IsNullOrWhiteSpace(ev.Url)
+            ? _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)
+            : null;
+
         float yCursor = 16f * scale;
         yCursor += 30f * scale; // time
         foreach (string _ in titleLines) yCursor += 26f * scale;
         yCursor += 6f * scale;
         if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) yCursor += 24f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Location))
-            foreach (string _ in _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW)) yCursor += 20f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Location)) yCursor += 6f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Description))
-            foreach (string _ in _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW)) yCursor += 18f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Description)) yCursor += 6f * scale;
+        if (locLines is not null)
+        {
+            foreach (string _ in locLines) yCursor += 20f * scale;
+            yCursor += 6f * scale;
+        }
+        if (descLines is not null)
+        {
+            foreach (string _ in descLines) yCursor += 18f * scale;
+            yCursor += 6f * scale;
+        }
         if (!ev.IsAllDay) yCursor += 24f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Url))
-            foreach (string _ in BreakLongToken(ev.Url, urlFont, maxW)) yCursor += 18f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Url)) yCursor += 6f * scale;
+        if (urlLines is not null)
+        {
+            foreach (string _ in urlLines) yCursor += 18f * scale;
+            yCursor += 6f * scale;
+        }
 
         float availableH = cardBottom - cardTop - 32f * scale;
         bool needsScroll = yCursor > availableH;
@@ -739,10 +755,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             y += 24f * scale;
         }
 
-        if (!string.IsNullOrWhiteSpace(ev.Location))
+        if (locLines is not null)
         {
             _textPaint.Color = textColor.WithAlpha(200);
-            IReadOnlyList<string> locLines = _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW);
             foreach (string line in locLines)
             {
                 canvas.DrawTextWithFallback(line, x, y, locFont, _textPaint);
@@ -751,10 +766,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             y += 6f * scale;
         }
 
-        if (!string.IsNullOrWhiteSpace(ev.Description))
+        if (descLines is not null)
         {
             _textPaint.Color = textColor.WithAlpha(180);
-            IReadOnlyList<string> descLines = _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW);
             foreach (string line in descLines)
             {
                 canvas.DrawTextWithFallback(line, x, y, descFont, _textPaint);
@@ -774,14 +788,10 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             y += 24f * scale;
         }
 
-        if (!string.IsNullOrWhiteSpace(ev.Url))
+        if (urlLines is not null)
         {
             _textPaint.Color = new SKColor(120, 160, 255);
-            // A URL is one long unbroken token (no spaces), so the word-wrap
-            // cache would give it a single line wider than the card. Break it
-            // into hard chunks that each fit maxW; a break may land mid-word
-            // (the standard behavior for URLs).
-            foreach (string chunk in BreakLongToken(ev.Url, urlFont, maxW))
+            foreach (string chunk in urlLines)
             {
                 canvas.DrawTextWithFallback(chunk, x, y, urlFont, _textPaint);
                 y += 18f * scale;
@@ -798,44 +808,5 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             _strokePaint.StrokeWidth = 2f * scale;
             canvas.DrawLine(cardRight - 6f * scale, cardTop + 8f * scale, cardRight - 6f * scale, cardBottom - 8f * scale, _strokePaint);
         }
-    }
-
-    /// <summary>Breaks a long unbroken token (a URL has no spaces) into lines
-    /// that each fit within <paramref name="maxWidth"/>. Greedy: accumulates
-    /// characters until the next one would exceed the width, then starts a new
-    /// line. A break may land mid-word, which is the expected behavior for
-    /// wrapping URLs.</summary>
-    private static List<string> BreakLongToken(string text, SKFont font, float maxWidth)
-    {
-        var result = new List<string>();
-        if (string.IsNullOrEmpty(text))
-        {
-            result.Add("");
-            return result;
-        }
-
-        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
-        {
-            result.Add(text);
-            return result;
-        }
-
-        var current = new StringBuilder();
-        foreach (char c in text)
-        {
-            string candidate = current.ToString() + c;
-            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
-            {
-                current.Append(c);
-            }
-            else
-            {
-                if (current.Length > 0) result.Add(current.ToString());
-                current.Clear();
-                current.Append(c);
-            }
-        }
-        if (current.Length > 0) result.Add(current.ToString());
-        return result;
     }
 }

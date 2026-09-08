@@ -78,12 +78,12 @@ internal sealed class WrapCache
     /// <summary>
     /// Greedy word wrap: splits <paramref name="text"/> into lines that fit
     /// within <paramref name="maxWidth"/> measured with <paramref name="font"/>.
-    /// Words are never split — a word wider than the available width gets its
-    /// own line. An empty/null text yields a single empty line, and a
-    /// <paramref name="maxWidth"/> ≤ 0 yields one word per line (matching the
-    /// edge semantics of the two former per-widget copies). Private to this
-    /// cache — the word-wrap rule is the wrap result's only consumer's job, so
-    /// it lives behind the cache instead of the shared text helper.
+    /// Words that fit within the available width are kept intact. Overlong words
+    /// (such as long URLs or unbroken run-on strings) that exceed
+    /// <paramref name="maxWidth"/> on their own are greedily sliced across
+    /// character boundaries so every line stays within bounds and never clips.
+    /// An empty/null text yields a single empty line, and a
+    /// <paramref name="maxWidth"/> ≤ 0 yields one word per line.
     /// </summary>
     private static List<string> WrapLine(string text, SKFont font, float maxWidth)
     {
@@ -94,7 +94,7 @@ internal sealed class WrapCache
             return result;
         }
 
-        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
+        if (maxWidth > 0 && FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
         {
             result.Add(text);
             return result;
@@ -103,7 +103,7 @@ internal sealed class WrapCache
         var current = new StringBuilder();
         foreach (string word in text.Split(' '))
         {
-            string candidate = current.Length == 0 ? word : current + " " + word;
+            string candidate = current.Length == 0 ? word : $"{current} {word}";
             if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
             {
                 current.Clear();
@@ -111,13 +111,45 @@ internal sealed class WrapCache
             }
             else
             {
-                if (current.Length > 0) result.Add(current.ToString());
-                current.Clear();
-                current.Append(word);
+                if (current.Length > 0)
+                {
+                    result.Add(current.ToString());
+                    current.Clear();
+                }
+
+                if (maxWidth > 0 && FontHelper.MeasureTextWithFallback(word, font) > maxWidth)
+                {
+                    BreakToken(word, font, maxWidth, result, current);
+                }
+                else
+                {
+                    current.Append(word);
+                }
             }
         }
 
         if (current.Length > 0) result.Add(current.ToString());
         return result;
+    }
+
+    private static void BreakToken(string word, SKFont font, float maxWidth, List<string> result, StringBuilder current)
+    {
+        var chunk = new StringBuilder();
+        foreach (Rune rune in word.EnumerateRunes())
+        {
+            chunk.Append(rune);
+            if (chunk.Length > rune.Utf16SequenceLength && FontHelper.MeasureTextWithFallback(chunk.ToString(), font) > maxWidth)
+            {
+                chunk.Length -= rune.Utf16SequenceLength;
+                result.Add(chunk.ToString());
+                chunk.Clear();
+                chunk.Append(rune);
+            }
+        }
+
+        if (chunk.Length > 0)
+        {
+            current.Append(chunk);
+        }
     }
 }
