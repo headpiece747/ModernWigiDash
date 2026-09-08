@@ -704,7 +704,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             foreach (string _ in _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW)) yCursor += 18f * scale;
         if (!string.IsNullOrWhiteSpace(ev.Description)) yCursor += 6f * scale;
         if (!ev.IsAllDay) yCursor += 24f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.Url)) yCursor += 24f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Url))
+            foreach (string _ in _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)) yCursor += 18f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Url)) yCursor += 6f * scale;
 
         float availableH = cardBottom - cardTop - 32f * scale;
         bool needsScroll = yCursor > availableH;
@@ -773,8 +775,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         if (!string.IsNullOrWhiteSpace(ev.Url))
         {
             _textPaint.Color = new SKColor(120, 160, 255);
-            canvas.DrawTextWithFallback("\U0001F517 Tap link to open", x, y, urlFont, _textPaint);
-            y += 24f * scale;
+            IReadOnlyList<string> urlLines = _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW);
+            foreach (string line in urlLines)
+            {
+                canvas.DrawTextWithFallback(line, x, y, urlFont, _textPaint);
+                y += 18f * scale;
+            }
+            y += 6f * scale;
         }
 
         canvas.Restore();
