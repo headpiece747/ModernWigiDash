@@ -2,7 +2,6 @@ using System.Windows.Automation;
 using System.Windows.Input;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.App.Theming;
-using ModernWigiDash.Core.Theming;
 
 namespace ModernWigiDash.App.Dialogs;
 

@@ -1,5 +1,3 @@
-using ModernWigiDash.App.Inspector;
-
 namespace ModernWigiDash.App.Inspector;
 
 /// <summary>
