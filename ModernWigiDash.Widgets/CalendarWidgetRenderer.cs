@@ -678,19 +678,49 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardLeft + 5f * scale, cardBottom), 2.5f * scale, 2.5f * scale, _fillPaint);
 
         float x = cardLeft + 16f * scale;
-        float y = cardTop + 16f * scale;
         float maxW = cardRight - x - 12f * scale;
 
+        // Measure total content height to decide if scrolling is needed.
         string timeStr = ev.IsAllDay ? "All day" : $"{ev.Start:HH:mm} \u2013 {ev.End:HH:mm}";
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 20f * scale);
+        string title = string.IsNullOrWhiteSpace(ev.Title) ? "Untitled" : ev.Title;
+        IReadOnlyList<string> titleLines = _wrapCache.GetOrWrap(title, titleFont, 20f * scale, maxW);
+        var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
+        var locFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 15f * scale);
+        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+        var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+        var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+
+        float yCursor = 16f * scale;
+        yCursor += 30f * scale; // time
+        foreach (string _ in titleLines) yCursor += 26f * scale;
+        yCursor += 6f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) yCursor += 24f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Location))
+            foreach (string _ in _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW)) yCursor += 20f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Location)) yCursor += 6f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Description))
+            foreach (string _ in _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW)) yCursor += 18f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Description)) yCursor += 6f * scale;
+        if (!ev.IsAllDay) yCursor += 24f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.Url)) yCursor += 24f * scale;
+
+        float availableH = cardBottom - cardTop - 32f * scale;
+        bool needsScroll = yCursor > availableH;
+
+        // Clip to the card interior so scrolled content never bleeds outside.
+        var clipRect = new SKRect(cardLeft, cardTop, cardRight, cardBottom);
+        canvas.Save();
+        canvas.ClipRect(clipRect);
+
+        float y = cardTop + 16f * scale;
+
         _textPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
         canvas.DrawTextWithFallback(timeStr, x, y, timeFont, _textPaint);
         y += 30f * scale;
 
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 20f * scale);
         _textPaint.Color = textColor;
-        string title = string.IsNullOrWhiteSpace(ev.Title) ? "Untitled" : ev.Title;
-        IReadOnlyList<string> titleLines = _wrapCache.GetOrWrap(title, titleFont, 20f * scale, maxW);
         foreach (string line in titleLines)
         {
             canvas.DrawTextWithFallback(line, x, y, titleFont, _textPaint);
@@ -700,7 +730,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(ev.FeedLabel))
         {
-            var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
             _textPaint.Color = new SKColor(120, 160, 255);
             canvas.DrawTextWithFallback($"[{ev.FeedLabel}]", x, y, feedFont, _textPaint);
             y += 24f * scale;
@@ -708,7 +737,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(ev.Location))
         {
-            var locFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 15f * scale);
             _textPaint.Color = textColor.WithAlpha(200);
             IReadOnlyList<string> locLines = _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW);
             foreach (string line in locLines)
@@ -721,7 +749,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(ev.Description))
         {
-            var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
             _textPaint.Color = textColor.WithAlpha(180);
             IReadOnlyList<string> descLines = _wrapCache.GetOrWrap(ev.Description, descFont, 14f * scale, maxW);
             foreach (string line in descLines)
@@ -738,7 +765,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             string durStr = dur.TotalHours >= 1
                 ? $"{(int)dur.TotalHours}h {dur.Minutes:D2}m"
                 : $"{dur.Minutes}m";
-            var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
             _textPaint.Color = textColor.WithAlpha(160);
             canvas.DrawTextWithFallback($"Duration: {durStr}", x, y, durFont, _textPaint);
             y += 24f * scale;
@@ -746,15 +772,19 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(ev.Url))
         {
-            // Only draw the URL hint if there's enough vertical space remaining
-            var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
-            float urlHeight = urlFont.Size;
+            _textPaint.Color = new SKColor(120, 160, 255);
+            canvas.DrawTextWithFallback("\U0001F517 Tap link to open", x, y, urlFont, _textPaint);
+            y += 24f * scale;
+        }
 
-            if (y + urlHeight <= cardBottom - 8f * scale)
-            {
-                _textPaint.Color = new SKColor(120, 160, 255);
-                canvas.DrawTextWithFallback("\U0001F517 Tap link to open", x, y, urlFont, _textPaint);
-            }
+        canvas.Restore();
+
+        // Scroll indicator when content overflows.
+        if (needsScroll)
+        {
+            _strokePaint.Color = textColor.WithAlpha(40);
+            _strokePaint.StrokeWidth = 2f * scale;
+            canvas.DrawLine(cardRight - 6f * scale, cardTop + 8f * scale, cardRight - 6f * scale, cardBottom - 8f * scale, _strokePaint);
         }
     }
 }
