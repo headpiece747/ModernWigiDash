@@ -34,7 +34,7 @@ public sealed class DebtGuardTests
         {
             ["ModernWigiDash.Hardware/Transport/DisplayDeviceEngine.cs"] =
                 "the standby verdict is read only once Wait confirms completion (CONTEXT.md DisplayDeviceEngine), the dispose-abandon budget reads the transport CloseBudgets, and the connect-fault continuation runs on a threadpool thread",
-            ["ModernWigiDash.Core/Models/ProfileOps.cs"] =
+            ["ModernWigiDash.Core/Models/WidgetRehydrator.cs"] =
                 "the profile load runs the widget InitializeAsync/Dispose synchronously inside the load (CONTEXT.md StartupWiring): a synchronous user action, not a tick",
             ["ModernWigiDash.Sdk/LoopLifetime.cs"] =
                 "the shared lifetime module's bounded join (the cancel / bounded-join / CTS-handoff dance owned once for PollLoop, FeedLoop, and FrameDelivery)",

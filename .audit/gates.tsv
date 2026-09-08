@@ -318,3 +318,6 @@
 2026-09-08T15:37:45Z	c8e5a21	manual - FAILED: DrawActiveScene_Playing_DarkIconSitsOnTheAccentHeroButton, DrawActiveScene_Stopped_HeroButtonUsesTheDisabledAlpha	ok	0	0	FAIL	2243	2	SKIP
 2026-09-08T15:40:47Z	c8e5a21	manual	ok	0	0	FAIL	2244	1	SKIP
 2026-09-08T15:42:55Z	c8e5a21	manual	ok	0	0	ok	2245	0	ok
+2026-09-08T15:45:46Z	f24c23a	manual - FAILED: HouseRules_SyncOverAsync_OnlyAtTheDocumentedBudgetedSites	ok	0	0	FAIL	2251	1	SKIP
+2026-09-08T15:46:50Z	f24c23a	manual	ok	0	0	ok	2252	0	FAIL
+2026-09-08T15:48:10Z	f24c23a	manual	ok	0	0	ok	2252	0	ok
