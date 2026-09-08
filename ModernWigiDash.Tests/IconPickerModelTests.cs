@@ -125,4 +125,28 @@ public class IconPickerModelTests
         model.Select("icons/arrow.svg");
         Assert.AreEqual("icons/arrow.svg", model.Accept());
     }
+
+    [TestMethod]
+    public void Accept_CustomFilePath_AcceptsAsIs()
+    {
+        var model = new IconPickerModel(null);
+
+        model.Select("C:/Users/test/icons/custom.svg");
+        Assert.AreEqual("C:/Users/test/icons/custom.svg", model.Accept());
+
+        model.Select("/home/user/icons/other.svg");
+        Assert.AreEqual("/home/user/icons/other.svg", model.Accept());
+    }
+
+    [TestMethod]
+    public void Accept_WhitespaceOnly_ReturnsNull()
+    {
+        var model = new IconPickerModel(null);
+
+        model.Select("   ");
+        Assert.IsNull(model.Accept());
+
+        model.Select("\t\n");
+        Assert.IsNull(model.Accept());
+    }
 }

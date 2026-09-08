@@ -40,7 +40,7 @@ internal sealed class IconPickerModel
     /// <summary>True when the cell's icon matches the current selection (case-insensitive).</summary>
     public bool IsHighlighted(string name) => name.Equals(_chosen, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The accept verdict: the chosen value, or null when it is blank (the Select button stays a no-op).</summary>
+    /// <summary>The accept verdict: the chosen value, or null when it is blank (the Select button stays a no-op). The custom-file shape is pinned by test: a non-blank value that is not a catalog name is accepted as-is, so the picker can never smuggle in an empty or whitespace-only path.</summary>
     public string? Accept() => string.IsNullOrWhiteSpace(_chosen) ? null : _chosen;
 
     /// <summary>Applies the search box's text as the filter and recomputes the visible names.</summary>
