@@ -38,6 +38,11 @@ internal sealed class StarterProfile
             new StarterPlacement("stopwatch_timer", 813, 148, 203, 148)
         ]),
 
+        new StarterPage("Calendar",
+        [
+            new StarterPlacement("calendar", 0, 0, 1016, 592)
+        ]),
+
         new StarterPage("Now Playing",
         [
             new StarterPlacement("now_playing", 0, 0, 1016, 592)

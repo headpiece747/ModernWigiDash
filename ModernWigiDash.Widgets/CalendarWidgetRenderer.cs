@@ -36,7 +36,8 @@ internal sealed class CalendarWidgetRenderer : IDisposable
     }
 
     /// <summary>The minimal 1x1 date card: a color box with year, month, day,
-    /// and weekday stacked vertically.</summary>
+    /// and weekday stacked vertically. Font sizes are derived from the rect
+    /// dimensions so the text fills the available space at any widget size.</summary>
     public void RenderMinimalDateCard(SKCanvas canvas, SKRect rect, CalendarSeasonalPalette palette, float scale, DateTime viewDate)
     {
         if (rect.IsEmpty)
@@ -51,34 +52,35 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.DrawRoundRect(rect, 12f * scale, 12f * scale, _strokePaint);
 
         float midX = rect.MidX;
+        float h = rect.Height;
 
         // Year at top
         string yearStr = viewDate.Year.ToString(CultureInfo.InvariantCulture);
-        var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f * scale);
+        var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(8f, h * 0.06f));
         _textPaint.Color = palette.Text.WithAlpha(170);
         float yearW = FontHelper.MeasureTextWithFallback(yearStr, yearFont);
-        canvas.DrawTextWithFallback(yearStr, midX - yearW / 2f, rect.Top + 18f * scale, yearFont, _textPaint);
+        canvas.DrawTextWithFallback(yearStr, midX - yearW / 2f, rect.Top + h * 0.12f, yearFont, _textPaint);
 
         // Month name
         string monthStr = viewDate.ToString("MMMM", CultureInfo.InvariantCulture).ToUpperInvariant();
-        var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 13f * scale);
+        var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(10f, h * 0.08f));
         _textPaint.Color = palette.Text;
         float monthW = FontHelper.MeasureTextWithFallback(monthStr, monthFont);
-        canvas.DrawTextWithFallback(monthStr, midX - monthW / 2f, rect.Top + 35f * scale, monthFont, _textPaint);
+        canvas.DrawTextWithFallback(monthStr, midX - monthW / 2f, rect.Top + h * 0.25f, monthFont, _textPaint);
 
         // Day number
         string dayStr = viewDate.Day.ToString(CultureInfo.InvariantCulture);
-        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 44f * scale);
+        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(24f, h * 0.35f));
         _textPaint.Color = palette.Text;
         float dayW = FontHelper.MeasureTextWithFallback(dayStr, dayFont);
-        canvas.DrawTextWithFallback(dayStr, midX - dayW / 2f, rect.Top + 82f * scale, dayFont, _textPaint);
+        canvas.DrawTextWithFallback(dayStr, midX - dayW / 2f, rect.Top + h * 0.55f, dayFont, _textPaint);
 
         // Weekday at bottom
         string dowStr = viewDate.ToString("dddd", CultureInfo.InvariantCulture).ToUpperInvariant();
-        var dowFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 9.5f * scale);
+        var dowFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(7f, h * 0.05f));
         _textPaint.Color = palette.Text.WithAlpha(180);
         float dowW = FontHelper.MeasureTextWithFallback(dowStr, dowFont);
-        canvas.DrawTextWithFallback(dowStr, midX - dowW / 2f, rect.Bottom - 12f * scale, dowFont, _textPaint);
+        canvas.DrawTextWithFallback(dowStr, midX - dowW / 2f, rect.Bottom - h * 0.08f, dowFont, _textPaint);
     }
 
     /// <summary>The adaptive view dispatcher: draws the dark container then
@@ -99,12 +101,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         {
             DrawLeftEditorialStrip(canvas, layout.LeftStripRect, palette, scale, viewDate);
             DrawPosterMonthCard(canvas, layout, display, palette, scale, viewDate);
-            DrawAgendaPanel(canvas, layout, display, palette, scale, agendaScrollY, maxAgendaScrollY);
+            DrawAgendaPanel(canvas, layout, display, palette, scale, viewDate, agendaScrollY, maxAgendaScrollY);
         }
         else if (layout.Mode == CalendarViewMode.SplitBanner4x2)
         {
             DrawPosterMonthCard(canvas, layout, display, palette, scale, viewDate);
-            DrawAgendaPanel(canvas, layout, display, palette, scale, agendaScrollY, maxAgendaScrollY);
+            DrawAgendaPanel(canvas, layout, display, palette, scale, viewDate, agendaScrollY, maxAgendaScrollY);
         }
         else
         {
@@ -149,8 +151,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         float statY = rect.Bottom - 30f * scale;
         for (int i = 0; i < StatLabels.Length; i++)
         {
-            float sw = FontHelper.MeasureTextWithFallback(StatLabels[i], statFont);
-            canvas.DrawTextWithFallback(StatLabels[i], rect.MidX - sw / 2f, statY, statFont, _textPaint);
+            string label = StatLabels[i];
+            float sw = FontHelper.MeasureTextWithFallback(label, statFont);
+            canvas.DrawTextWithFallback(label, rect.MidX - sw / 2f, statY, statFont, _textPaint);
             statY += 9f * scale;
         }
     }
@@ -308,7 +311,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         }
     }
 
-    private void DrawAgendaPanel(SKCanvas canvas, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, float agendaScrollY, float maxAgendaScrollY)
+    private void DrawAgendaPanel(SKCanvas canvas, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
     {
         SKRect rect = layout.AgendaRect;
         if (rect.IsEmpty)
@@ -324,7 +327,8 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         // Header
         var hFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f * scale);
         _textPaint.Color = new SKColor(120, 160, 255);
-        canvas.DrawTextWithFallback("UPCOMING AGENDA", rect.Left + 14f * scale, rect.Top + 16f * scale, hFont, _textPaint);
+        string agendaHeader = viewDate.Date == DateTime.Today ? "AGENDA" : "UPCOMING AGENDA";
+        canvas.DrawTextWithFallback(agendaHeader, rect.Left + 14f * scale, rect.Top + 16f * scale, hFont, _textPaint);
 
         var dFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 13f * scale);
         _textPaint.Color = SKColors.White;

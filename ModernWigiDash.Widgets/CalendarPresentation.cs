@@ -236,7 +236,14 @@ internal static class CalendarPresentation
             return $"In {(int)span.TotalHours}h";
         if (e.Start.Date == now.Date.AddDays(1))
             return "Tomorrow";
-        return e.Start.ToString("MMM d", CultureInfo.InvariantCulture);
+
+        // For events further out, show a compact duration summary
+        int days = (int)(e.Start.Date - now.Date).TotalDays;
+        if (days < 30)
+            return $"{days}d";
+        if (days < 365)
+            return $"{days / 7}w";
+        return $"{days / 30}m";
     }
 
     /// <summary>Builds tomorrow's timed rows (up to three, ordered by start): the

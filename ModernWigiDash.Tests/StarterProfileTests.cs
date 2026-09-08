@@ -10,14 +10,14 @@ public class StarterProfileTests
 
     private static readonly string[] ExpectedPageNames =
     [
-        "Main Dashboard", "Now Playing", "Weather Forecast",
+        "Main Dashboard", "Calendar", "Now Playing", "Weather Forecast",
         "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time"
     ];
 
     // ── layout spec (pure data — no widget instantiation, no loader/context) ──
 
     [TestMethod]
-    public void Layout_DefinesSixPagesInExpectedOrder()
+    public void Layout_DefinesSevenPagesInExpectedOrder()
     {
         CollectionAssert.AreEqual(ExpectedPageNames, StarterProfile.Layout.Select(p => p.Name).ToArray());
     }
