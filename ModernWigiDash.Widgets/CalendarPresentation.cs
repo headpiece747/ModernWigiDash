@@ -96,14 +96,12 @@ internal static class CalendarPresentation
             : Math.Max(1, Math.Min(timedRows, CalendarFeedPolicy.MaxTimedRows));
         foreach (CalendarEvent e in dayTimed.Take(slots))
         {
-            bool isLive = e.Start <= now && now < e.End;
-            bool isUrgent = !isLive && (e.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
             rows.Add(new CalendarRow(
                 FormatTime(e.Start),
                 Truncate(e.Title, 32),
                 e.FeedLabel,
-                isLive,
-                isUrgent,
+                IsLive(e, now),
+                IsUrgent(e, now),
                 e.Url,
                 e.Start,
                 e.End));
@@ -132,73 +130,11 @@ internal static class CalendarPresentation
         // The mini month grid for the viewed day's month.
         var (grid, monthTitle) = BuildMonthGrid(viewDate, now, snapshot.Events, notableDays);
 
-        static bool IsUpcoming(CalendarEvent ev, DateTime current)
-        {
-            if (ev.End != default)
-                return ev.End > current;
-            if (ev.IsAllDay)
-                return ev.Start.Date >= current.Date;
-            return ev.Start > current;
-        }
+        // Next upcoming event across the entire schedule (row + its countdown).
+        (CalendarRow? nextEvent, string nextCountdown) = BuildNextUpcoming(snapshot.Events, now);
 
-        // Next upcoming event across the entire schedule
-        CalendarRow? nextEvent = null;
-        string nextCountdown = string.Empty;
-        CalendarEvent? upcoming = snapshot.Events
-            .Where(e => IsUpcoming(e, now))
-            .OrderBy(e => e.Start)
-            .Cast<CalendarEvent?>()
-            .FirstOrDefault();
-
-        if (upcoming.HasValue)
-        {
-            CalendarEvent up = upcoming.Value;
-            bool isLive = up.Start <= now && now < up.End;
-            bool isUrgent = !isLive && (up.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
-            nextEvent = new CalendarRow(
-                up.IsAllDay ? "All day" : FormatTime(up.Start),
-                up.Title,
-                up.FeedLabel,
-                isLive,
-                isUrgent,
-                up.Url,
-                up.Start,
-                up.End);
-
-            if (isLive)
-            {
-                nextCountdown = "Live now";
-            }
-            else
-            {
-                var span = up.Start - now;
-                if (span.TotalMinutes <= 60)
-                    nextCountdown = $"In {(int)Math.Max(1, span.TotalMinutes)}m";
-                else if (span.TotalHours < 24 && up.Start.Date == now.Date)
-                    nextCountdown = $"In {(int)span.TotalHours}h";
-                else if (up.Start.Date == now.Date.AddDays(1))
-                    nextCountdown = "Tomorrow";
-                else
-                    nextCountdown = up.Start.ToString("MMM d", CultureInfo.InvariantCulture);
-            }
-        }
-
-        // Tomorrow's events
-        DateTime tomorrow = now.Date.AddDays(1);
-        var tomorrowEvents = snapshot.Events
-            .Where(e => e.Start.Date == tomorrow)
-            .OrderBy(e => e.Start)
-            .Take(3)
-            .Select(e => new CalendarRow(
-                e.IsAllDay ? "All day" : FormatTime(e.Start),
-                Truncate(e.Title, 32),
-                e.FeedLabel,
-                false,
-                false,
-                e.Url,
-                e.Start,
-                e.End))
-            .ToList();
+        // Tomorrow's events.
+        var tomorrowEvents = BuildTomorrowRows(snapshot.Events, now);
 
         return new CalendarDisplay(
             DateHeaderText: dateHeader,
@@ -237,6 +173,93 @@ internal static class CalendarPresentation
 
     private static readonly string[] MonthShortNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     private static readonly string[] MonthFullNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    /// <summary>The one live predicate: an event that has started but not ended.</summary>
+    private static bool IsLive(CalendarEvent e, DateTime now)
+        => e.Start <= now && now < e.End;
+
+    /// <summary>The one urgency predicate: a not-yet-live event starting within the
+    /// urgency window reads as "approaching". Shared by the timed rows and the
+    /// next-upcoming row so the two can never drift on what counts as urgent.</summary>
+    private static bool IsUrgent(CalendarEvent e, DateTime now)
+        => !IsLive(e, now) && (e.Start - now).TotalMinutes is > 0 and <= UrgencyWindowMinutes;
+
+    /// <summary>An event still upcoming at <paramref name="current"/>: its end is
+    /// in the future (or, for all-day items, its day has not passed).</summary>
+    private static bool IsUpcoming(CalendarEvent ev, DateTime current)
+    {
+        if (ev.End != default)
+            return ev.End > current;
+        if (ev.IsAllDay)
+            return ev.Start.Date >= current.Date;
+        return ev.Start > current;
+    }
+
+    /// <summary>Builds the next-upcoming-event display fact: the first upcoming
+    /// event's row plus its countdown string (empty when nothing is upcoming).
+    /// The row carries the shared live/urgent predicates; the countdown is owned
+    /// by <see cref="FormatCountdown"/>.</summary>
+    private static (CalendarRow? Row, string Countdown) BuildNextUpcoming(IEnumerable<CalendarEvent> events, DateTime now)
+    {
+        CalendarEvent? upcoming = events
+            .Where(e => IsUpcoming(e, now))
+            .OrderBy(e => e.Start)
+            .Cast<CalendarEvent?>()
+            .FirstOrDefault();
+
+        if (!upcoming.HasValue)
+            return (null, string.Empty);
+
+        CalendarEvent up = upcoming.Value;
+        bool isLive = IsLive(up, now);
+        var row = new CalendarRow(
+            up.IsAllDay ? "All day" : FormatTime(up.Start),
+            up.Title,
+            up.FeedLabel,
+            isLive,
+            IsUrgent(up, now),
+            up.Url,
+            up.Start,
+            up.End);
+        return (row, isLive ? "Live now" : FormatCountdown(up, now));
+    }
+
+    /// <summary>The countdown string for an upcoming (not yet live) event: minutes
+    /// under an hour, hours same-day, "Tomorrow" for the next day, else the month
+    /// + day. One owner of the rule so the wording cannot drift between call sites.</summary>
+    private static string FormatCountdown(CalendarEvent e, DateTime now)
+    {
+        var span = e.Start - now;
+        if (span.TotalMinutes <= 60)
+            return $"In {(int)Math.Max(1, span.TotalMinutes)}m";
+        if (span.TotalHours < 24 && e.Start.Date == now.Date)
+            return $"In {(int)span.TotalHours}h";
+        if (e.Start.Date == now.Date.AddDays(1))
+            return "Tomorrow";
+        return e.Start.ToString("MMM d", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Builds tomorrow's timed rows (up to three, ordered by start): the
+    /// "Tomorrow" strip's display facts. All-day items read as "All day"; none are
+    /// live or urgent (they are future by construction).</summary>
+    private static IReadOnlyList<CalendarRow> BuildTomorrowRows(IEnumerable<CalendarEvent> events, DateTime now)
+    {
+        DateTime tomorrow = now.Date.AddDays(1);
+        return events
+            .Where(e => e.Start.Date == tomorrow)
+            .OrderBy(e => e.Start)
+            .Take(3)
+            .Select(e => new CalendarRow(
+                e.IsAllDay ? "All day" : FormatTime(e.Start),
+                Truncate(e.Title, 32),
+                e.FeedLabel,
+                false,
+                false,
+                e.Url,
+                e.Start,
+                e.End))
+            .ToList();
+    }
 
     private static string FormatDateHeader(DateTime d)
         => $"{d.DayOfWeek}, {MonthShortNames[d.Month - 1]} {d.Day}";

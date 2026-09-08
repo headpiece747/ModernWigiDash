@@ -249,6 +249,81 @@ public class CalendarPresentationTests
         Assert.AreEqual(1, d.Rows.Count);
         Assert.AreEqual("Work", d.Rows[0].FeedLabel);
     }
+
+    // --- Next-upcoming countdown tiers (the FormatCountdown rule, pinned through Build) ---
+
+    private static CalendarSnapshot SnapWith(params CalendarEvent[] events)
+        => new() { Events = events, HasData = true, IsLive = true, LastUpdate = Now };
+
+    [TestMethod]
+    public void Build_NextUpcoming_UnderAnHour_CountsDownInMinutes()
+    {
+        // An event starting 20 minutes from now reads "In 20m".
+        var snap = SnapWith(Ev("Soon", 14, 50, 15, 20));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("In 20m", d.NextUpcomingCountdown);
+        Assert.IsFalse(d.NextUpcomingEvent!.IsLive);
+    }
+
+    [TestMethod]
+    public void Build_NextUpcoming_SameDayLater_CountsDownInHours()
+    {
+        // An event starting 3 hours from now (same day) reads "In 3h".
+        var snap = SnapWith(Ev("Later", 17, 30, 18, 0));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("In 3h", d.NextUpcomingCountdown);
+    }
+
+    [TestMethod]
+    public void Build_NextUpcoming_Tomorrow_ReadsTomorrow()
+    {
+        // An event on the next calendar day reads "Tomorrow".
+        var tomorrow = new CalendarEvent
+        {
+            Title = "Tmrw",
+            Start = new DateTime(2026, 9, 7, 9, 0, 0, DateTimeKind.Unspecified),
+            End = new DateTime(2026, 9, 7, 10, 0, 0, DateTimeKind.Unspecified),
+        };
+        var snap = SnapWith(tomorrow);
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("Tomorrow", d.NextUpcomingCountdown);
+    }
+
+    [TestMethod]
+    public void Build_NextUpcoming_LiveNow_ReadsLiveNow()
+    {
+        // The currently-active event is the next upcoming one and reads "Live now".
+        var snap = SnapWith(Ev("Standup", 14, 0, 15, 0));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("Live now", d.NextUpcomingCountdown);
+        Assert.IsTrue(d.NextUpcomingEvent!.IsLive);
+    }
+
+    [TestMethod]
+    public void Build_NextUpcoming_UrgentWindow_FlagsUrgentNotLive()
+    {
+        // An event starting within the 30-minute urgency window is urgent, not live.
+        var snap = SnapWith(Ev("Imminent", 14, 45, 15, 15));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.IsTrue(d.NextUpcomingEvent!.IsUrgent);
+        Assert.IsFalse(d.NextUpcomingEvent.IsLive);
+    }
+
+    [TestMethod]
+    public void Build_NoUpcomingEvents_EmptyCountdownAndNullRow()
+    {
+        // Only a past event: nothing upcoming, so no row and no countdown.
+        var snap = SnapWith(Ev("Past", 9, 0, 10, 0));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.IsNull(d.NextUpcomingEvent);
+        Assert.AreEqual(string.Empty, d.NextUpcomingCountdown);
+    }
 }
 
 [TestClass]
