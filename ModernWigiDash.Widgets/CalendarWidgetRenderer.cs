@@ -289,27 +289,43 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _strokePaint.StrokeWidth = 1f * scale;
         canvas.DrawLine(rect.Left, rect.Top, rect.Right, rect.Top, _strokePaint);
 
-        // Only show notable dates for the viewed day (not the whole month)
+        // Only show holidays for the viewed day (not feed events)
         IReadOnlyList<NotableDateItem> allItems = display.SafeNotableDates;
-        var viewedDayItems = allItems.Where(item => item.Day == viewDate.Day).ToList();
+        var viewedDayHolidays = allItems
+            .Where(item => item.Day == viewDate.Day && !item.IsFeedEvent)
+            .ToList();
 
-        if (viewedDayItems.Count == 0)
+        if (viewedDayHolidays.Count == 0)
             return;
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 9f * scale);
         float y = rect.Top + 13f * scale;
         float curX = rect.Left;
 
-        for (int i = 0; i < viewedDayItems.Count && i < 3; i++)
+        for (int i = 0; i < viewedDayHolidays.Count && i < 3; i++)
         {
-            NotableDateItem item = viewedDayItems[i];
+            NotableDateItem item = viewedDayHolidays[i];
             string entry = $"{item.Tag}  {item.Label}";
-            if (i < viewedDayItems.Count - 1 && i < 2) entry += "   \u00B7   ";
+            if (i < viewedDayHolidays.Count - 1 && i < 2) entry += "   \u00B7   ";
+
+            // Truncate entry to fit within remaining width
+            float availableW = rect.Right - curX;
+            if (availableW <= 0) break;
+
             float entryW = FontHelper.MeasureTextWithFallback(entry, labelFont);
+            if (entryW > availableW)
+            {
+                // Truncate with ellipsis
+                while (entry.Length > 3 && FontHelper.MeasureTextWithFallback(entry + "...", labelFont) > availableW)
+                    entry = entry[..^1];
+                entry += "...";
+                entryW = FontHelper.MeasureTextWithFallback(entry, labelFont);
+            }
+
             if (curX + entryW > rect.Right && i > 0)
                 break;
 
-            _textPaint.Color = item.IsFeedEvent ? palette.Accent : palette.Text.WithAlpha(200);
+            _textPaint.Color = palette.Text.WithAlpha(200);
             canvas.DrawTextWithFallback(entry, curX, y, labelFont, _textPaint);
             curX += entryW;
         }
@@ -730,9 +746,15 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(ev.Url))
         {
+            // Only draw the URL hint if there's enough vertical space remaining
             var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
-            _textPaint.Color = new SKColor(120, 160, 255);
-            canvas.DrawTextWithFallback("\U0001F517 Tap link to open", x, y, urlFont, _textPaint);
+            float urlHeight = urlFont.Size;
+
+            if (y + urlHeight <= cardBottom - 8f * scale)
+            {
+                _textPaint.Color = new SKColor(120, 160, 255);
+                canvas.DrawTextWithFallback("\U0001F517 Tap link to open", x, y, urlFont, _textPaint);
+            }
         }
     }
 }
