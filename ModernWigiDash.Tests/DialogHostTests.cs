@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -150,5 +151,72 @@ public class DialogHostTests
             }
         }
         return null;
+    }
+}
+
+/// <summary>
+/// Pins the shared small-dialog chrome at its own seam: the window shell and the
+/// OK/Cancel button row are spelled once in <see cref="DialogChrome"/> and every
+/// small dialog composes them. These tests drive the module directly through
+/// <see cref="StaRunner"/> (a fresh throwaway STA thread per call, no Application,
+/// no shown owner) so they add no persistent STA thread to the process — the
+/// chrome needs only the apartment, not a live dialog pump. The button-row ids and
+/// the window flags are verified where they are owned rather than only through a
+/// window walk.
+/// </summary>
+[TestClass]
+public class DialogChromeTests
+{
+    [TestMethod]
+    public void BuildButtonRow_WithCancel_EmitsOkAndCancelWithTheSharedIds()
+    {
+        StaRunner.Run(() =>
+        {
+            var owner = new Window();
+            var chrome = new DialogChrome(owner, new ThemeApplicator(), _ => null);
+            var (row, ok, cancel) = chrome.BuildButtonRow(withCancel: true);
+            Assert.IsNotNull(cancel);
+            Assert.AreEqual("BtnPromptOk", AutomationProperties.GetAutomationId(ok));
+            Assert.AreEqual("BtnPromptCancel", AutomationProperties.GetAutomationId(cancel));
+            Assert.IsTrue(ok.IsDefault);
+            Assert.IsTrue(cancel.IsCancel);
+            // The row carries both buttons, Cancel first (left of OK).
+            Assert.AreEqual(2, row.Children.Count);
+            Assert.AreSame(cancel, row.Children[0]);
+            Assert.AreSame(ok, row.Children[1]);
+        });
+    }
+
+    [TestMethod]
+    public void BuildButtonRow_WithoutCancel_EmitsOnlyTheOkButton()
+    {
+        StaRunner.Run(() =>
+        {
+            var owner = new Window();
+            var chrome = new DialogChrome(owner, new ThemeApplicator(), _ => null);
+            var (row, ok, cancel) = chrome.BuildButtonRow(withCancel: false);
+            Assert.IsNull(cancel);
+            Assert.AreEqual("BtnPromptOk", AutomationProperties.GetAutomationId(ok));
+            Assert.AreEqual(1, row.Children.Count);
+            Assert.AreSame(ok, row.Children[0]);
+        });
+    }
+
+    [TestMethod]
+    public void CreateWindow_SpellsTheSmallDialogShellFlags()
+    {
+        StaRunner.Run(() =>
+        {
+            var owner = new Window();
+            WpfWindow.ShowOwner(owner);
+            var chrome = new DialogChrome(owner, new ThemeApplicator(), _ => null);
+            var window = chrome.CreateWindow("Title", 380);
+            Assert.AreEqual("Title", window.Title);
+            Assert.AreEqual(380, window.Width);
+            Assert.AreEqual(SizeToContent.Height, window.SizeToContent);
+            Assert.AreEqual(WindowStartupLocation.CenterOwner, window.WindowStartupLocation);
+            Assert.AreEqual(ResizeMode.NoResize, window.ResizeMode);
+            Assert.IsFalse(window.ShowInTaskbar);
+        });
     }
 }

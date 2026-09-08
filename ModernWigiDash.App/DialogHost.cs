@@ -1,4 +1,3 @@
-using System.Windows.Automation;
 using System.Windows.Shapes;
 using Microsoft.Win32;
 using ModernWigiDash.App.Theming;
@@ -24,6 +23,7 @@ internal sealed class DialogHost
     private readonly ThemeApplicator _themeApplicator;
     private readonly Func<string, object?> _tryFindResource;
     private readonly Action<string, Exception?> _logError;
+    private readonly DialogChrome _chrome;
     private Window? _deviceAuthorizationWindow;
 
     public DialogHost(Window owner, ThemeApplicator themeApplicator, Func<string, object?> tryFindResource, Action<string, Exception?> logError)
@@ -32,6 +32,7 @@ internal sealed class DialogHost
         _themeApplicator = themeApplicator;
         _tryFindResource = tryFindResource;
         _logError = logError;
+        _chrome = new DialogChrome(owner, themeApplicator, tryFindResource);
     }
 
     /// <summary>
@@ -39,7 +40,7 @@ internal sealed class DialogHost
     /// </summary>
     public string? PromptForText(string title, string label, string initialValue)
     {
-        var dialog = CreateChrome(title, PromptWidth);
+        var dialog = _chrome.CreateWindow(title, PromptWidth);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -59,20 +60,9 @@ internal sealed class DialogHost
         Grid.SetRow(box, 1);
         root.Children.Add(box);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 14, 0, 0)
-        };
-        Grid.SetRow(buttons, 2);
-        var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-        AutomationProperties.SetAutomationId(btnCancel, "BtnPromptCancel");
-        var btnOk = new Button { Content = "OK", Style = _tryFindResource("AccentButton") as Style, IsDefault = true };
-        AutomationProperties.SetAutomationId(btnOk, "BtnPromptOk");
-        buttons.Children.Add(btnCancel);
-        buttons.Children.Add(btnOk);
-        root.Children.Add(buttons);
+        var (buttonRow, btnOk, btnCancel) = _chrome.BuildButtonRow(withCancel: true);
+        Grid.SetRow(buttonRow, 2);
+        root.Children.Add(buttonRow);
 
         dialog.Content = root;
         box.Focus();
@@ -84,7 +74,7 @@ internal sealed class DialogHost
             result = box.Text;
             dialog.DialogResult = true;
         };
-        btnCancel.Click += (_, _) => dialog.DialogResult = false;
+        btnCancel!.Click += (_, _) => dialog.DialogResult = false;
 
         dialog.ShowDialog();
         return result;
@@ -127,7 +117,7 @@ internal sealed class DialogHost
     /// </summary>
     private (Window Dialog, Button OkButton) CreateMessageDialog(string title, string message, bool isConfirm)
     {
-        var dialog = CreateChrome(title, PromptWidth);
+        var dialog = _chrome.CreateWindow(title, PromptWidth);
 
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -142,51 +132,15 @@ internal sealed class DialogHost
         };
         root.Children.Add(messageBlock);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 14, 0, 0)
-        };
-        Grid.SetRow(buttons, 1);
-
-        if (isConfirm)
-        {
-            var btnCancel = new Button { Content = "Cancel", Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-            AutomationProperties.SetAutomationId(btnCancel, "BtnPromptCancel");
-            btnCancel.Click += (_, _) => dialog.DialogResult = false;
-            buttons.Children.Add(btnCancel);
-        }
-
-        var btnOk = new Button { Content = "OK", Style = _tryFindResource("AccentButton") as Style, IsDefault = true };
-        AutomationProperties.SetAutomationId(btnOk, "BtnPromptOk");
+        var (buttonRow, btnOk, btnCancel) = _chrome.BuildButtonRow(withCancel: isConfirm);
+        Grid.SetRow(buttonRow, 1);
+        if (btnCancel is { } cancel)
+            cancel.Click += (_, _) => dialog.DialogResult = false;
         btnOk.Click += (_, _) => dialog.DialogResult = true;
-        buttons.Children.Add(btnOk);
-        root.Children.Add(buttons);
+        root.Children.Add(buttonRow);
 
         dialog.Content = root;
         return (dialog, btnOk);
-    }
-
-    /// <summary>Shared chrome for the small themed dialogs: fixed-width,
-    /// centered on the owner, non-resizable, themed background/font, and the
-    /// dark DWM title bar.</summary>
-    private Window CreateChrome(string title, double width)
-    {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = width,
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Owner = _owner,
-            ResizeMode = ResizeMode.NoResize,
-            ShowInTaskbar = false,
-            Background = _tryFindResource("BgPanel") as Brush ?? Brushes.Black,
-            FontFamily = _tryFindResource("PrimaryFont") as FontFamily ?? SystemFonts.MessageFontFamily
-        };
-        dialog.SourceInitialized += (_, _) => _themeApplicator.Apply(dialog);
-        return dialog;
     }
 
     /// <summary>
