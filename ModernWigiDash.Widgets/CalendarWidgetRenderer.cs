@@ -127,13 +127,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _strokePaint.StrokeWidth = 1f * scale;
         canvas.DrawRoundRect(rect, 12f * scale, 12f * scale, _strokePaint);
 
-        // Week badge at top (2x smaller: 5.5f * scale)
+        // Week badge at top - use larger font and ensure visibility
         int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(viewDate);
-        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 8f * scale);
+        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 10f * scale);
         _textPaint.Color = palette.Accent;
         string weekStr = $"W{weekNum:D2}";
         float ww = FontHelper.MeasureTextWithFallback(weekStr, weekFont);
-        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 16f * scale, weekFont, _textPaint);
+        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 18f * scale, weekFont, _textPaint);
 
         // Rotated typography branding "CALENDAR" - centered in the strip
         canvas.Save();
@@ -146,16 +146,16 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.DrawTextWithFallback(brandStr, -brandW / 2f, brandFont.Metrics.CapHeight / 2f, brandFont, _textPaint);
         canvas.Restore();
 
-        // Stacked indicators at bottom: 12M / 52W / 365D (2x smaller: 4.5f * scale)
-        var statFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 6f * scale);
+        // Stacked indicators at bottom: 12M / 52W / 365D - tightly stacked, almost touching
+        var statFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 5f * scale);
         _textPaint.Color = SKColors.White.WithAlpha(140);
-        float statY = rect.Bottom - 45f * scale;
-        for (int i = 0; i < StatLabels.Length; i++)
+        float statY = rect.Bottom - 8f * scale;
+        for (int i = StatLabels.Length - 1; i >= 0; i--)
         {
             string label = StatLabels[i];
             float sw = FontHelper.MeasureTextWithFallback(label, statFont);
             canvas.DrawTextWithFallback(label, rect.MidX - sw / 2f, statY, statFont, _textPaint);
-            statY += 14f * scale;
+            statY -= 7f * scale;
         }
     }
 
@@ -374,10 +374,28 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             {
                 _fillPaint.Color = new SKColor(24, 26, 36);
                 canvas.DrawRoundRect(heroRect, 8f * scale, 8f * scale, _fillPaint);
-                var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 11f * scale);
-                _textPaint.Color = SKColors.White.WithAlpha(120);
+
+                // Auto-scale hint text to fit within the hero card bounds
                 string hint = display.HasData ? "No upcoming events scheduled" : display.StalenessHint;
-                canvas.DrawTextWithFallback(hint, heroRect.Left + 12f * scale, heroRect.MidY - emptyFont.Metrics.Top * 0.4f, emptyFont, _textPaint);
+                float maxWidth = heroRect.Width - 24f * scale;
+                float maxHeight = heroRect.Height - 8f * scale;
+
+                var testFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 11f * scale);
+                var tb = new SKRect();
+                testFont.MeasureText(hint, out tb, _textPaint);
+
+                float fontSize = 11f * scale;
+                if (tb.Width > maxWidth || tb.Height > maxHeight)
+                {
+                    float scaleW = maxWidth / tb.Width;
+                    float scaleH = maxHeight / tb.Height;
+                    fontSize *= Math.Min(scaleW, scaleH);
+                }
+
+                var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize);
+                _textPaint.Color = SKColors.White.WithAlpha(120);
+                emptyFont.MeasureText(hint, out tb, _textPaint);
+                canvas.DrawTextWithFallback(hint, heroRect.MidX - tb.Width / 2f, heroRect.MidY - tb.Height / 2f, emptyFont, _textPaint);
             }
         }
 
