@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -705,7 +707,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         if (!string.IsNullOrWhiteSpace(ev.Description)) yCursor += 6f * scale;
         if (!ev.IsAllDay) yCursor += 24f * scale;
         if (!string.IsNullOrWhiteSpace(ev.Url))
-            foreach (string _ in _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)) yCursor += 18f * scale;
+            foreach (string _ in BreakLongToken(ev.Url, urlFont, maxW)) yCursor += 18f * scale;
         if (!string.IsNullOrWhiteSpace(ev.Url)) yCursor += 6f * scale;
 
         float availableH = cardBottom - cardTop - 32f * scale;
@@ -775,10 +777,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         if (!string.IsNullOrWhiteSpace(ev.Url))
         {
             _textPaint.Color = new SKColor(120, 160, 255);
-            IReadOnlyList<string> urlLines = _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW);
-            foreach (string line in urlLines)
+            // A URL is one long unbroken token (no spaces), so the word-wrap
+            // cache would give it a single line wider than the card. Break it
+            // into hard chunks that each fit maxW; a break may land mid-word
+            // (the standard behavior for URLs).
+            foreach (string chunk in BreakLongToken(ev.Url, urlFont, maxW))
             {
-                canvas.DrawTextWithFallback(line, x, y, urlFont, _textPaint);
+                canvas.DrawTextWithFallback(chunk, x, y, urlFont, _textPaint);
                 y += 18f * scale;
             }
             y += 6f * scale;
@@ -793,5 +798,44 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             _strokePaint.StrokeWidth = 2f * scale;
             canvas.DrawLine(cardRight - 6f * scale, cardTop + 8f * scale, cardRight - 6f * scale, cardBottom - 8f * scale, _strokePaint);
         }
+    }
+
+    /// <summary>Breaks a long unbroken token (a URL has no spaces) into lines
+    /// that each fit within <paramref name="maxWidth"/>. Greedy: accumulates
+    /// characters until the next one would exceed the width, then starts a new
+    /// line. A break may land mid-word, which is the expected behavior for
+    /// wrapping URLs.</summary>
+    private static List<string> BreakLongToken(string text, SKFont font, float maxWidth)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(text))
+        {
+            result.Add("");
+            return result;
+        }
+
+        if (FontHelper.MeasureTextWithFallback(text, font) <= maxWidth)
+        {
+            result.Add(text);
+            return result;
+        }
+
+        var current = new StringBuilder();
+        foreach (char c in text)
+        {
+            string candidate = current.ToString() + c;
+            if (FontHelper.MeasureTextWithFallback(candidate, font) <= maxWidth)
+            {
+                current.Append(c);
+            }
+            else
+            {
+                if (current.Length > 0) result.Add(current.ToString());
+                current.Clear();
+                current.Append(c);
+            }
+        }
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
     }
 }
