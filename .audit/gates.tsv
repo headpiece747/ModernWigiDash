@@ -315,3 +315,6 @@
 2026-09-08T02:45:34Z	2d28bd4	manual	ok	0	0	ok	2235	0	ok
 2026-09-08T03:07:17Z	3f7d884	manual	ok	0	0	ok	2236	0	ok
 2026-09-08T03:09:21Z	fb92ec9	manual	ok	0	0	ok	2236	0	ok
+2026-09-08T15:37:45Z	c8e5a21	manual - FAILED: DrawActiveScene_Playing_DarkIconSitsOnTheAccentHeroButton, DrawActiveScene_Stopped_HeroButtonUsesTheDisabledAlpha	ok	0	0	FAIL	2243	2	SKIP
+2026-09-08T15:40:47Z	c8e5a21	manual	ok	0	0	FAIL	2244	1	SKIP
+2026-09-08T15:42:55Z	c8e5a21	manual	ok	0	0	ok	2245	0	ok
