@@ -786,14 +786,14 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
     private void SelectWidget(PlacedWidgetInstance? widget)
     {
-        // The same-reference early-out keeps the mutation contract's
-        // selection re-application free when nothing changed (the in-page
-        // shapes pass the current selection straight through), and protects
-        // the re-entrant import path: the funnel's control resyncs can fire a
-        // handler that re-enters the contract while the old — now disposed —
+        // The same-reference early-out is owned by SelectionPolicy: it keeps the
+        // mutation contract's selection re-application free when nothing changed
+        // (the in-page shapes pass the current selection straight through), and
+        // protects the re-entrant import path (the funnel's control resyncs can
+        // fire a handler that re-enters the contract while the old, now disposed,
         // selected instance is still referenced, and re-applying it must not
-        // rebuild the inspector over a dead widget.
-        if (ReferenceEquals(widget, _selectedWidget)) return;
+        // rebuild the inspector over a dead widget).
+        if (SelectionPolicy.ShouldSkip(_selectedWidget, widget)) return;
         _selectedWidget = widget;
         _compositor.SelectedWidget = widget;
         _inspector.Refresh();
