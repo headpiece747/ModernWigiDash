@@ -66,6 +66,30 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     // into Feed (the C1 extraction: "what does a tap do" has one owner).
     private readonly CalendarGestureState _gesture = new();
 
+    // The display-facts memo (the house MemoSlot pattern, like FrameTime's
+    // _memoDisplay): Build is expensive (LINQ ToList, records, strings) and was
+    // running every tick at 30 FPS. Its now-dependent facts (live/urgent flags,
+    // the countdown, the today highlight) change at most once per minute, so the
+    // cache key carries the minute-of-now plus the snapshot identity, view date,
+    // and row budget; 59 of 60 ticks per minute hit the cache and allocate nothing.
+    private readonly MemoSlot<CalendarDisplayKey, CalendarDisplay> _displayMemo = new();
+
+    /// <summary>The calendar display-facts cache key: the snapshot identity
+    /// (reference equality - a new poll is a new object), the viewed day, the
+    /// minute-of-now (live/urgent/countdown granularity), and the row budget.</summary>
+    private readonly record struct CalendarDisplayKey(
+        int SnapshotIdentity, DateTime ViewDate, int MinuteOfDay, int Rows);
+
+    /// <summary>The last computed display facts (test seam): lets a test observe
+    /// whether the render tick recomputed or reused the memoized value across a
+    /// minute boundary, without a production surface.</summary>
+    internal CalendarDisplay? LastDisplay => _displayMemo.LastValue;
+
+    /// <summary>How many times the display-facts compute actually ran (a cache
+    /// hit does not increment this). Test seam: distinguishes a memo hit from a
+    /// recompute that happens to produce an equal value.</summary>
+    internal int DisplayRecomputeCount => _displayMemo.RecomputeCount;
+
     /// <summary>The shell-open seam: opens a meeting link in the default
     /// browser. Production uses the OS default handler (the http/https/mailto
     /// gate + Process.Start live in the gesture module); tests bind a recorder so
@@ -233,7 +257,17 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             ? 100
             : CalendarFeedPolicy.ResolveTimedRows(TimedRows);
 
-        CalendarDisplay display = CalendarPresentation.Build(snapshot, now, viewDate, rows);
+        // Memoize the display facts: a new poll, a viewed-day change, a minute
+        // rollover, or a row-budget change recomputes; otherwise the cached
+        // CalendarDisplay is reused and the tick allocates nothing. A null
+        // snapshot (no data) keys on identity 0 - Build handles the unavailable
+        // state, and the memo still avoids rebuilding it every tick.
+        var displayKey = new CalendarDisplayKey(
+            snapshot is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(snapshot),
+            viewDate.Date,
+            now.Hour * 60 + now.Minute,
+            rows);
+        CalendarDisplay display = _displayMemo.GetOrCompute(displayKey, () => CalendarPresentation.Build(snapshot, now, viewDate, rows));
 
         _layout = CalendarLayout.Compute(bounds, scale, display.Rows.Count, false, LayoutMode);
 

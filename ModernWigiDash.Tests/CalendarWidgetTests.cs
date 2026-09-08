@@ -233,4 +233,69 @@ public class CalendarWidgetTapToOpenTests
 
         Assert.AreEqual(0, opened.Count, "a swipe does not open a link");
     }
+
+    [TestMethod]
+    public void Render_DisplayMemo_HitsWithinAMinute_AndInvalidatesAtTheBoundary()
+    {
+        // The display-facts memo (the house MemoSlot pattern) must reuse the cached
+        // CalendarDisplay within a minute (no recompute) and recompute when the
+        // minute rolls over (the live/urgent/countdown facts change at minute
+        // granularity). Position an event 15 minutes out from the fake clock's
+        // start so the countdown is "In 15m", then drive the clock across a
+        // minute boundary and confirm the memo hits within the minute and
+        // invalidates at the rollover.
+        var clock = new FakeTimeProvider();
+        DateTime t0 = clock.GetLocalNow().LocalDateTime;
+        // An event 15 minutes out from the fake clock's actual start (the Ev
+        // helper pins a fixed date that would not match the fake clock, so the
+        // event is built inline against t0's date): the countdown reads "In 15m".
+        DateTime eventStart = t0.AddMinutes(15);
+        DateTime eventEnd = t0.AddMinutes(30);
+        var evs = new List<CalendarEvent>
+        {
+            new()
+            {
+                Title = "Soon",
+                Start = eventStart,
+                End = eventEnd,
+                Url = "https://meet.example/soon",
+            }
+        };
+        CalendarEventStore.Reset();
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events = evs,
+            HasData = true,
+            IsLive = true,
+            LastUpdate = t0,
+        });
+
+        var w = new CalendarWidget();
+        w.Clock = clock;
+        var bounds = new SKRect(0, 0, 320, 240);
+        using var surface = SKSurface.Create(new SKImageInfo(320, 240));
+
+        w.Render(surface.Canvas, bounds);
+        var first = w.LastDisplay;
+        Assert.IsNotNull(first, "the first render computes a display");
+        Assert.AreEqual("In 15m", first.NextUpcomingCountdown, "15 minutes out reads In 15m");
+        int computesAfterFirst = w.DisplayRecomputeCount;
+
+        // Advance 20 seconds - still the same minute: the memo hits, so no new
+        // compute runs and the countdown is unchanged.
+        clock.Advance(TimeSpan.FromSeconds(20));
+        w.Render(surface.Canvas, bounds);
+        Assert.AreEqual(computesAfterFirst, w.DisplayRecomputeCount, "within a minute the memo hits (no recompute)");
+        Assert.AreEqual("In 15m", w.LastDisplay!.NextUpcomingCountdown, "the cached countdown is unchanged within a minute");
+
+        // Advance a full minute: the minute-of-now key changes, the memo must
+        // recompute, and the countdown reflects the new time. Total advance from
+        // t0 is now 80s (20s + 60s), so the event is 13.67 minutes out -> "In 13m".
+        clock.Advance(TimeSpan.FromMinutes(1));
+        w.Render(surface.Canvas, bounds);
+        Assert.AreEqual(computesAfterFirst + 1, w.DisplayRecomputeCount, "a minute rollover forces exactly one recompute");
+        var after = w.LastDisplay;
+        Assert.IsNotNull(after, "the rollover render recomputes a display");
+        Assert.AreEqual("In 13m", after.NextUpcomingCountdown, "after the rollover the countdown reflects the new time");
+    }
 }

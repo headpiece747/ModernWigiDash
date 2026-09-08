@@ -12,6 +12,7 @@ public sealed class MemoSlot<TKey, TValue>
     private TKey _key = default!;
     private TValue _value = default!;
     private bool _hasValue;
+    private int _recomputes;
 
     /// <summary>Returns the cached value when <paramref name="key"/> equals
     /// the last key, else computes, stores, and returns it.</summary>
@@ -25,6 +26,17 @@ public sealed class MemoSlot<TKey, TValue>
         _key = key;
         _value = compute();
         _hasValue = true;
+        _recomputes++;
         return _value;
     }
+
+    /// <summary>The last computed/stored value, or default when nothing has been
+    /// computed yet. Test seam: lets a consumer observe the memoized result
+    /// without re-driving the compute.</summary>
+    public TValue? LastValue => _hasValue ? _value : default;
+
+    /// <summary>How many times the compute delegate actually ran (a cache hit
+    /// does not increment this). Test seam: distinguishes a memo hit from a
+    /// recompute that happens to produce an equal value.</summary>
+    public int RecomputeCount => _recomputes;
 }
