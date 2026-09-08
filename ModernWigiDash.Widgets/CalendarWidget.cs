@@ -254,7 +254,12 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         if (_gesture.DetailEvent is not null)
         {
             _gesture.SetFrameFacts(_layout, null, now);
-            _renderer.RenderDetailView(canvas, bounds, scale, _gesture.DetailEvent.Value, ColorOf(TextColorHex, SKColors.White), ColorOf(AccentColorHex, WidgetPalette.Accent), now);
+            var (maxScroll, cardRect, urlRect) = _renderer.RenderDetailView(
+                canvas, bounds, scale, _gesture.DetailEvent.Value,
+                ColorOf(TextColorHex, SKColors.White),
+                ColorOf(AccentColorHex, WidgetPalette.Accent),
+                now, _gesture.DetailScrollY);
+            _gesture.SetDetailFrameFacts(cardRect, maxScroll, urlRect);
             return;
         }
 

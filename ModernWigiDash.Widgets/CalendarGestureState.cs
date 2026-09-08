@@ -34,6 +34,13 @@ internal sealed class CalendarGestureState
     // The mutable touch state this module owns.
     private int _viewDateOffset;
     private CalendarEvent? _detailEvent;
+    private float _detailScrollY;
+    private float _maxDetailScrollY;
+    private float _touchStartDetailScrollY;
+    private bool _isDraggingDetail;
+    private bool _isDetailScrolled;
+    private SKRect _detailCardRect;
+    private SKRect _detailUrlRect;
     private SKPoint? _touchDown;
     private float _agendaScrollY;
     private float _touchStartScrollY;
@@ -62,6 +69,14 @@ internal sealed class CalendarGestureState
     /// when a timed row or the hero card is tapped.</summary>
     public CalendarEvent? DetailEvent => _detailEvent;
 
+    /// <summary>The current vertical scroll offset of the event detail card
+    /// (the renderer draws the detail content shifted by this amount).</summary>
+    public float DetailScrollY => _detailScrollY;
+
+    /// <summary>The maximum vertical scroll extent for the current event detail card
+    /// (0 when the content fits inside the card without overflowing).</summary>
+    public float MaxDetailScrollY => _maxDetailScrollY;
+
     /// <summary>The current vertical scroll offset of the agenda rows viewport
     /// (the renderer draws the rows shifted by this amount).</summary>
     public float AgendaScrollY => _agendaScrollY;
@@ -69,6 +84,16 @@ internal sealed class CalendarGestureState
     /// <summary>The maximum vertical scroll extent for the current agenda rows
     /// (0 when the rows fit the viewport).</summary>
     public float MaxAgendaScrollY => _maxAgendaScrollY;
+
+    /// <summary>Receives the detail view card layout and max scroll extent computed during render,
+    /// clamping the current detail scroll position into valid range.</summary>
+    public void SetDetailFrameFacts(SKRect cardRect, float maxScrollY, SKRect urlRect)
+    {
+        _detailCardRect = cardRect;
+        _maxDetailScrollY = Math.Max(0f, maxScrollY);
+        _detailScrollY = Math.Clamp(_detailScrollY, 0f, _maxDetailScrollY);
+        _detailUrlRect = urlRect;
+    }
 
     /// <summary>Receives the frame's facts after the widget composes them: the
     /// geometry, the display, the clock read, and the event list the display was
@@ -115,6 +140,14 @@ internal sealed class CalendarGestureState
         if (eventType == TouchEventType.TouchDown)
         {
             _touchDown = localPoint;
+            if (_detailEvent is not null)
+            {
+                _touchStartDetailScrollY = _detailScrollY;
+                _isDraggingDetail = !_detailCardRect.IsEmpty && _detailCardRect.Contains(localPoint.X, localPoint.Y);
+                _isDetailScrolled = false;
+                return;
+            }
+
             _touchStartScrollY = _agendaScrollY;
             _isDraggingAgenda = !_layout.AgendaScrollAreaRect.IsEmpty && _layout.AgendaScrollAreaRect.Contains(localPoint.X, localPoint.Y);
             _isAgendaScrolled = false;
@@ -123,6 +156,21 @@ internal sealed class CalendarGestureState
 
         if (eventType == TouchEventType.TouchMove)
         {
+            if (_detailEvent is not null)
+            {
+                if (_isDraggingDetail && _touchDown.HasValue && _maxDetailScrollY > 0f)
+                {
+                    float moveDy = localPoint.Y - _touchDown.Value.Y;
+                    if (Math.Abs(moveDy) > 4f)
+                    {
+                        _isDetailScrolled = true;
+                        _detailScrollY = Math.Clamp(_touchStartDetailScrollY - moveDy, 0f, _maxDetailScrollY);
+                        RequestRender();
+                    }
+                }
+                return;
+            }
+
             if (_isDraggingAgenda && _touchDown.HasValue && _maxAgendaScrollY > 0f)
             {
                 float moveDy = localPoint.Y - _touchDown.Value.Y;
@@ -141,38 +189,73 @@ internal sealed class CalendarGestureState
 
         SKPoint? down = _touchDown;
         _touchDown = null;
-        bool wasDragging = _isDraggingAgenda;
-        bool wasScrolled = _isAgendaScrolled;
-        _isDraggingAgenda = false;
-        _isAgendaScrolled = false;
-
         if (down is null)
             return;
-
-        if (wasDragging && wasScrolled)
-        {
-            // Drag-to-scroll gesture completed; do not trigger row selection.
-            return;
-        }
 
         float dx = localPoint.X - down.Value.X;
         float dy = localPoint.Y - down.Value.Y;
 
-        // Detail mode: tap on the URL hint opens the link; any other tap exits.
         if (_detailEvent is not null)
         {
+            bool wasDragging = _isDraggingDetail;
+            bool wasScrolled = _isDetailScrolled;
+            _isDraggingDetail = false;
+            _isDetailScrolled = false;
+
+            if (wasDragging && wasScrolled)
+            {
+                // Drag-to-scroll gesture completed; do not trigger tap actions.
+                return;
+            }
+
             if (Math.Abs(dx) < 10f && Math.Abs(dy) < 10f)
             {
                 CalendarEvent ev = _detailEvent.Value;
-                if (!string.IsNullOrWhiteSpace(ev.Url))
+
+                // Tap on "Tap to go back" header (above the pillbox card)
+                if (!_detailCardRect.IsEmpty && localPoint.Y < _detailCardRect.Top)
+                {
+                    _detailEvent = null;
+                    _detailScrollY = 0f;
+                    _maxDetailScrollY = 0f;
+                    RequestRender();
+                    return;
+                }
+
+                // Tap on meeting link (if tapped inside the URL rect within the visible card)
+                if (!string.IsNullOrWhiteSpace(ev.Url) &&
+                    !_detailUrlRect.IsEmpty &&
+                    _detailCardRect.Contains(localPoint.X, localPoint.Y) &&
+                    _detailUrlRect.Contains(localPoint.X, localPoint.Y))
                 {
                     OpenMeetingLink(ev.Url);
                     return;
                 }
 
+                // If URL is present and they tapped inside the card but _detailUrlRect is not set
+                if (!string.IsNullOrWhiteSpace(ev.Url) && _detailUrlRect.IsEmpty && _detailCardRect.Contains(localPoint.X, localPoint.Y))
+                {
+                    OpenMeetingLink(ev.Url);
+                    return;
+                }
+
+                // Any other tap exits detail mode back to agenda view
                 _detailEvent = null;
+                _detailScrollY = 0f;
+                _maxDetailScrollY = 0f;
                 RequestRender();
             }
+            return;
+        }
+
+        bool wasDraggingAgenda = _isDraggingAgenda;
+        bool wasScrolledAgenda = _isAgendaScrolled;
+        _isDraggingAgenda = false;
+        _isAgendaScrolled = false;
+
+        if (wasDraggingAgenda && wasScrolledAgenda)
+        {
+            // Drag-to-scroll gesture completed; do not trigger row selection.
             return;
         }
 
@@ -236,6 +319,10 @@ internal sealed class CalendarGestureState
             if (matched is not null)
             {
                 _detailEvent = matched;
+                _detailScrollY = 0f;
+                _maxDetailScrollY = 0f;
+                _detailCardRect = SKRect.Empty;
+                _detailUrlRect = SKRect.Empty;
                 RequestRender();
                 return;
             }
@@ -261,6 +348,10 @@ internal sealed class CalendarGestureState
         if (foundEvent is not null)
         {
             _detailEvent = foundEvent;
+            _detailScrollY = 0f;
+            _maxDetailScrollY = 0f;
+            _detailCardRect = SKRect.Empty;
+            _detailUrlRect = SKRect.Empty;
             RequestRender();
         }
     }

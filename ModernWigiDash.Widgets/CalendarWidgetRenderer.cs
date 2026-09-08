@@ -657,7 +657,15 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
     /// <summary>The single-event detail view: a scrollable card with time,
     /// title, feed label, location, description, duration, and meeting link.</summary>
-    public void RenderDetailView(SKCanvas canvas, SKRect bounds, float scale, CalendarEvent ev, SKColor textColor, SKColor accentColor, DateTime now)
+    public (float MaxScrollY, SKRect CardRect, SKRect UrlRect) RenderDetailView(
+        SKCanvas canvas,
+        SKRect bounds,
+        float scale,
+        CalendarEvent ev,
+        SKColor textColor,
+        SKColor accentColor,
+        DateTime now,
+        float scrollY = 0f)
     {
         _cardPaint.Color = new SKColor(18, 18, 24);
         canvas.DrawRoundRect(bounds, 16f * scale, 16f * scale, _cardPaint);
@@ -672,15 +680,16 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         float cardRight = bounds.Right - pad;
         float cardTop = bounds.Top + pad + 30f * scale;
         float cardBottom = bounds.Bottom - pad;
+        var cardRect = new SKRect(cardLeft, cardTop, cardRight, cardBottom);
         _cardPaint.Color = accentColor.WithAlpha(20);
-        canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardRight, cardBottom), 12f * scale, 12f * scale, _cardPaint);
+        canvas.DrawRoundRect(cardRect, 12f * scale, 12f * scale, _cardPaint);
 
         bool isLive = ev.Start <= now && now < ev.End;
         _fillPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
         canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardLeft + 5f * scale, cardBottom), 2.5f * scale, 2.5f * scale, _fillPaint);
 
         float x = cardLeft + 16f * scale;
-        float maxW = cardRight - x - 12f * scale;
+        float maxW = cardRight - x - 14f * scale;
 
         // Measure total content height to decide if scrolling is needed.
         string timeStr = ev.IsAllDay ? "All day" : $"{ev.Start:HH:mm} \u2013 {ev.End:HH:mm}";
@@ -704,37 +713,28 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             ? _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)
             : null;
 
-        float yCursor = 16f * scale;
-        yCursor += 30f * scale; // time
-        foreach (string _ in titleLines) yCursor += 26f * scale;
-        yCursor += 6f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) yCursor += 24f * scale;
-        if (locLines is not null)
-        {
-            foreach (string _ in locLines) yCursor += 20f * scale;
-            yCursor += 6f * scale;
-        }
-        if (descLines is not null)
-        {
-            foreach (string _ in descLines) yCursor += 18f * scale;
-            yCursor += 6f * scale;
-        }
-        if (!ev.IsAllDay) yCursor += 24f * scale;
-        if (urlLines is not null)
-        {
-            foreach (string _ in urlLines) yCursor += 18f * scale;
-            yCursor += 6f * scale;
-        }
+        float innerPadTop = 16f * scale;
+        float innerPadBottom = 16f * scale;
+        float totalContentH = innerPadTop;
+        totalContentH += 30f * scale; // time
+        totalContentH += titleLines.Count * 26f * scale + 6f * scale;
+        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) totalContentH += 24f * scale;
+        if (locLines is not null) totalContentH += locLines.Count * 20f * scale + 6f * scale;
+        if (descLines is not null) totalContentH += descLines.Count * 18f * scale + 6f * scale;
+        if (!ev.IsAllDay) totalContentH += 24f * scale;
+        if (urlLines is not null) totalContentH += urlLines.Count * 18f * scale + 6f * scale;
+        totalContentH += innerPadBottom;
 
-        float availableH = cardBottom - cardTop - 32f * scale;
-        bool needsScroll = yCursor > availableH;
+        float cardH = cardBottom - cardTop;
+        float maxScrollY = Math.Max(0f, totalContentH - cardH);
+        float clampedScrollY = Math.Clamp(scrollY, 0f, maxScrollY);
 
-        // Clip to the card interior so scrolled content never bleeds outside.
-        var clipRect = new SKRect(cardLeft, cardTop, cardRight, cardBottom);
+        // Clip strictly to the pillbox interior with rounded corners so scrolled text never touches or bleeds outside the card.
+        var clipInnerRect = new SKRect(cardLeft + 5.5f * scale, cardTop + 2f * scale, cardRight - 2f * scale, cardBottom - 2f * scale);
         canvas.Save();
-        canvas.ClipRect(clipRect);
+        canvas.ClipRoundRect(new SKRoundRect(clipInnerRect, 10f * scale, 10f * scale), antialias: true);
 
-        float y = cardTop + 16f * scale;
+        float y = cardTop + innerPadTop - clampedScrollY;
 
         _textPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
         canvas.DrawTextWithFallback(timeStr, x, y, timeFont, _textPaint);
@@ -788,25 +788,44 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             y += 24f * scale;
         }
 
+        SKRect urlRect = SKRect.Empty;
         if (urlLines is not null)
         {
+            float urlStartY = y;
             _textPaint.Color = new SKColor(120, 160, 255);
             foreach (string chunk in urlLines)
             {
                 canvas.DrawTextWithFallback(chunk, x, y, urlFont, _textPaint);
                 y += 18f * scale;
             }
+            float urlEndY = y;
             y += 6f * scale;
+            urlRect = new SKRect(cardLeft, urlStartY - 14f * scale, cardRight, urlEndY);
         }
 
         canvas.Restore();
 
-        // Scroll indicator when content overflows.
-        if (needsScroll)
+        // Scroll indicator inside the pillbox when content overflows
+        if (maxScrollY > 0f)
         {
-            _strokePaint.Color = textColor.WithAlpha(40);
+            float trackTop = cardTop + 10f * scale;
+            float trackBottom = cardBottom - 10f * scale;
+            float trackH = trackBottom - trackTop;
+            float trackX = cardRight - 6f * scale;
+
+            _strokePaint.Color = textColor.WithAlpha(30);
             _strokePaint.StrokeWidth = 2f * scale;
-            canvas.DrawLine(cardRight - 6f * scale, cardTop + 8f * scale, cardRight - 6f * scale, cardBottom - 8f * scale, _strokePaint);
+            canvas.DrawLine(trackX, trackTop, trackX, trackBottom, _strokePaint);
+
+            float thumbH = Math.Clamp(trackH * (cardH / totalContentH), 20f * scale, trackH);
+            float thumbTop = trackTop + (clampedScrollY / maxScrollY) * (trackH - thumbH);
+            _strokePaint.Color = accentColor.WithAlpha(180);
+            _strokePaint.StrokeWidth = 3f * scale;
+            _strokePaint.StrokeCap = SKStrokeCap.Round;
+            canvas.DrawLine(trackX, thumbTop, trackX, thumbTop + thumbH, _strokePaint);
+            _strokePaint.StrokeCap = SKStrokeCap.Butt;
         }
+
+        return (maxScrollY, cardRect, urlRect);
     }
 }

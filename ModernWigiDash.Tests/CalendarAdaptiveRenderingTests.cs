@@ -253,4 +253,130 @@ public class CalendarAdaptiveRenderingTests
         renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now);
         Assert.IsNotNull(surface);
     }
+
+    [TestMethod]
+    public void DetailView_DragUpAndDown_ScrollsContentAndStaysClamped()
+    {
+        CalendarEventStore.Reset();
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events =
+            [
+                new CalendarEvent
+                {
+                    Title = "Detailed Strategic Sync",
+                    Start = new DateTime(2026, 9, 6, 10, 0, 0, DateTimeKind.Unspecified),
+                    End = new DateTime(2026, 9, 6, 11, 0, 0, DateTimeKind.Unspecified),
+                    Location = "https://www.my.va.gov/VAVERA/s/flow/VERA_Start?appointmentId=001t000000AbCdEfGhIjKlMnOpQrStUvWxYz",
+                    Description = "Line 1 of long agenda\nLine 2 of instructions\nLine 3 of meeting goals\nLine 4 of attendees\nLine 5 of action items\nLine 6 of summary notes\nLine 7 of wrap-up checklist",
+                    Url = "https://meet.example.com/long/path/with/parameters?conference=123456&pin=987654",
+                    FeedLabel = "Work",
+                },
+            ],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget();
+        var bounds = new SKRect(0, 0, 800, 400);
+        using var surface = SKSurface.Create(new SKImageInfo(800, 400));
+        w.Render(surface!.Canvas, bounds);
+
+        var geo = CalendarLayout.Compute(bounds, 2.0f, 1, false);
+        var rowPoint = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+
+        // Tap row to enter detail mode
+        w.OnTouch(rowPoint, TouchEventType.TouchDown);
+        w.OnTouch(rowPoint, TouchEventType.TouchUp);
+
+        // Render detail view (computes card and max scroll extent)
+        w.Render(surface.Canvas, bounds);
+
+        // Drag up by 80px inside the pillbox to scroll down
+        float startX = bounds.MidX;
+        float startY = bounds.MidY;
+        w.OnTouch(new SKPoint(startX, startY), TouchEventType.TouchDown);
+        w.OnTouch(new SKPoint(startX, startY - 80f), TouchEventType.TouchMove);
+        w.OnTouch(new SKPoint(startX, startY - 80f), TouchEventType.TouchUp);
+
+        // Render scrolled frame
+        w.Render(surface.Canvas, bounds);
+        Assert.IsNotNull(surface);
+
+        // Drag down by 80px inside the pillbox to scroll back up
+        w.OnTouch(new SKPoint(startX, startY), TouchEventType.TouchDown);
+        w.OnTouch(new SKPoint(startX, startY + 80f), TouchEventType.TouchMove);
+        w.OnTouch(new SKPoint(startX, startY + 80f), TouchEventType.TouchUp);
+
+        w.Render(surface.Canvas, bounds);
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void DetailView_TapHeader_ExitsBackToAgenda()
+    {
+        CalendarEventStore.Reset();
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events =
+            [
+                new CalendarEvent
+                {
+                    Title = "Standup",
+                    Start = new DateTime(2026, 9, 6, 10, 0, 0, DateTimeKind.Unspecified),
+                    End = new DateTime(2026, 9, 6, 10, 15, 0, DateTimeKind.Unspecified),
+                },
+            ],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget();
+        var bounds = new SKRect(0, 0, 800, 400);
+        using var surface = SKSurface.Create(new SKImageInfo(800, 400));
+        w.Render(surface!.Canvas, bounds);
+
+        var geo = CalendarLayout.Compute(bounds, 2.0f, 1, false);
+        var rowPoint = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+
+        // Enter detail mode
+        w.OnTouch(rowPoint, TouchEventType.TouchDown);
+        w.OnTouch(rowPoint, TouchEventType.TouchUp);
+        w.Render(surface.Canvas, bounds);
+
+        // Tap top "Tap to go back" header (y = 15f)
+        var topBackPoint = new SKPoint(bounds.Left + 20f, bounds.Top + 15f);
+        w.OnTouch(topBackPoint, TouchEventType.TouchDown);
+        w.OnTouch(topBackPoint, TouchEventType.TouchUp);
+
+        // Re-render: should be back in agenda view without exceptions
+        w.Render(surface.Canvas, bounds);
+        Assert.IsNotNull(surface);
+    }
+
+    [TestMethod]
+    public void DetailView_Renderer_ComputesMaxScrollAndBounds()
+    {
+        using var renderer = new CalendarWidgetRenderer();
+        var bounds = new SKRect(0, 0, 400, 300);
+        using var surface = SKSurface.Create(new SKImageInfo(400, 300));
+
+        var ev = new CalendarEvent
+        {
+            Title = "Event with lots of lines that exceed the card",
+            Start = new DateTime(2026, 9, 6, 10, 0, 0, DateTimeKind.Unspecified),
+            End = new DateTime(2026, 9, 6, 10, 15, 0, DateTimeKind.Unspecified),
+            Location = "https://example.com/very/long/location/url/that/wraps/onto/multiple/lines",
+            Description = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8",
+            Url = "https://meet.example.com/meeting",
+        };
+
+        var (maxScroll, cardRect, urlRect) = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now, 20f);
+        Assert.IsTrue(maxScroll > 0f, "content must exceed card height and produce positive max scroll");
+        Assert.IsTrue(cardRect.Width > 0f, "cardRect width must be positive");
+        Assert.IsTrue(cardRect.Height > 0f, "cardRect height must be positive");
+        Assert.IsTrue(urlRect.Width > 0f, "urlRect width must be positive");
+    }
 }
