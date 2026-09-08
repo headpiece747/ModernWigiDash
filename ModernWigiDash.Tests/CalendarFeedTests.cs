@@ -534,6 +534,69 @@ public class CalDavFetcherTests
             </response>
         </multistatus>
         """;
+
+    [TestMethod]
+    public async Task FetchAsync_HostileRedirectLeavingHttpsOrigin_RefusesBeforeReadingBody()
+    {
+        // A hostile server answers a redirect that leaves the HTTPS origin (the
+        // shared HttpClient follows it, so response.RequestMessage.RequestUri is
+        // the final cleartext third-party URI). The fetcher must refuse before
+        // reading the body, so the attached Basic-auth header is never replayed.
+        var handler = new RecordingHandler(req =>
+        {
+            var resp = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", Encoding.UTF8, "text/calendar")
+            };
+            // Simulate the client having followed a redirect to a hostile host.
+            resp.RequestMessage = new HttpRequestMessage(HttpMethod.Get, "http://attacker.example/steal")
+            {
+                Version = req.Version
+            };
+            return resp;
+        });
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+        var feed = new CalDavFeed
+        {
+            FeedId = "f1",
+            Label = "P",
+            Server = "caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/cal/",
+            Username = "john"
+        };
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => fetcher.FetchAsync(feed, "secret", null, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task BuildUri_AbsoluteServerUrl_DoesNotDoubleTheScheme()
+    {
+        // A hand-edited profile carrying an absolute-URL Server must not produce
+        // a malformed "https://https://host" URI; the fetch path honors the URL's
+        // own scheme/host and appends the path. (BuildUri is private; pin it
+        // through the observable DiscoverAsync request URI.)
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+        var feed = new CalDavFeed
+        {
+            FeedId = "f1",
+            Label = "P",
+            Server = "https://caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/cal/",
+            Username = "john"
+        };
+        try { await fetcher.DiscoverAsync(feed, "secret", CancellationToken.None); }
+        catch (HttpRequestException) { /* 404 expected; we only inspect the request URI */ }
+
+        var sentUri = handler.Requests[0].RequestUri!;
+        Assert.AreEqual("https", sentUri.Scheme, "an absolute-URL Server keeps its own scheme");
+        Assert.AreEqual("caldav.example.com", sentUri.Authority, "no https://https:// malformation");
+    }
 }
 
 /// <summary>

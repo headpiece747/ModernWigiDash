@@ -132,6 +132,7 @@ internal sealed class CalDavFetcher : IFeedFetcher
         try
         {
             using var response = await _http().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
+            VerifyNoHostileRedirect(request, response);
             if (response.StatusCode == HttpStatusCode.NotModified)
                 return new FeedFetchResult(null, previousEtag);
             ThrowOnAuthFailure(response);
@@ -165,6 +166,7 @@ internal sealed class CalDavFetcher : IFeedFetcher
         try
         {
             using var response = await _http().SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token).ConfigureAwait(false);
+            VerifyNoHostileRedirect(request, response);
             ThrowOnAuthFailure(response);
             response.EnsureSuccessStatusCode();
 
@@ -206,6 +208,28 @@ internal sealed class CalDavFetcher : IFeedFetcher
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(userPass)));
     }
 
+    /// <summary>
+    /// Guards against a hostile redirect replaying the attached Basic-auth header.
+    /// The cleartext check in <see cref="ApplyBasicAuth"/> inspects the INITIAL
+    /// request URI, but the shared HttpClient follows redirects by default: a
+    /// server at https://caldav.example could answer 302 Location:
+    /// http://attacker.example and the already-attached credential would be sent
+    /// to the cleartext third-party host. After the send, re-validate that the
+    /// FINAL effective URI (response.RequestMessage.RequestUri, post-redirect)
+    /// is still https AND stays on the same authority as the original request;
+    /// any scheme or host change is refused before the body is read.
+    /// </summary>
+    private static void VerifyNoHostileRedirect(HttpRequestMessage request, HttpResponseMessage response)
+    {
+        if (request.RequestUri is not { } initial || response.RequestMessage?.RequestUri is not { } final)
+            return;
+        bool sameAuthority = string.Equals(initial.Authority, final.Authority, StringComparison.Ordinal);
+        bool finalIsHttps = string.Equals(final.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal);
+        if (!finalIsHttps || !sameAuthority)
+            throw new HttpRequestException(
+                "Refusing to follow a CalDAV redirect that leaves the HTTPS origin; the credential would be replayed.");
+    }
+
     private static void ThrowOnAuthFailure(HttpResponseMessage response)
     {
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -214,10 +238,19 @@ internal sealed class CalDavFetcher : IFeedFetcher
 
     private static Uri BuildUri(CalDavFeed feed, string path)
     {
-        // CalDAV is https in practice (iCloud is 443); http is allowed only for
-        // an explicit non-443/80 test server. The linter flags the literal; the
-        // production path is always https.
+        // CalDAV is https in practice (iCloud is 443); http is only for an explicit
+        // local test server. Accept BOTH the bare-host shape the editor enters
+        // ("caldav.icloud.com") and an already-absolute URL ("https://..."), so a
+        // hand-edited profile carrying either cannot produce a malformed
+        // "https://https://host" URI or get dropped by the completeness check.
 #pragma warning disable S5332 // http only for an explicit test-server port
+        if (Uri.TryCreate(feed.Server, UriKind.Absolute, out var absolute) &&
+            (string.Equals(absolute.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) ||
+             string.Equals(absolute.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)))
+        {
+            // Absolute URL: honor its own scheme/host; append the path.
+            return new Uri(absolute, path.TrimStart('/'));
+        }
         string scheme = feed.Port == 80 ? "http" : "https";
 #pragma warning restore S5332
         return new Uri($"{scheme}://{feed.Server}:{feed.Port}{path}");

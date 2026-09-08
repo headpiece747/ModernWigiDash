@@ -311,3 +311,5 @@
 2026-09-08T02:05:02Z	52d78c0	manual	ok	0	0	ok	2233	0	ok
 2026-09-08T02:38:42Z	691e677	probe2 - FAILED: PollTick_FreshBody_ParsesAndMergesEvents	ok	2	0	FAIL	2232	1	SKIP
 2026-09-08T02:40:13Z	691e677	manual	ok	0	0	ok	2233	0	ok
+2026-09-08T02:43:56Z	2d28bd4	manual	ok	0	0	ok	2235	0	FAIL
+2026-09-08T02:45:34Z	2d28bd4	manual	ok	0	0	ok	2235	0	ok
