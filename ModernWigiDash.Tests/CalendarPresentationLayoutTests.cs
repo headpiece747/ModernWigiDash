@@ -315,6 +315,19 @@ public class CalendarPresentationTests
     }
 
     [TestMethod]
+    public void Build_NextUpcoming_ExactUrgencyBoundary_IsInclusive()
+    {
+        // Exactly 30 minutes out (Now 14:30, start 15:00) is still urgent: the
+        // window is inclusive (<= UrgencyWindowMinutes). A regression flipping
+        // <= to < at the boundary would make this non-urgent and fail here.
+        var snap = SnapWith(Ev("Edge", 15, 0, 15, 30));
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.IsTrue(d.NextUpcomingEvent!.IsUrgent, "the 30-minute boundary is inclusive");
+        Assert.IsFalse(d.NextUpcomingEvent.IsLive);
+    }
+
+    [TestMethod]
     public void Build_NoUpcomingEvents_EmptyCountdownAndNullRow()
     {
         // Only a past event: nothing upcoming, so no row and no countdown.

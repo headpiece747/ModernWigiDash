@@ -536,12 +536,16 @@ public class CalDavFetcherTests
         """;
 
     [TestMethod]
-    public async Task FetchAsync_HostileRedirectLeavingHttpsOrigin_RefusesBeforeReadingBody()
+    public async Task FetchAsync_HostileRedirectLeavingHttpsOrigin_Refuses()
     {
         // A hostile server answers a redirect that leaves the HTTPS origin (the
         // shared HttpClient follows it, so response.RequestMessage.RequestUri is
-        // the final cleartext third-party URI). The fetcher must refuse before
-        // reading the body, so the attached Basic-auth header is never replayed.
+        // the final cleartext third-party URI). The fetcher must refuse: the
+        // VerifyNoHostileRedirect guard re-validates the FINAL effective URI after
+        // the send and throws before the result is used, so data fetched from a
+        // non-origin host is never trusted. (The credential-replay protection is
+        // this same check: a redirect off-origin means the request that carried
+        // the Basic-auth header landed somewhere other than the declared origin.)
         var handler = new RecordingHandler(req =>
         {
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
