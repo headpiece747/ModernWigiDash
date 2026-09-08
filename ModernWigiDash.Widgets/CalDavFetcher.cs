@@ -214,10 +214,16 @@ internal sealed class CalDavFetcher : IFeedFetcher
     /// request URI, but the shared HttpClient follows redirects by default: a
     /// server at https://caldav.example could answer 302 Location:
     /// http://attacker.example and the already-attached credential would be sent
-    /// to the cleartext third-party host. After the send, re-validate that the
-    /// FINAL effective URI (response.RequestMessage.RequestUri, post-redirect)
-    /// is still https AND stays on the same authority as the original request;
-    /// any scheme or host change is refused before the body is read.
+    /// to the cleartext third-party host. Two layers cover this:
+    /// (1) The .NET HttpClientHandler strips the Authorization header on any
+    ///     redirect that crosses to a different authority, so a multi-hop chain
+    ///     (https -&gt; http -&gt; https) never replays the credential to an
+    ///     intermediate hostile host even though only the terminal URI is checked
+    ///     here.
+    /// (2) This post-send re-validation of the FINAL effective URI
+    ///     (response.RequestMessage.RequestUri, post-redirect) as defense-in-depth:
+    ///     it must still be https AND stay on the same authority as the original
+    ///     request; any scheme or host change is refused before the body is read.
     /// </summary>
     private static void VerifyNoHostileRedirect(HttpRequestMessage request, HttpResponseMessage response)
     {
@@ -248,8 +254,15 @@ internal sealed class CalDavFetcher : IFeedFetcher
             (string.Equals(absolute.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) ||
              string.Equals(absolute.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)))
         {
-            // Absolute URL: honor its own scheme/host; append the path.
-            return new Uri(absolute, path.TrimStart('/'));
+            // Absolute URL: honor its own scheme/host and base path. A base with a
+            // non-root path but no trailing slash ("https://host/dav") would have
+            // new Uri(base, path) DROP the last segment via relative resolution
+            // (".../cal/" instead of ".../dav/cal/"), so normalize the base to end
+            // in "/" first - the CalDAV leg paths are always sub-paths of the base.
+            string basePath = absolute.PathAndQuery;
+            if (basePath.Length > 0 && !basePath.EndsWith("/", StringComparison.Ordinal))
+                basePath += "/";
+            return new Uri(absolute, basePath + path.TrimStart('/'));
         }
         string scheme = feed.Port == 80 ? "http" : "https";
 #pragma warning restore S5332

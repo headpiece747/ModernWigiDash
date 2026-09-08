@@ -576,6 +576,44 @@ public class CalDavFetcherTests
     }
 
     [TestMethod]
+    public async Task FetchAsync_HostileRedirectSameSchemeDifferentOrigin_Refuses()
+    {
+        // The authority-equality half of the VerifyNoHostileRedirect guard: a
+        // redirect that KEEPS https but changes the host is just as hostile as a
+        // cleartext downgrade - the credential would be replayed to a different
+        // origin. The guard requires the final authority to equal the initial
+        // authority, not merely scheme == https, so this must refuse too.
+        var handler = new RecordingHandler(req =>
+        {
+            var resp = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", Encoding.UTF8, "text/calendar")
+            };
+            // Same scheme (https), different authority: the realistic SSRF/
+            // credential-replay vector the authority check exists to catch.
+            resp.RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://attacker.example/steal")
+            {
+                Version = req.Version
+            };
+            return resp;
+        });
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+        var feed = new CalDavFeed
+        {
+            FeedId = "f1",
+            Label = "P",
+            Server = "caldav.example.com",
+            Port = 443,
+            PrincipalPath = "/cal/",
+            Username = "john"
+        };
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => fetcher.FetchAsync(feed, "secret", null, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task BuildUri_AbsoluteServerUrl_DoesNotDoubleTheScheme()
     {
         // A hand-edited profile carrying an absolute-URL Server must not produce
@@ -600,6 +638,33 @@ public class CalDavFetcherTests
         var sentUri = handler.Requests[0].RequestUri!;
         Assert.AreEqual("https", sentUri.Scheme, "an absolute-URL Server keeps its own scheme");
         Assert.AreEqual("caldav.example.com", sentUri.Authority, "no https://https:// malformation");
+    }
+
+    [TestMethod]
+    public async Task BuildUri_AbsoluteServerUrlWithBasePath_PreservesTheBaseSegment()
+    {
+        // A hand-edited profile carrying an absolute-URL Server WITH a non-root
+        // base path and no trailing slash ("https://host/dav") must not have the
+        // last base segment dropped by relative resolution: the principal leg
+        // resolves to ".../dav/cal/", never ".../cal/". (BuildUri is private; pin
+        // it through the observable DiscoverAsync request URI.)
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var client = new HttpClient(handler);
+        var fetcher = new CalDavFetcher(() => client);
+        var feed = new CalDavFeed
+        {
+            FeedId = "f1",
+            Label = "P",
+            Server = "https://caldav.example.com/dav",
+            Port = 443,
+            PrincipalPath = "/cal/",
+            Username = "john"
+        };
+        try { await fetcher.DiscoverAsync(feed, "secret", CancellationToken.None); }
+        catch (HttpRequestException) { /* 404 expected; we only inspect the request URI */ }
+
+        var sentUri = handler.Requests[0].RequestUri!;
+        Assert.AreEqual("/dav/cal/", sentUri.AbsolutePath, "the base path segment is preserved, not dropped");
     }
 }
 
