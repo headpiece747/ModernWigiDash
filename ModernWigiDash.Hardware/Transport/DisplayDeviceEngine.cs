@@ -541,19 +541,12 @@ public sealed class DisplayDeviceEngine : IDisposable
         // task's Result only once Wait confirms completion — the 2026-08-21
         // rule owned by the routine, so the call site cannot re-derive it.
         BoundedWaitVerdict verdict = RunBounded(() => transport.GoToStandby(), StandbyCloseBudget);
-        if (verdict.Error is not null)
+        string? line = verdict.Error is null
+            ? StandbyVerdict.NotConfirmedLine(verdict.Settled, verdict.Confirmed, hasTransport: true, duringDispose: false)
+            : StandbyVerdict.FailureLine(verdict.Error, duringDispose: false);
+        if (line is not null)
         {
-            _standbyLog.Write($"Standby failed: {verdict.Error.Message}");
-            return false;
-        }
-        // The non-confirmed verdict is observable, the dispose path's rule:
-        // a display left lit on the Welcome screen is a fact the log must
-        // carry (a silent standby attempt would hide it).
-        if (!verdict.Confirmed)
-        {
-            _standbyLog.Write(verdict.Settled
-                ? "Standby NOT confirmed: the standby control writes did not succeed — the display may stay lit"
-                : "Standby NOT confirmed: the bounded wait expired — a hung standby was abandoned, and the display may stay lit");
+            _standbyLog.Write(line);
         }
         return verdict.Confirmed;
     }
@@ -594,16 +587,14 @@ public sealed class DisplayDeviceEngine : IDisposable
         // (no live connection, the control writes failed, or the bounded
         // wait expired) must not go silent — the display may stay lit on
         // the Welcome screen, and that is a fact the log must carry. A
-        // throwing standby is the failure line instead.
-        if (standbyVerdict.Error is not null)
+        // throwing standby is the failure line instead. One spelling for
+        // both entry points (the StandbyVerdict module).
+        string? line = standbyVerdict.Error is null
+            ? StandbyVerdict.NotConfirmedLine(standbyVerdict.Settled, standbyVerdict.Confirmed, hasTransport: transport is not null, duringDispose: true)
+            : StandbyVerdict.FailureLine(standbyVerdict.Error, duringDispose: true);
+        if (line is not null)
         {
-            _standbyLog.Write($"Standby failed during dispose: {standbyVerdict.Error.Message}");
-        }
-        else if (transport is not null && !standbyVerdict.Confirmed)
-        {
-            _standbyLog.Write(standbyVerdict.Settled
-                ? "Standby NOT confirmed during dispose: the standby control writes did not succeed — the display may stay lit"
-                : "Standby NOT confirmed during dispose: the bounded close wait expired — a hung standby was abandoned at exit, and the display may stay lit");
+            _standbyLog.Write(line);
         }
 
         DisconnectInternal();
