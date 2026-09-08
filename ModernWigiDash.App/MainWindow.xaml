@@ -5,13 +5,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         mc:Ignorable="d"
-        Title="ModernWigiDash"
-        PreviewKeyDown="MainWindow_PreviewKeyDown"
-        Icon="Resources/Logo/logo.ico"
-        WindowState="Normal"
-        WindowStartupLocation="CenterScreen"
-        Width="1680" Height="900"
-        MinHeight="900" MinWidth="1680"
+         Title="ModernWigiDash"
+         PreviewKeyDown="MainWindow_PreviewKeyDown"
+         Icon="Resources/Logo/logo.ico"
+         WindowState="Normal"
+         WindowStartupLocation="CenterScreen"
+         Width="1780" Height="950"
+         MinHeight="950" MinWidth="1780"
         FontFamily="{StaticResource PrimaryFont}"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="Auto"
@@ -185,7 +185,7 @@
                 </Border>
 
                 <!-- 1:1 preview of the exact 1016x592 hardware screen resolution (no scaling => crisp text) -->
-                <Border x:Name="PreviewFrame" Grid.Row="1" Width="1016" Height="592" Margin="24"
+                <Border x:Name="PreviewFrame" Grid.Row="1" Width="1016" Height="592" Margin="16"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         Background="{DynamicResource BgDark}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8">
                     <skia:SKElement x:Name="SkiaCanvas" PaintSurface="SkiaCanvas_PaintSurface"

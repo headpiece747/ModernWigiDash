@@ -53,34 +53,35 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         float midX = rect.MidX;
         float h = rect.Height;
+        float w = rect.Width;
 
-        // Year at top
+        // Year at top - sized to fill width
         string yearStr = viewDate.Year.ToString(CultureInfo.InvariantCulture);
-        var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(8f, h * 0.06f));
+        var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.12f, w * 0.25f));
         _textPaint.Color = palette.Text.WithAlpha(170);
         float yearW = FontHelper.MeasureTextWithFallback(yearStr, yearFont);
-        canvas.DrawTextWithFallback(yearStr, midX - yearW / 2f, rect.Top + h * 0.12f, yearFont, _textPaint);
+        canvas.DrawTextWithFallback(yearStr, midX - yearW / 2f, rect.Top + h * 0.15f, yearFont, _textPaint);
 
-        // Month name
+        // Month name - sized to fill width
         string monthStr = viewDate.ToString("MMMM", CultureInfo.InvariantCulture).ToUpperInvariant();
-        var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(10f, h * 0.08f));
+        var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.15f, w * 0.35f));
         _textPaint.Color = palette.Text;
         float monthW = FontHelper.MeasureTextWithFallback(monthStr, monthFont);
-        canvas.DrawTextWithFallback(monthStr, midX - monthW / 2f, rect.Top + h * 0.25f, monthFont, _textPaint);
+        canvas.DrawTextWithFallback(monthStr, midX - monthW / 2f, rect.Top + h * 0.35f, monthFont, _textPaint);
 
-        // Day number
+        // Day number - largest element, fills most of the space
         string dayStr = viewDate.Day.ToString(CultureInfo.InvariantCulture);
-        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(24f, h * 0.35f));
+        var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.45f, w * 0.6f));
         _textPaint.Color = palette.Text;
         float dayW = FontHelper.MeasureTextWithFallback(dayStr, dayFont);
-        canvas.DrawTextWithFallback(dayStr, midX - dayW / 2f, rect.Top + h * 0.55f, dayFont, _textPaint);
+        canvas.DrawTextWithFallback(dayStr, midX - dayW / 2f, rect.Top + h * 0.65f, dayFont, _textPaint);
 
-        // Weekday at bottom
+        // Weekday at bottom - sized to fill width
         string dowStr = viewDate.ToString("dddd", CultureInfo.InvariantCulture).ToUpperInvariant();
-        var dowFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(7f, h * 0.05f));
+        var dowFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.1f, w * 0.3f));
         _textPaint.Color = palette.Text.WithAlpha(180);
         float dowW = FontHelper.MeasureTextWithFallback(dowStr, dowFont);
-        canvas.DrawTextWithFallback(dowStr, midX - dowW / 2f, rect.Bottom - h * 0.08f, dowFont, _textPaint);
+        canvas.DrawTextWithFallback(dowStr, midX - dowW / 2f, rect.Bottom - h * 0.12f, dowFont, _textPaint);
     }
 
     /// <summary>The adaptive view dispatcher: draws the dark container then
@@ -128,11 +129,11 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
         // Week badge at top (2x smaller: 5.5f * scale)
         int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(viewDate);
-        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 5.5f * scale);
+        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 8f * scale);
         _textPaint.Color = palette.Accent;
         string weekStr = $"W{weekNum:D2}";
         float ww = FontHelper.MeasureTextWithFallback(weekStr, weekFont);
-        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 14f * scale, weekFont, _textPaint);
+        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 16f * scale, weekFont, _textPaint);
 
         // Rotated typography branding "CALENDAR" - centered in the strip
         canvas.Save();
@@ -146,15 +147,15 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.Restore();
 
         // Stacked indicators at bottom: 12M / 52W / 365D (2x smaller: 4.5f * scale)
-        var statFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 4.5f * scale);
+        var statFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 6f * scale);
         _textPaint.Color = SKColors.White.WithAlpha(140);
-        float statY = rect.Bottom - 30f * scale;
+        float statY = rect.Bottom - 45f * scale;
         for (int i = 0; i < StatLabels.Length; i++)
         {
             string label = StatLabels[i];
             float sw = FontHelper.MeasureTextWithFallback(label, statFont);
             canvas.DrawTextWithFallback(label, rect.MidX - sw / 2f, statY, statFont, _textPaint);
-            statY += 9f * scale;
+            statY += 14f * scale;
         }
     }
 
@@ -451,9 +452,24 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
     private void DrawUnavailable(SKCanvas canvas, SKRect bounds, float scale, string hint, SKColor textColor)
     {
-        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 20f * scale);
-        _textPaint.Color = textColor.WithAlpha(160);
+        // Scale font size to fit the hint text within the bounds
+        float maxWidth = bounds.Width * 0.9f;
+        float maxHeight = bounds.Height * 0.5f;
+
+        var testFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 20f * scale);
         var tb = new SKRect();
+        testFont.MeasureText(hint, out tb, _textPaint);
+
+        float fontSize = 20f * scale;
+        if (tb.Width > maxWidth || tb.Height > maxHeight)
+        {
+            float scaleW = maxWidth / tb.Width;
+            float scaleH = maxHeight / tb.Height;
+            fontSize *= Math.Min(scaleW, scaleH);
+        }
+
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontSize);
+        _textPaint.Color = textColor.WithAlpha(160);
         font.MeasureText(hint, out tb, _textPaint);
         canvas.DrawTextWithFallback(hint, bounds.MidX - tb.Width / 2f, bounds.MidY - tb.Height / 2f, font, _textPaint);
     }

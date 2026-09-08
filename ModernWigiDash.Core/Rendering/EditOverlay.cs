@@ -98,7 +98,14 @@ internal sealed class EditOverlay
         if (!editMode || !isSelected) return;
 
         var bounds = new SKRect(0, 0, widget.Width, widget.Height);
+
+        // Draw selection border (not filled) so the widget content remains visible
+        _selectionPaint.Style = SKPaintStyle.Stroke;
+        _selectionPaint.StrokeWidth = 2f;
         canvas.DrawRect(bounds, _selectionPaint);
+
+        // Restore to fill style for other operations
+        _selectionPaint.Style = SKPaintStyle.Fill;
 
         // Badge text memoized per (DisplayName, ZIndex); the font is the
         // cache-owned field above (never disposed — the old using-CreatedFont
