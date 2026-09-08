@@ -189,7 +189,12 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             _producer?.Dispose();
             _producer = null;
             if (feeds.Count == 0)
+            {
+                // No feeds: clear the cached snapshot so the widget shows its
+                // unavailable state instead of stale events from a removed feed.
+                CalendarEventStore.UpdateFromDto(CalendarSnapshot.Empty);
                 return;
+            }
 
             int interval = CalendarFeedPolicy.ResolvePollInterval(PollIntervalMinutes);
             IFeedFetcher fetcher = (FetchFactory ?? CreateProductionFetcher)();
