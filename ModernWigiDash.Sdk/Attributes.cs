@@ -148,6 +148,8 @@ public sealed class WidgetPropertyAttribute : Attribute
     /// <see cref="IWidgetPropertyOptionsProvider"/> may override them.</summary>
     public string[] Options { get; }
 
+    /// <summary>Binds a widget property to an inspector row: the label, editor
+    /// kind, help text, fallback value, and static Choice options.</summary>
     /// <param name="displayName">The inspector row label.</param>
     /// <param name="propertyType">The editor kind (defaults to Text).</param>
     /// <param name="description">Help text shown with the row.</param>

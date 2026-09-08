@@ -18,8 +18,11 @@ public static class SvgPathParseCache<T>
 {
     private sealed class Box
     {
+        /// <summary>The cached-miss sentinel: a parser that returned null is
+        /// cached once so an unknown key never re-parses per frame.</summary>
         public static readonly Box Miss = new(false, default);
 
+        /// <summary>Wraps a successful parse result.</summary>
         public Box(T value) : this(true, value) { }
 
         private Box(bool hasValue, T? value)
@@ -28,7 +31,10 @@ public static class SvgPathParseCache<T>
             Value = value;
         }
 
+        /// <summary>True when this box holds a parsed value rather than the miss.</summary>
         public bool HasValue { get; }
+
+        /// <summary>The parsed value, or null for the miss sentinel.</summary>
         public T? Value { get; }
     }
 

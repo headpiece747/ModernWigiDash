@@ -22,6 +22,10 @@ public sealed class PollLoop : IDisposable
     // The failure-message dedup rule, owned once (the LogOnChange module).
     private readonly LogOnChange _failureDedup = new();
 
+    /// <summary>One parameterized poll loop: owns its cancellation lifecycle, the
+    /// readiness guard (pauses at 500ms while not ready), failure logging, and the
+    /// inter-tick delay. The App's sensor/frame-time producers and the engine's
+    /// touch poll are all instances.</summary>
     /// <param name="name">Log tag, e.g. "TOUCH".</param>
     /// <param name="interval">Delay between ticks.</param>
     /// <param name="ready">True when the probe can run. While false the loop

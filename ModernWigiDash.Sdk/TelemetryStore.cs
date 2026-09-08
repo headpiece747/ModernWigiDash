@@ -27,6 +27,9 @@ public sealed class TelemetryStore<TRecord> where TRecord : class
     private TRecord _current;
     private DateTime _lastProducerTimestamp;
 
+    /// <summary>Binds one record to a domain empty value and staleness window,
+    /// owning the freshness decision so consumers read only through
+    /// <see cref="TryReadFresh"/> and cannot skip it.</summary>
     /// <param name="emptyValue">The record a freshly reset store exposes
     /// (e.g. the disconnected/unavailable sentinel of the domain).</param>
     /// <param name="defaultMaxAge">The staleness window used by

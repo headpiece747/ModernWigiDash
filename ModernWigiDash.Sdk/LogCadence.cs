@@ -13,6 +13,8 @@ public sealed class LogCadence
     private readonly bool _logFirst;
     private int _count;
 
+    /// <summary>The first-log / every-Nth fire rule shared by the diagnostic log
+    /// lines, so a repeated condition logs once and then on a fixed cadence.</summary>
     /// <param name="interval">Cadence: fire on every Nth call.</param>
     /// <param name="logFirst">Also fire on the very first call — for failure
     /// logs, where the first occurrence must not be silent.</param>

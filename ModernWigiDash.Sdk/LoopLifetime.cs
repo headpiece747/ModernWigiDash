@@ -14,6 +14,8 @@ internal sealed class LoopLifetime : IDisposable
     private int _disposed;
     private TimeSpan _joinTimeout;
 
+    /// <summary>Owns a background loop task's bounded shutdown: the join waits a
+    /// fixed budget for the task to unwind, then abandons it rather than stalling.</summary>
     /// <param name="joinTimeout">The bounded wait for the loop task to unwind.</param>
     public LoopLifetime(TimeSpan joinTimeout)
     {

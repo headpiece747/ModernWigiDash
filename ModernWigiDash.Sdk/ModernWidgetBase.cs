@@ -186,10 +186,14 @@ public abstract class ModernWidgetBase : IModernWidget
 
     private sealed class PropertyInfoBox
     {
+        /// <summary>The cached-miss sentinel: a property that was not found is
+        /// remembered so the lookup (and its once-logged miss) runs once.</summary>
         public static readonly PropertyInfoBox Miss = new(null);
 
+        /// <summary>Wraps a resolved property, or null for the miss sentinel.</summary>
         public PropertyInfoBox(PropertyInfo? property) => Property = property;
 
+        /// <summary>The resolved property, or null when the lookup missed.</summary>
         public PropertyInfo? Property { get; }
     }
 

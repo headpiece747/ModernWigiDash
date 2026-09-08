@@ -16,7 +16,11 @@ public sealed class TelemetryStoreFacade<TRecord> where TRecord : class
     private readonly Func<TRecord, DateTime> _lastUpdateOf;
     private TelemetryStore<TRecord> _store;
 
-    /// <param name="emptyValue">The disconnected/unavailable state the store
+    /// <summary>The store-facade shape: owns one <see cref="TelemetryStore{TRecord}"/>
+    /// bound to the domain's empty value and staleness window, adding the
+    /// null-tolerant producer write plus the fake-clock test seams.
+    /// <c>LhmSensorStore</c> and <c>FrameTimeStore</c> wrap one instance each.</summary>
+    /// <param name="emptyValue">The record a freshly reset store exposes and
     /// resets to and a null producer write falls back to.</param>
     /// <param name="defaultMaxAge">Default staleness window for the data.</param>
     /// <param name="lastUpdateOf">Extracts the producer timestamp from a

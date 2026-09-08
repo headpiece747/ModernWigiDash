@@ -22,6 +22,8 @@ public sealed class FrameBufferPool
     /// <summary>Exact size of every pooled buffer, in bytes.</summary>
     public int BufferSize { get; }
 
+    /// <summary>Pre-allocates a fixed set of exact-size buffers so the frame
+    /// pipeline never churns the LOH per frame.</summary>
     /// <param name="bufferSize">Exact buffer size in bytes.</param>
     /// <param name="capacity">Number of buffers to pre-allocate (in-flight maximum + margin).</param>
     public FrameBufferPool(int bufferSize, int capacity)
