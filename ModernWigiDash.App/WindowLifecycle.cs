@@ -29,7 +29,7 @@ internal sealed class WindowLifecycle(
     Func<bool> runSessionEndStandby)
 {
     private bool _quitting;
-    private bool _startupMinimizeLatch;
+    private StartupMinimizeLatchPolicy.LatchState _startupMinimizeLatch = new(false);
 
     /// <summary>The explicit-quit flag (ADR-0018): set by the tray's Quit
     /// (<see cref="QuitClose"/>) before the close, so the close intercept - which
@@ -110,14 +110,12 @@ internal sealed class WindowLifecycle(
     {
         // The autostart minimize (ADR-0019) is deliberate, not a user minimize:
         // the one-shot latch vetoes the hide for the startup state change only,
-        // and it is cleared here before the other guards (the explicit clear in
+        // and it is consumed here before the other guards (the explicit clear in
         // the ctor covers the no-event path), so the first real user minimize
-        // still intercepts.
-        if (_startupMinimizeLatch)
-        {
-            _startupMinimizeLatch = false;
-            return;
-        }
+        // still intercepts. The policy lives in StartupMinimizeLatchPolicy.
+        var (veto, next) = StartupMinimizeLatchPolicy.Consume(_startupMinimizeLatch);
+        _startupMinimizeLatch = next;
+        if (veto) return;
         if (!wiredProvider() || _quitting || !isEnabledProvider() || windowStateProvider() != WindowState.Minimized)
         {
             return;
@@ -133,11 +131,11 @@ internal sealed class WindowLifecycle(
     /// the window the autostart path deliberately opened minimized. The startup
     /// state change's own event consumes it; the explicit clear after the write
     /// keeps it one-shot if no event fires for the change.</summary>
-    public void ArmStartupMinimizeLatch() => _startupMinimizeLatch = true;
+    public void ArmStartupMinimizeLatch() => _startupMinimizeLatch = StartupMinimizeLatchPolicy.Arm(_startupMinimizeLatch);
 
     /// <summary>Clears the one-shot autostart-minimize latch (the no-event path
     /// after the startup WindowState write).</summary>
-    public void ClearStartupMinimizeLatch() => _startupMinimizeLatch = false;
+    public void ClearStartupMinimizeLatch() => _startupMinimizeLatch = StartupMinimizeLatchPolicy.Clear(_startupMinimizeLatch);
 
     /// <summary>The session-end standby (ADR-0018): the production caller is the
     /// App's SessionEnding event. A system shutdown or logoff kills the process
