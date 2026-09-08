@@ -127,13 +127,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _strokePaint.StrokeWidth = 1f * scale;
         canvas.DrawRoundRect(rect, 12f * scale, 12f * scale, _strokePaint);
 
-        // Week badge at top - use larger font and ensure visibility
+        // Week badge at top - use original 5.5f font size for consistency
         int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(viewDate);
-        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 10f * scale);
+        var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 5.5f * scale);
         _textPaint.Color = palette.Accent;
         string weekStr = $"W{weekNum:D2}";
         float ww = FontHelper.MeasureTextWithFallback(weekStr, weekFont);
-        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 18f * scale, weekFont, _textPaint);
+        canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 16f * scale, weekFont, _textPaint);
 
         // Rotated typography branding "CALENDAR" - centered in the strip
         canvas.Save();

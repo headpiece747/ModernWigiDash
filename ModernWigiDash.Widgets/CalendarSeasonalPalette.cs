@@ -30,7 +30,7 @@ public static class CalendarSeasonalPalettes
         // Mar: Forest Teal
         new(new SKColor(20, 54, 46), SKColors.White, new SKColor(16, 185, 129), "MAR", "March"),
         // Apr: Canary Yellow (Dark text for contrast)
-        new(new SKColor(245, 200, 0), new SKColor(30, 41, 59), new SKColor(15, 23, 42), "APR", "April"),
+        new(new SKColor(245, 200, 0), new SKColor(30, 41, 59), new SKColor(30, 41, 59), "APR", "April"),
         // May: Royal Indigo
         new(new SKColor(41, 59, 134), SKColors.White, new SKColor(147, 197, 253), "MAY", "May"),
         // Jun: Deep Cobalt
@@ -42,7 +42,7 @@ public static class CalendarSeasonalPalettes
         // Sep: Warm Tangerine / Coral
         new(new SKColor(255, 77, 45), SKColors.White, new SKColor(254, 205, 211), "SEP", "September"),
         // Oct: Golden Ochre (Dark text)
-        new(new SKColor(234, 168, 18), new SKColor(30, 41, 59), new SKColor(15, 23, 42), "OCT", "October"),
+        new(new SKColor(234, 168, 18), new SKColor(30, 41, 59), new SKColor(30, 41, 59), "OCT", "October"),
         // Nov: Electric Azure
         new(new SKColor(0, 92, 185), SKColors.White, new SKColor(191, 219, 254), "NOV", "November"),
         // Dec: Warm Crimson / Berry
