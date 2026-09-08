@@ -211,4 +211,59 @@ public class CalendarAdaptiveLayoutTests
 
         Assert.AreEqual(0, geo.MonthGrid.Cells.Count);
     }
+
+    [TestMethod]
+    public void BuildAgendaScrollGeometry_NoExtent_NotVisible()
+    {
+        // Nothing to scroll: the thumb is hidden (the renderer draws nothing).
+        var area = new SKRect(10f, 100f, 300f, 400f);
+        var g = CalendarLayout.BuildAgendaScrollGeometry(area, maxScrollY: 0f, scrollY: 0f, scale: 1f);
+        Assert.IsFalse(g.Visible);
+    }
+
+    [TestMethod]
+    public void BuildAgendaScrollGeometry_EmptyArea_NotVisible()
+    {
+        // No scroll area at all: hidden even with a positive extent.
+        var g = CalendarLayout.BuildAgendaScrollGeometry(SKRect.Empty, maxScrollY: 50f, scrollY: 10f, scale: 1f);
+        Assert.IsFalse(g.Visible);
+    }
+
+    [TestMethod]
+    public void BuildAgendaScrollGeometry_TopOffset_ThumbAtTrackTop()
+    {
+        // At offset zero the thumb sits at the track's top inset; its width is the
+        // fixed 3*scale and it hugs the right edge of the scroll area.
+        var area = new SKRect(10f, 100f, 300f, 400f); // height 300
+        var g = CalendarLayout.BuildAgendaScrollGeometry(area, maxScrollY: 300f, scrollY: 0f, scale: 1f);
+        Assert.IsTrue(g.Visible);
+        Assert.AreEqual(100f + 4f, g.ThumbY, 0.01f, "thumb starts at the top inset");
+        Assert.AreEqual(300f - 5f, g.ThumbX, 0.01f, "thumb hugs the right edge");
+        Assert.AreEqual(3f, g.ThumbWidth, 0.01f, "fixed thumb width");
+    }
+
+    [TestMethod]
+    public void BuildAgendaScrollGeometry_FullOffset_ThumbAtTrackBottom()
+    {
+        // At full scroll the thumb reaches the track's bottom (top + track - height).
+        var area = new SKRect(10f, 100f, 300f, 400f); // height 300
+        float maxScroll = 300f;
+        var g = CalendarLayout.BuildAgendaScrollGeometry(area, maxScrollY: maxScroll, scrollY: maxScroll, scale: 1f);
+        float trackHeight = area.Height - 8f;
+        float expectedBottomY = area.Top + 4f + (trackHeight - g.ThumbHeight);
+        Assert.AreEqual(expectedBottomY, g.ThumbY, 0.01f, "full offset parks the thumb at the track bottom");
+    }
+
+    [TestMethod]
+    public void BuildAgendaScrollGeometry_ThumbHeight_ScalesWithContentRatio()
+    {
+        // More content (larger extent) shrinks the thumb toward the floor; the
+        // thumb height is the larger of the 20*scale floor and the ratio-scaled
+        // track share.
+        var area = new SKRect(10f, 100f, 300f, 400f); // height 300
+        float small = CalendarLayout.BuildAgendaScrollGeometry(area, maxScrollY: 300f, scrollY: 0f, scale: 1f).ThumbHeight;
+        float large = CalendarLayout.BuildAgendaScrollGeometry(area, maxScrollY: 3000f, scrollY: 0f, scale: 1f).ThumbHeight;
+        Assert.IsTrue(large < small, "a longer agenda yields a shorter thumb");
+        Assert.IsTrue(small >= 20f, "the thumb never drops below the 20*scale floor");
+    }
 }

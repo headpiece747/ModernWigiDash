@@ -384,17 +384,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             DrawRows(canvas, layout, display, scale, agendaScrollY);
             canvas.Restore();
 
-            // Subtle vertical scrollbar indicator when events exceed viewport
-            if (maxAgendaScrollY > 0f)
+            // Vertical scrollbar thumb when events exceed the viewport; the geometry
+            // is owned by CalendarLayout so the render path only draws it.
+            AgendaScrollGeometry thumb = CalendarLayout.BuildAgendaScrollGeometry(scrollArea, maxAgendaScrollY, agendaScrollY, scale);
+            if (thumb.Visible)
             {
-                float scrollTrackH = scrollArea.Height - 8f * scale;
-                float thumbH = Math.Max(20f * scale, scrollTrackH * (scrollArea.Height / (scrollArea.Height + maxAgendaScrollY)));
-                float scrollRatio = agendaScrollY / maxAgendaScrollY;
-                float thumbY = scrollArea.Top + 4f * scale + scrollRatio * (scrollTrackH - thumbH);
-                float thumbX = scrollArea.Right - 5f * scale;
-
                 _fillPaint.Color = SKColors.White.WithAlpha(60);
-                canvas.DrawRoundRect(new SKRect(thumbX, thumbY, thumbX + 3f * scale, thumbY + thumbH), 1.5f * scale, 1.5f * scale, _fillPaint);
+                canvas.DrawRoundRect(new SKRect(thumb.ThumbX, thumb.ThumbY, thumb.ThumbX + thumb.ThumbWidth, thumb.ThumbY + thumb.ThumbHeight), 1.5f * scale, 1.5f * scale, _fillPaint);
             }
         }
         else

@@ -40,6 +40,16 @@ public readonly record struct MonthGridCell(SKPoint Center, SKPoint DotCenter, S
 public readonly record struct MonthGridGeometry(float WeekdayHeaderHeight, IReadOnlyList<MonthGridCell> Cells);
 
 /// <summary>
+/// The agenda panel's scrollbar thumb geometry, computed once from the scroll
+/// area, the scrollable extent, and the current offset -- the one owner of the
+/// thumb's height/ratio/position math so the render path draws it and any future
+/// consumer reads the same source. <see cref="Visible"/> is false when there is
+/// nothing to scroll (the extent is zero) or no scroll area; the renderer only
+/// draws the thumb when it is true. Pure over its inputs: no pixels, no canvas.
+/// </summary>
+public readonly record struct AgendaScrollGeometry(bool Visible, float ThumbX, float ThumbY, float ThumbWidth, float ThumbHeight);
+
+/// <summary>
 /// The calendar widget's hit geometry, computed once per frame from the
 /// placement bounds and the display-facts counts -- the same inputs the render
 /// path uses, so the drawn rows and the touch targets can never drift apart.
@@ -566,5 +576,26 @@ public static class CalendarLayout
     /// </summary>
     public static bool IsNextChevronHit(CalendarGeometry geo, float x, float y)
         => !geo.NextChevronRect.IsEmpty && geo.NextChevronRect.Contains(x, y);
+
+    /// <summary>
+    /// Computes the agenda scrollbar thumb geometry from the scroll area, the
+    /// scrollable extent, and the current offset. The one owner of the thumb's
+    /// height/ratio/position math (the renderer used to inline it): a zero
+    /// extent or an empty scroll area yields <see cref="AgendaScrollGeometry"/>
+    /// with <c>Visible == false</c>, so the caller draws nothing. Pure over its
+    /// inputs -- no canvas, no pixels -- so the geometry is assertable directly.
+    /// </summary>
+    public static AgendaScrollGeometry BuildAgendaScrollGeometry(SKRect scrollArea, float maxScrollY, float scrollY, float scale)
+    {
+        if (scrollArea.IsEmpty || maxScrollY <= 0f)
+            return new AgendaScrollGeometry(false, 0f, 0f, 0f, 0f);
+
+        float trackHeight = scrollArea.Height - 8f * scale;
+        float thumbHeight = Math.Max(20f * scale, trackHeight * (scrollArea.Height / (scrollArea.Height + maxScrollY)));
+        float ratio = scrollY / maxScrollY;
+        float thumbY = scrollArea.Top + 4f * scale + ratio * (trackHeight - thumbHeight);
+        float thumbX = scrollArea.Right - 5f * scale;
+        return new AgendaScrollGeometry(true, thumbX, thumbY, 3f * scale, thumbHeight);
+    }
 }
 
