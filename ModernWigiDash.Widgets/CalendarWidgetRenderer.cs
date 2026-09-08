@@ -262,7 +262,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             }
         }
 
-        DrawNotableDatesFooter(canvas, layout.NotableDatesRect, display, palette, scale);
+        DrawNotableDatesFooter(canvas, layout.NotableDatesRect, display, palette, scale, viewDate);
     }
 
     private void DrawChevron(SKCanvas canvas, SKRect rect, string text, SKColor color, float scale)
@@ -280,7 +280,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.DrawTextWithFallback(text, rect.MidX - tw / 2f, rect.MidY - font.Metrics.Top * 0.42f, font, _textPaint);
     }
 
-    private void DrawNotableDatesFooter(SKCanvas canvas, SKRect rect, CalendarDisplay display, CalendarSeasonalPalette palette, float scale)
+    private void DrawNotableDatesFooter(SKCanvas canvas, SKRect rect, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime viewDate)
     {
         if (rect.IsEmpty || rect.Height < 14f * scale)
             return;
@@ -289,19 +289,22 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _strokePaint.StrokeWidth = 1f * scale;
         canvas.DrawLine(rect.Left, rect.Top, rect.Right, rect.Top, _strokePaint);
 
-        IReadOnlyList<NotableDateItem> items = display.SafeNotableDates;
-        if (items.Count == 0)
+        // Only show notable dates for the viewed day (not the whole month)
+        IReadOnlyList<NotableDateItem> allItems = display.SafeNotableDates;
+        var viewedDayItems = allItems.Where(item => item.Day == viewDate.Day).ToList();
+
+        if (viewedDayItems.Count == 0)
             return;
 
         var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 9f * scale);
         float y = rect.Top + 13f * scale;
         float curX = rect.Left;
 
-        for (int i = 0; i < items.Count && i < 3; i++)
+        for (int i = 0; i < viewedDayItems.Count && i < 3; i++)
         {
-            NotableDateItem item = items[i];
+            NotableDateItem item = viewedDayItems[i];
             string entry = $"{item.Tag}  {item.Label}";
-            if (i < items.Count - 1 && i < 2) entry += "   \u00B7   ";
+            if (i < viewedDayItems.Count - 1 && i < 2) entry += "   \u00B7   ";
             float entryW = FontHelper.MeasureTextWithFallback(entry, labelFont);
             if (curX + entryW > rect.Right && i > 0)
                 break;
