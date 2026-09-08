@@ -57,4 +57,18 @@ internal static class PictureSourcePolicy
     /// <summary>The placeholder hint: the cycling promise only when <paramref name="canCycle"/> holds.</summary>
     public static string PlaceholderHint(bool canCycle)
         => canCycle ? "Click/Tap to Cycle Pictures" : "Tap to set an Image Path";
+
+    /// <summary>
+    /// The next image index for a cycling folder: advances one position and wraps
+    /// at the folder's length. Pure decision over the current index and the
+    /// scanned list's length, so the wrap rule is assertable without the
+    /// filesystem or the widget's render tick. The widget binds the production
+    /// state (_imageIndex, _folderImages.Length) and routes every tap-to-cycle
+    /// through this module.
+    /// </summary>
+    public static int NextImageIndex(int currentIndex, int folderLength)
+    {
+        if (folderLength <= 0) return 0;
+        return (currentIndex + 1) % folderLength;
+    }
 }

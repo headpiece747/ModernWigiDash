@@ -65,4 +65,19 @@ public class PictureSourcePolicyTests
         Assert.AreEqual("Click/Tap to Cycle Pictures", PictureSourcePolicy.PlaceholderHint(true));
         Assert.AreEqual("Tap to set an Image Path", PictureSourcePolicy.PlaceholderHint(false));
     }
+
+    [TestMethod]
+    public void NextImageIndex_AdvancesAndWraps()
+    {
+        Assert.AreEqual(1, PictureSourcePolicy.NextImageIndex(0, 5));
+        Assert.AreEqual(2, PictureSourcePolicy.NextImageIndex(1, 5));
+        Assert.AreEqual(0, PictureSourcePolicy.NextImageIndex(4, 5));
+    }
+
+    [TestMethod]
+    public void NextImageIndex_EmptyFolder_ReturnsZero()
+    {
+        Assert.AreEqual(0, PictureSourcePolicy.NextImageIndex(0, 0));
+        Assert.AreEqual(0, PictureSourcePolicy.NextImageIndex(3, 0));
+    }
 }

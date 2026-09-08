@@ -417,7 +417,7 @@ public class PictureAndGifWidget : ModernWidgetBase
         if (eventType == TouchEventType.TouchUp && _folderImages.Length > 0 &&
             PictureSourcePolicy.CanCycle(SourceMode, ProbeFileExists(ImagePath), ProbeDirExists(ImagePath)))
         {
-            _imageIndex = (_imageIndex + 1) % _folderImages.Length;
+            _imageIndex = PictureSourcePolicy.NextImageIndex(_imageIndex, _folderImages.Length);
             _loadedPath = "";
             Context?.RequestRender();
         }
