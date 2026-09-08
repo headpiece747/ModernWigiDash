@@ -236,8 +236,10 @@ public class CalendarAdaptiveRenderingTests
     public void RenderDetailView_DirectRendererCall_WithLongUrlAndRunOnSentence_RendersSuccessfully()
     {
         using var renderer = new CalendarWidgetRenderer();
-        var bounds = new SKRect(0, 0, 500, 400);
-        using var surface = SKSurface.Create(new SKImageInfo(500, 400));
+        // A short card (500x400) so the long URL + run-on text overflow and
+        // produce a positive scroll extent.
+        var bounds = new SKRect(0, 0, 500, 220);
+        using var surface = SKSurface.Create(new SKImageInfo(500, 220));
 
         var ev = new CalendarEvent
         {
@@ -250,7 +252,11 @@ public class CalendarAdaptiveRenderingTests
             FeedLabel = "Work",
         };
 
-        renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now);
+        DetailFrameFacts facts = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now);
+        // The long URL + run-on description must overflow the short card, producing
+        // a positive scroll extent and a non-empty URL tap target.
+        Assert.IsTrue(facts.MaxScrollY > 0f, "long content must exceed the card height");
+        Assert.IsFalse(facts.UrlRect.IsEmpty, "URL tap target must be recorded for a URL-bearing event");
         Assert.IsNotNull(surface);
     }
 
@@ -373,10 +379,10 @@ public class CalendarAdaptiveRenderingTests
             Url = "https://meet.example.com/meeting",
         };
 
-        var (maxScroll, cardRect, urlRect) = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now, 20f);
-        Assert.IsTrue(maxScroll > 0f, "content must exceed card height and produce positive max scroll");
-        Assert.IsTrue(cardRect.Width > 0f, "cardRect width must be positive");
-        Assert.IsTrue(cardRect.Height > 0f, "cardRect height must be positive");
-        Assert.IsTrue(urlRect.Width > 0f, "urlRect width must be positive");
+        DetailFrameFacts facts = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now, 20f);
+        Assert.IsTrue(facts.MaxScrollY > 0f, "content must exceed card height and produce positive max scroll");
+        Assert.IsTrue(facts.CardRect.Width > 0f, "cardRect width must be positive");
+        Assert.IsTrue(facts.CardRect.Height > 0f, "cardRect height must be positive");
+        Assert.IsTrue(facts.UrlRect.Width > 0f, "urlRect width must be positive");
     }
 }

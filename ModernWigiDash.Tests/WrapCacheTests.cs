@@ -208,4 +208,38 @@ public class WrapCacheTests
         var negLines = cache.GetOrWrap(text, font, 14f, -50f);
         Assert.AreEqual(3, negLines.Count);
     }
+
+    [TestMethod]
+    public void WrapCache_SurrogatePairToken_WrapsWithoutSplittingSurrogates()
+    {
+        // A supplementary-plane character (emoji U+1F600) is encoded as a UTF-16
+        // surrogate pair. The wrap must not split the pair across two lines, and
+        // reconstructing the wrapped lines must round-trip the original string.
+        var cache = new WrapCache();
+        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f);
+
+        // Build a token wide enough to force wrapping: repeated emoji + ASCII.
+        const string emoji = "\U0001F600"; // Grinning face (surrogate pair)
+        string token = string.Concat(Enumerable.Repeat(emoji, 8)) + "abcdefghijklmnop";
+        const float maxWidth = 120f;
+
+        float fullWidth = FontHelper.MeasureTextWithFallback(token, font);
+        Assert.IsTrue(fullWidth > maxWidth, "test precondition: token must be wider than maxWidth");
+
+        var lines = cache.GetOrWrap(token, font, 14f, maxWidth);
+
+        Assert.IsTrue(lines.Count >= 2, "token must wrap onto multiple lines");
+        foreach (string line in lines)
+        {
+            float w = FontHelper.MeasureTextWithFallback(line, font);
+            Assert.IsTrue(w <= maxWidth + 0.1f, $"line '{line}' width {w} must not exceed maxWidth {maxWidth}");
+            // No line may end or begin with a lone surrogate half.
+            if (line.Length > 0)
+            {
+                Assert.IsFalse(char.IsHighSurrogate(line[^1]) || char.IsLowSurrogate(line[0]),
+                    $"line '{line}' has a split surrogate at its boundary");
+            }
+        }
+        Assert.AreEqual(token, string.Concat(lines), "reconstructing wrapped lines must perfectly preserve the surrogate-pair token");
+    }
 }

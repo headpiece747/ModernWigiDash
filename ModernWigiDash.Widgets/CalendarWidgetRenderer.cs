@@ -23,6 +23,19 @@ internal sealed class CalendarWidgetRenderer : IDisposable
     private static readonly string[] StatLabels = ["12M", "52W", "365D"];
     private static readonly string[] WeekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
 
+    // Detail-view line pitches (design units, before the scale factor). Shared by
+    // the measure pass (totalContentH) and the draw pass so the two cannot drift:
+    // changing a pitch here changes both the scroll extent and the drawn layout.
+    private const float TimeLineH = 30f;
+    private const float TitleLineH = 26f;
+    private const float FeedLineH = 24f;
+    private const float LocLineH = 20f;
+    private const float DescLineH = 18f;
+    private const float DurLineH = 24f;
+    private const float UrlLineH = 18f;
+    private const float SectionGap = 6f;
+    private const float InnerPad = 16f;
+
     /// <summary>The word-wrap cache for the detail view's title/location/
     /// description blocks (memoized so the 30 FPS tick path allocates nothing).</summary>
     private readonly WrapCache _wrapCache = new(16);
@@ -656,8 +669,10 @@ internal sealed class CalendarWidgetRenderer : IDisposable
     }
 
     /// <summary>The single-event detail view: a scrollable card with time,
-    /// title, feed label, location, description, duration, and meeting link.</summary>
-    public (float MaxScrollY, SKRect CardRect, SKRect UrlRect) RenderDetailView(
+    /// title, feed label, location, description, duration, and meeting link.
+    /// Returns the frame facts (max scroll, card rect, URL tap target) the
+    /// gesture module needs for hit-testing and scroll clamping.</summary>
+    public DetailFrameFacts RenderDetailView(
         SKCanvas canvas,
         SKRect bounds,
         float scale,
@@ -713,17 +728,15 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             ? _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)
             : null;
 
-        float innerPadTop = 16f * scale;
-        float innerPadBottom = 16f * scale;
-        float totalContentH = innerPadTop;
-        totalContentH += 30f * scale; // time
-        totalContentH += titleLines.Count * 26f * scale + 6f * scale;
-        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) totalContentH += 24f * scale;
-        if (locLines is not null) totalContentH += locLines.Count * 20f * scale + 6f * scale;
-        if (descLines is not null) totalContentH += descLines.Count * 18f * scale + 6f * scale;
-        if (!ev.IsAllDay) totalContentH += 24f * scale;
-        if (urlLines is not null) totalContentH += urlLines.Count * 18f * scale + 6f * scale;
-        totalContentH += innerPadBottom;
+        float totalContentH = InnerPad * scale;
+        totalContentH += TimeLineH * scale; // time
+        totalContentH += titleLines.Count * TitleLineH * scale + SectionGap * scale;
+        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) totalContentH += FeedLineH * scale;
+        if (locLines is not null) totalContentH += locLines.Count * LocLineH * scale + SectionGap * scale;
+        if (descLines is not null) totalContentH += descLines.Count * DescLineH * scale + SectionGap * scale;
+        if (!ev.IsAllDay) totalContentH += DurLineH * scale;
+        if (urlLines is not null) totalContentH += urlLines.Count * UrlLineH * scale + SectionGap * scale;
+        totalContentH += InnerPad * scale;
 
         float cardH = cardBottom - cardTop;
         float maxScrollY = Math.Max(0f, totalContentH - cardH);
@@ -734,25 +747,25 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         canvas.Save();
         canvas.ClipRoundRect(new SKRoundRect(clipInnerRect, 10f * scale, 10f * scale), antialias: true);
 
-        float y = cardTop + innerPadTop - clampedScrollY;
+        float y = cardTop + InnerPad * scale - clampedScrollY;
 
         _textPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
         canvas.DrawTextWithFallback(timeStr, x, y, timeFont, _textPaint);
-        y += 30f * scale;
+        y += TimeLineH * scale;
 
         _textPaint.Color = textColor;
         foreach (string line in titleLines)
         {
             canvas.DrawTextWithFallback(line, x, y, titleFont, _textPaint);
-            y += 26f * scale;
+            y += TitleLineH * scale;
         }
-        y += 6f * scale;
+        y += SectionGap * scale;
 
         if (!string.IsNullOrWhiteSpace(ev.FeedLabel))
         {
             _textPaint.Color = new SKColor(120, 160, 255);
             canvas.DrawTextWithFallback($"[{ev.FeedLabel}]", x, y, feedFont, _textPaint);
-            y += 24f * scale;
+            y += FeedLineH * scale;
         }
 
         if (locLines is not null)
@@ -761,9 +774,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             foreach (string line in locLines)
             {
                 canvas.DrawTextWithFallback(line, x, y, locFont, _textPaint);
-                y += 20f * scale;
+                y += LocLineH * scale;
             }
-            y += 6f * scale;
+            y += SectionGap * scale;
         }
 
         if (descLines is not null)
@@ -772,9 +785,9 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             foreach (string line in descLines)
             {
                 canvas.DrawTextWithFallback(line, x, y, descFont, _textPaint);
-                y += 18f * scale;
+                y += DescLineH * scale;
             }
-            y += 6f * scale;
+            y += SectionGap * scale;
         }
 
         if (!ev.IsAllDay)
@@ -785,7 +798,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 : $"{dur.Minutes}m";
             _textPaint.Color = textColor.WithAlpha(160);
             canvas.DrawTextWithFallback($"Duration: {durStr}", x, y, durFont, _textPaint);
-            y += 24f * scale;
+            y += DurLineH * scale;
         }
 
         SKRect urlRect = SKRect.Empty;
@@ -796,10 +809,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             foreach (string chunk in urlLines)
             {
                 canvas.DrawTextWithFallback(chunk, x, y, urlFont, _textPaint);
-                y += 18f * scale;
+                y += UrlLineH * scale;
             }
             float urlEndY = y;
-            y += 6f * scale;
+            y += SectionGap * scale;
+            // Extend the tap target ~one line above the first glyph so a slightly
+            // high tap still hits the link (the text baseline sits below the rect top).
             urlRect = new SKRect(cardLeft, urlStartY - 14f * scale, cardRight, urlEndY);
         }
 
@@ -826,6 +841,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             _strokePaint.StrokeCap = SKStrokeCap.Butt;
         }
 
-        return (maxScrollY, cardRect, urlRect);
+        return new DetailFrameFacts(maxScrollY, cardRect, urlRect);
     }
 }
+
+/// <summary>The frame facts the detail view hands back to the widget after a
+/// render: the max scroll extent (0 when content fits), the pillbox card rect,
+/// and the meeting-link tap target. The gesture module stores these so a touch
+/// sample can hit-test the URL region and clamp its scroll offset.</summary>
+internal sealed record DetailFrameFacts(float MaxScrollY, SKRect CardRect, SKRect UrlRect);

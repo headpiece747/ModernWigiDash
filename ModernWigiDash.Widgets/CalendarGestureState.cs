@@ -13,6 +13,15 @@ namespace ModernWigiDash.Widgets;
 /// a long handler. Tests drive <see cref="Feed"/> directly against a rendered
 /// frame's facts without re-reading the store per tap.
 /// </summary>
+/// <remarks>
+/// Thread-safety contract: <see cref="Feed"/> (touch samples) and
+/// <see cref="SetFrameFacts"/> / <see cref="SetDetailFrameFacts"/> (render-time
+/// updates) must be called from the same thread. In production both run on the
+/// WPF dispatcher (device touch is marshaled via <c>BeginInvoke</c>; the render
+/// tick is a <c>DispatcherTimer</c>), so they are serialized. The mutable state
+/// here is NOT protected by a lock; calling these methods concurrently from
+/// different threads would race. Tests call them sequentially on one thread.
+/// </remarks>
 internal sealed class CalendarGestureState
 {
     /// <summary>The maximum drag distance (in design units) that still counts as
@@ -222,18 +231,14 @@ internal sealed class CalendarGestureState
                     return;
                 }
 
-                // Tap on meeting link (if tapped inside the URL rect within the visible card)
+                // Tap on the meeting link: only when the URL rect was recorded by
+                // the last render AND the tap lands inside it. If the rect is not
+                // set (e.g. a touch arriving before the first detail render), the
+                // tap falls through to the exit below instead of opening the link.
                 if (!string.IsNullOrWhiteSpace(ev.Url) &&
                     !_detailUrlRect.IsEmpty &&
                     _detailCardRect.Contains(localPoint.X, localPoint.Y) &&
                     _detailUrlRect.Contains(localPoint.X, localPoint.Y))
-                {
-                    OpenMeetingLink(ev.Url);
-                    return;
-                }
-
-                // If URL is present and they tapped inside the card but _detailUrlRect is not set
-                if (!string.IsNullOrWhiteSpace(ev.Url) && _detailUrlRect.IsEmpty && _detailCardRect.Contains(localPoint.X, localPoint.Y))
                 {
                     OpenMeetingLink(ev.Url);
                     return;
