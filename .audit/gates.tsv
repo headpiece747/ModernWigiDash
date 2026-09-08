@@ -306,3 +306,6 @@
 2026-09-08T01:50:32Z	7989537	manual	ok	0	0	FAIL	2226	1	SKIP
 2026-09-08T01:52:41Z	7989537	manual	ok	0	0	ok	2227	0	ok
 2026-09-08T01:55:02Z	afa0a14	manual	ok	0	0	ok	2233	0	ok
+2026-09-08T02:01:06Z	52d78c0	flake-probe | FAILED: PollTick_FreshBody_ParsesAndMergesEvents	ok	2	0	FAIL	2232	1	SKIP
+2026-09-08T02:02:06Z	52d78c0	manual	ok	0	0	ok	2233	0	ok
+2026-09-08T02:05:02Z	52d78c0	manual	ok	0	0	ok	2233	0	ok

@@ -177,6 +177,12 @@ public class CalendarFeedProducerTests
         // The failed feed's last-good event survives (ADR-0017): no hole.
         Assert.IsTrue(snap.Events.Any(e => e.Title == "Bad"), "the dropped feed keeps its last-known event");
         Assert.IsTrue(snap.Events.Any(e => e.Title == "Good"), "the healthy feed still updated");
+        // Conditional fetch: tick 1 handed both feeds a null ETag; tick 2 re-sent
+        // each feed's stored ETag (4 fetches total, two per tick).
+        Assert.AreEqual(4, etagsSeen.Count, "one fetch per feed per tick");
+        Assert.IsNull(etagsSeen[0]);
+        Assert.IsNull(etagsSeen[1]);
+        Assert.IsTrue(etagsSeen.Skip(2).All(e => !string.IsNullOrEmpty(e)), "tick 2 re-sent the stored ETags");
     }
 
     [TestMethod]

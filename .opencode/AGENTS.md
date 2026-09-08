@@ -17,11 +17,16 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   to `.editorconfig`; it recreates a ~45,000-error wall on Windows checkouts.
 - Full gate run (build -> test -> format, stops at first failure, appends one
   trail row to `.audit/gates.tsv`): `scripts\run-gates.ps1`. Use it for full
-  runs instead of the three commands above. The build stage force-recompiles
-  (`--no-incremental`): an mtime-stale incremental build can report UP-TO-DATE
-  over changed content and hide a real warning. If the app is running from
-  `bin\Release`, the forced recompile fails on a locked output file; stop the
-  app first and re-run.
+   runs instead of the three commands above. The build stage force-recompiles
+   (`--no-incremental`): an mtime-stale incremental build can report UP-TO-DATE
+   over changed content and hide a real warning. If the app is running from
+   `bin\Release`, the forced recompile fails on a locked output file; stop the
+   app first and re-run. On a test-stage failure the gate re-runs the suite at
+   normal verbosity and folds the failing test names into the trail row's label
+   (the quiet run prints only the summary count, never which tests failed, so a
+   bare `FAIL` row would be undiagnosable: the 2026-09-08 one-off flake could
+   not be identified because of exactly this gap). A failed gate is diagnosed
+   from that row, never waved off as "a flake" by re-running until green.
 - Harness ps1 lint (opt-in, NOT a gate stage, ADR-0010 precedent):
   `scripts\ps-hygiene.ps1` (pure-ASCII sweep + PSScriptAnalyzer over
   `scripts\psa-settings.psd1` + Pester over `scripts\tests\`). Run when a

@@ -104,6 +104,19 @@ if ($testOut -match 'Failed:\s*(\d+)') { $tf = $Matches[1] }
 if ($testOut -match 'Passed:\s*(\d+)') { $tp = $Matches[1] }
 if (-not $testOk) {
     Write-Output $testOut
+    # The quiet run above prints only the summary line - never the failing test
+    # names - so a failed gate would leave the trail row with counts but no way
+    # to say WHICH tests failed (the 2026-09-08 flake could not be diagnosed
+    # because of exactly this). Re-run at normal verbosity to capture the
+    # "Failed <TestName>" lines and fold them into the row's label so the trail
+    # is self-diagnosing. Bounded to the first few names to keep the row one line.
+    $detail = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false }
+    $failedNames = @($detail.Output -split "`n" | Where-Object { $_ -match '^\s*Failed\s+(\S+)' } | ForEach-Object { $Matches[1] } | Select-Object -Unique)
+    if ($failedNames.Count -gt 0) {
+        $shown = $failedNames | Select-Object -First 5
+        if ($failedNames.Count -gt 5) { $shown += ('+' + ($failedNames.Count - 5) + ' more') }
+        $Label = ($Label + ' | FAILED: ' + ($shown -join ', '))
+    }
     Add-GateRow -l $Label -build ok -warn $bw -err $be -test FAIL -passed $tp -failed $tf -fmt SKIP
     Write-Output 'GATE FAILED at test.'
     exit 1
