@@ -137,3 +137,121 @@ public class CalendarWidgetEditorProviderTests
         Assert.IsNull(provider.GetEditorKind(pollProp));
     }
 }
+
+/// <summary>
+/// Pins the feed editor's row-state module at its own seam: the draft-list
+/// transitions (add, remove, edit a field, swap kind) and the two commit routes
+/// (the whole list through the write-back funnel, the CalDAV password through the
+/// credential seam). These tests drive the module directly with in-memory
+/// callbacks, so the bookkeeping is verified where it is owned rather than only
+/// through a WPF tree.
+/// </summary>
+[TestClass]
+public class CalendarFeedEditorRowsTests
+{
+    private static (CalendarFeedEditorRows Rows, List<string> Commits, List<(string FeedId, string Password)> Credentials) Make(
+        string? feedsJson = null,
+        bool withCredentialSeam = true)
+    {
+        var commits = new List<string>();
+        var credentials = new List<(string, string)>();
+        var rows = new CalendarFeedEditorRows(
+            feedsJson,
+            commit => commits.Add(commit),
+            withCredentialSeam ? (Action<string, string>)((id, pw) => credentials.Add((id, pw))) : null);
+        return (rows, commits, credentials);
+    }
+
+    [TestMethod]
+    public void Add_AppendsABlankDraftAndCommitsTheNewList()
+    {
+        var (rows, commits, _) = Make();
+
+        rows.Add();
+
+        Assert.AreEqual(1, rows.Drafts.Count);
+        Assert.AreEqual("ics", rows.Drafts[0].Kind);
+        // The commit carries the serialized list (one complete ics feed after the blank is dropped on serialize).
+        Assert.AreEqual(1, commits.Count);
+    }
+
+    [TestMethod]
+    public void Remove_DropsTheRowAndCommits()
+    {
+        string json = """[{"kind":"ics","feedId":"a","label":"A","url":"https://x.example/a"},{"kind":"ics","feedId":"b","label":"B","url":"https://x.example/b"}]""";
+        var (rows, commits, _) = Make(json);
+        int before = rows.Drafts.Count;
+
+        rows.Remove(0);
+
+        Assert.AreEqual(before - 1, rows.Drafts.Count);
+        Assert.AreEqual("b", rows.Drafts[0].FeedId);
+        Assert.IsTrue(commits.Count > 0);
+    }
+
+    [TestMethod]
+    public void SetLabel_WritesTheFieldAndCommits()
+    {
+        string json = """[{"kind":"ics","feedId":"a","label":"A","url":"https://x.example/a"}]""";
+        var (rows, commits, _) = Make(json);
+        int commitsBefore = commits.Count;
+
+        rows.SetLabel(0, "Renamed");
+
+        Assert.AreEqual("Renamed", rows.Drafts[0].Label);
+        Assert.AreEqual(commitsBefore + 1, commits.Count);
+    }
+
+    [TestMethod]
+    public void SetKind_SwapsTheRowKindAndCommits()
+    {
+        string json = """[{"kind":"ics","feedId":"a","label":"A","url":"https://x.example/a"}]""";
+        var (rows, commits, _) = Make(json);
+
+        rows.SetKind(0, "caldav");
+
+        Assert.AreEqual("caldav", rows.Drafts[0].Kind);
+        Assert.IsTrue(commits.Count > 0);
+    }
+
+    [TestMethod]
+    public void SavePassword_RoutesThroughTheCredentialSeamNotTheCommit()
+    {
+        string json = """[{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":443,"principalPath":"/cal/","username":"me"}]""";
+        var (rows, commits, credentials) = Make(json);
+        int commitsBefore = commits.Count;
+
+        rows.SavePassword(0, "secret");
+
+        // The password rides the credential seam, never the persisted JSON commit.
+        Assert.AreEqual(1, credentials.Count);
+        Assert.AreEqual(("icloud", "secret"), credentials[0]);
+        Assert.AreEqual(commitsBefore, commits.Count, "a password save must not trigger a FeedsJson commit");
+    }
+
+    [TestMethod]
+    public void SavePassword_WithoutACredentialSeam_IsANoOp()
+    {
+        string json = """[{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":443,"principalPath":"/cal/","username":"me"}]""";
+        var (rows, _, credentials) = Make(json, withCredentialSeam: false);
+
+        rows.SavePassword(0, "secret");
+
+        Assert.AreEqual(0, credentials.Count);
+    }
+
+    [TestMethod]
+    public void OutOfRangeTransitions_AreNoOps()
+    {
+        var (rows, commits, _) = Make();
+        int commitsBefore = commits.Count;
+
+        rows.Remove(99);
+        rows.SetLabel(99, "nope");
+        rows.SetKind(99, "caldav");
+        rows.SavePassword(99, "pw");
+
+        Assert.AreEqual(0, rows.Drafts.Count);
+        Assert.AreEqual(commitsBefore, commits.Count, "an out-of-range transition must not commit");
+    }
+}

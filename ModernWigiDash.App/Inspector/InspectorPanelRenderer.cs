@@ -420,9 +420,10 @@ internal static class InspectorPanelRenderer
     /// </summary>
     private static UIElement BuildCalendarFeedEditor(EditorDescription desc, InspectorCallbacks callbacks)
     {
-        List<CalendarFeedDraft> drafts = CalendarFeedEditorModel.Parse(desc.CurrentValue?.ToString()).ToList();
-
-        void Commit() => callbacks.ApplyInspectorPropertyValue(desc.Property, CalendarFeedEditorModel.Serialize(drafts));
+        var rows = new CalendarFeedEditorRows(
+            desc.CurrentValue?.ToString(),
+            commit => callbacks.ApplyInspectorPropertyValue(desc.Property, commit),
+            callbacks.SaveCalendarCredential);
 
         var addBtn = new Button
         {
@@ -439,24 +440,18 @@ internal static class InspectorPanelRenderer
             // rows followed by the button. The button is re-created each pass so
             // its handler always closes over the current draft list.
             host.Children.Clear();
-            for (int i = 0; i < drafts.Count; i++)
+            for (int i = 0; i < rows.Drafts.Count; i++)
             {
                 int index = i;
-                host.Children.Add(BuildFeedRow(drafts[index], index, () =>
-                {
-                    drafts.RemoveAt(index);
-                    RebuildRows();
-                    Commit();
-                }, Commit, callbacks));
+                host.Children.Add(BuildFeedRow(rows, index, RebuildRows));
             }
             host.Children.Add(addBtn);
         }
 
         addBtn.Click += (_, _) =>
         {
-            drafts.Add(new CalendarFeedDraft());
+            rows.Add();
             RebuildRows();
-            Commit();
         };
 
         RebuildRows();
@@ -465,11 +460,12 @@ internal static class InspectorPanelRenderer
 
     /// <summary>One feed row: the kind combo, the label box, the kind's
     /// connection field(s), a masked password field (CalDAV only, machine-local),
-    /// the enable checkbox, and the remove button. Field edits update the bound
-    /// draft and commit the whole list; the password commits through the
-    /// credential seam, never into the persisted JSON.</summary>
-    private static UIElement BuildFeedRow(CalendarFeedDraft draft, int index, Action remove, Action commit, InspectorCallbacks callbacks)
+    /// the enable checkbox, and the remove button. Field edits route through the
+    /// row-state module (which commits the whole list); the password routes
+    /// through the credential seam, never into the persisted JSON.</summary>
+    private static UIElement BuildFeedRow(CalendarFeedEditorRows rows, int index, Action rebuild)
     {
+        var draft = rows.Drafts[index];
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
 
         // Kind + remove on the first line.
@@ -477,7 +473,11 @@ internal static class InspectorPanelRenderer
         var removeBtn = new Button { Content = "Remove", Padding = new Thickness(8, 2, 8, 2) };
         AutomationProperties.SetAutomationId(removeBtn, $"CalFeedRemove_{index}");
         DockPanel.SetDock(removeBtn, Dock.Right);
-        removeBtn.Click += (_, _) => remove();
+        removeBtn.Click += (_, _) =>
+        {
+            rows.Remove(index);
+            rebuild();
+        };
         var kindCombo = new ComboBox
         {
             ItemsSource = new[] { "ics", "caldav" },
@@ -489,10 +489,7 @@ internal static class InspectorPanelRenderer
         kindCombo.SelectionChanged += (_, _) =>
         {
             if (kindCombo.SelectedItem is string kind)
-            {
-                draft.Kind = kind;
-                commit();
-            }
+                rows.SetKind(index, kind);
         };
         top.Children.Add(kindCombo);
         top.Children.Add(removeBtn);
@@ -502,7 +499,7 @@ internal static class InspectorPanelRenderer
         var labelBox = new TextBox { Margin = new Thickness(0, 4, 0, 0) };
         AutomationProperties.SetAutomationId(labelBox, $"CalFeedLabel_{index}");
         labelBox.Text = draft.Label;
-        labelBox.TextChanged += (_, _) => { draft.Label = labelBox.Text; commit(); };
+        labelBox.TextChanged += (_, _) => rows.SetLabel(index, labelBox.Text);
         row.Children.Add(labelBox);
 
         // Connection fields: swap between the .ics URL and the CalDAV triple as
@@ -513,19 +510,18 @@ internal static class InspectorPanelRenderer
             if (string.Equals(draft.Kind, "caldav", StringComparison.Ordinal))
             {
                 var grid = new StackPanel();
-                grid.Children.Add(BuildConnField("Server", draft.Server, v => { draft.Server = v; commit(); }, $"CalFeedServer_{index}"));
-                grid.Children.Add(BuildConnField("Principal path", draft.PrincipalPath, v => { draft.PrincipalPath = v; commit(); }, $"CalFeedPrincipal_{index}"));
-                grid.Children.Add(BuildConnField("Username", draft.Username, v => { draft.Username = v; commit(); }, $"CalFeedUsername_{index}"));
+                grid.Children.Add(BuildConnField("Server", draft.Server, v => rows.SetServer(index, v), $"CalFeedServer_{index}"));
+                grid.Children.Add(BuildConnField("Principal path", draft.PrincipalPath, v => rows.SetPrincipalPath(index, v), $"CalFeedPrincipal_{index}"));
+                grid.Children.Add(BuildConnField("Username", draft.Username, v => rows.SetUsername(index, v), $"CalFeedUsername_{index}"));
                 // The password is machine-local: it never rides the persisted JSON
                 // (the profile travels between machines), so it commits through
-                // the credential seam instead of the draft serialize. A blank
-                // feed id cannot be saved (the host refuses it).
-                grid.Children.Add(BuildPasswordField(draft.FeedId, callbacks, $"CalFeedPassword_{index}"));
+                // the credential seam instead of the draft serialize.
+                grid.Children.Add(BuildPasswordField(index, rows, $"CalFeedPassword_{index}"));
                 connHost.Content = grid;
             }
             else
             {
-                connHost.Content = BuildConnField(".ics URL", draft.Url, v => { draft.Url = v; commit(); }, $"CalFeedUrl_{index}");
+                connHost.Content = BuildConnField(".ics URL", draft.Url, v => rows.SetUrl(index, v), $"CalFeedUrl_{index}");
             }
         }
         RebuildConn();
@@ -535,8 +531,8 @@ internal static class InspectorPanelRenderer
         // Enable toggle.
         var enable = new CheckBox { Content = "Enabled", IsChecked = draft.Enabled, Foreground = Brushes.White, Margin = new Thickness(0, 4, 0, 0) };
         AutomationProperties.SetAutomationId(enable, $"CalFeedEnabled_{index}");
-        enable.Checked += (_, _) => { draft.Enabled = true; commit(); };
-        enable.Unchecked += (_, _) => { draft.Enabled = false; commit(); };
+        enable.Checked += (_, _) => rows.SetEnabled(index, true);
+        enable.Unchecked += (_, _) => rows.SetEnabled(index, false);
         row.Children.Add(enable);
 
         return row;
@@ -563,17 +559,13 @@ internal static class InspectorPanelRenderer
     /// seam (machine-local, never the persisted JSON) as it changes. The box is
     /// not seeded (the store holds the secret, not the editor), so typing saves
     /// immediately and a rebuild shows an empty box with a "saved" hint.</summary>
-    private static UIElement BuildPasswordField(string feedId, InspectorCallbacks callbacks, string automationId)
+    private static UIElement BuildPasswordField(int index, CalendarFeedEditorRows rows, string automationId)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
         panel.Children.Add(new TextBlock { Text = "Password (stored on this machine)", FontSize = 10, Foreground = Brushes.Gray, Margin = new Thickness(0, 0, 0, 2) });
         var box = new PasswordBox();
         AutomationProperties.SetAutomationId(box, automationId);
-        box.PasswordChanged += (_, _) =>
-        {
-            if (callbacks.SaveCalendarCredential is { } save && !string.IsNullOrEmpty(feedId))
-                save(feedId, box.Password);
-        };
+        box.PasswordChanged += (_, _) => rows.SavePassword(index, box.Password);
         panel.Children.Add(box);
         return panel;
     }
