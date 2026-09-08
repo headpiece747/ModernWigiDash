@@ -324,3 +324,4 @@
 2026-09-08T15:51:55Z	2134c5d	manual - FAILED: TryGoToStandby_WhenStandbyThrows_LogsTheFailureVerdictAndReturnsFalse	ok	0	0	FAIL	2255	2	SKIP
 2026-09-08T15:54:10Z	2134c5d	manual	ok	0	0	FAIL	2256	1	SKIP
 2026-09-08T15:55:46Z	2134c5d	manual	ok	0	0	ok	2257	0	ok
+2026-09-08T15:57:18Z	310291b	manual	ok	0	0	ok	2264	0	ok

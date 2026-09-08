@@ -188,52 +188,46 @@ public static class FontHelper
     }
 
     /// <summary>
-    /// Resolves a fallback typeface for a codepoint/style. Fallback order: Segoe UI Emoji →
-    /// Segoe UI Symbol → Segoe UI → system MatchCharacter → Default. MatchCharacter results are
-    /// deduped by family name so at most one native typeface per family is retained. The Lazy
-    /// wrapper makes a concurrent GetOrAdd double-run benign: only the stored Lazy is ever
-    /// evaluated (a discarded Lazy never materializes a typeface), and any duplicate native
-    /// typeface produced by MatchCharacter is disposed by <see cref="DedupeByFamily"/>.
+    /// Resolves a fallback typeface for a codepoint/style. The ladder (Geist →
+    /// Segoe UI Emoji → Segoe UI Symbol → Segoe UI → system MatchCharacter →
+    /// Default) is owned by <see cref="TypefaceResolver"/>; this method binds
+    /// the production probes (the cached glyph-presence check, the font
+    /// manager's MatchCharacter under its lock) and dedupes MatchCharacter
+    /// results by family name so at most one native typeface per family is
+    /// retained. The Lazy wrapper makes a concurrent GetOrAdd double-run
+    /// benign: only the stored Lazy is ever evaluated (a discarded Lazy never
+    /// materializes a typeface), and any duplicate native typeface produced by
+    /// MatchCharacter is disposed by <see cref="DedupeByFamily"/>.
     /// </summary>
     private static SKTypeface ResolveFallback((int Codepoint, int Weight, int Width, int Slant) key)
     {
-        var emoji = _segoeEmojiTypeface.Value;
-        if (emoji is { Handle: not 0 } && ContainsGlyphSafe(emoji, key.Codepoint))
-        {
-            return emoji;
-        }
-
-        var symbol = _segoeSymbolTypeface.Value;
-        if (symbol is { Handle: not 0 } && ContainsGlyphSafe(symbol, key.Codepoint))
-        {
-            return symbol;
-        }
-
-        var segoe = _segoeUiTypeface.Value;
-        if (segoe is { Handle: not 0 } && ContainsGlyphSafe(segoe, key.Codepoint))
-        {
-            return segoe;
-        }
-
-        try
-        {
-            SKTypeface? matched;
-            lock (_fontManagerLock)
+        SKTypeface? resolved = TypefaceResolver.ResolveFallback(
+            key.Codepoint,
+            containsGlyph: ContainsGlyphSafe,
+            geist: GeistTypeface,
+            emoji: _segoeEmojiTypeface.Value,
+            symbol: _segoeSymbolTypeface.Value,
+            segoeUi: _segoeUiTypeface.Value,
+            matchCharacter: codepoint =>
             {
-                matched = SKFontManager.Default.MatchCharacter(key.Codepoint);
-            }
-            if (matched is { Handle: not 0 })
-            {
-                return DedupeByFamily(matched, (key.Weight, key.Width, key.Slant));
-            }
-        }
-        catch
+                lock (_fontManagerLock)
+                {
+                    return SKFontManager.Default.MatchCharacter(codepoint);
+                }
+            });
+
+        if (resolved is null)
         {
-            // Silently fall through to default typeface
-            FileLog.Write("Font match failed, using default typeface");
+            return SKTypeface.Default;
         }
 
-        return SKTypeface.Default;
+        if (ReferenceEquals(resolved, GeistTypeface) || ReferenceEquals(resolved, _segoeEmojiTypeface.Value)
+            || ReferenceEquals(resolved, _segoeSymbolTypeface.Value) || ReferenceEquals(resolved, _segoeUiTypeface.Value))
+        {
+            return resolved;
+        }
+
+        return DedupeByFamily(resolved, (key.Weight, key.Width, key.Slant));
     }
 
     /// <summary>
