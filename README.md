@@ -77,6 +77,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Minimize to Tray on Startup** | Machine-local opt-in (Behavior group): the next launch opens hidden to the tray instead of showing the window, while the display keeps streaming. Composes with Start with Windows (the `--startup` + flag combination hides rather than minimizes) |
 | **Global Hotkeys** | The Hotkey widget binds an OS-level chord (Ctrl/Alt/Shift/Win + key) that fires even while the app is hidden to the tray, including a **Flip page** action and a **Run AHK Script** action that spawns your own AutoHotkey script. A machine-local **kill switch** in Settings vetoes the global registration and the AHK spawn (the anti-cheat off-switch) |
 | **Typography & Icons** | Dynamic font fallback engine with embedded Geist variable fonts and generated vector icon paths (`GriddyIcons`) |
+| **UIA AutomationIds** | Every interactive control carries a stable `AutomationId`, so UI automation harnesses can address widgets, inspector fields, and dialog controls by name instead of by visual-tree position |
+| **Memory Floor** | Usage-gated managed heap: the frame pipeline, bounded caches, and interop surfaces are allocation-clean; the idle tail (cached-font cap, tray-hidden repaint skip, streaming price parsers) keeps the steady-state footprint flat at ~440 MB working set |
 | **Extensible Plugin SDK** | Build isolated C# widget assemblies targeting `ModernWigiDash.Sdk` |
 
 ---
@@ -96,6 +98,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Stopwatch & Timer** | Stopwatch and countdown timer |
 | **Picture & GIF Viewer** | Static image and animated GIF playback |
 | **Weather Forecast** | Multi-day weather conditions with live refresh (optional hide-location) |
+| **Calendar** | Month grid + agenda view fed by ICS and CalDAV sources. Adaptive layout scales to placement size; Swiss-poster styling with week numbers and accent colors; scrollable detail page with tap-to-open meeting links; word-wrapped long URLs; feed inspector editor with password capture; notable-dates footer shows holidays for the viewed day |
 | **Text** | Static or animated text banners |
 
 ---
@@ -180,6 +183,27 @@ The Twitch widget authenticates via Twitch's **Device Authorization Grant**, no 
 4. Pick a live channel from the populated **Channel Name** list and keep **Auto Connect** enabled.
 
 The Client ID is public and is not a user token or secret. The widget uses anonymous, read-only IRC chat and never requests chat-writing permissions.
+
+---
+
+## Calendar Widget
+
+The Calendar widget shows a month grid with an agenda list of upcoming events, fed by one or more calendar sources configured in the widget inspector's **Feed editor**.
+
+**Supported sources:**
+
+- **ICS file** – a local `.ics` path (e.g. a Google Calendar export)
+- **CalDAV** – a remote CalDAV server URL + username + password (Google Calendar, Fastmail, iCloud, Nextcloud, etc.)
+
+**Features:**
+
+- **Adaptive layout** – the month grid, agenda rows, and detail page all scale to the widget's placement size; at 1×1 the widget collapses to a compact date card
+- **Swiss-poster styling** – clean typography, week numbers, and accent colors that adapt to the theme
+- **Scrollable detail page** – tap an event row to open a full-detail view inside the widget; drag to scroll long events; tap the meeting link (if present) to open it in your browser
+- **Word-wrapped URLs** – long meeting links and run-on sentences break at word boundaries instead of clipping
+- **Notable-dates footer** – shows holidays for the currently viewed day only
+- **Feed editor** – add, edit, and remove calendar feeds directly in the inspector; CalDAV passwords are captured via a secure prompt and stored DPAPI-encrypted alongside the profile
+- **Security hardening** – the CalDAV fetcher validates redirect targets against the expected origin, refuses credentials over cleartext HTTP, and the iCalendar parser rejects hostile input (oversized payloads, malformed VCALENDAR blocks, entity-injection attempts)
 
 ---
 
