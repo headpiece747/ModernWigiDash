@@ -109,13 +109,16 @@ if (-not $testOk) {
     # to say WHICH tests failed (the 2026-09-08 flake could not be diagnosed
     # because of exactly this). Re-run at normal verbosity to capture the
     # "Failed <TestName>" lines and fold them into the row's label so the trail
-    # is self-diagnosing. Bounded to the first few names to keep the row one line.
-    $detail = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false }
+    # is self-diagnosing. --no-build: the quiet run already compiled the fresh
+    # artifacts, so the diagnostic pass runs tests only (no second build).
+    # Bounded to the first few names to keep the row one line; the separator is
+    # a space-dash (not a pipe) so a test name containing '|' cannot collide.
+    $detail = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false --no-build }
     $failedNames = @($detail.Output -split "`n" | Where-Object { $_ -match '^\s*Failed\s+(\S+)' } | ForEach-Object { $Matches[1] } | Select-Object -Unique)
     if ($failedNames.Count -gt 0) {
         $shown = $failedNames | Select-Object -First 5
         if ($failedNames.Count -gt 5) { $shown += ('+' + ($failedNames.Count - 5) + ' more') }
-        $Label = ($Label + ' | FAILED: ' + ($shown -join ', '))
+        $Label = ($Label + ' - FAILED: ' + ($shown -join ', '))
     }
     Add-GateRow -l $Label -build ok -warn $bw -err $be -test FAIL -passed $tp -failed $tf -fmt SKIP
     Write-Output 'GATE FAILED at test.'
