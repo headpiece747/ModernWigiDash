@@ -171,6 +171,37 @@ public class FontAndTextTests
     }
 
     [TestMethod]
+    public void FontHelper_GetTextRuns_EmptyText_ReturnsEmptyList()
+    {
+        // The empty-text guard returns an empty run list without touching the
+        // font manager (the null/empty short-circuit, distinct from a real split).
+        var runs = FontHelper.GetTextRuns("", SKFontStyle.Normal);
+        Assert.AreEqual(0, runs.Count, "empty text must yield no runs");
+    }
+
+    [TestMethod]
+    public void FontHelper_MeasureTextWithFallback_EmptyText_ReturnsZero()
+    {
+        // The empty-text guard returns 0 width without resolving any typeface.
+        var arial = FontHelper.GetTypeface("Arial", SKFontStyle.Normal);
+        using var font = FontHelper.CreateFont(arial, 24f);
+        Assert.AreEqual(0f, FontHelper.MeasureTextWithFallback("", font));
+    }
+
+    [TestMethod]
+    public void FontHelper_GetTypeface_UnknownFamily_ReturnsAValidFallback()
+    {
+        // A family name no installed font matches must resolve to a valid
+        // fallback typeface (the unknown-family fallback leg of
+        // ResolveDirectTypeface) rather than a broken/null one. The exact
+        // family Skia reports for the fallback varies by machine, so pin the
+        // validity (non-null + live handle), not the family string.
+        var tf = FontHelper.GetTypeface("DefinitelyNotARealFontFamily12345", SKFontStyle.Normal);
+        Assert.IsNotNull(tf, "an unknown family must still resolve to a typeface");
+        Assert.AreNotEqual(IntPtr.Zero, tf.Handle, "the fallback typeface must have a live native handle");
+    }
+
+    [TestMethod]
     public void TextLabelWidget_Defaults_MatchSpec()
     {
         var widget = new TextLabelWidget();

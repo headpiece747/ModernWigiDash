@@ -334,6 +334,94 @@ public class ProfileOpsTests
             "the close behavior must survive the export/import round trip");
     }
 
+    [TestMethod]
+    public void ImportJson_RootedBackgroundImagePath_IsCleared()
+    {
+        // An imported page background that is a rooted/absolute path must be
+        // rejected (only safe relative paths survive): the sanitizer's
+        // SafeRelativePath clears it to an empty string on both the active page
+        // and every other page.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","BackgroundImagePath":"C:\\Windows\\wallpaper.jpg"},{"PageName":"B","BackgroundImagePath":"..\\evil.png"}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].BackgroundImagePath, "a rooted page background must be cleared");
+        Assert.AreEqual("", loaded.Pages[1].BackgroundImagePath, "a traversal page background must be cleared");
+    }
+
+    [TestMethod]
+    public void ImportJson_OverTotalWidgetBudget_LaterPagesAreEmptied()
+    {
+        // Once the total widget budget (MaxTotalWidgets = 1000) is exhausted
+        // across the import, later pages are emptied (the remaining <= 0 clear
+        // leg). Five pages of 200 widgets each (the per-page cap) consume the
+        // whole budget; a sixth page with one widget must be emptied.
+        string widgetEntry = "{\"PluginId\":\"profile_test_widget\"}";
+        string fullPage = string.Join(",", Enumerable.Repeat(widgetEntry, 200));
+        string fiveFullPages = string.Join(",", Enumerable.Range(0, 5).Select(i => $"{{\"PageName\":\"P{i}\",\"Widgets\":[{fullPage}]}}"));
+        string json = "{\"ProfileId\":\"x\",\"Pages\":[" + fiveFullPages + ",{\"PageName\":\"Last\",\"Widgets\":[{\"PluginId\":\"profile_test_widget\"}]}]}";
+        var loaded = ProfileOps.ImportJson(json, CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual(6, loaded.Pages.Count, "all six pages must import");
+        Assert.AreEqual(200, loaded.Pages[0].Widgets.Count, "the first page keeps its per-page cap");
+        Assert.AreEqual(0, loaded.Pages[5].Widgets.Count, "a page past the total budget must be emptied");
+    }
+
+    [TestMethod]
+    public void ImportJson_OversizedPropertyValue_IsTruncated()
+    {
+        // A string property value longer than the bound (256 chars) must be
+        // truncated so a hostile import cannot create a multi-MB allocation at
+        // geocode/parse time (the property-value truncation leg).
+        string longValue = new('x', 300);
+        string json = "{\"ProfileId\":\"x\",\"Pages\":[{\"PageName\":\"A\",\"Widgets\":[{\"PluginId\":\"profile_test_widget\",\"PropertyValues\":{\"Location\":\"" + longValue + "\"}}]}]}";
+        var loaded = ProfileOps.ImportJson(json, CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        string location = (string)loaded.Pages[0].Widgets[0].PropertyValues["Location"]!;
+        Assert.AreEqual(256, location.Length,
+            "an oversized string property must be truncated to the bound");
+    }
+
+    [TestMethod]
+    public void ImportJson_MalformedCalendarFeedsJson_IsCleared()
+    {
+        // The calendar widget's feed list rides one Text property ("FeedsJson")
+        // as a JSON array; a value that is not valid JSON (or not an array of
+        // well-formed feed objects) must fail the validation and be cleared,
+        // never carried into the profile as untrusted junk.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":{"FeedsJson":"not-json-at-all"}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["FeedsJson"],
+            "a malformed calendar-feeds value must be cleared by the sanitizer");
+    }
+
+    [TestMethod]
+    public void ImportJson_CalendarFeedsWithNonObjectEntry_IsCleared()
+    {
+        // A feeds array whose entry is not an object (a bare string) fails the
+        // per-entry validation and is cleared: the non-object rejection leg.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":{"FeedsJson":"[\"not-an-object\"]"}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["FeedsJson"],
+            "a feeds array with a non-object entry must be cleared");
+    }
+
+    [TestMethod]
+    public void ImportJson_CalDavFeedWithInvalidServer_IsCleared()
+    {
+        // A CalDAV feed whose server is not an absolute http(s) URL fails the
+        // CalDAV-server validation and is cleared: the invalid-server rejection
+        // leg.
+        var loaded = ProfileOps.ImportJson("""{"ProfileId":"x","Pages":[{"PageName":"A","Widgets":[{"PluginId":"profile_test_widget","PropertyValues":{"FeedsJson":"[{\"kind\":\"caldav\",\"server\":\"not-a-url\"}]"}}]}]}""", CreateLoader(), new TestContext());
+
+        Assert.IsNotNull(loaded);
+        Assert.AreEqual("", loaded.Pages[0].Widgets[0].PropertyValues["FeedsJson"],
+            "a CalDAV feed with a non-http server must be cleared");
+    }
+
     // ── widget-property bookkeeping: SetProperty → PropertyValues → export ──
 
     [TestMethod]

@@ -73,6 +73,23 @@ public class WidgetPluginLoaderTests
     }
 
     [TestMethod]
+    public void WidgetPluginLoader_DuplicateId_KeepsTheFirstRegistration()
+    {
+        // Registering a type whose [WidgetMetadata] id is already in the catalog
+        // must keep the first registration and log the duplicate (the duplicate-id
+        // guard), not overwrite it or throw.
+        var loader = new WidgetPluginLoader();
+        loader.RegisterBuiltInPlugin(typeof(DigitalAnalogClockWidget));
+        var firstInfo = loader.RegisteredPlugins.Single(p => p.PluginId == "clock_modern");
+
+        loader.RegisterBuiltInPlugin(typeof(DigitalAnalogClockWidget)); // same id again
+
+        Assert.AreEqual(1, loader.RegisteredPlugins.Count, "a duplicate id must not add a second entry");
+        Assert.AreSame(firstInfo, loader.RegisteredPlugins.Single(p => p.PluginId == "clock_modern"),
+            "the first registration must be kept on a duplicate");
+    }
+
+    [TestMethod]
     public void WidgetPluginLoader_NonWidgetTypes_Skipped()
     {
         var loader = new WidgetPluginLoader();

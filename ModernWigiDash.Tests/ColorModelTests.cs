@@ -20,6 +20,26 @@ public class ColorModelTests
         => Assert.AreEqual(new RgbaColor(255, 0, 0, 255), ColorConversions.HsvToRgb(new HsvColor(240, 1, 1)));
 
     [TestMethod]
+    public void HsvToRgb_YellowGreenHue_TakesTheSecondSwitchArm()
+    {
+        // Hue 90 lands in the second switch arm (60-120, the yellow-green band
+        // the primary-hue tests skip): with c=1 and x=0.5 the result is a
+        // yellow-green (R=128, G=255, B=0), not a pure primary.
+        Assert.AreEqual(new RgbaColor(255, 128, 255, 0), ColorConversions.HsvToRgb(new HsvColor(90, 1, 1)));
+    }
+
+    [TestMethod]
+    public void HsvToRgb_MagentaHue_TakesTheFinalSwitchArm()
+    {
+        // Hue 330 lands in the >=300 arm (the magenta-red band the primary-hue
+        // tests skip): red-dominant with blue, no green.
+        var c = ColorConversions.HsvToRgb(new HsvColor(330, 1, 1));
+        Assert.AreEqual(255, c.R);
+        Assert.AreEqual(0, c.G);
+        Assert.AreEqual(128, c.B, 1);
+    }
+
+    [TestMethod]
     public void HsvToRgb_ZeroSaturation_ReturnsGrayscale()
         => Assert.AreEqual(new RgbaColor(255, 128, 128, 128), ColorConversions.HsvToRgb(new HsvColor(200, 0, 0.5)));
 

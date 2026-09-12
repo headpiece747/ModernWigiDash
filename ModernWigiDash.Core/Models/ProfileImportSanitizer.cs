@@ -76,14 +76,9 @@ public static class ProfileImportSanitizer
         profile.Pages ??= [];
         profile.Pages = profile.Pages.Where(p => p is not null).ToList();
 
-        // A profile with zero pages cannot exist at runtime (the ctor creates
-        // one, DeletePage refuses the last) — an imported JSON with an empty
-        // pages array must be repaired here, or ActivePage hands out an orphan
-        // page that is not part of the profile.
-        if (profile.Pages.Count == 0)
-        {
-            profile.Pages.Add(new PageLayout());
-        }
+        // The Pages setter already guarantees a non-empty list (it repairs any
+        // null/empty assignment), so no zero-pages repair is needed here; the
+        // re-clamp below handles the index after null-element filtering.
 
         // Null-element filtering may have shrunk the page list — re-clamp the
         // deserialized active index (its setter clamped against the ORIGINAL

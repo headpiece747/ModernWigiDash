@@ -16,6 +16,24 @@ public class ThemeSettingsTests
     }
 
     [TestMethod]
+    public void Theme_StaticProperty_LazyInitializesAndAcceptsASet()
+    {
+        // The static Theme property is the App's ThemeStore's read/write target:
+        // the getter lazy-initializes on first read and the setter replaces the
+        // active value. Pin both legs so the property is not dead surface.
+        var before = ThemeSettings.Theme; // getter: lazy init (or the prior value)
+        Assert.IsNotNull(before);
+
+        var replacement = new ThemeSettings();
+        ThemeSettings.Theme = replacement; // setter
+        Assert.AreSame(replacement, ThemeSettings.Theme, "the setter must replace the active theme");
+
+        // Restore a fresh default so this test cannot leak state into other
+        // ThemeSettings tests that assume a clean active theme.
+        ThemeSettings.Theme = new ThemeSettings();
+    }
+
+    [TestMethod]
     public void ParseColor_6DigitHex_ReturnsOpaqueColor()
     {
         RgbaColor? color = ThemeSettings.ParseColor("#F59E0B");
