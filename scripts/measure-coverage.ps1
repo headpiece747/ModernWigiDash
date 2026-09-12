@@ -9,28 +9,28 @@ param(
 $ErrorActionPreference = "Stop"
 
 # The local coverage gate (no CI pipeline in this repo): runs the full suite
-# with MTP code coverage (--coverage --coverage-output-format cobertura; the
-# MSTest.Sdk test project auto-registers the Microsoft CodeCoverage extension,
-# the default MTP engine - chosen over coverlet.MTP, which was evaluated and
-# rejected 2026-09-12 for inconsistent report emission: it silently skips the
-# report after a clean build wipe and under a -p:BaseOutputPath redirect, while
-# the Microsoft engine emits reliably on every run) and fails with a non-zero
-# exit when any gated module (the pure-policy layers: Sdk/Core/Hardware) drops
-# below -MinLineCoverage. Output goes to a log under $ResultsDir; the console
-# prints the per-project table, the gate verdict, and the suite's "Test run
-# summary" line. The cobertura XML uses the same <package name="project"> +
-# class/lines/line hits shape the parse+gate logic below expects. NOTE: the
-# absolute percentages differ from the pre-MTP coverlet XPlat baseline because
-# the Microsoft engine attributes lines differently than coverlet (a toolchain
-# change, not a coverage regression); the gate floors are the contract.
+# with coverlet.MTP code coverage (--coverlet --coverlet-output-format
+# cobertura --coverlet-file-prefix wmd; the coverlet.MTP package is referenced
+# by the MSTest.Sdk test project and emits its report into --results-directory
+# as "<prefix>.coverage.cobertura.<timestamp>.xml", verified reliable under the
+# clean-build wipe + -p:BaseOutputPath redirect 2026-09-12) and fails with a
+# non-zero exit when any gated module (the pure-policy layers: Sdk/Core/
+# Hardware) drops below -MinLineCoverage. Output goes to a log under $ResultsDir;
+# the console prints the per-project table, the gate verdict, and the suite's
+# "Test run summary" line. The cobertura XML uses the same <package
+# name="project"> + class/lines/line hits shape the parse+gate logic below
+# expects. coverlet.MTP is the continuity choice over the Microsoft CodeCoverage
+# engine (--coverage): it is the documented coverlet port for MTP and keeps the
+# numbers comparable to the pre-MTP coverlet XPlat baseline; the two engines
+# attribute lines slightly differently (sequence-point instrumentation vs the
+# CodeCoverage mechanism), so absolute percentages differ a point or two between
+# them - the gate floors are the contract, not the exact figure.
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     # A coverage-specific temp output: the plain-test temp dir can be locked
-    # by a running ModernWigiDash.App.exe instance. The Microsoft CodeCoverage
-    # engine (--coverage) emits its report correctly under this redirect
-    # (verified 2026-09-12), unlike coverlet.MTP which was rejected for that
-    # exact incompatibility.
+    # by a running ModernWigiDash.App.exe instance. coverlet.MTP emits its
+    # report correctly under this redirect (verified 2026-09-12).
     $BuildDir = Join-Path ([System.IO.Path]::GetTempPath()) "opencode\wmd-cov-build"
 }
 if ([string]::IsNullOrWhiteSpace($ResultsDir)) {
@@ -84,7 +84,7 @@ if ($IsDisposable -and (Test-Path $ResultsDir)) {
 New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
 $runStart = Get-Date
 
-Write-Host "Running the full suite with MTP code coverage collection..."
+Write-Host "Running the full suite with coverlet.MTP code coverage collection..."
 # dotnet test (MTP mode) builds before testing (incrementally, recompiling
 # changed content - the house temp-BaseOutputPath test shape: never --no-build,
 # that would run a previous build's stale artifacts). The disposable BuildDir
@@ -96,27 +96,29 @@ Write-Host "Running the full suite with MTP code coverage collection..."
 # the test app and exits 5 on them, so the VSTest-era flags (--nologo,
 # -nodeReuse:false) are dropped; -p:BaseOutputPath still redirects the BUILD
 # output in MTP mode (verified), keeping the locked-bin isolation. Coverage is
-# collected via --coverage --coverage-output-format cobertura (the Microsoft
-# CodeCoverage extension, auto-registered by MSTest.Sdk; emits reliably under
-# the BaseOutputPath redirect, unlike coverlet.MTP). The report lands under
-# --results-directory as "<guid>.cobertura.xml"; the *.cobertura.xml glob below
-# picks it up.
+# collected via --coverlet --coverlet-output-format cobertura
+# --coverlet-file-prefix wmd (the coverlet.MTP package referenced by the test
+# csproj; emits reliably under the BaseOutputPath redirect, verified 2026-09-12).
+# The report lands under --results-directory as
+# "wmd.coverage.cobertura.<timestamp>.xml"; the prefix-scoped glob below picks
+# it up (a bare *.cobertura.xml would MISS the name: the timestamp sits between
+# ".cobertura." and ".xml", so the file does not end in ".cobertura.xml").
 & dotnet test --solution $Sln -c Release `
     "-p:BaseOutputPath=$BuildDir\" `
     --results-directory $ResultsDir `
-    --coverage --coverage-output-format cobertura *> $Log
+    --coverlet --coverlet-output-format cobertura --coverlet-file-prefix wmd *> $Log
 if ($LASTEXITCODE -ne 0) { throw "dotnet test failed (exit $LASTEXITCODE); see $Log" }
 
 # --- 2. Parse this invocation's cobertura result ---
 # One test project => exactly one report today; if a second test project is
 # ever added, each emits its own report and the gate must aggregate them:
-# fail loudly on ambiguity instead of silently keeping the newest. MTP names
-# the report "<asm>_<tfm>_<arch>.cobertura.xml" (not coverlet's fixed
-# "coverage.cobertura.xml"), so the glob matches any *.cobertura.xml and the
+# fail loudly on ambiguity instead of silently keeping the newest. coverlet.MTP
+# names the report "<prefix>.coverage.cobertura.<timestamp>.xml" (here
+# "wmd.coverage.cobertura.*.xml"), so the glob is scoped to that prefix and the
 # LastWriteTime filter keeps only this run's file.
-$Coverage = @(Get-ChildItem -Path $ResultsDir -Recurse -Filter "*.cobertura.xml" |
+$Coverage = @(Get-ChildItem -Path $ResultsDir -Recurse -Filter "wmd.coverage.cobertura.*.xml" |
     Where-Object { $_.LastWriteTime -ge $runStart })
-if ($Coverage.Count -eq 0) { throw "No *.cobertura.xml produced by this run under $ResultsDir" }
+if ($Coverage.Count -eq 0) { throw "No wmd.coverage.cobertura.*.xml produced by this run under $ResultsDir" }
 if ($Coverage.Count -gt 1) {
     throw "Multiple coverage reports produced ($($Coverage.Count)) - the gate does not aggregate; expected exactly one test project"
 }
