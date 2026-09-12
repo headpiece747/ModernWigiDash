@@ -50,10 +50,16 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
    carries the widget layout AND the ICS/CalDAV feed config, and the credential
    bin holds the DPAPI-wrapped CalDAV password, so none of it may reach the repo
    or GitHub. Basename matching catches a copy dropped anywhere in the tree;
-   legit repo files (source, synthetic test fixtures, the per-instance weather
-   cache) pass. Pinned by `scripts/tests/ScanStagedUserData.Tests.ps1`. Escape per
-    invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
-    CR + user-data scans still run).
+    legit repo files (source, synthetic test fixtures, the per-instance weather
+    cache) pass. Pinned by `scripts/tests/ScanStagedUserData.Tests.ps1`. Escape per
+     invocation only: `$env:WMD_GATE_GUARD_SKIP = '1'` (skips the gate check; the
+     CR + user-data scans still run). **Multi-commit trap (learned 2026-09-12):**
+    the guard checks the gate row's sha against *current* HEAD, so the moment you
+    land one commit, HEAD moves and the very next commit is blocked ("the tree
+    moved after the gate") until you re-run `scripts\run-gates.ps1` to record a
+    fresh green row at the new HEAD. When committing two or more logical changes
+    in one session, re-run the gate between commits (or stage + commit them in a
+    single pass), not just once up front.
 - Commit messages from the agent shell: write the message to a temp file with
   `Set-Content -Encoding ascii` (or `utf8NoBOM`) and commit with
   `git commit -F <file>`. Do NOT use `-Encoding UTF8`: Windows PowerShell 5.1
@@ -154,7 +160,47 @@ that sends user credentials or processes server-supplied URLs:
 5. **Bare `catch {}` is never acceptable for untrusted-input parsers.** Catch
    `Exception` (not bare), exclude `OperationCanceledException`, and emit one
    log line naming the input source and exception type/message. A hostile feed
-   that reliably triggers a parse fault must be observable, not silent.
+   that reliably triggered a parse fault must be observable, not silent.
+
+## Session Errors (learned 2026-09-12, OCR calendar-review pass)
+
+Real errors hit this session, each with the fix so they are not re-run into:
+
+1. **Multi-commit gate block.** After landing commit N, HEAD moves and the
+   commit guard blocks commit N+1 ("the tree moved after the gate") because the
+   last green gate row's sha no longer matches HEAD. Fix: re-run
+   `scripts\run-gates.ps1` between commits to record a fresh green row at the
+   new HEAD (documented in the Commit guard bullet above). Cost this session:
+   one blocked commit + a ~3 min gate re-run.
+2. **Wrong enclosing class for a shared test const.** Referenced
+   `CalendarWidgetTests.ValidIcsFeedJson` when the const actually lives in
+   `CalendarWidgetTapToOpenTests` (a sibling class in the same file) -> CS0117.
+   Fix: grep for the const's real declaring class before referencing it across
+   files; two `[TestClass]`es can share one `.cs` file.
+3. **Calling an expensive parse on the render tick.** First draft called
+   `ParseFeeds()` (JSON parse + log) directly inside `Render` (30 FPS). Fix:
+   cache the derived fact (`_feedCount`) as a field, refreshed in
+   `RestartProducer` (the write-through path) and lazily on first render; the
+   steady-state tick never re-parses. General rule: anything that parses JSON /
+   logs / allocates must not run per-frame unless memoized.
+4. **A behavior fix silently weakened existing tests.** The clobber fix made a
+   feed-less widget stop reading the shared store, which broke
+   `Render_DisplayMemo_HitsWithinAMinute...` (it seeded the store + used a
+   no-feed widget) AND would have made several touch/scroll tests pass
+   *trivially* (empty render -> nothing to tap). Fix: give those test widgets a
+   real feed (`FeedsJson = ValidIcsFeedJson`) so they exercise the legitimate
+   path. General rule: after a behavior change, check that previously-passing
+   tests still assert what they claim, not just that they pass.
+5. **Bulk `-replace` instead of the edit tool.** Fixed the class-name reference
+   with a PowerShell bulk replace rather than targeted edits; it worked but was
+   imprecise (formatting risk, no anchor verification). Fix: use the `edit` tool
+   with a unique `oldString` anchor even for repeated substitutions; reserve
+   bulk replace for whole-file mechanical rewrites you then re-read.
+6. **Non-existent test seam in a first draft.** Drafted detail-mode tests
+   calling `SetDetailEventForTest` (no such member) before checking the module's
+   surface. Fix: read the target type's members (or its existing tests) before
+   writing against them; prefer entering state through the production path (a
+   hero tap) over inventing a seam.
 
 ## Tool Mapping
 
