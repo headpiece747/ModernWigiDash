@@ -131,6 +131,25 @@ public class SingleInstanceGuardTests
             "a disposed guard must have closed its handle — the kernel event is unopenable");
     }
 
+    [TestMethod]
+    public void SecondaryLaunch_VanishedActivationEvent_LogsAndDoesNotThrow()
+    {
+        // The primary died between claiming the mutex and creating the event:
+        // the secondary's signal attempt finds no event to open. This is logged,
+        // not fatal — the launch exits either way, so the guard must not throw.
+        string mutexName = UniqueName("mutex");
+        using var heldClaim = new Mutex(initiallyOwned: true, mutexName);
+
+        var handles = new SingleInstanceGuard.GuardHandleFactory(
+            AcquireMutex: () => (new Mutex(initiallyOwned: false, mutexName, out bool createdNew), createdNew),
+            CreateEvent: () => new EventWaitHandle(false, EventResetMode.ManualReset, UniqueName("event")),
+            OpenEvent: () => throw new InvalidOperationException("no such event"));
+
+        using var guard = new SingleInstanceGuard(() => { }, handles);
+
+        Assert.IsFalse(guard.IsPrimary, "a second claim against a held mutex is the secondary");
+    }
+
     private static string UniqueName(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     /// <summary>In-memory handle factories over real (uniquely named)

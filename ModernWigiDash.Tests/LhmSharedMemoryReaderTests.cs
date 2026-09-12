@@ -198,6 +198,76 @@ public class LhmSharedMemoryReaderTests
     }
 
     [TestMethod]
+    public void TryParse_UnknownIndexFormat_ReturnsDisconnected()
+    {
+        // An index format that is neither JSON (1) nor MessagePack (2) takes
+        // ParseIndex's unknown arm (_ => null): the snapshot degrades to
+        // disconnected rather than throwing on the unrecognized format.
+        List<IndexEntry> entries =
+        [
+            new()
+            {
+                Identifier = "/cpu/0/temperature/0",
+                Offset = 0,
+                Size = 4,
+                SensorName = "CPU Package",
+                SensorType = "Temperature",
+                HardwareName = "CPU",
+            },
+        ];
+        byte[] data = [1, 2, 3, 4];
+
+        int unknownFormat = 99;
+        byte[] indexBytes = JsonSerializer.SerializeToUtf8Bytes(entries, CamelCase);
+        int indexOffset = MetadataBlockSize + 4 + (36 * 4);
+        int dataOffset = indexOffset + indexBytes.Length + 4;
+        byte[] map = new byte[dataOffset + data.Length];
+        WriteInt(map, 0, MetaDataSize);
+        WriteInt(map, 4, 1000);
+        WriteLong(map, 8, UnixNow);
+        WriteInt(map, MetadataBlockSize, indexBytes.Length);
+        WriteInt(map, MetadataBlockSize + 4, indexOffset);
+        WriteInt(map, MetadataBlockSize + 8, unknownFormat);
+        WriteInt(map, MetadataBlockSize + 12, data.Length);
+        WriteInt(map, MetadataBlockSize + 16, dataOffset);
+        Array.Copy(indexBytes, 0, map, indexOffset, indexBytes.Length);
+        Array.Copy(data, 0, map, dataOffset, data.Length);
+
+        SensorSnapshotDto dto = LhmSharedMemoryReader.TryParse(map);
+
+        Assert.IsFalse(dto.IsConnected, "an unknown index format degrades to disconnected");
+        Assert.AreEqual(0, dto.Readings.Count);
+    }
+
+    [TestMethod]
+    public void TryParse_EntryEscapingDataBounds_ReturnsDisconnected()
+    {
+        // An index entry whose offset+size escapes the declared data extent is
+        // a bounds violation MapReadings must reject (return null → disconnected),
+        // never an out-of-range read into the map.
+        List<IndexEntry> entries =
+        [
+            new()
+            {
+                Identifier = "/cpu/0/temperature/escaping",
+                Offset = 100, // past the 4-byte data blob
+                Size = 8,
+                SensorName = "Escaping Entry",
+                SensorType = "Temperature",
+                HardwareName = "CPU",
+            },
+        ];
+        byte[] data = [1, 2, 3, 4];
+
+        byte[] map = BuildMap(JsonIndexFormat, entries, data);
+
+        SensorSnapshotDto dto = LhmSharedMemoryReader.TryParse(map);
+
+        Assert.IsFalse(dto.IsConnected, "an entry escaping the data bounds degrades to disconnected");
+        Assert.AreEqual(0, dto.Readings.Count);
+    }
+
+    [TestMethod]
     public void UnitFor_SensorTypeStrings_ReturnsExpectedUnits()
     {
         Dictionary<string, string> expected = new()

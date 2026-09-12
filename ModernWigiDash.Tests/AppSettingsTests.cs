@@ -118,4 +118,37 @@ public class AppSettingsTests
         Assert.IsTrue(store.Load().KillSwitch);
         Directory.Delete(Path.GetDirectoryName(path)!, true);
     }
+
+    [TestMethod]
+    public void DefaultPath_LivesInTheUserStateDirBesideTheProfile()
+    {
+        // The production default path is the user state dir (ADR-0021 shape):
+        // %LOCALAPPDATA%\ModernWigiDash\app_settings.json, beside profile.json.
+        string def = AppSettingsStore.DefaultPath();
+
+        Assert.IsTrue(def.StartsWith(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            StringComparison.OrdinalIgnoreCase),
+            "the default lives under the user state dir, not the exe dir");
+        StringAssert.Contains(def, "ModernWigiDash", "the app's state folder names the dir");
+        StringAssert.EndsWith(def, Path.Combine("ModernWigiDash", "app_settings.json"));
+    }
+
+    [TestMethod]
+    public void Save_PathTooLong_AbsorbsTheFaultAndRemovesTheTempLitter()
+    {
+        // A path longer than MAX_PATH makes File.WriteAllText throw
+        // PathTooLongException before any temp file exists; the store must
+        // absorb it (one log line) and attempt the best-effort tmp cleanup
+        // without throwing into the wiring.
+        string longName = new string('x', 300);
+        string path = Path.Combine(Path.GetTempPath(), longName, longName, "app_settings.json");
+        var lines = new List<string>();
+        var store = new AppSettingsStore(path, log: lines.Add);
+
+        store.Save(new AppSettings { KillSwitch = true });
+
+        Assert.AreEqual(1, lines.Count, "the failed write logs one line (best-effort, never a throw into the wiring)");
+        Assert.IsFalse(File.Exists(path + ".tmp"), "no stale .tmp litter survives the failed save");
+    }
 }
