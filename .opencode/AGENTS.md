@@ -40,7 +40,7 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   --coverlet-output-format cobertura --coverlet-file-prefix wmd`; the
   coverlet.MTP package is referenced by the MSTest.Sdk test project). Baseline
   2026-09-12: 90.7% of instrumented src lines (Sdk 97.9, Core 95.0, Hardware
-  94.0, Widgets 93.4, App 82.9), 2,406 tests; the prior 2026-08-27 coverlet
+   94.0, Widgets 93.4, App 82.9), 2,407 tests; the prior 2026-08-27 coverlet
   XPlat baseline (87.9% / Sdk 92.9) predates the MTP migration and the ~290
   tests that landed since. The absolute percentages differ a point or two from
   the earlier Microsoft-engine baseline (86.4% / 2,296 tests) because the two
