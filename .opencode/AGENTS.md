@@ -34,6 +34,24 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
 - Coverage (regression floor, rerun after large test changes):
   `scripts\measure-coverage.ps1`. Baseline 2026-08-27: 87.9% of instrumented
   src lines (Sdk 92.9, Widgets 92.0, Hardware 89.5, Core 85.8, App 80.5).
+- OCR review (AI code review over a diff/commit; the `ocr_review` tool-mapping
+  alias routes here). The CLI binary is
+  `C:\Users\tobia\AppData\Roaming\npm\node_modules\@alibaba-group\open-code-review\node_modules\@alibaba-group\ocr-win32-x64\bin\opencodereview.exe`
+  (v1.10.1); its LLM config is `C:\Users\tobia\.opencodereview\config.json`
+  (provider `ninfer`, model `qwen3.8-27b` at `http://127.0.0.1:8080/v1`). Run it
+  scoped, not on a whole branch: `& <bin> review -c <sha> --audience agent
+  --format json --effort low --timeout 8 -o <tempfile>` for one commit, or
+  `--from <base> --to <tip>` for a range. Use `--preview` first (no LLM cost) to
+  confirm file selection, and `--exclude '**/*Tests.cs'` to keep the run small.
+  **Scope to ~8-15 files or a single commit**: the MCP `ocr_review` wrapper
+  times out on large ranges, but the direct CLI with a narrow scope completes in
+  ~2-3 min (verified end-to-end 2026-09-12: 5 files, 1 finding, 2m24s). Read the
+  JSON result's `comments[]` (fields `path`/`content`/`start_line`/`severity`/
+  `category`) and the `summary` block. PowerShell prints a spurious
+  `RemoteException` because git/ocr write progress to stderr; check `$LASTEXITCODE`
+  and the output file, not the exception. A real finding from a scoped pass is
+  worth fixing even if it lands after the reviewed commit (the 2026-09-12
+  calendar pass caught a detail-mode/feed-empty state disagreement this way).
 - Commit guard: a pre-commit hook blocks a commit unless the last gate row in
   `.audit/gates.tsv` is green in all stages, its sha equals current HEAD, and
   the run is at most 60 min old. Install once per clone with
@@ -201,6 +219,18 @@ Real errors hit this session, each with the fix so they are not re-run into:
    surface. Fix: read the target type's members (or its existing tests) before
    writing against them; prefer entering state through the production path (a
    hero tap) over inventing a seam.
+7. **A test that passed trivially hid a real state bug.** The pre-existing
+   `OnTouch_FirstRow_EntersDetailMode` asserted only "no URL opened", which is
+   true whether or not detail mode actually entered -- so it gave false
+   confidence. A scoped OCR pass (2026-09-12) then caught the real bug the
+   clobber fix introduced: emptying feeds while in detail left the gesture
+   module stuck in the invisible detail branch (canvas drew the agenda, touch
+   stayed in detail). Two lessons: (a) a "tap does X" test must assert the
+   post-state (e.g. `GestureDetailEventForTest is not null`), not just the
+   absence of a side effect; (b) the widget's render reads `Clock.GetLocalNow()`,
+   so a test that needs events to be "upcoming" must pin a `FakeTimeProvider`
+   and build event times relative to its start -- fixed-date events land in the
+   past vs. the real system clock and silently never enter the state under test.
 
 ## Tool Mapping
 
