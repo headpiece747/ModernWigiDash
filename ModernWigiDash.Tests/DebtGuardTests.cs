@@ -132,8 +132,8 @@ public sealed class DebtGuardTests
                 "one DWM window-attribute call; no handle is acquired or owned",
             ["ModernWigiDash.App/PresentMon/PresentMonLoader.cs"] =
                 "the process-lifetime PresentMon service DLL (NativeLibrary.Load): the handle is deliberately not freed - the DLL belongs to the service directory and the client session lives as long as the process",
-            ["ModernWigiDash.Widgets/HotkeyActionExecutor.cs"] =
-                "the SendInput P/Invoke fires input events; the call acquires and owns no handle",
+            ["ModernWigiDash.Widgets/HotkeyActionApi.cs"] =
+                "the SendInput P/Invoke fires input events; the call acquires and owns no handle (the executor routes through this bag; the GCHandle pins the input array for the duration of the call and frees it in the finally)",
             ["ModernWigiDash.App/Hotkey/HotkeyApi.cs"] =
                 "the RegisterHotKey/UnregisterHotKey P/Invoke registers and releases message-loop hotkeys; the calls acquire and own no handle",
             ["ModernWigiDash.App/PresentMon/TrackedTargetResolver.cs"] =

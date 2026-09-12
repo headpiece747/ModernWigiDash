@@ -371,3 +371,5 @@
 2026-09-12T12:57:37Z	1dc1ca5	manual	ok	0	0	ok	2356	0	ok
 2026-09-12T13:01:52Z	66bd0b3	manual	ok	0	0	ok	2362	0	ok
 2026-09-12T13:06:07Z	d574d5c	manual	ok	0	0	ok	2370	0	ok
+2026-09-12T13:12:52Z	e06bb2c	manual - FAILED: SendFailure_LogsFirstFailureOnce	ok	2	0	FAIL	2382	1	SKIP
+2026-09-12T13:14:16Z	e06bb2c	manual	ok	0	0	ok	2383	0	ok

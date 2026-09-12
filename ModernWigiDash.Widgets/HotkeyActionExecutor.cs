@@ -50,10 +50,11 @@ internal static class HotkeyActionExecutor
         public IntPtr ExtraInfo;
     }
 
-    // Entry point spelled explicitly so the binding cannot drift from the
-    // export on a method rename (ADR-0020).
-    [DllImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
-    private static extern uint SendInput(uint inputCount, Input[] inputs, int inputSize);
+    /// <summary>The OS surface the executor routes its input sends and process
+    /// starts through. Defaults to the production binding (real SendInput +
+    /// Process.Start); tests inject a fake so the routing is assertable without
+    /// sending real keystrokes or spawning processes.</summary>
+    internal static HotkeyActionApi Api { get; set; } = HotkeyActionApi.Default;
 
     public static async Task ExecuteAsync(IReadOnlyList<HotkeyAction> actions, CancellationToken cancellationToken)
     {
@@ -141,8 +142,16 @@ internal static class HotkeyActionExecutor
             }
         }).ToArray();
 
-        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) != inputs.Length)
-            throw new InvalidOperationException($"Windows rejected the keyboard input ({Marshal.GetLastWin32Error()}).");
+        var pinned = GCHandle.Alloc(inputs, GCHandleType.Pinned);
+        try
+        {
+            if (Api.SendInput((uint)inputs.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != inputs.Length)
+                throw new InvalidOperationException($"Windows rejected the keyboard input.");
+        }
+        finally
+        {
+            pinned.Free();
+        }
     }
 
     private static void SendUnicodeText(string text)
@@ -154,8 +163,20 @@ internal static class HotkeyActionExecutor
             inputs.Add(new Input { Type = InputKeyboard, Data = new InputUnion { Keyboard = new KeyboardInput { ScanCode = character, Flags = KeyEventUnicode } } });
             inputs.Add(new Input { Type = InputKeyboard, Data = new InputUnion { Keyboard = new KeyboardInput { ScanCode = character, Flags = KeyEventUnicode | KeyEventKeyUp } } });
         }
-        if (inputs.Count > 0 && SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<Input>()) != inputs.Count)
-            throw new InvalidOperationException($"Windows rejected the text input ({Marshal.GetLastWin32Error()}).");
+        if (inputs.Count > 0)
+        {
+            var array = inputs.ToArray();
+            var pinned = GCHandle.Alloc(array, GCHandleType.Pinned);
+            try
+            {
+                if (Api.SendInput((uint)array.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != array.Length)
+                    throw new InvalidOperationException($"Windows rejected the text input.");
+            }
+            finally
+            {
+                pinned.Free();
+            }
+        }
     }
 
     private static void SendMouseClick(string button)
@@ -174,21 +195,30 @@ internal static class HotkeyActionExecutor
     private static void SendMouse(uint flags, uint data = 0)
     {
         var input = new Input { Type = InputMouse, Data = new InputUnion { Mouse = new MouseInput { Flags = flags, MouseData = data } } };
-        if (SendInput(1, [input], Marshal.SizeOf<Input>()) != 1)
-            throw new InvalidOperationException($"Windows rejected the mouse input ({Marshal.GetLastWin32Error()}).");
+        Input[] array = [input];
+        var pinned = GCHandle.Alloc(array, GCHandleType.Pinned);
+        try
+        {
+            if (Api.SendInput(1, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != 1)
+                throw new InvalidOperationException($"Windows rejected the mouse input.");
+        }
+        finally
+        {
+            pinned.Free();
+        }
     }
 
     private static void Launch(string path, string arguments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        Process.Start(new ProcessStartInfo(path) { Arguments = arguments ?? "", UseShellExecute = true });
+        Api.StartProcess(path, arguments ?? "");
     }
 
     private static void OpenUrl(string url)
     {
         if (!ShellOpenPolicy.IsAllowedUrl(url))
             throw new ArgumentException("Only http, https, and mailto URLs are allowed.", nameof(url));
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        Api.StartProcess(url, "");
     }
 
     internal static ushort ParseVirtualKey(string value)
