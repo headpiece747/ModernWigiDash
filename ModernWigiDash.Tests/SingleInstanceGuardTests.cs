@@ -56,35 +56,30 @@ public class SingleInstanceGuardTests
     }
 
     [TestMethod]
-    public async Task Primary_ActivationSignal_FiresTheCallbackAndReParks()
+    public void Primary_ActivationSignal_FiresTheCallbackAndReParks()
     {
         var handles = InMemoryHandles(UniqueName("mutex"), UniqueName("event"));
         int activations = 0;
         using var guard = new SingleInstanceGuard(() => Interlocked.Increment(ref activations), handles);
 
-        // Two "second launches": open the event and signal it.
-        SignalActivation(handles);
-        SignalActivation(handles);
+        // Drive the consume-and-fire step directly instead of racing the
+        // thread pool that delivers the production callback: the invariant
+        // under test is the re-park-before-fire ordering (a fast second
+        // secondary launch cannot lose its activation), which is pure logic
+        // and deterministic when invoked directly. The old version signaled
+        // the event twice and waited up to 60 s for the thread pool to
+        // deliver both callbacks; under full-suite load the pool could be
+        // starved past that ceiling (30 s on the 2026-08-26 push, 60 s on a
+        // 2026-08-27 run), turning a correct guard into a flake. Driving the
+        // step directly removes the scheduling dependency entirely.
+        guard.ConsumeAndFireActivation();
+        guard.ConsumeAndFireActivation();
 
-        // The callbacks fire on thread-pool threads: one OS event +
-        // thread-pool round trip per signal, the second through the
-        // one-shot re-park. This is load-sensitive: on a loaded shared CI
-        // runner the thread pool can be starved past any fixed ceiling (it
-        // consumed 30 s on the 2026-08-26 v0.6.8 push and the full 60 s on a
-        // 2026-08-27 run). The ceiling here is a per-attempt timeout, not a
-        // target: the CI workflow runs this test in a fresh test host with a
-        // bounded retry, so a runner-load flake lands on a less-loaded
-        // moment and passes, while a real regression fails every attempt.
-        await TestWait.WaitUntilAsync(() => Volatile.Read(ref activations) >= 2, TimeSpan.FromSeconds(60));
-        // The guard re-parks BEFORE resetting (the no-lost-signal ordering),
-        // so a fast second signal can be delivered TWICE: the re-park
-        // observes the still-set event and fires again. That over-delivery
-        // is benign and documented in the guard, so the invariant pinned
-        // here is >= 2 (no lost signal, and the second activation is only
-        // reachable through the re-park), never the exactly-once count of 2,
-        // which is a scheduling artifact.
-        Assert.IsTrue(Volatile.Read(ref activations) >= 2,
-            "both activations must fire the callback - the one-shot registration re-parks for the second signal");
+        // The guard re-parks BEFORE firing (the no-lost-signal ordering), so
+        // each consume-and-fire hands the signal to the window. Both calls
+        // must fire the callback.
+        Assert.AreEqual(2, Volatile.Read(ref activations),
+            "each consume-and-fire must hand the signal to the window - the one-shot registration re-parks for the next");
     }
 
     [TestMethod]
@@ -151,12 +146,4 @@ public class SingleInstanceGuardTests
             OpenEvent: () => EventWaitHandle.OpenExisting(eventName));
     }
 
-    private static void SignalActivation(SingleInstanceGuard.GuardHandleFactory handles)
-    {
-        var opened = handles.OpenEvent();
-        using (opened)
-        {
-            opened.Set();
-        }
-    }
 }

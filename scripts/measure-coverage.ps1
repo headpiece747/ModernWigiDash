@@ -10,18 +10,27 @@ $ErrorActionPreference = "Stop"
 
 # The local coverage gate (no CI pipeline in this repo): runs the full suite
 # with MTP code coverage (--coverage --coverage-output-format cobertura; the
-# MSTest.Sdk test project auto-registers the CodeCoverage extension) and fails
-# with a non-zero exit when any gated module (the pure-policy layers:
-# Sdk/Core/Hardware) drops below -MinLineCoverage. Output goes to a log under
-# $ResultsDir; the console prints the per-project table, the gate verdict, and
-# the suite's "Test run summary" line. The MTP cobertura XML is structurally
-# identical to coverlet's (same <package name="project"> + class/lines/line
-# hits), so the parse+gate logic below is unchanged from the coverlet era.
+# MSTest.Sdk test project auto-registers the Microsoft CodeCoverage extension,
+# the default MTP engine - chosen over coverlet.MTP, which was evaluated and
+# rejected 2026-09-12 for inconsistent report emission: it silently skips the
+# report after a clean build wipe and under a -p:BaseOutputPath redirect, while
+# the Microsoft engine emits reliably on every run) and fails with a non-zero
+# exit when any gated module (the pure-policy layers: Sdk/Core/Hardware) drops
+# below -MinLineCoverage. Output goes to a log under $ResultsDir; the console
+# prints the per-project table, the gate verdict, and the suite's "Test run
+# summary" line. The cobertura XML uses the same <package name="project"> +
+# class/lines/line hits shape the parse+gate logic below expects. NOTE: the
+# absolute percentages differ from the pre-MTP coverlet XPlat baseline because
+# the Microsoft engine attributes lines differently than coverlet (a toolchain
+# change, not a coverage regression); the gate floors are the contract.
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     # A coverage-specific temp output: the plain-test temp dir can be locked
-    # by a running ModernWigiDash.App.exe instance.
+    # by a running ModernWigiDash.App.exe instance. The Microsoft CodeCoverage
+    # engine (--coverage) emits its report correctly under this redirect
+    # (verified 2026-09-12), unlike coverlet.MTP which was rejected for that
+    # exact incompatibility.
     $BuildDir = Join-Path ([System.IO.Path]::GetTempPath()) "opencode\wmd-cov-build"
 }
 if ([string]::IsNullOrWhiteSpace($ResultsDir)) {
@@ -87,9 +96,11 @@ Write-Host "Running the full suite with MTP code coverage collection..."
 # the test app and exits 5 on them, so the VSTest-era flags (--nologo,
 # -nodeReuse:false) are dropped; -p:BaseOutputPath still redirects the BUILD
 # output in MTP mode (verified), keeping the locked-bin isolation. Coverage is
-# collected via --coverage --coverage-output-format cobertura (the MSTest.Sdk
-# project auto-registers the CodeCoverage extension; no separate coverlet
-# package or -p:CollectCoverage needed).
+# collected via --coverage --coverage-output-format cobertura (the Microsoft
+# CodeCoverage extension, auto-registered by MSTest.Sdk; emits reliably under
+# the BaseOutputPath redirect, unlike coverlet.MTP). The report lands under
+# --results-directory as "<guid>.cobertura.xml"; the *.cobertura.xml glob below
+# picks it up.
 & dotnet test --solution $Sln -c Release `
     "-p:BaseOutputPath=$BuildDir\" `
     --results-directory $ResultsDir `

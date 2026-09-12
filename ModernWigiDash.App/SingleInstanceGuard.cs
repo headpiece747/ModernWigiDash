@@ -107,12 +107,17 @@ internal sealed class SingleInstanceGuard : IDisposable
     }
 
 #pragma warning disable S1172 // The state/timedOut parameters are the WaitOrTimerCallback shape; the signal carries both.
-    private void OnActivationSignaled(object? state, bool timedOut)
+    private void OnActivationSignaled(object? state, bool timedOut) => ConsumeAndFireActivation();
 #pragma warning restore S1172
+
+    /// <summary>The consume-and-fire step: re-park the one-shot registration
+    /// BEFORE firing (so a fast second secondary launch cannot lose its
+    /// activation), then consume the manual-reset signal and hand it to the
+    /// window. Exposed as a separate method so the no-lost-signal ordering is
+    /// drivable deterministically in tests without racing the thread pool that
+    /// delivers the production callback.</summary>
+    internal void ConsumeAndFireActivation()
     {
-        // One-shot registration: re-park BEFORE firing, so a fast second
-        // secondary launch cannot lose its activation, then consume the
-        // manual-reset signal and hand it to the window.
         ParkActivationWait();
         _activation?.Reset();
         _onActivate();

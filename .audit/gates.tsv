@@ -359,3 +359,5 @@
 2026-09-12T02:05:33Z	aa929b7	mtp-pipeline-rework-verify - FAILED: RunAsync_MembershipChangesBetweenCycles_PollsTheCurrentSet	ok	0	0	FAIL	2295	1	SKIP
 2026-09-12T02:07:38Z	aa929b7	mtp-pipeline-rework - FAILED: Primary_ActivationSignal_FiresTheCallbackAndReParks	ok	0	0	FAIL	2295	1	SKIP
 2026-09-12T02:09:03Z	aa929b7	mtp-pipeline-rework	ok	0	0	ok	2296	0	ok
+2026-09-12T12:00:34Z	54059c2	manual	ok	0	0	ok	2296	0	FAIL
+2026-09-12T12:02:15Z	54059c2	manual	ok	0	0	ok	2296	0	ok

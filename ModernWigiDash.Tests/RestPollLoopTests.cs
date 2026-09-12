@@ -24,6 +24,25 @@ public class RestPollLoopTests
             return tcs.Task;
         };
 
+    /// <summary>Advances the fake clock in bounded 30 s chunks until the target
+    /// cycle's batch hook signals, so the sequencing is deterministic even when
+    /// an advance lands before the loop has created the next cycle's timer (the
+    /// old single-advance-per-cycle shape could waste that advance and starve
+    /// the cycle under full-suite load). A real regression (the cycle never
+    /// runs) still fails: the pump is bounded and asserts the batch landed.</summary>
+    private static async Task PumpCycleAsync(FakeTimeProvider clock, TaskCompletionSource batch)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!batch.Task.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            clock.Advance(TimeSpan.FromSeconds(30));
+            await Task.Delay(1).ConfigureAwait(false); // let the loop task run the fired timer + cycle
+        }
+
+        Assert.IsTrue(batch.Task.IsCompleted, "the cycle's batch hook must signal within the pump window");
+        await batch.Task.ConfigureAwait(false);
+    }
+
     [TestMethod]
     public async Task RunAsync_BadSymbol_DoesNotKillTheLoop()
     {
@@ -153,16 +172,13 @@ public class RestPollLoopTests
                 return Task.CompletedTask;
             });
 
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await firstBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await PumpCycleAsync(clock, firstBatch);
 
         members = ["A", "B"]; // B subscribes while the loop is parked
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await secondBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await PumpCycleAsync(clock, secondBatch);
 
         members = ["B"]; // A is released while the loop is parked
-        clock.Advance(TimeSpan.FromSeconds(30));
-        await thirdBatch.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await PumpCycleAsync(clock, thirdBatch);
 
         CollectionAssert.AreEqual(new[] { "A", "A", "B", "B" }, sequence.ToArray(),
             "each cycle must poll the membership as it is at that cycle: late symbols join, released symbols leave");
