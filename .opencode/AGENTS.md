@@ -36,15 +36,17 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   `scripts\psa-settings.psd1` + Pester over `scripts\tests\`). Run when a
   harness script changes or before a release.
 - Coverage (regression floor, rerun after large test changes):
-  `scripts\measure-coverage.ps1` (MTP code coverage: `--coverage
-  --coverage-output-format cobertura`; the MSTest.Sdk project auto-registers
-  the CodeCoverage extension). Baseline 2026-09-12: 86.4% of instrumented src
-  lines (Sdk 91.0, Widgets 91.0, Hardware 78.4, Core 89.4, App 77.7); the prior
-  2026-08-27 coverlet XPlat baseline (87.9% / Sdk 92.9) predates the MTP
-  migration and the ~290 tests that landed since. The absolute percentages
-  shifted because MTP's CodeCoverage attributes lines differently than coverlet
-  (a toolchain change, not a regression); the gate floors (Sdk/Core/Hardware >=
-  70%) all hold with margin.
+  `scripts\measure-coverage.ps1` (coverlet.MTP code coverage: `--coverlet
+  --coverlet-output-format cobertura --coverlet-file-prefix wmd`; the
+  coverlet.MTP package is referenced by the MSTest.Sdk test project). Baseline
+  2026-09-12: 90.7% of instrumented src lines (Sdk 97.9, Core 95.0, Hardware
+  94.0, Widgets 93.4, App 82.9), 2,406 tests; the prior 2026-08-27 coverlet
+  XPlat baseline (87.9% / Sdk 92.9) predates the MTP migration and the ~290
+  tests that landed since. The absolute percentages differ a point or two from
+  the earlier Microsoft-engine baseline (86.4% / 2,296 tests) because the two
+  engines attribute lines differently (sequence-point instrumentation vs the
+  CodeCoverage mechanism, a toolchain change, not a regression); the gate
+  floors (Sdk/Core/Hardware >= 70%) all hold with margin.
 - OCR review (AI code review over a diff/commit; the `ocr_review` tool-mapping
   alias routes here). The CLI binary is
   `C:\Users\tobia\AppData\Roaming\npm\node_modules\@alibaba-group\open-code-review\node_modules\@alibaba-group\ocr-win32-x64\bin\opencodereview.exe`
