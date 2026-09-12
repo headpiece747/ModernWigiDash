@@ -54,4 +54,24 @@ public class CalendarSeasonalPaletteTests
         var decDates = CalendarNotableDates.GetForMonth(2026, 12);
         Assert.IsTrue(decDates.Any(d => d.Day == 25 && d.Label == "Christmas Day"));
     }
+
+    [TestMethod]
+    public void NotableDates_FloatingObservances_LandOnTheRightWeekday()
+    {
+        // MLK Jr. Day: 3rd Monday in Jan 2026 (Jan 1 is a Thursday -> 3rd Mon = 19).
+        var jan = CalendarNotableDates.GetForMonth(2026, 1);
+        Assert.IsTrue(jan.Any(d => d.Day == 19 && d.Label == "MLK Jr. Day"));
+
+        // Presidents' Day: 3rd Monday in Feb 2026 (Feb 1 is a Sunday -> 3rd Mon = 16).
+        var feb = CalendarNotableDates.GetForMonth(2026, 2);
+        Assert.IsTrue(feb.Any(d => d.Day == 16 && d.Label == "Presidents' Day"));
+
+        // Memorial Day: last Monday in May 2026 (May 31 is a Sunday -> last Mon = 25).
+        var may = CalendarNotableDates.GetForMonth(2026, 5);
+        Assert.IsTrue(may.Any(d => d.Day == 25 && d.Label == "Memorial Day"));
+
+        // Thanksgiving: 4th Thursday in Nov 2026 (Nov 1 is a Sunday -> 4th Thu = 26).
+        var nov = CalendarNotableDates.GetForMonth(2026, 11);
+        Assert.IsTrue(nov.Any(d => d.Day == 26 && d.Label == "Thanksgiving"));
+    }
 }

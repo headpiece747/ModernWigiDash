@@ -335,4 +335,46 @@ END:VCALENDAR
         Assert.AreEqual("Personal", personal[0].FeedLabel);
         Assert.AreEqual("#222222", personal[0].FeedColorHex);
     }
+
+    [TestMethod]
+    public void Parse_AllDayEventWithSameDayEnd_NormalizesEndToNextDay()
+    {
+        // An all-day event whose DTEND is date-only and on the same day as
+        // DTSTART gets its End normalized to the next day so the layout can treat
+        // End as "the day it occupies ends here".
+        string ics = """
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Test//EN
+BEGIN:VEVENT
+UID:allday@test
+DTSTART;VALUE=DATE:20260915
+DTEND;VALUE=DATE:20260915
+SUMMARY:All Day Same Day
+END:VEVENT
+END:VCALENDAR
+""";
+
+        IReadOnlyList<CalendarEvent> events = CalendarEventParser.Parse(ics, WindowStart, WindowEnd, "Work", "");
+
+        Assert.AreEqual(1, events.Count);
+        CalendarEvent e = events[0];
+        Assert.IsTrue(e.IsAllDay);
+        Assert.AreEqual(new DateTime(2026, 9, 15, 0, 0, 0, DateTimeKind.Unspecified), e.Start.Date);
+        Assert.AreEqual(new DateTime(2026, 9, 16, 0, 0, 0, DateTimeKind.Unspecified), e.End.Date, "a same-day all-day end normalizes to the next day");
+    }
+
+    [TestMethod]
+    public void StripHtml_DecodesEntitiesBeforeStrippingTags()
+    {
+        // An encoded tag (&lt;img&gt;) must not survive the strip: entities are
+        // decoded BEFORE tags are stripped, repeated to a fixed point.
+        Assert.AreEqual("hello world", CalendarEventParser.StripHtml("<p>hello <b>world</b></p>"));
+        // An encoded tag decodes into a live tag on the first pass, then the
+        // strip removes it (leaving the surrounding text, whitespace intact).
+        Assert.AreEqual("no  here", CalendarEventParser.StripHtml("no &lt;img src=x&gt; here"));
+        Assert.AreEqual("line1\nline2", CalendarEventParser.StripHtml("line1<br>line2"));
+        Assert.AreEqual(string.Empty, CalendarEventParser.StripHtml(""));
+        Assert.AreEqual("plain", CalendarEventParser.StripHtml("plain"));
+    }
 }
