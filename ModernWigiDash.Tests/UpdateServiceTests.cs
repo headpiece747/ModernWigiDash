@@ -367,6 +367,114 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
+    public async Task RunInstallPhase_StagesThenLaunches()
+    {
+        // A successful stage + launch: the install phase returns true only when
+        // both the download/stage and the launch succeed.
+        string dir = NewDir();
+        string zipPath = Path.Combine(dir, "slim.zip");
+        Directory.CreateDirectory(dir);
+#pragma warning disable S6966
+        using (var zip = await ZipFile.OpenAsync(zipPath, ZipArchiveMode.Create))
+        {
+            var entry = zip.CreateEntry("ModernWigiDash-win-x64/ModernWigiDash.App.exe");
+            using var w = new StreamWriter(await entry.OpenAsync());
+            await w.WriteAsync("exe");
+        }
+#pragma warning restore S6966
+        byte[] zipBytes = await File.ReadAllBytesAsync(zipPath);
+        string digest = Convert.ToHexString(SHA256.HashData(zipBytes)).ToLowerInvariant();
+
+        int spawns = 0;
+        var service = new UpdateService(
+            downloadFile: async (_, dest, _, _) => await File.WriteAllBytesAsync(dest, zipBytes).ConfigureAwait(false),
+            sha256Matches: (actual, expected) => actual == expected,
+            startProcess: _ => { spawns++; return null; },
+            updatesRoot: dir);
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", digest);
+
+        bool ok = await service.RunInstallPhase(info, new Progress<double>(), Path.Combine(Path.GetTempPath(), "wmd-install")).ConfigureAwait(false);
+
+        Assert.IsTrue(ok, "a clean stage + launch must report success");
+        Assert.AreEqual(1, spawns, "the launch seam must be invoked exactly once");
+    }
+
+    [TestMethod]
+    public async Task RunInstallPhase_FailedStage_DoesNotLaunch()
+    {
+        // A failed stage (sha mismatch) must short-circuit before the launch.
+        string dir = NewDir();
+        var service = new UpdateService(
+            downloadFile: async (_, dest, _, _) => await File.WriteAllTextAsync(dest, "corrupt").ConfigureAwait(false),
+            sha256Matches: (_, _) => false,
+            startProcess: _ => throw new InvalidOperationException("must not launch"),
+            updatesRoot: dir);
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+        bool ok = await service.RunInstallPhase(info, new Progress<double>(), Path.Combine(Path.GetTempPath(), "wmd-install")).ConfigureAwait(false);
+
+        Assert.IsFalse(ok, "a failed stage must fail the install phase without launching");
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_MissingHashStamp_ReturnsFalse()
+    {
+        // A staged cmd with no integrity stamp at all (the hash file is absent)
+        // is refused: the stamp is what proves the cmd was written by staging.
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+        int spawns = 0;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: _ => { spawns++; return null; });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+        bool ok = service.LaunchUpdater(info, Path.Combine(Path.GetTempPath(), "wmd-install"));
+
+        Assert.IsFalse(ok, "a missing integrity stamp must refuse the launch");
+        Assert.AreEqual(0, spawns);
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_MissingRelaunchMarker_LogsButStillLaunches()
+    {
+        // A staged cmd that passes the integrity check but lacks the {{RELAUNCH}}
+        // marker still launches (the swap runs); the app just won't relaunch
+        // itself. This is a logged warning, not a refusal.
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n"); // no {{RELAUNCH}} marker
+        File.WriteAllText(
+            UpdateService.StagedCmdHashPath(stagedCmd),
+            UpdateService.ComputeSha256(stagedCmd));
+        int spawns = 0;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: _ => { spawns++; return null; });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+        bool ok = service.LaunchUpdater(info, Path.Combine(Path.GetTempPath(), "wmd-install"));
+
+        Assert.IsTrue(ok, "a marker-missing cmd still launches (the swap runs)");
+        Assert.AreEqual(1, spawns);
+    }
+
+    [TestMethod]
+    public void Getters_ExposeTheLogAndUpdatesRoot()
+    {
+        string dir = NewDir();
+        var service = new UpdateService(updatesRoot: dir);
+
+        Assert.IsNotNull(service.Log, "the update-category log is exposed so callers log through one owner");
+        Assert.AreEqual(dir, service.UpdatesRoot);
+    }
+
+    [TestMethod]
     public void RunStartupPhase_HealsInterruptedSwapAndCleansStale()
     {
         string dir = NewDir();

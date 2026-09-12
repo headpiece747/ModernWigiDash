@@ -44,4 +44,33 @@ public class PopupClampTests
 
         Assert.IsTrue(placements.Length >= 1);
     }
+
+    [TestMethod]
+    public void AttachPopupWithinWindow_InvokesTheCustomPlacementCallback()
+    {
+        // Drive the attached callback on a live window: it resolves the target's
+        // client area at placement time and returns the clamped placements. The
+        // callback is the one site that reads the window's actual size, so this
+        // pins that AttachPopupWithinWindow wires a working callback (not just
+        // sets PlacementMode.Custom).
+        StaRunner.Run(() =>
+        {
+            var window = new Window { Width = 800, Height = 600 };
+            var grid = new System.Windows.Controls.Grid();
+            var target = new System.Windows.Controls.Border { Width = 100, Height = 30 };
+            grid.Children.Add(target);
+            window.Content = grid;
+            window.UpdateLayout();
+
+            var popup = new Popup();
+            PopupClamp.AttachPopupWithinWindow(popup, target);
+
+            Assert.AreEqual(PlacementMode.Custom, popup.Placement);
+            Assert.IsNotNull(popup.CustomPopupPlacementCallback, "the clamp attaches a callback");
+
+            // Invoke the callback with a popup that fits below the target.
+            var placements = popup.CustomPopupPlacementCallback!(new Size(200, 300), new Size(100, 30), new Point(0, 0));
+            Assert.IsTrue(placements.Length >= 1, "the callback returns at least the fallback placement");
+        });
+    }
 }

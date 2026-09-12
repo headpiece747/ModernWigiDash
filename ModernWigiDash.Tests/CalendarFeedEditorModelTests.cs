@@ -241,6 +241,50 @@ public class CalendarFeedEditorRowsTests
     }
 
     [TestMethod]
+    public void SetUrl_WritesTheFieldAndCommits()
+    {
+        string json = """[{"kind":"ics","feedId":"a","label":"A","url":"https://x.example/a"}]""";
+        var (rows, commits, _) = Make(json);
+        int commitsBefore = commits.Count;
+
+        rows.SetUrl(0, "https://y.example/b");
+
+        Assert.AreEqual("https://y.example/b", rows.Drafts[0].Url);
+        Assert.AreEqual(commitsBefore + 1, commits.Count);
+    }
+
+    [TestMethod]
+    public void SetServer_SetPrincipalPath_SetUsername_WriteTheFieldsAndCommit()
+    {
+        string json = """[{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":443,"principalPath":"/cal/","username":"me"}]""";
+        var (rows, commits, _) = Make(json);
+        int commitsBefore = commits.Count;
+
+        rows.SetServer(0, "https://new.example");
+        rows.SetPrincipalPath(0, "/CalDAV/");
+        rows.SetUsername(0, "you");
+
+        Assert.AreEqual("https://new.example", rows.Drafts[0].Server);
+        Assert.AreEqual("/CalDAV/", rows.Drafts[0].PrincipalPath);
+        Assert.AreEqual("you", rows.Drafts[0].Username);
+        Assert.AreEqual(commitsBefore + 3, commits.Count);
+    }
+
+    [TestMethod]
+    public void SetEnabled_TogglesTheRowFlagAndCommits()
+    {
+        string json = """[{"kind":"ics","feedId":"a","label":"A","url":"https://x.example/a","enabled":true}]""";
+        var (rows, commits, _) = Make(json);
+        Assert.IsTrue(rows.Drafts[0].Enabled);
+        int commitsBefore = commits.Count;
+
+        rows.SetEnabled(0, false);
+
+        Assert.IsFalse(rows.Drafts[0].Enabled);
+        Assert.AreEqual(commitsBefore + 1, commits.Count);
+    }
+
+    [TestMethod]
     public void OutOfRangeTransitions_AreNoOps()
     {
         var (rows, commits, _) = Make();
@@ -249,6 +293,11 @@ public class CalendarFeedEditorRowsTests
         rows.Remove(99);
         rows.SetLabel(99, "nope");
         rows.SetKind(99, "caldav");
+        rows.SetUrl(99, "u");
+        rows.SetServer(99, "s");
+        rows.SetPrincipalPath(99, "p");
+        rows.SetUsername(99, "n");
+        rows.SetEnabled(99, true);
         rows.SavePassword(99, "pw");
 
         Assert.AreEqual(0, rows.Drafts.Count);
