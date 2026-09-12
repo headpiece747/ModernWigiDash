@@ -45,6 +45,29 @@ public class CalendarSeasonalPaletteTests
     }
 
     [TestMethod]
+    public void ResolveCustom_UnparseableHexes_FallBackToNamedDefaults()
+    {
+        var date = new DateTime(2026, 3, 15, 0, 0, 0, DateTimeKind.Unspecified);
+        var p = CalendarSeasonalPalettes.ResolveCustom(date, "not-a-color", "");
+
+        // Unparseable accent falls back to the named blue; unparseable text to white.
+        Assert.AreEqual(new SKColor(79, 140, 255), p.Accent);
+        Assert.AreEqual(SKColors.White, p.Text);
+        // The fixed deep slate background is not user-supplied.
+        Assert.AreEqual(new SKColor(18, 20, 29), p.Background);
+        Assert.AreEqual("MAR", p.MonthCode);
+        Assert.AreEqual("March", p.FullMonthName);
+    }
+
+    [TestMethod]
+    public void ResolveCustom_ClampsOutOfRangeMonth()
+    {
+        // Month 0 clamps to January (index 0) rather than throwing.
+        var p = CalendarSeasonalPalettes.ResolveCustom(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Unspecified), "#FF0000", "#00FF00");
+        Assert.AreEqual("JAN", p.MonthCode);
+    }
+
+    [TestMethod]
     public void NotableDates_GetForMonth_ReturnsHolidaysAndObservances()
     {
         var septDates = CalendarNotableDates.GetForMonth(2026, 9);

@@ -60,6 +60,12 @@ public static class CalendarSeasonalPalettes
         return Palettes[idx];
     }
 
+    /// <summary>The month codes and full names, indexed by clamped month-1.
+    /// Shared by the seasonal table and the custom-mode label so the two can
+    /// never drift.</summary>
+    private static readonly string[] MonthCodes = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    private static readonly string[] FullMonthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
     /// <summary>
     /// Resolves the active palette for a given date and theme mode.
     /// </summary>
@@ -69,19 +75,28 @@ public static class CalendarSeasonalPalettes
     /// <param name="customText">The custom text hex color.</param>
     /// <returns>The resolved color palette.</returns>
     public static CalendarSeasonalPalette Resolve(DateTime viewDate, string? themeMode, string customAccent, string customText)
-    {
-        if (string.Equals(themeMode, "Custom", StringComparison.OrdinalIgnoreCase))
-        {
-            SKColor text = SKColor.TryParse(customText, out var t) ? t : SKColors.White;
-            SKColor accent = SKColor.TryParse(customAccent, out var a) ? a : new SKColor(79, 140, 255);
-            // Deep dark slate background for custom mode
-            SKColor bg = new(18, 20, 29);
-            string[] months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-            string[] full = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-            int m = Math.Clamp(viewDate.Month, 1, 12) - 1;
-            return new CalendarSeasonalPalette(bg, text, accent, months[m], full[m]);
-        }
+        => string.Equals(themeMode, "Custom", StringComparison.OrdinalIgnoreCase)
+            ? ResolveCustom(viewDate, customAccent, customText)
+            : GetForMonth(viewDate.Month);
 
-        return GetForMonth(viewDate.Month);
+    /// <summary>
+    /// Builds the custom-theme palette: parses the user's accent/text hexes
+    /// (falling back to named defaults when unparseable) over the fixed deep
+    /// slate background, with the month label from the shared table. Pure and
+    /// unit-testable without pixels; the parse-or-fallback rule has its own
+    /// seam instead of living inline in the per-frame resolve.
+    /// </summary>
+    /// <param name="viewDate">The date being viewed (supplies the month).</param>
+    /// <param name="customAccent">The custom accent hex color.</param>
+    /// <param name="customText">The custom text hex color.</param>
+    /// <returns>The custom-mode palette.</returns>
+    public static CalendarSeasonalPalette ResolveCustom(DateTime viewDate, string customAccent, string customText)
+    {
+        SKColor text = SKColor.TryParse(customText, out var t) ? t : SKColors.White;
+        SKColor accent = SKColor.TryParse(customAccent, out var a) ? a : new SKColor(79, 140, 255);
+        // Deep dark slate background for custom mode
+        SKColor bg = new(18, 20, 29);
+        int m = Math.Clamp(viewDate.Month, 1, 12) - 1;
+        return new CalendarSeasonalPalette(bg, text, accent, MonthCodes[m], FullMonthNames[m]);
     }
 }

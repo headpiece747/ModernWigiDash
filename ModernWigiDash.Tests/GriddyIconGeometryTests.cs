@@ -34,4 +34,31 @@ public class GriddyIconGeometryTests
     [TestMethod]
     public void ParsePathData_Empty_ReturnsNull()
         => Assert.IsNull(GriddyIconGeometry.ParsePathData(""));
+
+    [TestMethod]
+    public void BuildCell_KnownName_ReturnsA22x22WhiteGlyph()
+    {
+        // The Path is a DispatcherObject: build and assert on the same STA thread.
+        StaRunner.Run(() =>
+        {
+            var cell = GriddyIconGeometry.BuildCell("refresh");
+            Assert.IsNotNull(cell);
+            Assert.AreEqual(22, cell.Width);
+            Assert.AreEqual(22, cell.Height);
+            Assert.AreEqual(System.Windows.Media.Stretch.Uniform, cell.Stretch);
+            Assert.AreEqual(System.Windows.Media.Brushes.White, cell.Fill);
+            Assert.IsNotNull(cell.Data);
+        });
+    }
+
+    [TestMethod]
+    public void BuildCell_UnknownOrMalformed_ReturnsNull()
+    {
+        // An unknown name degrades to an empty cell (null), never a crash.
+        StaRunner.Run(() =>
+        {
+            Assert.IsNull(GriddyIconGeometry.BuildCell("no-such-icon"));
+            Assert.IsNull(GriddyIconGeometry.BuildCell("   "));
+        });
+    }
 }

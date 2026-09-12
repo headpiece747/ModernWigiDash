@@ -3,9 +3,9 @@ using Microsoft.Win32;
 namespace ModernWigiDash.App.Power;
 
 /// <summary>
-/// The Windows power-mode seam behind <see cref="PowerLifecycle"/>: a source
-/// of Suspend/Resume notifications, drivable by an in-memory fake in tests
-/// (the SystemEvents precedent). The real adapter subscribes to
+/// The Windows power-mode seam: a source of Suspend/Resume notifications,
+/// drivable by an in-memory fake in tests (the SystemEvents precedent). The
+/// real adapter (<see cref="SystemPowerModeSource"/>) subscribes to
 /// <see cref="Microsoft.Win32.SystemEvents.PowerModeChanged"/>; other power
 /// modes (e.g. StatusChange) are filtered out at the adapter.
 /// </summary>

@@ -445,7 +445,7 @@ internal sealed class CalendarGestureState
 
         if (!ShellOpenPolicy.IsAllowedUrl(url))
         {
-            ContextLogError($"Calendar: refusing to open a non-http(s)/mailto event link: {TruncateForLog(url)}");
+            ContextLogError($"Calendar: refusing to open a non-http(s)/mailto event link: {LogSanitizer.Sanitize(url)}");
             return;
         }
 
@@ -470,6 +470,4 @@ internal sealed class CalendarGestureState
 
     private void ContextLogError(string message, Exception? ex = null)
         => Context?.LogError(message, ex);
-
-    private static string TruncateForLog(string value) => value.Length <= 80 ? value : value[..80] + "...";
 }

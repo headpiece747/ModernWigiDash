@@ -149,4 +149,36 @@ public class IconPickerModelTests
         model.Select("\t\n");
         Assert.IsNull(model.Accept());
     }
+
+    [TestMethod]
+    public void BrowseSvg_ValidFile_CopiesAndSelectsIt()
+    {
+        var model = new IconPickerModel(null);
+        string copied = "icons/copied.svg";
+
+        var verdict = model.BrowseSvg("C:/src/picked.svg", _ => true, _ => copied);
+
+        Assert.IsTrue(verdict.Accepted);
+        Assert.AreEqual(copied, verdict.SelectedPath);
+        Assert.IsNull(verdict.RefusalMessage);
+        // The accepted file becomes the selection (the chip follows it).
+        Assert.AreEqual(copied, model.Chosen);
+        Assert.AreEqual($"Custom: {copied}", model.ChipText);
+    }
+
+    [TestMethod]
+    public void BrowseSvg_UnsupportedFile_RefusesWithoutCopying()
+    {
+        var model = new IconPickerModel(null);
+        bool copyCalled = false;
+
+        var verdict = model.BrowseSvg("C:/src/bad.svg", _ => false, _ => { copyCalled = true; return "icons/x.svg"; });
+
+        Assert.IsFalse(verdict.Accepted);
+        Assert.IsNull(verdict.SelectedPath);
+        Assert.AreEqual(IconPickerModel.UnsupportedSvgMessage, verdict.RefusalMessage);
+        Assert.IsFalse(copyCalled, "an unsupported file must never be copied into the icons folder");
+        // The selection is untouched by a refused browse.
+        Assert.AreEqual("", model.Chosen);
+    }
 }

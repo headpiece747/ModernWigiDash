@@ -1,6 +1,7 @@
 using System.Windows.Shapes;
 using Microsoft.Win32;
 using ModernWigiDash.App.Theming;
+using ModernWigiDash.App.Update;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;
@@ -245,10 +246,7 @@ internal sealed class DialogHost
                 BorderThickness = new Thickness(1),
                 BorderBrush = Brushes.Transparent
             };
-            if (GriddyIcons.TryGetPathData(name, out string? pathData))
-            {
-                cell.Content = TryBuildIconGeometry(pathData);
-            }
+            cell.Content = GriddyIconGeometry.BuildCell(name);
             if (model.IsHighlighted(name))
                 cell.BorderBrush = accentBrush;
             cell.Click += (_, _) =>
@@ -271,28 +269,6 @@ internal sealed class DialogHost
             }
         }
 
-        // The 22×22 white path glyph for a Griddy icon, or null when
-        // the path data does not parse (a malformed name degrades to an empty
-        // cell, never a crash).
-        static Path? TryBuildIconGeometry(string pathData)
-        {
-            try
-            {
-                return new Path
-                {
-                    Width = 22,
-                    Height = 22,
-                    Stretch = Stretch.Uniform,
-                    Fill = Brushes.White,
-                    Data = Geometry.Parse(pathData)
-                };
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         search.TextChanged += (_, _) =>
         {
             model.UpdateSearch(search.Text);
@@ -303,12 +279,12 @@ internal sealed class DialogHost
         {
             var dlg = new OpenFileDialog { Title = "Select an SVG icon", Filter = "SVG files (*.svg)|*.svg" };
             if (dlg.ShowDialog() != true) return;
-            if (!SvgIconLoader.TryGetPath(dlg.FileName, out _))
+            var verdict = model.BrowseSvg(dlg.FileName, p => SvgIconLoader.TryGetPath(p, out _), SvgIconLoader.CopyToIcons);
+            if (verdict.RefusalMessage is not null)
             {
-                Error("Unsupported SVG", "Only single-path SVG icons are supported.");
+                Error("Unsupported SVG", verdict.RefusalMessage);
                 return;
             }
-            model.Select(SvgIconLoader.CopyToIcons(dlg.FileName));
             UpdateChrome();
         };
 

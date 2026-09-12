@@ -28,9 +28,10 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
     private FramePump _framePump = null!;
 
-    /// <summary>Windows sleep/resume lifecycle: pauses the pump on suspend and
-    /// restarts it (plus a forced USB reconnect) on resume.</summary>
-    private Power.PowerLifecycle _powerLifecycle = null!;
+    /// <summary>The Windows power-mode source wired by WirePowerLifecycle:
+    /// paused on suspend, restarted (plus a forced USB reconnect) on resume.
+    /// Held so teardown can dispose it and drop the subscription.</summary>
+    private IPowerModeSource _powerModeSource = null!;
 
     /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
     /// The PresentMon interop is injected as a ctor parameter so the window
@@ -622,15 +623,27 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // Suspend stops the pump (no dead compose ticks while the display
         // is powered down); resume restarts it and forces the USB engine
         // to reconnect — Start() is guarded, so the extra call is
-        // harmless when the transport never dropped.
-        _powerLifecycle = new Power.PowerLifecycle(
-            powerModeSource,
-            onSuspend: () => Hop(() => _framePump.Stop()),
-            onResume: () => Hop(() =>
+        // harmless when the transport never dropped. The mode→action map
+        // is the identity function (Suspend→stop, Resume→start), so the
+        // subscription is wired here directly instead of through a module.
+        _powerModeSource = powerModeSource;
+        powerModeSource.ModeChanged += OnPowerModeChanged;
+    }
+
+    private void OnPowerModeChanged(PowerModes mode)
+    {
+        if (mode == PowerModes.Suspend)
+        {
+            Hop(() => _framePump.Stop());
+        }
+        else if (mode == PowerModes.Resume)
+        {
+            Hop(() =>
             {
                 _framePump.Start();
                 _usbDevice.Start();
-            }));
+            });
+        }
     }
 
     /// <summary>Teardown hook: runs the named teardown plan on close, isolating any throwing step.</summary>
@@ -740,7 +753,11 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // The pump stops before the delivery it pushes into: a compose tick
         // must never land on a disposed delivery.
         new TeardownStep("FramePump", _framePump.Dispose),
-        new TeardownStep("PowerLifecycle", _powerLifecycle.Dispose),
+        new TeardownStep("PowerLifecycle", () =>
+        {
+            _powerModeSource.ModeChanged -= OnPowerModeChanged;
+            _powerModeSource.Dispose();
+        }),
         new TeardownStep("Telemetry", _telemetry.Dispose),
         new TeardownStep("FrameDelivery", _delivery.Dispose),
         new TeardownStep("Profile", () => ProfileOps.DisposeProfile(_profile)),

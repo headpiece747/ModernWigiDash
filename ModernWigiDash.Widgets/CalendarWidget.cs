@@ -140,7 +140,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         // latter deserves a log line (a blank or well-formed-empty value is the
         // silent default state).
         if (feeds.Count == 0 && !string.IsNullOrWhiteSpace(FeedsJson) && !IsWellFormedEmpty(FeedsJson))
-            Context?.LogError($"Calendar: feeds JSON is malformed; rendering the unavailable display. Value: {TruncateForLog(FeedsJson)}");
+            Context?.LogError($"Calendar: feeds JSON is malformed; rendering the unavailable display. Value: {LogSanitizer.Sanitize(FeedsJson)}");
         return feeds;
     }
 
@@ -355,6 +355,4 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         => string.Equals(property.Name, nameof(FeedsJson), StringComparison.Ordinal)
             ? EditorKind.CalendarFeeds
             : null;
-
-    private static string TruncateForLog(string value) => value.Length <= 80 ? value : value[..80] + "...";
 }
