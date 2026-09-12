@@ -93,6 +93,88 @@ public class CalendarGestureStateTests
         Assert.AreEqual("Standup", gesture.DetailEvent.Value.Title);
     }
 
+    /// <summary>Enters detail mode the production way (a hero tap resolving the
+    /// render-time event) and installs the detail frame facts (card rect + URL
+    /// rect) so a subsequent release is interpreted against the geometry the last
+    /// detail render drew.</summary>
+    private static CalendarGestureState EnterDetailWithFacts(
+        string title, string url, SKRect cardRect, SKRect urlRect, List<string> opened)
+    {
+        var (geo, display, events) = BuildFrame((title, url));
+        Assert.IsNotNull(display.NextUpcomingEvent, "the frame carries a next-upcoming event to tap");
+
+        var gesture = new CalendarGestureState();
+        gesture.OpenUrlSeam = opened.Add;
+        gesture.SetFrameFacts(geo, display, Now, events);
+        gesture.UpdateScrollExtent();
+
+        // A hero tap enters detail mode for the render-time event.
+        var hero = new SKPoint(geo.AllDayRect.MidX, geo.AllDayRect.MidY);
+        gesture.Feed(hero, TouchEventType.TouchDown);
+        gesture.Feed(hero, TouchEventType.TouchUp);
+        Assert.IsTrue(gesture.DetailEvent is not null, "the hero tap entered detail mode");
+
+        // Install the detail frame facts the next render would hand over.
+        gesture.SetDetailFrameFacts(cardRect, maxScrollY: 0f, urlRect);
+        return gesture;
+    }
+
+    [TestMethod]
+    public void DetailMode_TapInsideUrlRect_OpensLink()
+    {
+        // A release that lands inside the URL rect (and inside the card) routes
+        // through the shell-open seam with the event's link -- it does NOT exit.
+        var card = new SKRect(50, 100, 300, 400);
+        var url = new SKRect(70, 360, 280, 390);
+        List<string> opened = [];
+        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+
+        var p = new SKPoint(url.MidX, url.MidY);
+        gesture.Feed(p, TouchEventType.TouchDown);
+        gesture.Feed(p, TouchEventType.TouchUp);
+
+        Assert.AreEqual(1, opened.Count, "a tap on the URL hint opens the meeting link");
+        Assert.AreEqual("https://meet.example/standup", opened[0]);
+        Assert.IsTrue(gesture.DetailEvent is not null, "opening the link stays in detail mode");
+    }
+
+    [TestMethod]
+    public void DetailMode_TapOnCardBody_ExitNotOpen()
+    {
+        // A release on the card body (inside the card, but outside the URL rect and
+        // below the card top) exits detail mode and never touches the seam.
+        var card = new SKRect(50, 100, 300, 400);
+        var url = new SKRect(70, 360, 280, 390);
+        List<string> opened = [];
+        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+
+        // A point well inside the card body, clear of the URL rect and the header.
+        var p = new SKPoint(card.MidX, 200f);
+        gesture.Feed(p, TouchEventType.TouchDown);
+        gesture.Feed(p, TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, opened.Count, "a card-body tap never opens the link");
+        Assert.IsNull(gesture.DetailEvent, "a card-body tap exits detail mode");
+    }
+
+    [TestMethod]
+    public void DetailMode_TapAboveCardTop_Exits()
+    {
+        // A release above the card (the "Tap to go back" header region) exits even
+        // though the event carries a link.
+        var card = new SKRect(50, 100, 300, 400);
+        var url = new SKRect(70, 360, 280, 390);
+        List<string> opened = [];
+        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+
+        var p = new SKPoint(card.MidX, 40f); // above card.Top (100)
+        gesture.Feed(p, TouchEventType.TouchDown);
+        gesture.Feed(p, TouchEventType.TouchUp);
+
+        Assert.AreEqual(0, opened.Count, "a header-region tap never opens the link");
+        Assert.IsNull(gesture.DetailEvent, "a header-region tap exits detail mode");
+    }
+
     [TestCleanup]
     public void Cleanup() => CalendarEventStore.Reset();
 }

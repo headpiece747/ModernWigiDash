@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
@@ -101,7 +99,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
     /// <summary>The adaptive view dispatcher: draws the dark container then
     /// routes to the mode-specific panels based on the computed layout.</summary>
-    public void RenderAdaptiveView(SKCanvas canvas, SKRect bounds, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
+    public void RenderAdaptiveView(SKCanvas canvas, SKRect bounds, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime now, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
     {
         // Dark outer container canvas - sharp rect fills 1016x592 physical LCD edge-to-edge
         _cardPaint.Color = new SKColor(12, 13, 18);
@@ -117,12 +115,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         {
             DrawLeftEditorialStrip(canvas, layout.LeftStripRect, palette, scale, viewDate);
             DrawPosterMonthCard(canvas, layout, display, palette, scale, viewDate);
-            DrawAgendaPanel(canvas, layout, display, palette, scale, viewDate, agendaScrollY, maxAgendaScrollY);
+            DrawAgendaPanel(canvas, layout, display, palette, scale, now, viewDate, agendaScrollY, maxAgendaScrollY);
         }
         else if (layout.Mode == CalendarViewMode.SplitBanner4x2)
         {
             DrawPosterMonthCard(canvas, layout, display, palette, scale, viewDate);
-            DrawAgendaPanel(canvas, layout, display, palette, scale, viewDate, agendaScrollY, maxAgendaScrollY);
+            DrawAgendaPanel(canvas, layout, display, palette, scale, now, viewDate, agendaScrollY, maxAgendaScrollY);
         }
         else
         {
@@ -346,7 +344,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         }
     }
 
-    private void DrawAgendaPanel(SKCanvas canvas, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
+    private void DrawAgendaPanel(SKCanvas canvas, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime now, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
     {
         SKRect rect = layout.AgendaRect;
         if (rect.IsEmpty)
@@ -359,10 +357,13 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _strokePaint.StrokeWidth = 1f * scale;
         canvas.DrawRoundRect(rect, 14f * scale, 14f * scale, _strokePaint);
 
-        // Header
+        // Header. The "is today" verdict reads the frame's clock read (now), not
+        // the machine wall clock (DateTime.Today): a render tick that crosses a
+        // midnight boundary mid-frame would otherwise disagree with the rest of
+        // the frame, and a test driving a fixed clock could not pin the header.
         var hFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f * scale);
         _textPaint.Color = new SKColor(120, 160, 255);
-        string agendaHeader = viewDate.Date == DateTime.Today ? "AGENDA" : "UPCOMING AGENDA";
+        string agendaHeader = viewDate.Date == now.Date ? "AGENDA" : "UPCOMING AGENDA";
         canvas.DrawTextWithFallback(agendaHeader, rect.Left + 14f * scale, rect.Top + 16f * scale, hFont, _textPaint);
 
         var dFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 13f * scale);

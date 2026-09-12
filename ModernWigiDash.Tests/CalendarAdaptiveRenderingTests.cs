@@ -30,7 +30,10 @@ public class CalendarAdaptiveRenderingTests
             LastUpdate = Now,
         });
 
-        return new CalendarWidget();
+        // The widget carries a real feed so it reads the seeded store (a feed-less
+        // instance would render its own unavailable state and have no rows/hero to
+        // touch or scroll).
+        return new CalendarWidget { FeedsJson = CalendarWidgetTapToOpenTests.ValidIcsFeedJson };
     }
 
     [TestMethod]
@@ -176,7 +179,7 @@ public class CalendarAdaptiveRenderingTests
             LastUpdate = Now,
         });
 
-        var w = new CalendarWidget();
+        var w = new CalendarWidget { FeedsJson = CalendarWidgetTapToOpenTests.ValidIcsFeedJson };
         var bounds = new SKRect(0, 0, 1016, 592);
         using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
         w.Render(surface!.Canvas, bounds);
@@ -218,7 +221,7 @@ public class CalendarAdaptiveRenderingTests
             LastUpdate = Now,
         });
 
-        var w = new CalendarWidget();
+        var w = new CalendarWidget { FeedsJson = CalendarWidgetTapToOpenTests.ValidIcsFeedJson };
         var bounds = new SKRect(0, 0, 1016, 592);
         using var surface = SKSurface.Create(new SKImageInfo(1016, 592));
         w.Render(surface!.Canvas, bounds);
@@ -284,7 +287,7 @@ public class CalendarAdaptiveRenderingTests
             LastUpdate = Now,
         });
 
-        var w = new CalendarWidget();
+        var w = new CalendarWidget { FeedsJson = CalendarWidgetTapToOpenTests.ValidIcsFeedJson };
         var bounds = new SKRect(0, 0, 800, 400);
         using var surface = SKSurface.Create(new SKImageInfo(800, 400));
         w.Render(surface!.Canvas, bounds);
@@ -339,7 +342,7 @@ public class CalendarAdaptiveRenderingTests
             LastUpdate = Now,
         });
 
-        var w = new CalendarWidget();
+        var w = new CalendarWidget { FeedsJson = CalendarWidgetTapToOpenTests.ValidIcsFeedJson };
         var bounds = new SKRect(0, 0, 800, 400);
         using var surface = SKSurface.Create(new SKImageInfo(800, 400));
         w.Render(surface!.Canvas, bounds);

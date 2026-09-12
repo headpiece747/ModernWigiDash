@@ -37,11 +37,16 @@ internal sealed class EditOverlay
         Style = SKPaintStyle.Stroke,
         StrokeWidth = 1f
     };
+    // The selection border is a stroke; its style and width are fixed at
+    // construction so DrawSelection never mutates a shared paint mid-compose
+    // (the old code set Style/StrokeWidth on every call, which was both wasted
+    // work and a latent cross-draw hazard if another path ever reused this
+    // paint before the restore ran).
     private readonly SKPaint _selectionPaint = new()
     {
         Color = new SKColor(59, 130, 246), // #3B82F6 vibrant blue
         Style = SKPaintStyle.Stroke,
-        StrokeWidth = 2.5f,
+        StrokeWidth = 2f,
         IsAntialias = true
     };
     private readonly SKPaint _badgeBackgroundPaint = new() { Color = new SKColor(59, 130, 246, 220) };
@@ -99,13 +104,9 @@ internal sealed class EditOverlay
 
         var bounds = new SKRect(0, 0, widget.Width, widget.Height);
 
-        // Draw selection border (not filled) so the widget content remains visible
-        _selectionPaint.Style = SKPaintStyle.Stroke;
-        _selectionPaint.StrokeWidth = 2f;
+        // Draw selection border (a stroke, by construction) so the widget
+        // content remains visible.
         canvas.DrawRect(bounds, _selectionPaint);
-
-        // Restore to fill style for other operations
-        _selectionPaint.Style = SKPaintStyle.Fill;
 
         // Badge text memoized per (DisplayName, ZIndex); the font is the
         // cache-owned field above (never disposed — the old using-CreatedFont

@@ -56,6 +56,16 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     private CalendarFeedProducer? _producer;
     private CalendarGeometry _layout;
 
+    // The parsed feed count, read on the render tick: a zero-feed instance
+    // renders its own unavailable state instead of reading the shared
+    // process-wide store (see Render). Kept in sync with FeedsJson -- refreshed
+    // in RestartProducer (the inspector write-through path) and lazily on first
+    // render (a fresh or test-constructed instance whose FeedsJson was set
+    // directly, bypassing OnPropertyChanged). A null value means "not yet
+    // computed"; the 30 FPS steady-state path never re-parses because
+    // RestartProducer keeps it current after any feed edit.
+    private int? _feedCount;
+
     // The per-mode draw paths live in the renderer (CalendarWidgetRenderer),
     // which owns the hoisted paints and the detail view's word-wrap cache.
     private readonly CalendarWidgetRenderer _renderer = new();
@@ -184,15 +194,17 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     private void RestartProducer()
     {
         IReadOnlyList<CalendarFeed> feeds = ParseFeeds();
+        _feedCount = feeds.Count;
         lock (_producerGate)
         {
             _producer?.Dispose();
             _producer = null;
             if (feeds.Count == 0)
             {
-                // No feeds: clear the cached snapshot so the widget shows its
-                // unavailable state instead of stale events from a removed feed.
-                CalendarEventStore.UpdateFromDto(CalendarSnapshot.Empty);
+                // No feeds: this instance has no producer and renders its own
+                // unavailable state (see Render). It must NOT write the shared
+                // process-wide store -- another calendar instance may own it, and
+                // clearing it here would clobber that instance's live snapshot.
                 return;
             }
 
@@ -246,6 +258,22 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             return;
         }
 
+        // A feed-less instance renders its OWN unavailable state, not whatever the
+        // process-wide store happens to hold (ADR-0011's static store is shared by
+        // every calendar instance, so a second, feeded calendar would otherwise
+        // bleed its events into this one). The feed count is cached (refreshed in
+        // RestartProducer, lazily here on first render) so the 30 FPS path never
+        // re-parses FeedsJson.
+        int feedCount = _feedCount ??= ParseFeeds().Count;
+        if (feedCount == 0)
+        {
+            _layout = CalendarLayout.Compute(bounds, scale, 0, false, LayoutMode);
+            _gesture.SetFrameFacts(_layout, null, now);
+            var emptyDisplay = CalendarPresentation.Build(null, now, viewDate, 0);
+            _renderer.RenderAdaptiveView(canvas, bounds, _layout, emptyDisplay, palette, scale, now, viewDate, 0f, 0f);
+            return;
+        }
+
         CalendarSnapshot? snapshot = CalendarEventStore.ReadSnapshot();
 
         // Detail mode: render the single event's detail view. The gesture module
@@ -293,7 +321,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
             return;
         }
 
-        _renderer.RenderAdaptiveView(canvas, bounds, _layout, display, palette, scale, viewDate, _gesture.AgendaScrollY, _gesture.MaxAgendaScrollY);
+        _renderer.RenderAdaptiveView(canvas, bounds, _layout, display, palette, scale, now, viewDate, _gesture.AgendaScrollY, _gesture.MaxAgendaScrollY);
     }
 
     /// <summary>

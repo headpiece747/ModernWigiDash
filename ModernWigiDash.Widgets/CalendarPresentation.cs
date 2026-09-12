@@ -225,8 +225,10 @@ internal static class CalendarPresentation
     }
 
     /// <summary>The countdown string for an upcoming (not yet live) event: minutes
-    /// under an hour, hours same-day, "Tomorrow" for the next day, else the month
-    /// + day. One owner of the rule so the wording cannot drift between call sites.</summary>
+    /// under an hour, hours same-day, "Tomorrow" for the next day, then a compact
+    /// duration summary by tier -- days under 30, weeks (rounded up) under a year,
+    /// months (rounded up) beyond that. One owner of the rule so the wording cannot
+    /// drift between call sites.</summary>
     private static string FormatCountdown(CalendarEvent e, DateTime now)
     {
         var span = e.Start - now;
@@ -237,13 +239,16 @@ internal static class CalendarPresentation
         if (e.Start.Date == now.Date.AddDays(1))
             return "Tomorrow";
 
-        // For events further out, show a compact duration summary
+        // For events further out, show a compact duration summary. Round the
+        // larger units UP so the figure never understates the true distance:
+        // truncating division made 30 days read "4w" (a step down from the
+        // adjacent "29d") and 31 days still "1m" would have been wrong too.
         int days = (int)(e.Start.Date - now.Date).TotalDays;
         if (days < 30)
             return $"{days}d";
         if (days < 365)
-            return $"{days / 7}w";
-        return $"{days / 30}m";
+            return $"{(int)Math.Ceiling(days / 7.0)}w";
+        return $"{(int)Math.Ceiling(days / 30.0)}m";
     }
 
     /// <summary>Builds tomorrow's timed rows (up to three, ordered by start): the

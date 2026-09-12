@@ -329,6 +329,41 @@ public class CalendarPresentationTests
     }
 
     [TestMethod]
+    public void Build_NextUpcoming_WeekTier_RoundsUpNotTruncates()
+    {
+        // 30 days out: the week tier must not read "4w" (truncating 30/7) -- it
+        // reads "5w", so the compact summary never understates the distance and
+        // the day->week boundary stays monotonic (29d then 5w, not 29d then 4w).
+        var far = new CalendarEvent
+        {
+            Title = "Far",
+            Start = Now.Date.AddDays(30),
+            End = Now.Date.AddDays(30).AddHours(1),
+        };
+        var snap = SnapWith(far);
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("5w", d.NextUpcomingCountdown);
+    }
+
+    [TestMethod]
+    public void Build_NextUpcoming_MonthTier_RoundsUpNotTruncates()
+    {
+        // 365 days out: the month tier rounds up (365/30 -> 13m), never truncates
+        // to a figure that understates the true distance.
+        var far = new CalendarEvent
+        {
+            Title = "Year",
+            Start = Now.Date.AddDays(365),
+            End = Now.Date.AddDays(365).AddHours(1),
+        };
+        var snap = SnapWith(far);
+        var d = CalendarPresentation.Build(snap, Now, Now.Date, 3);
+
+        Assert.AreEqual("13m", d.NextUpcomingCountdown);
+    }
+
+    [TestMethod]
     public void Build_NoUpcomingEvents_EmptyCountdownAndNullRow()
     {
         // Only a past event: nothing upcoming, so no row and no countdown.

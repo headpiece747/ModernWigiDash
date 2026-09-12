@@ -217,7 +217,11 @@ internal sealed class CalendarGestureState
                 return;
             }
 
-            if (Math.Abs(dx) < 10f && Math.Abs(dy) < 10f)
+            // Same tap-vs-drag tolerance as every other calendar gesture (the
+            // shared TapDragTolerance), not a separate screen-pixel figure: the
+            // detail card lives in the same rotated-local space as the agenda,
+            // so its tap window must scale with the rest of the widget.
+            if (Math.Abs(dx) <= TapDragTolerance && Math.Abs(dy) <= TapDragTolerance)
             {
                 CalendarEvent ev = _detailEvent.Value;
 

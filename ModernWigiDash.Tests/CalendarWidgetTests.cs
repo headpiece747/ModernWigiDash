@@ -107,6 +107,12 @@ public class CalendarWidgetTapToOpenTests
             Url = url,
         };
 
+    /// <summary>A well-formed single-ICS-feed FeedsJson value: gives a test
+    /// widget a real feed so it legitimately reads the shared store instead of
+    /// rendering its own feed-less unavailable state.</summary>
+    internal const string ValidIcsFeedJson =
+        "[{\"kind\":\"ics\",\"feedId\":\"test-feed\",\"label\":\"Test\",\"color\":\"#FFFFFF\",\"url\":\"https://cal.example.ics\"}]";
+
     /// <summary>Seeds the store, renders one frame (populating the widget's
     /// per-frame display + layout), and returns the widget plus the geometry so
     /// a test can aim a touch at a known zone.</summary>
@@ -130,7 +136,10 @@ public class CalendarWidgetTapToOpenTests
             LastUpdate = Now,
         });
 
-        var w = new CalendarWidget();
+        // The widget carries a real feed so it reads the seeded store (a feed-less
+        // instance would render its own unavailable state and have no hero/rows to
+        // touch).
+        var w = new CalendarWidget { FeedsJson = ValidIcsFeedJson };
         var bounds = new SKRect(0, 0, 320, 240);
         using var surface = SKSurface.Create(new SKImageInfo(320, 240));
         w.Render(surface!.Canvas, bounds);
@@ -138,6 +147,65 @@ public class CalendarWidgetTapToOpenTests
         int rowCount = Math.Min(CalendarFeedPolicy.ResolveTimedRows(w.TimedRows), evs.Count);
         var geo = CalendarLayout.Compute(bounds, scale, rowCount, false);
         return (w, geo);
+    }
+
+    [TestMethod]
+    public void Render_FeedlessInstance_DoesNotReadAnotherInstancesStoreData()
+    {
+        // ADR-0011's static store is shared by every calendar instance. A feed-less
+        // widget must render its OWN unavailable state, not bleed another (feeded)
+        // instance's events from the shared store into its own display.
+        CalendarEventStore.Reset();
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events = [Ev("OtherInstanceEvent", 15, 0, 16, 0, "https://meet.example/other")],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget(); // no feeds
+        var bounds = new SKRect(0, 0, 320, 240);
+        using var surface = SKSurface.Create(new SKImageInfo(320, 240));
+        w.Render(surface!.Canvas, bounds);
+
+        // The feed-less widget renders its own empty display and never reads the
+        // shared store: the memo is untouched (null) or, if a display was built,
+        // it carries no rows / next-upcoming event from the other instance's data.
+        if (w.LastDisplay is { } display)
+        {
+            Assert.AreEqual(0, display.Rows.Count, "a feed-less widget shows no rows from another instance's store data");
+            Assert.IsNull(display.NextUpcomingEvent, "a feed-less widget shows no next-upcoming event from the shared store");
+        }
+    }
+
+    [TestMethod]
+    public void RestartProducer_FeedlessInstance_DoesNotClearSharedStore()
+    {
+        // The clobber at its source: a feed-less instance restarting its producer
+        // must NOT write the shared process-wide store (another instance may own
+        // it). Seed the store, drop the widget's feeds to zero, and confirm the
+        // store still holds the other instance's snapshot.
+        CalendarEventStore.Reset();
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events = [Ev("OtherInstanceEvent", 15, 0, 16, 0, "https://meet.example/other")],
+            HasData = true,
+            IsLive = true,
+            LastUpdate = Now,
+        });
+
+        var w = new CalendarWidget { FeedsJson = ValidIcsFeedJson };
+        // Transition to a feed-less state through the inspector write-through path
+        // (OnPropertyChanged routes FeedsJson edits to RestartProducer).
+        w.FeedsJson = "";
+        w.OnPropertyChanged(nameof(CalendarWidget.FeedsJson), "");
+
+        // The shared store still carries the other instance's live snapshot; the
+        // feed-less restart did not clobber it with an empty one.
+        var snap = CalendarEventStore.ReadSnapshot();
+        Assert.IsTrue(snap.HasData, "the feed-less restart left the shared store's data intact");
+        Assert.AreEqual(1, snap.Events.Count, "the other instance's event survived the feed-less restart");
     }
 
     [TestCleanup]
@@ -270,7 +338,10 @@ public class CalendarWidgetTapToOpenTests
             LastUpdate = t0,
         });
 
-        var w = new CalendarWidget();
+        // The widget must carry a real feed: a feed-less instance renders its own
+        // unavailable state instead of reading the (shared) store, so the memo
+        // would never compute a display from the seeded snapshot.
+        var w = new CalendarWidget { FeedsJson = ValidIcsFeedJson };
         w.Clock = clock;
         var bounds = new SKRect(0, 0, 320, 240);
         using var surface = SKSurface.Create(new SKImageInfo(320, 240));
