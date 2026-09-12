@@ -1,6 +1,3 @@
-using System.Runtime.InteropServices;
-using ModernWigiDash.Widgets;
-
 namespace ModernWigiDash.Tests;
 
 /// <summary>
@@ -27,7 +24,7 @@ public class HotkeyActionExecutorTests
         {
             var self = this;
             Api = new HotkeyActionApi(
-                (count, buffer, size) => { self.SendCounts.Add(count); return self.SendBehavior(count); },
+                (uint count, IntPtr buffer, int size, out uint win32Error) => { self.SendCounts.Add(count); win32Error = 0; return self.SendBehavior(count); },
                 (file, args) => { self.ProcessStarts.Add((file, args)); });
         }
     }

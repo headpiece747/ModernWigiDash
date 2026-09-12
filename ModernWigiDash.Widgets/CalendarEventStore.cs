@@ -64,19 +64,6 @@ internal static class CalendarEventStore
         defaultMaxAge: TimeSpan.FromSeconds(StalenessWindowSeconds),
         lastUpdateOf: dto => dto.LastUpdate);
 
-    /// <summary>Internal test seam: builds a store bound to a fake clock (and
-    /// optional max age) so the freshness tests can drive time.</summary>
-    internal static TelemetryStore<CalendarSnapshot> CreateStoreForTest(TimeProvider timeProvider, TimeSpan? maxAge = null)
-        => Facade.CreateStoreForTest(timeProvider, maxAge);
-
-    /// <summary>Internal test seam: installs the store behind the static
-    /// read/update surface.</summary>
-    internal static TelemetryStore<CalendarSnapshot> StoreForTest
-    {
-        get => Facade.StoreForTest;
-        set => Facade.StoreForTest = value;
-    }
-
     /// <summary>Returns the cached snapshot when it is fresh enough, else null
     /// (the widget renders its unavailable state).</summary>
     public static CalendarSnapshot? TryReadFresh() => Facade.TryReadFresh();

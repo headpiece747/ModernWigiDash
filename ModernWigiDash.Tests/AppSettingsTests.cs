@@ -137,18 +137,35 @@ public class AppSettingsTests
     [TestMethod]
     public void Save_PathTooLong_AbsorbsTheFaultAndRemovesTheTempLitter()
     {
-        // A path longer than MAX_PATH makes File.WriteAllText throw
-        // PathTooLongException before any temp file exists; the store must
-        // absorb it (one log line) and attempt the best-effort tmp cleanup
-        // without throwing into the wiring.
+        // A path longer than MAX_PATH makes the write throw PathTooLongException;
+        // the store must absorb it (one log line) and remove the temp litter
+        // without throwing into the wiring. The long-path opt-in (Windows registry
+        // or managed handling) can make an over-MAX_PATH path succeed instead of
+        // throwing, so probe the path first and assert the log line only when the
+        // path genuinely faults; the no-throw and no-litter invariants hold either
+        // way.
         string longName = new string('x', 300);
         string path = Path.Combine(Path.GetTempPath(), longName, longName, "app_settings.json");
+        bool pathFaults;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            pathFaults = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException)
+        {
+            pathFaults = true;
+        }
+
         var lines = new List<string>();
         var store = new AppSettingsStore(path, log: lines.Add);
 
-        store.Save(new AppSettings { KillSwitch = true });
+        store.Save(new AppSettings { KillSwitch = true }); // must not throw into the wiring
 
-        Assert.AreEqual(1, lines.Count, "the failed write logs one line (best-effort, never a throw into the wiring)");
-        Assert.IsFalse(File.Exists(path + ".tmp"), "no stale .tmp litter survives the failed save");
+        if (pathFaults)
+            Assert.AreEqual(1, lines.Count, "a faulting path logs exactly one line (best-effort, never a throw)");
+        else
+            Assert.AreEqual(0, lines.Count, "a non-faulting (long-path-enabled) path saves cleanly with no error line");
+        Assert.IsFalse(File.Exists(path + ".tmp"), "no stale .tmp litter survives the save");
     }
 }

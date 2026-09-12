@@ -16,15 +16,23 @@ internal sealed class HotkeyActionApi(
     HotkeyActionApi.SendInputFn sendInput,
     HotkeyActionApi.StartProcessFn startProcess)
 {
-    /// <summary>The number of inputs actually injected by SendInput.</summary>
-    internal delegate uint SendInputFn(uint inputCount, IntPtr inputs, int inputSize);
+    /// <summary>Injects the inputs and reports how many were actually sent plus
+    /// the Win32 error code captured in the frame immediately after the native
+    /// call (the only place <see cref="Marshal.GetLastWin32Error"/> is still
+    /// meaningful; a later read returns whatever clobbered ThreadLastError).</summary>
+    internal delegate uint SendInputFn(uint inputCount, IntPtr inputs, int inputSize, out uint win32Error);
 
     /// <summary>Starts a process with the given file path and arguments (shell-execute).</summary>
     internal delegate void StartProcessFn(string filePath, string arguments);
 
     /// <summary>The production binding: the real P/Invoke extern + Process.Start.</summary>
     public static readonly HotkeyActionApi Default = new(
-        (count, buffer, size) => SendInputNative(count, buffer, size),
+        (uint count, IntPtr buffer, int size, out uint win32Error) =>
+        {
+            uint sent = SendInputNative(count, buffer, size);
+            win32Error = (uint)Marshal.GetLastWin32Error();
+            return sent;
+        },
         (file, args) => { Process.Start(new ProcessStartInfo(file) { Arguments = args, UseShellExecute = true }); });
 
     internal HotkeyActionApi.SendInputFn SendInput { get; } = sendInput;

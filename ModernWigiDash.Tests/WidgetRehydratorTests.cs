@@ -215,10 +215,22 @@ public class WidgetRehydratorTests
     [WidgetMetadata("throwing_init_widget", "Throwing Init")]
     private sealed class ThrowingInitWidget : ModernWidgetBase
     {
+        // Static so the test can observe the disposal even though Rehydrate
+        // returns null on this path (the instance cannot be referenced or cast
+        // from outside the nested type).
+        public static bool Disposed { get; private set; }
+        public static void ResetDisposedForTest() => Disposed = false;
+
         public override ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("init boom");
 
         public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+        public override ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return base.DisposeAsync();
+        }
     }
 
     [TestMethod]
@@ -227,7 +239,9 @@ public class WidgetRehydratorTests
         // A widget whose InitializeAsync throws (synchronously, not yielding)
         // must hit the outer catch: it logs the failure, disposes the
         // half-initialized instance, and skips the widget (returns null),
-        // leaving no active instance.
+        // leaving no active instance. The static Disposed flag pins that the
+        // half-initialized instance was actually torn down, not just skipped.
+        ThrowingInitWidget.ResetDisposedForTest();
         var loader = CreateLoader(typeof(ThrowingInitWidget));
         var placed = new PlacedWidgetInstance { PluginId = "throwing_init_widget" };
 
@@ -235,6 +249,7 @@ public class WidgetRehydratorTests
 
         Assert.IsNull(instance, "A throwing init must be skipped");
         Assert.IsNull(placed.ActiveInstance, "A skipped rehydration must leave no active instance");
+        Assert.IsTrue(ThrowingInitWidget.Disposed, "the half-initialized instance must be disposed by the outer catch");
     }
 
     [TestMethod]

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Widgets;
@@ -145,8 +144,8 @@ internal static class HotkeyActionExecutor
         var pinned = GCHandle.Alloc(inputs, GCHandleType.Pinned);
         try
         {
-            if (Api.SendInput((uint)inputs.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != inputs.Length)
-                throw new InvalidOperationException($"Windows rejected the keyboard input.");
+            if (Api.SendInput((uint)inputs.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>(), out uint win32Error) != inputs.Length)
+                throw new InvalidOperationException($"Windows rejected the keyboard input ({win32Error}).");
         }
         finally
         {
@@ -169,8 +168,8 @@ internal static class HotkeyActionExecutor
             var pinned = GCHandle.Alloc(array, GCHandleType.Pinned);
             try
             {
-                if (Api.SendInput((uint)array.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != array.Length)
-                    throw new InvalidOperationException($"Windows rejected the text input.");
+                if (Api.SendInput((uint)array.Length, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>(), out uint win32Error) != array.Length)
+                    throw new InvalidOperationException($"Windows rejected the text input ({win32Error}).");
             }
             finally
             {
@@ -199,8 +198,8 @@ internal static class HotkeyActionExecutor
         var pinned = GCHandle.Alloc(array, GCHandleType.Pinned);
         try
         {
-            if (Api.SendInput(1, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>()) != 1)
-                throw new InvalidOperationException($"Windows rejected the mouse input.");
+            if (Api.SendInput(1, pinned.AddrOfPinnedObject(), Marshal.SizeOf<Input>(), out uint win32Error) != 1)
+                throw new InvalidOperationException($"Windows rejected the mouse input ({win32Error}).");
         }
         finally
         {

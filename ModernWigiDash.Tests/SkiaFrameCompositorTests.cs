@@ -116,12 +116,13 @@ public class SkiaFrameCompositorTests
     }
 
     [TestMethod]
-    public void Compose_OpaqueAndTranslucentWidgets_BothPaint()
+    public void Compose_TranslucentWidget_TakesTheSaveLayerAlphaPath()
     {
         // A widget with Opacity < 0.99 takes the save-layer alpha path (the
         // _alphaPaint + SaveLayer/Restore legs), distinct from the opaque fast
-        // path. The translucent interior must still be present (a blend toward
-        // the background, not a hole).
+        // path (covered by Compose_WidgetPaintsItsBounds). The translucent
+        // interior must still be present (a blend toward the background, not a
+        // hole).
         using var compositor = new SkiaFrameCompositor();
         var widget = Widget(100, 100, 200, 150, new SolidWidget(new SKColor(200, 30, 40)));
         widget.Opacity = 0.5f;
@@ -131,7 +132,10 @@ public class SkiaFrameCompositorTests
 
         var interior = PixelAt(compositor, 150, 150);
         Assert.AreNotEqual(PageBackground, interior, "A translucent widget must still paint its bounds");
-        Assert.IsTrue(interior.Alpha > 0 && interior.Red > PageBackground.Red,
+        // PixelAt forces alpha to 255 on read, so only the color channels are
+        // assertable here; the red channel must have moved toward the widget
+        // color (a blend over the background, not a hole).
+        Assert.IsTrue(interior.Red > PageBackground.Red,
             "The translucent interior must blend the widget color over the background");
     }
 
