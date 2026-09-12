@@ -459,6 +459,126 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
     }
 
     [TestMethod]
+    public void SendFrame_WhenNotConnected_RefusesWithoutTouchingTheWire()
+    {
+        // A transport with no live connection refuses a frame before reaching
+        // the wire (the _isConnected gate).
+        var backend = new RecordingBackend { IsOpen = false };
+        using var transport = new DisplayHidTransport(backend);
+        byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
+
+        FrameSendResult result = transport.SendFrame(frame);
+
+        Assert.AreEqual(FrameSendResult.Refused, result);
+        Assert.AreEqual(0, backend.ControlCalls.Count, "no control write may go out when not connected");
+    }
+
+    [TestMethod]
+    public void SendFrame_NonArrayMemory_CopiesAndSends()
+    {
+        // A frame handed in as non-array memory (an offset segment) takes the
+        // copy fallback: the transport still sends the full payload.
+        var backend = new RecordingBackend();
+        using var transport = new DisplayHidTransport(backend);
+        byte[] backing = new byte[DisplayGeometry.FrameBufferSize + 16];
+        ReadOnlyMemory<byte> frame = backing.AsMemory(16, DisplayGeometry.FrameBufferSize);
+
+        FrameSendResult result = transport.SendFrame(frame);
+
+        Assert.AreEqual(FrameSendResult.Sent, result);
+        Assert.AreEqual(DisplayGeometry.FrameBufferSize, backend.BulkWrites[0].Length);
+    }
+
+    [TestMethod]
+    public void SendFrame_HeaderControlFails_ReportsFailed()
+    {
+        // A refused frame-header control write is a broken pipe: the transport
+        // reports Failed without writing the bulk payload.
+        var backend = new RecordingBackend { ControlOutResult = false };
+        using var transport = new DisplayHidTransport(backend);
+        byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
+
+        FrameSendResult result = transport.SendFrame(frame);
+
+        Assert.AreEqual(FrameSendResult.Failed, result);
+        Assert.AreEqual(0, backend.BulkWrites.Count, "no bulk write follows a failed header");
+    }
+
+    [TestMethod]
+    public void SendFrame_BulkWriteThrows_ReportsFailed()
+    {
+        // A native USB fault mid bulk write (the backend throws) must be caught
+        // by SendFrame's exception leg and reported as Failed, not propagate.
+        var backend = new RecordingBackend { BulkWriteException = new System.IO.IOException("pipe fault") };
+        using var transport = new DisplayHidTransport(backend);
+        byte[] frame = new byte[DisplayGeometry.FrameBufferSize];
+
+        FrameSendResult result = transport.SendFrame(frame);
+
+        Assert.AreEqual(FrameSendResult.Failed, result, "a throwing bulk write is a transport failure");
+    }
+
+    [TestMethod]
+    public void ReadTouch_ControlInFails_ReturnsNull()
+    {
+        // A failed touch control-in is a null report (no touch), not an error.
+        var backend = new RecordingBackend { ControlInResult = false };
+        using var transport = new DisplayHidTransport(backend);
+
+        TouchReport? report = transport.ReadTouch();
+
+        Assert.IsNull(report);
+    }
+
+    [TestMethod]
+    public void ReadTouch_ShortTouchTransfer_ReturnsNull()
+    {
+        // A short touch transfer leaves stale bytes past the transferred count;
+        // only a full report can be parsed, so a short read is a null report.
+        var backend = new RecordingBackend { TouchResponse = new byte[DisplayProtocolConstants.TouchReportSize - 1] };
+        using var transport = new DisplayHidTransport(backend);
+
+        TouchReport? report = transport.ReadTouch();
+
+        Assert.IsNull(report, "a short touch transfer must not be parsed as a touch");
+    }
+
+    [TestMethod]
+    public void ReadTouch_NoTouchType_ReturnsNull()
+    {
+        // A full touch report with type None is "no touch": a null report.
+        byte[] none = new byte[DisplayProtocolConstants.TouchReportSize];
+        none[0] = DisplayProtocolConstants.TouchTypeNone;
+        var backend = new RecordingBackend { TouchResponse = none };
+        using var transport = new DisplayHidTransport(backend);
+
+        TouchReport? report = transport.ReadTouch();
+
+        Assert.IsNull(report);
+    }
+
+    [TestMethod]
+    public void ReadTouch_ValidDown_ReturnsTheReport()
+    {
+        // A full touch report with a valid Down type and in-bounds coordinates
+        // parses into a TouchReport.
+        byte[] down = new byte[DisplayProtocolConstants.TouchReportSize];
+        down[0] = DisplayProtocolConstants.TouchTypeDown;
+        BitConverter.GetBytes((short)100).CopyTo(down, 2);
+        BitConverter.GetBytes((short)50).CopyTo(down, 4);
+        var backend = new RecordingBackend { TouchResponse = down };
+        using var transport = new DisplayHidTransport(backend);
+
+        TouchReport? report = transport.ReadTouch();
+
+        Assert.IsTrue(report.HasValue, "a valid Down touch must parse into a report");
+        short x = report.Value.X;
+        short y = report.Value.Y;
+        Assert.AreEqual(100, x);
+        Assert.AreEqual(50, y);
+    }
+
+    [TestMethod]
     public void ReadTouch_DoesNotWaitForAnInFlightBulkWrite()
     {
         // The hot paths share the backend, not a lock: a frame write in
