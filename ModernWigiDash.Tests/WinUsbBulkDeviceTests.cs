@@ -76,7 +76,10 @@ public class WinUsbBulkDeviceTests
             {
                 if (WritePipeThrows)
                     throw new System.ComponentModel.Win32Exception("scripted bulk transfer fault");
-                transferred = WritePipeTransferred ?? bufferLength;
+                // A refused transfer reports nothing reached the wire unless an
+                // explicit partial count is scripted (the real driver reports the
+                // actually-transferred length, which is 0 on a clean refusal).
+                transferred = WritePipeTransferred ?? (WritePipeResult ? bufferLength : 0);
                 return WritePipeResult;
             },
             controlTransfer: (IntPtr interfaceHandle, WinUsbNative.WinUsbSetupPacket setupPacket, byte[] buffer, uint bufferLength, out uint transferred, IntPtr overlapped) =>
@@ -286,6 +289,70 @@ public class WinUsbBulkDeviceTests
     }
 
     [TestMethod]
+    public void ControlOut_Success_ReturnsTrue()
+    {
+        // A control OUT on an opened device routes through the WinUSB API; the
+        // verdict is the API's return value.
+        var script = new ApiScript();
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+
+        bool ok = device.ControlOut(DisplayProtocolConstants.CmdFrameHeader, 0x1234, [1, 2, 3]);
+
+        Assert.IsTrue(ok);
+    }
+
+    [TestMethod]
+    public void ControlOut_ApiRefuses_ReturnsFalse()
+    {
+        var script = new ApiScript { ControlTransferResult = false };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+
+        Assert.IsFalse(device.ControlOut(DisplayProtocolConstants.CmdFrameHeader, 0, []));
+    }
+
+    [TestMethod]
+    public void Open_AlreadyOpen_IsANoOp()
+    {
+        // A second Open on an open device short-circuits (the IsOpen guard)
+        // without re-enumerating the SetupAPI.
+        var script = new ApiScript();
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        int firstEnumCalls = script.EnumCalls;
+
+        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual(firstEnumCalls, script.EnumCalls, "a re-open must not re-enumerate");
+    }
+
+    [TestMethod]
+    public void Open_EnumDeviceInterfacesFails_ReturnsFalse()
+    {
+        // No interface on the enumerated device set: the open refuses before
+        // reaching CreateFile.
+        var script = new ApiScript { EnumInterfacesResult = false };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        Assert.IsFalse(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.IsFalse(device.IsOpen);
+    }
+
+    [TestMethod]
+    public void Open_NoDeviceDetail_ReturnsFalse()
+    {
+        // A zero required-size from the detail query means no device: the open
+        // refuses.
+        var script = new ApiScript { RequiredSize = 0 };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        Assert.IsFalse(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.IsFalse(device.IsOpen);
+    }
+
+    [TestMethod]
     public void BulkWrite_ShortWrite_FailsAndReportsTransferred()
     {
         var script = new ApiScript { WritePipeTransferred = 123 };
@@ -309,6 +376,36 @@ public class WinUsbBulkDeviceTests
 
         Assert.IsTrue(ok);
         Assert.AreEqual(1024, transferred);
+    }
+
+    [TestMethod]
+    public void BulkWrite_WhenNotOpen_ReturnsFalseWithoutTouchingTheWire()
+    {
+        // A bulk write on a never-opened device must refuse at the IsOpen guard
+        // without reaching the WinUSB API.
+        var script = new ApiScript();
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        // Do NOT open: IsOpen stays false.
+
+        bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
+
+        Assert.IsFalse(ok, "a closed device must refuse a bulk write");
+        Assert.AreEqual(0, transferred);
+    }
+
+    [TestMethod]
+    public void BulkWrite_ApiRefuses_LogsTheFailureAndReturnsFalse()
+    {
+        // A WritePipe that returns false (the transfer was refused) is a failed
+        // write: the failure leg logs and reports the verdict.
+        var script = new ApiScript { WritePipeResult = false };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+
+        bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
+
+        Assert.IsFalse(ok, "a refused write is a failed write");
+        Assert.AreEqual(0, transferred, "no bytes are reported when the transfer is refused");
     }
 
     [TestMethod]

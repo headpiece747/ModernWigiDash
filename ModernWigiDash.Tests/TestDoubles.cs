@@ -869,6 +869,29 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
     public bool WriterThrows { get; set; }
     public int CloseCalls { get; private set; }
 
+    // Scriptable transfer behavior for driving a fully-opened backend's
+    // ControlIn/ControlOut/BulkWrite methods (the LibUsbTransferBackend seam).
+    // A null value takes the default (control OUT returns the requested length,
+    // control IN fills the buffer, the bulk writer succeeds with full chunks).
+    public int? ControlOutTransferred { get; set; }
+    public Exception? ControlOutException { get; set; }
+    public int? ControlInTransferred { get; set; }
+    public Exception? ControlInException { get; set; }
+    public Error WriteChunkError { get; set; } = Error.Success;
+    public int? WriteChunkTransferred { get; set; }
+    public Exception? WriteChunkException { get; set; }
+    public int WriteChunkCalls { get; private set; }
+
+    // Acquisition-leg fault seams: drive the backend's SetConfiguration-failure
+    // continuation and the dispose teardown's exception catch without hardware.
+    public bool SetConfigurationThrows { get; set; }
+    public bool CloseThrows { get; set; }
+
+    // The endpoint writer (a separate class) bumps this counter through the
+    // owning device, so the increment is an explicit member rather than a
+    // cross-class field write.
+    internal void RecordWriteChunk() => WriteChunkCalls++;
+
     public ushort VendorId => 0x28DA;
     public ushort ProductId => 0xEF01;
     public bool IsOpen { get; private set; }
@@ -890,7 +913,11 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
         return IsOpen;
     }
 
-    public void SetConfiguration(int config) => Configuration = (byte)config;
+    public void SetConfiguration(int config)
+    {
+        if (SetConfigurationThrows) throw new InvalidOperationException("fake set-configuration failure");
+        Configuration = (byte)config;
+    }
 
     public bool ClaimInterface(int interfaceID) => ClaimResult;
 
@@ -898,6 +925,7 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
 
     public void Close()
     {
+        if (CloseThrows) throw new InvalidOperationException("fake close failure");
         IsOpen = false;
         CloseCalls++;
     }
@@ -924,7 +952,7 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
     public UsbEndpointWriter OpenEndpointWriter(WriteEndpointID writeEndpointID, EndpointType endpointType)
     {
         if (WriterThrows) throw new InvalidOperationException("fake endpoint-writer failure");
-        return null!; // the tests only exercise the failure paths; a success needs a real device
+        return new FakeEndpointWriter(this);
     }
 
     public UsbEndpointReader OpenEndpointReader(ReadEndpointID readEndpointID) => throw new NotSupportedException();
@@ -932,9 +960,32 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
     public UsbEndpointReader OpenEndpointReader(ReadEndpointID readEndpointID, int readBufferSize, EndpointType endpointType) => throw new NotSupportedException();
     public UsbEndpointTransferQueueReader OpenEndpointTransferQueueReader(ReadEndpointID readEndpointId, int readBufferSize, CancellationToken token, int transferQueueSize = 1) => throw new NotSupportedException();
 
-    public int ControlTransfer(UsbSetupPacket setupPacket) => throw new NotSupportedException();
-    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, int length) => throw new NotSupportedException();
-    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, out int transferLength) => throw new NotSupportedException();
+    public int ControlTransfer(UsbSetupPacket setupPacket)
+    {
+        if (ControlOutException is not null) throw ControlOutException;
+        return ControlOutTransferred ?? 0;
+    }
+
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, int length)
+    {
+        // Distinguish OUT (a write: wValue/request on the vendor-out type) from
+        // IN by the request direction the backend sets; the fake keys off the
+        // buffer presence + the configured verdicts. A control OUT with a data
+        // payload reports the requested length unless scripted otherwise.
+        if (setupPacket.RequestType == DisplayProtocolConstants.VendorOutRequestType)
+        {
+            if (ControlOutException is not null) throw ControlOutException;
+            return ControlOutTransferred ?? length;
+        }
+        if (ControlInException is not null) throw ControlInException;
+        return ControlInTransferred ?? length;
+    }
+
+    public int ControlTransfer(UsbSetupPacket setupPacket, byte[] buffer, int offset, out int transferLength)
+    {
+        transferLength = ControlTransfer(setupPacket, buffer, offset, buffer.Length);
+        return transferLength;
+    }
     public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket) => throw new NotSupportedException();
     public Task<int> ControlTransferAsync(UsbSetupPacket setupPacket, byte[] buffer, int offset, int length) => throw new NotSupportedException();
 
@@ -944,6 +995,33 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
     public bool GetString(out string stringData, short langId, byte stringIndex) => throw new NotSupportedException();
     public string GetStringDescriptor(byte descriptorIndex, bool failSilently = false) => throw new NotSupportedException();
     public bool TryGetConfigDescriptor(byte configIndex, out UsbConfigInfo descriptor) => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Functional endpoint writer for a fully-opened <see cref="FakeLibUsbDevice"/>:
+/// overrides <see cref="UsbEndpointWriter.Write"/> (the virtual seam the
+/// LibUsbTransferBackend's chunked bulk write calls through) so the backend's
+/// BulkWrite success/short-write/error/exception legs are drivable without
+/// hardware. The verdicts read from the owning device's scriptable knobs.
+/// </summary>
+internal sealed class FakeEndpointWriter : UsbEndpointWriter
+{
+    private readonly FakeLibUsbDevice _device;
+
+    public FakeEndpointWriter(FakeLibUsbDevice device)
+        : base(device, 0, WriteEndpointID.Ep01, EndpointType.Bulk)
+    {
+        _device = device;
+    }
+
+    public override Error Write(ReadOnlySpan<byte> buffer, int offset, int count, int timeout, out int transferLength)
+    {
+        _device.RecordWriteChunk();
+        if (_device.WriteChunkException is not null)
+            throw _device.WriteChunkException;
+        transferLength = _device.WriteChunkTransferred ?? count;
+        return _device.WriteChunkError;
+    }
 }
 
 /// <summary>
