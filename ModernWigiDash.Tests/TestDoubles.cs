@@ -341,6 +341,10 @@ internal sealed class RecordingBackend : ITransferBackend
     /// the real backends' full-transfer contract, a short write fails.</summary>
     public int? BulkWriteTransferred { get; set; }
 
+    /// <summary>When set, BulkWrite throws this instead of returning a verdict:
+    /// drives the caller's exception-handling leg (a native USB fault mid-write).</summary>
+    public Exception? BulkWriteException { get; set; }
+
     /// <summary>Called on the writing thread when a bulk write begins (before
     /// the gate below parks it) — the contention pin's "the write is in
     /// flight" signal.</summary>
@@ -355,6 +359,8 @@ internal sealed class RecordingBackend : ITransferBackend
     {
         BulkWriteEntered?.Invoke();
         HoldBulkWriteUntil?.Wait();
+        if (BulkWriteException is not null)
+            throw BulkWriteException;
         BulkWrites.Add(data);
         transferred = BulkWriteTransferred ?? data.Length;
         return BulkWriteResult && transferred == data.Length;

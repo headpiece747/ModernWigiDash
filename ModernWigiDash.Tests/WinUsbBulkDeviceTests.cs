@@ -36,6 +36,7 @@ public class WinUsbBulkDeviceTests
         public bool SetPipePolicyThrows { get; set; }
         public uint? WritePipeTransferred { get; set; }
         public bool WritePipeResult { get; set; } = true;
+        public bool WritePipeThrows { get; set; }
         public uint? ControlTransferBytes { get; set; }
         public bool ControlTransferResult { get; set; } = true;
 
@@ -73,6 +74,8 @@ public class WinUsbBulkDeviceTests
             },
             writePipe: (IntPtr interfaceHandle, byte pipeId, IntPtr buffer, uint bufferLength, out uint transferred, IntPtr overlapped) =>
             {
+                if (WritePipeThrows)
+                    throw new System.ComponentModel.Win32Exception("scripted bulk transfer fault");
                 transferred = WritePipeTransferred ?? bufferLength;
                 return WritePipeResult;
             },
@@ -306,5 +309,50 @@ public class WinUsbBulkDeviceTests
 
         Assert.IsTrue(ok);
         Assert.AreEqual(1024, transferred);
+    }
+
+    [TestMethod]
+    public void BulkWrite_NativeFault_IsCaughtAndReportsFailure()
+    {
+        // A native USB fault mid bulk write (the WinUSB API throws instead of
+        // returning a verdict) must be caught by BulkWrite's exception leg and
+        // reported as a failure, not propagate out to the caller.
+        var script = new ApiScript { WritePipeThrows = true };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+
+        bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
+
+        Assert.IsFalse(ok, "a throwing bulk transfer is a failed write");
+        Assert.AreEqual(0, transferred, "no bytes are reported when the transfer faults");
+    }
+
+    [TestMethod]
+    public void ControlOut_WhenNotOpen_ReturnsFalseWithoutTouchingTheWire()
+    {
+        // A control OUT on a device that was never opened must refuse (the IsOpen
+        // guard) without reaching the WinUSB API.
+        var script = new ApiScript();
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        // Do NOT open: IsOpen stays false.
+
+        bool ok = device.ControlOut(DisplayProtocolConstants.CmdFrameHeader, 0, []);
+
+        Assert.IsFalse(ok, "a closed device must refuse a control OUT");
+    }
+
+    [TestMethod]
+    public void ControlIn_WhenNotOpen_ReturnsFalseWithoutTouchingTheWire()
+    {
+        // A control IN on a device that was never opened must refuse (the IsOpen
+        // guard) and report zero transferred.
+        var script = new ApiScript();
+        using var device = new WinUsbBulkDevice(script.ToApi());
+        // Do NOT open: IsOpen stays false.
+
+        bool ok = device.ControlIn(DisplayProtocolConstants.CmdGetTouch, new byte[8], out int transferred);
+
+        Assert.IsFalse(ok, "a closed device must refuse a control IN");
+        Assert.AreEqual(0, transferred);
     }
 }

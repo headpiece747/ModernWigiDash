@@ -235,6 +235,30 @@ public class DisplayHidTransportTests
     }
 
     [TestMethod]
+    public void SendInitCommands_BlankFrameBulkWriteThrows_InitFails()
+    {
+        // A native USB fault mid blank-frame write (the backend throws instead
+        // of returning a verdict) must be caught by the init sequence's
+        // exception leg and fail init, not propagate out of SendInitCommands.
+        var backend = new RecordingBackend { BulkWriteException = new System.IO.IOException("pipe fault") };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsFalse(transport.SendInitCommands(), "a throwing init bulk write fails init through the exception leg");
+    }
+
+    [TestMethod]
+    public void SendInitCommands_BackendNotOpen_SkipsBlankFrameAndFails()
+    {
+        // A backend that is not open skips the blank-frame write (the IsOpen
+        // guard) and reports init failure rather than writing into a dead pipe.
+        var backend = new RecordingBackend { IsOpen = false };
+        using var transport = new DisplayHidTransport(backend);
+
+        Assert.IsFalse(transport.SendInitCommands(), "a closed backend cannot complete the init sequence");
+        Assert.AreEqual(0, backend.BulkWrites.Count, "no bulk write may go out on a closed backend");
+    }
+
+    [TestMethod]
     public void Connect_WinUsbInitBulkWriteFails_FallsBackToLibUsb()
     {
         // The on-device F1 shape at the policy level: every control write
