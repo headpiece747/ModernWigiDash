@@ -100,6 +100,11 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     /// recompute that happens to produce an equal value.</summary>
     internal int DisplayRecomputeCount => _displayMemo.RecomputeCount;
 
+    /// <summary>The gesture module's current detail-mode event (null = agenda
+    /// view). Test seam: lets a test observe whether a feed edit exited detail
+    /// mode, without a production surface.</summary>
+    internal CalendarEvent? GestureDetailEventForTest => _gesture.DetailEvent;
+
     /// <summary>The shell-open seam: opens a meeting link in the default
     /// browser. Production uses the OS default handler (the http/https/mailto
     /// gate + Process.Start live in the gesture module); tests bind a recorder so
@@ -205,6 +210,11 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
                 // unavailable state (see Render). It must NOT write the shared
                 // process-wide store -- another calendar instance may own it, and
                 // clearing it here would clobber that instance's live snapshot.
+                // Also exit detail mode if one is active: the feed-less render
+                // draws the agenda/unavailable view, so the gesture module must
+                // not keep interpreting taps through the now-invisible detail
+                // branch (the canvas and touch state would disagree).
+                _gesture.ExitDetail();
                 return;
             }
 

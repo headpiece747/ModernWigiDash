@@ -104,6 +104,22 @@ internal sealed class CalendarGestureState
         _detailUrlRect = urlRect;
     }
 
+    /// <summary>Exits detail mode back to the agenda view (the same state reset the
+    /// tap handler applies on a card-body/header tap). Idempotent: a no-op when
+    /// already out of detail. Called by the widget when the feed list empties, so
+    /// the canvas and the touch state cannot disagree -- a feed-less render draws
+    /// the unavailable/agenda view, and the gesture module must not keep
+    /// interpreting taps through the now-invisible detail branch.</summary>
+    public void ExitDetail()
+    {
+        if (_detailEvent is null)
+            return;
+        _detailEvent = null;
+        _detailScrollY = 0f;
+        _maxDetailScrollY = 0f;
+        RequestRender();
+    }
+
     /// <summary>Receives the frame's facts after the widget composes them: the
     /// geometry, the display, the clock read, and the event list the display was
     /// built from. Called once per render, so a touch sample always interprets

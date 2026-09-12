@@ -208,6 +208,54 @@ public class CalendarWidgetTapToOpenTests
         Assert.AreEqual(1, snap.Events.Count, "the other instance's event survived the feed-less restart");
     }
 
+    [TestMethod]
+    public void RestartProducer_FeedsEmptiedWhileInDetail_ExitsDetailMode()
+    {
+        // A feed-less render draws the agenda/unavailable view, so the gesture
+        // module must not keep interpreting taps through the now-invisible detail
+        // branch. Entering detail mode and then emptying the feed list (the
+        // inspector write-through path) must reset the detail state -- otherwise
+        // the canvas shows the agenda while touch handling stays stuck in detail.
+        // A controlled clock: the widget's render reads Clock.GetLocalNow(), so the
+        // events must be positioned relative to the fake clock's actual start to be
+        // "upcoming" (the fixed-date Ev helper would land in the past vs. the real
+        // system clock and never enter detail mode).
+        var clock = new FakeTimeProvider();
+        DateTime t0 = clock.GetLocalNow().LocalDateTime;
+        var evs = new List<CalendarEvent>
+        {
+            new() { Title = "Standup", Start = t0.AddMinutes(-15), End = t0.AddMinutes(0), Url = "https://meet.example/standup" },
+            new() { Title = "Lunch", Start = t0.AddMinutes(30), End = t0.AddMinutes(60), Url = "https://meet.example/lunch" },
+        };
+        CalendarEventStore.UpdateFromDto(new CalendarSnapshot
+        {
+            Events = evs,
+            HasData = true,
+            IsLive = true,
+            LastUpdate = t0,
+        });
+
+        var bounds = new SKRect(0, 0, 320, 240);
+        var w = new CalendarWidget { FeedsJson = ValidIcsFeedJson, Clock = clock };
+        using var surface = SKSurface.Create(new SKImageInfo(320, 240));
+        w.Render(surface!.Canvas, bounds);
+        float scale = Math.Min(bounds.Width / CalendarLayout.DesignWidth, bounds.Height / CalendarLayout.DesignHeight);
+        int rowCount = Math.Min(CalendarFeedPolicy.ResolveTimedRows(w.TimedRows), evs.Count);
+        var geo = CalendarLayout.Compute(bounds, scale, rowCount, false);
+
+        // Enter detail mode via a row tap.
+        var p = new SKPoint(geo.RowRects[0].MidX, geo.RowRects[0].MidY);
+        w.OnTouch(p, TouchEventType.TouchDown);
+        w.OnTouch(p, TouchEventType.TouchUp);
+        Assert.IsTrue(w.GestureDetailEventForTest is not null, "a row tap entered detail mode");
+
+        // Empty the feed list through the inspector write-through path.
+        w.FeedsJson = "";
+        w.OnPropertyChanged(nameof(CalendarWidget.FeedsJson), "");
+
+        Assert.IsNull(w.GestureDetailEventForTest, "emptying the feeds exits detail mode so canvas and touch agree");
+    }
+
     [TestCleanup]
     public void Cleanup() => CalendarEventStore.Reset();
 
