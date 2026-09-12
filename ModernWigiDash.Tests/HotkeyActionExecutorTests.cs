@@ -17,6 +17,10 @@ public class HotkeyActionExecutorTests
         // Default: echo the requested count back (the real SendInput reports how
         // many it actually injected). Set to 0 to simulate a rejection.
         public Func<uint, uint> SendBehavior = count => count;
+        // The Win32 error code the fake reports alongside a send (the executor
+        // surfaces it in its rejection message); set to a real code to pin that
+        // the value reaches the message.
+        public uint Win32Error = 0;
 
         public HotkeyActionApi Api { get; }
 
@@ -24,7 +28,7 @@ public class HotkeyActionExecutorTests
         {
             var self = this;
             Api = new HotkeyActionApi(
-                (uint count, IntPtr buffer, int size, out uint win32Error) => { self.SendCounts.Add(count); win32Error = 0; return self.SendBehavior(count); },
+                (uint count, IntPtr buffer, int size, out uint win32Error) => { self.SendCounts.Add(count); win32Error = self.Win32Error; return self.SendBehavior(count); },
                 (file, args) => { self.ProcessStarts.Add((file, args)); });
         }
     }
@@ -144,6 +148,23 @@ public class HotkeyActionExecutorTests
         HotkeyActionExecutor.Api = rec.Api;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunAsync(new HotkeyAction { Kind = HotkeyActionKind.KeyChord, Value = "A" }));
+    }
+
+    [TestMethod]
+    public async Task SendInputRejected_MessageCarriesTheWin32Error()
+    {
+        // The rejection message must surface the Win32 error code captured in the
+        // frame after the native call (the whole point of the seam widening): a
+        // real code set on the fake reaches the message verbatim.
+        const uint invalidParameter = 87; // ERROR_INVALID_PARAMETER
+        var rec = new RecordingApi { SendBehavior = _ => 0, Win32Error = invalidParameter };
+        HotkeyActionExecutor.Api = rec.Api;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RunAsync(new HotkeyAction { Kind = HotkeyActionKind.KeyChord, Value = "A" }));
+
+        StringAssert.Contains(ex.Message, $"{invalidParameter}",
+            "the rejection message must carry the Win32 error code so a rejected input names the device's reason");
     }
 
     [TestMethod]

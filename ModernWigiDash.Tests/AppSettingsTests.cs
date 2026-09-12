@@ -167,5 +167,22 @@ public class AppSettingsTests
         else
             Assert.AreEqual(0, lines.Count, "a non-faulting (long-path-enabled) path saves cleanly with no error line");
         Assert.IsFalse(File.Exists(path + ".tmp"), "no stale .tmp litter survives the save");
+
+        // Best-effort: the probe (and, on long-path-enabled machines, the save
+        // itself) may have left the long directories in Temp. Cleanup throws on an
+        // over-MAX_PATH or absent path - swallow it the same way the probe did.
+        string? dir = Path.GetDirectoryName(path);
+        try
+        {
+            Directory.Delete(dir!, true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; the test's assertions above already ran.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup; the test's assertions above already ran.
+        }
     }
 }
