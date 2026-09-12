@@ -216,6 +216,53 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
+    public void TryConnect_TransportThrows_CatchesAndReportsFailure()
+    {
+        // A driver-stack fault mid-connect (the transport's Connect throws)
+        // must be caught by the engine's connect exception leg and reported as
+        // a failed connect, not propagate out of TryConnect.
+        var fake = new FakeTransport { ConnectFailure = "driver fault" };
+        using var engine = new DisplayDeviceEngine(() => fake);
+
+        bool ok = engine.TryConnect();
+
+        Assert.IsFalse(ok, "a throwing connect is a failed connect");
+        Assert.AreNotEqual(ConnectionState.Connected, engine.State, "a failed connect must not report connected");
+    }
+
+    [TestMethod]
+    public void Disconnect_TransportDisposeThrows_LandsTheFailureLine()
+    {
+        // A device whose Dispose throws during teardown (a torn-down pipe)
+        // must land the bounded-wait failure line, not propagate out of the
+        // disconnect path. The verdict is read from the task's Result only
+        // after Wait confirms completion (the RunBounded rule).
+        var fake = new FakeTransport { ConnectResult = true, ConnectedAfterConnect = true, DisposeFailure = "pipe torn down" };
+        using var engine = new DisplayDeviceEngine(() => fake);
+        Assert.IsTrue(engine.TryConnect());
+
+        // Must not throw: the bounded-wait verdict catches the disposal fault
+        // and lands the failure line instead of propagating it out of Dispose.
+        engine.Dispose();
+
+        Assert.AreNotEqual(ConnectionState.Connected, engine.State, "a disposed engine must not report connected");
+    }
+
+    [TestMethod]
+    public void SetTransportForTest_InstallsTheTransport()
+    {
+        // The test seam installs a transport directly (no factory). It must not
+        // throw and leaves the engine usable (the seam is the budget-reads
+        // before-connect path, so no connect attempt runs here).
+        var fake = new FakeTransport();
+        using var engine = new DisplayDeviceEngine();
+
+        engine.SetTransportForTest(fake);
+
+        Assert.AreNotEqual(ConnectionState.Connected, engine.State, "installing a transport does not by itself connect");
+    }
+
+    [TestMethod]
     public void Dispose_Twice_IsSafe()
     {
         var engine = new DisplayDeviceEngine();

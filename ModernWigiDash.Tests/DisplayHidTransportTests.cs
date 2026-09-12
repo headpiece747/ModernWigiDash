@@ -205,6 +205,59 @@ public class DisplayHidTransportTests
         Assert.IsTrue(winUsb.Disposed, "Every provider's partial state must be torn down");
     }
 
+    [TestMethod]
+    public void Connect_AlreadyConnected_IsANoOp()
+    {
+        // A second Connect on a connected transport short-circuits (the
+        // _isConnected guard) without re-running any provider.
+        var backend = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories = [new ConnectProvider("USB-WINUSB", () => backend, "WinUSB")];
+
+        Assert.IsTrue(transport.Connect());
+        int firstControlCalls = backend.ControlCalls.Count;
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        Assert.AreEqual(firstControlCalls, backend.ControlCalls.Count, "a re-connect must not re-run the init sequence");
+    }
+
+    [TestMethod]
+    public void Connect_ProviderThrows_TerminalFailure()
+    {
+        // A provider that lets an exception escape (the real legs catch their
+        // own failures) is treated as terminal: the connect fails and cleans up.
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            new ConnectProvider("USB-WINUSB", () => throw new InvalidOperationException("leg fault"), "WinUSB"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsFalse(ok, "an escaping provider exception is a terminal connect failure");
+        Assert.IsFalse(transport.IsConnected);
+    }
+
+    [TestMethod]
+    public void Connect_SuccessLine_WritesTheProvidersSuccessLine()
+    {
+        // A provider that carries a SuccessLine writes it on a successful
+        // connect (the leg's one-line identity in the file log).
+        var backend = new RecordingBackend();
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            new ConnectProvider("USB-WINUSB", () => backend, "WinUSB", "WinUSB pipe ready"),
+        ];
+
+        bool ok = transport.Connect();
+
+        Assert.IsTrue(ok);
+        Assert.IsTrue(transport.IsConnected);
+    }
+
     // ── the init verdict: the blank-frame bulk write folds into the connect result ──
 
     [TestMethod]

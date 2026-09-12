@@ -1172,6 +1172,7 @@ internal sealed class FakeTransport : IDisplayTransport
 
     public bool Connect()
     {
+        if (ConnectFailure is not null) throw new InvalidOperationException(ConnectFailure);
         OnConnect?.Invoke();
         return ConnectResult;
     }
@@ -1192,6 +1193,14 @@ internal sealed class FakeTransport : IDisplayTransport
     /// that errors mid-ritual); the engine's bounded-wait verdict must land
     /// the failure line and the caller must not see the raw exception.</summary>
     public string? GoToStandbyFailure { get; set; }
+    /// <summary>Simulates a connect attempt that throws (a driver-stack fault
+    /// mid-open); the engine's connect exception leg must catch it and report
+    /// a failed connect.</summary>
+    public string? ConnectFailure { get; set; }
+    /// <summary>Simulates a device whose Dispose throws (a torn-down pipe);
+    /// the engine's bounded-wait verdict must land the failure line.</summary>
+    public string? DisposeFailure { get; set; }
+
     public bool GoToStandby()
     {
         if (GoToStandbyBlockMs > 0) Thread.Sleep(GoToStandbyBlockMs);
@@ -1204,6 +1213,12 @@ internal sealed class FakeTransport : IDisplayTransport
     public void Dispose()
     {
         if (DisposeBlockMs > 0) Thread.Sleep(DisposeBlockMs);
+        // Deliberate fault-injection seam: drives the engine's bounded-wait
+        // disposal-failure verdict (the torn-down-pipe scenario). The throw is
+        // the feature, not a defect.
+#pragma warning disable S3877 // scripted fault seam (test double)
+        if (DisposeFailure is not null) throw new InvalidOperationException(DisposeFailure);
+#pragma warning restore S3877
         Disposed = true;
     }
 }
