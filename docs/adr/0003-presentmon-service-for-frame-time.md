@@ -11,7 +11,7 @@ The frame-time pipeline (`FrameTimeReader` → `FrameTimeStore` → `FrameTimeWi
 1. **Elevation surface**: The in-house ETW reader runs inside the service (LocalSystem). Any widget that depends on it inherits the "service must be running" coupling, and the reader itself is custom code that has to stay correct against ETW provider contracts (DXGI/D3D9/DxgKrnl).
 2. **Dupes a solved problem**: PresentMon (Intel) already implements exactly this capture, a Windows service that owns the ETW session, plus an API (`PresentMonAPI2.dll`) that clients load at runtime and query over a named pipe.
 
-Separately, the project's own `ModernWigiDashService` is being **isolated** (kept in the repo but not used at runtime for now): its three historical roles were USB transport (the app has a working direct-USB engine), LHM sensor capture (deferred), and frame-time ETW capture (this ADR). With frame-time externalized, the service has no active role today.
+Separately, the project's own `ModernWigiDashService` had three historical roles: USB transport (the app has a working direct-USB engine), LHM sensor capture (later externalized to LibreHardwareService shared memory, ADR-0004), and frame-time ETW capture (this ADR). With all three externalized, the service has no active role; it was removed wholesale by ADR-0005 (the "isolated, preserved in the repo" wording that followed this paragraph was a transitional state, since superseded).
 
 ## Decision
 
@@ -24,7 +24,7 @@ Separately, the project's own `ModernWigiDashService` is being **isolated** (kep
 - **Process targeting**: PresentMon is PID-based (`pmStartTrackingProcess(hSession, pid)` must be called before queries return data). The app keeps its existing process-selection logic (preferred foreground-window PID via `GetForegroundWindow` → `GetWindowThreadProcessId`, else most-active presenter) and feeds the resolved PID to PresentMon, re-applying on target change.
 - **Query model**: one dynamic query with a rolling 1s window, registering `PM_METRIC_PRESENTED_FPS` (AVG/P99/P01), `PM_METRIC_CPU_FRAME_TIME`, `PM_METRIC_GPU_TIME`, `PM_METRIC_GPU_BUSY`, `PM_METRIC_APPLICATION`. The existing 1s `PollLoop` shape polls `pmPollDynamicQuery(hQuery, pid, …)`.
 - **Fallback**: when PresentMon Service is absent, the widget shows a graceful "PresentMon not installed" empty state, no crash, no admin prompt.
-- **`ModernWigiDashService`**: isolated, not used at runtime now, code preserved in the repo (kept in case the deferred LHM plan needs it).
+- **`ModernWigiDashService`**: removed wholesale by ADR-0005 (its USB role is owned directly by the app, its sensor role by LibreHardwareService shared memory per ADR-0004, and its frame-time role by PresentMon per this ADR). The earlier "isolated, code preserved" note was a transitional state.
 
 ## Consequences
 
@@ -32,7 +32,7 @@ Separately, the project's own `ModernWigiDashService` is being **isolated** (kep
 - Removes per-run elevation for the FPS/frametime widget. One elevated install registers PresentMon Service; the app then works non-elevated forever.
 - Deletes a maintenance-heavy custom ETW capture (provider contracts, session management) in favor of Intel's maintained service.
 - The widget, `FrameTimeStore`, and `PollLoop` survive unchanged. The blast radius is the producer only.
-- One less service to run today (the project's own service is isolated).
+- One less service to run today (the project's own service was removed by ADR-0005; only Intel's PresentMon Service remains, and it is optional).
 
 **Negative:**
 - New runtime dependency on Intel's service + SDK install (pinned version, LocalSystem).
