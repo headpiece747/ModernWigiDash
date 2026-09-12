@@ -55,7 +55,7 @@
 - No mocking frameworks for things you own. Use real or test implementations. Reserve mocks/fakes for third-party boundaries (e.g., `IDisplayTransport` seams).
 - Test behavior, not implementation details.
 - This project is desktop/USB, no WebApplicationFactory/Testcontainers. Hardware-bound tests use seam injection or null readers.
-- Test build must use temp output when the app is running: `dotnet test ModernWigiDash.slnx -c Release --nologo -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ -nodeReuse:false`.
+- Test build must use temp output when the app is running (MTP mode; drop the VSTest-era `--nologo`/`-nodeReuse:false` flags, which MTP forwards to the test app and exits 5 on): `dotnet test --solution ModernWigiDash.slnx -c Release -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ --results-directory C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\results`.
 - **MSTest v3 assertion API** (learned 2026-09-07): the async exception assertions are `Assert.ThrowsAsync<T>(Func<Task>, string? message = null)` and `Assert.ThrowsExactlyAsync<T>(...)`. There is NO `Assert.ThrowsExceptionAsync` (that's xUnit). Sync form: `Assert.Throws<T>(Action, string?)` / `Assert.ThrowsExactly<T>(...)`. When in doubt, grep the existing tests for `ThrowsAsync` to see the house pattern.
 
 ## 5. Performance

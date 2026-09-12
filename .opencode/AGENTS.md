@@ -10,8 +10,12 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
 ## Verification Commands
 
 - Build: `dotnet build ModernWigiDash.slnx -c Release --nologo`
-- Tests (temp output avoids a running app locking the App output):
-  `dotnet test ModernWigiDash.slnx -c Release --nologo -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ -nodeReuse:false`
+- Tests (MTP mode, opted in via `global.json`; temp BaseOutputPath avoids a
+  running app locking the App output). MTP forwards unrecognized tokens to the
+  test app and exits 5 on them, so the VSTest-era flags (`--nologo`,
+  `-nodeReuse:false`) are dropped; `-p:BaseOutputPath` still redirects the
+  build output in MTP mode:
+  `dotnet test --solution ModernWigiDash.slnx -c Release -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\ --results-directory C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\results`
 - Format: `dotnet format ModernWigiDash.slnx --verify-no-changes --verbosity quiet`
   Line endings are deliberately unpinned (ADR-0010). Do NOT re-add `end_of_line`
   to `.editorconfig`; it recreates a ~45,000-error wall on Windows checkouts.
@@ -32,8 +36,15 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   `scripts\psa-settings.psd1` + Pester over `scripts\tests\`). Run when a
   harness script changes or before a release.
 - Coverage (regression floor, rerun after large test changes):
-  `scripts\measure-coverage.ps1`. Baseline 2026-08-27: 87.9% of instrumented
-  src lines (Sdk 92.9, Widgets 92.0, Hardware 89.5, Core 85.8, App 80.5).
+  `scripts\measure-coverage.ps1` (MTP code coverage: `--coverage
+  --coverage-output-format cobertura`; the MSTest.Sdk project auto-registers
+  the CodeCoverage extension). Baseline 2026-09-12: 86.4% of instrumented src
+  lines (Sdk 91.0, Widgets 91.0, Hardware 78.4, Core 89.4, App 77.7); the prior
+  2026-08-27 coverlet XPlat baseline (87.9% / Sdk 92.9) predates the MTP
+  migration and the ~290 tests that landed since. The absolute percentages
+  shifted because MTP's CodeCoverage attributes lines differently than coverlet
+  (a toolchain change, not a regression); the gate floors (Sdk/Core/Hardware >=
+  70%) all hold with margin.
 - OCR review (AI code review over a diff/commit; the `ocr_review` tool-mapping
   alias routes here). The CLI binary is
   `C:\Users\tobia\AppData\Roaming\npm\node_modules\@alibaba-group\open-code-review\node_modules\@alibaba-group\ocr-win32-x64\bin\opencodereview.exe`

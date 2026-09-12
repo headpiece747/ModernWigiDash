@@ -14,9 +14,12 @@ mode: subagent
 > `find_symbol` → glider_search_symbols, `get_public_api` → glider_get_type_info,
 > `find_references` → glider_find_references, `get_type_hierarchy` →
 > glider_get_type_hierarchy. NOTE: this repo uses MSTest, not xUnit.
-> Write MSTest tests. Run: `dotnet test ModernWigiDash.slnx -c Release --nologo
+> Write MSTest tests. Run (MTP mode; drop the VSTest-era `--nologo`/`-nodeReuse:false`
+> flags, which MTP forwards to the test app and exits 5 on):
+> `dotnet test --solution ModernWigiDash.slnx -c Release
 > -p:BaseOutputPath=C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\
-> -nodeReuse:false` (temp output avoids a running app instance locking the App output).
+> --results-directory C:\Users\tobia\AppData\Local\Temp\opencode\wmd-build\results`
+> (temp BaseOutputPath avoids a running app instance locking the App output).
 
 ## Role Definition
 

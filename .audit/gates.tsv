@@ -344,3 +344,18 @@
 2026-09-08T22:58:12Z	09f0d4f	calendar-url-wordwrap	ok	0	0	ok	2284	0	ok
 2026-09-08T23:10:03Z	e22d098	calendar-detail-scroll	ok	0	0	ok	2287	0	ok
 2026-09-08T23:32:45Z	52671c6	manual	ok	0	0	ok	2288	0	ok
+2026-09-08T23:57:56Z	55956e6	manual	ok	0	0	ok	2288	0	ok
+2026-09-12T00:02:34Z	63d8f48	manual	ok	0	0	ok	2288	0	ok
+2026-09-12T00:05:35Z	63d8f48	manual	ok	0	0	ok	2288	0	ok
+2026-09-12T00:53:20Z	63d8f48	manual	ok	0	0	ok	2293	0	ok
+2026-09-12T00:56:38Z	63d8f48	manual	ok	0	0	ok	2295	0	ok
+2026-09-12T00:58:47Z	c56ce60	manual	ok	0	0	ok	2295	0	ok
+2026-09-12T01:03:45Z	f3be239	manual	ok	0	0	ok	2295	0	ok
+2026-09-12T01:13:34Z	4ef1360	manual	ok	0	0	ok	2296	0	ok
+2026-09-12T01:14:44Z	5843b82	manual	ok	0	0	ok	2296	0	ok
+2026-09-12T01:33:26Z	28d221a	manual	ok	0	0	ok	2296	0	ok
+2026-09-12T01:42:52Z	aa929b7	manual	ok	0	0	ok	2296	0	ok
+2026-09-12T02:03:38Z	aa929b7	mtp-pipeline-rework	ok	0	0	ok	n/a	n/a	ok
+2026-09-12T02:05:33Z	aa929b7	mtp-pipeline-rework-verify - FAILED: RunAsync_MembershipChangesBetweenCycles_PollsTheCurrentSet	ok	0	0	FAIL	2295	1	SKIP
+2026-09-12T02:07:38Z	aa929b7	mtp-pipeline-rework - FAILED: Primary_ActivationSignal_FiresTheCallbackAndReParks	ok	0	0	FAIL	2295	1	SKIP
+2026-09-12T02:09:03Z	aa929b7	mtp-pipeline-rework	ok	0	0	ok	2296	0	ok

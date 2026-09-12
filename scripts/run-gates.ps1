@@ -11,9 +11,16 @@
 #                     the app is running from bin\Release the forced
 #                     recompile fails on a locked output file: stop the app
 #                     (the harness `stop`) and re-run.)
-#   2. dotnet test   (the house temp-BaseOutputPath command - NEVER
-#                     --no-build with that path: it would run the previous
-#                     build's stale artifacts instead of the changed tree)
+#   2. dotnet test   (MTP mode, opted in via global.json. The house
+#                     temp-BaseOutputPath shape is kept - -p:BaseOutputPath
+#                     still redirects the BUILD output in MTP mode, so a
+#                     running app never locks bin\Release. Three VSTest-era
+#                     flags are dropped because MTP forwards unrecognized
+#                     tokens to the test app and exits 5 on them: --nologo,
+#                     --no-incremental, -nodeReuse:false. Test RESULTS go to
+#                     --results-directory. NEVER --no-build: it would run the
+#                     previous build's stale artifacts instead of the changed
+#                     tree.)
 #   3. dotnet format --verify-no-changes
 # A former 4th stage (the em-dash prose scan of the 2026-08-23 sweep) was
 # retired 2026-08-27: em-dash usage is governed by the prose style rules
@@ -95,26 +102,32 @@ if (-not $buildOk) {
     exit 1
 }
 
-# --- 2. test (fresh artifacts via the temp BaseOutputPath) ---
-$r = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false -v q }
+# --- 2. test (MTP mode; fresh build artifacts via the temp BaseOutputPath) ---
+# MTP forwards unrecognized tokens to the test app and exits 5 on them, so the
+# VSTest-era flags (--nologo, -nodeReuse:false) are dropped. -p:BaseOutputPath
+# still redirects the BUILD output in MTP mode (verified), keeping the house
+# locked-bin isolation; --results-directory holds the test results. The summary
+# is MTP's lowercase form (total/failed/succeeded/skipped), not VSTest's
+# "Passed: N".
+$r = Get-NativeOutput { dotnet test --solution $sln -c Release -p:BaseOutputPath="$outDir\" --results-directory "$outDir\results" --show-test-results failed }
 $testOut = $r.Output
 $testOk  = ($r.ExitCode -eq 0)
 $tp = 'n/a'; $tf = 'n/a'
-if ($testOut -match 'Failed:\s*(\d+)') { $tf = $Matches[1] }
-if ($testOut -match 'Passed:\s*(\d+)') { $tp = $Matches[1] }
+# MTP indents the summary counts ("  total:", "  failed:", ...), so allow
+# leading whitespace before the key.
+if ($testOut -match '(?m)^\s*succeeded:\s*(\d+)') { $tp = $Matches[1] }
+if ($testOut -match '(?m)^\s*failed:\s*(\d+)')    { $tf = $Matches[1] }
 if (-not $testOk) {
     Write-Output $testOut
-    # The quiet run above prints only the summary line - never the failing test
-    # names - so a failed gate would leave the trail row with counts but no way
-    # to say WHICH tests failed (the 2026-09-08 flake could not be diagnosed
-    # because of exactly this). Re-run at normal verbosity to capture the
-    # "Failed <TestName>" lines and fold them into the row's label so the trail
-    # is self-diagnosing. --no-build: the quiet run already compiled the fresh
-    # artifacts, so the diagnostic pass runs tests only (no second build).
-    # Bounded to the first few names to keep the row one line; the separator is
-    # a space-dash (not a pipe) so a test name containing '|' cannot collide.
-    $detail = Get-NativeOutput { dotnet test $sln -c Release --nologo -p:BaseOutputPath=$outDir -nodeReuse:false --no-build }
-    $failedNames = @($detail.Output -split "`n" | Where-Object { $_ -match '^\s*Failed\s+(\S+)' } | ForEach-Object { $Matches[1] } | Select-Object -Unique)
+    # --show-test-results failed already printed the failing test names inline
+    # (one "failed <TestName>" line each), so unlike the old VSTest quiet run
+    # there is no separate diagnostic re-run: the single run above is both the
+    # gate and the self-diagnosis. Parse those lines and fold them into the
+    # row's label so the trail says WHICH tests failed (the 2026-09-08 flake
+    # could not be diagnosed when the quiet run printed only counts). Bounded to
+    # the first few names to keep the row one line; the separator is a space-dash
+    # (not a pipe) so a test name containing '|' cannot collide.
+    $failedNames = @($testOut -split "`n" | Where-Object { $_ -match '^\s*failed\s+(\S+)' } | ForEach-Object { $Matches[1] } | Select-Object -Unique)
     if ($failedNames.Count -gt 0) {
         $shown = $failedNames | Select-Object -First 5
         if ($failedNames.Count -gt 5) { $shown += ('+' + ($failedNames.Count - 5) + ' more') }

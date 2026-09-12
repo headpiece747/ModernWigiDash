@@ -9,10 +9,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 # The local coverage gate (no CI pipeline in this repo): runs the full suite
-# with the XPlat collector and fails with a non-zero exit when any gated
-# module (the pure-policy layers: Sdk/Core/Hardware) drops below
-# -MinLineCoverage. Output goes to a log under $ResultsDir; the console
-# prints the per-project table, the gate verdict, and the suite's Passed! line.
+# with MTP code coverage (--coverage --coverage-output-format cobertura; the
+# MSTest.Sdk test project auto-registers the CodeCoverage extension) and fails
+# with a non-zero exit when any gated module (the pure-policy layers:
+# Sdk/Core/Hardware) drops below -MinLineCoverage. Output goes to a log under
+# $ResultsDir; the console prints the per-project table, the gate verdict, and
+# the suite's "Test run summary" line. The MTP cobertura XML is structurally
+# identical to coverlet's (same <package name="project"> + class/lines/line
+# hits), so the parse+gate logic below is unchanged from the coverlet era.
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
@@ -30,7 +34,7 @@ $GateNames = @("ModernWigiDash.Sdk", "ModernWigiDash.Core", "ModernWigiDash.Hard
 
 New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
 
-# --- 1. Run the suite with the XPlat collector (output to log) ---
+# --- 1. Run the suite with MTP code coverage (output to log) ---
 # A fresh results dir per invocation: the collector nests reports under
 # TestResults\<guid> and accumulates forever, so a run that exits 0 without
 # producing a report must FAIL the gate, never fall back to last run's data.
@@ -71,31 +75,37 @@ if ($IsDisposable -and (Test-Path $ResultsDir)) {
 New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
 $runStart = Get-Date
 
-Write-Host "Running the full suite with coverage collection..."
-# dotnet test builds before testing (incrementally, recompiling changed
-# content - the house temp-BaseOutputPath test shape: never --no-build,
-# that would run a previous build's stale artifacts). The disposable
-# BuildDir wipe above starts the bin output clean, so the coverage numbers
-# can only measure this run's binaries. The trailing separator on the
-# BaseOutputPath value is load-bearing: without it MSBuild concatenates
-# $(BaseOutputPath)$(Configuration) into a "<dir>Release" SIBLING of the
-# build dir, which the wipe would never reach. -p:CollectCoverage is not
-# spelled: the XPlat collector collects by default once attached (verified
-# against this toolchain 2026-08-26; the CONTEXT.md baseline command
-# spells it the same way).
-& dotnet test $Sln -c Release --nologo `
-    "-p:BaseOutputPath=$BuildDir\" -nodeReuse:false `
-    --collect:"XPlat Code Coverage" `
-    --results-directory $ResultsDir *> $Log
+Write-Host "Running the full suite with MTP code coverage collection..."
+# dotnet test (MTP mode) builds before testing (incrementally, recompiling
+# changed content - the house temp-BaseOutputPath test shape: never --no-build,
+# that would run a previous build's stale artifacts). The disposable BuildDir
+# wipe above starts the bin output clean, so the coverage numbers can only
+# measure this run's binaries. The trailing separator on the BaseOutputPath
+# value is load-bearing: without it MSBuild concatenates
+# $(BaseOutputPath)$(Configuration) into a "<dir>Release" SIBLING of the build
+# dir, which the wipe would never reach. MTP forwards unrecognized tokens to
+# the test app and exits 5 on them, so the VSTest-era flags (--nologo,
+# -nodeReuse:false) are dropped; -p:BaseOutputPath still redirects the BUILD
+# output in MTP mode (verified), keeping the locked-bin isolation. Coverage is
+# collected via --coverage --coverage-output-format cobertura (the MSTest.Sdk
+# project auto-registers the CodeCoverage extension; no separate coverlet
+# package or -p:CollectCoverage needed).
+& dotnet test --solution $Sln -c Release `
+    "-p:BaseOutputPath=$BuildDir\" `
+    --results-directory $ResultsDir `
+    --coverage --coverage-output-format cobertura *> $Log
 if ($LASTEXITCODE -ne 0) { throw "dotnet test failed (exit $LASTEXITCODE); see $Log" }
 
 # --- 2. Parse this invocation's cobertura result ---
 # One test project => exactly one report today; if a second test project is
 # ever added, each emits its own report and the gate must aggregate them:
-# fail loudly on ambiguity instead of silently keeping the newest.
-$Coverage = @(Get-ChildItem -Path $ResultsDir -Recurse -Filter "coverage.cobertura.xml" |
+# fail loudly on ambiguity instead of silently keeping the newest. MTP names
+# the report "<asm>_<tfm>_<arch>.cobertura.xml" (not coverlet's fixed
+# "coverage.cobertura.xml"), so the glob matches any *.cobertura.xml and the
+# LastWriteTime filter keeps only this run's file.
+$Coverage = @(Get-ChildItem -Path $ResultsDir -Recurse -Filter "*.cobertura.xml" |
     Where-Object { $_.LastWriteTime -ge $runStart })
-if ($Coverage.Count -eq 0) { throw "No coverage.cobertura.xml produced by this run under $ResultsDir" }
+if ($Coverage.Count -eq 0) { throw "No *.cobertura.xml produced by this run under $ResultsDir" }
 if ($Coverage.Count -gt 1) {
     throw "Multiple coverage reports produced ($($Coverage.Count)) - the gate does not aggregate; expected exactly one test project"
 }
@@ -142,9 +152,14 @@ foreach ($name in $GateNames) {
     if ($rate -lt $MinLineCoverage) { $Below += "$name ($('{0:P1}' -f $rate))" }
 }
 
-$suiteLine = (Get-Content $Log | Select-String -Pattern "Passed!").Line | Select-Object -Last 1
+# MTP prints a multi-line "Test run summary" block; surface its header line
+# (the one carrying Passed!/Failed!) plus the total/failed/succeeded counts so
+# the console shows the suite verdict alongside the coverage table.
+$summaryHeader = (Get-Content $Log | Select-String -Pattern "^Test run summary:").Line | Select-Object -Last 1
+$countLines    = @(Get-Content $Log | Select-String -Pattern '^\s+(total|failed|succeeded|skipped):' | ForEach-Object { $_.Line.Trim() })
 Write-Host ""
-if ($null -ne $suiteLine) { Write-Host $suiteLine }
+if ($null -ne $summaryHeader) { Write-Host $summaryHeader }
+foreach ($cl in $countLines) { Write-Host ("  " + $cl) }
 
 if ($Below.Count -gt 0) {
     Write-Host ""
