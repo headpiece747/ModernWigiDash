@@ -41,6 +41,16 @@ public class GridSizePresetTests
     }
 
     [TestMethod]
+    public void GridSizePreset_ToSize_UnknownValue_Throws()
+    {
+        // A hand-edited profile can carry a GridSizePreset ordinal that no
+        // member declares; ToSize must fail loudly (the defensive throw) rather
+        // than silently size the widget from an unknown preset.
+        var bogus = (GridSizePreset)999;
+        Assert.Throws<ArgumentOutOfRangeException>(() => bogus.ToSize());
+    }
+
+    [TestMethod]
     public void SnapToCell_RoundsToNearestCellBoundary()
     {
         Assert.AreEqual(0f, GridSizeExtensions.SnapX(0f), 0.001f);

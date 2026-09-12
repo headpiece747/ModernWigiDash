@@ -68,12 +68,6 @@ public abstract class ModernWidgetBase : IModernWidget
     protected IWidgetScriptLaunchContext? ScriptLaunchContext
         => Context is { } context ? context as IWidgetScriptLaunchContext : null;
 
-    /// <summary>The credential facet of the host context (null when the host has
-    /// no credential store): the calendar feed editor's CalDAV password store
-    /// routes through it.</summary>
-    protected IWidgetCredentialContext? CredentialContext
-        => Context is { } context ? context as IWidgetCredentialContext : null;
-
     /// <summary>Stores the host context. Overrides must call this first
     /// (<c>await base.InitializeAsync(context, cancellationToken)</c>) before
     /// using <see cref="Context"/>.</summary>

@@ -7,8 +7,8 @@ namespace ModernWigiDash.Sdk;
 /// credentials depends on this capability explicitly instead of seeing every
 /// host service (the <c>IWidgetActionInvoker</c> / <c>IWidgetEditorProvider</c>
 /// optional-facet precedent). A host without a credential store simply does not
-/// implement it; <see cref="ModernWidgetBase.CredentialContext"/> is then null
-/// and the store degrades to a no-op.
+/// implement it, and the caller's <c>as IWidgetCredentialContext</c> cast yields
+/// null so the store degrades to a no-op.
 /// </summary>
 public interface IWidgetCredentialContext
 {

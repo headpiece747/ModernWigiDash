@@ -16,6 +16,27 @@ public class FrameTimeStatisticsTests
     }
 
     [TestMethod]
+    public void FrameTimeStatistics_Percentile_SingleSample_ReturnsThatSample()
+    {
+        // A one-sample window has no spread: every percentile is the sample
+        // itself. Pinned for both the stack-alloc fast path (a double[] is an
+        // ICollection<double>) and the LINQ fallback (a query result is not),
+        // so neither single-element branch can silently regress.
+        Assert.AreEqual(42.0, FrameTimeStatistics.Percentile([42.0], 50));
+        Assert.AreEqual(42.0, FrameTimeStatistics.Percentile(new[] { 42.0 }.OrderBy(v => v), 50));
+    }
+
+    [TestMethod]
+    public void FrameTimeStatistics_Percentile_EmptyEnumerable_FallbackPath_ReturnsZero()
+    {
+        // An empty enumerable that is NOT a small ICollection<double> (a LINQ
+        // query result) takes the fallback path's empty branch, distinct from
+        // the fast path's empty branch (an empty double[] is an ICollection).
+        IEnumerable<double> empty = Enumerable.Empty<double>().OrderBy(v => v);
+        Assert.AreEqual(0, FrameTimeStatistics.Percentile(empty, 50));
+    }
+
+    [TestMethod]
     public void FrameTimeStatistics_LowFps_ConvertsFromFrameTimes()
     {
         var frameTimes = Enumerable.Range(0, 1000).Select(i => (double)i).ToArray();

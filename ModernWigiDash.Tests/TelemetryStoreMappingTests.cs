@@ -12,6 +12,18 @@ public class TelemetryStoreMappingTests
         FrameTimeStore.StoreForTest = FrameTimeStore.CreateStoreForTest(TimeProvider.System);
     }
 
+    [TestMethod]
+    public void StoreForTest_Getter_ReturnsTheInstalledStore()
+    {
+        // The test seam's getter must hand back exactly the store that was
+        // installed (the read side of the install): a setter/getter drift would
+        // leave tests observing a different store than the one they seeded.
+        var store = LhmSensorStore.CreateStoreForTest(TimeProvider.System);
+        LhmSensorStore.StoreForTest = store;
+
+        Assert.AreSame(store, LhmSensorStore.StoreForTest, "the getter must return the installed store");
+    }
+
     private static FakeTimeProvider FixedClock() => new(new DateTimeOffset(2026, 8, 7, 12, 0, 0, TimeSpan.Zero));
 
     [TestMethod]

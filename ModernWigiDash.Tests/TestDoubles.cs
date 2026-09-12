@@ -50,12 +50,10 @@ internal class TestContext : IModernWigiDashContext, IWidgetPropertyPersistingCo
     public virtual void PersistProperty(object widget, string propertyName, object? value)
         => PersistedProperties.Add((widget, propertyName, value));
 
-    public void SetWidgetProperty(object widget, System.Reflection.PropertyInfo property, object? value)
-    {
-        property.SetValue(widget, value);
-        (widget as IModernWidget)?.OnPropertyChanged(property.Name, value);
-        PersistProperty(widget, property.Name, value);
-    }
+    // SetWidgetProperty deliberately uses the interface's default member (the
+    // one spelling of the commit owner): the test double must not re-spell it,
+    // or the default body goes unexercised. The virtual PersistProperty above
+    // is what the default routes into, so the commit still records here.
 
     public virtual void NavigatePage(int delta) => NavigatePageCalls.Add(delta);
 

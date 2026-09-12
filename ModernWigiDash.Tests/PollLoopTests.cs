@@ -93,6 +93,47 @@ public class PollLoopTests
     }
 
     [TestMethod]
+    public async Task TickThrowsOCE_WhenCancelled_UnwindsTheLoop()
+    {
+        // Arrange — the tick throws OperationCanceledException once the loop's
+        // own token is cancelled: the loop's cancellation catch must break
+        // cleanly instead of routing the OCE through the failure handler or
+        // letting it escape. Drive it by stopping the loop (which cancels its
+        // token) while a tick is about to run, so the tick's OCE lands in the
+        // cancellation leg rather than the timer-wait or not-ready-delay legs.
+        int ticks = 0;
+        int failures = 0;
+        var tickEntered = new ManualResetEventSlim(false);
+        var tickRelease = new ManualResetEventSlim(false);
+        using var loop = new PollLoop(
+            "T", TimeSpan.FromMilliseconds(20),
+            ready: () => true,
+            tick: () =>
+            {
+                ticks++;
+                tickEntered.Set();
+                tickRelease.Wait();
+                // After Stop has cancelled the token, the resumed tick throws
+                // OCE: this is the path the cancellation catch must swallow.
+                throw new OperationCanceledException();
+            },
+            onTickFailure: () => failures++,
+            log: _ => { });
+
+        // Act — reach the first tick, then Stop (cancels the token) mid-tick
+        loop.Start();
+        Assert.IsTrue(tickEntered.Wait(TimeSpan.FromSeconds(2)), "Loop must reach its first tick.");
+        loop.Stop();
+        tickRelease.Set();
+        await Task.Delay(150);
+
+        // Assert — the loop unwound on the tick's OCE; the failure handler was
+        // NOT invoked for the cancellation (it is a shutdown, not a poll fault).
+        Assert.AreEqual(1, ticks, "no further tick may fire after Stop");
+        Assert.AreEqual(0, failures, "a cancellation OCE must not be routed through the failure handler");
+    }
+
+    [TestMethod]
     public async Task Dispose_IsIdempotent()
     {
         // Arrange

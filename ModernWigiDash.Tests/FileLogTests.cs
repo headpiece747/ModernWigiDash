@@ -129,6 +129,67 @@ public class FileLogTests
             "an existing backup is replaced, not appended to");
     }
 
+    [TestMethod]
+    public void Rotate_WhenBackupTargetIsADirectory_SwallowsTheMoveFailure()
+    {
+        // A rotation whose .1 target is a directory makes File.Move throw
+        // (you cannot move a file onto a directory): TryRotateIfNeeded's catch
+        // reports the rotation failure once and keeps appending past the cap
+        // (best-effort - a locked/odd backup must not wedge logging). Seed an
+        // over-cap file, block the .1 target with a directory, then drive the
+        // rotation cadence; the write must not throw and must keep landing.
+        File.WriteAllBytes(_logPath, new byte[FileLog.RotationCapBytes + 1]);
+        Directory.CreateDirectory(_rotatedPath); // blocks the move target
+
+        for (int i = 0; i < 100; i++)
+            FileLog.Write($"pre-failed-rotation line {i}"); // must not throw
+
+        FileLog.Flush();
+        Assert.IsTrue(File.Exists(_logPath), "the active log must still exist after a failed rotation");
+        string content = ReadLog(_logPath);
+        Assert.IsTrue(content.Contains("pre-failed-rotation line 99"),
+            "logging must continue into the same file when the rotation move fails");
+    }
+
+    [TestMethod]
+    public void Write_WhenLogPathIsADirectory_SwallowsTheFailureAndRecovers()
+    {
+        // Pointing LogPath at a directory makes the writer's FileStream throw
+        // (a directory is not a writable file): the Write catch block reports
+        // the failure once and resets the writer so logging recovers. The
+        // best-effort contract is "never throw" - this pins the failure leg
+        // (the catch block runs without throwing) and the recovery (a later
+        // write to a real path lands), neither of which the happy-path tests
+        // exercise.
+        FileLog.LogPath = _tempDir; // a directory, not a file
+        FileLog.Write("this write must fail but never throw"); // must not throw
+
+        // Recovery: pointing back at a real file must resume logging.
+        FileLog.LogPath = _logPath;
+        FileLog.Write("recovered write after a failed one");
+        FileLog.Flush();
+        Assert.IsTrue(ReadLog(_logPath).Contains("recovered write after a failed one"),
+            "logging must recover after a failed write resets the writer");
+    }
+
+    [TestMethod]
+    public void Flush_WhenWriterFails_SwallowsTheFailureAndRecovers()
+    {
+        // A write + flush against a directory-backed path must swallow the
+        // IOException (the locked-file leg) and reset the writer, never
+        // throwing. The recovery assertion (a later write to a real path
+        // lands) is what proves the writer was reset rather than left wedged.
+        FileLog.LogPath = _tempDir; // a directory, not a file
+        FileLog.Write("write into the bad path"); // must not throw
+        FileLog.Flush(); // must swallow the failure
+
+        FileLog.LogPath = _logPath;
+        FileLog.Write("recovered after a failed flush");
+        FileLog.Flush();
+        Assert.IsTrue(ReadLog(_logPath).Contains("recovered after a failed flush"),
+            "logging must recover after a failed flush resets the writer");
+    }
+
     private static string ReadLog(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

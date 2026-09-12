@@ -162,24 +162,6 @@ public sealed class FrameDelivery : IDisposable
     /// </summary>
     internal bool IsReady => _isReady?.Invoke() ?? _send is not null;
 
-    /// <summary>
-    /// One coherent snapshot of the frame delivery's accounting: the
-    /// sent/dropped/refused/failed trichotomy as one record. A new drop reason
-    /// is added in one place (this record + the counter field it reads), and a
-    /// reader who wants the verdict reads one value, not eight counters
-    /// recombined into a judgment.
-    /// </summary>
-    internal FrameDeliveryStats GetStats() => new(
-        FramesSent: Interlocked.Read(ref _sent),
-        DroppedCount: Interlocked.Read(ref _dropped),
-        DroppedUnconfiguredCount: Interlocked.Read(ref _droppedUnconfigured),
-        DroppedNotReadyCount: Interlocked.Read(ref _droppedNotReady),
-        DroppedPoolCount: Interlocked.Read(ref _droppedPool),
-        DroppedCoalescedCount: Interlocked.Read(ref _droppedCoalesced),
-        DroppedEncodeCount: Interlocked.Read(ref _droppedEncode),
-        SendFailedCount: Interlocked.Read(ref _sendFailed),
-        SendRefusedCount: Interlocked.Read(ref _sendRefused));
-
     /// <summary>Frames successfully handed to the transport. Instrumentation
     /// (also feeds the log cadence): the delivery pipeline is the single owner
     /// of frame accounting. The transport keeps only a bulk-layer diagnostic

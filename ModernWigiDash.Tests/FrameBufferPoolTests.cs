@@ -53,6 +53,28 @@ public class FrameBufferPoolTests
     }
 
     [TestMethod]
+    public void Release_PastCapacity_DropsTheDoubleRelease()
+    {
+        // A release past the pool's capacity is the double-release guard: the
+        // pool never grows beyond what the constructor pre-allocated. Drive it
+        // by acquiring the pool's only buffer, then releasing a SECOND
+        // same-size buffer (a foreign one, as if a caller double-released):
+        // the free count would exceed capacity and the extra release is dropped.
+        var pool = new FrameBufferPool(bufferSize: 1024, capacity: 1);
+        byte[]? pooled = pool.Acquire();
+        Assert.IsNotNull(pooled);
+
+        pool.Release(pooled);            // back to full (freeCount == capacity)
+        pool.Release(new byte[1024]);    // past capacity: must be dropped
+
+        // The pool still holds exactly its one pre-allocated buffer: a fresh
+        // acquire returns the pooled one, and a second acquire finds nothing.
+        byte[]? reacquired = pool.Acquire();
+        Assert.AreSame(pooled, reacquired, "the dropped release must not have grown the pool");
+        Assert.IsNull(pool.Acquire(), "the pool must still hold only its capacity-many buffers");
+    }
+
+    [TestMethod]
     public void FullCycle_MultipleFrames_KeepsAllocatingFromPool()
     {
         var pool = new FrameBufferPool(bufferSize: 1024, capacity: 4);
