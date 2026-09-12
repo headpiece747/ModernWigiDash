@@ -48,10 +48,6 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     private ProfileLayout _profile = null!;
     private PlacedWidgetInstance? _selectedWidget;
 
-    /// <summary>Test seam: the live active page index — the device-touch
-    /// drain's navigation outcome is observable without a UI assertion.</summary>
-    internal int ActivePageIndex => _profile?.ActivePageIndex ?? 0;
-
     // XAML-fired events can arrive during InitializeComponent, before the ctor
     // assigns the modules they forward to (e.g. the opacity slider's initial
     // ValueChanged). Guarded handlers no-op until this is set, as the last

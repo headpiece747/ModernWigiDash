@@ -33,16 +33,6 @@ internal sealed class PresentMonQueryCapability
         _freeFrame = freeFrame;
     }
 
-    /// <summary>Test seam: constructs a capability from raw delegates.</summary>
-    internal static PresentMonQueryCapability Create(
-        PmRegisterDynamicQuery registerDynamic,
-        PmFreeDynamicQuery freeDynamic,
-        PmPollDynamicQuery pollDynamic,
-        PmRegisterFrameQuery registerFrame,
-        PmConsumeFrames consumeFrames,
-        PmFreeFrameQuery freeFrame)
-        => new(registerDynamic, freeDynamic, pollDynamic, registerFrame, consumeFrames, freeFrame);
-
     public PmStatus RegisterDynamic(IntPtr session, out IntPtr handle, PresentMonQueryElement[] elements, ulong count, double windowMs, double offsetMs)
         => _registerDynamic(session, out handle, elements, count, windowMs, offsetMs);
 
