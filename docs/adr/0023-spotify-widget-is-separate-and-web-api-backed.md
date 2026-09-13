@@ -2,7 +2,17 @@
 
 ## Status
 
-Accepted (2026-09-13)
+**Retracted (2026-09-13).** The Web-API-backed Spotify widget was removed before
+shipping. Spotify's 2025 Development Mode changes gate the Web API behind a paid
+Premium subscription: each developer gets one Development Mode Client ID, at most
+five authorized users, and a reduced endpoint set (bulk fetching phased out).
+Extended access requires a registered business with 250,000 monthly users. That
+entitlement model makes the Web API a poor fit for a personal dashboard, and the
+passive-SMTC **Now Playing** widget already covers now-playing on a free account
+with zero setup. The widget source, its tests, and the `TrustedUriPolicy` Spotify
+methods were deleted; this ADR is kept only as the record of why the decision
+changed. Revisit only if a user asks for explicit Web-API control (playlists,
+playback) and accepts the Premium entitlement.
 
 ## Context
 

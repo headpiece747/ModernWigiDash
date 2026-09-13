@@ -253,7 +253,6 @@ public sealed class ArchitectureTests
             "ModernWigiDash.App/Update/UpdateService.cs",
             "ModernWigiDash.Widgets/PriceFeedManager.cs",
             "ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs",
-            "ModernWigiDash.Widgets/Spotify/SpotifyApiClient.cs",
             "ModernWigiDash.Widgets/WeatherClient.cs",
             "ModernWigiDash.Widgets/CalendarWidget.cs",
         };
