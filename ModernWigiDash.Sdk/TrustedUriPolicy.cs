@@ -20,4 +20,14 @@ public static class TrustedUriPolicy
     public static bool IsTwitchAuthorizationUri(Uri uri)
         => string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
         && IsTwitchAuthorizationHost(uri.Host);
+
+    /// <summary>True when <paramref name="host"/> is spotify.com or a subdomain of it.</summary>
+    public static bool IsSpotifyAuthorizationHost(string? host)
+        => string.Equals(host, "spotify.com", StringComparison.OrdinalIgnoreCase)
+        || (host?.EndsWith(".spotify.com", StringComparison.OrdinalIgnoreCase) == true);
+
+    /// <summary>True when the URI may be shell-opened for Spotify device auth: an https URL on a trusted host.</summary>
+    public static bool IsSpotifyAuthorizationUri(Uri uri)
+        => string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal)
+        && IsSpotifyAuthorizationHost(uri.Host);
 }

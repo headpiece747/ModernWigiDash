@@ -390,3 +390,9 @@
 2026-09-12T18:38:49Z	f2f647b	manual	ok	0	0	ok	2407	0	ok
 2026-09-12T18:47:39Z	2f2147b	manual	ok	0	0	ok	2407	0	ok
 2026-09-12T18:53:03Z	65cd011	manual	ok	0	0	ok	2407	0	ok
+2026-09-12T20:22:06Z	16b1a52	manual	ok	0	0	ok	2409	0	ok
+2026-09-13T14:45:59Z	79202ab	manual - FAILED: HouseRules_NoAdHocHttpClientInSrc	ok	6	0	FAIL	2426	1	SKIP
+2026-09-13T14:47:48Z	79202ab	manual	ok	1	0	ok	2427	0	FAIL
+2026-09-13T14:56:36Z	79202ab	manual	ok	2	0	ok	2409	0	FAIL
+2026-09-13T14:57:57Z	79202ab	manual	ok	0	0	ok	2409	0	ok
+2026-09-13T15:00:06Z	79202ab	manual	ok	0	0	ok	2427	0	ok
