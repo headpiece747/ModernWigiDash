@@ -396,3 +396,8 @@
 2026-09-13T14:56:36Z	79202ab	manual	ok	2	0	ok	2409	0	FAIL
 2026-09-13T14:57:57Z	79202ab	manual	ok	0	0	ok	2409	0	ok
 2026-09-13T15:00:06Z	79202ab	manual	ok	0	0	ok	2427	0	ok
+2026-09-13T15:03:22Z	d27dbbf	manual - FAILED: TryConnect_WhenNoService_ReturnsFalse	ok	31	0	FAIL	2433	1	SKIP
+2026-09-13T15:04:22Z	d27dbbf	manual - FAILED: TryConnect_VerifiesConnectionStateConsistency	ok	31	0	FAIL	2433	1	SKIP
+2026-09-13T15:05:40Z	d27dbbf	manual	ok	31	0	ok	2434	0	FAIL
+2026-09-13T15:06:58Z	d27dbbf	manual	ok	29	0	ok	2434	0	FAIL
+2026-09-13T15:08:35Z	d27dbbf	manual	ok	29	0	ok	2434	0	ok

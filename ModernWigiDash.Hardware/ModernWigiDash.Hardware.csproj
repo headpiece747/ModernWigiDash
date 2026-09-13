@@ -21,6 +21,7 @@
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="LibUsbDotNet" />
+    <PackageReference Include="System.ServiceModel.Http" />
   </ItemGroup>
 
   <ItemGroup>

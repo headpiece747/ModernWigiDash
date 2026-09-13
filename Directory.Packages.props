@@ -27,5 +27,6 @@
     <PackageVersion Include="SkiaSharp.Views.WPF" Version="4.152.0" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.34.0.3385" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+    <PackageVersion Include="System.ServiceModel.Http" Version="10.0.652802" />
   </ItemGroup>
 </Project>
