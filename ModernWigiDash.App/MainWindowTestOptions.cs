@@ -1,6 +1,7 @@
 using ModernWigiDash.App.Hotkey;
 using ModernWigiDash.App.Power;
 using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.Hardware.Service;
 using ModernWigiDash.Hardware.Transport;
 
 namespace ModernWigiDash.App;
@@ -22,4 +23,5 @@ internal sealed record MainWindowTestOptions(
     HotkeyApi? HotkeyApi = null,
     AhkLaunchApi? AhkApi = null,
     AppSettingsStore? AppSettingsStore = null,
-    DisplayDeviceEngine? UsbEngine = null);
+    DisplayDeviceEngine? UsbEngine = null,
+    Func<WigiDashServiceClient>? VendorServiceClientFactory = null);

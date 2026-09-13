@@ -76,6 +76,17 @@ public class StartupWiringTests
     }
 
     [TestMethod]
+    public void BuildStartupWiring_VendorServicePrecedesTheProfileLoad()
+    {
+        StartupWiring plan = PlanOfLiveWindow();
+
+        Assert.IsTrue(IndexOf(plan, "VendorService") < IndexOf(plan, "ProfileLoad"),
+            "the vendor service client is exposed through the process-wide static before the profile load instantiates the widgets that read it");
+        Assert.IsTrue(IndexOf(plan, "Telemetry") < IndexOf(plan, "VendorService"),
+            "both are background data sources wired together, before the catalog/profile work");
+    }
+
+    [TestMethod]
     public void BuildStartupWiring_StepNames_AreUnique()
     {
         StartupWiring plan = PlanOfLiveWindow();

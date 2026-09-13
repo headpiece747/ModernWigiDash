@@ -38,6 +38,19 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// can be constructed with a fake in tests (no real DLL load).</summary>
     private TelemetryProducers _telemetry = null!;
 
+    /// <summary>The vendor WigiDash service client (ADR-0022): one connection
+    /// lifecycle over the vendor's local WCF endpoint, exposing the HWiNFO
+    /// sensor facet and the AIDA64 panel facet. Wired by the VendorService
+    /// startup step and exposed to the reflection-instantiated widgets through
+    /// the process-wide <c>VendorService.Instance</c> static (the ADR-0011
+    /// image). Null until the VendorService step runs.</summary>
+    private ModernWigiDash.Hardware.Service.WigiDashServiceClient? _vendorService;
+
+    /// <summary>The vendor service client factory (the test seam): production
+    /// is null (WireVendorService builds a real client); tests bind a fake so
+    /// no WCF channel opens at window construction.</summary>
+    private Func<ModernWigiDash.Hardware.Service.WigiDashServiceClient>? _vendorServiceFactory;
+
     // The wiring-assigned fields (_framePump, _powerLifecycle, _telemetry,
     // _profile, _inputController, _deviceTouchDrain, _delivery, _inspector,
     // _dialogHost, _pageTabs, _profilePersistence, _tray) are null!-typed: they
@@ -204,6 +217,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         _traySurface = options.TraySurface;
         _sessionEndStandby = options.SessionEndStandby;
+        _vendorServiceFactory = options.VendorServiceClientFactory;
         _hotkeyApi = options.HotkeyApi ?? HotkeyApi.Default;
         _ahkApi = options.AhkApi ?? AhkLaunchApi.Default;
         // The AHK spawn policy (ADR-0019): the refusal ladder + log lines, driving
@@ -324,6 +338,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
         new WiringStep("Telemetry", () => WireTelemetry(presentMonNative)),
 
+        new WiringStep("VendorService", WireVendorService),
+
         new WiringStep("WidgetCatalog", WireWidgetCatalog),
 
         new WiringStep("ProfilePersistence", () => WireProfilePersistence(profilePath)),
@@ -387,6 +403,22 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // The engine's Start() above fires the initial connect. Do NOT
         // block the UI thread waiting for USB — the render timer will
         // start sending frames as soon as the connection succeeds.
+    }
+
+    /// <summary>Vendor service (ADR-0022): construct the shared WigiDash service
+    /// client, attempt one connect + provider init, and expose it to the
+    /// reflection-instantiated widgets through the process-wide static. The
+    /// connect is best-effort (the ADR-0017 image): an absent vendor service
+    /// degrades to a null instance, so the HWiNFO/AIDA64 widgets draw their
+    /// house placeholder instead of throwing. The factory seam lets tests bind
+    /// a fake client without opening a real WCF channel.</summary>
+    private void WireVendorService()
+    {
+        var factory = _vendorServiceFactory ?? (() => new ModernWigiDash.Hardware.Service.WigiDashServiceClient());
+        var client = factory();
+        client.TryConnect();
+        _vendorService = client;
+        ModernWigiDash.Hardware.Service.VendorService.SetInstance(client);
     }
 
     /// <summary>Widget catalog: attribute-driven registration plus the catalog UI refresh.</summary>
@@ -759,6 +791,16 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             _powerModeSource.Dispose();
         }),
         new TeardownStep("Telemetry", _telemetry.Dispose),
+        // The vendor service channel is closed before the display goes to
+        // standby (the ADR-0022 seam): a clean exit releases the WCF channel
+        // and drops the process-wide static so no widget render can reach a
+        // disposed client. Null-safe: an absent vendor service is a no-op.
+        new TeardownStep("VendorService", () =>
+        {
+            ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            _vendorService?.Dispose();
+            _vendorService = null;
+        }),
         new TeardownStep("FrameDelivery", _delivery.Dispose),
         new TeardownStep("Profile", () => ProfileOps.DisposeProfile(_profile)),
         new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
