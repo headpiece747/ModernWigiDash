@@ -40,6 +40,13 @@ public sealed class WigiDashServiceClient : IDisposable
         Aida = new AidaPanelFacet(this);
     }
 
+    /// <summary>Test constructor: injects facet implementations directly.</summary>
+    internal WigiDashServiceClient(ISensorValues sensors, IAidaPanel aida)
+    {
+        Sensors = sensors;
+        Aida = aida;
+    }
+
     /// <summary>
     /// Attempts to connect to the vendor service and initialize both providers.
     /// Returns true when the channel is open and at least one provider initialized.

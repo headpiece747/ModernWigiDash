@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ModernWigiDash.Sdk\ModernWigiDash.Sdk.csproj" />
     <ProjectReference Include="..\ModernWigiDash.Core\ModernWigiDash.Core.csproj" />
+    <ProjectReference Include="..\ModernWigiDash.Hardware\ModernWigiDash.Hardware.csproj" />
   </ItemGroup>
 
   <ItemGroup>

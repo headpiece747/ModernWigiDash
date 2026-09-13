@@ -39,7 +39,7 @@ public sealed class ArchitectureTests
             ["ModernWigiDash.Sdk"] = [],
             ["ModernWigiDash.Core"] = ["ModernWigiDash.Sdk"],
             ["ModernWigiDash.Hardware"] = ["ModernWigiDash.Sdk"],
-            ["ModernWigiDash.Widgets"] = ["ModernWigiDash.Core", "ModernWigiDash.Sdk"],
+            ["ModernWigiDash.Widgets"] = ["ModernWigiDash.Core", "ModernWigiDash.Hardware", "ModernWigiDash.Sdk"],
             ["ModernWigiDash.App"] = ["ModernWigiDash.Core", "ModernWigiDash.Hardware", "ModernWigiDash.Sdk", "ModernWigiDash.Widgets"],
             ["ModernWigiDash.Tests"] = ["ModernWigiDash.App", "ModernWigiDash.Core", "ModernWigiDash.Hardware", "ModernWigiDash.Sdk", "ModernWigiDash.Widgets"],
         };
