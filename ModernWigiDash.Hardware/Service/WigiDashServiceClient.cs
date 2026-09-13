@@ -84,12 +84,17 @@ public sealed class WigiDashServiceClient : IDisposable
     internal void EnsureChannel()
     {
         if (_channel != null) return;
+        // MaxReceivedMessageSize must exceed the largest vendor response: a full
+        // HWiNFO GetSensorList() payload is larger than the 64 KB WCF default
+        // (observed on-device 2026-09-13: the default quota threw QuotaExceeded).
+        // 1 MB covers the sensor list plus an AIDA64 frame read.
         var binding = new BasicHttpBinding
         {
             OpenTimeout = TimeSpan.FromSeconds(5),
             CloseTimeout = TimeSpan.FromSeconds(5),
             ReceiveTimeout = TimeSpan.FromSeconds(10),
             SendTimeout = TimeSpan.FromSeconds(10),
+            MaxReceivedMessageSize = 1024 * 1024,
         };
         var endpoint = new EndpointAddress(EndpointAddress);
         _factory = new ChannelFactory<IWigiDashWcf>(binding, endpoint);
