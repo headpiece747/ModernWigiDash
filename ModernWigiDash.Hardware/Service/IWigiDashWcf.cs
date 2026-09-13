@@ -41,7 +41,7 @@ public interface IWigiDashWcf
     bool DeInitAidaProvider();
 
     [OperationContract]
-    (bool Ok, byte[] Buffer) ReadAidaMmap(int offset, int length);
+    (bool Ok, byte[]? Buffer) ReadAidaMmap(int offset, int length);
 
     [OperationContract]
     bool WriteAidaMmap(int offset, byte[] buffer);
