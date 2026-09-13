@@ -84,17 +84,20 @@ public sealed class WigiDashServiceClient : IDisposable
     internal void EnsureChannel()
     {
         if (_channel != null) return;
-        // MaxReceivedMessageSize must exceed the largest vendor response: a full
-        // HWiNFO GetSensorList() payload is larger than the 64 KB WCF default
-        // (observed on-device 2026-09-13: the default quota threw QuotaExceeded).
-        // 1 MB covers the sensor list plus an AIDA64 frame read.
+        // MaxReceivedMessageSize must exceed the largest vendor response. A full
+        // AIDA64 frame read returns 1,202,944 raw RGB565 bytes (1016x592x2), which
+        // WCF base-64-encodes inside the SOAP envelope to ~1.6 MB; a 1 MB quota
+        // therefore throws QuotaExceeded on every full-frame read and the widget
+        // degrades to its placeholder (observed on-device 2026-09-13). The vendor's
+        // own Manager binds at 20 MB for this reason; we match it so both the
+        // unbounded-size sensor list and a full AIDA64 frame clear the quota.
         var binding = new BasicHttpBinding
         {
             OpenTimeout = TimeSpan.FromSeconds(5),
             CloseTimeout = TimeSpan.FromSeconds(5),
             ReceiveTimeout = TimeSpan.FromSeconds(10),
             SendTimeout = TimeSpan.FromSeconds(10),
-            MaxReceivedMessageSize = 1024 * 1024,
+            MaxReceivedMessageSize = 20 * 1024 * 1024,
         };
         var endpoint = new EndpointAddress(EndpointAddress);
         _factory = new ChannelFactory<IWigiDashWcf>(binding, endpoint);
