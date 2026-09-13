@@ -145,15 +145,19 @@ public sealed class WigiDashServiceClient : IDisposable
         _aidaReady = SafeCall(() => _channel!.InitAidaProvider());
     }
 
-    internal VendorSensorItem[]? GetRawSensorList()
+    internal IReadOnlyList<VendorSensorItem>? GetRawSensorList()
     {
-        try { return _channel!.GetSensorList(); }
+        try { return _channel!.GetSensorList()?.ToList(); }
         catch { return null; }
     }
 
     internal (double Value, bool IsValid)? GetRawSensorValue(int rt, int id1, int id2)
     {
-        try { return _channel!.GetSensorValue(rt, id1, id2); }
+        try
+        {
+            var value = _channel!.GetSensorValue(rt, id1, id2, out var isValid);
+            return (value, isValid);
+        }
         catch { return null; }
     }
 
@@ -161,7 +165,7 @@ public sealed class WigiDashServiceClient : IDisposable
     {
         try
         {
-            var (ok, buffer) = _channel.ReadAidaMmap(offset, length);
+            var ok = _channel.ReadAidaMmap(offset, length, out var buffer);
             return ok ? buffer : null;
         }
         catch { return null; }
