@@ -20,17 +20,16 @@ public sealed class WigiDashServiceClientTests
     public void Sensors_BeforeARead_IsNotReadyAndReadsNoValue()
     {
         // IsReady is a pure probe (no I/O): a fresh client is not ready until a
-        // read opens the channel and initializes the provider. GetSensorList is
-        // deliberately not asserted here - it self-heals (connects when the
-        // service is reachable), which the connected test and the
-        // failed-call test pin from both directions.
+        // background refresh connects and initializes the provider. Reads are
+        // served from the background cache, so a fresh client returns no data.
         using var client = new WigiDashServiceClient();
         Assert.IsFalse(client.Sensors.IsReady, "a fresh client is not ready until it connects");
-        Assert.IsNull(client.Sensors.GetSensorValue(0, 0, 0), "a value read before the provider is ready degrades to no data");
+        Assert.IsNull(client.Sensors.GetSensorValue(0, 0, 0), "no reading is cached yet");
+        Assert.IsNull(client.Sensors.GetSensorList(), "no list is cached yet");
     }
 
     [TestMethod]
-    public void Sensors_WhenConnected_ListDeserializesWithTheVendorContract()
+    public async Task Sensors_WhenConnected_ListDeserializesWithTheVendorContract()
     {
         // Regression pin for the 2026-09-13 on-device bug: the mirror's data
         // contract must carry the vendor's SensorItem name/namespace, or WCF
@@ -40,6 +39,8 @@ public sealed class WigiDashServiceClientTests
         using var client = new WigiDashServiceClient();
         if (!client.TryConnect())
             return;
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
 
         var sensors = client.Sensors.GetSensorList();
         Assert.IsNotNull(sensors,
@@ -90,24 +91,24 @@ public sealed class WigiDashServiceClientTests
     }
 
     [TestMethod]
-    public void Sensors_EmptyListFromATornDownProvider_ReinitializesAndRecovers()
+    public async Task Sensors_EmptyListFromATornDownProvider_ReinitializesAndRecovers()
     {
         // The vendor's HWiNFO provider is a shared session; when another
         // consumer (the vendor Manager) deinits it, GetSensorList returns an
-        // empty list, not an error (observed on-device 2026-09-13). The client
-        // must re-initialize the provider and recover on that read.
+        // empty list, not an error. The background refresh must re-initialize
+        // the provider and publish the recovered list.
         var channel = new FakeWcfChannel();
         using var client = new WigiDashServiceClient(channel);
 
-        var sensors = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
 
         Assert.IsTrue(channel.InitCalled, "an empty sensor list must trigger a provider re-initialization");
-        Assert.IsNotNull(sensors);
-        Assert.AreEqual(1, sensors.Count);
+        Assert.IsNotNull(client.Sensors.GetSensorList());
+        Assert.AreEqual(1, client.Sensors.GetSensorList()!.Count);
     }
 
     [TestMethod]
-    public void Sensors_NonEmptyList_DoesNotReinitialize()
+    public async Task Sensors_NonEmptyList_DoesNotReinitialize()
     {
         var channel = new FakeWcfChannel
         {
@@ -115,81 +116,55 @@ public sealed class WigiDashServiceClientTests
         };
         using var client = new WigiDashServiceClient(channel);
 
-        var sensors = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
 
         Assert.IsFalse(channel.InitCalled);
-        Assert.IsNotNull(sensors);
-        Assert.AreEqual(1, sensors.Count);
+        Assert.AreEqual(1, client.Sensors.GetSensorList()!.Count);
     }
 
     [TestMethod]
-    public void Sensors_FailedCallDropsTheChannelSoTheClientCanReconnect()
+    public async Task Sensors_FailedCallDropsTheChannelSoTheClientCanReconnect()
     {
         // A faulted/dead channel must degrade to no data AND be dropped, so the
-        // next read reopens it (the app self-heals when the vendor service
+        // next refresh reopens it (the app self-heals when the vendor service
         // restarts; the former client kept the dead channel forever).
         var channel = new FakeWcfChannel { ThrowOnList = true };
         using var client = new WigiDashServiceClient(channel);
 
         Assert.IsNull(client.Sensors.GetSensorList(), "a failed call must degrade to no data, not throw");
+
+        await WaitUntilAsync(() => !client.Sensors.IsReady);
+
         Assert.IsFalse(client.Sensors.IsReady, "the dead channel must be dropped for the next attempt to reopen");
     }
 
     [TestMethod]
-    public void Sensors_AfterAFailedCall_ReopensTheChannelOnceTheRetryWindowElapses()
-    {
-        // The full self-heal path through the injected channel factory + clock:
-        // open -> read -> the channel dies -> drop -> after the retry window,
-        // reopen and recover (no app relaunch).
-        var clock = new FakeTimeProvider();
-        int opened = 0;
-        var channel = new FakeWcfChannel();
-        using var client = new WigiDashServiceClient(() => { opened++; return channel; }, clock);
-
-        var first = client.Sensors.GetSensorList();
-        Assert.IsNotNull(first);
-        Assert.AreEqual(1, opened, "the first read opens the channel");
-        Assert.IsTrue(client.Sensors.IsReady);
-
-        channel.ThrowOnList = true;
-        Assert.IsNull(client.Sensors.GetSensorList(), "a dead channel must degrade to no data");
-        Assert.IsFalse(client.Sensors.IsReady, "and be dropped");
-
-        channel.ThrowOnList = false;
-        Assert.IsNull(client.Sensors.GetSensorList(), "the reopen is throttled inside the retry window");
-        Assert.AreEqual(1, opened, "no reopen inside the retry window");
-
-        clock.Advance(TimeSpan.FromSeconds(6));
-        var recovered = client.Sensors.GetSensorList();
-        Assert.IsNotNull(recovered, "the client must recover once the retry window elapses");
-        Assert.AreEqual(2, opened, "the dropped channel must be reopened after the retry window");
-        Assert.IsTrue(client.Sensors.IsReady);
-    }
-
-    [TestMethod]
-    public void Sensors_FailedValueReadDropsTheChannelSoTheClientCanReconnect()
+    public async Task Sensors_FailedValueReadDropsTheChannelSoTheClientCanReconnect()
     {
         var channel = new FakeWcfChannel { ThrowOnValue = true };
         using var client = new WigiDashServiceClient(channel);
 
         Assert.IsNull(client.Sensors.GetSensorValue(1, 2, 0), "a failed value read must degrade to no data");
-        Assert.IsFalse(client.Sensors.IsReady, "and drop the dead channel");
+
+        await WaitUntilAsync(() => !client.Sensors.IsReady);
+        Assert.IsFalse(client.Sensors.IsReady, "the dead channel must be dropped");
     }
 
     [TestMethod]
-    public void Sensors_InitThrows_DropsTheChannelSoTheNextAttemptCanReopen()
+    public async Task Sensors_InitThrows_DropsTheChannelSoTheNextAttemptCanReopen()
     {
         int opened = 0;
         var channel = new FakeWcfChannel { ThrowOnInit = true };
         using var client = new WigiDashServiceClient(() => { opened++; return channel; }, new FakeTimeProvider());
 
         Assert.IsNull(client.Sensors.GetSensorList(), "a throwing init must degrade to no data");
-        Assert.AreEqual(1, opened, "the channel was opened once");
+
+        await WaitUntilAsync(() => opened >= 1);
         Assert.IsFalse(client.Sensors.IsReady, "the faulted channel must be dropped, not retried in place forever");
     }
 
     [TestMethod]
-    public void Sensors_NilListElement_IsSkippedNotThrown()
+    public async Task Sensors_NilListElement_IsSkippedNotThrown()
     {
         // A nil element (<SensorItem i:nil="true"/>) deserializes to null; the
         // old projection threw an NRE that reached the render tick uncaught and
@@ -201,11 +176,52 @@ public sealed class WigiDashServiceClientTests
         };
         using var client = new WigiDashServiceClient(channel);
 
-        var sensors = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
 
-        Assert.IsNotNull(sensors);
-        Assert.AreEqual(1, sensors.Count, "a nil list element must be skipped, not projected");
+        Assert.AreEqual(1, client.Sensors.GetSensorList()!.Count, "a nil list element must be skipped, not projected");
     }
+
+    [TestMethod]
+    public async Task Sensors_AfterAFailedCall_ReopensTheChannelOnceTheRetryWindowElapses()
+    {
+        // The full self-heal path through the injected channel factory + clock:
+        // the background refresh reads, the channel dies, drops, and after the
+        // retry window reopens and recovers (no app relaunch).
+        var clock = new FakeTimeProvider();
+        int opened = 0;
+        var channel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
+        };
+        using var client = new WigiDashServiceClient(() => { opened++; return channel; }, clock);
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
+        Assert.AreEqual(1, opened, "the first refresh opens the channel");
+        Assert.IsTrue(client.Sensors.IsReady);
+
+        // The channel dies: the next (stale) read schedules a refresh, which
+        // fails and drops the channel.
+        channel.ThrowOnList = true;
+        clock.Advance(TimeSpan.FromSeconds(3));
+        _ = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => !client.Sensors.IsReady);
+
+        // The reopen is rate-limited: no attempt inside the retry window.
+        channel.ThrowOnList = false;
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        _ = client.Sensors.GetSensorList();
+        Assert.AreEqual(1, opened, "no reopen inside the retry window");
+
+        // Past the windows: the next refresh reopens and recovers.
+        clock.Advance(TimeSpan.FromSeconds(6));
+        _ = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => opened >= 2);
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
+        Assert.IsTrue(client.Sensors.IsReady);
+    }
+
+    private static Task WaitUntilAsync(Func<bool> condition)
+        => TestWait.WaitUntilAsync(condition, TimeSpan.FromSeconds(5));
 
     private sealed class FakeWcfChannel : IWigiDashWcf
     {

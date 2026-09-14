@@ -43,6 +43,28 @@ public sealed class WigiDashServiceClient : IDisposable
     private DateTimeOffset _lastProviderAttemptUtc = DateTimeOffset.MinValue;
     private bool _disposed;
 
+    /// <summary>Lock-free readiness flag (the facet's IsReady is read on the UI thread).</summary>
+    private volatile bool _connected;
+
+    // --- Background-refreshed cache: the UI thread never performs WCF I/O ---
+    private readonly System.Threading.Lock _cacheLock = new();
+    private IReadOnlyList<VendorSensorItem>? _cachedSensors;
+    private DateTimeOffset _cachedSensorsAtUtc = DateTimeOffset.MinValue;
+    private readonly Dictionary<(int ReadingType, int SensorId1, int SensorId2), VendorSensorReading> _cachedReadings = [];
+    private DateTimeOffset _cachedReadingsAtUtc = DateTimeOffset.MinValue;
+    private readonly HashSet<(int ReadingType, int SensorId1, int SensorId2)> _requestedKeys = [];
+    private int _refreshInFlight;
+    private DateTimeOffset _lastRefreshAttemptUtc = DateTimeOffset.MinValue;
+
+    /// <summary>Minimum gap between background refresh attempts (a wedged service backoff).</summary>
+    private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long a cached sensor list is served before a refresh is scheduled.</summary>
+    private static readonly TimeSpan SensorListTtl = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a cached sensor reading is served before a refresh is scheduled.</summary>
+    private static readonly TimeSpan SensorValueTtl = TimeSpan.FromMilliseconds(500);
+
     /// <summary>The HWiNFO sensor read facet.</summary>
     public ISensorValues Sensors { get; }
 
@@ -72,6 +94,7 @@ public sealed class WigiDashServiceClient : IDisposable
         _clock = TimeProvider.System;
         _channel = channel;
         _sensorReady = true; // the injected channel stands in for a connected service
+        _connected = true;
         Sensors = new SensorValuesFacet(this);
     }
 
@@ -133,6 +156,8 @@ public sealed class WigiDashServiceClient : IDisposable
             {
                 FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
             }
+
+            _connected = _sensorReady;
         }
         catch
         {
@@ -227,6 +252,7 @@ public sealed class WigiDashServiceClient : IDisposable
         try { _factory?.Close(); } catch { try { _factory?.Abort(); } catch { /* best-effort */ } }
         _factory = null;
         _sensorReady = false;
+        _connected = false;
     }
 
     /// <summary>Closes the channel. The vendor's shared provider is left initialized (see the class notes).</summary>
@@ -245,80 +271,189 @@ public sealed class WigiDashServiceClient : IDisposable
         }
     }
 
-    // --- Facets ---
+    // --- Background cache (no WCF I/O on the caller's thread) ---
 
-    private sealed class SensorValuesFacet(WigiDashServiceClient owner) : ISensorValues
+    /// <summary>
+    /// Schedules a background refresh when a cache entry is stale. The caller
+    /// holds <see cref="_cacheLock"/>. Single-flight and rate-limited: a refresh
+    /// already running wins, and <see cref="RefreshMinInterval"/> backs a wedged
+    /// service off (its calls hold a pool thread for the binding timeout).
+    /// </summary>
+    private void ScheduleRefreshLocked()
     {
-        public bool IsReady
-        {
-            get { lock (owner._gate) return owner._channel != null && owner._sensorReady; }
-        }
+        if (_disposed) return;
+        var now = _clock.GetUtcNow();
+        if (now - _lastRefreshAttemptUtc < RefreshMinInterval) return;
+        if (Interlocked.CompareExchange(ref _refreshInFlight, 1, 0) != 0) return;
+        _lastRefreshAttemptUtc = now;
+        _ = Task.Run(RefreshCache);
+    }
 
-        public IReadOnlyList<VendorSensorItem>? GetSensorList()
+    /// <summary>
+    /// Performs the vendor I/O off the caller's thread and publishes one
+    /// snapshot. Connection state mutates under <see cref="_gate"/> (the same
+    /// lock the synchronous connect path uses); the snapshot swaps under a brief
+    /// <see cref="_cacheLock"/>, so a reader never waits on I/O. Never throws.
+    /// </summary>
+    private void RefreshCache()
+    {
+        IReadOnlyList<VendorSensorItem>? list = null;
+        var readings = new Dictionary<(int, int, int), VendorSensorReading>();
+        try
         {
-            lock (owner._gate)
+            lock (_gate)
             {
-                // Reconnect when the channel is missing (never connected, or a
-                // previous call dropped it). Throttled inside the client.
-                owner.EnsureConnectedLocked();
-                if (owner._channel == null) return null;
+                if (_disposed) return;
 
-                var raw = owner.GetRawSensorList();
+                EnsureConnectedLocked();
+                if (_channel == null) return;
+
+                var raw = GetRawSensorList();
                 if (raw == null)
                 {
-                    // A dead or faulted channel: drop it so the next read reopens.
-                    owner.CloseChannelLocked();
-                    return null;
+                    CloseChannelLocked();
+                    return;
                 }
 
                 if (raw.Count == 0)
                 {
-                    // Empty means the shared provider was torn down (see
-                    // ProviderRetryIntervalMs); re-init and re-read.
-                    owner.ReinitSensorProviderLocked();
-                    raw = owner.GetRawSensorList();
+                    // Empty means the shared provider was torn down; re-init and re-read.
+                    ReinitSensorProviderLocked();
+                    raw = GetRawSensorList();
                     if (raw == null)
                     {
-                        owner.CloseChannelLocked();
-                        return null;
+                        CloseChannelLocked();
+                        return;
                     }
                 }
 
-                var items = new List<VendorSensorItem>(raw.Count);
-                foreach (var s in raw)
+                list = ProjectSensors(raw);
+                foreach (var key in RequestedKeys())
                 {
-                    // A nil list element (<SensorItem i:nil="true"/>) deserializes
-                    // to null; projecting it threw an NRE that reached the render
-                    // tick uncaught and killed the process. Skip nulls.
-                    if (s is null)
+                    var value = GetRawSensorValue(key.ReadingType, key.SensorId1, key.SensorId2);
+                    if (value == null)
                     {
-                        continue;
+                        CloseChannelLocked();
+                        break;
                     }
 
-                    items.Add(new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit));
+                    readings[key] = new VendorSensorReading(value.Value.Value, value.Value.IsValid);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort: a failed refresh publishes null and backs off via the TTL stamps.
+        }
+        finally
+        {
+            PublishSnapshot(list, readings);
+            Interlocked.Exchange(ref _refreshInFlight, 0);
+        }
+    }
+
+    private (int ReadingType, int SensorId1, int SensorId2)[] RequestedKeys()
+    {
+        lock (_cacheLock)
+        {
+            return [.. _requestedKeys];
+        }
+    }
+
+    private void PublishSnapshot(
+        IReadOnlyList<VendorSensorItem>? list,
+        IReadOnlyDictionary<(int, int, int), VendorSensorReading> readings)
+    {
+        lock (_cacheLock)
+        {
+            if (_disposed) return;
+            var now = _clock.GetUtcNow();
+
+            if (list != null)
+            {
+                _cachedSensors = list;
+            }
+            else
+            {
+                // A failed refresh: drop the readings so the widget degrades to
+                // its placeholder instead of showing a stale value.
+                _cachedReadings.Clear();
+            }
+
+            // Stamp the list attempt either way (the failure backoff).
+            _cachedSensorsAtUtc = now;
+
+            if (readings.Count > 0)
+            {
+                foreach (var kv in readings)
+                {
+                    _cachedReadings[kv.Key] = kv.Value;
+                }
+            }
+
+            if (list != null && readings.Count > 0)
+            {
+                _cachedReadingsAtUtc = now;
+            }
+
+            _requestedKeys.Clear();
+        }
+    }
+
+    private static IReadOnlyList<VendorSensorItem> ProjectSensors(IReadOnlyList<VendorSensorItem> raw)
+    {
+        var items = new List<VendorSensorItem>(raw.Count);
+        foreach (var s in raw)
+        {
+            // A nil list element (<SensorItem i:nil="true"/>) deserializes to
+            // null; projecting it threw an NRE that reached the render tick
+            // uncaught and killed the process. Skip nulls.
+            if (s is null)
+            {
+                continue;
+            }
+
+            items.Add(new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit));
+        }
+
+        return items;
+    }
+
+    // --- Facets ---
+
+    private sealed class SensorValuesFacet(WigiDashServiceClient owner) : ISensorValues
+    {
+        public bool IsReady => owner._connected;
+
+        public IReadOnlyList<VendorSensorItem>? GetSensorList()
+        {
+            // Served from the background-refreshed cache: the UI thread never
+            // performs WCF I/O. The first read returns null and schedules the
+            // first refresh (the widget shows its placeholder for one frame).
+            lock (owner._cacheLock)
+            {
+                if (owner._clock.GetUtcNow() - owner._cachedSensorsAtUtc >= SensorListTtl)
+                {
+                    owner.ScheduleRefreshLocked();
                 }
 
-                return items;
+                return owner._cachedSensors;
             }
         }
 
         public VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2)
         {
-            lock (owner._gate)
+            lock (owner._cacheLock)
             {
-                if (owner._channel == null || !owner._sensorReady) return null;
-                var r = owner.GetRawSensorValue(readingType, sensorId1, sensorId2);
-                if (r == null)
+                var key = (readingType, sensorId1, sensorId2);
+                owner._requestedKeys.Add(key);
+                bool missing = !owner._cachedReadings.ContainsKey(key);
+                if (missing || owner._clock.GetUtcNow() - owner._cachedReadingsAtUtc >= SensorValueTtl)
                 {
-                    // A dead or faulted channel: drop it so the next read
-                    // reopens (the list path does the same; without this,
-                    // IsReady kept claiming a dead channel and recovery waited
-                    // on the next 5 s list refresh).
-                    owner.CloseChannelLocked();
-                    return null;
+                    owner.ScheduleRefreshLocked();
                 }
 
-                return new VendorSensorReading(r.Value.Value, r.Value.IsValid);
+                return owner._cachedReadings.TryGetValue(key, out var reading) ? reading : null;
             }
         }
     }
