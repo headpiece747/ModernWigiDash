@@ -15,7 +15,7 @@
 
 </div>
 
-ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, direct USB access, and **in-app auto-updates**, all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), Twitch chat, media controls, and market tickers at your fingertips.
+ModernWigiDash replaces vendor dashboard software with a **zero-allocation SkiaSharp frame compositor**, an **extensible widget plugin architecture**, direct USB access, and **in-app auto-updates**, all built on .NET 10 with current C# idioms. Frames stream to the display over direct **USB HID / WinUSB** transport, with hardware telemetry (via LibreHardwareService), frame-time analytics (via PresentMon Service), HWiNFO/AIDA64 vendor readings and panels, Twitch chat, media controls, market tickers, and a calendar at your fingertips.
 
 <div align="center">
 
@@ -67,6 +67,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Hardware Abstraction** | Direct USB HID control via `DisplayHidTransport`, native WinUSB P/Invoke with LibUsbDotNet fallback |
 | **Hardware Telemetry** | Live CPU, GPU, VRAM, RAM, and thermal readouts read from **LibreHardwareService's** shared-memory maps (ADR-0004), no elevation required |
 | **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003). The app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy. The readout drops to **zero when the tracked target isn't actually displayed** (e.g. a backgrounded fullscreen game) instead of showing its hidden render rate |
+| **Vendor Integration** | The **HWiNFO Sensor** widget reads any HWiNFO sensor G.SKILL's WigiDash service exposes (over its WCF endpoint, served to the UI from a background-refreshed cache so the render tick never does I/O; the connection self-heals when the service starts or restarts). The **AIDA64 Panel** widget renders your AIDA64 sensor panel live from the vendor's shared map, playing the vendor **master** role itself (ADR-0026) so AIDA64 publishes frames with the vendor Manager closed |
+| **Telemetry Display Modes** | Every reading widget draws in **Gauge / Bar / Value / Graph** modes with auto-scaling, a sparkline history, and a shrink-to-fit layout that keeps the value inside the widget at any placement size |
 | **In-App Auto-Update** | Checks GitHub once at startup; downloads a slim app-only zip (~90 MB, SHA-256 verified) and swaps the executable in place on restart, no manual zip juggling |
 | **Power Lifecycle** | Windows sleep/resume handling: the 30 FPS pump pauses on suspend and restarts with a forced USB reconnect on wake |
 | **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards. Persisted to `app_theme.json` in `%LocalAppData%\ModernWigiDash` (a pre-release copy next to the exe migrates automatically, one time); the profile export carries the theme and import offers a one-click restore |

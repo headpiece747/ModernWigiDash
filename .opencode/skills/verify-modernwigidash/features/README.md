@@ -50,3 +50,4 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Calendar feed editor](./calendar.md) covers adding a feed row, editing its URL/label, and the on-disk FeedsJson persistence proof (the load-bearing second view), with the `Add feed` needle-collision and debounced-persist gotchas.
 - [Profile round trip](./profile-roundtrip.md) covers export and import of the profile file, with the on-disk JSON second-view proof.
 - [USB status badge](./usb-status.md) covers the badge's Simulated-mode state (UI side only; physical-display behavior routes to hardware-e2e-validation).
+- [Vendor widgets](./vendor-widgets.md) covers placing the HWiNFO Sensor and AIDA64 Panel widgets, the sensor dropdown, the display-mode cycles, and the shared AIDA64 master (the log's one-registration line is the second view for the sharing rule).
