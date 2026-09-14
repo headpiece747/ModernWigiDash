@@ -16,6 +16,7 @@ namespace ModernWigiDash.Widgets;
 public sealed class AidaPanelWidget : ModernWidgetBase
 {
     private readonly AidaPanelMaster? _master;
+    private readonly bool _masterBorrowed;
     private readonly AidaMmapReader? _reader;
     private SKBitmap? _frameBitmap;
     private long _lastFrameVersion;
@@ -25,13 +26,16 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
 
     /// <summary>
-    /// Binds the production master: it registers the vendor's AIDA64 widget slot
-    /// and drives the publish/ack protocol on a background loop, so AIDA64
-    /// publishes live frames. The widget only draws the published copy.
+    /// Borrows the process-wide master: it registers the vendor's AIDA64 widget
+    /// slot and drives the publish/ack protocol on a background loop, so AIDA64
+    /// publishes live frames. The widget only draws the published copy. The
+    /// master is SHARED (slot 0 is one slot), so two AIDA64 widgets never fight
+    /// over it.
     /// </summary>
     public AidaPanelWidget()
-        : this(AidaPanelService.CreateProduction())
     {
+        _master = AidaPanelService.Acquire();
+        _masterBorrowed = true;
     }
 
     /// <summary>Read-only seam (tests, and the path used when another master owns the slot).</summary>
@@ -212,7 +216,15 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        _master?.Dispose();
+        if (_masterBorrowed)
+        {
+            AidaPanelService.Release();
+        }
+        else
+        {
+            _master?.Dispose();
+        }
+
         _reader?.Dispose();
         RecycleBitmap();
         _placeholderTitlePaint.Dispose();

@@ -23,15 +23,21 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 == Do I need the telemetry? ==
 
-  No. Everything works with just the app:
-    - Clock, Stopwatch, Audio Visualizer, Now Playing, Twitch, Hotkey,
-      Stock & Crypto, Picture & GIF, Weather, Text  — all fine.
-    - Two widgets need a background service, and only those two:
-        Hardware Monitor  <- needs LibreHardwareService
-        FPS / Frame Time  <- needs PresentMon Service
-  Without the services those widgets show a graceful "unavailable" state.
-  Both services are bundled and installed by  setup-telemetry.bat  (Admin).
-  They run in the background and start automatically with Windows.
+   No. Everything works with just the app:
+     - Clock, Stopwatch, Audio Visualizer, Now Playing, Twitch, Hotkey,
+       Stock & Crypto, Picture & GIF, Weather, Calendar, Text  — all fine.
+     - Three widgets need a background service:
+         Hardware Monitor   <- needs LibreHardwareService
+         FPS / Frame Time   <- needs PresentMon Service
+         HWiNFO Sensor      <- needs the vendor's WigiDash service, which the
+         AIDA64 Panel          vendor's WigiDash Manager installs. The AIDA64
+                               Panel also needs AIDA64 running with its LCD
+                               output set to the WigiDash (AIDA64 / main menu /
+                               File / Preferences / Hardware Monitoring / LCD).
+   Without the services those widgets show a graceful "unavailable" state.
+   The first two services are bundled and installed by  setup-telemetry.bat
+   (Admin); they run in the background and start automatically with Windows.
+   The vendor service comes from G.SKILL's WigiDash Manager (not bundled).
 
 == First run ==
 
@@ -40,20 +46,19 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
-== What's new in v0.6.10 ==
+== What's new in v0.8.0 ==
 
-  - Minimize to tray on startup: a machine-local opt-in in the settings hub
-    (Behavior group). When enabled, the next launch opens hidden to the tray
-    instead of showing the window, while the display keeps streaming frames.
-    It composes with Start with Windows: launching autostarted with the flag
-    set hides the window rather than minimizing it.
-  - Reliability and internals: the refresh-token rejection is now covered on
-    either leg of the refresh sequence (a rotated access token that fails
-    validation clears the session exactly as a refresh-side refusal does),
-    the bounded standby-wait failure lines carry the vendor's own wording,
-    and the weather pane renders its no-data view instead of placeholder
-    numbers. The settings, lifecycle, page-management, and widget modules
-    were deepened so each rule has one owner and the window stays thin.
+  - New widgets from the vendor integration: HWiNFO Sensor (pick any sensor the
+    vendor's WigiDash service exposes) and AIDA64 Panel (shows your AIDA64 sensor
+    panel live on the display).
+  - Both telemetry widgets (Hardware Monitor and HWiNFO Sensor) now draw in
+    Gauge / Bar / Value / Graph modes, with text that always fits the widget.
+  - The AIDA64 Panel is placed full-screen by default.
+  - Removed the Spotify widget (Spotify's 2025 Web-API changes gate it behind a
+    paid Premium subscription; the free Now Playing widget covers now-playing).
+  - Reliability: the vendor connection recovers on its own when the service
+    starts or restarts, vendor reads never block the UI, and a broken widget can
+    no longer take the app down.
 
 
 == Data locations & reset ==
