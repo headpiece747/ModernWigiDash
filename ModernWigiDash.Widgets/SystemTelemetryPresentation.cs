@@ -107,7 +107,9 @@ public static class SystemTelemetryPresentation
     /// building per frame).
     /// </summary>
     public static string FormatValue(float value, float decimals)
-        => value.ToString(ValueFormats[Math.Clamp((int)MathF.Round(decimals), 0, 3)], CultureInfo.InvariantCulture);
+        => float.IsFinite(value)
+            ? value.ToString(ValueFormats[Math.Clamp((int)MathF.Round(decimals), 0, 3)], CultureInfo.InvariantCulture)
+            : "--";
 
     private static readonly string[] ValueFormats = ["F0", "F1", "F2", "F3"];
 
@@ -119,13 +121,21 @@ public static class SystemTelemetryPresentation
     public static float ResolveMax(bool autoScale, double sensorMax, float maxValue, float value)
     {
         double reference = autoScale ? Math.Max(sensorMax, value) : maxValue;
-        return reference > 0 ? (float)reference : Math.Max(1f, value * 1.2f);
+        if (!double.IsFinite(reference) || reference <= 0)
+        {
+            reference = Math.Max(1f, value * 1.2f);
+        }
+
+        return double.IsFinite(reference) ? (float)reference : 1f;
     }
 
     /// <summary>
     /// The value progress fraction clamped into 0..1 (shared by the gauge and
-    /// bar tracks). A non-positive max can never divide by zero.
+    /// bar tracks). A non-positive max can never divide by zero, and a
+    /// non-finite value/max degrades to 0 (Math.Clamp does not clamp NaN).
     /// </summary>
     public static float GaugeFraction(float value, float max)
-        => Math.Clamp(value / Math.Max(1f, max), 0f, 1f);
+        => float.IsFinite(value) && float.IsFinite(max)
+            ? Math.Clamp(value / Math.Max(1f, max), 0f, 1f)
+            : 0f;
 }

@@ -166,16 +166,43 @@ public sealed class WigiDashServiceClientTests
         Assert.IsTrue(client.Sensors.IsReady);
     }
 
+    [TestMethod]
+    public void Sensors_FailedValueReadDropsTheChannelSoTheClientCanReconnect()
+    {
+        var channel = new FakeWcfChannel { ThrowOnValue = true };
+        using var client = new WigiDashServiceClient(channel);
+
+        Assert.IsNull(client.Sensors.GetSensorValue(1, 2, 0), "a failed value read must degrade to no data");
+        Assert.IsFalse(client.Sensors.IsReady, "and drop the dead channel");
+    }
+
+    [TestMethod]
+    public void Sensors_InitThrows_DropsTheChannelSoTheNextAttemptCanReopen()
+    {
+        int opened = 0;
+        var channel = new FakeWcfChannel { ThrowOnInit = true };
+        using var client = new WigiDashServiceClient(() => { opened++; return channel; }, new FakeTimeProvider());
+
+        Assert.IsNull(client.Sensors.GetSensorList(), "a throwing init must degrade to no data");
+        Assert.AreEqual(1, opened, "the channel was opened once");
+        Assert.IsFalse(client.Sensors.IsReady, "the faulted channel must be dropped, not retried in place forever");
+    }
+
     private sealed class FakeWcfChannel : IWigiDashWcf
     {
         public bool InitCalled { get; private set; }
 
         public bool ThrowOnList { get; set; }
 
+        public bool ThrowOnValue { get; set; }
+
+        public bool ThrowOnInit { get; set; }
+
         public List<VendorSensorItem> Sensors { get; set; } = [];
 
         public bool InitSensorProvider(bool smbus, bool ec, bool presentmon)
         {
+            if (ThrowOnInit) throw new InvalidOperationException("init dead");
             InitCalled = true;
             Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")];
             return true;
@@ -192,6 +219,7 @@ public sealed class WigiDashServiceClientTests
 
         public double GetSensorValue(int readingType, int sensorId1, int sensorId2, out bool isValid)
         {
+            if (ThrowOnValue) throw new InvalidOperationException("value dead");
             isValid = true;
             return 42;
         }

@@ -124,7 +124,11 @@ public sealed class WigiDashServiceClient : IDisposable
         try
         {
             EnsureChannel();
-            _sensorReady = SafeCall(() => _channel!.InitSensorProvider(true, true, true));
+            // A THROWN transport fault must reach the catch below and drop the
+            // channel: the former SafeCall wrapper swallowed it, so a faulted
+            // channel was retried in place forever and TryConnect could never
+            // reopen one (the doc promised the opposite).
+            _sensorReady = _channel!.InitSensorProvider(true, true, true);
             if (!_sensorReady)
             {
                 FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
@@ -290,7 +294,17 @@ public sealed class WigiDashServiceClient : IDisposable
             {
                 if (owner._channel == null || !owner._sensorReady) return null;
                 var r = owner.GetRawSensorValue(readingType, sensorId1, sensorId2);
-                return r == null ? null : new VendorSensorReading(r.Value.Value, r.Value.IsValid);
+                if (r == null)
+                {
+                    // A dead or faulted channel: drop it so the next read
+                    // reopens (the list path does the same; without this,
+                    // IsReady kept claiming a dead channel and recovery waited
+                    // on the next 5 s list refresh).
+                    owner.CloseChannelLocked();
+                    return null;
+                }
+
+                return new VendorSensorReading(r.Value.Value, r.Value.IsValid);
             }
         }
     }

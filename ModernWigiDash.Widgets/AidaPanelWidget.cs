@@ -49,7 +49,7 @@ public sealed class AidaPanelWidget : ModernWidgetBase
 
         // Version-token discipline: only rebuild the bitmap when the buffer
         // content changes (a new frame was read).
-        var version = ComputeBufferVersion(frame.Payload, frame.PayloadLength);
+        var version = ComputeBufferVersion(frame.Payload, frame.PayloadLength, frame.Width, frame.Height);
         if (version != _lastFrameVersion || _frameBitmap == null)
         {
             RecycleBitmap();
@@ -78,11 +78,23 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         Context?.LogError($"AIDA64 panel unavailable: {_reader.LastError}");
     }
 
-    private static long ComputeBufferVersion(byte[] buffer, int length)
+    private static long ComputeBufferVersion(byte[] buffer, int length, int width, int height)
     {
-        long hash = 0;
-        for (int i = 0; i < length; i += 4)
-            hash ^= buffer[i];
+        // FNV-1a over the WHOLE payload, seeded with the geometry. The former
+        // sampled XOR folded 1.2 MB into 8 bits (it ignored the green channel
+        // and every unsampled byte, and collided about 1/256), so a redraw could
+        // leave the previous panel on screen. The full hash is a few hundred
+        // microseconds and only matters when a frame arrives.
+        const uint fnvOffset = 2166136261u;
+        const uint fnvPrime = 16777619u;
+        uint hash = fnvOffset;
+        hash = (hash ^ (uint)width) * fnvPrime;
+        hash = (hash ^ (uint)height) * fnvPrime;
+        for (int i = 0; i < length; i++)
+        {
+            hash = (hash ^ buffer[i]) * fnvPrime;
+        }
+
         return hash;
     }
 
@@ -94,16 +106,23 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         // The payload is an RGB565 little-endian BMP body, stored bottom-up
         // (the reader validates a positive biHeight), while an SKBitmap is
         // top-down. Copy rows in reverse so the panel is not drawn upside
-        // down. A straight copy into an Rgb565 bitmap still avoids a per-pixel
-        // expansion (the old RGBA path allocated a 4x buffer per rebuild).
+        // down. The stride is TIGHT (width*2): the reader validates a tightly
+        // packed payload, so a 4-byte-padded stride would read past the frame
+        // the reader validated and shift every row (a silent misrender).
         var info = new SKImageInfo(width, height, SKColorType.Rgb565, SKAlphaType.Opaque);
         var bitmap = new SKBitmap(info);
         var pixels = bitmap.GetPixels();
-        int srcStride = ((width * 2) + 3) / 4 * 4;
+        int srcStride = width * 2;
         int copyBytes = width * 2;
         for (int row = 0; row < height; row++)
         {
             int srcOffset = (height - 1 - row) * srcStride;
+            if (srcOffset < 0 || srcOffset + copyBytes > payloadLength)
+            {
+                bitmap.Dispose();
+                return null;
+            }
+
             Marshal.Copy(payload, srcOffset, IntPtr.Add(pixels, row * bitmap.RowBytes), copyBytes);
         }
 

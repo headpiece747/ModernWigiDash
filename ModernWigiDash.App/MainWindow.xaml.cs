@@ -414,9 +414,12 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// a fake client without opening a real WCF channel.</summary>
     private void WireVendorService()
     {
+        // No eager TryConnect: the client self-heals on its first read (the
+        // widget's list refresh reconnects/re-inits, throttled), so boot never
+        // blocks on the vendor service and a test host that omits the factory
+        // opens no WCF channel at all.
         var factory = _vendorServiceFactory ?? (() => new ModernWigiDash.Hardware.Service.WigiDashServiceClient());
         var client = factory();
-        client.TryConnect();
         _vendorService = client;
         ModernWigiDash.Hardware.Service.VendorService.SetInstance(client);
     }
