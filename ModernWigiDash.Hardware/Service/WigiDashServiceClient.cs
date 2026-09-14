@@ -59,6 +59,13 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>Minimum gap between background refresh attempts (a wedged service backoff).</summary>
     private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// Deduplicated log for the untrusted-input read failures (the project's
+    /// rule 5: an untrusted-input catch emits one line naming the source and
+    /// the exception, so a hostile or broken producer is observable).
+    /// </summary>
+    private readonly DiagLog _readFailLog = new("VENDOR-SERVICE", cadence: 60, logFirst: true);
+
     /// <summary>How long a cached sensor list is served before a refresh is scheduled.</summary>
     private static readonly TimeSpan SensorListTtl = TimeSpan.FromSeconds(2);
 
@@ -227,8 +234,15 @@ public sealed class WigiDashServiceClient : IDisposable
 
     internal IReadOnlyList<VendorSensorItem>? GetRawSensorList()
     {
-        try { return _channel!.GetSensorList()?.ToList(); }
-        catch { return null; }
+        try
+        {
+            return _channel!.GetSensorList()?.ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _readFailLog.Write(() => $"sensor list read failed: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
     }
 
     internal (double Value, bool IsValid)? GetRawSensorValue(int rt, int id1, int id2)
@@ -238,7 +252,11 @@ public sealed class WigiDashServiceClient : IDisposable
             var value = _channel!.GetSensorValue(rt, id1, id2, out var isValid);
             return (value, isValid);
         }
-        catch { return null; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _readFailLog.Write(() => $"sensor value ({rt}:{id1}:{id2}) read failed: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
     }
 
     private void CloseChannelLocked()

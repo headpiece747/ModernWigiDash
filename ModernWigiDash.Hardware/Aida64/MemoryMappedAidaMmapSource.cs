@@ -20,6 +20,8 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
     private readonly Func<string, MemoryMappedFile> _openMap;
     private MemoryMappedFile? _map;
     private MemoryMappedViewAccessor? _accessor;
+    private Mutex? _mutex;
+    private bool _mutexProbed;
     private bool _disposed;
 
     /// <summary>
@@ -56,20 +58,13 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
             return false;
         }
 
-        Mutex? mutex = null;
+        // The mutex is probed ONCE for the source's lifetime: the vendor's
+        // descriptor denies a non-elevated process, so OpenExisting threw on
+        // every read (90 exceptions a second at 30 FPS before this). A null
+        // handle means "copy unlocked", never "map down"; the map-open failure
+        // below is the liveness signal.
+        Mutex? mutex = GetMutex();
         bool acquired = false;
-        try
-        {
-            mutex = _openMutex(MutexName);
-        }
-        catch
-        {
-            // Best-effort: the vendor creates the mutex with a descriptor that
-            // denies a non-elevated process, and an absent mutex means AIDA64
-            // is fully down, which the map-open failure below reports. Either
-            // way the copy is attempted; the reader validates the header.
-        }
-
         if (mutex is not null)
         {
             bool usable = true;
@@ -90,7 +85,6 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
 
             if (usable && !acquired)
             {
-                mutex.Dispose();
                 error = "AIDA64 map mutex not acquired within 100 ms (writer holds it)";
                 return false;
             }
@@ -124,24 +118,45 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
         }
         finally
         {
-            if (mutex is not null)
+            if (acquired && mutex is not null)
             {
-                if (acquired)
+                try
                 {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch (ApplicationException)
-                    {
-                        // The writer's process may have exited while the mutex
-                        // was held. Releasing an orphaned mutex is best-effort.
-                    }
+                    mutex.ReleaseMutex();
                 }
-
-                mutex.Dispose();
+                catch (ApplicationException)
+                {
+                    // The writer's process may have exited while the mutex was
+                    // held. Releasing an orphaned mutex is best-effort.
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// The cached mutex handle: probed once, null when unopenable (the vendor
+    /// denies a non-elevated process), disposed with the source.
+    /// </summary>
+    private Mutex? GetMutex()
+    {
+        if (_mutexProbed)
+        {
+            return _mutex;
+        }
+
+        _mutexProbed = true;
+        try
+        {
+            _mutex = _openMutex(MutexName);
+        }
+        catch
+        {
+            // Best-effort: an absent mutex means AIDA64 is fully down, which
+            // the map-open failure reports. The copy is still attempted.
+            _mutex = null;
+        }
+
+        return _mutex;
     }
 
     /// <inheritdoc />
@@ -154,6 +169,8 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
 
         _disposed = true;
         DisposeAccessor();
+        _mutex?.Dispose();
+        _mutex = null;
     }
 
     private bool EnsureAccessor(out string? error)
