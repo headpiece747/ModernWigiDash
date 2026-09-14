@@ -78,17 +78,20 @@ public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvi
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var client = VendorService.Instance;
-        if (client == null || !client.Sensors.IsReady)
+        if (client == null)
         {
-            DrawPlaceholder(canvas, bounds);
+            DrawPlaceholder(canvas, bounds, serviceReady: false);
             return;
         }
 
+        // No readiness gate here: RefreshReading's list refresh (every 5 s)
+        // drives the client's self-heal, so a vendor service that starts or
+        // restarts after the app is picked up without a relaunch.
         RefreshReading(client);
 
         if (!_hasReading || _sensor == null)
         {
-            DrawPlaceholder(canvas, bounds);
+            DrawPlaceholder(canvas, bounds, client.Sensors.IsReady);
             return;
         }
 
@@ -140,8 +143,10 @@ public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvi
     {
         var now = Environment.TickCount64;
 
-        if (_sensorList == null || now - _sensorListAt >= SensorListRefreshMs)
+        if (now - _sensorListAt >= SensorListRefreshMs)
         {
+            // Retry on the cadence even after a failed read: a null list must
+            // not short-circuit into a per-tick retry storm.
             _sensorList = client.Sensors.GetSensorList()?.ToArray();
             _sensorListAt = now;
         }
@@ -191,8 +196,13 @@ public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvi
         _hasReading = true;
     }
 
-    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
-        => _renderer.DrawPlaceholder(canvas, bounds, "HWiNFO", "Vendor service not connected", ColorOf("#9CA3AF", SKColors.Gray));
+    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds, bool serviceReady)
+        => _renderer.DrawPlaceholder(
+            canvas,
+            bounds,
+            "HWiNFO",
+            serviceReady ? "No sensor data" : "Vendor service not connected",
+            ColorOf("#9CA3AF", SKColors.Gray));
 
     /// <summary>The stable key for a vendor sensor: reading type + both ids.</summary>
     internal static string ComposeKey(int readingType, int sensorId1, int sensorId2)

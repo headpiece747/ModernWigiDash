@@ -27,11 +27,12 @@ public sealed class WigiDashServiceClient : IDisposable
     /// The vendor's HWiNFO provider is a SHARED, process-wide session on the
     /// service: any consumer's <c>DeInit</c> tears it down for every other
     /// consumer (the vendor Manager deinits on exit) and <c>GetSensorList</c>
-    /// then returns an EMPTY list, not an error. Re-initialize at most this
-    /// often when a list read comes back empty, so a widget recovers without an
-    /// init storm on the render tick.
+    /// then returns an EMPTY list, not an error. Retry the provider - reconnect
+    /// when the channel is missing/dead, re-initialize when it was torn down -
+    /// at most this often, so the render tick's probe and list refresh recover
+    /// without an init storm.
     /// </summary>
-    private const long SensorProviderReinitIntervalMs = 5000;
+    private const long ProviderRetryIntervalMs = 5000;
 
     private readonly System.Threading.Lock _gate = new();
     private IWigiDashWcf? _channel;
@@ -62,34 +63,57 @@ public sealed class WigiDashServiceClient : IDisposable
     internal WigiDashServiceClient(IWigiDashWcf channel)
     {
         _channel = channel;
+        _sensorReady = true; // the injected channel stands in for a connected service
         Sensors = new SensorValuesFacet(this);
     }
 
     /// <summary>
-    /// Attempts to connect to the vendor service and initialize both providers.
-    /// Returns true when the channel is open and at least one provider initialized.
-    /// Never throws: a connection failure degrades to false (the ADR-0017 pattern).
+    /// Attempts to connect to the vendor service and initialize the HWiNFO
+    /// provider. Returns true when the channel is open and the provider is
+    /// initialized. Never throws (the ADR-0017 pattern). Throttled: a repeat
+    /// call within <see cref="ProviderRetryIntervalMs"/> is a no-op, so a widget
+    /// can use it as its self-heal probe.
     /// </summary>
     public bool TryConnect()
     {
         lock (_gate)
         {
             if (_disposed) return false;
-            try
+            EnsureConnectedLocked();
+            return _channel != null && _sensorReady;
+        }
+    }
+
+    /// <summary>
+    /// (Re)opens the channel and initializes the provider when the client is not
+    /// ready, throttled to one attempt per <see cref="ProviderRetryIntervalMs"/>.
+    /// The caller holds <see cref="_gate"/>. A failed leg drops the channel so
+    /// the next attempt reopens it, and never throws: the app recovers when the
+    /// vendor service starts or restarts after the app (the former one-shot
+    /// connect left the widget a placeholder until the next app launch).
+    /// </summary>
+    internal void EnsureConnectedLocked()
+    {
+        if (_disposed || (_channel != null && _sensorReady))
+            return;
+
+        var now = Environment.TickCount64;
+        if (now - _lastSensorInitTicks < ProviderRetryIntervalMs)
+            return;
+        _lastSensorInitTicks = now;
+
+        try
+        {
+            EnsureChannel();
+            _sensorReady = SafeCall(() => _channel!.InitSensorProvider(true, true, true));
+            if (!_sensorReady)
             {
-                EnsureChannel();
-                _lastSensorInitTicks = Environment.TickCount64;
-                _sensorReady = SafeCall(() => _channel!.InitSensorProvider(true, true, true));
-                var ok = _sensorReady;
-                if (!ok)
-                    FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
-                return ok;
+                FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
             }
-            catch
-            {
-                CloseChannelLocked();
-                return false;
-            }
+        }
+        catch
+        {
+            CloseChannelLocked();
         }
     }
 
@@ -133,7 +157,7 @@ public sealed class WigiDashServiceClient : IDisposable
         if (_channel == null || _disposed)
             return;
         var now = Environment.TickCount64;
-        if (now - _lastSensorInitTicks < SensorProviderReinitIntervalMs)
+        if (now - _lastSensorInitTicks < ProviderRetryIntervalMs)
             return;
         _lastSensorInitTicks = now;
         _sensorReady = SafeCall(() => _channel.InitSensorProvider(true, true, true));
@@ -197,16 +221,32 @@ public sealed class WigiDashServiceClient : IDisposable
         {
             lock (owner._gate)
             {
+                // Reconnect when the channel is missing (never connected, or a
+                // previous call dropped it). Throttled inside the client.
+                owner.EnsureConnectedLocked();
                 if (owner._channel == null) return null;
+
                 var raw = owner.GetRawSensorList();
-                if (raw is { Count: 0 })
+                if (raw == null)
+                {
+                    // A dead or faulted channel: drop it so the next read reopens.
+                    owner.CloseChannelLocked();
+                    return null;
+                }
+
+                if (raw.Count == 0)
                 {
                     // Empty means the shared provider was torn down (see
-                    // SensorProviderReinitIntervalMs); re-init and re-read.
+                    // ProviderRetryIntervalMs); re-init and re-read.
                     owner.ReinitSensorProviderLocked();
                     raw = owner.GetRawSensorList();
+                    if (raw == null)
+                    {
+                        owner.CloseChannelLocked();
+                        return null;
+                    }
                 }
-                if (raw == null) return null;
+
                 return raw.Select(s => new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit)).ToList();
             }
         }

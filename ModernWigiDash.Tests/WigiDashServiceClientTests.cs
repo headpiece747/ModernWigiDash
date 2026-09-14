@@ -17,12 +17,16 @@ public sealed class WigiDashServiceClientTests
     }
 
     [TestMethod]
-    public void Sensors_WhenNotConnected_IsReadyFalse()
+    public void Sensors_BeforeARead_IsNotReadyAndReadsNoValue()
     {
+        // IsReady is a pure probe (no I/O): a fresh client is not ready until a
+        // read opens the channel and initializes the provider. GetSensorList is
+        // deliberately not asserted here - it self-heals (connects when the
+        // service is reachable), which the connected test and the
+        // failed-call test pin from both directions.
         using var client = new WigiDashServiceClient();
-        Assert.IsFalse(client.Sensors.IsReady);
-        Assert.IsNull(client.Sensors.GetSensorList());
-        Assert.IsNull(client.Sensors.GetSensorValue(0, 0, 0));
+        Assert.IsFalse(client.Sensors.IsReady, "a fresh client is not ready until it connects");
+        Assert.IsNull(client.Sensors.GetSensorValue(0, 0, 0), "a value read before the provider is ready degrades to no data");
     }
 
     [TestMethod]
@@ -118,9 +122,24 @@ public sealed class WigiDashServiceClientTests
         Assert.AreEqual(1, sensors.Count);
     }
 
+    [TestMethod]
+    public void Sensors_FailedCallDropsTheChannelSoTheClientCanReconnect()
+    {
+        // A faulted/dead channel must degrade to no data AND be dropped, so the
+        // next read reopens it (the app self-heals when the vendor service
+        // restarts; the former client kept the dead channel forever).
+        var channel = new FakeWcfChannel { ThrowOnList = true };
+        using var client = new WigiDashServiceClient(channel);
+
+        Assert.IsNull(client.Sensors.GetSensorList(), "a failed call must degrade to no data, not throw");
+        Assert.IsFalse(client.Sensors.IsReady, "the dead channel must be dropped for the next attempt to reopen");
+    }
+
     private sealed class FakeWcfChannel : IWigiDashWcf
     {
         public bool InitCalled { get; private set; }
+
+        public bool ThrowOnList { get; set; }
 
         public List<VendorSensorItem> Sensors { get; set; } = [];
 
@@ -137,7 +156,8 @@ public sealed class WigiDashServiceClientTests
 
         public string? GetHwinfoSdkVersion() => "1.0";
 
-        public List<VendorSensorItem> GetSensorList() => Sensors;
+        public List<VendorSensorItem> GetSensorList()
+            => ThrowOnList ? throw new InvalidOperationException("channel dead") : Sensors;
 
         public double GetSensorValue(int readingType, int sensorId1, int sensorId2, out bool isValid)
         {
