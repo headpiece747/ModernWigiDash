@@ -305,7 +305,10 @@ internal sealed class FakeAidaMmapSource(byte[]? map = null) : IAidaMmapSource
             return false;
         }
 
-        if (offset < 0 || length < 0 || offset + length > Map.Length || length > destination.Length)
+        // 64-bit compare, matching the production adapter (a producer-controlled
+        // offset near int.MaxValue wrapped the 32-bit sum negative and reached
+        // Array.Copy, which throws — the seam must return false instead).
+        if (offset < 0 || length < 0 || (long)offset + length > Map.Length || length > destination.Length)
         {
             error = "range out of bounds";
             return false;
