@@ -63,10 +63,32 @@ public static class SystemTelemetryPresentation
         bool autoScale,
         float maxValue,
         float decimals)
+        => Build(reading.Label, reading.Unit, reading.Max, value, displayLabelOverride, unitOverride, displayMode, autoScale, maxValue, decimals);
+
+    /// <summary>
+    /// The reading display from raw inputs (the HWiNFO widget's vendor reading,
+    /// which has no LibreHardwareService DTO): the label/unit overrides fall
+    /// back to the raw reading's, the mode parses with the shared rule (unknown
+    /// → Gauge), the hero value formats invariant with the decimal count
+    /// clamped, and the progress derives from the resolved maximum.
+    /// <paramref name="sensorMax"/> is the source's recorded peak (0 when it has
+    /// none; the HWiNFO widget feeds its observed history maximum instead).
+    /// </summary>
+    public static SystemTelemetryDisplay Build(
+        string readingLabel,
+        string readingUnit,
+        double sensorMax,
+        float value,
+        string displayLabelOverride,
+        string unitOverride,
+        string displayMode,
+        bool autoScale,
+        float maxValue,
+        float decimals)
     {
-        string label = string.IsNullOrWhiteSpace(displayLabelOverride) ? reading.Label : displayLabelOverride;
-        string unit = string.IsNullOrWhiteSpace(unitOverride) ? reading.Unit : unitOverride;
-        float max = ResolveMax(autoScale, reading.Max, maxValue, value);
+        string label = string.IsNullOrWhiteSpace(displayLabelOverride) ? readingLabel : displayLabelOverride;
+        string unit = string.IsNullOrWhiteSpace(unitOverride) ? readingUnit : unitOverride;
+        float max = ResolveMax(autoScale, sensorMax, maxValue, value);
 
         return new SystemTelemetryDisplay(
             HasReading: true,

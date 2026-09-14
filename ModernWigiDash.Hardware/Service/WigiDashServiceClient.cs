@@ -9,42 +9,59 @@ namespace ModernWigiDash.Hardware.Service;
 /// <summary>
 /// The vendor WCF service consumption seam (ADR-0022): one connection lifecycle
 /// owning the BasicHttp channel to the vendor's WigiDashService at localhost:8733,
-/// with two narrow read facets (<see cref="ISensorValues"/>, <see cref="IAidaPanel"/>)
-/// mirroring the vendor's own split. The client owns the channel open/close/reconnect;
-/// the facets are stateless reads over the established channel. Tolerant parsing: a
-/// malformed or partial response degrades to a named "no data" verdict, never a throw
-/// into the render tick. Testable without the service via an in-memory fake implementing
-/// both facets behind the same seam.
+/// with one narrow read facet (<see cref="ISensorValues"/>) mirroring the vendor's
+/// sensor provider. The client owns the channel open/close/reconnect; the facet is a
+/// stateless read over the established channel. Tolerant parsing: a malformed or
+/// partial response degrades to a named "no data" verdict, never a throw into the
+/// render tick. The HWiNFO provider is a SHARED session on the service: the client
+/// re-initializes it when a list read comes back empty (another consumer deinit it)
+/// and never de-initializes it on exit. Testable without the service via an
+/// in-memory fake implementing the facet behind the same seam.
 /// </summary>
 public sealed class WigiDashServiceClient : IDisposable
 {
     private const string EndpointAddress = "http://localhost:8733/WigiDashService/WigiDashWcf/";
     private const string SensorInitTag = "[VENDOR-SERVICE]";
 
+    /// <summary>
+    /// The vendor's HWiNFO provider is a SHARED, process-wide session on the
+    /// service: any consumer's <c>DeInit</c> tears it down for every other
+    /// consumer (the vendor Manager deinits on exit) and <c>GetSensorList</c>
+    /// then returns an EMPTY list, not an error. Re-initialize at most this
+    /// often when a list read comes back empty, so a widget recovers without an
+    /// init storm on the render tick.
+    /// </summary>
+    private const long SensorProviderReinitIntervalMs = 5000;
+
     private readonly System.Threading.Lock _gate = new();
     private IWigiDashWcf? _channel;
     private ChannelFactory<IWigiDashWcf>? _factory;
     private bool _sensorReady;
-    private bool _aidaReady;
+    private long _lastSensorInitTicks;
     private bool _disposed;
 
     /// <summary>The HWiNFO sensor read facet.</summary>
     public ISensorValues Sensors { get; }
 
-    /// <summary>The AIDA64 panel image-frame read facet.</summary>
-    public IAidaPanel Aida { get; }
-
     public WigiDashServiceClient()
     {
         Sensors = new SensorValuesFacet(this);
-        Aida = new AidaPanelFacet(this);
     }
 
-    /// <summary>Test constructor: injects facet implementations directly.</summary>
-    internal WigiDashServiceClient(ISensorValues sensors, IAidaPanel aida)
+    /// <summary>Test constructor: injects the facet implementation directly.</summary>
+    internal WigiDashServiceClient(ISensorValues sensors)
     {
         Sensors = sensors;
-        Aida = aida;
+    }
+
+    /// <summary>
+    /// Test constructor: injects the WCF channel directly, so the client's
+    /// shared-provider recovery policy is drivable without the vendor service.
+    /// </summary>
+    internal WigiDashServiceClient(IWigiDashWcf channel)
+    {
+        _channel = channel;
+        Sensors = new SensorValuesFacet(this);
     }
 
     /// <summary>
@@ -60,9 +77,9 @@ public sealed class WigiDashServiceClient : IDisposable
             try
             {
                 EnsureChannel();
+                _lastSensorInitTicks = Environment.TickCount64;
                 _sensorReady = SafeCall(() => _channel!.InitSensorProvider(true, true, true));
-                _aidaReady = SafeCall(() => _channel!.InitAidaProvider());
-                var ok = _sensorReady || _aidaReady;
+                var ok = _sensorReady;
                 if (!ok)
                     FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
                 return ok;
@@ -78,19 +95,15 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>True when the channel is open and at least one provider is ready.</summary>
     public bool IsConnected
     {
-        get { lock (_gate) return _channel != null && (_sensorReady || _aidaReady); }
+        get { lock (_gate) return _channel != null && _sensorReady; }
     }
 
     internal void EnsureChannel()
     {
         if (_channel != null) return;
-        // MaxReceivedMessageSize must exceed the largest vendor response. A full
-        // AIDA64 frame read returns 1,202,944 raw RGB565 bytes (1016x592x2), which
-        // WCF base-64-encodes inside the SOAP envelope to ~1.6 MB; a 1 MB quota
-        // therefore throws QuotaExceeded on every full-frame read and the widget
-        // degrades to its placeholder (observed on-device 2026-09-13). The vendor's
-        // own Manager binds at 20 MB for this reason; we match it so both the
-        // unbounded-size sensor list and a full AIDA64 frame clear the quota.
+        // MaxReceivedMessageSize must exceed the largest vendor response. The
+        // vendor's own Manager binds at 20 MB; we match it so the unbounded-size
+        // sensor list clears the quota.
         var binding = new BasicHttpBinding
         {
             OpenTimeout = TimeSpan.FromSeconds(5),
@@ -143,9 +156,19 @@ public sealed class WigiDashServiceClient : IDisposable
         _sensorReady = SafeCall(() => _channel!.GetSensorInitStatus() > 0);
     }
 
-    internal void RefreshAidaReadiness()
+    /// <summary>
+    /// Re-initializes the shared HWiNFO provider when it has been torn down
+    /// underneath us. The caller holds <see cref="_gate"/>. Throttled.
+    /// </summary>
+    internal void ReinitSensorProviderLocked()
     {
-        _aidaReady = SafeCall(() => _channel!.InitAidaProvider());
+        if (_channel == null || _disposed)
+            return;
+        var now = Environment.TickCount64;
+        if (now - _lastSensorInitTicks < SensorProviderReinitIntervalMs)
+            return;
+        _lastSensorInitTicks = now;
+        _sensorReady = SafeCall(() => _channel.InitSensorProvider(true, true, true));
     }
 
     internal IReadOnlyList<VendorSensorItem>? GetRawSensorList()
@@ -164,21 +187,10 @@ public sealed class WigiDashServiceClient : IDisposable
         catch { return null; }
     }
 
-    internal byte[]? GetRawAidaMmap(int offset, int length)
-    {
-        try
-        {
-            var ok = _channel.ReadAidaMmap(offset, length, out var buffer);
-            return ok ? buffer : null;
-        }
-        catch { return null; }
-    }
-
     private void CloseChannelLocked()
     {
-        if (_channel != null)
+        if (_channel is System.ServiceModel.ICommunicationObject cc)
         {
-            var cc = (System.ServiceModel.ICommunicationObject)_channel;
             try { cc.Close(TimeSpan.FromSeconds(5)); }
             catch { try { cc.Abort(); } catch { /* best-effort */ } }
         }
@@ -186,7 +198,6 @@ public sealed class WigiDashServiceClient : IDisposable
         try { _factory?.Close(); } catch { try { _factory?.Abort(); } catch { /* best-effort */ } }
         _factory = null;
         _sensorReady = false;
-        _aidaReady = false;
     }
 
     public void Dispose()
@@ -195,8 +206,11 @@ public sealed class WigiDashServiceClient : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            try { _channel?.DeInitSensorProvider(); } catch { /* best-effort */ }
-            try { _channel?.DeInitAidaProvider(); } catch { /* best-effort */ }
+            // Deliberately NO DeInitSensorProvider here: the HWiNFO provider is
+            // a shared session on the vendor service, so deinitializing it on
+            // our exit would tear it down for the vendor Manager (which does
+            // not re-init on demand). We leave the service's provider as it was
+            // and re-initialize lazily if someone else deinits it.
             CloseChannelLocked();
         }
     }
@@ -214,8 +228,15 @@ public sealed class WigiDashServiceClient : IDisposable
         {
             lock (owner._gate)
             {
-                if (owner._channel == null || !owner._sensorReady) return null;
+                if (owner._channel == null) return null;
                 var raw = owner.GetRawSensorList();
+                if (raw is { Count: 0 })
+                {
+                    // Empty means the shared provider was torn down (see
+                    // SensorProviderReinitIntervalMs); re-init and re-read.
+                    owner.ReinitSensorProviderLocked();
+                    raw = owner.GetRawSensorList();
+                }
                 if (raw == null) return null;
                 return raw.Select(s => new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit)).ToList();
             }
@@ -232,20 +253,4 @@ public sealed class WigiDashServiceClient : IDisposable
         }
     }
 
-    private sealed class AidaPanelFacet(WigiDashServiceClient owner) : IAidaPanel
-    {
-        public bool IsReady
-        {
-            get { lock (owner._gate) return owner._channel != null && owner._aidaReady; }
-        }
-
-        public byte[]? ReadAidaMmap(int offset, int length)
-        {
-            lock (owner._gate)
-            {
-                if (owner._channel == null || !owner._aidaReady) return null;
-                return owner.GetRawAidaMmap(offset, length);
-            }
-        }
-    }
 }

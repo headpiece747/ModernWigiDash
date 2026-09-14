@@ -76,7 +76,7 @@ public class VendorServiceWiringTests
 
     private static WigiDashServiceClient CreateFakeClient()
     {
-        return new WigiDashServiceClient(new FakeSensorValues(), new FakeAidaPanel());
+        return new WigiDashServiceClient(new FakeSensorValues());
     }
 
     private sealed class FakeSensorValues : ISensorValues
@@ -84,11 +84,5 @@ public class VendorServiceWiringTests
         public bool IsReady => false;
         public IReadOnlyList<VendorSensorItem>? GetSensorList() => null;
         public VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2) => null;
-    }
-
-    private sealed class FakeAidaPanel : IAidaPanel
-    {
-        public bool IsReady => false;
-        public byte[]? ReadAidaMmap(int offset, int length) => null;
     }
 }

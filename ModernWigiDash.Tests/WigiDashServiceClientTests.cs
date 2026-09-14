@@ -26,11 +26,22 @@ public sealed class WigiDashServiceClientTests
     }
 
     [TestMethod]
-    public void Aida_WhenNotConnected_IsReadyFalse()
+    public void Sensors_WhenConnected_ListDeserializesWithTheVendorContract()
     {
+        // Regression pin for the 2026-09-13 on-device bug: the mirror's data
+        // contract must carry the vendor's SensorItem name/namespace, or WCF
+        // silently deserializes the whole response to an empty list and the
+        // HWiNFO widget shows its placeholder forever. Tolerant on machines
+        // without the vendor Manager (the ADR-0017 absent-service path).
         using var client = new WigiDashServiceClient();
-        Assert.IsFalse(client.Aida.IsReady);
-        Assert.IsNull(client.Aida.ReadAidaMmap(0, 1024));
+        if (!client.TryConnect())
+            return;
+
+        var sensors = client.Sensors.GetSensorList();
+        Assert.IsNotNull(sensors,
+            "a connected vendor service must deserialize its sensor list, not drop it as an empty sequence");
+        Assert.IsTrue(sensors.Count > 0,
+            "the vendor service reports HWiNFO's sensors; an empty list means the data-contract mirror is wrong");
     }
 
     [TestMethod]
@@ -72,5 +83,66 @@ public sealed class WigiDashServiceClientTests
 
         var invalid = new VendorSensorReading(0, false);
         Assert.IsFalse(invalid.IsValid);
+    }
+
+    [TestMethod]
+    public void Sensors_EmptyListFromATornDownProvider_ReinitializesAndRecovers()
+    {
+        // The vendor's HWiNFO provider is a shared session; when another
+        // consumer (the vendor Manager) deinits it, GetSensorList returns an
+        // empty list, not an error (observed on-device 2026-09-13). The client
+        // must re-initialize the provider and recover on that read.
+        var channel = new FakeWcfChannel();
+        using var client = new WigiDashServiceClient(channel);
+
+        var sensors = client.Sensors.GetSensorList();
+
+        Assert.IsTrue(channel.InitCalled, "an empty sensor list must trigger a provider re-initialization");
+        Assert.IsNotNull(sensors);
+        Assert.AreEqual(1, sensors.Count);
+    }
+
+    [TestMethod]
+    public void Sensors_NonEmptyList_DoesNotReinitialize()
+    {
+        var channel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
+        };
+        using var client = new WigiDashServiceClient(channel);
+
+        var sensors = client.Sensors.GetSensorList();
+
+        Assert.IsFalse(channel.InitCalled);
+        Assert.IsNotNull(sensors);
+        Assert.AreEqual(1, sensors.Count);
+    }
+
+    private sealed class FakeWcfChannel : IWigiDashWcf
+    {
+        public bool InitCalled { get; private set; }
+
+        public List<VendorSensorItem> Sensors { get; set; } = [];
+
+        public bool InitSensorProvider(bool smbus, bool ec, bool presentmon)
+        {
+            InitCalled = true;
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")];
+            return true;
+        }
+
+        public bool DeInitSensorProvider() => true;
+
+        public int GetSensorInitStatus() => 1;
+
+        public string? GetHwinfoSdkVersion() => "1.0";
+
+        public List<VendorSensorItem> GetSensorList() => Sensors;
+
+        public double GetSensorValue(int readingType, int sensorId1, int sensorId2, out bool isValid)
+        {
+            isValid = true;
+            return 42;
+        }
     }
 }

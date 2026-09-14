@@ -3,7 +3,9 @@ namespace ModernWigiDash.Widgets;
 /// <summary>
 /// The Hardware Monitor widget: renders one live LibreHardwareService sensor
 /// reading through the SystemTelemetryPresentation display rules, in gauge,
-/// bar, value, or sparkline-graph mode.
+/// bar, value, or sparkline-graph mode. The pixel layout lives in the shared
+/// <see cref="TelemetryReadingRenderer"/> (the HWiNFO widget draws the same
+/// modes); this widget owns the data source, gates, and property surface.
 /// </summary>
 [WidgetMetadata("hardware_monitor", "Hardware Monitor", Category = "System Monitoring")]
 public class HardwareMonitorWidget : ModernWidgetBase
@@ -44,30 +46,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
-    private readonly Queue<float> _history = new();
-    private const int HistoryCapacity = 96;
-    private bool _disposed;
-
-    // Hoisted paints: the colors mutate per render (property-driven), so the
-    // 30 FPS render allocates no SKPaint — the gauge/bar strokes and the
-    // sparkline line/fill included.
-    private readonly SKPaint _headerPaint = new() { IsAntialias = true };
-    private readonly SKPaint _valuePaint = new() { IsAntialias = true };
-    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
-    private readonly SKPaint _gaugeTrackPaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-    private readonly SKPaint _gaugeProgressPaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 12f, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
-    private readonly SKPaint _barTrackPaint = new() { IsAntialias = true };
-    private readonly SKPaint _barProgressPaint = new() { IsAntialias = true };
-    private readonly SKPaint _sparkFillPaint = new() { Style = SKPaintStyle.Fill, IsAntialias = true };
-    private readonly SKPaint _sparkLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
-    private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
-
-    // The graph mode's sparkline paths are caller-owned and rewound per frame
-    // (the history appends a sample every frame, so the geometry is never
-    // stable — the paths themselves must not be reallocated either).
-    private SKPath? _sparkLinePath;
-    private SKPath? _sparkFillPath;
+    private readonly TelemetryReadingRenderer _renderer = new();
 
     // The SensorLabel→reading match was a linear scan per frame; the match is
     // cached keyed by (snapshot identity, label) — a new snapshot (~1/s) or a
@@ -88,7 +67,7 @@ public class HardwareMonitorWidget : ModernWidgetBase
     }
 
     /// <summary>Internal test accessor: how many history samples are buffered.</summary>
-    internal int HistoryCountForTest => _history.Count;
+    internal int HistoryCountForTest => _renderer.HistoryCountForTest;
 
     /// <summary>
     /// Draws the reading in its display mode, or the unavailable placeholder:
@@ -125,8 +104,8 @@ public class HardwareMonitorWidget : ModernWidgetBase
         }
 
         // The display rules (label/unit resolution, mode fallback, value
-        // format, progress) live in the presentation module; the render
-        // methods below are thin adapters that lay the display out.
+        // format, progress) live in the presentation module; the renderer lays
+        // them out.
         var display = SystemTelemetryPresentation.Build(
             reading,
             value: (float)reading.Value,
@@ -137,219 +116,16 @@ public class HardwareMonitorWidget : ModernWidgetBase
             maxValue: MaxValue,
             decimals: Decimals);
 
-        switch (display.Mode)
-        {
-            case SystemTelemetryDisplayMode.Bar:
-                RenderBar(canvas, bounds, display, accent, text);
-                break;
-            case SystemTelemetryDisplayMode.Value:
-                RenderValue(canvas, bounds, display, text);
-                break;
-            case SystemTelemetryDisplayMode.Graph:
-                RenderGraph(canvas, bounds, display, (float)reading.Value, accent, text, reading);
-                break;
-            default:
-                RenderGauge(canvas, bounds, display, accent, text);
-                break;
-        }
+        _renderer.Render(canvas, bounds, display, (float)reading.Value, reading.Min, reading.Max, accent, text);
     }
 
     private void DrawPlaceholder(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
-        => TextRenderHelper.DrawTitleSubtitlePlaceholder(canvas, bounds, display.PlaceholderTitle, display.PlaceholderSubtitle, text, _placeholderTitlePaint, _placeholderSubPaint);
+        => _renderer.DrawPlaceholder(canvas, bounds, display.PlaceholderTitle, display.PlaceholderSubtitle, text);
 
-    private void DrawHeader(SKCanvas canvas, SKRect bounds, string label, float pad, SKColor text)
-    {
-        var headerFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
-        _headerPaint.Color = text;
-        canvas.DrawTextWithFallback(TextRenderHelper.TruncateText(label, headerFont, bounds.Width - pad * 2f), bounds.Left + pad, bounds.Top + pad + 24f, headerFont, _headerPaint);
-    }
-
-    /// <summary>
-    /// Draws the big hero value with its trailing unit — the "value + unit"
-    /// block shared by the four display modes. Per-mode spacing stays at the
-    /// call sites: value font size, baseline anchor, unit font size, and the
-    /// unit's pixel offset from the value (the +4/+5/+6 deltas are pixel
-    /// behavior, not duplication).
-    /// </summary>
-    /// <param name="canvas">The canvas to draw on.</param>
-    /// <param name="display">The reading display state (value text, unit).</param>
-    /// <param name="anchorX">The value's horizontal anchor: its center, or its
-    /// right edge when <paramref name="rightAligned"/> is set.</param>
-    /// <param name="baselineAnchor">Baseline before the value's own height
-    /// contribution; Gauge adds 1/3 of the measured height to sit the value on
-    /// its own metrics, the other modes use 0 for a fixed baseline.</param>
-    /// <param name="baselineFromValue">Fraction of the measured value height
-    /// added to <paramref name="baselineAnchor"/> for the baseline.</param>
-    /// <param name="valFontSize">The hero value's font size in px.</param>
-    /// <param name="valueColor">The hero value's color.</param>
-    /// <param name="unitColor">The trailing unit's color.</param>
-    /// <param name="unitFontSize">The unit's font size in px.</param>
-    /// <param name="unitOffset">The unit's pixel offset from the value's right edge.</param>
-    /// <param name="rightAligned">Align the value's right edge to the anchor instead of centering it.</param>
-    private void DrawHeroValue(
-        SKCanvas canvas,
-        SystemTelemetryDisplay display,
-        float anchorX,
-        float baselineAnchor,
-        float baselineFromValue,
-        float valFontSize,
-        SKColor valueColor,
-        SKColor unitColor,
-        float unitFontSize,
-        float unitOffset,
-        bool rightAligned = false)
-    {
-        string valStr = display.ValueText;
-
-        var valFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, valFontSize);
-        _valuePaint.Color = valueColor;
-        valFont.MeasureText(valStr, out var valBounds, _valuePaint);
-
-        float valueX = rightAligned ? anchorX - valBounds.Width : anchorX - valBounds.Width / 2f;
-        float baselineY = baselineAnchor + valBounds.Height * baselineFromValue;
-        canvas.DrawTextWithFallback(valStr, valueX, baselineY, valFont, _valuePaint);
-
-        if (!string.IsNullOrWhiteSpace(display.Unit))
-        {
-            var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, unitFontSize);
-            _unitPaint.Color = unitColor;
-            canvas.DrawTextWithFallback(display.Unit, valueX + valBounds.Width + unitOffset, baselineY, unitFont, _unitPaint);
-        }
-    }
-
-    private void RenderGauge(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor accent, SKColor text)
-    {
-        float pad = 16f;
-        DrawHeader(canvas, bounds, display.Label, pad, text);
-
-        float gaugeSize = Math.Min(bounds.Width * 0.42f, bounds.Height - 48f);
-        float cx = bounds.MidX;
-        float cy = bounds.MidY + 10f;
-        float radius = (gaugeSize / 2f) - 10f;
-        var arcBounds = new SKRect(cx - radius, cy - radius, cx + radius, cy + radius);
-
-        _gaugeTrackPaint.Color = text.WithAlpha(20);
-        canvas.DrawArc(arcBounds, 135f, 270f, false, _gaugeTrackPaint);
-
-        float progress = display.Progress;
-        _gaugeProgressPaint.Color = accent;
-        canvas.DrawArc(arcBounds, 135f, 270f * progress, false, _gaugeProgressPaint);
-
-        DrawHeroValue(canvas, display, cx, cy, 1f / 3f, gaugeSize * 0.2f, text, text.WithAlpha(180), 11f, 4f);
-    }
-
-    private void RenderBar(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor accent, SKColor text)
-    {
-        float pad = 16f;
-        DrawHeader(canvas, bounds, display.Label, pad, text);
-
-        DrawHeroValue(canvas, display, bounds.MidX, bounds.MidY + 4f, 0f,
-            Math.Clamp(bounds.Height * 0.22f, 22f, 48f), text, text.WithAlpha(180), 12f, 5f);
-
-        var barRect = new SKRect(bounds.Left + pad, bounds.MidY + 20f, bounds.Right - pad, bounds.MidY + 32f);
-        float trackRadius = barRect.Height / 2f;
-
-        _barTrackPaint.Color = text.WithAlpha(20);
-        canvas.DrawRoundRect(barRect, trackRadius, trackRadius, _barTrackPaint);
-
-        float progress = display.Progress;
-        float progressWidth = Math.Max(barRect.Height, barRect.Width * progress);
-        var progressRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + progressWidth, barRect.Bottom);
-        float progressRadius = Math.Min(trackRadius, progressWidth / 2f);
-        _barProgressPaint.Color = accent;
-        canvas.DrawRoundRect(progressRect, progressRadius, progressRadius, _barProgressPaint);
-    }
-
-    private void RenderValue(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, SKColor text)
-    {
-        float pad = 16f;
-        DrawHeader(canvas, bounds, display.Label, pad, text);
-
-        DrawHeroValue(canvas, display, bounds.MidX, bounds.MidY + 4f, 0f,
-            Math.Min(bounds.Width * 0.22f, bounds.Height * 0.42f), text, text.WithAlpha(180), 14f, 6f);
-    }
-
-    private void RenderGraph(SKCanvas canvas, SKRect bounds, SystemTelemetryDisplay display, float value, SKColor accent, SKColor text, SensorReadingDto reading)
-    {
-        float pad = 16f;
-        DrawHeader(canvas, bounds, display.Label, pad, text);
-
-        // The sparkline is the only consumer of the history buffer, so the
-        // sample is appended here — Gauge/Bar/Value frames skip the queue work.
-        _history.Enqueue(value);
-        while (_history.Count > HistoryCapacity)
-        {
-            _history.Dequeue();
-        }
-
-        float graphTop = bounds.Top + 40f;
-        float graphBottom = bounds.Bottom - pad;
-        var area = new SKRect(bounds.Left + pad, graphTop, bounds.Right - pad, graphBottom);
-
-        int count = _history.Count;
-        if (count >= 2)
-        {
-            // Zero-alloc: copy the float history onto the stack for the
-            // sparkline, computing min/max in the same single pass (replaces
-            // Cast<double>().ToList() + Min() + Max() per frame).
-            Span<float> samples = count <= HistoryCapacity
-                ? stackalloc float[count]
-                : new float[count];
-            float min = float.MaxValue;
-            float max = float.MinValue;
-            int i = 0;
-            foreach (float sample in _history)
-            {
-                samples[i++] = sample;
-                if (sample < min) min = sample;
-                if (sample > max) max = sample;
-            }
-
-            float lo = Math.Min(min, (float)reading.Min);
-            float hi = Math.Max(max, (float)reading.Max);
-            if (hi - lo < 1e-6f)
-            {
-                lo = value - 1f;
-                hi = value + 1f;
-            }
-
-            // The caller-owned paths are rewound per frame (the sample history
-            // changes every frame, so the geometry is never stable — the paths
-            // themselves are not reallocated either), and the hoisted paints
-            // are re-colored per frame.
-            _sparkFillPath ??= new SKPath();
-            _sparkLinePath ??= new SKPath();
-            SparklineRenderer.RebuildSparklinePaths(area, samples, lo, hi, _sparkLinePath, _sparkFillPath);
-            _sparkFillPaint.Color = accent.WithAlpha(40);
-            canvas.DrawPath(_sparkFillPath, _sparkFillPaint);
-            _sparkLinePaint.Color = accent;
-            canvas.DrawPath(_sparkLinePath, _sparkLinePaint);
-        }
-
-        const float valFontSize = 22f;
-        DrawHeroValue(canvas, display, area.Right, area.Top + valFontSize, 0f,
-            valFontSize, accent, text.WithAlpha(180), 11f, 4f, rightAligned: true);
-    }
-
-    /// <summary>Disposes the hoisted paints and the caller-owned sparkline paths.</summary>
+    /// <summary>Disposes the shared renderer's paints and sparkline paths.</summary>
     public override ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
-        _disposed = true;
-        _headerPaint.Dispose();
-        _valuePaint.Dispose();
-        _unitPaint.Dispose();
-        _gaugeTrackPaint.Dispose();
-        _gaugeProgressPaint.Dispose();
-        _barTrackPaint.Dispose();
-        _barProgressPaint.Dispose();
-        _sparkFillPaint.Dispose();
-        _sparkLinePaint.Dispose();
-        _placeholderTitlePaint.Dispose();
-        _placeholderSubPaint.Dispose();
-        _sparkLinePath?.Dispose();
-        _sparkFillPath?.Dispose();
+        _renderer.Dispose();
         return base.DisposeAsync();
     }
 }
-

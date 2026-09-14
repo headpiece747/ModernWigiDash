@@ -469,7 +469,12 @@ public static class FontHelper
         FontCacheEviction.EvictIfFull(CachedFonts, FontCacheEviction.CachedFontLimit);
         // Value overload, no factory: a per-call closure allocates its display
         // class on the method's entry path even when the miss branch never runs.
-        var created = CreateFont(typeface, size);
+        // Create at the QUANTIZED size, not the raw request: the key IS the
+        // size identity, so a raw-size value let a request of, say, 9.0 return
+        // a font created at 8.82 for the same half-point key — an
+        // order-dependent actual size for identical calls (observed as a
+        // flaky font-fit test, 2026-09-13).
+        var created = CreateFont(typeface, sizeKey / 2f);
         var winner = CachedFonts.GetOrAdd(key, created);
         if (!ReferenceEquals(winner, created))
         {

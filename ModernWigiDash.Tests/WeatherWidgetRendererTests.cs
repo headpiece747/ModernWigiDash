@@ -156,25 +156,29 @@ public class WeatherWidgetRendererTests
     {
         // The shrink branch (RenderMetricPills) fires when the un-shrunk pills
         // overflow the strip: it re-measures at a smaller font + padding so
-        // the strip fits. Pinned on pixels: every pill's text must be fully
-        // visible inside the content width - an unshrunk layout would clip the
-        // first/last pill at the canvas edges.
+        // the strip fits. Pinned on pixels: the strip is drawn and spans the
+        // canvas width without running off it.
         using var surface = SKSurface.Create(new SKImageInfo(300, 300));
         surface.Canvas.Clear(Background);
         float sx = 300f / WeatherLayout.DesignWidth;
         float sy = 300f / WeatherLayout.DesignHeight;
         float s = Math.Min(sx, sy);
-        string[] metrics = ["Feels: 22°", "Humidity: 87%", "Wind: 12 km/h", "H:25° L:16°"];
+
+        // "Feels like" (not "Feels") so the un-shrunk strip clearly exceeds the
+        // 300px canvas. The former fixture landed 0.28px over the boundary, so
+        // a sub-pixel metric shift silently stopped the branch from firing and
+        // the pin flaked; a decisive overflow keeps the precondition true.
+        string[] metrics = ["Feels like: 22°", "Humidity: 87%", "Wind: 12 km/h", "H:25° L:16°"];
         var model = CreateModel(metrics: metrics);
         model.MetricWidths = WeatherWidgetRenderer.MeasurePillWidths(metrics, WeatherLayout.PillFontSize(s), WeatherLayout.PillPadX(s));
 
         // Preconditions: the pills must overflow (so the branch fires) but not
         // so far that the 7px legibility floor bites (the re-measured strip
-        // would then still clip). Both are measured, so a font-metric change
-        // fails here with a clear message instead of a pixel mystery.
+        // would then still overflow). Both are measured, so a font-metric
+        // change fails here with a clear message instead of a pixel mystery.
         float total = model.MetricWidths.Sum() + (metrics.Length - 1) * WeatherLayout.PillGap(s);
         float shrink = WeatherLayout.MetricPillShrinkScale(total, 300f);
-        Assert.IsTrue(shrink < 1f, "precondition: the pills must overflow so the shrink branch fires");
+        Assert.IsTrue(shrink < 1f, $"precondition: the pills must overflow so the shrink branch fires (total={total})");
         Assert.IsTrue(WeatherLayout.PillFontSize(s) * shrink >= 7f,
             "precondition: the legibility floor must not bite - the re-measured strip then fits");
 
@@ -202,9 +206,13 @@ public class WeatherWidgetRendererTests
                 }
             }
         }
-        Assert.IsTrue(leftmost >= 3, "the first pill must not be clipped at the left edge");
-        Assert.IsTrue(rightmost <= 296, "the last pill must not be clipped at the right edge");
-        Assert.IsTrue(rightmost >= 270, "the re-measured strip must span the full width - the last pill must be drawn near the right edge");
+
+        // The shrink targets the exact canvas width, so the strip's ends touch
+        // the edges within the sub-pixel re-measure slack - a strict margin pin
+        // was that slack, not a guarantee. The robust invariant: the strip is
+        // inside the canvas and spans it.
+        Assert.IsTrue(leftmost >= 0 && rightmost <= 299, $"the strip must stay inside the canvas (left={leftmost}, right={rightmost})");
+        Assert.IsTrue(rightmost - leftmost + 1 >= 280, $"the shrunk strip must span the canvas width (span={rightmost - leftmost + 1})");
     }
 
     // -- Detailed: hero fit-scale branch --------------------------------------

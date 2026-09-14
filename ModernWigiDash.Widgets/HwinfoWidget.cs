@@ -4,19 +4,30 @@ using ModernWigiDash.Sdk;
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
-/// The dedicated HWiNFO sensor widget (ADR-0022): reads sensor values through
-/// the vendor WigiDash service's ISensorValues facet. Distinct from the existing
+/// The dedicated HWiNFO sensor widget (ADR-0022): reads one sensor through the
+/// vendor WigiDash service's <see cref="ISensorValues"/> facet. Distinct from the
 /// Hardware Monitor widget (which reads LibreHardwareService shared memory);
-/// placing one vs. the other IS the source choice. Min/Max are left at 0 (the
-/// vendor returns a single reading per sensor). Degrades to the house placeholder
-/// when the vendor service is absent (ADR-0017 image).
+/// placing one vs. the other IS the source choice. The sensor is picked by name
+/// in the inspector (<see cref="IWidgetPropertyOptionsProvider"/>, the vendor's
+/// own sensor dropdown), and the reading refreshes on a short throttle so the
+/// 30 FPS render tick never becomes a WCF call per frame. It draws with the same
+/// Gauge/Bar/Value/Graph display modes as the Hardware Monitor widget (the shared
+/// <see cref="TelemetryReadingRenderer"/>); the vendor reports a single value per
+/// sensor (no min/max), so auto-scale uses the observed history maximum. Degrades
+/// to the house placeholder when the vendor service is absent (ADR-0017 image).
 /// </summary>
 [WidgetMetadata("hwinfo", "HWiNFO Sensor", Category = "System Monitoring")]
-public sealed class HwinfoWidget : ModernWidgetBase
+public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
 {
-    /// <summary>The "Sensor Index": which sensor from the vendor's list to display.</summary>
-    [WidgetProperty("Sensor Index", WidgetPropertyType.Number, "Index into the vendor's sensor list (0-based)", 0f)]
-    public float SensorIndex { get; set; } = 0f;
+    /// <summary>How long a fetched sensor list is trusted before a refetch (the list is stable).</summary>
+    private const long SensorListRefreshMs = 5000;
+
+    /// <summary>Minimum gap between vendor reads; matches the vendor's own ~1 Hz display cadence.</summary>
+    private const long ReadingRefreshMs = 500;
+
+    /// <summary>The "Sensor": which vendor sensor to display, keyed by reading type + ids.</summary>
+    [WidgetProperty("Sensor", WidgetPropertyType.Choice, "HWiNFO sensor exposed by the vendor service", "")]
+    public string SensorKey { get; set; } = "";
 
     /// <summary>The "Display Label": overrides the label shown on the widget.</summary>
     [WidgetProperty("Display Label", WidgetPropertyType.Text, "Override the label (leave empty to use the sensor name)", "")]
@@ -25,6 +36,18 @@ public sealed class HwinfoWidget : ModernWidgetBase
     /// <summary>The "Unit": overrides the unit shown.</summary>
     [WidgetProperty("Unit", WidgetPropertyType.Text, "Override the unit (leave empty to use the sensor's)", "")]
     public string Unit { get; set; } = "";
+
+    /// <summary>The "Display Mode": how the reading is visualized (Gauge, Bar, Value, or Graph).</summary>
+    [WidgetProperty("Display Mode", WidgetPropertyType.Choice, "How to visualize the reading", "Gauge", "Gauge", "Bar", "Value", "Graph")]
+    public string DisplayMode { get; set; } = "Gauge";
+
+    /// <summary>The "Auto Scale" toggle: scale the gauge/bar to the highest reading observed.</summary>
+    [WidgetProperty("Auto Scale", WidgetPropertyType.Boolean, "Scale the gauge/bar to the highest reading observed", true)]
+    public bool AutoScale { get; set; } = true;
+
+    /// <summary>The "Max Value": the manual gauge/bar maximum when Auto Scale is off.</summary>
+    [WidgetProperty("Max Value", WidgetPropertyType.Number, "Manual gauge/bar maximum when Auto Scale is off", 100f)]
+    public float MaxValue { get; set; } = 100f;
 
     /// <summary>The "Decimals": the number of decimal places the hero value shows.</summary>
     [WidgetProperty("Decimals", WidgetPropertyType.Number, "Number of decimal places shown", 1f)]
@@ -38,16 +61,20 @@ public sealed class HwinfoWidget : ModernWidgetBase
     [WidgetProperty("Text Color", WidgetPropertyType.Color, "Header, label, and value color", "#FAFAFA")]
     public string TextColorHex { get; set; } = "#FAFAFA";
 
-    private VendorSensorItem? _cachedSensor;
+    private VendorSensorItem[]? _sensorList;
+    private long _sensorListAt;
+    private VendorSensorItem? _sensor;
     private double _lastValue;
     private bool _hasReading;
+    private long _readingAt;
+    private string? _readingKey;
 
-    private readonly SKPaint _headerPaint = new() { IsAntialias = true };
-    private readonly SKPaint _valuePaint = new() { IsAntialias = true };
-    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
-    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
-    private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
+    private readonly TelemetryReadingRenderer _renderer = new();
 
+    /// <summary>Internal test accessor: how many history samples are buffered.</summary>
+    internal int HistoryCountForTest => _renderer.HistoryCountForTest;
+
+    /// <inheritdoc />
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         var client = VendorService.Instance;
@@ -59,50 +86,101 @@ public sealed class HwinfoWidget : ModernWidgetBase
 
         RefreshReading(client);
 
-        if (!_hasReading)
+        if (!_hasReading || _sensor == null)
         {
             DrawPlaceholder(canvas, bounds);
             return;
         }
 
-        var label = string.IsNullOrEmpty(DisplayLabel) ? (_cachedSensor?.Name ?? "Sensor") : DisplayLabel;
-        var unit = string.IsNullOrEmpty(Unit) ? (_cachedSensor?.Unit ?? "") : Unit;
-        var decimals = Math.Max(0, (int)Decimals);
-        var valueStr = _lastValue.ToString($"F{decimals}", CultureInfo.InvariantCulture);
+        // The vendor reports a single value per sensor (no min/max), so
+        // auto-scale uses the observed history maximum as its reference; a
+        // manual Max Value applies when Auto Scale is off.
+        var display = SystemTelemetryPresentation.Build(
+            _sensor.Name,
+            _sensor.Unit ?? string.Empty,
+            _renderer.HistoryMax,
+            (float)_lastValue,
+            displayLabelOverride: DisplayLabel,
+            unitOverride: Unit,
+            displayMode: DisplayMode,
+            autoScale: AutoScale,
+            maxValue: MaxValue,
+            decimals: Decimals);
 
-        // Header
-        _headerPaint.Color = ColorOf(TextColorHex, SKColors.White);
-        var headerFont = FontHelper.GetCachedFont(FontHelper.GeistTypeface, 28f);
-        canvas.DrawText(label, bounds.Left + 16f, bounds.Top + 36f, headerFont, _headerPaint);
+        _renderer.Render(
+            canvas, bounds, display, (float)_lastValue, 0, 0,
+            ColorOf(AccentColorHex, WidgetPalette.Accent),
+            ColorOf(TextColorHex, SKColors.White));
+    }
 
-        // Value
-        _valuePaint.Color = ColorOf(AccentColorHex, WidgetPalette.Accent);
-        var valueFont = FontHelper.GetCachedFont(FontHelper.GeistTypeface, 48f);
-        canvas.DrawText(valueStr, bounds.Left + 16f, bounds.Top + 96f, valueFont, _valuePaint);
+    /// <summary>
+    /// The sensor dropdown: the vendor's live sensor list, keyed by
+    /// reading type + ids so the persisted pick survives a service restart.
+    /// </summary>
+    public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
+    {
+        if (!string.Equals(propertyName, nameof(SensorKey), StringComparison.Ordinal))
+            return [];
 
-        // Unit
-        if (!string.IsNullOrEmpty(unit))
-        {
-            _unitPaint.Color = ColorOf(TextColorHex, SKColors.White);
-            var unitFont = FontHelper.GetCachedFont(FontHelper.GeistTypeface, 24f);
-            var valueWidth = valueFont.MeasureText(valueStr);
-            canvas.DrawText(unit, bounds.Left + 16f + valueWidth + 8f, bounds.Top + 96f, unitFont, _unitPaint);
-        }
+        var sensors = VendorService.Instance?.Sensors.GetSensorList();
+        if (sensors == null)
+            return [];
+
+        return sensors
+            .Select(s =>
+            {
+                var source = string.IsNullOrWhiteSpace(s.Type) ? null : s.Type;
+                var label = source == null ? s.Name : $"{s.Name} ({source})";
+                return new WidgetPropertyOption(ComposeKey(s.ReadingType, s.SensorId1, s.SensorId2), label);
+            })
+            .ToArray();
     }
 
     private void RefreshReading(WigiDashServiceClient client)
     {
-        var index = Math.Max(0, (int)SensorIndex);
-        var sensors = client.Sensors.GetSensorList();
-        if (sensors == null || index >= sensors.Count)
+        var now = Environment.TickCount64;
+
+        if (_sensorList == null || now - _sensorListAt >= SensorListRefreshMs)
         {
+            _sensorList = client.Sensors.GetSensorList()?.ToArray();
+            _sensorListAt = now;
+        }
+
+        if (_sensorList == null || _sensorList.Length == 0)
+        {
+            _sensor = null;
             _hasReading = false;
             return;
         }
 
-        var sensor = sensors[index];
-        _cachedSensor = sensor;
-        var reading = client.Sensors.GetSensorValue(sensor.ReadingType, sensor.SensorId1, sensor.SensorId2);
+        // An empty pick falls back to the first sensor, so a freshly placed
+        // widget shows a live reading instead of an empty placeholder.
+        var key = SensorKey;
+        if (!TryParseKey(key, out int readingType, out int sensorId1, out int sensorId2))
+        {
+            _sensor = _sensorList[0];
+            readingType = _sensor.ReadingType;
+            sensorId1 = _sensor.SensorId1;
+            sensorId2 = _sensor.SensorId2;
+        }
+        else
+        {
+            _sensor = Array.Find(_sensorList, s =>
+                s.ReadingType == readingType && s.SensorId1 == sensorId1 && s.SensorId2 == sensorId2);
+            if (_sensor == null)
+            {
+                _hasReading = false;
+                return;
+            }
+        }
+
+        if (now - _readingAt < ReadingRefreshMs && string.Equals(_readingKey, key, StringComparison.Ordinal))
+            return;
+
+        _readingAt = now;
+        _readingKey = key;
+
+        var reading = client.Sensors.GetSensorValue(readingType, sensorId1, sensorId2);
         if (reading == null || !reading.IsValid)
         {
             _hasReading = false;
@@ -114,22 +192,32 @@ public sealed class HwinfoWidget : ModernWidgetBase
     }
 
     private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
+        => _renderer.DrawPlaceholder(canvas, bounds, "HWiNFO", "Vendor service not connected", ColorOf("#9CA3AF", SKColors.Gray));
+
+    /// <summary>The stable key for a vendor sensor: reading type + both ids.</summary>
+    internal static string ComposeKey(int readingType, int sensorId1, int sensorId2)
+        => $"{readingType}:{sensorId1}:{sensorId2}";
+
+    /// <summary>Parses a key produced by <see cref="ComposeKey"/>; false for an empty/garbage value.</summary>
+    internal static bool TryParseKey(string? key, out int readingType, out int sensorId1, out int sensorId2)
     {
-        var text = ColorOf("#9CA3AF", SKColors.Gray);
-        TextRenderHelper.DrawTitleSubtitlePlaceholder(
-            canvas, bounds,
-            "HWiNFO",
-            "Vendor service not connected",
-            text, _placeholderTitlePaint, _placeholderSubPaint);
+        readingType = 0;
+        sensorId1 = 0;
+        sensorId2 = 0;
+        if (string.IsNullOrEmpty(key))
+            return false;
+
+        var parts = key.Split(':');
+        return parts.Length == 3
+            && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out readingType)
+            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out sensorId1)
+            && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out sensorId2);
     }
 
+    /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        _headerPaint.Dispose();
-        _valuePaint.Dispose();
-        _unitPaint.Dispose();
-        _placeholderTitlePaint.Dispose();
-        _placeholderSubPaint.Dispose();
+        _renderer.Dispose();
         return base.DisposeAsync();
     }
 }

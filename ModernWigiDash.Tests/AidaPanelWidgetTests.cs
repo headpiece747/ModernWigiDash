@@ -1,111 +1,116 @@
-using ModernWigiDash.Hardware.Service;
+using ModernWigiDash.Hardware.Aida64;
 using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.Tests;
 
+/// <summary>
+/// The AIDA64 panel widget: it draws the frame its reader returns, and degrades
+/// to the house placeholder (never a throw) when AIDA64 is not publishing.
+/// The reader's own validation policy is pinned in <see cref="AidaMmapReaderTests"/>.
+/// </summary>
 [TestClass]
-public class AidaPanelWidgetTests
+public sealed class AidaPanelWidgetTests
 {
     [TestMethod]
-    public void Render_NoService_ProducesCanvas()
+    public void Render_NoMap_ProducesCanvas()
     {
-        VendorService.SetInstance(null);
-        var widget = new AidaPanelWidget();
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource());
+        var widget = new AidaPanelWidget(reader);
         using var bitmap = new SKBitmap(200, 100);
         using var canvas = new SKCanvas(bitmap);
+
         widget.Render(canvas, new SKRect(0, 0, 200, 100));
+
         Assert.AreEqual(200, bitmap.Width);
     }
 
     [TestMethod]
-    public void Render_ServiceNotReady_ProducesCanvas()
+    public void Render_WithFrame_ProducesCanvas()
     {
-        var client = CreateFakeClient(aidaReady: false);
-        VendorService.SetInstance(client);
-        try
-        {
-            var widget = new AidaPanelWidget();
-            using var bitmap = new SKBitmap(200, 100);
-            using var canvas = new SKCanvas(bitmap);
-            widget.Render(canvas, new SKRect(0, 0, 200, 100));
-            Assert.AreEqual(100, bitmap.Height);
-        }
-        finally
-        {
-            VendorService.SetInstance(null);
-        }
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource(BuildValidMap(1016, 592)));
+        var widget = new AidaPanelWidget(reader);
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
+
+        widget.Render(canvas, new SKRect(0, 0, 200, 100));
+
+        Assert.AreEqual(100, bitmap.Height);
     }
 
     [TestMethod]
-    public void Render_WithFrameData_ProducesCanvas()
+    public void Render_MalformedMap_ProducesCanvas()
     {
-        var frameBytes = new byte[1016 * 592 * 2];
-        for (int i = 0; i < frameBytes.Length; i += 2)
-        {
-            frameBytes[i] = 0xFF;
-            frameBytes[i + 1] = 0x7F;
-        }
+        var map = BuildValidMap(1016, 592);
+        map[116] = 0x00; // break the BMP signature
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource(map));
+        var widget = new AidaPanelWidget(reader);
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
 
-        var client = CreateFakeClient(aidaReady: true, frameBuffer: frameBytes);
-        VendorService.SetInstance(client);
-        try
-        {
-            var widget = new AidaPanelWidget();
-            using var bitmap = new SKBitmap(200, 100);
-            using var canvas = new SKCanvas(bitmap);
-            widget.Render(canvas, new SKRect(0, 0, 200, 100));
-            Assert.AreEqual(200, bitmap.Width);
-        }
-        finally
-        {
-            VendorService.SetInstance(null);
-        }
+        widget.Render(canvas, new SKRect(0, 0, 200, 100));
+
+        Assert.AreEqual(100, bitmap.Height);
     }
 
     [TestMethod]
-    public void Render_ShortBuffer_ProducesCanvas()
+    public async Task DisposeAsync_DisposesTheReaderAndItsMapSource()
     {
-        var shortBuffer = new byte[100];
-        var client = CreateFakeClient(aidaReady: true, frameBuffer: shortBuffer);
-        VendorService.SetInstance(client);
-        try
-        {
-            var widget = new AidaPanelWidget();
-            using var bitmap = new SKBitmap(200, 100);
-            using var canvas = new SKCanvas(bitmap);
-            widget.Render(canvas, new SKRect(0, 0, 200, 100));
-            Assert.AreEqual(100, bitmap.Height);
-        }
-        finally
-        {
-            VendorService.SetInstance(null);
-        }
+        var source = new FakeAidaMmapSource(BuildValidMap(64, 32));
+        var widget = new AidaPanelWidget(new AidaMmapReader(source));
+
+        await widget.DisposeAsync();
+
+        Assert.IsTrue(source.Disposed);
     }
 
-    private static WigiDashServiceClient CreateFakeClient(bool aidaReady, byte[]? frameBuffer = null)
+    [TestMethod]
+    public void BuildBitmap_BottomUpPayload_IsFlippedToTopDown()
     {
-        return new WigiDashServiceClient(new FakeSensorValues(), new FakeAidaPanel(aidaReady, frameBuffer));
+        // A 2x2 panel. BMP file row 0 is the image BOTTOM row, so the payload
+        // is [red row][black row]; the built bitmap's top row must be black and
+        // its bottom row red (the on-device bug drew the panel upside down).
+        byte[] payload = [0x00, 0xF8, 0x00, 0xF8, 0x00, 0x00, 0x00, 0x00];
+
+        using var bitmap = AidaPanelWidget.BuildBitmap(payload, payload.Length, 2, 2);
+
+        Assert.IsNotNull(bitmap);
+        Assert.AreEqual(SKColors.Black, bitmap.GetPixel(0, 0));
+        Assert.AreEqual(new SKColor(255, 0, 0), bitmap.GetPixel(0, 1));
     }
 
-    private sealed class FakeSensorValues : ISensorValues
+    private static byte[] BuildValidMap(int width, int height)
     {
-        public bool IsReady => false;
-        public IReadOnlyList<VendorSensorItem>? GetSensorList() => null;
-        public VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2) => null;
-    }
+        const int bitmapOffset = 116;
+        int payloadLength = width * height * 2;
+        int bitmapSize = 66 + payloadLength;
+        var map = new byte[bitmapOffset + bitmapSize];
 
-    private sealed class FakeAidaPanel : IAidaPanel
-    {
-        private readonly bool _ready;
-        private readonly byte[]? _buffer;
+        BitConverter.GetBytes(0xC0FFFEEEu).CopyTo(map, 8);
+        BitConverter.GetBytes(1).CopyTo(map, 16);
+        BitConverter.GetBytes(width).CopyTo(map, 40);
+        BitConverter.GetBytes(height).CopyTo(map, 44);
+        BitConverter.GetBytes(135174).CopyTo(map, 88);
+        BitConverter.GetBytes(bitmapSize).CopyTo(map, 92);
+        BitConverter.GetBytes(bitmapOffset).CopyTo(map, 96);
 
-        public FakeAidaPanel(bool ready, byte[]? buffer)
+        map[bitmapOffset] = (byte)'B';
+        map[bitmapOffset + 1] = (byte)'M';
+        BitConverter.GetBytes(66).CopyTo(map, bitmapOffset + 10);
+        BitConverter.GetBytes(40).CopyTo(map, bitmapOffset + 14);
+        BitConverter.GetBytes(width).CopyTo(map, bitmapOffset + 18);
+        BitConverter.GetBytes(height).CopyTo(map, bitmapOffset + 22);
+        BitConverter.GetBytes((ushort)16).CopyTo(map, bitmapOffset + 28);
+        BitConverter.GetBytes(3).CopyTo(map, bitmapOffset + 30);
+        BitConverter.GetBytes(0xF800u).CopyTo(map, bitmapOffset + 54);
+        BitConverter.GetBytes(0x07E0u).CopyTo(map, bitmapOffset + 58);
+        BitConverter.GetBytes(0x001Fu).CopyTo(map, bitmapOffset + 62);
+
+        for (int i = 0; i < payloadLength; i += 2)
         {
-            _ready = ready;
-            _buffer = buffer;
+            map[bitmapOffset + 66 + i] = 0x1F;
+            map[bitmapOffset + 66 + i + 1] = 0x08;
         }
 
-        public bool IsReady => _ready;
-        public byte[]? ReadAidaMmap(int offset, int length) => _buffer;
+        return map;
     }
 }

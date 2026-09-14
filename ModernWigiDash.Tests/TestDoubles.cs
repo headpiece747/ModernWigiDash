@@ -10,6 +10,7 @@ using LibUsbDotNet.Main;
 using ModernWigiDash.App.Hotkey;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.Hardware.Aida64;
 using ModernWigiDash.Hardware.Transport;
 using AppClass = ModernWigiDash.App.App;
 
@@ -281,6 +282,41 @@ internal sealed class StubLhmMapSource : ILhmMapSource
         error = Error;
         return Bytes;
     }
+}
+
+/// <summary>
+/// The AIDA64 panel-map seam: serves bounded copies out of an in-memory byte
+/// buffer (or a scripted error), so <see cref="AidaMmapReader"/>'s header
+/// validation runs without the real vendor shared map.
+/// </summary>
+internal sealed class FakeAidaMmapSource(byte[]? map = null) : IAidaMmapSource
+{
+    public byte[]? Map { get; set; } = map;
+    public string? Error { get; set; }
+    public bool Disposed { get; private set; }
+    public int Calls { get; private set; }
+
+    public bool TryRead(int offset, int length, byte[] destination, out string? error)
+    {
+        Calls++;
+        if (Map is null)
+        {
+            error = Error ?? "AIDA64 map unavailable";
+            return false;
+        }
+
+        if (offset < 0 || length < 0 || offset + length > Map.Length || length > destination.Length)
+        {
+            error = "range out of bounds";
+            return false;
+        }
+
+        Array.Copy(Map, offset, destination, 0, length);
+        error = null;
+        return true;
+    }
+
+    public void Dispose() => Disposed = true;
 }
 
 /// <summary>SMTC source seam: hands out an injectable manager (null for the
