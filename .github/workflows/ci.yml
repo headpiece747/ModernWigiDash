@@ -13,11 +13,13 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # v7/v6 are the current majors and run on Node 24; the v4 majors targeted
+      # Node 20, which GitHub deprecated (a warning on every run).
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 

@@ -18,11 +18,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # The v4 majors target Node 20, which GitHub deprecated: every run logged
+      # "Node.js 20 is deprecated ... forced to run on Node.js 24". v7/v6 are the
+      # current majors and run on Node 24 natively. That line was noise, never a
+      # failure, but it sat at the end of the log next to the real error.
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -64,4 +68,29 @@ jobs:
           } else {
             Write-Host "Creating release $tag."
             gh release create $tag $fullZip $slimZip --generate-notes
+          }
+
+      - name: Verify published assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Read the release back and compare each asset's size to the file this
+          # run built. The publish step is not trusted to have landed the right
+          # bytes: the v0.7.0 release carried a 105.9 MB full-bundle asset that
+          # was really the slim payload, and nothing failed. Nothing here deletes
+          # anything, so a mismatch fails the run while the release keeps
+          # whatever it already held.
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
+          $version = $tag.TrimStart("v")
+          $expected = [ordered]@{
+            "ModernWigiDash-v$version-win-x64.zip"  = (Get-Item "ModernWigiDash-v$version-win-x64.zip").Length
+            "ModernWigiDash-v$version-app-only.zip" = (Get-Item "ModernWigiDash-v$version-app-only.zip").Length
+          }
+          $release = gh release view $tag --json assets | ConvertFrom-Json
+          foreach ($name in $expected.Keys) {
+            $asset = $release.assets | Where-Object { $_.name -eq $name }
+            if (-not $asset) { throw "Release $tag has no asset named $name after publish." }
+            if ($asset.size -ne $expected[$name]) { throw "Asset $name on $tag is $($asset.size) bytes; this run built $($expected[$name]) bytes." }
+            Write-Host ("verified {0}: {1:N0} bytes" -f $name, $asset.size)
           }

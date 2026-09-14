@@ -103,6 +103,23 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   ASCII (`git log -1 --format=%s | ForEach-Object { [int][char]$_[0] }` must be
   < 128); a BOM-prefixed subject shows first-char code 65279/8745. The lone-CR
   guard covers line endings but not a leading BOM, so this check is the catch.
+- Releases: the `Release` workflow (`.github/workflows/release.yml`) owns every
+  tag's release. A `v*` tag push builds both zips through
+  `scripts/build-release.ps1 -Version <semver>` and creates the release, or
+  replaces its assets in place when one already exists; a manual dispatch does
+  the same for an existing tag. Never create, edit, or delete a release for a
+  tag by hand (the 2026-09-14 v0.8.0 incident): a hand-made release is what
+  routed the old publish step into its delete-then-upload branch, which deleted
+  the release and then failed with "release not found", and a hand-attached
+  artifact is how v0.7.0 shipped a 105.9 MB "full bundle" that was really the
+  slim payload. Two guardrails now run at the artifact: `build-release.ps1`
+  refuses a full bundle smaller than 2x the app-only zip (it also names an
+  offline `-SkipTelemetry` zip as a dev artifact, so it cannot masquerade as the
+  release bundle), and the workflow verifies every uploaded asset's byte size
+  after publishing. To repair an older tag's assets, check out that tag, copy the
+  current workflow + build script onto a throwaway branch, and dispatch the
+  workflow with `-f tag=<tag>`; do NOT `gh workflow run --ref <tag>`, which runs
+  that tag's own (older, possibly broken) workflow file.
 - Branch review: incoming PRs and feature branches go through the
   `code-reviewer` agent backed by `.opencode/rules/dotnet-rules.md`. The agent
   covers the judgment layer the pins cannot see: is an allow-list reason true,

@@ -13,8 +13,14 @@ $ErrorActionPreference = "Stop"
 # ModernWigiDash-v<semver>-win-x64.zip so every release has a distinct,
 # immutable, sortable filename. When no -Version is given (local ad-hoc
 # builds), fall back to the unversioned name.
+# -SkipTelemetry produces a DEV artifact: it carries no telemetry installers,
+# so it is not the shippable full bundle, and its name says so. A dev zip under
+# the release name is how a 105.9 MB "full bundle" reached the v0.7.0 release
+# page, indistinguishable in size from its own app-only zip; the name is the
+# one guard that survives a hand upload.
 if ([string]::IsNullOrWhiteSpace($OutputZip)) {
-    $OutputZip = if ([string]::IsNullOrWhiteSpace($Version)) { "ModernWigiDash-win-x64.zip" } else { "ModernWigiDash-v$Version-win-x64.zip" }
+    $stem = if ([string]::IsNullOrWhiteSpace($Version)) { "ModernWigiDash" } else { "ModernWigiDash-v$Version" }
+    $OutputZip = if ($SkipTelemetry) { "$stem-win-x64-dev-no-telemetry.zip" } else { "$stem-win-x64.zip" }
 }
 
 $Root       = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -189,6 +195,32 @@ $SlimZipPath = if ([string]::IsNullOrWhiteSpace($Version)) { Join-Path $Root "Mo
 if (Test-Path $SlimZipPath) { Remove-Item $SlimZipPath -Force }
 Compress-Archive -Path $SlimPayload -DestinationPath $SlimZipPath
 if (-not (Test-Path $SlimZipPath)) { throw "Slim zip creation failed" }
+
+# --- 5c. Artifact shape: the shippable full bundle carries the telemetry set ---
+# Both zips hold the same self-contained exe; the full bundle's extra ~218 MB IS
+# the bundled telemetry installers (LibreHardwareService + PresentMon MSIs), so
+# it lands near 3x the app-only zip. A payload without them is a dev artifact,
+# not a release: the v0.7.0 release shipped a 105.9 MB "full bundle" within 1 KB
+# of its own app-only zip and nothing failed. This check turns that into a build
+# error instead of a bad release asset.
+$fullBytes = (Get-Item $ZipPath).Length
+$slimBytes = (Get-Item $SlimZipPath).Length
+Write-Host ("Artifact sizes: full {0:N1} MB, app-only {1:N1} MB ({2:N2}x)" -f ($fullBytes / 1MB), ($slimBytes / 1MB), ($fullBytes / $slimBytes))
+if ($SkipTelemetry) {
+    Write-Host "WARNING: offline build (-SkipTelemetry). $OutputZip is a dev artifact with no telemetry installers; do not publish it as a release asset." -ForegroundColor Yellow
+} else {
+    $minRatio = 2.0
+    $minFullBytes = 150MB
+    if ($fullBytes -lt ($slimBytes * $minRatio) -or $fullBytes -lt $minFullBytes) {
+        $message = ("Release artifact check failed: the full bundle is {0:N1} MB against an app-only zip of {1:N1} MB. " +
+            "The shippable full bundle adds the bundled telemetry installers (LibreHardwareService + PresentMon, ~218 MB) " +
+            "to the same exe, so it must be at least {2:N1}x the app-only zip and at least {3:N0} MB. " +
+            "A payload without them is a dev artifact: check that the telemetry block ran (-SkipTelemetry off) and that " +
+            "the full zip was built from its own staging folder.") -f ($fullBytes / 1MB), ($slimBytes / 1MB), $minRatio, ($minFullBytes / 1MB)
+        throw $message
+    }
+}
+
 Write-Host ""
 Write-Host "Built $SlimZipPath"
 

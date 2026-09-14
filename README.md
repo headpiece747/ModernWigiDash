@@ -69,7 +69,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Frame-Time Analyst** | Real-time FPS and frame-time graphs driven by Intel's **PresentMon Service** (ADR-0003). The app connects non-elevated and polls a rolling 1s dynamic query for FPS, frame times, and GPU busy. The readout drops to **zero when the tracked target isn't actually displayed** (e.g. a backgrounded fullscreen game) instead of showing its hidden render rate |
 | **Vendor Integration** | The **HWiNFO Sensor** widget reads any HWiNFO sensor G.SKILL's WigiDash service exposes (over its WCF endpoint, served to the UI from a background-refreshed cache so the render tick never does I/O; the connection self-heals when the service starts or restarts). The **AIDA64 Panel** widget renders your AIDA64 sensor panel live from the vendor's shared map, playing the vendor **master** role itself (ADR-0026) so AIDA64 publishes frames with the vendor Manager closed |
 | **Telemetry Display Modes** | Every reading widget draws in **Gauge / Bar / Value / Graph** modes with auto-scaling, a sparkline history, and a shrink-to-fit layout that keeps the value inside the widget at any placement size |
-| **In-App Auto-Update** | Checks GitHub once at startup; downloads a slim app-only zip (~90 MB, SHA-256 verified) and swaps the executable in place on restart, no manual zip juggling |
+| **In-App Auto-Update** | Checks GitHub once at startup; downloads a slim app-only zip (~110 MB, SHA-256 verified) and swaps the executable in place on restart, no manual zip juggling |
 | **Power Lifecycle** | Windows sleep/resume handling: the 30 FPS pump pauses on suspend and restarts with a forced USB reconnect on wake |
 | **Titanium Amber Theme** | Dark titanium finish with amber accents, high-contrast indicators, and rounded container cards. Persisted to `app_theme.json` in `%LocalAppData%\ModernWigiDash` (a pre-release copy next to the exe migrates automatically, one time); the profile export carries the theme and import offers a one-click restore |
 | **Profile Persistence** | Auto-saved profile (`profile.json` in `%LocalAppData%\ModernWigiDash`). Widget placements, pages, and property values survive restarts via debounced save + flush-on-close; `display_device.log` and `crash.log` live in the same folder, never next to the exe |
@@ -161,7 +161,7 @@ Release zips are built and published **automatically by CI**: push a `v*` tag (e
 Each release ships two zips:
 
 - **`ModernWigiDash-vX.Y.Z-win-x64.zip`.** The full bundle: the single-file exe + `Resources` + bundled LibreHardwareService and PresentMon installers (used by `setup-telemetry.bat`). Use this for fresh installs.
-- **`ModernWigiDash-vX.Y.Z-app-only.zip`.** The slim exe + `Resources` only (~90 MB). This is the **in-app updater's payload, never use it for a fresh install** (it has no telemetry installers).
+- **`ModernWigiDash-vX.Y.Z-app-only.zip`.** The slim exe + `Resources` only (~110 MB). This is the **in-app updater's payload, never use it for a fresh install** (it has no telemetry installers).
 
 The build stamps the exe with the release version (`InformationalVersion` for the updater, `FileVersion` for Explorer's Details tab), auto-resolves the latest upstream telemetry versions (recorded in `telemetry/third-party-licenses/telemetry-versions.txt`), and asserts the stamp before zipping. To build by hand:
 
