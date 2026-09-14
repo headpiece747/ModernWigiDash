@@ -10,9 +10,7 @@ public sealed class AidaMmapReader : IDisposable
 {
     internal const int MapHeaderSize = 24 + 92;
     internal const int MagicTagOffset = 8;
-    internal const int WidgetVersionOffset = 12;
     internal const int NumWidgetsOffset = 16;
-    internal const int ConfigUpdatedOffset = 20;
     internal const int WidgetWidthOffset = 40;
     internal const int WidgetHeightOffset = 44;
     internal const int BitmapFormatOffset = 88;

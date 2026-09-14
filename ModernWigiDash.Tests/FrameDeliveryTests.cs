@@ -432,10 +432,16 @@ public class FrameDeliveryTests
         using var bitmap = CreateFrameBitmap();
 
         delivery.Push(bitmap);
-        await TestWait.WaitUntilAsync(() => delivery.SendFailedCount > 0, TimeSpan.FromSeconds(5));
+
+        // Wait on the LOG, not SendFailedCount: the counter is incremented
+        // before the log line is written on the sender thread, so waiting on
+        // the counter races the write (an order-dependent gate failure under
+        // load, 2026-09-14).
+        await TestWait.WaitUntilAsync(() => logs.Count > 0, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual(1, logs.Count, "The first send failure must be logged exactly once");
         StringAssert.Contains(logs[0], "Send failed");
+        Assert.AreEqual(1, delivery.SendFailedCount);
     }
 
     [TestMethod]

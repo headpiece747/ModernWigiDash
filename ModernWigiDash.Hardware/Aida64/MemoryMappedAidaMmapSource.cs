@@ -14,7 +14,6 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
 {
     internal const string MapName = @"Global\Gskill_Frontier_Aida64Widget";
     internal const string MutexName = @"Global\Gskill_Frontier_Aida64WidgetMutex";
-    internal const long MapSize = 8 * 1024 * 1024;
     internal static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
     private readonly Func<string, Mutex?> _openMutex;

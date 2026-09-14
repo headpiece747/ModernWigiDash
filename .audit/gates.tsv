@@ -410,3 +410,5 @@
 2026-09-13T20:20:44Z	4f6a090	manual	ok	55	0	ok	2427	0	ok
 2026-09-14T00:47:33Z	167875a	manual	ok	36	0	ok	2460	0	ok
 2026-09-14T00:52:49Z	3b74c5d	manual	ok	0	0	ok	2460	0	ok
+2026-09-14T01:00:40Z	5458533	manual - FAILED: SendFailure_LogsFirstFailureOnce	ok	0	0	FAIL	2459	1	SKIP
+2026-09-14T01:02:57Z	5458533	manual	ok	0	0	ok	2460	0	ok

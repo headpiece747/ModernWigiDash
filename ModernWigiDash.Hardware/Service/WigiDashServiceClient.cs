@@ -118,43 +118,10 @@ public sealed class WigiDashServiceClient : IDisposable
         _channel = _factory.CreateChannel();
     }
 
-    internal bool TryEnsureChannel()
-    {
-        try
-        {
-            EnsureChannel();
-            return true;
-        }
-        catch
-        {
-            CloseChannelLocked();
-            return false;
-        }
-    }
-
-    internal bool Call<T>(Func<T> action, out T result)
-    {
-        try
-        {
-            result = action();
-            return true;
-        }
-        catch
-        {
-            result = default!;
-            return false;
-        }
-    }
-
     internal bool SafeCall(Func<bool> action)
     {
         try { return action(); }
         catch { return false; }
-    }
-
-    internal void RefreshSensorReadiness()
-    {
-        _sensorReady = SafeCall(() => _channel!.GetSensorInitStatus() > 0);
     }
 
     /// <summary>
