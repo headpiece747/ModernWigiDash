@@ -35,7 +35,7 @@ $ZipPath    = Join-Path $Root $OutputZip
 # Gated behind -SkipTelemetry: that switch is the documented offline dev path,
 # and the resolved versions are only consumed by the telemetry bundle block.
 function Get-LatestReleaseVersion([string]$Repo) {
-    $json = & curl.exe -f -L -sS "https://api.github.com/repos/$Repo/releases/latest"
+    $json = & curl.exe -f -L -sS --retry 5 --retry-all-errors --retry-delay 3 "https://api.github.com/repos/$Repo/releases/latest"
     if ($LASTEXITCODE -ne 0) { throw "Could not query latest release for $Repo" }
     $release = $json | ConvertFrom-Json
     return $release.tag_name.TrimStart("v")
@@ -69,7 +69,11 @@ function Get-Download([string]$Url, [string]$Dest) {
         Remove-Item -LiteralPath $Dest -Force
     }
     Write-Host "  downloading $(Split-Path $Dest -Leaf)..."
-    & curl.exe -f -L -sS -o "$Dest" "$Url"
+    # --retry-all-errors makes --retry cover HTTP 5xx too. Without it --retry
+    # only covers transport errors, and one transient CDN 504 killed a whole
+    # release run (PresentMon's MSI, 2026-09-14) because the download has no
+    # other retry.
+    & curl.exe -f -L -sS --retry 5 --retry-all-errors --retry-delay 3 -o "$Dest" "$Url"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Dest)) {
         if (Test-Path -LiteralPath $Dest) { Remove-Item -LiteralPath $Dest -Force }
         throw "Download failed: $Url"
