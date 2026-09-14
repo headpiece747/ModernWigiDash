@@ -150,10 +150,12 @@ public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvi
     {
         var now = Environment.TickCount64;
 
-        if (now - _sensorListAt >= SensorListRefreshMs)
+        // Retry fast until the first list lands (the client serves it from a
+        // background cache and schedules the fetch, so a miss is cheap); once a
+        // list is held, settle to the 5 s cadence.
+        long listCadence = _sensorList is { Length: > 0 } ? SensorListRefreshMs : 250;
+        if (now - _sensorListAt >= listCadence)
         {
-            // Retry on the cadence even after a failed read: a null list must
-            // not short-circuit into a per-tick retry storm.
             _sensorList = client.Sensors.GetSensorList()?.ToArray();
             _sensorListAt = now;
         }
