@@ -49,16 +49,17 @@ jobs:
           # Idempotent publish: a release may already exist (created by hand,
           # or by an earlier trigger of this same tag). gh release create fails
           # on an existing tag, which turned a re-trigger into a false-failure
-          # (the v0.6.9 run). So check first: when the release exists, delete
-          # the release object (keeping the tag, so the tag can be re-pushed)
-          # and upload the freshly built zips; only create the release when it
-          # is absent. Deleting then uploading replaces stale assets rather
-          # than appending duplicates.
+          # (the v0.6.9 run). When the release exists, upload the freshly built
+          # zips with --clobber (same-named assets are replaced in place, never
+          # duplicated); only create the release when it is absent. Do NOT
+          # delete the release first: gh release upload cannot target a deleted
+          # release, so the old delete-then-upload path deleted the release and
+          # then failed with "release not found" (the v0.8.0 run), leaving the
+          # tag with no release at all.
           $existing = $null
           try { $existing = gh release view $tag --json tagName -q .tagName 2>$null } catch { $existing = $null }
           if ($existing) {
-            Write-Host "Release $tag already exists; updating its assets in place."
-            gh release delete $tag
+            Write-Host "Release $tag already exists; replacing its assets in place."
             gh release upload $tag $fullZip $slimZip --clobber
           } else {
             Write-Host "Creating release $tag."
