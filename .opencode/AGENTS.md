@@ -39,19 +39,22 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   `scripts\measure-coverage.ps1` (coverlet.MTP code coverage: `--coverlet
   --coverlet-output-format cobertura --coverlet-file-prefix wmd`; the
   coverlet.MTP package is referenced by the MSTest.Sdk test project). Baseline
-  2026-09-12: 90.7% of instrumented src lines (Sdk 97.9, Core 95.0, Hardware
-   94.0, Widgets 93.4, App 82.9), 2,407 tests; the prior 2026-08-27 coverlet
-  XPlat baseline (87.9% / Sdk 92.9) predates the MTP migration and the ~290
-  tests that landed since. The absolute percentages differ a point or two from
-  the earlier Microsoft-engine baseline (86.4% / 2,296 tests) because the two
+  2026-09-14: 89.7% of instrumented src lines (Sdk 97.9, Core 94.6, Hardware
+  91.8, Widgets 92.0, App 82.8), 2,465 tests; the prior 2026-09-12 baseline
+  (90.7% / 2,407 tests) predates the vendor/AIDA/telemetry surface added since,
+  and the 2026-08-27 coverlet XPlat baseline (87.9% / Sdk 92.9) predates the
+  MTP migration. The absolute percentages differ a point or two from the
+  earlier Microsoft-engine baseline (86.4% / 2,296 tests) because the two
   engines attribute lines differently (sequence-point instrumentation vs the
   CodeCoverage mechanism, a toolchain change, not a regression); the gate
   floors (Sdk/Core/Hardware >= 70%) all hold with margin.
 - OCR review (AI code review over a diff/commit; the `ocr_review` tool-mapping
   alias routes here). The CLI binary is
   `C:\Users\tobia\AppData\Roaming\npm\node_modules\@alibaba-group\open-code-review\node_modules\@alibaba-group\ocr-win32-x64\bin\opencodereview.exe`
-  (v1.10.1); its LLM config is `C:\Users\tobia\.opencodereview\config.json`
-  (provider `ninfer`, model `qwen3.8-27b` at `http://127.0.0.1:8080/v1`). Run it
+  (v1.9.4); its LLM config is `C:\Users\tobia\.opencodereview\config.json`
+  (provider `ninfer`, model `qwen3.8-27b-quasar` at `http://127.0.0.1:8080/v1`;
+  the served model name must match NInfer's, or every file review fails with
+  "model not found"). Run it
   scoped, not on a whole branch: `& <bin> review -c <sha> --audience agent
   --format json --effort low --timeout 8 -o <tempfile>` for one commit, or
   `--from <base> --to <tip>` for a range. Use `--preview` first (no LLM cost) to
