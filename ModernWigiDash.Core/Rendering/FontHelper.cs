@@ -466,7 +466,11 @@ public static class FontHelper
             return existing;
         }
 
-        FontCacheEviction.EvictIfFull(CachedFonts, FontCacheEviction.CachedFontLimit);
+        var evicted = FontCacheEviction.EvictIfFullRetiring(CachedFonts, FontCacheEviction.CachedFontLimit);
+        if (evicted is not null)
+        {
+            RetireFonts(evicted);
+        }
         // Value overload, no factory: a per-call closure allocates its display
         // class on the method's entry path even when the miss branch never runs.
         // Create at the QUANTIZED size, not the raw request: the key IS the
@@ -492,6 +496,29 @@ public static class FontHelper
         => GetCachedFont(GetTypeface(familyName, style), size);
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(long TypefaceHandle, int SizeKey), SKFont> CachedFonts = new();
+
+    // The fonts the last reset evicted, retired one generation behind so a
+    // render path holding one (a hero value fetched before its unit) is never
+    // unref'd out from under it. Every evicted font is therefore disposed on the
+    // NEXT reset, deterministically, instead of leaving the native release to
+    // the finalizer.
+    private static SKFont[]? _retiredFonts;
+
+    /// <summary>Retires the evicted fonts, disposing the generation before them.</summary>
+    private static void RetireFonts(SKFont[] evicted)
+    {
+        var previous = _retiredFonts;
+        _retiredFonts = evicted;
+        if (previous is null)
+        {
+            return;
+        }
+
+        foreach (var font in previous)
+        {
+            font.Dispose();
+        }
+    }
 
     /// <summary>
     /// The per-font resolution of (typeface handle, style value + wrapper),

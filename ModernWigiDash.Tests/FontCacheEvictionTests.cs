@@ -48,4 +48,25 @@ public class FontCacheEvictionTests
 
         Assert.AreEqual(0, cache.Count, "past the limit: the whole cache resets (entries refill on demand)");
     }
+
+    [TestMethod]
+    public void EvictIfFullRetiring_AboveLimit_ClearsAndHandsBackTheValues()
+    {
+        var cache = CacheOf(3);
+
+        var evicted = FontCacheEviction.EvictIfFullRetiring(cache, limit: 2);
+
+        Assert.AreEqual(0, cache.Count, "the reset clears the cache");
+        Assert.IsNotNull(evicted, "the evicted values are handed back so the caller can retire them a generation later");
+        Assert.AreEqual(3, evicted.Length);
+    }
+
+    [TestMethod]
+    public void EvictIfFullRetiring_AtOrBelowLimit_ReturnsNull()
+    {
+        var cache = CacheOf(2);
+
+        Assert.IsNull(FontCacheEviction.EvictIfFullRetiring(cache, limit: 2), "at the limit: the rule is strictly greater-than");
+        Assert.AreEqual(2, cache.Count);
+    }
 }

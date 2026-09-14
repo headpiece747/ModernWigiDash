@@ -49,11 +49,11 @@ public sealed class AidaPanelWidget : ModernWidgetBase
 
         // Version-token discipline: only rebuild the bitmap when the buffer
         // content changes (a new frame was read).
-        var version = ComputeBufferVersion(frame.Payload, frame.PayloadLength, frame.Width, frame.Height);
+        var version = ComputeBufferVersion(frame.Buffer, frame.PixelOffset, frame.PayloadLength, frame.Width, frame.Height);
         if (version != _lastFrameVersion || _frameBitmap == null)
         {
             RecycleBitmap();
-            _frameBitmap = BuildBitmap(frame.Payload, frame.PayloadLength, frame.Width, frame.Height);
+            _frameBitmap = BuildBitmap(frame.Buffer, frame.PixelOffset, frame.PayloadLength, frame.Width, frame.Height);
             _lastFrameVersion = version;
         }
 
@@ -78,19 +78,19 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         Context?.LogError($"AIDA64 panel unavailable: {_reader.LastError}");
     }
 
-    private static long ComputeBufferVersion(byte[] buffer, int length, int width, int height)
+    private static long ComputeBufferVersion(byte[] buffer, int offset, int length, int width, int height)
     {
-        // FNV-1a over the WHOLE payload, seeded with the geometry. The former
-        // sampled XOR folded 1.2 MB into 8 bits (it ignored the green channel
-        // and every unsampled byte, and collided about 1/256), so a redraw could
-        // leave the previous panel on screen. The full hash is a few hundred
-        // microseconds and only matters when a frame arrives.
+        // FNV-1a over the WHOLE pixel payload, seeded with the geometry. The
+        // former sampled XOR folded 1.2 MB into 8 bits (it ignored the green
+        // channel and every unsampled byte, and collided about 1/256), so a
+        // redraw could leave the previous panel on screen. The full hash is a
+        // few hundred microseconds and only matters when a frame arrives.
         const uint fnvOffset = 2166136261u;
         const uint fnvPrime = 16777619u;
         uint hash = fnvOffset;
         hash = (hash ^ (uint)width) * fnvPrime;
         hash = (hash ^ (uint)height) * fnvPrime;
-        for (int i = 0; i < length; i++)
+        for (int i = offset; i < offset + length; i++)
         {
             hash = (hash ^ buffer[i]) * fnvPrime;
         }
@@ -98,7 +98,7 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         return hash;
     }
 
-    internal static SKBitmap? BuildBitmap(byte[] payload, int payloadLength, int width, int height)
+    internal static SKBitmap? BuildBitmap(byte[] buffer, int pixelOffset, int payloadLength, int width, int height)
     {
         if (width <= 0 || height <= 0 || payloadLength != width * height * 2)
             return null;
@@ -116,14 +116,14 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         int copyBytes = width * 2;
         for (int row = 0; row < height; row++)
         {
-            int srcOffset = (height - 1 - row) * srcStride;
-            if (srcOffset < 0 || srcOffset + copyBytes > payloadLength)
+            int srcOffset = pixelOffset + ((height - 1 - row) * srcStride);
+            if (srcOffset < pixelOffset || srcOffset + copyBytes > buffer.Length)
             {
                 bitmap.Dispose();
                 return null;
             }
 
-            Marshal.Copy(payload, srcOffset, IntPtr.Add(pixels, row * bitmap.RowBytes), copyBytes);
+            Marshal.Copy(buffer, srcOffset, IntPtr.Add(pixels, row * bitmap.RowBytes), copyBytes);
         }
 
         return bitmap;

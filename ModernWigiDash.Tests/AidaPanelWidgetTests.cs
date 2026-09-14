@@ -71,7 +71,7 @@ public sealed class AidaPanelWidgetTests
         // its bottom row red (the on-device bug drew the panel upside down).
         byte[] payload = [0x00, 0xF8, 0x00, 0xF8, 0x00, 0x00, 0x00, 0x00];
 
-        using var bitmap = AidaPanelWidget.BuildBitmap(payload, payload.Length, 2, 2);
+        using var bitmap = AidaPanelWidget.BuildBitmap(payload, pixelOffset: 0, payload.Length, 2, 2);
 
         Assert.IsNotNull(bitmap);
         Assert.AreEqual(SKColors.Black, bitmap.GetPixel(0, 0));

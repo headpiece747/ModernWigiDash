@@ -32,8 +32,7 @@ public sealed class AidaMmapReader : IDisposable
 
     private readonly IAidaMmapSource _mapSource;
     private readonly byte[] _headerBuffer = new byte[MapHeaderSize];
-    private readonly byte[] _bmpHeaderBuffer = new byte[BmpHeaderSize];
-    private readonly byte[] _payloadBuffer = new byte[PanelPayloadBytes];
+    private readonly byte[] _bitmapBuffer = new byte[BmpHeaderSize + PanelPayloadBytes];
 
     /// <summary>
     /// Binds the reader to the map source it reads from.
@@ -72,18 +71,6 @@ public sealed class AidaMmapReader : IDisposable
                 return null;
             }
 
-            if (!_mapSource.TryRead(bitmapOffset, BmpHeaderSize, _bmpHeaderBuffer, out error))
-            {
-                LastError = error;
-                return null;
-            }
-
-            if (!TryValidateBmpHeader(_bmpHeaderBuffer, width, height))
-            {
-                LastError = "AIDA64 panel bitmap header malformed";
-                return null;
-            }
-
             int payloadLength = bitmapSize - BmpPixelOffset;
             if (payloadLength != width * height * 2 || payloadLength > PanelPayloadBytes)
             {
@@ -91,13 +78,23 @@ public sealed class AidaMmapReader : IDisposable
                 return null;
             }
 
-            if (!_mapSource.TryRead(bitmapOffset + BmpPixelOffset, payloadLength, _payloadBuffer, out error))
+            // ONE read of the BMP header + pixels. Three separate copies (map
+            // header, BMP header, pixels) let a redraw pair a header from one
+            // frame with pixels from the next; the combined read removes that
+            // window and two mutex probes per frame.
+            if (!_mapSource.TryRead(bitmapOffset, BmpHeaderSize + payloadLength, _bitmapBuffer, out error))
             {
                 LastError = error;
                 return null;
             }
 
-            return new AidaFrameSnapshot(_payloadBuffer, payloadLength, width, height);
+            if (!TryValidateBmpHeader(_bitmapBuffer, width, height))
+            {
+                LastError = "AIDA64 panel bitmap header malformed";
+                return null;
+            }
+
+            return new AidaFrameSnapshot(_bitmapBuffer, BmpPixelOffset, payloadLength, width, height);
         }
         catch (Exception ex)
         {

@@ -49,4 +49,27 @@ public static class FontCacheEviction
             cache.Clear();
         }
     }
+
+    /// <summary>
+    /// The variant for caches whose values own native handles (the SKFont
+    /// cache): on the reset the outgoing values are handed back instead of
+    /// dropped, so the caller can retire them a generation later. A render path
+    /// may hold a font across a second lookup (a hero value plus its unit), so
+    /// disposing the evicted set immediately could unref a font still in use.
+    /// Returns null when nothing evicted.
+    /// </summary>
+    /// <param name="cache">The cache to bound.</param>
+    /// <param name="limit">The cache's declared cap.</param>
+    public static TValue[]? EvictIfFullRetiring<TKey, TValue>(ConcurrentDictionary<TKey, TValue> cache, int limit)
+        where TKey : notnull
+    {
+        if (cache.Count <= limit)
+        {
+            return null;
+        }
+
+        var outgoing = cache.Values.ToArray();
+        cache.Clear();
+        return outgoing;
+    }
 }

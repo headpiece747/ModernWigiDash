@@ -19,7 +19,8 @@ public sealed class AidaMmapReaderTests
     public void TryReadFrame_ValidMap_ReturnsSnapshotWithTheWidgetGeometry()
     {
         var map = BuildValidMap(64, 32);
-        using var reader = new AidaMmapReader(new FakeAidaMmapSource(map));
+        var source = new FakeAidaMmapSource(map);
+        using var reader = new AidaMmapReader(source);
 
         var frame = reader.TryReadFrame();
 
@@ -27,6 +28,8 @@ public sealed class AidaMmapReaderTests
         Assert.AreEqual(64, frame.Width);
         Assert.AreEqual(32, frame.Height);
         Assert.AreEqual(64 * 32 * 2, frame.PayloadLength);
+        Assert.AreEqual(66, frame.PixelOffset, "the pixels follow the 66-byte BMP header in the combined buffer");
+        Assert.AreEqual(2, source.Calls, "one header read plus one combined bitmap read (the tear window narrowed)");
         Assert.IsNull(reader.LastError);
     }
 
