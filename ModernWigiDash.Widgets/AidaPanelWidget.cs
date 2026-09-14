@@ -12,7 +12,7 @@ namespace ModernWigiDash.Widgets;
 /// RGB565) is validated against the map's own header during each read. Degrades to the
 /// house placeholder when AIDA64 is not running (ADR-0017 image).
 /// </summary>
-[WidgetMetadata("aida_panel", "AIDA64 Panel", Category = "System Monitoring")]
+[WidgetMetadata("aida_panel", "AIDA64 Panel", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class AidaPanelWidget : ModernWidgetBase
 {
     private readonly AidaMmapReader _reader;

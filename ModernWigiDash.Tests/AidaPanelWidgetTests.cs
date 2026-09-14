@@ -12,6 +12,18 @@ namespace ModernWigiDash.Tests;
 public sealed class AidaPanelWidgetTests
 {
     [TestMethod]
+    public void DefaultSize_IsTheFullFramebuffer()
+    {
+        // The panel is the full 1016x592 surface, so a new placement should land
+        // full-screen (Size5x4) instead of the 2x2 house default.
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource());
+        var widget = new AidaPanelWidget(reader);
+
+        Assert.AreEqual(GridSizePreset.Size5x4.ToSize().Width, widget.DefaultSize.Width);
+        Assert.AreEqual(GridSizePreset.Size5x4.ToSize().Height, widget.DefaultSize.Height);
+    }
+
+    [TestMethod]
     public void Render_NoMap_ProducesCanvas()
     {
         using var reader = new AidaMmapReader(new FakeAidaMmapSource());
