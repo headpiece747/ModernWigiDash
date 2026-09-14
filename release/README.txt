@@ -110,3 +110,7 @@ ModernWigiDash — G.Skill WigiDash widget stack
   LibreHardwareService      MPL-2.0  — https://github.com/epinter/LibreHardwareService
   PresentMon Service        MIT  — https://github.com/GameTechDev/PresentMon
   See  telemetry\third-party-licenses\NOTICES.txt  for full texts + sources.
+
+  Thanks to ElmorLabs, whose WigiDash service the HWiNFO Sensor and AIDA64
+  Panel widgets read, and who helped with both integrations:
+    https://github.com/ElmorLabs-WigiDash

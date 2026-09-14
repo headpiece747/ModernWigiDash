@@ -251,6 +251,20 @@ Widgets also override `InitializeAsync(IModernWigiDashContext, CancellationToken
 
 ---
 
+## Acknowledgements
+
+The **HWiNFO Sensor** and **AIDA64 Panel** widgets integrate with the WigiDash
+service, which is ElmorLabs' work. We are grateful both for permission to use it
+and for their help with the two integrations: the HWiNFO sensor catalog, the
+background-refreshed read path, and the AIDA64 shared-map handshake (the master
+role `AidaPanelMaster` plays, ADR-0022 / ADR-0024 / ADR-0026) were worked out
+with them.
+
+ElmorLabs publishes the WigiDash widget framework and sample widgets at
+[github.com/ElmorLabs-WigiDash](https://github.com/ElmorLabs-WigiDash).
+
+---
+
 ## License
 
 Released under the [MIT License](LICENSE).
