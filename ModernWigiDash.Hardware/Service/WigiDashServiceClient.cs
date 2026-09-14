@@ -35,10 +35,12 @@ public sealed class WigiDashServiceClient : IDisposable
     private const long ProviderRetryIntervalMs = 5000;
 
     private readonly System.Threading.Lock _gate = new();
+    private readonly Func<IWigiDashWcf> _createChannel;
+    private readonly TimeProvider _clock;
     private IWigiDashWcf? _channel;
     private ChannelFactory<IWigiDashWcf>? _factory;
     private bool _sensorReady;
-    private long _lastSensorInitTicks;
+    private DateTimeOffset _lastProviderAttemptUtc = DateTimeOffset.MinValue;
     private bool _disposed;
 
     /// <summary>The HWiNFO sensor read facet.</summary>
@@ -47,12 +49,16 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>Creates the client over the production vendor-service channel.</summary>
     public WigiDashServiceClient()
     {
+        _createChannel = CreateProductionChannel;
+        _clock = TimeProvider.System;
         Sensors = new SensorValuesFacet(this);
     }
 
     /// <summary>Test constructor: injects the facet implementation directly.</summary>
     internal WigiDashServiceClient(ISensorValues sensors)
     {
+        _createChannel = CreateProductionChannel;
+        _clock = TimeProvider.System;
         Sensors = sensors;
     }
 
@@ -62,8 +68,22 @@ public sealed class WigiDashServiceClient : IDisposable
     /// </summary>
     internal WigiDashServiceClient(IWigiDashWcf channel)
     {
+        _createChannel = () => channel;
+        _clock = TimeProvider.System;
         _channel = channel;
         _sensorReady = true; // the injected channel stands in for a connected service
+        Sensors = new SensorValuesFacet(this);
+    }
+
+    /// <summary>
+    /// Test constructor: injects the channel factory and clock, so the whole
+    /// reconnect path (open -> fail -> drop -> reopen) is drivable without the
+    /// vendor service; a fake clock advances the retry window.
+    /// </summary>
+    internal WigiDashServiceClient(Func<IWigiDashWcf> createChannel, TimeProvider clock)
+    {
+        _createChannel = createChannel;
+        _clock = clock;
         Sensors = new SensorValuesFacet(this);
     }
 
@@ -97,10 +117,9 @@ public sealed class WigiDashServiceClient : IDisposable
         if (_disposed || (_channel != null && _sensorReady))
             return;
 
-        var now = Environment.TickCount64;
-        if (now - _lastSensorInitTicks < ProviderRetryIntervalMs)
+        if (!RetryWindowElapsed())
             return;
-        _lastSensorInitTicks = now;
+        _lastProviderAttemptUtc = _clock.GetUtcNow();
 
         try
         {
@@ -126,9 +145,17 @@ public sealed class WigiDashServiceClient : IDisposable
     internal void EnsureChannel()
     {
         if (_channel != null) return;
-        // MaxReceivedMessageSize must exceed the largest vendor response. The
-        // vendor's own Manager binds at 20 MB; we match it so the unbounded-size
-        // sensor list clears the quota.
+        _channel = _createChannel();
+    }
+
+    /// <summary>
+    /// The production channel factory: a BasicHttp binding whose
+    /// MaxReceivedMessageSize must exceed the largest vendor response (the
+    /// vendor's own Manager binds at 20 MB; we match it so the unbounded-size
+    /// sensor list clears the quota). The factory is kept for disposal.
+    /// </summary>
+    private IWigiDashWcf CreateProductionChannel()
+    {
         var binding = new BasicHttpBinding
         {
             OpenTimeout = TimeSpan.FromSeconds(5),
@@ -139,8 +166,15 @@ public sealed class WigiDashServiceClient : IDisposable
         };
         var endpoint = new EndpointAddress(EndpointAddress);
         _factory = new ChannelFactory<IWigiDashWcf>(binding, endpoint);
-        _channel = _factory.CreateChannel();
+        return _factory.CreateChannel();
     }
+
+    /// <summary>
+    /// True when at least <see cref="ProviderRetryIntervalMs"/> has elapsed since
+    /// the last provider attempt (true before the first attempt).
+    /// </summary>
+    private bool RetryWindowElapsed()
+        => _clock.GetUtcNow() - _lastProviderAttemptUtc >= TimeSpan.FromMilliseconds(ProviderRetryIntervalMs);
 
     internal bool SafeCall(Func<bool> action)
     {
@@ -156,10 +190,9 @@ public sealed class WigiDashServiceClient : IDisposable
     {
         if (_channel == null || _disposed)
             return;
-        var now = Environment.TickCount64;
-        if (now - _lastSensorInitTicks < ProviderRetryIntervalMs)
+        if (!RetryWindowElapsed())
             return;
-        _lastSensorInitTicks = now;
+        _lastProviderAttemptUtc = _clock.GetUtcNow();
         _sensorReady = SafeCall(() => _channel.InitSensorProvider(true, true, true));
     }
 

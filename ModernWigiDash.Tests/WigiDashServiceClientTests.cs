@@ -135,6 +135,37 @@ public sealed class WigiDashServiceClientTests
         Assert.IsFalse(client.Sensors.IsReady, "the dead channel must be dropped for the next attempt to reopen");
     }
 
+    [TestMethod]
+    public void Sensors_AfterAFailedCall_ReopensTheChannelOnceTheRetryWindowElapses()
+    {
+        // The full self-heal path through the injected channel factory + clock:
+        // open -> read -> the channel dies -> drop -> after the retry window,
+        // reopen and recover (no app relaunch).
+        var clock = new FakeTimeProvider();
+        int opened = 0;
+        var channel = new FakeWcfChannel();
+        using var client = new WigiDashServiceClient(() => { opened++; return channel; }, clock);
+
+        var first = client.Sensors.GetSensorList();
+        Assert.IsNotNull(first);
+        Assert.AreEqual(1, opened, "the first read opens the channel");
+        Assert.IsTrue(client.Sensors.IsReady);
+
+        channel.ThrowOnList = true;
+        Assert.IsNull(client.Sensors.GetSensorList(), "a dead channel must degrade to no data");
+        Assert.IsFalse(client.Sensors.IsReady, "and be dropped");
+
+        channel.ThrowOnList = false;
+        Assert.IsNull(client.Sensors.GetSensorList(), "the reopen is throttled inside the retry window");
+        Assert.AreEqual(1, opened, "no reopen inside the retry window");
+
+        clock.Advance(TimeSpan.FromSeconds(6));
+        var recovered = client.Sensors.GetSensorList();
+        Assert.IsNotNull(recovered, "the client must recover once the retry window elapses");
+        Assert.AreEqual(2, opened, "the dropped channel must be reopened after the retry window");
+        Assert.IsTrue(client.Sensors.IsReady);
+    }
+
     private sealed class FakeWcfChannel : IWigiDashWcf
     {
         public bool InitCalled { get; private set; }
