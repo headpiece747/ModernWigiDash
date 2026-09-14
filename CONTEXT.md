@@ -208,7 +208,7 @@ ModernWigiDash is a .NET 10 WPF application that drives a USB-connected small LC
 
 ┌─────────────────────────────────────────────────────────┐
 │  ModernWigiDash.Widgets                                 │
-│  13 widget implementations                              │
+│  15 widget implementations                              │
 │  Stores (LhmSensorStore, FrameTimeStore)                │
 │  PriceFeedManager, Twitch, TextRenderHelper              │
 └─────────────────────────────────────────────────────────┘

@@ -88,6 +88,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | Widget | Description |
 | :--- | :--- |
 | **Hardware Monitor** | Multi-gauge readouts for CPU, GPU, VRAM, memory, and storage utilization (via LibreHardwareService) |
+| **HWiNFO Sensor** | Any HWiNFO sensor the vendor WigiDash service exposes (CPU/GPU temperatures, clocks, memory), with Gauge / Bar / Value / Graph modes and a name-based sensor picker |
+| **AIDA64 Panel** | Your AIDA64 sensor panel, rendered live and full-screen on the display, read straight from the vendor's shared map |
 | **FPS / Frame Time** | Real-time FPS, 1% / 0.1% lows, and GPU-busy metrics with an overlay-style readout (via PresentMon Service); reads zero when the tracked app isn't on screen |
 | **Audio Visualizer** | Real-time multi-band spectrum and oscilloscope visualization from WASAPI loopback capture |
 | **Now Playing** | Windows System Media Transport Controls integration with album artwork and transport buttons |
@@ -121,7 +123,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 - **OS**: Windows 10 or Windows 11 (x64)
 - **Runtime**: none for release builds (self-contained single-file EXE); the .NET 10 SDK is required only to build from source
 - **Hardware**: [G.Skill WigiDash](https://www.gskill.com/product/412/415/1702982997/WigiDash) 7″ USB touch panel (`USB\VID_28DA&PID_EF01`)
-- **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors) and [PresentMon Service](https://github.com/microsoft/PresentMon) (frame-time analytics). The app runs without them; the related widgets show an unavailable state
+- **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors), [PresentMon Service](https://github.com/microsoft/PresentMon) (frame-time analytics), and G.SKILL's WigiDash Manager (its service backs the HWiNFO Sensor and AIDA64 Panel widgets). The AIDA64 Panel also needs AIDA64 running with its LCD output set to the WigiDash. The app runs without them; the related widgets show an unavailable state
 
 ---
 
@@ -146,7 +148,7 @@ dotnet test ModernWigiDash.slnx -c Release
 dotnet run --project ModernWigiDash.App\ModernWigiDash.App.csproj
 ```
 
-The app connects to the display directly over USB. Frames and touch work with no service installation. Hardware telemetry requires LibreHardwareService to be installed; frame-time widgets require PresentMon Service; both degrade gracefully to an "unavailable" state when absent.
+The app connects to the display directly over USB. Frames and touch work with no service installation. Hardware telemetry requires LibreHardwareService to be installed; frame-time widgets require PresentMon Service; the HWiNFO Sensor and AIDA64 Panel widgets require G.SKILL's WigiDash service (and AIDA64 with its LCD output set to the WigiDash, for the panel). Each degrades gracefully to an "unavailable" state when absent.
 
 ---
 
