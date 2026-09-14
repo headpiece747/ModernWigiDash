@@ -38,7 +38,7 @@ public class VendorServiceWiringTests
             {
                 Assert.AreSame(client, VendorService.Instance,
                     "the VendorService startup step must expose the factory's client through the process-wide static");
-                return null;
+                return new object();
             }
             finally
             {
@@ -65,7 +65,7 @@ public class VendorServiceWiringTests
                 window.QuitClose();
                 Assert.IsNull(VendorService.Instance,
                     "teardown must drop the process-wide static so no widget render reaches a disposed client");
-                return null;
+                return new object();
             }
             finally
             {

@@ -43,6 +43,7 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>The HWiNFO sensor read facet.</summary>
     public ISensorValues Sensors { get; }
 
+    /// <summary>Creates the client over the production vendor-service channel.</summary>
     public WigiDashServiceClient()
     {
         Sensors = new SensorValuesFacet(this);
@@ -200,6 +201,7 @@ public sealed class WigiDashServiceClient : IDisposable
         _sensorReady = false;
     }
 
+    /// <summary>Closes the channel. The vendor's shared provider is left initialized (see the class notes).</summary>
     public void Dispose()
     {
         lock (_gate)
