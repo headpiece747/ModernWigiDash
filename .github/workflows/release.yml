@@ -94,3 +94,27 @@ jobs:
             if ($asset.size -ne $expected[$name]) { throw "Asset $name on $tag is $($asset.size) bytes; this run built $($expected[$name]) bytes." }
             Write-Host ("verified {0}: {1:N0} bytes" -f $name, $asset.size)
           }
+
+      - name: Credit line in the release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The credit for the vendor integration belongs on every release page,
+          # not only in the shipped README. gh's --generate-notes owns the body
+          # on the create path, so the credit is prepended here instead, which
+          # also covers a release that already existed (the asset-refresh branch
+          # never touches the body). The membership guard makes the step
+          # idempotent: re-running a tag never stacks it twice. The body goes
+          # through a file so its line endings survive argv.
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
+          $credit = "Thanks to [ElmorLabs](https://github.com/ElmorLabs-WigiDash) for the WigiDash service the HWiNFO Sensor and AIDA64 Panel widgets read, and for the help with both integrations."
+          $release = gh release view $tag --json body | ConvertFrom-Json
+          if ($release.body -like "*ElmorLabs-WigiDash*") {
+            Write-Host "Release $tag notes already carry the credit."
+          } else {
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+            [System.IO.File]::WriteAllText($notesPath, ($credit + "`r`n`r`n" + $release.body), [System.Text.UTF8Encoding]::new($false))
+            gh release edit $tag --notes-file $notesPath
+            Write-Host "Prepended the ElmorLabs credit to the release notes of $tag."
+          }
