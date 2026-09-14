@@ -263,5 +263,9 @@ public sealed class WigiDashServiceClientTests
             isValid = true;
             return 42;
         }
+
+        public bool InitAidaProvider() => true;
+
+        public bool WriteAidaMmap(int offset, byte[] buffer) => true;
     }
 }

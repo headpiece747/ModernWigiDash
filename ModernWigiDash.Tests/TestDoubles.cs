@@ -322,6 +322,100 @@ internal sealed class FakeAidaMmapSource(byte[]? map = null) : IAidaMmapSource
     public void Dispose() => Disposed = true;
 }
 
+/// <summary>
+/// The AIDA64 master's write seam: records the handshake writes (cloned), with
+/// scriptable init/write results.
+/// </summary>
+internal sealed class FakeAidaMmapWriter : IAidaMmapWriter
+{
+    public bool InitResult { get; set; } = true;
+    public bool WriteResult { get; set; } = true;
+    public int InitCalls { get; private set; }
+    public List<(int Offset, byte[] Data)> Writes { get; } = [];
+
+    public bool TryInit(out string? error)
+    {
+        InitCalls++;
+        error = InitResult ? null : "init refused";
+        return InitResult;
+    }
+
+    public bool TryWrite(int offset, byte[] data, out string? error)
+    {
+        error = WriteResult ? null : "write refused";
+        if (!WriteResult)
+        {
+            return false;
+        }
+
+        Writes.Add((offset, (byte[])data.Clone()));
+        return true;
+    }
+}
+
+/// <summary>
+/// Builds a vendor-shaped AIDA64 map for the reader/master tests: the map header
+/// + first widget record, a 66-byte RGB565 BMP header, and the pixels. The BMP
+/// signature at the bitmap offset is the master protocol's "new frame" marker
+/// (non-zero unless <paramref name="markerSet"/> is false).
+/// </summary>
+internal static class AidaTestMap
+{
+    internal const int BitmapOffset = 116;
+
+    internal static byte[] BuildValid(int width, int height, uint slaveCounter = 7, bool markerSet = true)
+    {
+        int payloadLength = width * height * 2;
+        int bitmapSize = 66 + payloadLength;
+        var map = new byte[BitmapOffset + bitmapSize];
+
+        BitConverter.GetBytes(slaveCounter).CopyTo(map, 4);
+        BitConverter.GetBytes(0xC0FFFEEEu).CopyTo(map, 8);
+        BitConverter.GetBytes(1).CopyTo(map, 16);
+        BitConverter.GetBytes(width).CopyTo(map, 40);
+        BitConverter.GetBytes(height).CopyTo(map, 44);
+        BitConverter.GetBytes(5).CopyTo(map, 48);
+        BitConverter.GetBytes(4).CopyTo(map, 52);
+        BitConverter.GetBytes(135174).CopyTo(map, 88);
+        BitConverter.GetBytes(bitmapSize).CopyTo(map, 92);
+        BitConverter.GetBytes(BitmapOffset).CopyTo(map, 96);
+
+        if (markerSet)
+        {
+            map[BitmapOffset] = (byte)'B';
+            map[BitmapOffset + 1] = (byte)'M';
+        }
+
+        BitConverter.GetBytes(bitmapSize).CopyTo(map, BitmapOffset + 2);
+        BitConverter.GetBytes(66).CopyTo(map, BitmapOffset + 10);
+        BitConverter.GetBytes(40).CopyTo(map, BitmapOffset + 14);
+        BitConverter.GetBytes(width).CopyTo(map, BitmapOffset + 18);
+        BitConverter.GetBytes(height).CopyTo(map, BitmapOffset + 22);
+        BitConverter.GetBytes((ushort)16).CopyTo(map, BitmapOffset + 28);
+        BitConverter.GetBytes(3).CopyTo(map, BitmapOffset + 30);
+        BitConverter.GetBytes(0xF800u).CopyTo(map, BitmapOffset + 54);
+        BitConverter.GetBytes(0x07E0u).CopyTo(map, BitmapOffset + 58);
+        BitConverter.GetBytes(0x001Fu).CopyTo(map, BitmapOffset + 62);
+
+        // A consumed slot: the master's frame ack writes four zero bytes at the
+        // bitmap offset. The BMP file-size field lands at bytes 2..3 of the
+        // marker, so the whole four bytes must be cleared for the slot to read
+        // as "no new frame".
+        if (!markerSet)
+        {
+            Array.Clear(map, BitmapOffset, 4);
+        }
+
+        for (int i = 0; i < payloadLength; i += 2)
+        {
+            map[BitmapOffset + 66 + i] = 0x1F;
+            map[BitmapOffset + 66 + i + 1] = 0x08;
+        }
+
+        return map;
+    }
+}
+
 /// <summary>SMTC source seam: hands out an injectable manager (null for the
 /// no-manager path).</summary>
 internal sealed class StubMediaSessionSource : IMediaSessionSource

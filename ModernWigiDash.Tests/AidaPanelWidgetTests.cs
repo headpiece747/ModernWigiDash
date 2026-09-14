@@ -24,6 +24,24 @@ public sealed class AidaPanelWidgetTests
     }
 
     [TestMethod]
+    public async Task Render_WithAPublishedMasterFrame_DrawsIt()
+    {
+        var writer = new FakeAidaMmapWriter();
+        var master = new AidaPanelMaster(new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32)), writer, log: static _ => { });
+        Assert.IsTrue(master.EnsureRegistered());
+        master.PollOnce();
+        var widget = new AidaPanelWidget(master);
+
+        using var surface = SKSurface.Create(new SKImageInfo(200, 100));
+        surface.Canvas.Clear(SKColors.Transparent);
+        widget.Render(surface.Canvas, new SKRect(0, 0, 200, 100));
+
+        Assert.AreNotEqual(SKColors.Transparent, surface.PeekPixels().GetPixelColor(100, 50), "a published frame must be drawn");
+
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
     public void Render_NoMap_ProducesCanvas()
     {
         using var reader = new AidaMmapReader(new FakeAidaMmapSource());

@@ -15,7 +15,8 @@ namespace ModernWigiDash.Widgets;
 [WidgetMetadata("aida_panel", "AIDA64 Panel", Category = "System Monitoring", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class AidaPanelWidget : ModernWidgetBase
 {
-    private readonly AidaMmapReader _reader;
+    private readonly AidaPanelMaster? _master;
+    private readonly AidaMmapReader? _reader;
     private SKBitmap? _frameBitmap;
     private long _lastFrameVersion;
     private string? _lastLoggedError;
@@ -23,37 +24,44 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
     private readonly SKPaint _placeholderSubPaint = new() { IsAntialias = true };
 
-    /// <summary>Binds the production reader over the vendor's named shared map.</summary>
+    /// <summary>
+    /// Binds the production master: it registers the vendor's AIDA64 widget slot
+    /// and drives the publish/ack protocol on a background loop, so AIDA64
+    /// publishes live frames. The widget only draws the published copy.
+    /// </summary>
     public AidaPanelWidget()
-        : this(new AidaMmapReader(new MemoryMappedAidaMmapSource()))
+        : this(AidaPanelService.CreateProduction())
     {
     }
 
+    /// <summary>Read-only seam (tests, and the path used when another master owns the slot).</summary>
     internal AidaPanelWidget(AidaMmapReader reader)
     {
         _reader = reader;
     }
 
+    /// <summary>Master seam (tests).</summary>
+    internal AidaPanelWidget(AidaPanelMaster master)
+    {
+        _master = master;
+    }
+
     /// <inheritdoc />
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        var frame = _reader.TryReadFrame();
-        if (frame == null)
+        if (!TryAcquireFrame(out byte[] buffer, out int pixelOffset, out int length, out int width, out int height, out long version))
         {
-            LogReadFailureOnce();
             DrawPlaceholder(canvas, bounds);
             return;
         }
 
-        _lastLoggedError = null;
-
-        // Version-token discipline: only rebuild the bitmap when the buffer
-        // content changes (a new frame was read).
-        var version = ComputeBufferVersion(frame.Buffer, frame.PixelOffset, frame.PayloadLength, frame.Width, frame.Height);
+        // Version-token discipline: the master hands out a monotonic generation
+        // per published frame; the read-only path hashes the pixels (only a
+        // changed frame rebuilds the bitmap).
         if (version != _lastFrameVersion || _frameBitmap == null)
         {
             RecycleBitmap();
-            _frameBitmap = BuildBitmap(frame.Buffer, frame.PixelOffset, frame.PayloadLength, frame.Width, frame.Height);
+            _frameBitmap = BuildBitmap(buffer, pixelOffset, length, width, height);
             _lastFrameVersion = version;
         }
 
@@ -70,9 +78,65 @@ public sealed class AidaPanelWidget : ModernWidgetBase
         }
     }
 
+    /// <summary>
+    /// The frame to draw: the master's published copy when the master is bound
+    /// (it starts the background loop lazily), else a direct read of the map
+    /// slot (the fallback for when another master owns the slot, and the seam
+    /// the tests drive). False means "no frame" — the caller draws the
+    /// placeholder.
+    /// </summary>
+    private bool TryAcquireFrame(out byte[] buffer, out int pixelOffset, out int length, out int width, out int height, out long version)
+    {
+        if (_master is not null)
+        {
+            _master.Start();
+            var published = _master.TryGetPublished();
+            if (published is null)
+            {
+                buffer = [];
+                pixelOffset = 0;
+                length = 0;
+                width = 0;
+                height = 0;
+                version = 0;
+                return false;
+            }
+
+            buffer = published.Pixels;
+            pixelOffset = 0;
+            length = published.Length;
+            width = published.Width;
+            height = published.Height;
+            version = published.Generation;
+            return true;
+        }
+
+        var frame = _reader!.TryReadFrame();
+        if (frame is null)
+        {
+            LogReadFailureOnce();
+            buffer = [];
+            pixelOffset = 0;
+            length = 0;
+            width = 0;
+            height = 0;
+            version = 0;
+            return false;
+        }
+
+        _lastLoggedError = null;
+        buffer = frame.Buffer;
+        pixelOffset = frame.PixelOffset;
+        length = frame.PayloadLength;
+        width = frame.Width;
+        height = frame.Height;
+        version = ComputeBufferVersion(buffer, pixelOffset, length, width, height);
+        return true;
+    }
+
     private void LogReadFailureOnce()
     {
-        if (string.Equals(_reader.LastError, _lastLoggedError, StringComparison.Ordinal))
+        if (_reader is null || string.Equals(_reader.LastError, _lastLoggedError, StringComparison.Ordinal))
             return;
         _lastLoggedError = _reader.LastError;
         Context?.LogError($"AIDA64 panel unavailable: {_reader.LastError}");
@@ -148,7 +212,8 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        _reader.Dispose();
+        _master?.Dispose();
+        _reader?.Dispose();
         RecycleBitmap();
         _placeholderTitlePaint.Dispose();
         _placeholderSubPaint.Dispose();

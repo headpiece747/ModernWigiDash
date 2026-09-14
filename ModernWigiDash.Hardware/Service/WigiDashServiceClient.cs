@@ -259,6 +259,51 @@ public sealed class WigiDashServiceClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Ensures the vendor's AIDA64 map provider is initialized. Called by the
+    /// AIDA64 panel master off the UI thread; never throws.
+    /// </summary>
+    internal bool TryInitAidaProvider()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return false;
+            try
+            {
+                EnsureChannel();
+                return _channel!.InitAidaProvider();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _readFailLog.Write(() => $"AIDA64 provider init failed: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes the small master-handshake bytes into the vendor's AIDA64 shared
+    /// map (the header, the widget record, the heartbeat counter, the frame
+    /// ack). Never throws; a failure leaves the channel alone (a rejected write
+    /// is not a dead channel).
+    /// </summary>
+    internal bool TryWriteAidaMmap(int offset, byte[] buffer)
+    {
+        lock (_gate)
+        {
+            if (_disposed || _channel is null) return false;
+            try
+            {
+                return _channel.WriteAidaMmap(offset, buffer);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _readFailLog.Write(() => $"AIDA64 map write failed at {offset}: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+    }
+
     private void CloseChannelLocked()
     {
         if (_channel is System.ServiceModel.ICommunicationObject cc)

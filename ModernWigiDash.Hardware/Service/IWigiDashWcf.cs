@@ -58,4 +58,23 @@ public interface IWigiDashWcf
         [MessageParameter(Name = "sensor_id1")] int sensorId1,
         [MessageParameter(Name = "sensor_id2")] int sensorId2,
         [MessageParameter(Name = "IsValid")] out bool isValid);
+
+    // --- AIDA64 panel provider (the master handshake) ---
+
+    /// <summary>
+    /// Initializes the vendor's AIDA64 shared-map provider, which owns the map
+    /// (the map exists only while some client has initialized it). The AIDA64
+    /// panel master calls this before registering its widget slot.
+    /// </summary>
+    [OperationContract]
+    bool InitAidaProvider();
+
+    /// <summary>
+    /// Writes bytes into the vendor's AIDA64 shared map. The vendor's binding
+    /// caps REQUEST size (~64 KB), so only the small master handshake (header,
+    /// widget record, heartbeat counter, frame ack) may go through here; the
+    /// ~1.2 MB frame is read from the map directly (ADR-0024/0026).
+    /// </summary>
+    [OperationContract]
+    bool WriteAidaMmap(int offset, byte[] buffer);
 }
