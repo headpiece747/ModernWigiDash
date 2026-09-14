@@ -188,6 +188,25 @@ public sealed class WigiDashServiceClientTests
         Assert.IsFalse(client.Sensors.IsReady, "the faulted channel must be dropped, not retried in place forever");
     }
 
+    [TestMethod]
+    public void Sensors_NilListElement_IsSkippedNotThrown()
+    {
+        // A nil element (<SensorItem i:nil="true"/>) deserializes to null; the
+        // old projection threw an NRE that reached the render tick uncaught and
+        // killed the process.
+        var channel = new FakeWcfChannel
+        {
+            IncludeNullSensor = true,
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
+        };
+        using var client = new WigiDashServiceClient(channel);
+
+        var sensors = client.Sensors.GetSensorList();
+
+        Assert.IsNotNull(sensors);
+        Assert.AreEqual(1, sensors.Count, "a nil list element must be skipped, not projected");
+    }
+
     private sealed class FakeWcfChannel : IWigiDashWcf
     {
         public bool InitCalled { get; private set; }
@@ -197,6 +216,8 @@ public sealed class WigiDashServiceClientTests
         public bool ThrowOnValue { get; set; }
 
         public bool ThrowOnInit { get; set; }
+
+        public bool IncludeNullSensor { get; set; }
 
         public List<VendorSensorItem> Sensors { get; set; } = [];
 
@@ -215,7 +236,10 @@ public sealed class WigiDashServiceClientTests
         public string? GetHwinfoSdkVersion() => "1.0";
 
         public List<VendorSensorItem> GetSensorList()
-            => ThrowOnList ? throw new InvalidOperationException("channel dead") : Sensors;
+        {
+            if (ThrowOnList) throw new InvalidOperationException("channel dead");
+            return IncludeNullSensor ? [null!, .. Sensors] : Sensors;
+        }
 
         public double GetSensorValue(int readingType, int sensorId1, int sensorId2, out bool isValid)
         {

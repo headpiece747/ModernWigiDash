@@ -134,6 +134,13 @@ public sealed class HwinfoWidget : ModernWidgetBase, IWidgetPropertyOptionsProvi
             {
                 var source = string.IsNullOrWhiteSpace(s.Type) ? null : s.Type;
                 var label = source == null ? s.Name : $"{s.Name} ({source})";
+                // The vendor's Name/Type are untrusted and only per-string quota
+                // bounded (8 KB); bound the UI label too.
+                if (label.Length > 128)
+                {
+                    label = label[..128];
+                }
+
                 return new WidgetPropertyOption(ComposeKey(s.ReadingType, s.SensorId1, s.SensorId2), label);
             })
             .ToArray();

@@ -17,6 +17,10 @@ public class SkiaFrameCompositor : IDisposable
     private bool _isEditMode = false;
     private PlacedWidgetInstance? _selectedWidget;
 
+    // Placements whose render threw, so the failure logs once instead of every
+    // frame (the widget is retried each tick; a persistent fault must not spam).
+    private readonly HashSet<PlacedWidgetInstance> _loggedRenderFailures = [];
+
     // Zero-alloc render path: the buffer never changes, so the canvas is
     // created once and reused per compose; the background parse is hoisted
     // (reparsed only when the page's hex changes); the alpha layer paint is
@@ -129,7 +133,21 @@ public class SkiaFrameCompositor : IDisposable
                 _canvas.SaveLayer(_alphaPaint);
             }
 
-            widget.ActiveInstance.Render(_canvas, bounds);
+            try
+            {
+                widget.ActiveInstance.Render(_canvas, bounds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One widget must never take down the frame: this method is
+                // try/finally only and the render tick has no catch above it, so
+                // an uncaught widget throw killed the process. Log once per
+                // placement and keep compositing.
+                if (_loggedRenderFailures.Add(widget))
+                {
+                    FileLog.Write($"[COMPOSITOR] widget '{widget.PluginId}' ({widget.InstanceId}) render failed: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
 
             if (widget.Opacity < 0.99f)
             {

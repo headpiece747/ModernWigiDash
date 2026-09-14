@@ -284,7 +284,21 @@ public sealed class WigiDashServiceClient : IDisposable
                     }
                 }
 
-                return raw.Select(s => new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit)).ToList();
+                var items = new List<VendorSensorItem>(raw.Count);
+                foreach (var s in raw)
+                {
+                    // A nil list element (<SensorItem i:nil="true"/>) deserializes
+                    // to null; projecting it threw an NRE that reached the render
+                    // tick uncaught and killed the process. Skip nulls.
+                    if (s is null)
+                    {
+                        continue;
+                    }
+
+                    items.Add(new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit));
+                }
+
+                return items;
             }
         }
 

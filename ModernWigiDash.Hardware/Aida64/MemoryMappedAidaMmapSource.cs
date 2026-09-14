@@ -103,7 +103,10 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
                 return false;
             }
 
-            if (offset + length > _accessor!.Capacity)
+            // 64-bit compare: a producer-controlled offset near int.MaxValue made
+            // the 32-bit sum wrap negative and pass this guard, leaving the
+            // framework to reject the read (a per-frame close/reopen churn).
+            if ((long)offset + length > _accessor!.Capacity)
             {
                 error = "AIDA64 map too small for the requested range";
                 return false;
