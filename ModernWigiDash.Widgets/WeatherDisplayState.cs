@@ -55,10 +55,6 @@ internal sealed class WeatherDisplayState(WeatherClient client, string neutralLo
     /// owner's gated read.</summary>
     internal WeatherResolutionState Identity => client.Identity;
 
-    /// <summary>The pending resolved-label write-back awaiting the
-    /// UI-thread flush — forwarded from the identity owner's gated read.</summary>
-    internal string? PendingLabelWriteback => client.PendingLabelWriteback;
-
     /// <summary>The last successful fetch's timestamp (the staleness
     /// display's input) — read under the gate, since the apply stamps it
     /// under the same gate.</summary>
@@ -136,20 +132,8 @@ internal sealed class WeatherDisplayState(WeatherClient client, string neutralLo
     }
 
     /// <summary>
-    /// The single edit-path invalidation, per drop kind: the shared identity
-    /// value, the coordinates, the query, the throttle, AND the pending
-    /// write-back all drop through the identity owner's one gated entry —
-    /// the Location Match pick (Coordinates kind) keeps the candidates it was
-    /// offered from while the old winner's name + population void; every
-    /// other resolution input (Location kind) voids the whole identity so the
-    /// render-model cache key turns and the header drops the old city
-    /// immediately. One application site, by construction.
-    /// </summary>
-    internal void Invalidate(WeatherInvalidationKind kind) => client.Invalidate(kind);
-
-    /// <summary>
-    /// Test seam: replaces the state wholesale under the gate (the
-    /// boot-load version-guard test stamps the pre-await state directly).
+    /// The snapshot state, replaced wholesale: a test seam for the boot-load
+    /// version-guard case, which stamps the pre-await state directly.
     /// </summary>
     internal void ReplaceState(WeatherSnapshotState state)
     {

@@ -414,9 +414,9 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     }
 
     /// <summary>
-    /// Routes a resolution-input edit through the invalidation rule (both
-    /// twins drop at the same kind) and force-refreshes when the kind is not
-    /// None.
+    /// Routes a resolution-input edit through the invalidation rule (the
+    /// identity owner drops at the kind the rule declares) and force-refreshes
+    /// when the kind is not None.
     /// </summary>
     /// <param name="propertyName">The property that changed.</param>
     /// <param name="newValue">The property's new value.</param>
@@ -425,17 +425,17 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         // The drop granularity is the rule's decision (WeatherInvalidation):
         // a Location Match pick keeps the candidates it was offered from,
         // every other resolution input voids the whole identity (a stale pick
-        // can never win). The two twins (the client's fetch control and the
-        // widget's display state) take the SAME kind through their own gated
-        // entry — the display-state transitions run under the SAME gate the
-        // module's guarded apply takes, so the clear is atomic against an
-        // in-flight fetch's assignment (either the assignment lands before
-        // the clear and is erased, or the guard re-reads the new location and
-        // the assignment never happens; the edit can never be resurrected
-        // over). Both Invalidate entries also drop a PENDING resolved-label
-        // write-back (the race a completed-but-unflushed fetch leaves) —
-        // strictly stronger under the gate, safe because the identity
-        // re-check is also under the gate.
+        // can never win). There is ONE owner and ONE gated entry: the client's
+        // `Invalidate`, which the display state composes with. The clear is
+        // atomic against an in-flight fetch's assignment (either the assignment
+        // lands before the clear and is erased, or the guard re-reads the new
+        // location and the assignment never happens; the edit can never be
+        // resurrected over). It also drops a PENDING resolved-label write-back
+        // (the race a completed-but-unflushed fetch leaves) — strictly stronger
+        // under the gate, safe because the identity re-check is also under it.
+        // (The display state's own transitions still take ITS gate first and
+        // then the client's, in that one order; that nesting is the atomic
+        // apply, and it is not a second owner of the identity.)
         WeatherInvalidationKind kind = WeatherInvalidation.KindForProperty(propertyName);
         if (kind == WeatherInvalidationKind.Location && _locationWritebackSuppressed)
         {
@@ -448,7 +448,13 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
 
         if (kind != WeatherInvalidationKind.None)
         {
-            _displayState.Invalidate(kind);
+            // The client IS the identity owner and the one gated entry for an
+            // invalidation; the display state is a forward onto it. Calling both
+            // ran the drop rule twice per edit (idempotent, so it was never
+            // wrong - but it meant the pass-through had a production caller, so
+            // nobody could tell the forward was redundant, and the widget's own
+            // comment described two independently-gated "twins" that no longer
+            // exist).
             _client.Invalidate(kind);
             RequestRefresh(force: true);
         }

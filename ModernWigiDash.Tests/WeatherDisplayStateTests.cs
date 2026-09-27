@@ -157,7 +157,7 @@ public class WeatherDisplayStateTests
 
         state.Client.QueueLabelWriteback(() => false, "Amsterdam, Netherlands");
 
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
         Assert.IsNull(state.Client.TakePendingWriteback(BareLocation(), () => false),
             "a never-queued write-back takes back null ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â not an empty string");
     }
@@ -176,7 +176,7 @@ public class WeatherDisplayStateTests
         Assert.AreEqual("First", first);
         Assert.AreEqual("Second", second,
             "the queue and the take serialize on the one gate ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a queued value can never be lost to a take");
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
     }
 
     [TestMethod]
@@ -192,12 +192,12 @@ public class WeatherDisplayStateTests
         string? taken = state.Client.TakePendingWriteback(BareLocation() with { CustomLabel = "Home" }, () => false);
 
         Assert.IsNull(taken, "a CustomLabel set after the queue must veto the write at the take");
-        Assert.AreEqual("Miami, Florida, United States of America", state.PendingLabelWriteback,
+        Assert.AreEqual("Miami, Florida, United States of America", state.Client.PendingLabelWriteback,
             "the vetoed write-back stays queued ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â a veto must never silently lose the resolved label");
         Assert.AreEqual("Miami, Florida, United States of America",
             state.Client.TakePendingWriteback(BareLocation(), () => false),
             "removing the label re-opens the take on the next frame");
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
     }
 
     [TestMethod]
@@ -209,7 +209,7 @@ public class WeatherDisplayStateTests
         string? taken = state.Client.TakePendingWriteback(BareLocation("Berlin"), () => false);
 
         Assert.IsNull(taken, "writing the location onto itself is a no-op churn ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the take refuses");
-        Assert.AreEqual("Berlin", state.PendingLabelWriteback, "the refused write-back stays queued");
+        Assert.AreEqual("Berlin", state.Client.PendingLabelWriteback, "the refused write-back stays queued");
     }
 
     [TestMethod]
@@ -221,7 +221,7 @@ public class WeatherDisplayStateTests
         string? taken = state.Client.TakePendingWriteback(BareLocation(), () => true);
 
         Assert.IsNull(taken, "the suppression flag's veto runs at the take, under the gate");
-        Assert.AreEqual("Berlin", state.PendingLabelWriteback);
+        Assert.AreEqual("Berlin", state.Client.PendingLabelWriteback);
     }
 
     [TestMethod]
@@ -250,13 +250,13 @@ public class WeatherDisplayStateTests
             resolvedName: "Miami, Florida, United States of America"));
         state.Client.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        state.Invalidate(WeatherInvalidationKind.Coordinates);
+        state.Client.Invalidate(WeatherInvalidationKind.Coordinates);
 
         Assert.AreEqual("", state.Identity.ResolvedName);
         Assert.AreEqual(0, state.Identity.Population);
         Assert.AreEqual(2, state.Identity.Candidates.Count,
             "a Location Match pick resolves against the candidates it was offered from");
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
     }
 
     [TestMethod]
@@ -267,12 +267,12 @@ public class WeatherDisplayStateTests
             resolvedName: "Miami, Florida, United States of America"));
         state.Client.QueueLabelWriteback(() => true, "Miami, Florida, United States of America");
 
-        state.Invalidate(WeatherInvalidationKind.Location);
+        state.Client.Invalidate(WeatherInvalidationKind.Location);
 
         Assert.AreEqual(0, state.Identity.Candidates.Count);
         Assert.AreEqual(0, state.Identity.Population);
         Assert.AreEqual("", state.Identity.ResolvedName);
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
     }
 
     // -- The folded resolved identity (value + null-keeps + sentinel) -------
@@ -289,7 +289,7 @@ public class WeatherDisplayStateTests
             "the header must show the neutral label until a resolution sets a real identity");
         Assert.AreEqual(0, state.Identity.Candidates.Count);
         Assert.AreEqual(0, state.Identity.Population);
-        Assert.IsNull(state.PendingLabelWriteback);
+        Assert.IsNull(state.Client.PendingLabelWriteback);
     }
 
     [TestMethod]

@@ -582,7 +582,7 @@ public class WeatherFetchFlowTests
         }
 
         public WeatherResolutionState Identity => _displayState.Identity;
-        public string? PendingLabelWriteback => _displayState.PendingLabelWriteback;
+        public string? PendingLabelWriteback => _displayState.Client.PendingLabelWriteback;
         public WeatherLocation Location = NycCoords;
 
         public bool StaticSnapshotFlag { get; set; }

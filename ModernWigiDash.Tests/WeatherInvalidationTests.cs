@@ -115,12 +115,12 @@ public sealed class WeatherInvalidationTests
     [TestMethod]
     public void CoordinatesKind_DropsThroughTheRuleAndKeepsTheCandidates()
     {
-        var (client, state) = SeedOwner();
+        var (client, _) = SeedOwner();
         WeatherResolutionState seed = client.Identity;
 
         // The widget's gated entry routes through the owner's one application
         // site (the client's Invalidate forwards to the same member).
-        state.Invalidate(WeatherInvalidationKind.Coordinates);
+        client.Invalidate(WeatherInvalidationKind.Coordinates);
 
         // THE DECLARED RULE: the post-drop identity IS the rule's output for
         // the seeded value.
@@ -140,9 +140,9 @@ public sealed class WeatherInvalidationTests
     [TestMethod]
     public void LocationKind_VoidsTheWholeIdentity()
     {
-        var (client, state) = SeedOwner();
+        var (client, _) = SeedOwner();
 
-        state.Invalidate(WeatherInvalidationKind.Location);
+        client.Invalidate(WeatherInvalidationKind.Location);
 
         // THE DECLARED RULE: the WHOLE resolved identity voids — nothing of
         // the old resolution may survive.
