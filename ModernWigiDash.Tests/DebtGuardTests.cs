@@ -486,6 +486,36 @@ public sealed class DebtGuardTests
     }
 
     [TestMethod]
+    public void HouseRules_TheStartupLog_CarriesTheHostEnvironmentStamp()
+    {
+        // The OS build used to appear NOWHERE in production code - not in the
+        // startup log, not in the crash log - so a report of "the latest
+        // Windows 11 update broke it" could not be narrowed from anything the
+        // app itself wrote, and had to be resolved by asking the reporter
+        // instead of by reading a file they already had (2026-09-27).
+        //
+        // HostEnvironmentStampTests pins the FORMAT. This pins the CALL, which
+        // is the half that can rot unnoticed: delete the write from OnStartup
+        // and every format assertion still passes, because none of them start
+        // the app.
+        // raw: true because the call site lives INSIDE an interpolated string
+        // ($"[App] === Host === {HostEnvironmentStamp.Describe()}"), and the
+        // stripped scan blanks string literals - which would make this pin see
+        // zero writers and fail for the wrong reason, or worse, pass if the
+        // expected list were ever emptied. An interpolation hole is code.
+        var hits = RepoScan.ScanSrc(new Regex(@"HostEnvironmentStamp\.Describe\(\)"), raw: true)
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+        CollectionAssert.AreEqual(
+            new[] { "ModernWigiDash.App/App.xaml.cs" },
+            hits,
+            "exactly one owner writes the host stamp into the startup log: " + string.Join("; ", hits)
+            + ". A second writer is two spellings of the same fact; none at all means every future environment-specific report is unanswerable from the log.");
+    }
+
+    [TestMethod]
     public void HouseRules_UserStateDirectory_HasExactlyOneResolver()
     {
         // The user state dir (%LocalAppData%\ModernWigiDash) was resolved

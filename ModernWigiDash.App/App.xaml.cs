@@ -43,6 +43,12 @@ public partial class App : Application
         try
         {
             FileLog.Write($"[App] === Application starting === BaseDir={AppContext.BaseDirectory}");
+            // The host stamp, on its own line so the line above stays
+            // byte-compatible with anything matching it. This is what makes an
+            // environment-specific report answerable from the log the reporter
+            // already has, instead of by asking them which Windows build they
+            // are on (HostEnvironmentStamp).
+            FileLog.Write($"[App] === Host === {HostEnvironmentStamp.Describe()}");
         }
         catch (IOException)
         {
