@@ -1024,6 +1024,11 @@ internal static class StaRunner
 internal sealed class FakeLibUsbDevice : IUsbDevice
 {
     public bool OpenThrows { get; set; }
+
+    /// <summary>When set, Open throws a real <see cref="UsbException"/> carrying
+    /// this libusb error code — the seam for the adapter's Error → verdict
+    /// mapping, which a non-libusb exception cannot reach.</summary>
+    public Error? OpenError { get; set; }
     public bool ClaimResult { get; set; } = true;
     public bool WriterThrows { get; set; }
     public int CloseCalls { get; private set; }
@@ -1062,6 +1067,12 @@ internal sealed class FakeLibUsbDevice : IUsbDevice
 
     public void Open()
     {
+        // OpenError is the libusb-code seam: the adapter's acquisition maps
+        // Error.Access / Error.Busy to DeviceBusy, and that mapping is only
+        // testable if the fake can raise a real UsbException carrying one. A
+        // plain InvalidOperationException would land on the generic
+        // not-responding path instead.
+        if (OpenError is { } usbError) throw new UsbException(usbError);
         if (OpenThrows) throw new InvalidOperationException("fake open failure");
         IsOpen = true;
     }

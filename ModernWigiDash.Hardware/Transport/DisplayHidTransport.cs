@@ -114,21 +114,6 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         TryCreateLibUsbBackend,
         "LibUsbDotNet 3.0");
 
-    /// <summary>One provider's open attempt: the backend it produced (null when
-    /// it could not open the device) plus WHICH failure it was. The two travel
-    /// together so the loop can report a truthful state without a second
-    /// side-channel property that could go stale — a provider that failed
-    /// because the device is busy and one that failed because nothing is
-    /// attached must not collapse into the same "no device" verdict.</summary>
-    internal readonly record struct ProviderAttempt(ITransferBackend? Backend, ConnectionState Failure)
-    {
-        /// <summary>An attempt that opened the device.</summary>
-        public static ProviderAttempt Opened(ITransferBackend backend) => new(backend, ConnectionState.Connected);
-
-        /// <summary>An attempt that did not, carrying the reason.</summary>
-        public static ProviderAttempt Failed(ConnectionState failure) => new(null, failure);
-    }
-
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
     /// connect/init/frame/touch policy is drivable without hardware.
@@ -293,12 +278,13 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     }
 
     /// <summary>
-    /// LibUsbDotNet attempt: find → open → configure → claim → endpoint →
-    /// backend. Partial-state teardown is owned here: every failure path
-    /// closes the LOCAL device — the claim-failure path closes it directly,
-    /// the terminal catch closes the open/config/claimed device it created.
-    /// Never the adopted global backend, which belongs to a previous provider
-    /// attempt.
+    /// LibUsbDotNet attempt: a thin bind into the adapter, which owns the whole
+    /// acquisition (find → open → configure → claim → endpoint → backend), its
+    /// partial-state teardown, and its own libusb error vocabulary.
+    /// CONTEXT.md's claim that no driver-stack ownership lives in the transport
+    /// is true here now; it was not while this method carried the
+    /// <c>Error.Access → DeviceBusy</c> table (2026-09-27), which was dead code
+    /// because the adapter swallowed every exception into a null.
     /// </summary>
     private ProviderAttempt TryCreateLibUsbBackend()
     {
@@ -308,31 +294,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // across the seam). The transport keeps only the attempt's start line
         // and hands the device-lookup seam across.
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
-        try
-        {
-            ITransferBackend? backend = LibUsbTransferBackend.TryOpen(LibUsbDeviceProvider);
-            return backend is null
-                ? ProviderAttempt.Failed(ConnectionState.DeviceNotFound)
-                : ProviderAttempt.Opened(backend);
-        }
-        catch (UsbException ex)
-        {
-            // libusb names the reason on the exception, so the fallback leg can
-            // report the same distinction the WinUSB leg makes: Error.Access is
-            // "the display is there and another client owns it" (the exact
-            // error the 2026-09-27 incident hit on BOTH legs), NoDevice /
-            // NotFound are genuinely absent, anything else is a device that
-            // would not cooperate.
-            ConnectionState failure = ex.ErrorCode switch
-            {
-                LibUsbDotNet.Error.Access or LibUsbDotNet.Error.Busy => ConnectionState.DeviceBusy,
-                LibUsbDotNet.Error.NoDevice or LibUsbDotNet.Error.NotFound => ConnectionState.DeviceNotFound,
-                _ => ConnectionState.DeviceNotResponding,
-            };
-            DiagLog legLog = new("USB-LIBUSB", 1);
-            legLog.Write($"Connect failed: {failure} ({ex.GetType().Name}: {ex.Message})");
-            return ProviderAttempt.Failed(failure);
-        }
+        return LibUsbTransferBackend.TryOpen(LibUsbDeviceProvider);
     }
 
     /// <summary>

@@ -3,8 +3,8 @@ namespace ModernWigiDash.Hardware.Transport;
 /// <summary>
 /// One connect attempt in <see cref="DisplayHidTransport.Connect"/>'s provider
 /// loop: <see cref="TryCreate"/> opens the device and returns a
-/// <see cref="DisplayHidTransport.ProviderAttempt"/> — the backend, or the
-/// reason there is none. The record carries only the leg's identity — its
+/// <see cref="ProviderAttempt"/> — the backend, or the reason there is none. The
+/// record carries only the leg's identity — its
 /// diagnostic <see cref="Tag"/> (the file-log vocabulary the loop and the leg
 /// bound into their <c>DiagLog</c> instances), the display name for the logger
 /// line, and the leg's success line. The loop spells its own failure lines from
@@ -20,6 +20,6 @@ namespace ModernWigiDash.Hardware.Transport;
 /// </summary>
 internal sealed record ConnectProvider(
     string Tag,
-    Func<DisplayHidTransport.ProviderAttempt> TryCreate,
+    Func<ProviderAttempt> TryCreate,
     string DisplayName = "",
     string? SuccessLine = null);

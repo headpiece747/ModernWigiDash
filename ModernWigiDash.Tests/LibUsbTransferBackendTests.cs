@@ -14,9 +14,99 @@ public sealed class LibUsbTransferBackendTests
 {
     private static LibUsbTransferBackend OpenedBackend(FakeLibUsbDevice device)
     {
-        var backend = LibUsbTransferBackend.TryOpen(() => device);
-        Assert.IsNotNull(backend, "a default-configured fake device must open cleanly");
-        return backend;
+        ProviderAttempt attempt = LibUsbTransferBackend.TryOpen(() => device);
+        Assert.AreEqual(ConnectionState.Connected, attempt.Failure,
+            "a default-configured fake device must open cleanly");
+        return (LibUsbTransferBackend)attempt.Backend!;
+    }
+
+    // ── The acquisition's own verdict (2026-09-27) ────────────────────────────
+    // The adapter swallowed every exception into a bare null, so the connect
+    // loop could only ever read "no device" from this leg and its
+    // Error.Access → DeviceBusy mapping was dead code. The adapter now returns
+    // its own reason, and these pin it leg by leg.
+
+    [TestMethod]
+    [DataRow(LibUsbDotNet.Error.Access, ConnectionState.DeviceBusy)]
+    [DataRow(LibUsbDotNet.Error.Busy, ConnectionState.DeviceBusy)]
+    [DataRow(LibUsbDotNet.Error.NoDevice, ConnectionState.DeviceNotFound)]
+    [DataRow(LibUsbDotNet.Error.NotFound, ConnectionState.DeviceNotFound)]
+    [DataRow(LibUsbDotNet.Error.Timeout, ConnectionState.DeviceNotResponding)]
+    [DataRow(LibUsbDotNet.Error.Io, ConnectionState.DeviceNotResponding)]
+    public void TryOpen_UsbError_MapsToTheFailureVerdict(LibUsbDotNet.Error code, ConnectionState expected)
+    {
+        var device = new FakeLibUsbDevice { OpenError = code };
+
+        ProviderAttempt attempt = LibUsbTransferBackend.TryOpen(() => device);
+
+        Assert.AreEqual(expected, attempt.Failure);
+        Assert.IsNull(attempt.Backend, "a failed acquisition never hands back a backend");
+    }
+
+    [TestMethod]
+    public void TryOpen_AccessDenied_ReportsBusyNotAbsent()
+    {
+        // The regression, stated directly: the display is present and the open
+        // is denied, so the verdict must not read as a missing device.
+        var device = new FakeLibUsbDevice { OpenError = LibUsbDotNet.Error.Access };
+
+        ProviderAttempt attempt = LibUsbTransferBackend.TryOpen(() => device);
+
+        Assert.AreNotEqual(ConnectionState.DeviceNotFound, attempt.Failure);
+        Assert.AreEqual(ConnectionState.DeviceBusy, attempt.Failure);
+    }
+
+    [TestMethod]
+    public void TryOpen_ClaimRefused_ReportsBusyAndClosesTheDevice()
+    {
+        // A refused claim is the same fact by another route: the interface is
+        // held by another kernel client, so the display is present. The teardown
+        // moves from this path's own inline Close() to the single finally, and
+        // must still happen exactly once.
+        var device = new FakeLibUsbDevice { ClaimResult = false };
+
+        ProviderAttempt attempt = LibUsbTransferBackend.TryOpen(() => device);
+
+        Assert.AreEqual(ConnectionState.DeviceBusy, attempt.Failure);
+        Assert.AreEqual(1, device.CloseCalls, "the un-adopted device must be released exactly once");
+    }
+
+    [TestMethod]
+    public void TryOpen_Failure_ReleasesTheDeviceExactlyOnce()
+    {
+        // The single finally owns teardown now, so a failure path cannot forget
+        // it and a path that already closed cannot double-close.
+        var device = new FakeLibUsbDevice { OpenError = LibUsbDotNet.Error.Access };
+
+        LibUsbTransferBackend.TryOpen(() => device);
+
+        Assert.AreEqual(1, device.CloseCalls);
+    }
+
+    [TestMethod]
+    public void TryOpen_Success_DoesNotCloseTheAdoptedDevice()
+    {
+        // The finally is guarded by the adopted flag: closing here would hand
+        // the transport a backend whose device is already shut.
+        var device = new FakeLibUsbDevice();
+
+        using var backend = OpenedBackend(device);
+
+        Assert.AreEqual(0, device.CloseCalls, "the adopted device must stay open for the transport");
+    }
+
+    [TestMethod]
+    public void TryOpen_NoDevice_ReportsNotFoundWithNoBackend()
+    {
+        // Through the deviceProvider seam ONLY. Passing null would take the
+        // production VID/PID lookup, which enumerates and opens the user's real
+        // display from a test run - the exact thing the window-construction
+        // guardrail exists to prevent, and it did find the attached device
+        // while this test was being written.
+        ProviderAttempt attempt = LibUsbTransferBackend.TryOpen(() => null);
+
+        Assert.AreEqual(ConnectionState.DeviceNotFound, attempt.Failure);
+        Assert.IsNull(attempt.Backend);
     }
 
     [TestMethod]
@@ -211,16 +301,6 @@ public sealed class LibUsbTransferBackendTests
         backend.Dispose();
 
         Assert.AreEqual(1, device.CloseCalls, "dispose on an already-closed device is a no-op");
-    }
-
-    [TestMethod]
-    public void TryOpen_ProviderReturnsNull_ReturnsNull()
-    {
-        // An explicit provider that finds nothing is the same "no device"
-        // verdict as the production default.
-        LibUsbTransferBackend? backend = LibUsbTransferBackend.TryOpen(() => null);
-
-        Assert.IsNull(backend);
     }
 
     [TestMethod]

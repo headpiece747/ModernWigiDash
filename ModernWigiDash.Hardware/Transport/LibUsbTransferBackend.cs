@@ -67,9 +67,10 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
     /// so the transport's never-free-while-in-flight lock stays reserved for
     /// the adopted backend.
     /// </summary>
-    public static LibUsbTransferBackend? TryOpen(Func<IUsbDevice?>? deviceProvider)
+    public static ProviderAttempt TryOpen(Func<IUsbDevice?>? deviceProvider)
     {
         IUsbDevice? device = null;
+        bool adopted = false;
         try
         {
             device = deviceProvider is not null ? deviceProvider() : FindLibUsbDevice();
@@ -77,7 +78,7 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
             if (device is null)
             {
                 _findLog.Write($"No WigiDash device found (VID=0x{DisplayProtocolConstants.VendorId:X4}, PID=0x{DisplayProtocolConstants.ProductId:X4})");
-                return null;
+                return ProviderAttempt.Failed(ConnectionState.DeviceNotFound);
             }
 
             _findLog.Write($"Device found: VID=0x{device.VendorId:X4} PID=0x{device.ProductId:X4}");
@@ -105,12 +106,14 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
                 _configLog.Write($"SetConfiguration(1) failed: {ex.Message} (continuing)");
             }
 
-            bool claimed = device.ClaimInterface(0);
-            if (!claimed)
+            if (!device.ClaimInterface(0))
             {
-                _claimLog.Write("Failed to claim USB interface 0");
-                device.Close();
-                return null;
+                // The interface is held by another kernel client: the display is
+                // PRESENT and someone else has it, the same fact the WinUSB leg
+                // reports as ERROR_ACCESS_DENIED rather than a missing device
+                // (2026-09-27). The device is closed by the finally below.
+                _claimLog.Write("Failed to claim USB interface 0 (another client holds it)");
+                return ProviderAttempt.Failed(ConnectionState.DeviceBusy);
             }
 
             _claimLog.Write("ClaimInterface(0) succeeded");
@@ -119,25 +122,55 @@ internal sealed class LibUsbTransferBackend : ITransferBackend
             _endpointLog.Write($"Using bulk OUT endpoint: {endpointId}");
 
             var backend = new LibUsbTransferBackend(device, device.OpenEndpointWriter(endpointId, EndpointType.Bulk));
+            adopted = true;
             _legLog.Write($"Connected: endpoint={endpointId}");
-            return backend;
+            return ProviderAttempt.Opened(backend);
+        }
+        catch (UsbException ex)
+        {
+            // The libusb error code is the only place this vocabulary can be
+            // read correctly, so it is read HERE — the adapter that owns the
+            // acquisition. The previous attempt sat in the transport's connect
+            // loop and could never run, because this method swallowed every
+            // exception into a bare null.
+            ConnectionState failure = MapUsbError(ex.ErrorCode);
+            _legLog.Write($"Connect failed: {failure} ({ex.GetType().Name}: {ex.Message})");
+            return ProviderAttempt.Failed(failure);
         }
         catch (Exception ex)
         {
             _legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
-            // Terminal teardown of the LOCAL device: an opened (and possibly
-            // configured + claimed) device must be released, or it leaks until
-            // process exit. The device is local to this attempt — the transport
-            // never adopted it — so no transport lock is needed; the
-            // never-free-while-in-flight rule applies to the adopted backend,
-            // which the transport tears down under its lock.
-            if (device is not null)
-            {
-                device.Close();
-            }
-            return null;
+            return ProviderAttempt.Failed(ConnectionState.DeviceNotResponding);
+        }
+        finally
+        {
+            // Terminal teardown of the LOCAL device on every path that did NOT
+            // hand a backend to the transport: an opened (and possibly
+            // configured + claimed) device must be released or it leaks until
+            // process exit. One site, so no failure path can forget it. The
+            // device is local to this attempt — the transport never adopted it —
+            // so no transport lock is needed; the never-free-while-in-flight
+            // rule applies to the adopted backend, which the transport tears
+            // down under its lock.
+            if (!adopted)
+                device?.Close();
         }
     }
+
+    /// <summary>
+    /// The libusb error code mapped to the app's failure vocabulary. Two
+    /// meanings, not one: <see cref="Error.Access"/> and <see cref="Error.Busy"/>
+    /// mean the display is THERE and another client owns it (the exact case the
+    /// 2026-09-27 report hit on both legs), <see cref="Error.NoDevice"/> and
+    /// <see cref="Error.NotFound"/> mean it is genuinely absent, and anything
+    /// else is a device that would not cooperate.
+    /// </summary>
+    private static ConnectionState MapUsbError(Error code) => code switch
+    {
+        Error.Access or Error.Busy => ConnectionState.DeviceBusy,
+        Error.NoDevice or Error.NotFound => ConnectionState.DeviceNotFound,
+        _ => ConnectionState.DeviceNotResponding,
+    };
 
     /// <summary>Finds the WigiDash device via the shared LibUsbDotNet context
     /// (the production default behind the leg's device-lookup seam).</summary>

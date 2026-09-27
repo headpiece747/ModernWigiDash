@@ -100,9 +100,9 @@ public class DisplayHidTransportTests
             if (opened != ConnectionState.Connected)
             {
                 fake.Dispose();
-                return DisplayHidTransport.ProviderAttempt.Failed(opened);
+                return ProviderAttempt.Failed(opened);
             }
-            return DisplayHidTransport.ProviderAttempt.Opened(fake);
+            return ProviderAttempt.Opened(fake);
         },
         "WinUSB");
 
@@ -119,7 +119,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(busy),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
         ConnectionState outcome = transport.Connect();
@@ -136,8 +136,8 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-            new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "WinUSB"),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-WINUSB", () => ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "WinUSB"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
         Assert.AreEqual(ConnectionState.DeviceNotFound, transport.Connect());
@@ -187,7 +187,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(fake),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
         // The WinUSB path must be abandoned after the failed PING (inside
@@ -219,7 +219,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -243,7 +243,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -264,7 +264,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -281,7 +281,7 @@ public class DisplayHidTransportTests
         // _isConnected guard) without re-running any provider.
         var backend = new RecordingBackend();
         using var transport = new DisplayHidTransport();
-        transport.ProviderFactories = [new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Opened(backend), "WinUSB")];
+        transport.ProviderFactories = [new ConnectProvider("USB-WINUSB", () => ProviderAttempt.Opened(backend), "WinUSB")];
 
         Assert.AreEqual(ConnectionState.Connected, transport.Connect());
         int firstControlCalls = backend.ControlCalls.Count;
@@ -318,7 +318,7 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-            new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Opened(backend), "WinUSB", "WinUSB pipe ready"),
+            new ConnectProvider("USB-WINUSB", () => ProviderAttempt.Opened(backend), "WinUSB", "WinUSB pipe ready"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -393,7 +393,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -414,7 +414,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
@@ -433,8 +433,8 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-            new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound); }, "WinUSB"),
-            new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return DisplayHidTransport.ProviderAttempt.Opened(libUsb); }, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return ProviderAttempt.Failed(ConnectionState.DeviceNotFound); }, "WinUSB"),
+            new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return ProviderAttempt.Opened(libUsb); }, "LibUsbDotNet 3.0"),
         ];
 
         bool ok = transport.Connect() == ConnectionState.Connected;
