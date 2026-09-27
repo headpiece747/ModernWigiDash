@@ -93,12 +93,41 @@ public class CalendarGestureStateTests
         Assert.AreEqual("Standup", gesture.DetailEvent.Value.Title);
     }
 
+    /// <summary>The bounds the detail geometry is computed for: a 250x300 widget.</summary>
+    private static readonly SKRect DetailBounds = new(50, 100, 300, 400);
+
+    /// <summary>Counts whose content FITS the card, so the meeting link is on
+    /// screen and inside the card rect - the shape the link-tap tests need.</summary>
+    private static DetailLineCounts FittingCounts => new(
+        TitleLines: 1,
+        LocationLines: null,
+        DescriptionLines: null,
+        UrlLines: 1,
+        HasFeedLabel: false,
+        HasDuration: true);
+
+    /// <summary>Counts whose content OVERFLOWS the card, so there is a real
+    /// scroll extent to drag against.</summary>
+    private static DetailLineCounts OverflowingCounts => new(
+        TitleLines: 6,
+        LocationLines: 2,
+        DescriptionLines: 3,
+        UrlLines: 1,
+        HasFeedLabel: true,
+        HasDuration: true);
+
     /// <summary>Enters detail mode the production way (a hero tap resolving the
-    /// render-time event) and installs the detail frame facts (card rect + URL
-    /// rect) so a subsequent release is interpreted against the geometry the last
-    /// detail render drew.</summary>
-    private static CalendarGestureState EnterDetailWithFacts(
-        string title, string url, SKRect cardRect, SKRect urlRect, List<string> opened)
+    /// render-time event) and installs the detail geometry, returning both so a
+    /// test can pick its tap point FROM the geometry the module hit-tests
+    /// against.
+    ///
+    /// The geometry is computed by <see cref="CalendarLayout.ComputeDetail"/>, the
+    /// one owner, rather than handed in as two hand-picked rects. A test that
+    /// invents its own card and URL rects can only prove the module reads the
+    /// rects it was given; computing them the way production does is what proves
+    /// the module hit-tests the real geometry (2026-09-27).</summary>
+    private static (CalendarGestureState Gesture, CalendarDetailGeometry Detail) EnterDetail(
+        string title, string url, DetailLineCounts counts, List<string> opened)
     {
         var (geo, display, events) = BuildFrame((title, url));
         Assert.IsNotNull(display.NextUpcomingEvent, "the frame carries a next-upcoming event to tap");
@@ -114,9 +143,9 @@ public class CalendarGestureStateTests
         gesture.Feed(hero, TouchEventType.TouchUp);
         Assert.IsTrue(gesture.DetailEvent is not null, "the hero tap entered detail mode");
 
-        // Install the detail frame facts the next render would hand over.
-        gesture.SetDetailFrameFacts(cardRect, maxScrollY: 0f, urlRect);
-        return gesture;
+        CalendarDetailGeometry detail = CalendarLayout.ComputeDetail(DetailBounds, 1f, counts, scrollY: 0f);
+        gesture.SetDetailGeometry(detail);
+        return (gesture, detail);
     }
 
     [TestMethod]
@@ -124,12 +153,12 @@ public class CalendarGestureStateTests
     {
         // A release that lands inside the URL rect (and inside the card) routes
         // through the shell-open seam with the event's link -- it does NOT exit.
-        var card = new SKRect(50, 100, 300, 400);
-        var url = new SKRect(70, 360, 280, 390);
         List<string> opened = [];
-        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+        var (gesture, detail) = EnterDetail("Standup", "https://meet.example/standup", FittingCounts, opened);
+        Assert.IsFalse(detail.UrlRect.IsEmpty, "the fitting layout must place the link inside the card");
+        Assert.IsTrue(detail.CardRect.Contains(detail.UrlRect.MidX, detail.UrlRect.MidY), "the link must be on screen for this test to mean anything");
 
-        var p = new SKPoint(url.MidX, url.MidY);
+        var p = new SKPoint(detail.UrlRect.MidX, detail.UrlRect.MidY);
         gesture.Feed(p, TouchEventType.TouchDown);
         gesture.Feed(p, TouchEventType.TouchUp);
 
@@ -143,13 +172,13 @@ public class CalendarGestureStateTests
     {
         // A release on the card body (inside the card, but outside the URL rect and
         // below the card top) exits detail mode and never touches the seam.
-        var card = new SKRect(50, 100, 300, 400);
-        var url = new SKRect(70, 360, 280, 390);
         List<string> opened = [];
-        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+        var (gesture, detail) = EnterDetail("Standup", "https://meet.example/standup", FittingCounts, opened);
 
-        // A point well inside the card body, clear of the URL rect and the header.
-        var p = new SKPoint(card.MidX, 200f);
+        // A point well inside the card body: below the card top, clear of the link.
+        float bodyY = detail.CardRect.Top + 20f;
+        Assert.IsTrue(bodyY < detail.UrlRect.Top, "the body point must sit above the link for this test to mean anything");
+        var p = new SKPoint(detail.CardRect.MidX, bodyY);
         gesture.Feed(p, TouchEventType.TouchDown);
         gesture.Feed(p, TouchEventType.TouchUp);
 
@@ -162,12 +191,10 @@ public class CalendarGestureStateTests
     {
         // A release above the card (the "Tap to go back" header region) exits even
         // though the event carries a link.
-        var card = new SKRect(50, 100, 300, 400);
-        var url = new SKRect(70, 360, 280, 390);
         List<string> opened = [];
-        var gesture = EnterDetailWithFacts("Standup", "https://meet.example/standup", card, url, opened);
+        var (gesture, detail) = EnterDetail("Standup", "https://meet.example/standup", FittingCounts, opened);
 
-        var p = new SKPoint(card.MidX, 40f); // above card.Top (100)
+        var p = new SKPoint(detail.CardRect.MidX, detail.CardRect.Top - 60f);
         gesture.Feed(p, TouchEventType.TouchDown);
         gesture.Feed(p, TouchEventType.TouchUp);
 
@@ -181,29 +208,16 @@ public class CalendarGestureStateTests
         // A Down inside the detail card followed by a Move beyond the drag
         // tolerance scrolls the detail view; the subsequent Up must NOT be read
         // as a tap (no open, no exit) because the gesture was a completed drag.
-        var (geo, display, events) = BuildFrame(("Standup", "https://meet.example/standup"));
-        Assert.IsNotNull(display.NextUpcomingEvent);
-
-        var gesture = new CalendarGestureState();
         List<string> opened = [];
-        gesture.OpenUrlSeam = opened.Add;
-        gesture.SetFrameFacts(geo, display, Now, events);
-        gesture.UpdateScrollExtent();
+        var (gesture, detail) = EnterDetail("Standup", "https://meet.example/standup", OverflowingCounts, opened);
 
-        var hero = new SKPoint(geo.AllDayRect.MidX, geo.AllDayRect.MidY);
-        gesture.Feed(hero, TouchEventType.TouchDown);
-        gesture.Feed(hero, TouchEventType.TouchUp);
-        Assert.IsTrue(gesture.DetailEvent is not null, "the hero tap entered detail mode");
-
-        // Install detail facts with a positive scroll extent and a card that
-        // contains the touch point.
-        var card = new SKRect(50, 100, 300, 400);
-        var url = new SKRect(70, 360, 280, 390);
-        gesture.SetDetailFrameFacts(card, maxScrollY: 200f, url);
-        Assert.AreEqual(200f, gesture.MaxDetailScrollY);
+        // The extent is now DERIVED from the geometry rather than handed in, so
+        // this asserts the real one is positive rather than a fed-in number.
+        Assert.IsTrue(gesture.MaxDetailScrollY > 0f, "overflowing content must leave a scroll extent to drag against");
+        Assert.AreEqual(detail.MaxScrollY, gesture.MaxDetailScrollY, "the extent the module reports is the geometry's");
 
         // Down inside the card arms the detail drag.
-        var down = new SKPoint(card.MidX, 200f);
+        var down = new SKPoint(detail.CardRect.MidX, detail.CardRect.Top + 100f);
         gesture.Feed(down, TouchEventType.TouchDown);
 
         // Drag up by 50 (beyond the 4-unit tolerance): pulling the content up

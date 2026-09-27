@@ -50,6 +50,77 @@ public readonly record struct MonthGridGeometry(float WeekdayHeaderHeight, IRead
 public readonly record struct AgendaScrollGeometry(bool Visible, float ThumbX, float ThumbY, float ThumbWidth, float ThumbHeight);
 
 /// <summary>
+/// The detail view's line counts, measured with the wrap cache: the one
+/// font-dependent input to <see cref="CalendarLayout.ComputeDetail"/>, supplied
+/// by whoever holds the fonts (the render path, or the widget when it needs the
+/// geometry before the first draw). A null count means the section is ABSENT and
+/// is neither drawn nor given a pitch — the same distinction the render path
+/// drew with, stated as data instead of as four null checks.
+/// </summary>
+public readonly record struct DetailLineCounts(
+    int TitleLines,
+    int? LocationLines,
+    int? DescriptionLines,
+    int? UrlLines,
+    bool HasFeedLabel,
+    bool HasDuration);
+
+/// <summary>
+/// The single-event detail view's geometry, computed once per frame: the
+/// pillbox card and its clip interior, the text column, the baseline y of every
+/// section, the meeting-link tap target, and the scroll extent and clamped
+/// offset.
+///
+/// This is the one owner of that arithmetic. It used to live in the render path,
+/// which computed the rects while drawing and handed the three the touch path
+/// needed back to the widget — so display and input did not share a geometry
+/// source here, unlike the other three modes and unlike
+/// <see cref="NowPlayingGeometry"/>. Pure over its inputs: no canvas, no pixels,
+/// no fonts, so it is assertable directly and can be computed before anything is
+/// drawn.
+///
+/// A section's y is meaningful only when the matching count in
+/// <see cref="DetailLineCounts"/> is present; for an absent section it is simply
+/// where the running cursor was.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct CalendarDetailGeometry(
+    SKRect CardRect,
+    SKRect ClipRect,
+    float TextX,
+    float TimeY,
+    float TitleY,
+    float FeedY,
+    float LocationY,
+    float DescriptionY,
+    float DurationY,
+    float UrlY,
+    SKRect UrlRect,
+    float MaxScrollY,
+    float ClampedScrollY,
+    float TotalContentHeight);
+
+/// <summary>
+/// One measured detail frame: the geometry plus the wrapped text it was measured
+/// from, produced by a single canvas-free measure pass.
+///
+/// The two travel together on purpose. The geometry is what the touch path needs
+/// and the lines are what the draw path needs, and they are only consistent
+/// because they came from ONE pass over the same text at the same width - a
+/// caller that measured the geometry and then let the renderer wrap the text
+/// again would be trusting two measurements to agree. Splitting them would let
+/// the extent and the drawn lines drift apart silently.
+/// </summary>
+public sealed record CalendarDetailFrame(
+    CalendarDetailGeometry Geometry,
+    IReadOnlyList<string> TitleLines,
+    IReadOnlyList<string>? LocationLines,
+    IReadOnlyList<string>? DescriptionLines,
+    IReadOnlyList<string>? UrlLines,
+    bool HasFeedLabel,
+    bool HasDuration);
+
+/// <summary>
 /// The calendar widget's hit geometry, computed once per frame from the
 /// placement bounds and the display-facts counts -- the same inputs the render
 /// path uses, so the drawn rows and the touch targets can never drift apart.
@@ -596,6 +667,180 @@ public static class CalendarLayout
         float thumbY = scrollArea.Top + 4f * scale + ratio * (trackHeight - thumbHeight);
         float thumbX = scrollArea.Right - 5f * scale;
         return new AgendaScrollGeometry(true, thumbX, thumbY, 3f * scale, thumbHeight);
+    }
+
+    // --- the single-event detail view -----------------------------------------
+    //
+    // Detail-view line pitches (design units, before the scale factor). They live
+    // here, beside the other three modes' numbers, because the measure pass (the
+    // content height) and the draw pass (the baselines) must not be able to drift:
+    // changing a pitch changes the scroll extent AND the drawn layout in the same
+    // edit, in the one place both read.
+
+    /// <summary>The inner padding above the first line and below the last.</summary>
+    public const float DetailInnerPad = 16f;
+
+    /// <summary>The time line's pitch.</summary>
+    public const float DetailTimeLineH = 30f;
+
+    /// <summary>A wrapped title line's pitch.</summary>
+    public const float DetailTitleLineH = 26f;
+
+    /// <summary>The feed-label line's pitch.</summary>
+    public const float DetailFeedLineH = 24f;
+
+    /// <summary>A wrapped location line's pitch.</summary>
+    public const float DetailLocLineH = 20f;
+
+    /// <summary>A wrapped description line's pitch.</summary>
+    public const float DetailDescLineH = 18f;
+
+    /// <summary>The duration line's pitch.</summary>
+    public const float DetailDurLineH = 24f;
+
+    /// <summary>A wrapped meeting-link line's pitch.</summary>
+    public const float DetailUrlLineH = 18f;
+
+    /// <summary>The gap between stacked sections.</summary>
+    public const float DetailSectionGap = 6f;
+
+    /// <summary>The padding between the widget bounds and the pillbox card.</summary>
+    public const float DetailPad = 20f;
+
+    /// <summary>The height reserved above the card for the "Tap to go back" line.</summary>
+    public const float DetailBackRowH = 30f;
+
+    /// <summary>The text column's inset from the card's left edge, past the live
+    /// accent bar.</summary>
+    public const float DetailTextInset = 16f;
+
+    /// <summary>The text column's inset from the card's right edge.</summary>
+    public const float DetailTextRightInset = 14f;
+
+    /// <summary>How far above the first URL glyph the tap target reaches, so a
+    /// slightly high tap still opens the link (the baseline sits below the rect
+    /// top).</summary>
+    public const float DetailUrlTapSlack = 14f;
+
+    /// <summary>
+    /// Computes the detail view's geometry for one frame — the one owner of the
+    /// card rect, the clip interior, the text column, every section's baseline,
+    /// the link tap target, and the scroll extent.
+    /// </summary>
+    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <param name="scale">The frame's uniform scale factor.</param>
+    /// <param name="counts">The measured line counts per section. The only
+    /// font-dependent input, supplied by the caller (the
+    /// <see cref="NowPlayingGeometry"/> precedent: one measured width in, pure
+    /// math out).</param>
+    /// <param name="scrollY">The current scroll offset; clamped into
+    /// <c>[0, MaxScrollY]</c> here, so the drawn frame and the touch state cannot
+    /// disagree about where the content actually is.</param>
+    public static CalendarDetailGeometry ComputeDetail(
+        SKRect bounds, float scale, DetailLineCounts counts, float scrollY)
+    {
+        float pad = DetailPad * scale;
+
+        float cardLeft = bounds.Left + pad;
+        float cardRight = bounds.Right - pad;
+        float cardTop = bounds.Top + pad + DetailBackRowH * scale;
+        float cardBottom = bounds.Bottom - pad;
+        var cardRect = new SKRect(cardLeft, cardTop, cardRight, cardBottom);
+
+        float x = cardLeft + DetailTextInset * scale;
+
+        // The content height: every present section's lines plus the gaps that
+        // follow them, plus the inner padding at each end.
+        float totalContentH = DetailInnerPad * scale;
+        totalContentH += DetailTimeLineH * scale;
+        totalContentH += counts.TitleLines * DetailTitleLineH * scale + DetailSectionGap * scale;
+        if (counts.HasFeedLabel)
+        {
+            totalContentH += DetailFeedLineH * scale;
+        }
+
+        if (counts.LocationLines is int locationLines)
+        {
+            totalContentH += locationLines * DetailLocLineH * scale + DetailSectionGap * scale;
+        }
+
+        if (counts.DescriptionLines is int descriptionLines)
+        {
+            totalContentH += descriptionLines * DetailDescLineH * scale + DetailSectionGap * scale;
+        }
+
+        if (counts.HasDuration)
+        {
+            totalContentH += DetailDurLineH * scale;
+        }
+
+        if (counts.UrlLines is int urlLines)
+        {
+            totalContentH += urlLines * DetailUrlLineH * scale + DetailSectionGap * scale;
+        }
+
+        totalContentH += DetailInnerPad * scale;
+
+        float cardH = cardBottom - cardTop;
+        float maxScrollY = Math.Max(0f, totalContentH - cardH);
+        float clampedScrollY = Math.Clamp(scrollY, 0f, maxScrollY);
+
+        // Clip strictly to the pillbox interior with rounded corners so scrolled
+        // text never touches or bleeds outside the card.
+        var clipRect = new SKRect(
+            cardLeft + 5.5f * scale,
+            cardTop + 2f * scale,
+            cardRight - 2f * scale,
+            cardBottom - 2f * scale);
+
+        // The running baseline cursor, in the same order the draw pass walks.
+        float y = cardTop + DetailInnerPad * scale - clampedScrollY;
+
+        float timeY = y;
+        y += DetailTimeLineH * scale;
+
+        float titleY = y;
+        y += counts.TitleLines * DetailTitleLineH * scale + DetailSectionGap * scale;
+
+        float feedY = y;
+        if (counts.HasFeedLabel)
+        {
+            y += DetailFeedLineH * scale;
+        }
+
+        float locationY = y;
+        if (counts.LocationLines is int locationCount)
+        {
+            y += locationCount * DetailLocLineH * scale + DetailSectionGap * scale;
+        }
+
+        float descriptionY = y;
+        if (counts.DescriptionLines is int descriptionCount)
+        {
+            y += descriptionCount * DetailDescLineH * scale + DetailSectionGap * scale;
+        }
+
+        float durationY = y;
+        if (counts.HasDuration)
+        {
+            y += DetailDurLineH * scale;
+        }
+
+        // The link's tap target spans the whole card width (a wrapped URL's lines
+        // are shorter than the column, and the target is easier to hit that way).
+        var urlRect = SKRect.Empty;
+        float urlY = y;
+        if (counts.UrlLines is int urlCount)
+        {
+            float urlStartY = y;
+            y += urlCount * DetailUrlLineH * scale;
+            urlRect = new SKRect(cardLeft, urlStartY - DetailUrlTapSlack * scale, cardRight, y);
+        }
+
+        return new CalendarDetailGeometry(
+            cardRect, clipRect, x,
+            timeY, titleY, feedY, locationY, descriptionY, durationY, urlY,
+            urlRect, maxScrollY, clampedScrollY, totalContentH);
     }
 }
 

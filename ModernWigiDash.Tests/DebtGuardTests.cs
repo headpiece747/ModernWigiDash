@@ -575,6 +575,39 @@ public sealed class DebtGuardTests
     };
 
     [TestMethod]
+    public void HouseRules_CalendarDetailGeometry_IsMeasuredOnceInOnePlace()
+    {
+        // The detail view's geometry used to be computed INSIDE the draw path,
+        // which handed three of the numbers back to the widget for the touch
+        // path. That made display and input two consumers of a geometry produced
+        // as a side effect of drawing, and it is why a touch arriving before the
+        // first detail draw found no card rect, no link target and no scroll
+        // extent (the architecture review's calendar candidate, 2026-09-27).
+        //
+        // The rule now: CalendarLayout owns the arithmetic, the renderer's
+        // canvas-free MeasureDetail is the ONE production caller, and the frame
+        // it produces is what both the draw and the touch path read. A second
+        // production caller means either the draw path re-derives the geometry
+        // (it can then disagree with what it draws) or the widget measures a
+        // second time and trusts the two to agree - both are the defect.
+        var sites = RepoScan.ScanSrc(new Regex(@"ComputeDetail\("), raw: true)
+            .Select(hit => hit.Split(':', 3)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+        var expected = new[]
+        {
+            "ModernWigiDash.Widgets/CalendarLayout.cs",            // the owner
+            "ModernWigiDash.Widgets/CalendarWidgetRenderer.cs",     // the one measure pass
+        };
+
+        CollectionAssert.AreEqual(expected, sites,
+            "the calendar detail geometry must be computed in exactly two files: the layout that owns it and the renderer's canvas-free measure. Found: "
+            + string.Join("; ", sites)
+            + ". A third production caller means a second measurement somewhere - the draw path re-deriving the geometry it was handed, or the widget measuring a frame the renderer will measure again. Both let the drawn layout and the hit-tested one drift apart, which is the whole defect this moved to fix.");
+    }
+
+    [TestMethod]
     public void HouseRules_NamedMapAdapters_ShareTheOneAcquirePolicy()
     {
         // "Bounded, mutex-guarded copy of a producer-owned named map" is one

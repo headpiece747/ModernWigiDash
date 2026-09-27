@@ -286,18 +286,24 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
 
         CalendarSnapshot? snapshot = CalendarEventStore.ReadSnapshot();
 
-        // Detail mode: render the single event's detail view. The gesture module
-        // keeps its own layout (the one drawn last frame) so a tap can still hit
-        // the URL hint or exit; only the display and clock read are refreshed.
+        // Detail mode: the single event's detail view. The frame is MEASURED
+        // first, without a canvas, and handed to the gesture module before a
+        // pixel is drawn - so a touch arriving in the first frame of detail mode
+        // hit-tests the real geometry (a drag scrolls, a link tap opens) instead
+        // of finding nothing and falling through to "exit". The draw then takes
+        // the same frame, so what is drawn and what is hit-tested are one
+        // measurement rather than two that have to agree.
         if (_gesture.DetailEvent is not null)
         {
             _gesture.SetFrameFacts(_layout, null, now);
-            DetailFrameFacts facts = _renderer.RenderDetailView(
-                canvas, bounds, scale, _gesture.DetailEvent.Value,
+            CalendarDetailFrame detail = _renderer.MeasureDetail(
+                bounds, scale, _gesture.DetailEvent.Value, _gesture.DetailScrollY);
+            _gesture.SetDetailGeometry(detail.Geometry);
+            _renderer.RenderDetailView(
+                detail, canvas, bounds, scale, _gesture.DetailEvent.Value,
                 ColorOf(TextColorHex, SKColors.White),
                 ColorOf(AccentColorHex, WidgetPalette.Accent),
-                now, _gesture.DetailScrollY);
-            _gesture.SetDetailFrameFacts(facts.CardRect, facts.MaxScrollY, facts.UrlRect);
+                now);
             return;
         }
 

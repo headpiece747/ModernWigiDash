@@ -21,18 +21,12 @@ internal sealed class CalendarWidgetRenderer : IDisposable
     private static readonly string[] StatLabels = ["12M", "52W", "365D"];
     private static readonly string[] WeekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
 
-    // Detail-view line pitches (design units, before the scale factor). Shared by
-    // the measure pass (totalContentH) and the draw pass so the two cannot drift:
-    // changing a pitch here changes both the scroll extent and the drawn layout.
-    private const float TimeLineH = 30f;
-    private const float TitleLineH = 26f;
-    private const float FeedLineH = 24f;
-    private const float LocLineH = 20f;
-    private const float DescLineH = 18f;
-    private const float DurLineH = 24f;
-    private const float UrlLineH = 18f;
-    private const float SectionGap = 6f;
-    private const float InnerPad = 16f;
+    // The detail view's line pitches and pads used to live here, shared by this
+    // file's measure and draw passes. They moved to CalendarLayout with the
+    // geometry they describe: the measure pass still runs here (it needs the
+    // fonts), but the arithmetic it feeds is the layout's, and the draw pass
+    // reads the layout's record, so a pitch can no longer be changed in one place
+    // and not the other (2026-09-27).
 
     /// <summary>The word-wrap cache for the detail view's title/location/
     /// description blocks (memoized so the 30 FPS tick path allocates nothing).</summary>
@@ -669,56 +663,38 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         }
     }
 
-    /// <summary>The single-event detail view: a scrollable card with time,
-    /// title, feed label, location, description, duration, and meeting link.
-    /// Returns the frame facts (max scroll, card rect, URL tap target) the
-    /// gesture module needs for hit-testing and scroll clamping.</summary>
-    public DetailFrameFacts RenderDetailView(
-        SKCanvas canvas,
-        SKRect bounds,
-        float scale,
-        CalendarEvent ev,
-        SKColor textColor,
-        SKColor accentColor,
-        DateTime now,
-        float scrollY = 0f)
+    /// <summary>Measures the detail frame for one event: the wrapped lines per
+    /// section and the geometry they imply. NO CANVAS - which is the point.
+    ///
+    /// The widget calls this before it draws anything, so the gesture module
+    /// holds the real geometry from the first frame in detail mode. It used to
+    /// receive the geometry as a by-product of rendering, so a touch arriving
+    /// before the first detail draw found no card rect, no link target and no
+    /// scroll extent: a drag did nothing and a link tap fell through to "exit
+    /// detail" instead of opening the link. Five `IsEmpty` guards stood in for
+    /// that missing state; a `default` geometry now means the same thing to
+    /// `SKRect.Contains` without the guards (2026-09-27).</summary>
+    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <param name="scale">The frame's uniform scale factor.</param>
+    /// <param name="ev">The event being shown.</param>
+    /// <param name="scrollY">The current scroll offset; the layout clamps it.</param>
+    public CalendarDetailFrame MeasureDetail(SKRect bounds, float scale, CalendarEvent ev, float scrollY)
     {
-        _cardPaint.Color = new SKColor(18, 18, 24);
-        canvas.DrawRoundRect(bounds, 16f * scale, 16f * scale, _cardPaint);
-
-        float pad = 20f * scale;
-
-        var backFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f * scale);
-        _textPaint.Color = textColor.WithAlpha(120);
-        canvas.DrawTextWithFallback("Tap to go back", bounds.Left + pad, bounds.Top + pad - backFont.Metrics.Top, backFont, _textPaint);
-
-        float cardLeft = bounds.Left + pad;
-        float cardRight = bounds.Right - pad;
-        float cardTop = bounds.Top + pad + 30f * scale;
-        float cardBottom = bounds.Bottom - pad;
-        var cardRect = new SKRect(cardLeft, cardTop, cardRight, cardBottom);
-        _cardPaint.Color = accentColor.WithAlpha(20);
-        canvas.DrawRoundRect(cardRect, 12f * scale, 12f * scale, _cardPaint);
-
-        bool isLive = ev.Start <= now && now < ev.End;
-        _fillPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
-        canvas.DrawRoundRect(new SKRect(cardLeft, cardTop, cardLeft + 5f * scale, cardBottom), 2.5f * scale, 2.5f * scale, _fillPaint);
-
-        float x = cardLeft + 16f * scale;
-        float maxW = cardRight - x - 14f * scale;
-
-        // Measure total content height to decide if scrolling is needed.
-        string timeStr = ev.IsAllDay ? "All day" : $"{ev.Start:HH:mm} \u2013 {ev.End:HH:mm}";
-        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
+        float pad = CalendarLayout.DetailPad * scale;
         var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 20f * scale);
-        string title = string.IsNullOrWhiteSpace(ev.Title) ? "Untitled" : ev.Title;
-        IReadOnlyList<string> titleLines = _wrapCache.GetOrWrap(title, titleFont, 20f * scale, maxW);
-        var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
         var locFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 15f * scale);
         var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
-        var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
         var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
 
+        // The wrap width is the text column the layout is about to compute, from
+        // the layout's own numbers rather than a second derivation of them.
+        float cardLeft = bounds.Left + pad;
+        float cardRight = bounds.Right - pad;
+        float textX = cardLeft + CalendarLayout.DetailTextInset * scale;
+        float maxW = cardRight - textX - CalendarLayout.DetailTextRightInset * scale;
+
+        string title = string.IsNullOrWhiteSpace(ev.Title) ? "Untitled" : ev.Title;
+        IReadOnlyList<string> titleLines = _wrapCache.GetOrWrap(title, titleFont, 20f * scale, maxW);
         IReadOnlyList<string>? locLines = !string.IsNullOrWhiteSpace(ev.Location)
             ? _wrapCache.GetOrWrap(ev.Location, locFont, 15f * scale, maxW)
             : null;
@@ -729,125 +705,161 @@ internal sealed class CalendarWidgetRenderer : IDisposable
             ? _wrapCache.GetOrWrap(ev.Url, urlFont, 14f * scale, maxW)
             : null;
 
-        float totalContentH = InnerPad * scale;
-        totalContentH += TimeLineH * scale; // time
-        totalContentH += titleLines.Count * TitleLineH * scale + SectionGap * scale;
-        if (!string.IsNullOrWhiteSpace(ev.FeedLabel)) totalContentH += FeedLineH * scale;
-        if (locLines is not null) totalContentH += locLines.Count * LocLineH * scale + SectionGap * scale;
-        if (descLines is not null) totalContentH += descLines.Count * DescLineH * scale + SectionGap * scale;
-        if (!ev.IsAllDay) totalContentH += DurLineH * scale;
-        if (urlLines is not null) totalContentH += urlLines.Count * UrlLineH * scale + SectionGap * scale;
-        totalContentH += InnerPad * scale;
+        var counts = new DetailLineCounts(
+            titleLines.Count,
+            locLines?.Count,
+            descLines?.Count,
+            urlLines?.Count,
+            !string.IsNullOrWhiteSpace(ev.FeedLabel),
+            !ev.IsAllDay);
 
-        float cardH = cardBottom - cardTop;
-        float maxScrollY = Math.Max(0f, totalContentH - cardH);
-        float clampedScrollY = Math.Clamp(scrollY, 0f, maxScrollY);
+        return new CalendarDetailFrame(
+            CalendarLayout.ComputeDetail(bounds, scale, counts, scrollY),
+            titleLines,
+            locLines,
+            descLines,
+            urlLines,
+            counts.HasFeedLabel,
+            counts.HasDuration);
+    }
 
-        // Clip strictly to the pillbox interior with rounded corners so scrolled text never touches or bleeds outside the card.
-        var clipInnerRect = new SKRect(cardLeft + 5.5f * scale, cardTop + 2f * scale, cardRight - 2f * scale, cardBottom - 2f * scale);
+    /// <summary>Draws a measured detail frame.
+    ///
+    /// The geometry is an INPUT, not this method's output. It is handed the same
+    /// <see cref="CalendarDetailFrame"/> the widget already gave the gesture
+    /// module, so what is drawn and what is hit-tested are the same measurement
+    /// rather than two computations that have to agree (2026-09-27).</summary>
+    /// <param name="frame">The measured frame (from <see cref="MeasureDetail"/>).</param>
+    /// <param name="canvas">The target canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <param name="scale">The frame's uniform scale factor.</param>
+    /// <param name="ev">The event being shown.</param>
+    /// <param name="textColor">The theme's text color.</param>
+    /// <param name="accentColor">The theme's accent color.</param>
+    /// <param name="now">The frame's clock read, for the live marker.</param>
+    public void RenderDetailView(
+        CalendarDetailFrame frame,
+        SKCanvas canvas,
+        SKRect bounds,
+        float scale,
+        CalendarEvent ev,
+        SKColor textColor,
+        SKColor accentColor,
+        DateTime now)
+    {
+        CalendarDetailGeometry geo = frame.Geometry;
+
+        _cardPaint.Color = new SKColor(18, 18, 24);
+        canvas.DrawRoundRect(bounds, 16f * scale, 16f * scale, _cardPaint);
+
+        float pad = CalendarLayout.DetailPad * scale;
+        var backFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f * scale);
+        _textPaint.Color = textColor.WithAlpha(120);
+        canvas.DrawTextWithFallback("Tap to go back", bounds.Left + pad, bounds.Top + pad - backFont.Metrics.Top, backFont, _textPaint);
+
+        var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 18f * scale);
+        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 20f * scale);
+        var feedFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
+        var locFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 15f * scale);
+        var descFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+        var durFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+        var urlFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 14f * scale);
+
+        _cardPaint.Color = accentColor.WithAlpha(20);
+        canvas.DrawRoundRect(geo.CardRect, 12f * scale, 12f * scale, _cardPaint);
+
+        bool isLive = ev.Start <= now && now < ev.End;
+        _fillPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
+        canvas.DrawRoundRect(
+            new SKRect(geo.CardRect.Left, geo.CardRect.Top, geo.CardRect.Left + 5f * scale, geo.CardRect.Bottom),
+            2.5f * scale, 2.5f * scale, _fillPaint);
+
+        string timeStr = ev.IsAllDay ? "All day" : $"{ev.Start:HH:mm} – {ev.End:HH:mm}";
+
         canvas.Save();
-        canvas.ClipRoundRect(new SKRoundRect(clipInnerRect, 10f * scale, 10f * scale), antialias: true);
-
-        float y = cardTop + InnerPad * scale - clampedScrollY;
+        canvas.ClipRoundRect(new SKRoundRect(geo.ClipRect, 10f * scale, 10f * scale), antialias: true);
 
         _textPaint.Color = isLive ? new SKColor(239, 68, 68) : accentColor;
-        canvas.DrawTextWithFallback(timeStr, x, y, timeFont, _textPaint);
-        y += TimeLineH * scale;
+        canvas.DrawTextWithFallback(timeStr, geo.TextX, geo.TimeY, timeFont, _textPaint);
 
         _textPaint.Color = textColor;
-        foreach (string line in titleLines)
+        float y = geo.TitleY;
+        foreach (string line in frame.TitleLines)
         {
-            canvas.DrawTextWithFallback(line, x, y, titleFont, _textPaint);
-            y += TitleLineH * scale;
+            canvas.DrawTextWithFallback(line, geo.TextX, y, titleFont, _textPaint);
+            y += CalendarLayout.DetailTitleLineH * scale;
         }
-        y += SectionGap * scale;
 
-        if (!string.IsNullOrWhiteSpace(ev.FeedLabel))
+        if (frame.HasFeedLabel)
         {
             _textPaint.Color = new SKColor(120, 160, 255);
-            canvas.DrawTextWithFallback($"[{ev.FeedLabel}]", x, y, feedFont, _textPaint);
-            y += FeedLineH * scale;
+            canvas.DrawTextWithFallback($"[{ev.FeedLabel}]", geo.TextX, geo.FeedY, feedFont, _textPaint);
         }
 
-        if (locLines is not null)
+        if (frame.LocationLines is not null)
         {
             _textPaint.Color = textColor.WithAlpha(200);
-            foreach (string line in locLines)
+            y = geo.LocationY;
+            foreach (string line in frame.LocationLines)
             {
-                canvas.DrawTextWithFallback(line, x, y, locFont, _textPaint);
-                y += LocLineH * scale;
+                canvas.DrawTextWithFallback(line, geo.TextX, y, locFont, _textPaint);
+                y += CalendarLayout.DetailLocLineH * scale;
             }
-            y += SectionGap * scale;
         }
 
-        if (descLines is not null)
+        if (frame.DescriptionLines is not null)
         {
             _textPaint.Color = textColor.WithAlpha(180);
-            foreach (string line in descLines)
+            y = geo.DescriptionY;
+            foreach (string line in frame.DescriptionLines)
             {
-                canvas.DrawTextWithFallback(line, x, y, descFont, _textPaint);
-                y += DescLineH * scale;
+                canvas.DrawTextWithFallback(line, geo.TextX, y, descFont, _textPaint);
+                y += CalendarLayout.DetailDescLineH * scale;
             }
-            y += SectionGap * scale;
         }
 
-        if (!ev.IsAllDay)
+        if (frame.HasDuration)
         {
             TimeSpan dur = ev.End - ev.Start;
             string durStr = dur.TotalHours >= 1
                 ? $"{(int)dur.TotalHours}h {dur.Minutes:D2}m"
                 : $"{dur.Minutes}m";
             _textPaint.Color = textColor.WithAlpha(160);
-            canvas.DrawTextWithFallback($"Duration: {durStr}", x, y, durFont, _textPaint);
-            y += DurLineH * scale;
+            canvas.DrawTextWithFallback($"Duration: {durStr}", geo.TextX, geo.DurationY, durFont, _textPaint);
         }
 
-        SKRect urlRect = SKRect.Empty;
-        if (urlLines is not null)
+        if (frame.UrlLines is not null)
         {
-            float urlStartY = y;
             _textPaint.Color = new SKColor(120, 160, 255);
-            foreach (string chunk in urlLines)
+            y = geo.UrlY;
+            foreach (string chunk in frame.UrlLines)
             {
-                canvas.DrawTextWithFallback(chunk, x, y, urlFont, _textPaint);
-                y += UrlLineH * scale;
+                canvas.DrawTextWithFallback(chunk, geo.TextX, y, urlFont, _textPaint);
+                y += CalendarLayout.DetailUrlLineH * scale;
             }
-            float urlEndY = y;
-            y += SectionGap * scale;
-            // Extend the tap target ~one line above the first glyph so a slightly
-            // high tap still hits the link (the text baseline sits below the rect top).
-            urlRect = new SKRect(cardLeft, urlStartY - 14f * scale, cardRight, urlEndY);
         }
 
         canvas.Restore();
 
         // Scroll indicator inside the pillbox when content overflows
-        if (maxScrollY > 0f)
+        if (geo.MaxScrollY > 0f)
         {
-            float trackTop = cardTop + 10f * scale;
-            float trackBottom = cardBottom - 10f * scale;
+            float trackTop = geo.CardRect.Top + 10f * scale;
+            float trackBottom = geo.CardRect.Bottom - 10f * scale;
             float trackH = trackBottom - trackTop;
-            float trackX = cardRight - 6f * scale;
+            float trackX = geo.CardRect.Right - 6f * scale;
 
             _strokePaint.Color = textColor.WithAlpha(30);
             _strokePaint.StrokeWidth = 2f * scale;
             canvas.DrawLine(trackX, trackTop, trackX, trackBottom, _strokePaint);
 
-            float thumbH = Math.Clamp(trackH * (cardH / totalContentH), 20f * scale, trackH);
-            float thumbTop = trackTop + (clampedScrollY / maxScrollY) * (trackH - thumbH);
+            float thumbH = Math.Clamp(trackH * (geo.CardRect.Height / geo.TotalContentHeight), 20f * scale, trackH);
+            float thumbTop = trackTop + (geo.ClampedScrollY / geo.MaxScrollY) * (trackH - thumbH);
             _strokePaint.Color = accentColor.WithAlpha(180);
             _strokePaint.StrokeWidth = 3f * scale;
             _strokePaint.StrokeCap = SKStrokeCap.Round;
             canvas.DrawLine(trackX, thumbTop, trackX, thumbTop + thumbH, _strokePaint);
             _strokePaint.StrokeCap = SKStrokeCap.Butt;
         }
-
-        return new DetailFrameFacts(maxScrollY, cardRect, urlRect);
     }
 }
-
-/// <summary>The frame facts the detail view hands back to the widget after a
-/// render: the max scroll extent (0 when content fits), the pillbox card rect,
-/// and the meeting-link tap target. The gesture module stores these so a touch
-/// sample can hit-test the URL region and clamp its scroll offset.</summary>
-internal sealed record DetailFrameFacts(float MaxScrollY, SKRect CardRect, SKRect UrlRect);

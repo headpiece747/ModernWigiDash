@@ -15,7 +15,7 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 /// <remarks>
 /// Thread-safety contract: <see cref="Feed"/> (touch samples) and
-/// <see cref="SetFrameFacts"/> / <see cref="SetDetailFrameFacts"/> (render-time
+/// <see cref="SetFrameFacts"/> / <see cref="SetDetailGeometry"/> (render-time
 /// updates) must be called from the same thread. In production both run on the
 /// WPF dispatcher (device touch is marshaled via <c>BeginInvoke</c>; the render
 /// tick is a <c>DispatcherTimer</c>), so they are serialized. The mutable state
@@ -44,12 +44,10 @@ internal sealed class CalendarGestureState
     private int _viewDateOffset;
     private CalendarEvent? _detailEvent;
     private float _detailScrollY;
-    private float _maxDetailScrollY;
     private float _touchStartDetailScrollY;
     private bool _isDraggingDetail;
     private bool _isDetailScrolled;
-    private SKRect _detailCardRect;
-    private SKRect _detailUrlRect;
+    private CalendarDetailGeometry _detailGeometry;
     private SKPoint? _touchDown;
     private float _agendaScrollY;
     private float _touchStartScrollY;
@@ -82,10 +80,6 @@ internal sealed class CalendarGestureState
     /// (the renderer draws the detail content shifted by this amount).</summary>
     public float DetailScrollY => _detailScrollY;
 
-    /// <summary>The maximum vertical scroll extent for the current event detail card
-    /// (0 when the content fits inside the card without overflowing).</summary>
-    public float MaxDetailScrollY => _maxDetailScrollY;
-
     /// <summary>The current vertical scroll offset of the agenda rows viewport
     /// (the renderer draws the rows shifted by this amount).</summary>
     public float AgendaScrollY => _agendaScrollY;
@@ -94,15 +88,25 @@ internal sealed class CalendarGestureState
     /// (0 when the rows fit the viewport).</summary>
     public float MaxAgendaScrollY => _maxAgendaScrollY;
 
-    /// <summary>Receives the detail view card layout and max scroll extent computed during render,
-    /// clamping the current detail scroll position into valid range.</summary>
-    public void SetDetailFrameFacts(SKRect cardRect, float maxScrollY, SKRect urlRect)
+    /// <summary>Receives the detail view's geometry for the frame, clamping the
+    /// current detail scroll position into its range.
+    ///
+    /// The whole record, not three loose fields: the card rect, the link tap
+    /// target and the scroll extent are ONE geometry that
+    /// <see cref="CalendarLayout.ComputeDetail"/> produced, so the touch path
+    /// cannot hold a card rect from one computation beside an extent from
+    /// another. The extent is read off the record rather than mirrored into a
+    /// field, so it cannot go stale against the rects (2026-09-27).</summary>
+    public void SetDetailGeometry(CalendarDetailGeometry geometry)
     {
-        _detailCardRect = cardRect;
-        _maxDetailScrollY = Math.Max(0f, maxScrollY);
-        _detailScrollY = Math.Clamp(_detailScrollY, 0f, _maxDetailScrollY);
-        _detailUrlRect = urlRect;
+        _detailGeometry = geometry;
+        _detailScrollY = Math.Clamp(_detailScrollY, 0f, MaxDetailScrollY);
     }
+
+    /// <summary>The detail view's scrollable extent, from this frame's
+    /// geometry. Zero before the first geometry arrives, which is a
+    /// not-yet-measured frame rather than "content fits".</summary>
+    public float MaxDetailScrollY => Math.Max(0f, _detailGeometry.MaxScrollY);
 
     /// <summary>Exits detail mode back to the agenda view (the same state reset the
     /// tap handler applies on a card-body/header tap). Idempotent: a no-op when
@@ -116,7 +120,7 @@ internal sealed class CalendarGestureState
             return;
         _detailEvent = null;
         _detailScrollY = 0f;
-        _maxDetailScrollY = 0f;
+        _detailGeometry = default;
         RequestRender();
     }
 
@@ -168,7 +172,7 @@ internal sealed class CalendarGestureState
             if (_detailEvent is not null)
             {
                 _touchStartDetailScrollY = _detailScrollY;
-                _isDraggingDetail = !_detailCardRect.IsEmpty && _detailCardRect.Contains(localPoint.X, localPoint.Y);
+                _isDraggingDetail = _detailGeometry.CardRect.Contains(localPoint.X, localPoint.Y);
                 _isDetailScrolled = false;
                 return;
             }
@@ -183,13 +187,13 @@ internal sealed class CalendarGestureState
         {
             if (_detailEvent is not null)
             {
-                if (_isDraggingDetail && _touchDown.HasValue && _maxDetailScrollY > 0f)
+                if (_isDraggingDetail && _touchDown.HasValue && MaxDetailScrollY > 0f)
                 {
                     float moveDy = localPoint.Y - _touchDown.Value.Y;
                     if (Math.Abs(moveDy) > 4f)
                     {
                         _isDetailScrolled = true;
-                        _detailScrollY = Math.Clamp(_touchStartDetailScrollY - moveDy, 0f, _maxDetailScrollY);
+                        _detailScrollY = Math.Clamp(_touchStartDetailScrollY - moveDy, 0f, MaxDetailScrollY);
                         RequestRender();
                     }
                 }
@@ -242,11 +246,11 @@ internal sealed class CalendarGestureState
                 CalendarEvent ev = _detailEvent.Value;
 
                 // Tap on "Tap to go back" header (above the pillbox card)
-                if (!_detailCardRect.IsEmpty && localPoint.Y < _detailCardRect.Top)
+                if (localPoint.Y < _detailGeometry.CardRect.Top)
                 {
                     _detailEvent = null;
                     _detailScrollY = 0f;
-                    _maxDetailScrollY = 0f;
+                    _detailGeometry = default;
                     RequestRender();
                     return;
                 }
@@ -256,9 +260,8 @@ internal sealed class CalendarGestureState
                 // set (e.g. a touch arriving before the first detail render), the
                 // tap falls through to the exit below instead of opening the link.
                 if (!string.IsNullOrWhiteSpace(ev.Url) &&
-                    !_detailUrlRect.IsEmpty &&
-                    _detailCardRect.Contains(localPoint.X, localPoint.Y) &&
-                    _detailUrlRect.Contains(localPoint.X, localPoint.Y))
+                    _detailGeometry.CardRect.Contains(localPoint.X, localPoint.Y) &&
+                    _detailGeometry.UrlRect.Contains(localPoint.X, localPoint.Y))
                 {
                     OpenMeetingLink(ev.Url);
                     return;
@@ -267,7 +270,7 @@ internal sealed class CalendarGestureState
                 // Any other tap exits detail mode back to agenda view
                 _detailEvent = null;
                 _detailScrollY = 0f;
-                _maxDetailScrollY = 0f;
+                _detailGeometry = default;
                 RequestRender();
             }
             return;
@@ -345,9 +348,7 @@ internal sealed class CalendarGestureState
             {
                 _detailEvent = matched;
                 _detailScrollY = 0f;
-                _maxDetailScrollY = 0f;
-                _detailCardRect = SKRect.Empty;
-                _detailUrlRect = SKRect.Empty;
+                _detailGeometry = default;
                 RequestRender();
                 return;
             }
@@ -374,9 +375,7 @@ internal sealed class CalendarGestureState
         {
             _detailEvent = foundEvent;
             _detailScrollY = 0f;
-            _maxDetailScrollY = 0f;
-            _detailCardRect = SKRect.Empty;
-            _detailUrlRect = SKRect.Empty;
+            _detailGeometry = default;
             RequestRender();
         }
     }

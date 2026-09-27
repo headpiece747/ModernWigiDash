@@ -255,8 +255,10 @@ public class CalendarAdaptiveRenderingTests
             FeedLabel = "Work",
         };
 
-        DetailFrameFacts facts = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now);
-        // The long URL + run-on description must overflow the short card, producing
+        // Measure, then draw the SAME frame - the two-step the widget runs, so
+        // this test exercises the production path rather than a render that happens
+        // to return its geometry as a side effect.
+        CalendarDetailFrame frame = renderer.MeasureDetail(bounds, 1.0f, ev, scrollY: 0f); renderer.RenderDetailView(frame, surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now); CalendarDetailGeometry facts = frame.Geometry;        // The long URL + run-on description must overflow the short card, producing
         // a positive scroll extent and a non-empty URL tap target.
         Assert.IsTrue(facts.MaxScrollY > 0f, "long content must exceed the card height");
         Assert.IsFalse(facts.UrlRect.IsEmpty, "URL tap target must be recorded for a URL-bearing event");
@@ -382,7 +384,7 @@ public class CalendarAdaptiveRenderingTests
             Url = "https://meet.example.com/meeting",
         };
 
-        DetailFrameFacts facts = renderer.RenderDetailView(surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now, 20f);
+        CalendarDetailFrame frame = renderer.MeasureDetail(bounds, 1.0f, ev, scrollY: 20f); renderer.RenderDetailView(frame, surface!.Canvas, bounds, 1.0f, ev, SKColors.White, SKColors.Cyan, Now); CalendarDetailGeometry facts = frame.Geometry;
         Assert.IsTrue(facts.MaxScrollY > 0f, "content must exceed card height and produce positive max scroll");
         Assert.IsTrue(facts.CardRect.Width > 0f, "cardRect width must be positive");
         Assert.IsTrue(facts.CardRect.Height > 0f, "cardRect height must be positive");
