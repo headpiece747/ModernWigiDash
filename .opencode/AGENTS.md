@@ -133,6 +133,28 @@ Hardware + Sdk + Widgets; Tests -> all five. The layering is machine-pinned by
   task are missing (Temp was cleaned), recreate them per those skills rather
   than hand-rolling an elevated launch.
 
+- Every app run starts from the DEFAULT profile and theme. Delete
+  `profile.json` and `app_theme.json` from `%LOCALAPPDATA%\ModernWigiDash`
+  before launching: the app then loads starter defaults, the state a first-time
+  user sees. Deleting is per-run, not once — the app writes a fresh default
+  `profile.json` on exit. Standing user preference (stated 2026-09-27): never
+  verify against the saved layout. A loaded profile hides layout, theme, and
+  first-run regressions behind real user state. `wmd-verify.ps1 clean` is NOT
+  this: it restores a backup, which is the opposite of a default run.
+- Two neighbours are reference-only, never part of an app run.
+  `C:\dev\ModernWigiDashRust` is a SEPARATE build the user is trying: never run
+  it, and never read its log lines as evidence about this app. Its binary writes
+  the same `%LOCALAPPDATA%\ModernWigiDash\display_device.log` and its vocabulary
+  differs ("Display not found - running in simulation mode" vs this app's "No
+  physical device found"), so that file is a MIXED log — CRLF lines are .NET,
+  bare-LF lines are the Rust build. G.SKILL's WigiDash Manager
+  (`C:\Program Files (x86)\G.SKILL\WigiDash Manager\`) exists as a reference
+  for porting vendor behavior or solving a problem. Its auto-start
+  `WigiDashService` is a legitimate client of the same USB device, so a live
+  Manager during an app run denies the WinUSB open (ERROR_ACCESS_DENIED on BOTH
+  the WinUSB and LibUsbDotNet legs) — close it before a hardware run instead of
+  concluding the app is broken.
+
 ## Debt Guardrails (machine-pinned in `DebtGuardTests`, run in the gate's test
 stage, so the commit guard enforces them before every commit)
 
@@ -266,6 +288,22 @@ Real errors hit this session, each with the fix so they are not re-run into:
    past vs. the real system clock and silently never enter the state under test.
 
 ## Tool Mapping
+
+**Reach for codegraph and online research before a manual read loop** (user
+directive 2026-09-27). This repo has a `.codegraph/` index and the codegraph MCP
+is wired, so `codegraph_explore` is the FIRST call for any locate / understand /
+blast-radius question — one call returns the verbatim source of the relevant
+symbols grouped by file plus the call paths between them, which a grep-and-read
+loop costs many times more for the same answer. Raw Grep/Read are for non-C#
+assets, config, and only after codegraph didn't cover it; treat an "edited
+since last index sync" banner as "Read this file". Online research
+(websearch / webfetch) answers what the local code cannot: Windows and
+USB/driver behavior and KB articles, .NET/WPF API semantics, third-party
+packages (LibUsbDotNet, PresentMon, SkiaSharp), upstream GitHub issues. The
+`research` skill is the version worth writing down when the finding deserves a
+cited repo artifact. Say which of the two you used when answering an
+investigative question; if a project has no `.codegraph/`, skip codegraph there
+and say that instead.
 
 The kit's RoslynNavigator MCP server is NOT installed. Glider (wired in
 `opencode.json`) provides the equivalent tools. Each skill and agent carries a
