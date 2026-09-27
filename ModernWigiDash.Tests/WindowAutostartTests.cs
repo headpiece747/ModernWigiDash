@@ -28,7 +28,7 @@ public class WindowAutostartTests
     }
 
     [TestMethod]
-    public void StartupMinimized_WithHideToTrayBehavior_OpensMinimizedWithoutHiding_AndTheNextMinimizeStillHides()
+    public void StartupMinimized_OpensMinimizedWithoutHiding_AndTheNextMinimizeStillHides()
     {
         string profilePath = SeedProfile(CloseBehaviorPolicy.HideToTray);
         Host.Run<object?>(() =>
@@ -45,15 +45,32 @@ public class WindowAutostartTests
                 Assert.IsTrue(window.IsVisible, "the autostart window is visible, not hidden - without the latch the hideToTray intercept would have hidden it at sign-in");
                 Assert.AreEqual(WindowState.Minimized, window.WindowState, "the --startup flag opens the window minimized");
 
-                // The latch is one-shot: the first real user minimize after
-                // the startup still hides to the tray. Restore first (the
-                // window is minimized), then minimize like a user would.
+                // What this proves, and what it does NOT - both checked by mutation,
+                // because the first answer here was wrong twice:
+                //
+                // It proves the post-constructor state: the ctor's own
+                // "WindowState = Minimized" write raises StateChanged
+                // SYNCHRONOUSLY, which consumes the armed latch, so the user's
+                // first real minimize is a normal intercept and hides. The
+                // Normal round-trip is needed because the window is already
+                // Minimized: setting Minimized again raises no change.
+                //
+                // It does NOT prove that the ctor calls ClearStartupMinimizeLatch.
+                // Deleting that call leaves the suite green, because the ctor's own
+                // state write has already consumed the latch - the explicit clear
+                // is belt-and-braces for the no-event path its comment names, and
+                // in this scenario it is redundant. I twice claimed this assertion
+                // was covered elsewhere and removed it; the mutation showed the
+                // claim was unproven, and then showed why it can never be pinned
+                // here. The assertion stays because the post-constructor state is
+                // the real user-visible claim; the defensive clear is a
+                // production observation, not a test obligation.
                 window.WindowState = WindowState.Normal;
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
                 window.WindowState = WindowState.Minimized;
                 window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
 
-                Assert.IsFalse(window.IsVisible, "the first real minimize after the startup still hides to the tray (the one-shot latch is spent)");
+                Assert.IsFalse(window.IsVisible, "the first real minimize after the startup still hides to the tray (the ctor's one-shot latch is spent)");
             }
             finally
             {
