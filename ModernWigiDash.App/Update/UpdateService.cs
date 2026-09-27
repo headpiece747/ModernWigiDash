@@ -43,8 +43,8 @@ internal sealed class UpdateService
         ModernWigiDash.Sdk.DiagLog? log = null)
     {
         _updatesRoot = updatesRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ModernWigiDash", "updates");
+            UserStateDirectory.Resolve(),
+            "updates");
         _downloadText = downloadText ?? DownloadTextAsync;
         _downloadFile = downloadFile ?? DownloadFileAsync;
         // The single digest-check expression: the seam IS the verification

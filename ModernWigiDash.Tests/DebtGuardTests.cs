@@ -486,6 +486,34 @@ public sealed class DebtGuardTests
     }
 
     [TestMethod]
+    public void HouseRules_UserStateDirectory_HasExactlyOneResolver()
+    {
+        // The user state dir (%LocalAppData%\ModernWigiDash) was resolved
+        // independently by five owners - the two log paths, profile.json,
+        // app_settings.json and app_theme.json - and a test host that
+        // redirected one of them still wrote the other four into the
+        // developer's real profile (2026-09-27: pinning just the logs left the
+        // suite writing a real profile.json on every gate run, which is exactly
+        // the non-default state the user refuses to verify against).
+        //
+        // UserStateDirectory.Resolve is the one owner, in the leaf project so
+        // Core's theme path can reach it. A second resolver is the defect
+        // coming back, so the count is pinned rather than reviewed: the theme
+        // owner lives below App, and a seam only App could see would leave half
+        // the callers unbound.
+        var hits = RepoScan.ScanSrc(new Regex(@"GetFolderPath\(\s*Environment\.SpecialFolder\.LocalApplicationData\s*\)"))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+        CollectionAssert.AreEqual(
+            new[] { "ModernWigiDash.Sdk/UserStateDirectory.cs" },
+            hits,
+            "the user state dir must be resolved in exactly one place: " + string.Join("; ", hits)
+            + ". A second Environment.GetFolderPath(LocalApplicationData) is a user-data path the test host cannot redirect, so the test suite writes the developer's real profile again. Route every user-data path through UserStateDirectory.Resolve.");
+    }
+
+    [TestMethod]
     public void FindMainWindowCtors_InjectedViolations_StayVisibleToTheRule()
     {
         // Negative verification (the house shape): the extractor the window

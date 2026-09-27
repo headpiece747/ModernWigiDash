@@ -32,6 +32,11 @@ public sealed class ProfilePersistenceTests
     [TestMethod]
     public void DefaultProfilePath_ReturnsLocalAppDataModernWigiDashProfileJson()
     {
+        // The state-dir seam is process-global, and a window test binds it to a
+        // temp folder: without this reset the expected value would be whatever
+        // that test left behind, and this assertion would silently become a
+        // test-order dependency (2026-09-27).
+        UserStateDirectory.Reset();
         string expected = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ModernWigiDash", "profile.json");

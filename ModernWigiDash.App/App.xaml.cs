@@ -13,19 +13,6 @@ public partial class App : Application
     private SingleInstanceGuard? _instanceGuard;
 
     /// <summary>
-    /// The folder the logs and the profile live in, resolved once per process.
-    /// Production is <c>%LocalAppData%\ModernWigiDash</c>; the test host
-    /// replaces it BEFORE constructing <see cref="App"/> so the constructor's
-    /// own startup line lands in a test-owned folder instead of appending to
-    /// the developer's real diagnostic log (the constructor runs on every
-    /// window-test invoke, so without this seam the test suite writes
-    /// thousands of scripted-device lines into the user's log).
-    /// </summary>
-    internal static Func<string> AppDataDirectory { get; set; } = () => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ModernWigiDash");
-
-    /// <summary>
     /// The production constructor: pins the log paths next to the profile
     /// (LocalAppData, never next to the exe), arms the crash handlers, and
     /// binds the exit marker + final flush.
@@ -35,8 +22,13 @@ public partial class App : Application
         // Logs live next to the profile, never next to the exe: a Program
         // Files install is read-only for standard users, and a single-file
         // host's BaseDirectory is the extraction dir under %TEMP%. Both paths
-        // are pinned here before the first write below.
-        string appDataDir = AppDataDirectory();
+        // are pinned here before the first write below, in the ONE state
+        // directory every user-data file shares (UserStateDirectory) — the
+        // profile, the settings and the theme resolve it too, so a test host
+        // that rebinds that single seam redirects this whole surface instead
+        // of only the two log paths (2026-09-27: pinning just the logs left the
+        // suite writing a real profile.json on every gate run).
+        string appDataDir = UserStateDirectory.Resolve();
         try
         {
             Directory.CreateDirectory(appDataDir);

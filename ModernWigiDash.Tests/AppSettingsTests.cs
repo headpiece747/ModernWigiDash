@@ -124,6 +124,10 @@ public class AppSettingsTests
     {
         // The production default path is the user state dir (ADR-0021 shape):
         // %LOCALAPPDATA%\ModernWigiDash\app_settings.json, beside profile.json.
+        // Reset first: the state-dir seam is process-global and a window test
+        // binds it to a temp folder, so without this the assertions below would
+        // be decided by test order (2026-09-27).
+        UserStateDirectory.Reset();
         string def = AppSettingsStore.DefaultPath();
 
         Assert.IsTrue(def.StartsWith(

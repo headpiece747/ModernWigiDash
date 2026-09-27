@@ -48,10 +48,15 @@ internal sealed class ProfilePersistence : IDisposable
         _log = log;
     }
 
+    /// <summary>
+    /// The production profile path. The folder comes from
+    /// <see cref="UserStateDirectory"/> — the one owner of the state dir — so a
+    /// test host that rebinds that seam redirects the profile along with the
+    /// log, the settings and the theme, instead of this one path escaping to
+    /// the developer's real profile (2026-09-27).
+    /// </summary>
     public static string DefaultProfilePath()
-        => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            DirectoryName, FileName);
+        => Path.Combine(UserStateDirectory.Resolve(), FileName);
 
     /// <summary>
     /// Reads the persisted profile through the one import boundary

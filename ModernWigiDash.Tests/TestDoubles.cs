@@ -851,9 +851,10 @@ internal sealed class StaHost
         // InitializeComponent separately. Without it, Application resources
         // (e.g. the window's PrimaryFont StaticResource) are missing.
         ResetApplicationState();
-        // Bind the log/profile folder seam BEFORE the constructor runs: the ctor
-        // pins FileLog/CrashLog to it and writes a startup line of its own.
-        _ = TestLogDir;
+        // Bind the state-directory seam BEFORE any user-data path is composed:
+        // the App constructor pins the two log paths to it and writes a startup
+        // line, and the window's default profile path resolves it too.
+        _ = TestStateDirectory;
         var app = new AppClass();
         app.InitializeComponent();
         // The test App must never auto-shutdown: a test window's close (the
@@ -880,23 +881,22 @@ internal sealed class StaHost
     }
 
     /// <summary>
-    /// The one log/profile folder the whole test process shares, created on
-    /// first use: under TEMP, never under the user's real profile folder.
-    /// Bound to <c>App.AppDataDirectory</c> before each test App is
-    /// constructed, because the App constructor itself pins
-    /// <c>FileLog.LogPath</c>/<c>CrashLog.LogPath</c> and writes a startup
-    /// line — on every window-test invoke — and nothing in the test host
-    /// restored them, so the suite used to append scripted-device lines
-    /// ("\\.\GLOBALROOT\Device\WigiDash", "scripted bulk transfer fault") to
-    /// the user's real diagnostic log.
+    /// The one state folder the whole test process shares, created on first
+    /// use: under TEMP, never the user's real profile. Bound to
+    /// <see cref="UserStateDirectory.Resolve"/> before the first path is
+    /// composed, because every user-data path resolves it independently —
+    /// display log, crash log, profile.json, app_settings.json, app_theme.json
+    /// — and redirecting only the logs (the 2026-09-27 first attempt) left the
+    /// suite writing a real <c>profile.json</c> into the developer's profile on
+    /// every gate run.
     /// </summary>
-    private static string TestLogDir
+    private static string TestStateDirectory
     {
         get
         {
-            string dir = Path.Combine(Path.GetTempPath(), "ModernWigiDash.Tests", "logs");
+            string dir = Path.Combine(Path.GetTempPath(), "ModernWigiDash.Tests", "state");
             Directory.CreateDirectory(dir);
-            AppClass.AppDataDirectory = () => dir;
+            UserStateDirectory.Resolve = () => dir;
             return dir;
         }
     }

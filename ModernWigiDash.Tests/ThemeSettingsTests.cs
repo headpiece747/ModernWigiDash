@@ -297,6 +297,10 @@ public class ThemeSettingsTests
     [TestMethod]
     public void DefaultPath_LivesInTheUserStateDir()
     {
+        // Reset first: the state-dir seam is process-global and a window test
+        // binds it to a temp folder, so without this the expected value is
+        // whatever that test left behind (2026-09-27).
+        UserStateDirectory.Reset();
         string expected = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ModernWigiDash", "app_theme.json");
@@ -308,6 +312,7 @@ public class ThemeSettingsTests
     [TestMethod]
     public void DefaultPath_LivesInTheProfileStateDirectory()
     {
+        UserStateDirectory.Reset();
         string stateDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             ProfilePersistence.DirectoryName);

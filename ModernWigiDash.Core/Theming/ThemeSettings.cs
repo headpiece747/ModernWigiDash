@@ -108,7 +108,7 @@ public class ThemeSettings
     /// app-settings files. Pinned in lockstep against the App's
     /// <c>ProfilePersistence.DirectoryName</c> by test (ThemeSettingsTests), so
     /// the state dir can never split between the two owners.</summary>
-    public const string StateDirectoryName = "ModernWigiDash";
+    public const string StateDirectoryName = UserStateDirectory.Name;
 
     /// <summary>The pre-read size cap for a theme file (ADR-0021): a real theme
     /// is ~1 KB, so 1 MB rejects a hostile multi-GB file before the read
@@ -120,12 +120,14 @@ public class ThemeSettings
     private static readonly JsonSerializerOptions SaveOptions = new() { WriteIndented = true };
 
     /// <summary>The one theme file location: %LOCALAPPDATA%\ModernWigiDash\app_theme.json
-    /// (ADR-0021). The old exe-dir location is a read-only legacy migration
-    /// source (<see cref="LegacyPath"/>), never a read/write target.</summary>
+    /// (ADR-0021). The folder comes from <see cref="UserStateDirectory"/> — the
+    /// one owner of the state dir, which lives in the leaf project precisely so
+    /// Core can reach it (a seam only App could see would leave this path
+    /// writing the real theme during a test run). The old exe-dir location is a
+    /// read-only legacy migration source (<see cref="LegacyPath"/>), never a
+    /// read/write target.</summary>
     public static string DefaultPath()
-        => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            StateDirectoryName, FileName);
+        => Path.Combine(UserStateDirectory.Resolve(), FileName);
 
     /// <summary>The legacy exe-dir theme file (pre-ADR-0021): the one-time
     /// migration source <see cref="Load()"/> reads when the state file is absent.

@@ -18,10 +18,11 @@ public static class SvgIconLoader
     // refreshes the entry, so a copied icon appears on the next frame.
     private static readonly ConcurrentDictionary<string, bool> ExistenceCache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The per-user icons directory under LocalApplicationData.</summary>
+    /// <summary>The per-user icons directory, under the one state directory
+    /// every user-data path shares (UserStateDirectory) so a test run reads and
+    /// writes its icons in temp rather than the developer's real set.</summary>
     public static string IconsDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ModernWigiDash",
+        UserStateDirectory.Resolve(),
         "icons");
 
     /// <summary>

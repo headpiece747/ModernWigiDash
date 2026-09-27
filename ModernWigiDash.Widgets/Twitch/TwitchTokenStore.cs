@@ -12,8 +12,7 @@ internal sealed class TwitchTokenStore
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private static string DefaultTokenPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ModernWigiDash",
+        UserStateDirectory.Resolve(),
         "twitch-auth.bin");
     private readonly string _tokenPath;
 

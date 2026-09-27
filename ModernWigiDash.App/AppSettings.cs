@@ -59,10 +59,11 @@ internal sealed class AppSettingsStore
         _log = log;
     }
 
+    /// <summary>The production settings path, in the one state dir every
+    /// user-data file shares (see <see cref="UserStateDirectory"/>), so the
+    /// test host's rebind redirects this file with the rest of the surface.</summary>
     public static string DefaultPath()
-        => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            ProfilePersistence.DirectoryName, FileName);
+        => Path.Combine(UserStateDirectory.Resolve(), FileName);
 
     /// <summary>
     /// Loads the settings; an absent file returns the defaults and a corrupt

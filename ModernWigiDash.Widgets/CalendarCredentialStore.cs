@@ -36,8 +36,7 @@ public sealed class CalendarCredentialStore
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ModernWigiDash",
+        UserStateDirectory.Resolve(),
         "calendar-credentials.bin");
 
     private readonly string _path;
