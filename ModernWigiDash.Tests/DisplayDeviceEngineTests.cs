@@ -676,11 +676,18 @@ public class DisplayDeviceEngineTests
     }
 
     [TestMethod]
-    public void ReconnectPeriod_DefaultsToFiveSeconds()
+    public void ReconnectPeriod_IsTheBackoffsFirstDelayNotAFixedCadence()
     {
+        // The seam is the FLOOR, not the period: the timer is re-armed from
+        // ReconnectBackoffPolicy after every attempt, so a flat 5 s would be
+        // the old flood back (2026-09-27). The name says what it pins -- it used
+        // to claim a five-second default, which stopped being true the moment
+        // the backoff landed.
         using var engine = new DisplayDeviceEngine();
 
-        Assert.AreEqual(TimeSpan.FromSeconds(5), engine.ReconnectPeriod);
+        Assert.AreEqual(ReconnectBackoffPolicy.FirstDelay, engine.ReconnectPeriod);
+        Assert.AreEqual(TimeSpan.FromSeconds(5), engine.ReconnectPeriod,
+            "the first retry keeps the old 5 s so a cable reseat is unaffected");
     }
 
     [TestMethod]

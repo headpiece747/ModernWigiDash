@@ -5,7 +5,7 @@ Drives through UIA v4 core (the UIAutomationCore COM API) - NOT the legacy
 System.Windows.Automation v3 managed client (the .NET 3.0-era WPF API): v3
 misbehaves against .NET WPF providers and was the root cause of this
 harness's drive failures; the v4 core reads the same tree correctly.
-No elevation; drives the app in Simulated connection mode (physical-display
+No elevation; drives the app with no display attached, so the badge settles on its no-display label (physical-display
 behavior routes to the hardware-e2e-validation skill instead).
 
 Usage (repo root derived from this script's location, so it runs from anywhere):

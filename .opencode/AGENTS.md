@@ -175,7 +175,17 @@ Raw-scan pins against the src tree (shared mechanics in `RepoScan`):
 - every P/Invoke in src spells its `EntryPoint` explicitly (the method-name
   binding is a rename away from the first-call EntryPointNotFoundException; the
   spelled pairs are probed against the real DLL by `PInvokeBindingTests`,
-  ADR-0020).
+  ADR-0020),
+- the transport connect seam stays a typed `ConnectionState` outcome, never a
+  `bool` (`HouseRules_ConnectSeam_StaysATypedOutcomeNotABool`: one declaration
+  + one implementation, no `bool Connect(`, and the three failure states
+  declared in `ConnectionState` itself). A bool cannot carry which fault
+  occurred, so a display that is PRESENT but held by another client read as
+  "no physical device" (2026-09-27): the badge said "Simulated" for an absent
+  device, a busy one and a wedged one alike. The flood half of that change is
+  pinned BEHAVIOURALLY instead (a line-count bound over 20 failed opens in
+  `WinUsbBulkDeviceTests`), because a bound also catches a merely loosened
+  cadence, which a scan for the old `, 1)` spelling would miss.
 
 A violation fails the gate and the message spells the fix; a new legitimate
 site is a deliberate allow-list edit with a reason. Hygiene sweeps:
