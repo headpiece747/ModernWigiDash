@@ -365,4 +365,101 @@ public class WeatherPresentationTests
         Assert.AreEqual(0, display.DailyHighLows.Count);
         Assert.AreEqual(0, display.HourlyTemps.Count);
     }
+
+    // --- StalenessLine: the rule's per-second memo (2026-09-27) ---------------
+    //
+    // The memo was four private fields on the widget, next to the header paints,
+    // and therefore had no test at all: it was unreachable state on the draw
+    // path. It now sits beside the rule it caches, which is the only place it
+    // could be pinned from.
+
+    /// <summary>A last-success stamp far enough back that the time-ago arm
+    /// BUILDS a fresh string each call.</summary>
+    private static readonly DateTime MemoNow = new(2026, 9, 27, 12, 0, 0, DateTimeKind.Utc);
+
+    [TestMethod]
+    public void StalenessLine_SameInputs_ReusesTheSameStringInstance()
+    {
+        var memo = new WeatherPresentation.StalenessLine();
+        var lastSuccess = MemoNow.AddMinutes(-30);
+
+        // The time-ago arm specifically: BuildStalenessText returns an
+        // INTERPOLATED string there, so a miss allocates a new instance and a hit
+        // does not. The "Updating…" arm returns a literal, which the runtime
+        // interns - probing the memo through that arm would pass with the memo
+        // deleted, i.e. it would be a value against itself.
+        string? first = memo.Text(false, lastSuccess, MemoNow);
+        string? second = memo.Text(false, lastSuccess, MemoNow);
+
+        Assert.AreEqual("Updated 30m ago", first);
+        Assert.IsTrue(
+            ReferenceEquals(first, second),
+            "a frame that changes none of the line's inputs must reuse the memoized string - "
+            + "the render path runs at 30 FPS and the buckets change once a second, so this is the 30x saving");
+    }
+
+    [TestMethod]
+    public void StalenessLine_ElapsedSecondCrosses_Recomputes()
+    {
+        var memo = new WeatherPresentation.StalenessLine();
+        var lastSuccess = MemoNow.AddMinutes(-30);
+
+        // Same second, different sub-second: the key is the whole elapsed SECOND,
+        // so a frame 400 ms later is still a hit.
+        memo.Text(false, lastSuccess, MemoNow);
+        string? withinTheSecond = memo.Text(false, lastSuccess, MemoNow.AddMilliseconds(400));
+        Assert.IsTrue(ReferenceEquals(withinTheSecond, memo.Text(false, lastSuccess, MemoNow.AddMilliseconds(400))),
+            "a sub-second advance must not invalidate the memo - the buckets only move once a second");
+
+        // A minute later the text genuinely differs, so it must be rebuilt.
+        string? nextMinute = memo.Text(false, lastSuccess, MemoNow.AddMinutes(1));
+        Assert.AreEqual("Updated 31m ago", nextMinute, "crossing into the next minute must reformat");
+    }
+
+    [TestMethod]
+    public void StalenessLine_FetchFlagFlips_Recomputes()
+    {
+        var memo = new WeatherPresentation.StalenessLine();
+        var lastSuccess = MemoNow.AddMinutes(-30);
+
+        memo.Text(false, lastSuccess, MemoNow);
+        Assert.AreEqual("Updating\u2026", memo.Text(true, lastSuccess, MemoNow),
+            "a fetch starting changes the line even though the clock did not");
+        Assert.AreEqual("Updated 30m ago", memo.Text(false, lastSuccess, MemoNow),
+            "the fetch ending changes it back");
+    }
+
+    [TestMethod]
+    public void StalenessLine_LastSuccessChanges_Recomputes()
+    {
+        var memo = new WeatherPresentation.StalenessLine();
+
+        memo.Text(false, MemoNow.AddMinutes(-30), MemoNow);
+        Assert.AreEqual("Updated 5m ago", memo.Text(false, MemoNow.AddMinutes(-5), MemoNow),
+            "a new last-success stamp re-times the line even at the same instant");
+    }
+
+    [TestMethod]
+    public void StalenessLine_NeverFetched_StaysNullAcrossSeconds()
+    {
+        var memo = new WeatherPresentation.StalenessLine();
+
+        // The user-visible property: hours after startup with no successful
+        // fetch there is still nothing to report, and the first real stamp is
+        // not served from a stale memo.
+        Assert.IsNull(memo.Text(false, DateTime.MinValue, MemoNow));
+        Assert.IsNull(memo.Text(false, DateTime.MinValue, MemoNow.AddHours(3)),
+            "hours later there is still nothing to report");
+        Assert.AreEqual("Updated 1m ago", memo.Text(false, MemoNow.AddMinutes(-1), MemoNow),
+            "the first real stamp must not be served from the never-fetched memo");
+
+        // What this does NOT pin, stated so nobody assumes it does: the
+        // long.MinValue SENTINEL that keys the never-fetched arm is a hit-rate
+        // property, not a behavioural one. Replacing it with a real elapsed count
+        // leaves every assertion here green, because BuildStalenessText already
+        // returns null for MinValue on its own - the only difference is that the
+        // memo would miss once a second instead of once a frame, formatting a
+        // null. Deliberately not claimed as mutation-covered: there is no black-box
+        // observable for it, and a test that cannot fail is worse than no test.
+    }
 }

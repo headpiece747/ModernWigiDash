@@ -575,6 +575,33 @@ public sealed class DebtGuardTests
     };
 
     [TestMethod]
+    public void HouseRules_WeatherWidget_HoldsNoPaintOfItsOwn()
+    {
+        // CONTEXT.md describes WeatherWidgetRenderer as "the widget's draw paths".
+        // That was FALSE: the widget drew the header (title, unit badge, subtitle,
+        // staleness line) with four hoisted SKPaints of its own while the renderer
+        // drew the five content modes with thirteen. So adding one paint to this
+        // screen meant discovering that the hoisting discipline was split across
+        // two owners, and a paint could be declared in the widget and missed by
+        // the renderer's Dispose (found by the architecture review, 2026-09-27).
+        //
+        // One screen, one draw owner: every SKPaint on the weather screen is the
+        // renderer's, released by its one Dispose call.
+        // Stripped mode, so the pin counts CODE: the widget's own comment names
+        // SKPaint when it explains that the paints moved to the renderer, and a
+        // raw scan flagged that sentence as a violation. (The first shape of this
+        // pin used raw and failed on its own documentation.)
+        var hits = RepoScan.ScanSrc(new Regex(@"SKPaint|\.IsAntialias\s*=|\.Style\s*="))
+            .Where(hit => hit.StartsWith("ModernWigiDash.Widgets/WeatherForecastWidget.cs:", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.AreEqual(0, hits.Count,
+            "the weather widget must hold no SKPaint: the header joined the renderer, so the paints and their disposal live in one place. Found at: "
+            + string.Join("; ", hits.Select(hit => hit.Split(':', 3)[0].Replace('\\', '/') + ":" + hit.Split(':', 3)[1]))
+            + ". A paint declared here is native memory the renderer's Dispose cannot see, and the glossary's 'the widget's draw paths' claim stays false.");
+    }
+
+    [TestMethod]
     public void HouseRules_CalendarDetailGeometry_IsMeasuredOnceInOnePlace()
     {
         // The detail view's geometry used to be computed INSIDE the draw path,

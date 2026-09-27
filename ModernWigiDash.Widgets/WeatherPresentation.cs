@@ -284,4 +284,54 @@ internal static class WeatherPresentation
         if (elapsed.TotalHours < 24) return $"Updated {(int)elapsed.TotalHours}h ago";
         return $"Updated {(int)elapsed.TotalDays}d ago";
     }
+
+    /// <summary>
+    /// The staleness line's per-second memo, sitting beside the rule it caches so
+    /// the cadence and the rule cannot be separated.
+    ///
+    /// The time-ago buckets only change once a second, but the render path runs
+    /// at 30 FPS, so recomputing the string every frame would rebuild it 30 times
+    /// for one visible value. The memo keys on the three inputs the string
+    /// actually depends on - the elapsed whole second, whether a fetch is in
+    /// flight, and the last-success stamp - so a frame that changes none of them
+    /// (every frame, in the steady state) returns the same instance and formats
+    /// nothing.
+    ///
+    /// It was four fields on the widget, next to the header paints, because the
+    /// widget drew the header. The header now belongs to the draw module, so the
+    /// memo belongs to the rule rather than to whoever happens to paint the line
+    /// (2026-09-27).
+    /// </summary>
+    internal sealed class StalenessLine
+    {
+        private DateTime _lastSuccess;
+        private bool _fetching;
+        private long _elapsedSecond = -1;
+        private string? _text;
+
+        /// <summary>The staleness line for this frame, formatted at most once per
+        /// change of its inputs.</summary>
+        /// <param name="isFetching">Whether a fetch is in flight.</param>
+        /// <param name="lastSuccessFetchTime">The last successful fetch's stamp.</param>
+        /// <param name="now">The frame's clock read.</param>
+        public string? Text(bool isFetching, DateTime lastSuccessFetchTime, DateTime now)
+        {
+            // MinValue means "no fetch ever succeeded", and its elapsed span is
+            // not a second count - a sentinel keeps it from aliasing a real
+            // elapsed value.
+            long elapsedSecond = lastSuccessFetchTime <= DateTime.MinValue
+                ? long.MinValue
+                : (long)(now - lastSuccessFetchTime).TotalSeconds;
+            if (_elapsedSecond == elapsedSecond && _fetching == isFetching && _lastSuccess == lastSuccessFetchTime)
+            {
+                return _text;
+            }
+
+            _elapsedSecond = elapsedSecond;
+            _fetching = isFetching;
+            _lastSuccess = lastSuccessFetchTime;
+            _text = BuildStalenessText(isFetching, lastSuccessFetchTime, now);
+            return _text;
+        }
+    }
 }

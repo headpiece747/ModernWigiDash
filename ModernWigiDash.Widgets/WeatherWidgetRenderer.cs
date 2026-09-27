@@ -25,6 +25,21 @@ internal sealed class WeatherWidgetRenderer : IDisposable
     private readonly SKPaint _heroTempPaint = new() { IsAntialias = true };
     private readonly SKPaint _heroDescPaint = new() { IsAntialias = true };
 
+    // The header's four paints, hoisted here beside the content paths' thirteen
+    // so there is ONE place a paint is declared and disposed for this screen. They
+    // lived on the widget, which drew the header, while this module drew
+    // everything below it - so adding a fifth header paint meant discovering the
+    // hoisting discipline was split across two owners, and the glossary's claim
+    // that this module is "the widget's draw paths" was false (2026-09-27).
+    private readonly SKPaint _titlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
+    private readonly SKPaint _subtitlePaint = new() { IsAntialias = true };
+    private readonly SKPaint _stalePaint = new() { IsAntialias = true };
+
+    // The staleness line's per-second memo, with the rule it caches (the widget
+    // held both as four fields of its own, next to the paints it no longer owns).
+    private readonly WeatherPresentation.StalenessLine _stalenessLine = new();
+
     /// <summary>Releases the hoisted paints' native Skia handles — the owning
     /// widget's DisposeAsync calls this (see the paint-hoisting note there).</summary>
     public void Dispose()
@@ -42,6 +57,91 @@ internal sealed class WeatherWidgetRenderer : IDisposable
         _heroIconPaint.Dispose();
         _heroTempPaint.Dispose();
         _heroDescPaint.Dispose();
+        _titlePaint.Dispose();
+        _unitPaint.Dispose();
+        _subtitlePaint.Dispose();
+        _stalePaint.Dispose();
+    }
+
+    /// <summary>
+    /// Draws the header - title, temperature-unit badge, guidance subtitle, and
+    /// the staleness line - and returns the rect the CONTENT paths draw into.
+    ///
+    /// Returning the content rect is the point: the header's own height feeds
+    /// the content box (the subtitle pushes it down, the staleness line pushes its
+    /// bottom up), so whoever composes that box has to know what the header drew.
+    /// Returning it means the draw module owns the whole screen's geometry
+    /// composition, and the caller cannot compute a content box from a different
+    /// notion of the header than the one that was painted.
+    /// </summary>
+    /// <param name="canvas">The frame canvas.</param>
+    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <param name="header">The header geometry from <see cref="WeatherLayout.ComputeHeader"/>.</param>
+    /// <param name="scale">The frame's uniform scale factor.</param>
+    /// <param name="scaleY">The frame's vertical scale factor (the content gap
+    /// uses it, and it is not the same number as <paramref name="scale"/>).</param>
+    /// <param name="model">The render model, for the truncated header and subtitle.</param>
+    /// <param name="tempUnit">The temperature unit the badge shows.</param>
+    /// <param name="isFetchInFlight">Whether a fetch is in flight (the staleness
+    /// line's "Updating…" arm).</param>
+    /// <param name="lastSuccessFetchTime">The last successful fetch's stamp.</param>
+    /// <param name="now">The frame's clock read.</param>
+    /// <param name="textPrimary">The theme's primary text color.</param>
+    /// <returns>The rect the content paths draw into.</returns>
+    public SKRect RenderHeader(
+        SKCanvas canvas,
+        SKRect bounds,
+        WeatherHeaderLayout header,
+        float scale,
+        float scaleY,
+        WeatherRenderModel model,
+        string tempUnit,
+        bool isFetchInFlight,
+        DateTime lastSuccessFetchTime,
+        DateTime now,
+        SKColor textPrimary)
+    {
+        var titleFont = GetTitleFont(header.TitleFontSize);
+        _titlePaint.Color = textPrimary;
+        canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, _titlePaint);
+
+        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, WeatherLayout.BadgeFontSize(scale));
+        _unitPaint.Color = SKColors.White;
+        float unitWidth = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
+        canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - unitWidth / 2f, header.BadgeRect.MidY + 4.5f * scale, unitFont, _unitPaint);
+
+        // Guidance or confirmation text, computed once per model rebuild (the
+        // key includes CandidateCount).
+        float subtitleHeight = 0f;
+        if (model.SubtitleText is { Length: > 0 } subtitle)
+        {
+            float subtitleFontSize = Math.Clamp(header.TitleFontSize * 0.6f, 9f, 18f);
+            var subtitleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, subtitleFontSize);
+            _subtitlePaint.Color = new SKColor(255, 255, 255, 160);
+            float subtitleY = header.HeaderTextY + header.TitleFontSize * 0.85f;
+            canvas.DrawTextWithFallback(subtitle, bounds.Left + header.Pad, subtitleY, subtitleFont, _subtitlePaint);
+            subtitleHeight = header.TitleFontSize * 1.1f;
+        }
+
+        // The staleness line's display rule (Updating… / time-ago / nothing) and
+        // its once-per-second memo both live in the presentation module; this is
+        // the draw half.
+        string? staleText = _stalenessLine.Text(isFetchInFlight, lastSuccessFetchTime, now);
+        float staleHeight = 0f;
+        if (staleText is { Length: > 0 })
+        {
+            float staleFontSize = Math.Clamp(10f * scale, 7f, 14f);
+            var staleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, staleFontSize);
+            _stalePaint.Color = new SKColor(255, 255, 255, 120);
+            canvas.DrawTextWithFallback(staleText, bounds.Left + header.Pad, bounds.Bottom - header.Pad + 2f * scale, staleFont, _stalePaint);
+            staleHeight = staleFontSize * 1.4f;
+        }
+
+        return new SKRect(
+            bounds.Left + header.Pad,
+            bounds.Top + header.HeaderHeight + 6f * scaleY + subtitleHeight,
+            bounds.Right - header.Pad,
+            bounds.Bottom - header.Pad - staleHeight);
     }
 
     /// <summary>One hero text element: the string, its cached font, and the

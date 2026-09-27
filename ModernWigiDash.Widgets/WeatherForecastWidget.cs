@@ -284,36 +284,7 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     // per-card loops). The header's two paints (title, unit badge) follow the
     // same hoisted pattern here — the 30 FPS render path allocates no paints.
     private readonly WeatherWidgetRenderer _renderer = new();
-    private readonly SKPaint _titlePaint = new() { IsAntialias = true };
-    private readonly SKPaint _unitPaint = new() { IsAntialias = true };
-    private readonly SKPaint _subtitlePaint = new() { IsAntialias = true };
-    private readonly SKPaint _stalePaint = new() { IsAntialias = true };
-
     private SKRect _lastBounds;
-
-    // The staleness line changes at most once per second (the time-ago
-    // buckets); the render recomputes it once per second, not once per frame.
-    private DateTime _staleMemoLastSuccess;
-    private bool _staleMemoFetching;
-    private long _staleMemoElapsedSecond = -1;
-    private string? _staleMemoText;
-
-    private string? BuildStalenessLine(bool fetching, DateTime lastSuccess, DateTime now)
-    {
-        long elapsedSecond = lastSuccess <= DateTime.MinValue
-            ? long.MinValue
-            : (long)(now - lastSuccess).TotalSeconds;
-        if (_staleMemoElapsedSecond == elapsedSecond && _staleMemoFetching == fetching && _staleMemoLastSuccess == lastSuccess)
-        {
-            return _staleMemoText;
-        }
-
-        _staleMemoElapsedSecond = elapsedSecond;
-        _staleMemoFetching = fetching;
-        _staleMemoLastSuccess = lastSuccess;
-        _staleMemoText = WeatherPresentation.BuildStalenessText(fetching, lastSuccess, now);
-        return _staleMemoText;
-    }
 
     // The render-model cache: every formatted string the draw paths need is
     // rebuilt only when (data version, bounds, property snapshot) changes —
@@ -402,14 +373,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
             await _pollCts.CancelAsync().ConfigureAwait(false);
             _pollCts.Dispose();
         }
-        // The hoisted SKPaints wrap native Skia handles — release them like
-        // every other widget's DisposeAsync (profile reloads / edits recreate
-        // widgets, and finalizer-driven reclamation would accumulate).
+        // Every hoisted SKPaint on this screen - the header's four and the content
+        // paths' thirteen - is the draw module's, so one call releases them all
+        // (profile reloads / edits recreate widgets, and finalizer-driven
+        // reclamation would accumulate). The widget holds none of its own.
         _renderer.Dispose();
-        _titlePaint.Dispose();
-        _unitPaint.Dispose();
-        _subtitlePaint.Dispose();
-        _stalePaint.Dispose();
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -517,48 +485,15 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         var model = WeatherRenderModelFactory.Resolve(_renderModel, buildInputs);
         if (!ReferenceEquals(_renderModel, model)) _renderModel = model;
 
-        var titleFont = WeatherWidgetRenderer.GetTitleFont(header.TitleFontSize);
-        _titlePaint.Color = textPrimary;
-        canvas.DrawTextWithFallback(model.TruncatedHeader, bounds.Left + header.Pad, header.HeaderTextY, titleFont, _titlePaint);
-
-        var unitFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, WeatherLayout.BadgeFontSize(s));
-        _unitPaint.Color = SKColors.White;
-        float uW = FontHelper.MeasureTextWithFallback(tempUnit, unitFont);
-        canvas.DrawTextWithFallback(tempUnit, header.BadgeRect.MidX - uW / 2f, header.BadgeRect.MidY + 4.5f * s, unitFont, _unitPaint);
-
-        // Guidance or confirmation text, computed once per model rebuild (the
-        // key includes CandidateCount).
-        float subtitleH = 0f;
-        if (model.SubtitleText is { Length: > 0 } subtitle)
-        {
-            float subtitleFontSize = Math.Clamp(header.TitleFontSize * 0.6f, 9f, 18f);
-            var subtitleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, subtitleFontSize);
-            _subtitlePaint.Color = new SKColor(255, 255, 255, 160);
-            float subtitleY = header.HeaderTextY + header.TitleFontSize * 0.85f;
-            canvas.DrawTextWithFallback(subtitle, bounds.Left + header.Pad, subtitleY, subtitleFont, _subtitlePaint);
-            subtitleH = header.TitleFontSize * 1.1f;
-        }
-
-        // The staleness line's display rule (Updating… / time-ago / nothing) lives
-        // in the presentation module; the string itself is memoized per second
-        // (the time-ago buckets change at most once per second).
-        string? staleText = BuildStalenessLine(
-            IsFetchInFlight, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime);
-        float staleH = 0f;
-        if (staleText is { Length: > 0 })
-        {
-            float staleFontSize = Math.Clamp(10f * s, 7f, 14f);
-            var staleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, staleFontSize);
-            _stalePaint.Color = new SKColor(255, 255, 255, 120);
-            canvas.DrawTextWithFallback(staleText, bounds.Left + header.Pad, bounds.Bottom - header.Pad + 2f * s, staleFont, _stalePaint);
-            staleH = staleFontSize * 1.4f;
-        }
-
-        SKRect contentBounds = new(
-            bounds.Left + header.Pad,
-            bounds.Top + header.HeaderHeight + 6f * sy + subtitleH,
-            bounds.Right - header.Pad,
-            bounds.Bottom - header.Pad - staleH);
+        // The header is drawn by the same module that draws the five content
+        // modes, and it hands back the rect those modes draw into. The header's
+        // own height feeds that rect (the subtitle pushes it down, the staleness
+        // line pushes its bottom up), so composing it here would mean holding a
+        // second notion of the header than the one just painted.
+        SKRect contentBounds = _renderer.RenderHeader(
+            canvas, bounds, header, s, sy, model, tempUnit,
+            IsFetchInFlight, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime,
+            textPrimary);
 
         switch (WeatherLayout.ParseMode(LayoutMode))
         {
