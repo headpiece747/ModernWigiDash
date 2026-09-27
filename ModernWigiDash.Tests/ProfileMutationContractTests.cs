@@ -4,12 +4,28 @@ using ModernWigiDash.App.Power;
 namespace ModernWigiDash.Tests;
 
 /// <summary>
-/// The window's one post-mutation contract (<c>ApplyProfileMutation</c>)
-/// pinned through a live window on STA: each mutation shape applies exactly
-/// its refresh bundle (no shape touches a control the contract says it
-/// mustn't), and the window-driven dirty mark reaches the persisted profile
-/// file through the debounce — no call site owns any save or mark logic of
-/// its own anymore.
+/// The window's one post-mutation contract (<c>ApplyProfileMutation</c>) pinned
+/// through a live window on STA, plus the window's delete seam and its dirty-mark
+/// reach into the profile file.
+///
+/// <para>
+/// The contract's BEHAVIOUR - which refresh bundle each shape applies, one dirty
+/// mark per mutation - belongs to <see cref="ProfileMutationFunnel"/> and is
+/// pinned by <see cref="ProfileMutationFunnelTests"/> with no window at all. What
+/// only a window can show is the BINDING: that each bundle member lands on the
+/// control the window means by it (the tab strip is the real
+/// <c>PanelPageTabs</c>, the snap resync is the real <c>ChkSnapToGrid</c>). That
+/// is two controls across three shapes - six facts - and it was spread over three
+/// separate windows, one shape each, when all six fit in one (the architecture
+/// review's "wire nothing" seam candidate, 2026-09-27).
+/// </para>
+///
+/// The delete seam's stale-index rule is pinned at the module level
+/// (<c>PageManagementTests.Delete_StaleIndex_IsANoOpNotAThrow</c>, which asserts
+/// the <c>StaleIndex</c> verdict). What needs the window is that the window
+/// PASSES the index through instead of indexing the page list itself first -
+/// which is why it rides along in the consolidated test rather than paying for a
+/// window of its own.
 /// </summary>
 [TestClass]
 public class ProfileMutationContractTests
@@ -23,82 +39,62 @@ public class ProfileMutationContractTests
     }
 
     [TestMethod]
-    public void Structural_RebuildsTheTabStrip_LeavesSnapToggleAlone()
+    public void EveryShape_RoutesItsRefreshBundleToTheRealControls_AndTheDeleteSeamPassesAStaleIndexThrough()
     {
         var (_, error) = Host.Invoke(() =>
         {
             var window = NewWindow();
             try
             {
-                // Diverge the page-level toggle from the profile state.
+                // ORDER IS LOADING-BEARING, and the reason is worth stating.
+                // RawWrite runs FIRST, and it runs with the PROFILE diverged from
+                // the CONTROL - profile snap false, control still true from
+                // construction. That divergence has to be planted in the profile,
+                // not in the checkbox: the checkbox's own write-back handler
+                // routes a control-side change through the Transform shape into
+                // the profile, so touching the control would re-sync the two and
+                // leave nothing to observe.
+                //
+                // This is also what makes the assertion real. The previous form
+                // ("a raw write re-syncs the snap toggle", asserted while the
+                // control already held true) passed whether or not the binding
+                // ran at all - turning SetSnapToGridFromHandler into a no-op left
+                // the mutation green.
+                window.Profile.ActivePage.SnapToGrid = false;
+                var firstTab = window.PanelPageTabs.Children[0];
+                window.ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
+                Assert.AreNotSame(firstTab, window.PanelPageTabs.Children[0],
+                    "a raw write rebuilds the tab strip from the (imported) profile");
+                Assert.IsFalse(window.ChkSnapToGrid.IsChecked == true,
+                    "a raw write re-syncs the snap toggle FROM THE PROFILE - the control was true and the profile false, so only the binding can explain it");
+
+                // Diverge the page-level toggle from the profile state: from here
+                // the toggle is false and every shape must leave it alone.
                 window.ChkSnapToGrid.IsChecked = false;
-                var firstTabBefore = window.PanelPageTabs.Children[0];
 
+                firstTab = window.PanelPageTabs.Children[0];
                 window.ApplyProfileMutation(ProfileMutationShape.Structural, null);
-
-                Assert.AreNotSame(firstTabBefore, window.PanelPageTabs.Children[0],
+                Assert.AreNotSame(firstTab, window.PanelPageTabs.Children[0],
                     "a structural mutation re-syncs the tab strip from the profile");
                 Assert.IsFalse(window.ChkSnapToGrid.IsChecked == true,
-                    "a structural mutation never resyncs the snap toggle — only RawWrite does");
-            }
-            finally
-            {
-                window.Close();
-            }
-            return null;
-        });
-        Assert.IsNull(error, error?.ToString());
-    }
+                    "a structural mutation never resyncs the snap toggle - only RawWrite does");
 
-    [TestMethod]
-    public void Transform_TouchesNoStructuralControls()
-    {
-        var (_, error) = Host.Invoke(() =>
-        {
-            var window = NewWindow();
-            try
-            {
-                // Diverge the page-level toggle from the profile state.
-                window.ChkSnapToGrid.IsChecked = false;
-                var firstTabBefore = window.PanelPageTabs.Children[0];
-
+                firstTab = window.PanelPageTabs.Children[0];
                 window.ApplyProfileMutation(ProfileMutationShape.Transform, null);
-
-                Assert.AreSame(firstTabBefore, window.PanelPageTabs.Children[0],
+                Assert.AreSame(firstTab, window.PanelPageTabs.Children[0],
                     "a transform (in-page) mutation never rebuilds the tab strip");
                 Assert.IsFalse(window.ChkSnapToGrid.IsChecked == true,
                     "a transform (in-page) mutation never touches the snap toggle");
-            }
-            finally
-            {
-                window.Close();
-            }
-            return null;
-        });
-        Assert.IsNull(error, error?.ToString());
-    }
 
-    [TestMethod]
-    public void RawWrite_ResyncsPageControlsFromTheProfile()
-    {
-        // A raw write (an import) replaces the whole profile state: the
-        // funnel re-syncs the page-level controls from the profile. The snap
-        // toggle is already in sync after construction (its write-back handler
-        // would land a divergence into the profile, so it cannot stage one),
-        // so its resync is a no-op write here; the tab strip is rebuilt.
-        var (_, error) = Host.Invoke(() =>
-        {
-            var window = NewWindow();
-            try
-            {
-                var firstTabBefore = window.PanelPageTabs.Children[0];
-
-                window.ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
-
-                Assert.AreNotSame(firstTabBefore, window.PanelPageTabs.Children[0],
-                    "a raw write rebuilds the tab strip from the (imported) profile");
-                Assert.IsTrue(window.ChkSnapToGrid.IsChecked == true,
-                    "a raw write re-syncs the snap toggle from the (imported) page's state");
+                // The delete seam passes a stale index straight through to the
+                // module instead of indexing the page list first (the old shape
+                // threw here, ahead of the module's own validation). Free here:
+                // the window is already up.
+                int tabsBefore = window.PanelPageTabs.Children.Count;
+                window.DeletePage(99); // stale: beyond any real profile
+                window.DeletePage(-1); // stale: below the list
+                Assert.AreEqual(tabsBefore, window.PanelPageTabs.Children.Count,
+                    "a stale index must leave the page set untouched");
             }
             finally
             {
@@ -148,33 +144,6 @@ public class ProfileMutationContractTests
             var (_, closeError) = Host.Invoke(() => { window.Close(); return null; });
             Assert.IsNull(closeError, closeError?.ToString());
         }
-    }
-
-    [TestMethod]
-    public void DeletePage_StaleIndex_IsANoOpNotAThrow()
-    {
-        // The window's delete seam must degrade a stale page index to a silent
-        // no-op: the confirm's page facts read through the module's bounds-safe
-        // accessor, never by the window indexing the page list first (the old
-        // shape threw here, ahead of DeletePage's own validation).
-        var (_, error) = Host.Invoke(() =>
-        {
-            var window = NewWindow();
-            try
-            {
-                int tabsBefore = window.PanelPageTabs.Children.Count;
-                window.DeletePage(99); // stale: beyond any real profile
-                window.DeletePage(-1); // stale: below the list
-                Assert.AreEqual(tabsBefore, window.PanelPageTabs.Children.Count,
-                    "a stale index must leave the page set untouched");
-            }
-            finally
-            {
-                window.Close();
-            }
-            return null;
-        });
-        Assert.IsNull(error, error?.ToString());
     }
 
     private static MainWindow NewWindow()
