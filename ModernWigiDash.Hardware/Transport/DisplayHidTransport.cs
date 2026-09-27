@@ -6,55 +6,63 @@
 using LibUsbDotNet.LibUsb;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
-/// LibUsbDotNet 3.0.224 transport for the WigiDash display device.
-/// Uses standard control and bulk USB transfer patterns:
-///   ControlOut(0x21, request, wValue, 0, data) for control OUT
-///   iface.OutPipe.Write(buffer) for bulk OUT
-///   ControlIn(0xA1, request, wValue, 0, buffer) for control IN
-/// The backend (WinUSB or LibUsbDotNet) is chosen once in
-/// <see cref="Connect"/> and everything else talks to the
-/// <see cref="ITransferBackend"/> seam. Connect iterates the
-/// <see cref="ProviderFactories"/> list (WinUSB first, LibUsbDotNet fallback):
-/// each provider opens the device and returns a backend (or null), and the
-/// first backend that survives the init sequence is adopted. The WinUSB
-/// provider constructs a real <see cref="WinUsbBulkDevice"/>; tests inject
-/// fake providers — including a fake WinUSB leg — through the list, so the
-/// connect policy — open, init, fallback — is drivable without hardware.
+/// The WigiDash display transport: the connect loop, the two provider legs, the
+/// init sequence, and the standby ritual, composed over a
+/// <see cref="DisplayWire"/> that owns the live backend and the frame and touch
+/// wires built on it.
+///
+/// This file used to hold all four of those plus the transfer plumbing, 671
+/// lines, so answering "what happens when the display is busy?" meant reading the
+/// loop, both leg bodies, the adapters' TryOpen and the fold — and the reason the
+/// answer was unreachable showed up in a fifth place (the architecture review's
+/// transport candidate, 2026-09-27). The jobs that were not the connect loop
+/// moved to the module that owns them:
+///
+/// <list type="bullet">
+/// <item><see cref="DisplayWire"/> — the backend, the tracked control/bulk
+/// transfers, and the drain that keeps a native handle from being freed
+/// mid-transfer. Every path's transfers go through it.</item>
+/// <item><see cref="DisplayFrameSender"/> — the frame path's wire: the reused
+/// header buffer, the header/bulk/abort bracketing, and the 30 FPS zero-alloc
+/// fast path.</item>
+/// <item><see cref="DisplayTouchReader"/> — the touch path's wire: the control
+/// IN, the short-transfer rule, and the vendor report's parse.</item>
+/// </list>
+///
+/// What stays here is what is genuinely the transport's: the ORDER the two legs
+/// are tried in, the fold that decides which failure is worth reporting, and the
+/// init gate between them. The legs themselves own their acquisition
+/// (<see cref="WinUsbBulkDevice"/>, <see cref="LibUsbTransferBackend"/>), so no
+/// driver-stack ownership lives here — which is the claim the glossary makes and
+/// the one this file can now actually be true about.
 /// </summary>
 internal sealed class DisplayHidTransport : IDisplayTransport
 {
     private readonly ILogger<DisplayHidTransport> _logger;
 
-    private ITransferBackend? _backend;
+    /// <summary>The live backend and the transfers over it. Composition root
+    /// wiring only — the wire owns its own state.</summary>
+    private readonly DisplayWire _wire = new();
 
-    private volatile bool _isConnected;
+    private readonly DisplayFrameSender _frameSender;
+    private readonly DisplayTouchReader _touchReader;
+
     private int _isDisposed;
-    // The teardown-only swap lock: it serializes the backend swap/dispose
-    // against the in-flight drain wait (below). The hot transfer paths no
-    // longer take it — that coarse lock used to hold a 16 ms touch read
-    // behind a ~55 ms frame write. A plain object (not System.Threading.Lock)
-    // because the drain wait calls Monitor.Wait on it directly.
-    private readonly object _swapLock = new();
 
-    // The in-flight wire-transfer count: every control in/out and bulk write
-    // increments it before touching the backend and decrements it in finally.
-    // Teardown waits for zero before freeing the backend's native handle, so
-    // the handle is never freed mid-transfer — the rule the coarse lock used
-    // to hold, now scoped to teardown alone.
-    private int _inFlightTransfers;
+    // Standby is the one-shot line of the shutdown path — always fires.
+    private readonly DiagLog _standbyLog = new("STANDBY", 1);
 
     /// <summary>
     /// The transport's connection truth — kept for test observability only.
     /// It is NOT on the <see cref="IDisplayTransport"/> seam: production
     /// callers (the engine) gate on their own ConnectionState, and the
-    /// transport's methods read the private field directly.
+    /// transport's methods read the wire's flag directly.
     /// </summary>
-    internal bool IsConnected => _isConnected;
+    internal bool IsConnected => _wire.IsConnected;
 
     /// <summary>
     /// The worst-case duration a hung device can hold the transport's teardown
@@ -93,6 +101,8 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {
         _logger = logger ?? NullLogger<DisplayHidTransport>.Instance;
+        _frameSender = new DisplayFrameSender(_wire, _logger);
+        _touchReader = new DisplayTouchReader(_wire);
         ProviderFactories = [WinUsbProvider, LibUsbProvider];
     }
 
@@ -134,13 +144,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     internal DisplayHidTransport(ITransferBackend backend, ILogger<DisplayHidTransport>? logger = null)
         : this(logger)
     {
-        _backend = backend;
-        _isConnected = backend.IsOpen;
+        _wire.AdoptLive(backend);
     }
 
     public ConnectionState Connect()
     {
-        if (_isConnected)
+        if (_wire.IsConnected)
             return ConnectionState.Connected;
 
         _logger.LogInformation("Connecting to WigiDash...");
@@ -150,10 +159,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // interface, so exactly one backend is adopted: the first that
         // survives the init sequence. Each provider owns its open attempt and
         // partial-state teardown; the loop owns the init gate and the
-        // dispose-on-init-failure (through Cleanup like the other teardowns:
-        // the backend handle must not be freed while a transfer could be in
-        // flight). Starts at the weakest verdict (nothing found) so any real leg
-        // failure outranks it; MoreSpecific folds the legs together.
+        // dispose-on-init-failure (through the wire's release, like the other
+        // teardowns: the backend handle must not be freed while a transfer
+        // could be in flight). Starts at the weakest verdict (nothing found) so
+        // any real leg failure outranks it; MoreSpecific folds the legs together.
         ConnectionState lastFailure = ConnectionState.DeviceNotFound;
         foreach (var provider in ProviderFactories)
         {
@@ -174,7 +183,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 // as terminal like the LibUsb leg's connect exception.
                 legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
                 _logger.LogError(ex, "Failed to connect to WigiDash");
-                Cleanup();
+                _wire.Release();
                 return ConnectionState.DeviceNotResponding;
             }
 
@@ -196,7 +205,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             }
 
             // Adopt the backend before init: SendInitCommands talks through it.
-            _backend = attempt.Backend;
+            _wire.Adopt(attempt.Backend);
             legLog.Write($"Direct {provider.DisplayName} connection opened");
 
             if (SendInitCommands())
@@ -206,7 +215,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 // running (the engine's ConnectionState gate already blocks
                 // frame flow until Connect() returns; this keeps the transport's
                 // own flag truthful too).
-                _isConnected = true;
+                _wire.SetConnected(true);
                 if (provider.SuccessLine is not null)
                 {
                     legLog.Write(provider.SuccessLine);
@@ -222,10 +231,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             legLog.Write(hasNextAttempt
                 ? "Init commands failed — trying the next provider"
                 : "Init commands failed — connection failed");
-            // The same teardown rule as Cleanup: the drain wait covers any
-            // transfer still in flight before the handle is freed.
-            Cleanup();
-            _isConnected = false;
+            // The same teardown rule as the wire's release: the drain wait
+            // covers any transfer still in flight before the handle is freed.
+            _wire.Release();
             lastFailure = MoreSpecific(lastFailure, ConnectionState.DeviceNotResponding);
         }
 
@@ -258,7 +266,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// There is deliberately no PING here — the only PING lives in
     /// <see cref="SendInitCommands"/>. Partial-state teardown is owned here: a
     /// failed open disposes
-    /// the device under the swap lock (same rule as <see cref="Cleanup"/>).
+    /// the device under the wire's swap lock (same rule as its release).
     /// Both failure exits dispose the LOCAL device — never the adopted global
     /// backend, which belongs to a previous provider attempt.
     ///
@@ -282,10 +290,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 return ProviderAttempt.Opened(winUsb);
             }
 
-            TearDownWinUsb(winUsb);
+            _wire.AbandonAttempt(winUsb);
             return ProviderAttempt.Failed(opened);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // The device logs its own "Exception during Open" and returns a
             // state, so anything arriving HERE came from this leg's teardown,
@@ -293,12 +301,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             // unreachable for it (this catch is the outer one), and the teardown
             // failure the user cares about is the connect verdict the loop
             // prints.
-            _ = ex;
-            lock (_swapLock)
-            {
-                winUsb.Dispose();
-                _backend = null;
-            }
+            _wire.AbandonAttempt(winUsb);
             return ProviderAttempt.Failed(ConnectionState.DeviceNotResponding);
         }
     }
@@ -344,283 +347,14 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
         // The init sequence (PING → wake → brightness → pages → blank frame →
         // GoToScreen) lives in its own module so the verdict is testable
-        // without the connect loop. The backend's transfer tracking
-        // (TrackTransferBegin/End) wraps each call here, so the teardown drain
-        // still waits out an in-flight init write.
-        var seq = new InitSequence(_backend!, initLog);
-        bool initOk = RunTracked(() => seq.Run());
+        // without the connect loop. The wire's transfer tracking
+        // (RunTracked) wraps the call, so the teardown drain still waits out
+        // an in-flight init write.
+        var seq = new InitSequence(_wire.Backend!, initLog);
+        bool initOk = _wire.RunTracked(() => seq.Run());
 
         _logger.LogInformation("Device initialization complete (3 pages), ok={InitOk}", initOk);
         return initOk;
-    }
-
-    /// <summary>Runs the given action with transfer tracking (the teardown
-    /// drain waits it out). The init sequence routes through this so a hung
-    /// init write is visible to the close path.</summary>
-    private bool RunTracked(Func<bool> action)
-    {
-        TrackTransferBegin();
-        try
-        {
-            return action();
-        }
-        finally
-        {
-            TrackTransferEnd();
-        }
-    }
-
-    /// <summary>
-    /// Vendor OUT control transfer through the active backend.
-    /// bmRequestType = 0x21 (Class | Interface | Host-to-Device). Tracked as
-    /// an in-flight transfer (the teardown drain waits it out).
-    /// </summary>
-    private bool ControlOut(byte request, ushort wValue, byte[]? data)
-    {
-        TrackTransferBegin();
-        try
-        {
-            return _backend?.ControlOut(request, wValue, data) ?? false;
-        }
-        finally
-        {
-            TrackTransferEnd();
-        }
-    }
-
-    /// <summary>
-    /// Vendor IN control transfer through the active backend.
-    /// bmRequestType = 0xA1 (Vendor | Device-to-Host | Interface).
-    /// Reports the transferred byte count so callers can require a full report.
-    /// Tracked as an in-flight transfer (the teardown drain waits it out).
-    /// </summary>
-    private bool ControlIn(byte request, ushort wValue, ushort wIndex, byte[] buffer, out int transferred)
-    {
-        transferred = 0;
-        TrackTransferBegin();
-        try
-        {
-            return _backend?.ControlIn(request, buffer, out transferred, wValue, wIndex) ?? false;
-        }
-        finally
-        {
-            TrackTransferEnd();
-        }
-    }
-
-    /// <summary>
-    /// Marks a wire transfer in flight before it reads the backend. The
-    /// increment precedes the backend read: a transfer that lands while
-    /// teardown is draining sees the backend still live and completes against
-    /// it; one that lands after the drain sees a null backend and exits
-    /// without touching a freed handle.
-    /// </summary>
-    private void TrackTransferBegin() => Interlocked.Increment(ref _inFlightTransfers);
-
-    /// <summary>
-    /// Releases the in-flight mark. Teardown re-checks the count after each
-    /// wait slice, so the final release is observed within one slice.
-    /// </summary>
-    private void TrackTransferEnd() => Interlocked.Decrement(ref _inFlightTransfers);
-
-    /// <summary>
-    /// Writes bulk data through the active backend. Direct WinUSB writes the
-    /// whole payload in one pipe write; the LibUsb adapter chunks for the
-    /// legacy driver's throughput. Tracked as an in-flight transfer (the
-    /// teardown drain waits it out).
-    /// </summary>
-    private bool WriteBulkData(byte[] data)
-    {
-        TrackTransferBegin();
-        try
-        {
-            return _backend?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
-        }
-        finally
-        {
-            TrackTransferEnd();
-        }
-    }
-
-    // Diagnostic cadences: the two touch-diag failure sites share one counter
-    // (they are mutually exclusive branches), the Raw dump is every 200th.
-    // Note: the raw-dump cadence counts success-path calls only (every 200th
-    // successful read).
-    private const string TouchDiagCategory = "TOUCH-DIAG";
-    private readonly DiagLog _touchDiagLog = new(TouchDiagCategory, 20, logFirst: true);
-    private readonly DiagLog _touchDiagRawLog = new(TouchDiagCategory, 200);
-    // Standby is the one-shot line of the shutdown path — always fires.
-    private readonly DiagLog _standbyLog = new("STANDBY", 1);
-    // The send-skipped log rides the ILogger, not FileLog, so it keeps a bare
-    // LogCadence instead of a DiagLog.
-    private readonly LogCadence _sendFrameSkippedLog = new(60);
-
-    // Reused per-call buffers: each has a single consumer loop (the frame header
-    // the delivery's one sender thread, the touch buffer the 16 ms poll thread)
-    // and the two are distinct — so these are never touched concurrently, with
-    // no per-call allocation on the hot paths. The backend swap (not the
-    // buffers) is what the in-flight count protects during teardown.
-    private readonly byte[] _frameHeader = new byte[DisplayProtocolConstants.FrameHeaderDataSize];
-    private readonly byte[] _touchBuffer = new byte[DisplayProtocolConstants.TouchReportSize];
-
-    public TouchReport? ReadTouch()
-    {
-        if (_backend is not { IsOpen: true })
-        {
-            _touchDiagLog.Write($"Not connected: isConnected={_isConnected}");
-            return null;
-        }
-
-        try
-        {
-            byte[] touchBuf = _touchBuffer;
-
-            bool ok = ControlIn(DisplayProtocolConstants.CmdGetTouch, 0, 0, touchBuf, out int transferred);
-
-            if (!ok)
-            {
-                _touchDiagLog.Write("ControlIn FAILED");
-                return null;
-            }
-
-            if (transferred != DisplayProtocolConstants.TouchReportSize)
-            {
-                // A short transfer leaves stale bytes past the transferred
-                // count in the reused buffer; only a full report can be
-                // parsed as a touch.
-                _touchDiagLog.Write($"ControlIn short transfer: {transferred}/{DisplayProtocolConstants.TouchReportSize} bytes");
-                return null;
-            }
-
-            byte type = touchBuf[0];
-            short x = BitConverter.ToInt16(touchBuf, 2);
-            short y = BitConverter.ToInt16(touchBuf, 4);
-
-            _touchDiagRawLog.Write(() => $"Raw: type={type} x={x} y={y}");
-
-            if (type == DisplayProtocolConstants.TouchTypeNone)
-                return null;
-
-            if (x < 0 || x >= DisplayProtocolConstants.FramebufferWidth ||
-                y < 0 || y >= DisplayProtocolConstants.FramebufferHeight)
-                return null;
-
-            return new TouchReport
-            {
-                Type = type,
-                X = x,
-                Y = y
-            };
-        }
-        catch (Exception ex)
-        {
-            // Same vocabulary as the other touch-diag lines above — the
-            // hand-baked "[TOUCH-DIAG] " prefix was the drift the DiagLog
-            // binding exists to prevent.
-            _touchDiagLog.Write($"Exception: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Tears down a failed WinUSB attempt: frees the device and clears the
-    /// backend under the swap lock — the handle must never be freed while a
-    /// transfer could be in flight (same rule as <see cref="Cleanup"/>).
-    /// </summary>
-    private void TearDownWinUsb(WinUsbBulkDevice winUsb)
-    {
-        lock (_swapLock)
-        {
-            winUsb.Dispose();
-            _backend = null;
-        }
-    }
-
-    private void Cleanup()
-    {
-        // Teardown is the only lock user: stop new transfers (the
-        // _isConnected gate), wait for the in-flight transfers to drain (so
-        // the backend's native handle is never freed mid-transfer — the rule
-        // the coarse lock used to hold), then dispose the backend. The drain
-        // wait is bounded by the pipe timeouts (a hung write waits out its
-        // own timeout — the CloseBound the close budgets derive from), and
-        // the lock is reentrant, so a re-entrant Dispose calling in is safe.
-        lock (_swapLock)
-        {
-            _isConnected = false;
-
-            while (Volatile.Read(ref _inFlightTransfers) > 0)
-                Monitor.Wait(_swapLock, 10);
-
-            // The backend owns the device-specific teardown (WinUSB handle free,
-            // LibUsb interface release + close); the transport just drops it.
-            _backend?.Dispose();
-            _backend = null;
-        }
-
-        // Context is a shared singleton - don't dispose
-    }
-
-    public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer)
-    {
-        if (!_isConnected)
-        {
-            if (_sendFrameSkippedLog.Due())
-                _logger.LogWarning("SendFrame SKIPPED: not connected");
-            return FrameSendResult.Refused;
-        }
-
-        if (frameBuffer.Length < DisplayProtocolConstants.FrameBufferSize)
-        {
-            _logger.LogWarning("Frame buffer too small: {Len} < {Req}",
-                frameBuffer.Length, DisplayProtocolConstants.FrameBufferSize);
-            return FrameSendResult.Refused;
-        }
-
-        try
-        {
-            // Zero-alloc fast path: the frame pipeline hands us byte[] buffers,
-            // so the memory is almost always an array segment already — reuse it
-            // instead of copying 1.2 MB per frame. Fall back to a copy only for
-            // genuine non-array memory.
-            byte[] frameArray;
-            if (!MemoryMarshal.TryGetArray(frameBuffer, out ArraySegment<byte> segment) ||
-                segment.Offset != 0 ||
-                segment.Count != frameBuffer.Length)
-            {
-                frameArray = frameBuffer.ToArray();
-            }
-            else
-            {
-                frameArray = segment.Array!;
-            }
-
-            // Reused header buffer: the header belongs to the one sender thread
-            // (the touch buffer is the poll thread's, a distinct array), so no
-            // per-frame allocation on the 30 FPS path and no lock to hold. The
-            // wire format is owned once by DisplayProtocolConstants.BuildFrameHeader
-            // (the cold blank-framebuffer path shares it); the in-place byte writes
-            // avoid BitConverter's per-field byte[4] allocations.
-            DisplayProtocolConstants.BuildFrameHeader(_frameHeader, frameArray.Length);
-
-            if (!ControlOut(DisplayProtocolConstants.CmdFrameHeader, wValue: 0, _frameHeader))
-            {
-                return FrameSendResult.Failed;
-            }
-
-            if (!WriteBulkData(frameArray))
-            {
-                ControlOut(DisplayProtocolConstants.CmdFrameAbort, 0, null);
-                return FrameSendResult.Failed;
-            }
-
-            return FrameSendResult.Sent;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "SendFrame FAILED");
-            return FrameSendResult.Failed;
-        }
     }
 
     /// <summary>
@@ -630,11 +364,11 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// </summary>
     private bool GoToScreen(byte screenId, byte transition = 0)
     {
-        if (!_isConnected)
+        if (!_wire.IsConnected)
             return false;
 
         ushort wValue = (ushort)((transition << 2) | screenId);
-        bool ok = ControlOut(DisplayProtocolConstants.CmdGoToScreen, wValue, null);
+        bool ok = _wire.ControlOut(DisplayProtocolConstants.CmdGoToScreen, wValue, null);
         if (ok)
         {
             _logger.LogInformation("GoToScreen 0x{ScreenId:X2} (wValue=0x{WValue:X4})", screenId, wValue);
@@ -644,7 +378,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     public bool GoToStandby()
     {
-        if (!_isConnected)
+        if (!_wire.IsConnected)
             return false;
 
         // The vendor's own sleep ritual (its Manager's exit path is exactly
@@ -653,7 +387,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // has no active auto-sleep — it would idle on the Welcome screen
         // with the backlight on.
         bool ok = GoToScreen(DisplayProtocolConstants.ScreenWelcome)
-            && ControlOut(DisplayProtocolConstants.CmdSleepDevice, 0, null);
+            && _wire.ControlOut(DisplayProtocolConstants.CmdSleepDevice, 0, null);
         if (ok)
         {
             // One-shot per shutdown (the standby guarantee) — Cadence 1.
@@ -662,10 +396,20 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         return ok;
     }
 
+    /// <summary>The frame path. The framing, the header buffer and the
+    /// zero-alloc fast path belong to <see cref="DisplayFrameSender"/>; this is
+    /// the seam method the engine and the frame pipeline call.</summary>
+    public FrameSendResult SendFrame(ReadOnlyMemory<byte> frameBuffer)
+        => _frameSender.Send(frameBuffer);
+
+    /// <summary>The touch path. The short-transfer rule and the vendor parse
+    /// belong to <see cref="DisplayTouchReader"/>.</summary>
+    public TouchReport? ReadTouch() => _touchReader.Read();
+
     public void Dispose()
     {
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
-        Cleanup();
+        _wire.Release();
         GC.SuppressFinalize(this);
     }
 }

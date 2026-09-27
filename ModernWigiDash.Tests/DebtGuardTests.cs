@@ -575,6 +575,40 @@ public sealed class DebtGuardTests
     };
 
     [TestMethod]
+    public void HouseRules_TransportKeepsTheConnectLoop_NotTheWires()
+    {
+        // DisplayHidTransport was 671 lines holding four unrelated jobs: the
+        // connect loop, the two provider legs, the frame wire, and the touch
+        // wire. The frame and touch wires moved to DisplayFrameSender and
+        // DisplayTouchReader, and the live backend plus every tracked transfer
+        // moved to DisplayWire (the architecture review's transport candidate,
+        // dated 2026-09-27). The file is the composition root and the connect
+        // policy; the wires are not its business again.
+        //
+        // Each token below is one job's fingerprint. Answering "what does a frame
+        // cost?" or "why was that touch dropped?" must mean reading ONE short
+        // file, not grepping the transport.
+        //
+        // CmdSleepDevice is deliberately NOT here: the standby ritual (welcome
+        // screen + sleep) is the transport's own job and stays. The pin caught
+        // itself on that on its first run, which is the reason to run a new pin
+        // against the real tree before trusting it to catch anything.
+        var jobs = new Regex(
+            @"MemoryMarshal|CmdFrameHeader|CmdFrameAbort|CmdGetTouch|"
+            + @"TouchReportSize|FrameHeaderDataSize|TrackTransferBegin|TrackTransferEnd|"
+            + @"BuildFrameHeader|_inFlightTransfers|_frameHeader|_touchBuffer");
+
+        var hits = RepoScan.ScanSrc(jobs)
+            .Where(hit => hit.StartsWith("ModernWigiDash.Hardware/Transport/DisplayHidTransport.cs:", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.AreEqual(0, hits.Count,
+            "the transport owns the connect order, the failure fold, the init gate and the standby ritual - not the frame or touch wire. Found at: "
+            + string.Join("; ", hits.Select(hit => hit.Split(':', 3)[0].Replace('\\', '/') + ":" + hit.Split(':', 3)[1]))
+            + ". Frame framing belongs to DisplayFrameSender, the touch parse and its short-transfer rule to DisplayTouchReader, and the backend plus the tracked transfers to DisplayWire.");
+    }
+
+    [TestMethod]
     public void HouseRules_WeatherWidget_HoldsNoPaintOfItsOwn()
     {
         // CONTEXT.md describes WeatherWidgetRenderer as "the widget's draw paths".
