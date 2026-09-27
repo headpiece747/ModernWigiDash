@@ -557,6 +557,81 @@ public sealed class DebtGuardTests
             + ". Two ways to fail, both silent at run time: a third site re-types a tag, so a rename leaves it emitting under the old name forever (a leg's DiagLog is constructed per attempt, not per lifetime); or one owner was renamed and the other was not, so the leg and its adapter log under different names with nothing in the build noticing.");
     }
 
+    /// <summary>How long the display waits on the network, per src file. Every
+    /// 30 s that is NOT a network wait is listed here with its reason, so a new
+    /// one has to be a deliberate allow-list edit. The counts are per FILE on
+    /// purpose: a line number moves on every unrelated edit, a count does not.
+    /// The limit of this pin, stated so nobody trusts it for more than it is: a
+    /// wait spelled in another unit, or spelled as a different number, is not a
+    /// 30 s and does not appear here. It polices the value that was actually
+    /// duplicated five times, not every timeout in the app.</summary>
+    private static readonly Dictionary<string, (int Count, string Reason)> ThirtySecondWaitSites = new()
+    {
+        ["ModernWigiDash.Widgets/NetworkBudget.cs"] = (1, "the budget itself - the one owner"),
+        ["ModernWigiDash.Widgets/HotkeyButtonWidget.cs"] = (1, "the action CTS (a widget action bound), not a network wait"),
+        ["ModernWigiDash.Widgets/PictureAndGifWidget.cs"] = (1, "the folder rescan period (a filesystem poll), not a network wait"),
+        ["ModernWigiDash.Widgets/PriceFeedManager.cs"] = (3, "the REST poll cadence, the reconnect ceiling, and the retired-CTS grace - three different policies that happen to share the number"),
+        ["ModernWigiDash.Widgets/Twitch/TwitchChatConnection.cs"] = (1, "the IRC reconnect ceiling, not a per-request wait"),
+    };
+
+    [TestMethod]
+    public void HouseRules_NetworkBudget_IsTheOnlySpellingOfA30SecondWait()
+    {
+        // The network wait was spelled 30 s in five places across four files
+        // (the weather client, the geocoder, both calendar legs, the Twitch API
+        // client) with nothing tying them together: tightening the weather
+        // client's header phase left the geocoder reading the body for another
+        // half minute (found by the architecture review, 2026-09-27). It is now
+        // one constant, NetworkBudget.Wait.
+        // Stripped mode (the default), so this counts CODE references: a comment
+        // that mentions the constant, or a doc <see cref>, is prose about the
+        // owner, not a leg budgeting from it.
+        var actual = RepoScan.ScanSrc(new Regex(@"FromSeconds\(30\)"))
+            .GroupBy(hit => hit.Split(':', 3)[0].Replace('\\', '/'))
+            .ToDictionary(g => g.Key, g => g.Count());
+        var expected = ThirtySecondWaitSites
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Count);
+
+        CollectionAssert.AreEquivalent(
+            expected,
+            actual,
+            "the 30 s waits in src must match the allow-list exactly. Allowed today:"
+            + Environment.NewLine + string.Join(Environment.NewLine,
+                ThirtySecondWaitSites.OrderBy(kv => kv.Key)
+                    .Select(kv => $"  {kv.Key} x{kv.Value.Count} - {kv.Value.Reason}"))
+            + Environment.NewLine + "A new outbound leg that budgets its own 30 s is the drift this pin exists to stop: give it NetworkBudget.Wait, or, if the wait genuinely is not a network wait, add it here with its reason. A retired site is a deliberate allow-list edit, not a silent shrink."
+            + Environment.NewLine + $"Found: {(actual.Count == 0 ? "(none)" : string.Join(", ", actual.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key} x{kv.Value}")))}");
+    }
+
+    [TestMethod]
+    public void HouseRules_NetworkLegs_BudgetFromTheSharedConstant()
+    {
+        // The other half of the same rule, and the half that actually proves the
+        // consolidation: a stray-30s scan alone would still be green if every leg
+        // stopped budgeting from the owner and went back to its own literal
+        // spelled in another unit. Every network leg must name the constant.
+        var expected = new Dictionary<string, int>
+        {
+            ["ModernWigiDash.Widgets/WeatherClient.cs"] = 1,
+            ["ModernWigiDash.Widgets/WeatherGeocoder.cs"] = 2, // the body-phase deadline, in CancelAfter and in the reported message
+            ["ModernWigiDash.Widgets/CalDavFetcher.cs"] = 1,
+            ["ModernWigiDash.Widgets/IcsUrlFetcher.cs"] = 1,
+            ["ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs"] = 1,
+        };
+        // Stripped mode, so a doc <see cref="NetworkBudget.Wait"/> or a comment
+        // naming the constant does not count as a leg budgeting from it.
+        var actual = RepoScan.ScanSrc(new Regex(@"NetworkBudget\.Wait"))
+            .GroupBy(hit => hit.Split(':', 3)[0].Replace('\\', '/'))
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        CollectionAssert.AreEquivalent(
+            expected,
+            actual,
+            "every network leg must take its wait from NetworkBudget.Wait (counted per file, so a line move is not a failure). Found: "
+            + (actual.Count == 0 ? "(none)" : string.Join(", ", actual.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key} x{kv.Value}")))
+            + ". A site count that drops means a leg stopped naming the owner - either restore the reference or delete the leg.");
+    }
+
     [TestMethod]
     public void HouseRules_PriceFeeds_DoNotReconnectAtAFlatRate()
     {

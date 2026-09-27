@@ -87,7 +87,9 @@ internal sealed class WeatherGeocoder
     /// observed on the next request.</param>
     /// <param name="logError">Optional error sink; when omitted, failures are silent.</param>
     /// <param name="httpTimeoutOverride">Test seam: a per-instance override of
-    /// the per-leg body-read deadline (defaults to <see cref="HttpTimeout"/>).</param>
+    /// the per-leg body-read deadline (defaults to <see cref="NetworkBudget.Wait"/>,
+    /// this leg's BODY phase of the shared network budget - the shared client's
+    /// own Timeout only bounds the header phase under ResponseHeadersRead).</param>
     public WeatherGeocoder(Func<HttpClient> http, Action<string, Exception?>? logError = null, TimeSpan? httpTimeoutOverride = null)
     {
         _http = http;
@@ -99,9 +101,6 @@ internal sealed class WeatherGeocoder
     /// a response larger than this is rejected before it is buffered.</summary>
     internal const long MaxResponseBytes = 2 * 1024 * 1024;
 
-    /// <summary>The per-leg body-read deadline (the shared client's
-    /// <c>Timeout</c> only bounds the header phase under ResponseHeadersRead).</summary>
-    internal static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(30);
     /// <summary>Per-instance test seam: overrides the per-leg deadline (see
     /// <see cref="ReadBoundedAsync"/>) so the timeout path is drivable without
     /// waiting the real 30 s. Injected at construction (per-instance, so one
@@ -131,7 +130,7 @@ internal sealed class WeatherGeocoder
         // failure path (log + throttle stamp) would be skipped, leaving a
         // silent 30s retry loop during an outage. Convert it to a failure.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(HttpTimeoutOverride ?? HttpTimeout);
+        timeoutCts.CancelAfter(HttpTimeoutOverride ?? NetworkBudget.Wait);
         try
         {
             using var response = await _http().GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token).ConfigureAwait(false);
@@ -154,7 +153,7 @@ internal sealed class WeatherGeocoder
             // the callers log it and stamp the throttle. The message states
             // the EFFECTIVE deadline (the override, when the test seam set
             // one), not the default.
-            double effectiveSeconds = (HttpTimeoutOverride ?? HttpTimeout).TotalSeconds;
+            double effectiveSeconds = (HttpTimeoutOverride ?? NetworkBudget.Wait).TotalSeconds;
             throw new TimeoutException($"HTTP leg exceeded the {effectiveSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s deadline");
         }
     }

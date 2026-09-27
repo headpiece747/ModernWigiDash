@@ -21,7 +21,11 @@ internal sealed class WeatherClient
         // A hung upstream must not stall the fetch claim (and the widget's
         // render-kick cadence) indefinitely — 30s is the bound for every leg
         // that rides the shared client.
-        Timeout = TimeSpan.FromSeconds(30)
+        // The header phase of the shared network budget (NetworkBudget.Wait). The
+        // body phase is the geocoder's own deadline: under ResponseHeadersRead
+        // this one stops applying once the headers land, so the two are phases of
+        // one budget rather than two numbers that happen to agree.
+        Timeout = NetworkBudget.Wait
     };
 
     /// <summary>The fetch cool-down window — the one cadence constant the

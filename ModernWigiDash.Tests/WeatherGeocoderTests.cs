@@ -263,7 +263,7 @@ public class WeatherGeocoderTests
         // involved), so the converter's catch branch - the same one the
         // internal deadline and the shared client's own timeout reach - runs
         // without waiting the real deadline; the message is built from the
-        // same (HttpTimeoutOverride ?? HttpTimeout) expression.
+        // same (HttpTimeoutOverride ?? NetworkBudget.Wait) expression.
         var geocoder = Geocoder(new StubHttpHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new ImmediateOceStream()) }));
 

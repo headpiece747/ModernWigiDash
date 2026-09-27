@@ -8,7 +8,7 @@ internal class TwitchApiClient(string clientId, HttpClient? httpClient = null)
 {
     private static readonly HttpClient SharedHttpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(30)
+        Timeout = NetworkBudget.Wait
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

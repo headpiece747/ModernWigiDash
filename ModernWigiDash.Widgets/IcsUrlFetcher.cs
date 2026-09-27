@@ -52,15 +52,13 @@ internal interface IFeedFetcher
 /// </summary>
 internal sealed class IcsUrlFetcher : IFeedFetcher
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
-
     private readonly Func<HttpClient> _http;
     private readonly TimeSpan _timeout;
 
     public IcsUrlFetcher(Func<HttpClient> http, TimeSpan? timeout = null)
     {
         _http = http;
-        _timeout = timeout ?? DefaultTimeout;
+        _timeout = timeout ?? NetworkBudget.Wait;
     }
 
     public async Task<FeedFetchResult> FetchAsync(

@@ -17,15 +17,13 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal sealed class CalDavFetcher : IFeedFetcher
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
-
     private readonly Func<HttpClient> _http;
     private readonly TimeSpan _timeout;
 
     public CalDavFetcher(Func<HttpClient> http, TimeSpan? timeout = null)
     {
         _http = http;
-        _timeout = timeout ?? DefaultTimeout;
+        _timeout = timeout ?? NetworkBudget.Wait;
     }
 
     /// <summary>The one seam the producer uses to learn which calendars an
