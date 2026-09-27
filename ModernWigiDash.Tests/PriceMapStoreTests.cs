@@ -21,6 +21,39 @@ public class PriceMapStoreTests
     // ── the live rule: always overwrites, change-keep on null ─────────
 
     [TestMethod]
+    public void PriceStaleness_TheStampAndTheVerdictShareOneClock()
+    {
+        // The cross-module seam the store's own tests could not see. The record's
+        // Timestamp is written HERE from the injected clock; whether it reads
+        // stale is decided by TickerStalenessPresentation, against a now its
+        // caller names. PriceInfo used to carry its own mutable TimeProvider for
+        // that decision, defaulting to TimeProvider.System and never assigned in
+        // production, so the stamp and the verdict came from two different clocks
+        // and met only at a field nobody wired.
+        //
+        // The two tests this replaces built the record by hand, which means they
+        // supplied BOTH halves of that seam and could not see it - they were
+        // "value against itself". Here one clock drives both, so advancing it
+        // past the freshness window must flip the verdict; if the read ever
+        // reaches for an ambient clock again, this goes red.
+        var (store, clock) = StoreAt();
+        store.ApplyLive("BTC", 100m, 1m, "Binance");
+        var info = store.TryGet("BTC");
+        Assert.IsNotNull(info, "the store must have stamped the record");
+
+        Assert.IsFalse(
+            TickerStalenessPresentation.IsStale(info, clock.GetUtcNow().UtcDateTime),
+            "a price stamped inside the 60s window is fresh");
+
+        clock.Advance(TimeSpan.FromSeconds(61));
+
+        Assert.IsTrue(
+            TickerStalenessPresentation.IsStale(info, clock.GetUtcNow().UtcDateTime),
+            "the same clock, advanced past the window, must make the stamped record read stale - "
+            + "if this is green only because the reader fell back to an ambient clock, the stamp and the verdict disagree again");
+    }
+
+    [TestMethod]
     public void ApplyLive_FirstWrite_StoresPriceSourceTimestampAndCurrency()
     {
         var (store, clock) = StoreAt();

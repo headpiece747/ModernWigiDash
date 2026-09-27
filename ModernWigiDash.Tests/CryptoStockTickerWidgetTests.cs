@@ -114,25 +114,26 @@ public class CryptoStockTickerWidgetTests
     [TestMethod]
     public void TickerStaleness_IsStale_MissingRecord_True()
     {
-        Assert.IsTrue(TickerStalenessPresentation.IsStale(null), "no price must never look live");
+        var now = new DateTime(2026, 8, 14, 12, 0, 0, DateTimeKind.Utc);
+        Assert.IsTrue(TickerStalenessPresentation.IsStale(null, now), "no price must never look live");
     }
 
     [TestMethod]
     public void TickerStaleness_IsStale_FreshRecord_False()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime, Clock = clock };
+        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime };
 
-        Assert.IsFalse(TickerStalenessPresentation.IsStale(info));
+        Assert.IsFalse(TickerStalenessPresentation.IsStale(info, clock.GetUtcNow().UtcDateTime));
     }
 
     [TestMethod]
     public void TickerStaleness_IsStale_StaleRecord_True()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61), Clock = clock };
+        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61) };
 
-        Assert.IsTrue(TickerStalenessPresentation.IsStale(info));
+        Assert.IsTrue(TickerStalenessPresentation.IsStale(info, clock.GetUtcNow().UtcDateTime));
     }
 
     [TestMethod]

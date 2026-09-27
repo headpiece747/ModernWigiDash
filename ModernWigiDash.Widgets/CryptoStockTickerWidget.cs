@@ -176,7 +176,10 @@ public class CryptoStockTickerWidget : ModernWidgetBase
 
         AssetKind kind = AssetKindValue;
         var info = Feed.GetPrice(Symbol, kind);
-        bool isStale = TickerStalenessPresentation.IsStale(info);
+        // The read site's clock, named here because the record's stamp came from
+        // the store's injected clock: deciding against an ambient clock instead
+        // would compare a stamped time against a different clock's now.
+        bool isStale = TickerStalenessPresentation.IsStale(info, Clock.GetUtcNow().UtcDateTime);
         if (info != null)
         {
             Price = FormatPrice(info.Price, info.CurrencySymbol);

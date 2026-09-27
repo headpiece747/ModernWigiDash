@@ -142,24 +142,6 @@ public class PriceFeedManagerRestPollTests
     // ── freshness policy: the 60s window, one spelling ─────────────────
 
     [TestMethod]
-    public void PriceInfo_IsStale_WithinWindow_False()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime, Clock = clock };
-
-        Assert.IsFalse(info.IsStale, "a price stamped inside the 60s window is fresh");
-    }
-
-    [TestMethod]
-    public void PriceInfo_IsStale_PastWindow_True()
-    {
-        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 14, 12, 0, 0, TimeSpan.Zero));
-        var info = new PriceInfo { Price = 100m, Timestamp = clock.GetUtcNow().UtcDateTime.AddSeconds(-61), Clock = clock };
-
-        Assert.IsTrue(info.IsStale, "a price stamped outside the 60s window is stale");
-    }
-
-    [TestMethod]
     public async Task FallbackCoinGeckoAsync_FreshBinanceUsPrice_IsNotDowngraded()
     {
         var stub = new StubHttpHandler(request =>

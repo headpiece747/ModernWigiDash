@@ -24,7 +24,8 @@ public enum AssetKind
 public class PriceInfo
 {
     /// <summary>The freshness window in seconds — the one spelling shared by
-    /// <see cref="IsStale"/> and the CoinGecko downgrade guard.</summary>
+    /// <see cref="TickerStalenessPresentation.IsStale"/> and the store's
+    /// merge rule.</summary>
     internal const double FreshnessSeconds = 60;
 
     /// <summary>The last known price.</summary>
@@ -42,11 +43,17 @@ public class PriceInfo
         $"{(ChangePercent >= 0 ? "+" : "")}{ChangePercent.ToString("F2", CultureInfo.InvariantCulture)}%";
     /// <summary>Whether the change is upward (the badge's color pick).</summary>
     public bool IsPositive => ChangePercent >= 0;
-    /// <summary>Whether the sample is older than the freshness window (the store's clock).</summary>
-    public bool IsStale => (Clock.GetUtcNow().UtcDateTime - Timestamp).TotalSeconds > FreshnessSeconds;
 
-    /// <summary>Test seam: clock for the staleness decision.</summary>
-    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+    // This record carries no clock, and that is the point. It used to hold a
+    // mutable internal TimeProvider that IsStale read, defaulting to
+    // TimeProvider.System and never assigned in production - so the STAMP (which
+    // the store takes from the manager's injected clock) and the READ (which took
+    // an ambient system clock) came from two different clocks and met only at a
+    // field nobody wired. Benign while both were the system clock, and invisible
+    // to the suite: every test that exercised IsStale built the record itself, so
+    // it supplied both halves and could not see the seam. Freshness is now decided
+    // by TickerStalenessPresentation.IsStale(info, now), with the read site naming
+    // the now, so the record is pure data the store writes (2026-09-27).
 }
 
 /// <summary>
