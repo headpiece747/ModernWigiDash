@@ -10,13 +10,11 @@ namespace ModernWigiDash.App;
 /// session ran on.
 ///
 /// It exists because the app writes a rich, tagged log and still could not
-/// answer the one question a field report always asks: "which Windows update
-/// was this?" Before this, the OS version appeared NOWHERE in production code -
-/// not in the log, not in the crash log - so an environment-specific report
-/// (a Windows 11 update reported as "it stopped working", 2026-09-27) could
-/// not be narrowed down from anything the app itself produced, and every such
-/// report had to be resolved by asking the reporter instead of by reading a
-/// file they already had.
+/// answer the one question an environment-specific report always asks: "what
+/// was this machine running?" Before this, the OS version appeared NOWHERE in
+/// production code - not in the log, not in the crash log - so the answer
+/// required asking the reporter rather than reading a file they already had
+/// (2026-09-27).
 ///
 /// <para>
 /// WHY THE REGISTRY, AND WHY <c>win=</c> RATHER THAN <c>os=</c>: the obvious

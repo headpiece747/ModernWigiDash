@@ -489,10 +489,9 @@ public sealed class DebtGuardTests
     public void HouseRules_TheStartupLog_CarriesTheHostEnvironmentStamp()
     {
         // The OS build used to appear NOWHERE in production code - not in the
-        // startup log, not in the crash log - so a report of "the latest
-        // Windows 11 update broke it" could not be narrowed from anything the
-        // app itself wrote, and had to be resolved by asking the reporter
-        // instead of by reading a file they already had (2026-09-27).
+        // startup log, not in the crash log - so an environment-specific report
+        // could only be answered by asking the reporter, never by reading the
+        // log they already had (2026-09-27).
         //
         // HostEnvironmentStampTests pins the FORMAT. This pins the CALL, which
         // is the half that can rot unnoticed: delete the write from OnStartup

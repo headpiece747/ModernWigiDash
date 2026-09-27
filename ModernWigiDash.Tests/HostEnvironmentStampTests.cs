@@ -11,9 +11,9 @@ namespace ModernWigiDash.Tests;
 /// <c>OnStartup</c>, which is the exact regression the stamp exists to prevent,
 /// so the call is pinned too (in
 /// <c>DebtGuardTests.HouseRules_TheStartupLog_CarriesTheHostEnvironmentStamp</c>).
-/// The Windows version used to appear nowhere in production code, so a report
-/// of "the latest Windows 11 update broke it" could not be narrowed from
-/// anything the app wrote (2026-09-27).
+/// The Windows version used to appear nowhere in production code, so an
+/// environment-specific report could only be answered by asking the reporter
+/// rather than by reading the log they already had (2026-09-27).
 /// </summary>
 [TestClass]
 public class HostEnvironmentStampTests
