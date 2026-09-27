@@ -23,6 +23,14 @@ public class DisplayHidTransportTests
     private sealed class FakeWinUsbBulkDevice : WinUsbBulkDevice
     {
         public bool OpenResult { get; init; } = true;
+
+        /// <summary>When set, the fake reports this exact failure verdict
+        /// instead of deriving one from <see cref="OpenResult"/> — the seam for
+        /// the bug this change exists for: a driver stack that opens nothing
+        /// because the device is BUSY must be distinguishable from one that
+        /// found nothing, or the engine reports a present device as absent.</summary>
+        public ConnectionState? OpenOutcome { get; init; }
+
         public bool ControlResult { get; init; } = true;
         public bool BulkWriteResult { get; init; } = true;
         public int OpenCalls { get; private set; }
@@ -35,11 +43,16 @@ public class DisplayHidTransportTests
 
         public override bool IsOpen => _isOpen;
 
-        public override bool Open(Guid interfaceGuid)
+        public override ConnectionState Open(Guid interfaceGuid)
         {
             OpenCalls++;
-            _isOpen = OpenResult;
-            return OpenResult;
+            // The fake reports the state the test asked for, defaulting to the
+            // "could not open" verdict — the shape the real device now returns.
+            ConnectionState outcome = OpenOutcome ?? (OpenResult
+                ? ConnectionState.Connected
+                : ConnectionState.DeviceNotFound);
+            _isOpen = outcome == ConnectionState.Connected;
+            return outcome;
         }
 
         public override bool ControlIn(byte request, byte[] buffer, out int transferred, ushort wValue = 0, ushort wIndex = 0)
@@ -80,14 +93,70 @@ public class DisplayHidTransportTests
         "USB-WINUSB",
         () =>
         {
-            if (!fake.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
+            // Forwards the device's own verdict: the fake reports which failure
+            // it was scripted with, so a busy fake stays busy through the seam
+            // instead of being flattened to "no backend".
+            ConnectionState opened = fake.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+            if (opened != ConnectionState.Connected)
             {
                 fake.Dispose();
-                return null;
+                return DisplayHidTransport.ProviderAttempt.Failed(opened);
             }
-            return fake;
+            return DisplayHidTransport.ProviderAttempt.Opened(fake);
         },
         "WinUSB");
+
+    [TestMethod]
+    public void Connect_WinUsbBusy_LibUsbNotFound_ReportsBusyNotAbsent()
+    {
+        // The fold across legs (2026-09-27). WinUSB reports the display is there
+        // but denied; the LibUsbDotNet fallback then finds nothing it can use.
+        // The verdict must stay BUSY — reporting "no device" because the LAST
+        // leg came back empty-handed is precisely how a present display came to
+        // read as a missing one.
+        var busy = new FakeWinUsbBulkDevice { OpenResult = false, OpenOutcome = ConnectionState.DeviceBusy };
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            WinUsbLeg(busy),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+        ];
+
+        ConnectionState outcome = transport.Connect();
+
+        Assert.AreEqual(ConnectionState.DeviceBusy, outcome);
+        Assert.IsFalse(transport.IsConnected);
+    }
+
+    [TestMethod]
+    public void Connect_BothLegsNotFound_ReportsDeviceNotFound()
+    {
+        // Absent really does report absent, so the busy verdict cannot be
+        // dismissed as "it always says busy now".
+        using var transport = new DisplayHidTransport();
+        transport.ProviderFactories =
+        [
+            new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "WinUSB"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
+        ];
+
+        Assert.AreEqual(ConnectionState.DeviceNotFound, transport.Connect());
+    }
+
+    [TestMethod]
+    public void MoreSpecific_PrefersTheActionableVerdict()
+    {
+        // The total order behind the fold, pinned so a future edit cannot make
+        // the rank order arbitrary: BUSY > NOT-RESPONDING > NOT-FOUND, because
+        // "another app has it" is the most actionable thing the log can say and
+        // must never be displaced by a vaguer verdict.
+        Assert.AreEqual(ConnectionState.DeviceBusy, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceNotFound, ConnectionState.DeviceBusy));
+        Assert.AreEqual(ConnectionState.DeviceBusy, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceBusy, ConnectionState.DeviceNotFound));
+        Assert.AreEqual(ConnectionState.DeviceBusy, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceNotResponding, ConnectionState.DeviceBusy));
+        Assert.AreEqual(ConnectionState.DeviceNotResponding, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceNotFound, ConnectionState.DeviceNotResponding));
+        Assert.AreEqual(ConnectionState.DeviceNotResponding, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceNotResponding, ConnectionState.DeviceNotFound));
+        Assert.AreEqual(ConnectionState.DeviceNotFound, DisplayHidTransport.MoreSpecific(ConnectionState.DeviceNotFound, ConnectionState.DeviceNotFound));
+    }
 
     [TestMethod]
     public void Connect_WinUsbOpenAndPingSucceed_ConnectsAndRunsInit()
@@ -96,7 +165,7 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories = [WinUsbLeg(fake)];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         Assert.IsTrue(transport.IsConnected);
@@ -118,7 +187,7 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(fake),
-            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
         // The WinUSB path must be abandoned after the failed PING (inside
@@ -126,7 +195,7 @@ public class DisplayHidTransportTests
         // exactly one ControlIn); the LibUsb fallback then reports no device,
         // so the outcome is deterministic. Assert the deterministic part: the
         // fake was consulted and disposed.
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.AreEqual(1, fake.ControlInCalls, "The failed PING went through the injected fake");
         Assert.IsTrue(fake.Disposed, "The failed WinUSB device must be disposed");
@@ -150,10 +219,10 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         Assert.IsTrue(transport.IsConnected);
@@ -174,10 +243,10 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         Assert.IsTrue(transport.IsConnected);
@@ -195,10 +264,10 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => null, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound), "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok);
         Assert.IsFalse(transport.IsConnected);
@@ -212,12 +281,12 @@ public class DisplayHidTransportTests
         // _isConnected guard) without re-running any provider.
         var backend = new RecordingBackend();
         using var transport = new DisplayHidTransport();
-        transport.ProviderFactories = [new ConnectProvider("USB-WINUSB", () => backend, "WinUSB")];
+        transport.ProviderFactories = [new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Opened(backend), "WinUSB")];
 
-        Assert.IsTrue(transport.Connect());
+        Assert.AreEqual(ConnectionState.Connected, transport.Connect());
         int firstControlCalls = backend.ControlCalls.Count;
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         Assert.AreEqual(firstControlCalls, backend.ControlCalls.Count, "a re-connect must not re-run the init sequence");
@@ -234,7 +303,7 @@ public class DisplayHidTransportTests
             new ConnectProvider("USB-WINUSB", () => throw new InvalidOperationException("leg fault"), "WinUSB"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok, "an escaping provider exception is a terminal connect failure");
         Assert.IsFalse(transport.IsConnected);
@@ -249,10 +318,10 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-            new ConnectProvider("USB-WINUSB", () => backend, "WinUSB", "WinUSB pipe ready"),
+            new ConnectProvider("USB-WINUSB", () => DisplayHidTransport.ProviderAttempt.Opened(backend), "WinUSB", "WinUSB pipe ready"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         Assert.IsTrue(transport.IsConnected);
@@ -324,10 +393,10 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok, "the fallback leg completes the init sequence through a healthy pipe");
         Assert.IsTrue(transport.IsConnected);
@@ -345,10 +414,10 @@ public class DisplayHidTransportTests
         transport.ProviderFactories =
         [
             WinUsbLeg(winUsb),
-            new ConnectProvider("USB-LIBUSB", () => libUsb, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-LIBUSB", () => DisplayHidTransport.ProviderAttempt.Opened(libUsb), "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok, "a connected verdict requires a leg that survived the whole init sequence");
         Assert.IsFalse(transport.IsConnected);
@@ -364,11 +433,11 @@ public class DisplayHidTransportTests
         using var transport = new DisplayHidTransport();
         transport.ProviderFactories =
         [
-new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "WinUSB"),
-             new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return libUsb; }, "LibUsbDotNet 3.0"),
+            new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return DisplayHidTransport.ProviderAttempt.Failed(ConnectionState.DeviceNotFound); }, "WinUSB"),
+            new ConnectProvider("USB-LIBUSB", () => { order.Add("libusb"); return DisplayHidTransport.ProviderAttempt.Opened(libUsb); }, "LibUsbDotNet 3.0"),
         ];
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsTrue(ok);
         CollectionAssert.AreEqual(new[] { "winusb", "libusb" }, order, "The provider list is tried strictly in order");
@@ -775,7 +844,7 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         var device = new FakeLibUsbDevice { OpenThrows = true };
         using var transport = TransportWithLibUsbDevice(device);
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok);
         Assert.AreEqual(1, device.CloseCalls, "the device whose open threw must be released, not leaked");
@@ -787,7 +856,7 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         var device = new FakeLibUsbDevice { ClaimResult = false };
         using var transport = TransportWithLibUsbDevice(device);
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok);
         Assert.AreEqual(1, device.CloseCalls, "an unclaimed device must be released");
@@ -802,7 +871,7 @@ new ConnectProvider("USB-WINUSB", () => { order.Add("winusb"); return null; }, "
         var device = new FakeLibUsbDevice { WriterThrows = true };
         using var transport = TransportWithLibUsbDevice(device);
 
-        bool ok = transport.Connect();
+        bool ok = transport.Connect() == ConnectionState.Connected;
 
         Assert.IsFalse(ok);
         Assert.AreEqual(1, device.CloseCalls, "an endpoint-writer failure must release the open+claimed device");

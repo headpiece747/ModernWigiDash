@@ -55,6 +55,28 @@ public class FileLogTests
     }
 
     [TestMethod]
+    public void Write_FirstLineOfASession_CarriesTheDate()
+    {
+        // The multi-day-log fix (2026-09-27). A time-of-day-only stamp left a
+        // log that spans days impossible to place against a Windows event-log
+        // entry. The FIRST line of each session therefore carries the full UTC
+        // date, so every fresh process and every rotation is anchored — while
+        // adding no extra line, which is why the line-count pins above still
+        // hold.
+        FileLog.Write("first line of the session");
+        FileLog.Write("second line of the session");
+        FileLog.Flush();
+
+        string[] lines = ReadLog(_logPath).TrimEnd('\r', '\n').Split('\n');
+        Assert.IsTrue(
+            System.Text.RegularExpressions.Regex.IsMatch(lines[0], @"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] "),
+            $"the first line of a session must open with a full yyyy-MM-dd stamp, got: {lines[0]}");
+        Assert.IsTrue(
+            System.Text.RegularExpressions.Regex.IsMatch(lines[1], @"^\[\d{2}:\d{2}:\d{2}\.\d{3}\] "),
+            $"only the first line pays for the date, got: {lines[1]}");
+    }
+
+    [TestMethod]
     public void Write_MultiLineTokenValue_FlattenAndRedactLandInTheFile()
     {
         // FileLog.Write is the line-policy owner: the sanitize pass (flatten

@@ -48,9 +48,23 @@ public sealed class DisplayDeviceEngine : IDisposable
 
     /// <summary>
     /// Test seam: the reconnect timer period (see <see cref="Start"/>).
-    /// Defaults to 5s — the reconnect cadence on a missing/vanished device.
+    /// Defaults to the backoff policy's first delay — the cadence for the first
+    /// retry after a failure. A successful connect and every failure past the
+    /// first re-arm the timer from <see cref="ReconnectBackoffPolicy"/> instead,
+    /// so this is the floor, not the fixed period.
     /// </summary>
-    internal TimeSpan ReconnectPeriod { get; set; } = TimeSpan.FromSeconds(5);
+    internal TimeSpan ReconnectPeriod { get; set; } = ReconnectBackoffPolicy.FirstDelay;
+
+    /// <summary>
+    /// Connect attempts that failed since the last success. The only state the
+    /// backoff owns: the policy is a pure function of this count, so the engine
+    /// carries a counter rather than a timer, a clock, or a schedule.
+    ///
+    /// Written only inside <see cref="TryConnect"/> and read from the timer
+    /// thread, so it needs no interlocked add: TryConnect's <c>_connecting</c>
+    /// gate admits one attempt at a time, and the read is a Volatile.Read.
+    /// </summary>
+    private int _consecutiveFailures;
 
     // The never-stall-on-close budgets: read from the transport's close-budget
     // policy (IDisplayTransport.CloseBudgets), where they are derived strictly
@@ -175,7 +189,9 @@ public sealed class DisplayDeviceEngine : IDisposable
         // ReconnectTick below already runs on the Timer thread.
         RunConnectAttempt(_connectLog, "Initial connection failed, will retry via reconnect timer");
 
-        _reconnectTimer.Change(ReconnectPeriod, ReconnectPeriod);
+        // One owner for the reconnect schedule: the same backoff that re-arms it
+        // after every later attempt, so the initial arm cannot drift from it.
+        ArmReconnectTimer();
     }
 
 #pragma warning disable S1172 // timer callback signature requires the state parameter
@@ -196,9 +212,36 @@ public sealed class DisplayDeviceEngine : IDisposable
         }
         if (!shouldReconnect) return;
 
+        // Re-arm the timer from the backoff BEFORE the attempt: the attempt is
+        // fire-and-forget, so arming afterwards would race the next tick (and
+        // with a doubling period the race would compound). Success re-arms it
+        // again from the reset counter, so a recovered device goes straight
+        // back to the fast first-retry cadence.
+        ArmReconnectTimer();
+
         RunConnectAttempt(_reconnectLog);
     }
 #pragma warning restore S1172
+
+    /// <summary>
+    /// Sets the next reconnect delay from the current failure count. The
+    /// interval (not just the due time) is re-armed too, so the delay grows with
+    /// each failure instead of the timer firing every tick and being ignored.
+    /// </summary>
+    private void ArmReconnectTimer()
+    {
+        if (Volatile.Read(ref _isDisposed) != 0) return;
+        TimeSpan delay = ReconnectBackoffPolicy.DelayFor(Volatile.Read(ref _consecutiveFailures));
+        try
+        {
+            _reconnectTimer.Change(delay, delay);
+        }
+        catch (ObjectDisposedException)
+        {
+            // A dispose raced the arm: there is no timer left to re-arm, which
+            // is the outcome the dispose wanted anyway.
+        }
+    }
 
     /// <summary>One fire-and-forget connect attempt with fault logging — the
     /// Start and reconnect-timer scaffolding share this shape (the connect
@@ -286,21 +329,21 @@ public sealed class DisplayDeviceEngine : IDisposable
             DisconnectInternal();
 
             IDisplayTransport? transport = null;
-            bool connected = false;
+            ConnectionState reached = ConnectionState.DeviceNotFound;
             bool disposedDuringConnect = false;
 
             try
             {
                 transport = _transportFactory();
-                connected = transport.Connect();
+                reached = transport.Connect();
             }
             catch (Exception ex)
             {
                 _connectLog.Write($"Connection exception: {ex.Message}");
-                connected = false;
+                reached = ConnectionState.DeviceNotResponding;
             }
 
-            if (connected)
+            if (reached == ConnectionState.Connected)
             {
                 // Dispose() can run while this connect is in flight (the
                 // entry guard predates the assignment). Re-check under the
@@ -318,7 +361,7 @@ public sealed class DisplayDeviceEngine : IDisposable
                 if (disposedDuringConnect)
                 {
                     DisposeTransport(transport);
-                    connected = false;
+                    reached = ConnectionState.Disconnected;
                 }
                 else
                 {
@@ -327,32 +370,42 @@ public sealed class DisplayDeviceEngine : IDisposable
                     // AddWidget + blank framebuffer + GoToScreen) on both the
                     // WinUSB and LibUsb paths.
                     State = ConnectionState.Connected;
+                    _consecutiveFailures = 0;
+                    // A recovered device goes straight back to the fast first
+                    // retry cadence instead of waiting out the backoff it had
+                    // accumulated while it was away.
+                    ArmReconnectTimer();
                     Log("Hardware connection successful!");
                 }
             }
             else
             {
                 // The un-adopted transport is released whether Connect()
-                // returned false or the attempt threw — the orphan rule a
-                // transport that would never reach standby must not leak its
-                // handle (the production transport self-cleans on a false
+                // returned a failure state or the attempt threw — the orphan rule
+                // a transport that would never reach standby must not leak its
+                // handle (the production transport self-cleans on a failure
                 // return; Dispose is idempotent for it, and the rule holds for
                 // any future transport that allocates on connect).
                 DisposeTransport(transport);
-                Log("Transport connection failed - falling back to simulation");
             }
 
-            if (!connected && !disposedDuringConnect)
+            if (reached != ConnectionState.Connected && !disposedDuringConnect)
             {
                 lock (_lock)
                 {
                     _transport = null;
                 }
-                State = ConnectionState.Simulated;
-                Log("No physical device found - running in simulation mode");
+                // The state IS the verdict now: the engine publishes the reason
+                // the transport named instead of flattening every failure to
+                // "no physical device". The badge and this line are the only two
+                // places the four outcomes are spelled, and they spell the same
+                // words.
+                State = reached;
+                _consecutiveFailures++;
+                Log(ConnectVerdict.Line(reached, _consecutiveFailures));
             }
 
-            return connected;
+            return reached == ConnectionState.Connected;
         }
         finally
         {

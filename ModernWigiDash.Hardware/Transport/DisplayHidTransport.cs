@@ -114,6 +114,21 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         TryCreateLibUsbBackend,
         "LibUsbDotNet 3.0");
 
+    /// <summary>One provider's open attempt: the backend it produced (null when
+    /// it could not open the device) plus WHICH failure it was. The two travel
+    /// together so the loop can report a truthful state without a second
+    /// side-channel property that could go stale — a provider that failed
+    /// because the device is busy and one that failed because nothing is
+    /// attached must not collapse into the same "no device" verdict.</summary>
+    internal readonly record struct ProviderAttempt(ITransferBackend? Backend, ConnectionState Failure)
+    {
+        /// <summary>An attempt that opened the device.</summary>
+        public static ProviderAttempt Opened(ITransferBackend backend) => new(backend, ConnectionState.Connected);
+
+        /// <summary>An attempt that did not, carrying the reason.</summary>
+        public static ProviderAttempt Failed(ConnectionState failure) => new(null, failure);
+    }
+
     /// <summary>
     /// Test seam: constructs the transport bound to an injected backend, so the
     /// connect/init/frame/touch policy is drivable without hardware.
@@ -125,10 +140,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         _isConnected = backend.IsOpen;
     }
 
-    public bool Connect()
+    public ConnectionState Connect()
     {
         if (_isConnected)
-            return true;
+            return ConnectionState.Connected;
 
         _logger.LogInformation("Connecting to WigiDash...");
 
@@ -139,7 +154,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // partial-state teardown; the loop owns the init gate and the
         // dispose-on-init-failure (through Cleanup like the other teardowns:
         // the backend handle must not be freed while a transfer could be in
-        // flight).
+        // flight). Starts at the weakest verdict (nothing found) so any real leg
+        // failure outranks it; MoreSpecific folds the legs together.
+        ConnectionState lastFailure = ConnectionState.DeviceNotFound;
         foreach (var provider in ProviderFactories)
         {
             // This attempt's file-log vocabulary: the loop binds the provider's
@@ -147,10 +164,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             // exception, success, init failure — rides that tag (the DiagLog
             // module; no hand-baked "[TAG] " prefixes at call sites).
             var legLog = new DiagLog(provider.Tag, 1);
-            ITransferBackend? backend;
+            ProviderAttempt attempt;
             try
             {
-                backend = provider.TryCreate();
+                attempt = provider.TryCreate();
             }
             catch (Exception ex)
             {
@@ -160,14 +177,22 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 legLog.Write($"Connect exception: {ex.GetType().FullName}: {ex.Message}");
                 _logger.LogError(ex, "Failed to connect to WigiDash");
                 Cleanup();
-                return false;
+                return ConnectionState.DeviceNotResponding;
             }
 
-            if (backend is null)
+            if (attempt.Backend is null)
+            {
+                // Remember the most informative failure for the return value.
+                // A later leg failing for a different reason must not overwrite
+                // a "busy" verdict with a vaguer one: DeviceBusy is the fact
+                // the user can act on, so it outranks the not-found default and
+                // only a DeviceNotResponding from another leg supersedes it.
+                lastFailure = MoreSpecific(lastFailure, attempt.Failure);
                 continue;
+            }
 
             // Adopt the backend before init: SendInitCommands talks through it.
-            _backend = backend;
+            _backend = attempt.Backend;
 
             if (SendInitCommands())
             {
@@ -182,7 +207,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                     legLog.Write(provider.SuccessLine);
                 }
                 _logger.LogInformation("Connected to WigiDash via {Via}", provider.DisplayName);
-                return true;
+                return ConnectionState.Connected;
             }
 
             // Init failed through this stack — the same control sequence may
@@ -196,10 +221,32 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             // transfer still in flight before the handle is freed.
             Cleanup();
             _isConnected = false;
+            lastFailure = MoreSpecific(lastFailure, ConnectionState.DeviceNotResponding);
         }
 
-        return false;
+        return lastFailure;
     }
+
+    /// <summary>
+    /// Folds two legs' failures into the one verdict worth reporting, with a
+    /// total order on how actionable they are. Only the second leg's report
+    /// matters when both are equally specific, so the order is total (no
+    /// "neither" case, no null): <see cref="ConnectionState.DeviceBusy"/> (the
+    /// display is there, another client has it) beats
+    /// <see cref="ConnectionState.DeviceNotResponding"/> (it is there and
+    /// misbehaving) beats <see cref="ConnectionState.DeviceNotFound"/>. A busy
+    /// device must never be reported as absent just because the fallback leg
+    /// found nothing.
+    /// </summary>
+    internal static ConnectionState MoreSpecific(ConnectionState current, ConnectionState candidate) =>
+        Rank(candidate) > Rank(current) ? candidate : current;
+
+    private static int Rank(ConnectionState state) => state switch
+    {
+        ConnectionState.DeviceBusy => 2,
+        ConnectionState.DeviceNotResponding => 1,
+        _ => 0,
+    };
 
     /// <summary>
     /// WinUSB attempt: open a real <see cref="WinUsbBulkDevice"/> → backend.
@@ -210,7 +257,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// Both failure exits dispose the LOCAL device — never the adopted global
     /// backend, which belongs to a previous provider attempt.
     /// </summary>
-    private ITransferBackend? TryCreateWinUsbBackend()
+    private ProviderAttempt TryCreateWinUsbBackend()
     {
         // The leg's own file-log lines bind its tag once here; the device's
         // Open diagnostics (WinUsbBulkDevice) emit the same tag through its
@@ -219,15 +266,19 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         var winUsb = new WinUsbBulkDevice();
         try
         {
-            if (winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid))
+            // The device parses its own Win32 error into the state, so this leg
+            // simply forwards the verdict it was given — no second interpretation
+            // of the failure here that could disagree with the device's.
+            ConnectionState opened = winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+            if (opened == ConnectionState.Connected)
             {
                 legLog.Write("Direct WinUSB connection opened");
-                return winUsb;
+                return ProviderAttempt.Opened(winUsb);
             }
 
-            legLog.Write("Failed to open the WinUSB device interface");
+            legLog.Write($"Failed to open the WinUSB device interface: {opened}");
             TearDownWinUsb(winUsb);
-            return null;
+            return ProviderAttempt.Failed(opened);
         }
         catch (Exception ex)
         {
@@ -237,7 +288,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 winUsb.Dispose();
                 _backend = null;
             }
-            return null;
+            return ProviderAttempt.Failed(ConnectionState.DeviceNotResponding);
         }
     }
 
@@ -249,7 +300,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// Never the adopted global backend, which belongs to a previous provider
     /// attempt.
     /// </summary>
-    private ITransferBackend? TryCreateLibUsbBackend()
+    private ProviderAttempt TryCreateLibUsbBackend()
     {
         // The leg's own file-log vocabulary (USB-FIND/OPEN/CONFIG/CLAIM/
         // ENDPOINT/DESC + the USB-LIBUSB attempt line) is owned by the adapter
@@ -257,7 +308,31 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // across the seam). The transport keeps only the attempt's start line
         // and hands the device-lookup seam across.
         _logger.LogInformation("Connecting to WigiDash via LibUsbDotNet 3.0 (fallback)...");
-        return LibUsbTransferBackend.TryOpen(LibUsbDeviceProvider);
+        try
+        {
+            ITransferBackend? backend = LibUsbTransferBackend.TryOpen(LibUsbDeviceProvider);
+            return backend is null
+                ? ProviderAttempt.Failed(ConnectionState.DeviceNotFound)
+                : ProviderAttempt.Opened(backend);
+        }
+        catch (UsbException ex)
+        {
+            // libusb names the reason on the exception, so the fallback leg can
+            // report the same distinction the WinUSB leg makes: Error.Access is
+            // "the display is there and another client owns it" (the exact
+            // error the 2026-09-27 incident hit on BOTH legs), NoDevice /
+            // NotFound are genuinely absent, anything else is a device that
+            // would not cooperate.
+            ConnectionState failure = ex.ErrorCode switch
+            {
+                LibUsbDotNet.Error.Access or LibUsbDotNet.Error.Busy => ConnectionState.DeviceBusy,
+                LibUsbDotNet.Error.NoDevice or LibUsbDotNet.Error.NotFound => ConnectionState.DeviceNotFound,
+                _ => ConnectionState.DeviceNotResponding,
+            };
+            DiagLog legLog = new("USB-LIBUSB", 1);
+            legLog.Write($"Connect failed: {failure} ({ex.GetType().Name}: {ex.Message})");
+            return ProviderAttempt.Failed(failure);
+        }
     }
 
     /// <summary>
@@ -274,7 +349,10 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     internal bool SendInitCommands()
     {
         _logger.LogInformation("Sending device initialization commands...");
-        DiagLog initLog = new("USB-INIT", 1);
+        // The init sequence is ten-odd lines per attempt, so it rides the same
+        // flood cadence as the enumeration behind it: full on the first attempt,
+        // then every Nth (the attempt's verdict line is never suppressed).
+        DiagLog initLog = new("USB-INIT", BackendDiag.ConnectTraceCadence, logFirst: true);
 
         // The init sequence (PING → wake → brightness → pages → blank frame →
         // GoToScreen) lives in its own module so the verdict is testable

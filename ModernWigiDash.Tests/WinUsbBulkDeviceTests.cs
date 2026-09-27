@@ -32,6 +32,14 @@ public class WinUsbBulkDeviceTests
         public bool PathQueryResult { get; set; } = true;
         public string DevicePath { get; set; } = """\\\\.\\GLOBALROOT\\Device\\WigiDash""";
         public bool CreateFileResult { get; set; } = true;
+
+        /// <summary>The Win32 error the scripted CreateFile "left behind",
+        /// surfaced through the api bag's GetLastError seam. Defaults to
+        /// ERROR_ACCESS_DENIED so the default failing-CreateFile script is the
+        /// BUSY case — the one the reported state must not collapse into
+        /// "no device". A test about a different error sets it explicitly.</summary>
+        public int CreateFileError { get; set; } = SetupApiNative.ErrorAccessDenied;
+
         public bool InitializeResult { get; set; } = true;
         public bool SetPipePolicyThrows { get; set; }
         public uint? WritePipeTransferred { get; set; }
@@ -53,7 +61,9 @@ public class WinUsbBulkDeviceTests
         public uint CreateFileFlags { get; private set; }
         public List<(byte PipeId, int TimeoutMs)> PipePolicies { get; } = [];
 
-        public WinUsbApi ToApi() => new(
+        public WinUsbApi ToApi()
+        {
+            WinUsbApi api = new(
             initialize: (IntPtr deviceHandle, out IntPtr interfaceHandle) =>
             {
                 InitializeCalls++;
@@ -133,6 +143,13 @@ public class WinUsbBulkDeviceTests
                 CloseHandleCalls++;
                 return true;
             });
+            // The scripted last-error, so Open's decision-carrying read is driven by
+            // the test instead of by whatever the process last failed with. Assigned
+            // after construction because GetLastError is a settable property on the
+            // bag, not a positional parameter.
+            api.GetLastError = () => CreateFileError;
+            return api;
+        }
     }
 
     [TestMethod]
@@ -141,9 +158,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript();
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsTrue(ok);
+        Assert.AreEqual(ConnectionState.Connected, outcome);
         Assert.IsTrue(device.IsOpen);
         Assert.AreEqual(1, script.GetClassDevsCalls);
         Assert.AreEqual(1, script.EnumCalls);
@@ -167,9 +184,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { RequiredSize = 160 };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsTrue(ok);
+        Assert.AreEqual(ConnectionState.Connected, outcome);
         // The ERROR_INVALID_USER_BUFFER (1784) trap: cbSize must be
         // sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) — 8 on x64, 6 on x86 —
         // NOT the queried requiredSize (160), which the driver rejects.
@@ -185,9 +202,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { InitializeResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.IsFalse(device.IsOpen);
         Assert.AreEqual(1, script.CloseHandleCalls, "the device handle must be closed when WinUsb_Initialize fails");
         Assert.AreEqual(0, script.PipePolicies.Count, "no pipe timeouts may be configured after a failed initialize");
@@ -199,9 +216,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { GetClassDevsResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(0, script.EnumCalls);
         Assert.AreEqual(0, script.CreateFileCalls);
         Assert.AreEqual(0, script.CloseHandleCalls);
@@ -214,9 +231,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { PathQueryResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(0, script.CreateFileCalls, "no device handle exists before the path query");
         Assert.AreEqual(0, script.CloseHandleCalls);
     }
@@ -227,9 +244,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { DevicePath = "" };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(0, script.CreateFileCalls, "an empty path must never reach CreateFileW");
     }
 
@@ -239,11 +256,60 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { CreateFileResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(0, script.InitializeCalls);
         Assert.AreEqual(0, script.CloseHandleCalls, "the invalid handle must not be closed");
+    }
+
+    // ── The regression this seam exists for (2026-09-27) ──────────────────────
+    // A display that is PRESENT but whose open is denied must not report as
+    // absent. The enumeration found it, the path is right, and the only reason
+    // CreateFileW refused is another client holding the handle — so the verdict
+    // is DeviceBusy, and the user's next action is "close the other app", not
+    // "check the cable".
+
+    [TestMethod]
+    public void Open_CreateFileDenied_ReportsDeviceBusyNotAbsent()
+    {
+        var script = new ApiScript { CreateFileResult = false, CreateFileError = SetupApiNative.ErrorAccessDenied };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+
+        Assert.AreEqual(
+            ConnectionState.DeviceBusy,
+            outcome,
+            "ERROR_ACCESS_DENIED on a device the enumeration just found is BUSY, not absent");
+    }
+
+    [TestMethod]
+    public void Open_CreateFileFails_OtherError_ReportsNotRespondingNotAbsent()
+    {
+        // The same leg with a non-access error: the device was still found, so
+        // "not found" would be a lie in the other direction — it is attached
+        // and would not cooperate.
+        var script = new ApiScript { CreateFileResult = false, CreateFileError = 32 /* ERROR_SHARING_VIOLATION */ };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+
+        Assert.AreEqual(ConnectionState.DeviceNotResponding, outcome);
+    }
+
+    [TestMethod]
+    public void Open_EnumerationFindsNothing_ReportsDeviceNotFound()
+    {
+        // The other side of the same boundary: nothing attached really does
+        // report absent, so DeviceNotFound stays a live, tested verdict rather
+        // than a fallback for everything.
+        var script = new ApiScript { RequiredSize = 0 };
+        using var device = new WinUsbBulkDevice(script.ToApi());
+
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+
+        Assert.AreEqual(ConnectionState.DeviceNotFound, outcome);
     }
 
     [TestMethod]
@@ -257,9 +323,9 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { SetPipePolicyThrows = true };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsFalse(ok);
+        Assert.AreNotEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(1, script.FreeCalls, "the WinUSB interface handle must be freed on the exception path");
         Assert.AreEqual(1, script.CloseHandleCalls, "the device handle must be closed on the exception path");
     }
@@ -273,7 +339,7 @@ public class WinUsbBulkDeviceTests
         // WinUSB and LibUsb backends agreeing on transferred > 0.
         var script = new ApiScript { ControlTransferBytes = 0 };
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         Assert.IsFalse(device.ControlIn(0x00, new byte[4], out _));
     }
@@ -283,7 +349,7 @@ public class WinUsbBulkDeviceTests
     {
         var script = new ApiScript();
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         Assert.IsTrue(device.ControlIn(0x00, new byte[4], out _));
     }
@@ -295,7 +361,7 @@ public class WinUsbBulkDeviceTests
         // verdict is the API's return value.
         var script = new ApiScript();
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         bool ok = device.ControlOut(DisplayProtocolConstants.CmdFrameHeader, 0x1234, [1, 2, 3]);
 
@@ -307,7 +373,7 @@ public class WinUsbBulkDeviceTests
     {
         var script = new ApiScript { ControlTransferResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         Assert.IsFalse(device.ControlOut(DisplayProtocolConstants.CmdFrameHeader, 0, []));
     }
@@ -319,12 +385,12 @@ public class WinUsbBulkDeviceTests
         // without re-enumerating the SetupAPI.
         var script = new ApiScript();
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
         int firstEnumCalls = script.EnumCalls;
 
-        bool ok = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
+        ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
-        Assert.IsTrue(ok);
+        Assert.AreEqual(ConnectionState.Connected, outcome);
         Assert.AreEqual(firstEnumCalls, script.EnumCalls, "a re-open must not re-enumerate");
     }
 
@@ -336,7 +402,7 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { EnumInterfacesResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        Assert.IsFalse(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.DeviceNotFound, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
         Assert.IsFalse(device.IsOpen);
     }
 
@@ -348,7 +414,7 @@ public class WinUsbBulkDeviceTests
         var script = new ApiScript { RequiredSize = 0 };
         using var device = new WinUsbBulkDevice(script.ToApi());
 
-        Assert.IsFalse(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.DeviceNotFound, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
         Assert.IsFalse(device.IsOpen);
     }
 
@@ -357,7 +423,7 @@ public class WinUsbBulkDeviceTests
     {
         var script = new ApiScript { WritePipeTransferred = 123 };
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
 
@@ -370,7 +436,7 @@ public class WinUsbBulkDeviceTests
     {
         var script = new ApiScript();
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
 
@@ -400,7 +466,7 @@ public class WinUsbBulkDeviceTests
         // write: the failure leg logs and reports the verdict.
         var script = new ApiScript { WritePipeResult = false };
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
 
@@ -416,7 +482,7 @@ public class WinUsbBulkDeviceTests
         // reported as a failure, not propagate out to the caller.
         var script = new ApiScript { WritePipeThrows = true };
         using var device = new WinUsbBulkDevice(script.ToApi());
-        Assert.IsTrue(device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+        Assert.AreEqual(ConnectionState.Connected, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
 
         bool ok = device.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, new byte[1024], out int transferred);
 

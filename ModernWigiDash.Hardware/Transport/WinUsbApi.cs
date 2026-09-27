@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace ModernWigiDash.Hardware.Transport;
 
 internal delegate bool WinUsbInitializeFn(IntPtr deviceHandle, out IntPtr interfaceHandle);
@@ -57,4 +59,19 @@ internal sealed class WinUsbApi(
     internal WinUsbDestroyDeviceInfoListFn DestroyDeviceInfoList { get; } = destroyDeviceInfoList;
     internal WinUsbCreateFileFn CreateFile { get; } = createFile;
     internal WinUsbCloseHandleFn CloseHandle { get; } = closeHandle;
+
+    /// <summary>
+    /// The Win32 last-error reader, on the bag for the same reason the rest of
+    /// the surface is: <see cref="WinUsbBulkDevice.Open"/>'s CreateFile
+    /// failure BRANCHES on ERROR_ACCESS_DENIED to report
+    /// <see cref="ConnectionState.DeviceBusy"/> instead of "no device", and a
+    /// branch that reads ambient <c>Marshal.GetLastWin32Error</c> is a branch a
+    /// test cannot drive — it would read whatever the process last failed with.
+    /// A settable property (not a positional ctor parameter) keeps the other
+    /// eleven members untouched; production keeps the real read.
+    ///
+    /// Only the decision-carrying read goes through here. The other
+    /// GetLastWin32Error calls in Open feed log text alone, so they stay direct.
+    /// </summary>
+    internal Func<int> GetLastError { get; set; } = static () => Marshal.GetLastWin32Error();
 }

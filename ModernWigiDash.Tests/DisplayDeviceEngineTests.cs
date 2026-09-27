@@ -484,7 +484,9 @@ public class DisplayDeviceEngineTests
     [DataRow(ConnectionState.Disconnected, false)]
     [DataRow(ConnectionState.Connecting, false)]
     [DataRow(ConnectionState.Connected, true)]
-    [DataRow(ConnectionState.Simulated, false)]
+    [DataRow(ConnectionState.DeviceNotFound, false)]
+    [DataRow(ConnectionState.DeviceBusy, false)]
+    [DataRow(ConnectionState.DeviceNotResponding, false)]
     public void CanSendFrames_TracksTheConnectionState(ConnectionState state, bool expected)
     {
         // The readiness policy the delivery bind site reads: true only for
@@ -515,7 +517,76 @@ public class DisplayDeviceEngineTests
         bool ok = engine.TryConnect();
 
         Assert.IsFalse(ok);
-        Assert.AreEqual(ConnectionState.Simulated, engine.State, "no device - running in simulation mode");
+        Assert.AreEqual(ConnectionState.DeviceNotFound, engine.State, "no device - running in simulation mode");
+    }
+
+    [TestMethod]
+    [DataRow(ConnectionState.DeviceBusy, "another app holds the device")]
+    [DataRow(ConnectionState.DeviceNotResponding, "did not complete initialization")]
+    [DataRow(ConnectionState.DeviceNotFound, "No WigiDash interface found")]
+    public void TryConnect_PublishesTheTransportVerdictInsteadOfAbsent(
+        ConnectionState outcome, string expectedFragment)
+    {
+        // The engine-level half of the 2026-09-27 fix. The engine used to log
+        // one sentence for every failure, so a BUSY display (present, handle
+        // held by another client) was reported as "no physical device found".
+        // Now the state the transport named is the state the engine publishes,
+        // and the log line names the same reason.
+        var transport = new FakeTransport { ConnectResult = false, ConnectOutcome = outcome };
+        using var engine = new DisplayDeviceEngine(() => transport);
+
+        engine.TryConnect();
+
+        Assert.AreEqual(outcome, engine.State, "the engine must publish the reason, not flatten it");
+        Assert.IsFalse(engine.CanSendFrames, "no hardware is driving frames in any failure state");
+        string log = ReadEngineLog();
+        StringAssert.Contains(log, expectedFragment);
+    }
+
+    [TestMethod]
+    public void TryConnect_BusyDevice_NeverLogsTheAbsentWording()
+    {
+        // The pinned regression in the log itself: the old engine emitted
+        // "No physical device found" here, which is the sentence that sent the
+        // 2026-09-27 investigation after a missing cable instead of the app
+        // that actually held the handle.
+        var transport = new FakeTransport { ConnectResult = false, ConnectOutcome = ConnectionState.DeviceBusy };
+        using var engine = new DisplayDeviceEngine(() => transport);
+
+        engine.TryConnect();
+
+        Assert.IsFalse(
+            ReadEngineLog().Contains("No physical device found", StringComparison.OrdinalIgnoreCase),
+            "a busy display must never be logged as a missing one");
+    }
+
+    [TestMethod]
+    public void TryConnect_ConnectSucceeds_ResetsTheBackoffCounter()
+    {
+        // A device that comes back must go straight to the fast first-retry
+        // cadence, not wait out the backoff it accumulated while it was away.
+        var transport = new FakeTransport { ConnectResult = false, ConnectOutcome = ConnectionState.DeviceNotFound };
+        using var engine = new DisplayDeviceEngine(() => transport);
+        engine.TryConnect();
+        engine.TryConnect();
+        Assert.AreEqual(ConnectionState.DeviceNotFound, engine.State);
+
+        transport.ConnectResult = true;
+        engine.TryConnect();
+
+        Assert.AreEqual(ConnectionState.Connected, engine.State);
+    }
+
+    private string ReadEngineLog()
+    {
+        // The engine writes through the shared FileLog, redirected to this
+        // test's temp file by TestInitialize. Flush first: FileLog buffers on a
+        // cadence (8 KB / 250 ms), so a test that reads without flushing sees an
+        // empty file and would assert nothing.
+        FileLog.Flush();
+        using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     [TestMethod]
@@ -557,8 +628,8 @@ public class DisplayDeviceEngineTests
         var connected = new DisplayDeviceEngine(new FakeTransport { ConnectResult = true }, ConnectionState.Connected);
         Assert.AreEqual(ConnectionState.Connected, connected.State, "a bound engine starts in the caller-seeded state");
 
-        var simulated = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false }, ConnectionState.Simulated);
-        Assert.AreEqual(ConnectionState.Simulated, simulated.State);
+        var notFound = new DisplayDeviceEngine(new FakeTransport { ConnectResult = false }, ConnectionState.DeviceNotFound);
+        Assert.AreEqual(ConnectionState.DeviceNotFound, notFound.State);
     }
 
     // ── the reconnect tick gate ──────────────────────────────────────

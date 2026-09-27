@@ -14,7 +14,9 @@ public class MainWindowDisplayModelTests
     public void UsbBadgeModel_EveryState_MapsToLabelAndBrush()
     {
         Assert.AreEqual(("Connected", "AccentGreen"), UsbBadgeModel.From(ConnectionState.Connected));
-        Assert.AreEqual(("Simulated", "AccentRed"), UsbBadgeModel.From(ConnectionState.Simulated));
+        Assert.AreEqual(("No display", "AccentRed"), UsbBadgeModel.From(ConnectionState.DeviceNotFound));
+        Assert.AreEqual(("In use", "AccentRed"), UsbBadgeModel.From(ConnectionState.DeviceBusy));
+        Assert.AreEqual(("Not responding", "AccentRed"), UsbBadgeModel.From(ConnectionState.DeviceNotResponding));
         Assert.AreEqual(("Connecting", "DangerBorder"), UsbBadgeModel.From(ConnectionState.Connecting));
         Assert.AreEqual(("Disconnected", "DangerBorder"), UsbBadgeModel.From(ConnectionState.Disconnected));
     }

@@ -24,6 +24,15 @@ internal static class SetupApiNative
     public const uint OpenExisting = 3;
     public const uint FileAttributeNormal = 0x80;
     public const uint FileFlagOverlapped = 0x40000000;
+
+    /// <summary>
+    /// Win32 <c>ERROR_ACCESS_DENIED</c> (5): the device open was refused. On a
+    /// USB device interface this is what a second client holding the handle
+    /// produces, and it is the one error code the connect path must name rather
+    /// than collapse into "no device" — the enumeration already proved the
+    /// display is present.
+    /// </summary>
+    public const int ErrorAccessDenied = 5;
     public static readonly IntPtr InvalidHandleValue = new(-1);
 
     /// <summary>

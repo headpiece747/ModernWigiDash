@@ -42,7 +42,14 @@ internal class WinUsbBulkDevice : ITransferBackend
     // This leg's file-log vocabulary: the tag binds once here (the DiagLog
     // module), never hand-baked at the call site — line is always
     // "[USB-WINUSB] {message}".
-    private static readonly DiagLog _diagnosticLog = new(LogCategory, 1);
+    //
+    // The cadence is the flood fix (2026-09-27): every Open() step is logged
+    // through this one instance, so a cadence of 1 wrote the whole eight-step
+    // SetupAPI sequence on EVERY reconnect attempt. The instance is static, so
+    // its counter spans the process: the first Open traces in full, later ones
+    // only every BackendDiag.ConnectTraceCadence-th attempt. The attempt's
+    // verdict is never suppressed — the engine logs it through ConnectVerdict.
+    private static readonly DiagLog _diagnosticLog = new(LogCategory, BackendDiag.ConnectTraceCadence, logFirst: true);
 
     private static void Log(string msg) => _diagnosticLog.Write(msg);
 
@@ -54,10 +61,22 @@ internal class WinUsbBulkDevice : ITransferBackend
     /// <summary>
     /// Opens the WigiDash device using SetupAPI enumeration and WinUSB initialization.
     /// </summary>
-    public virtual bool Open(Guid interfaceGuid)
+    /// <returns>
+    /// <see cref="ConnectionState.Connected"/> on success, otherwise which leg
+    /// failed, parsed from the Win32 error at this boundary: enumeration found
+    /// nothing or the path was empty
+    /// (<see cref="ConnectionState.DeviceNotFound"/>), <c>CreateFileW</c> was
+    /// denied with ERROR_ACCESS_DENIED / 5 — another client owns the handle
+    /// (<see cref="ConnectionState.DeviceBusy"/>), or the handle opened but
+    /// <c>WinUsb_Initialize</c> failed
+    /// (<see cref="ConnectionState.DeviceNotResponding"/>). The distinction
+    /// matters to the user: a busy device is present and needs the other app to
+    /// let go, a missing one needs a cable.
+    /// </returns>
+    public virtual ConnectionState Open(Guid interfaceGuid)
     {
         if (IsOpen)
-            return true;
+            return ConnectionState.Connected;
 
         try
         {
@@ -72,7 +91,7 @@ internal class WinUsbBulkDevice : ITransferBackend
             {
                 int error = Marshal.GetLastWin32Error();
                 Log($"SetupDiGetClassDevsW failed: GetLastError={error} (0x{error:X8})");
-                return false;
+                return ConnectionState.DeviceNotFound;
             }
 
             Log($"SetupDiGetClassDevsW succeeded: deviceInfo=0x{deviceInfo.ToInt64():X}");
@@ -89,7 +108,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                 {
                     int error = Marshal.GetLastWin32Error();
                     Log($"SetupDiEnumDeviceInterfaces failed: GetLastError={error} (0x{error:X8})");
-                    return false;
+                    return ConnectionState.DeviceNotFound;
                 }
 
                 Log($"SetupDiEnumDeviceInterfaces succeeded: Flags=0x{ifaceData.Flags:X}");
@@ -105,7 +124,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                 if (requiredSize == 0)
                 {
                     Log("SetupDiGetDeviceInterfaceDetailW returned requiredSize=0, no device");
-                    return false;
+                    return ConnectionState.DeviceNotFound;
                 }
 
                 // Allocate buffer and get device path
@@ -127,7 +146,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                     {
                         int error = Marshal.GetLastWin32Error();
                         Log($"SetupDiGetDeviceInterfaceDetailW (get path) failed: GetLastError={error} (0x{error:X8})");
-                        return false;
+                        return ConnectionState.DeviceNotFound;
                     }
 
                     // Device path string starts right after the cbSize DWORD (at offset 4)
@@ -138,7 +157,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                     if (string.IsNullOrEmpty(devicePath))
                     {
                         Log("Device path is empty");
-                        return false;
+                        return ConnectionState.DeviceNotFound;
                     }
 
                     // Open device with shared access.
@@ -158,9 +177,23 @@ internal class WinUsbBulkDevice : ITransferBackend
 
                     if (_deviceHandle == SetupApiNative.InvalidHandleValue)
                     {
-                        int error = Marshal.GetLastWin32Error();
+                        // Read through the api bag, not Marshal directly: this
+                        // value decides the reported state, so it has to be
+                        // drivable from a test (see WinUsbApi.GetLastError).
+                        int error = _api.GetLastError();
                         Log($"CreateFileW failed: GetLastError={error} (0x{error:X8})");
-                        return false;
+                        // ERROR_ACCESS_DENIED (5) is the load-bearing case: the
+                        // enumeration FOUND the display and the path is right, so
+                        // the only reason the open is refused is another client
+                        // holding the handle. Reporting that as "no device" is
+                        // what made a present, busy display read as a missing
+                        // one (the 2026-09-27 incident). Every other Win32 error
+                        // on this call is treated as "not openable" — the
+                        // enumeration already proved the device is there, so
+                        // DeviceNotResponding is the honest bucket.
+                        return error == SetupApiNative.ErrorAccessDenied
+                            ? ConnectionState.DeviceBusy
+                            : ConnectionState.DeviceNotResponding;
                     }
 
                     Log($"CreateFileW succeeded: handle=0x{_deviceHandle.ToInt64():X}");
@@ -172,7 +205,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                         Log($"WinUsb_Initialize failed: GetLastError={error} (0x{error:X8})");
                         _api.CloseHandle(_deviceHandle);
                         _deviceHandle = IntPtr.Zero;
-                        return false;
+                        return ConnectionState.DeviceNotResponding;
                     }
 
                     Log($"WinUsb_Initialize succeeded: interfaceHandle=0x{_interfaceHandle.ToInt64():X}");
@@ -198,7 +231,7 @@ internal class WinUsbBulkDevice : ITransferBackend
                     }
 
                     Log($"Pipe timeouts configured (control={DisplayProtocolConstants.ControlPipeTimeoutMs}ms, bulk={DisplayProtocolConstants.BulkPipeTimeoutMs}ms)");
-                    return true;
+                    return ConnectionState.Connected;
                 }
                 finally
                 {
@@ -215,10 +248,12 @@ internal class WinUsbBulkDevice : ITransferBackend
             Log($"Exception during Open: {ex.Message}");
             // Self-contained partial-state cleanup: an exception after
             // CreateFile or WinUsb_Initialize would otherwise leave live
-            // handles open. Idempotent with the leg's Dispose on the false
+            // handles open. Idempotent with the leg's Dispose on the failure
             // return — the handles are zeroed, so the second call is a no-op.
+            // A throw mid-open is a device that would not cooperate, not one
+            // that is absent, so it reports as not-responding.
             Dispose();
-            return false;
+            return ConnectionState.DeviceNotResponding;
         }
     }
 

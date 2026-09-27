@@ -26,8 +26,17 @@ internal interface IDisplayTransport : IDisposable
     /// Connects to the USB display hardware (WinUSB first, LibUsbDotNet
     /// fallback) and runs the initialization sequence.
     /// </summary>
-    /// <returns>True if connection and hardware initialization succeeded; otherwise, false.</returns>
-    bool Connect();
+    /// <returns>
+    /// <see cref="ConnectionState.Connected"/> when the device is connected and
+    /// initialized, otherwise the truthful failure variant —
+    /// <see cref="ConnectionState.DeviceNotFound"/>,
+    /// <see cref="ConnectionState.DeviceBusy"/> or
+    /// <see cref="ConnectionState.DeviceNotResponding"/>. A <c>bool</c> used to
+    /// stand here, and every one of those failures read as "no display"; the
+    /// caller must be able to tell an absent device from a busy one without
+    /// parsing a log.
+    /// </returns>
+    ConnectionState Connect();
 
     /// <summary>
     /// Streams a raw frame buffer payload to the hardware display.

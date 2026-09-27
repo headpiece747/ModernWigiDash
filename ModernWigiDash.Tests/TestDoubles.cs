@@ -1329,11 +1329,20 @@ internal sealed class FakeTransport : IDisplayTransport
     /// </summary>
     public CloseBudgetPolicy CloseBudgets { get; set; } = CloseBudgetPolicy.Create(TimeSpan.FromSeconds(2));
 
-    public bool Connect()
+    /// <summary>Which failure verdict a non-connecting attempt reports. Defaults
+    /// to <see cref="ConnectionState.DeviceNotFound"/>, the old "no display"
+    /// default; a test that is about the busy-vs-absent distinction sets
+    /// <see cref="ConnectionState.DeviceBusy"/> and asserts the engine names it
+    /// instead of reporting a missing device.</summary>
+    public ConnectionState ConnectOutcome { get; set; } = ConnectionState.DeviceNotFound;
+
+    public ConnectionState Connect()
     {
         if (ConnectFailure is not null) throw new InvalidOperationException(ConnectFailure);
         OnConnect?.Invoke();
-        return ConnectResult;
+        return ConnectResult
+            ? ConnectionState.Connected
+            : ConnectOutcome;
     }
     /// <summary>What the last <see cref="SendFrame"/> call actually
     /// received — pins that the engine forwards buffers untouched (the
