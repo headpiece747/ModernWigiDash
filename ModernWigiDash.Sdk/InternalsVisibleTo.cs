@@ -24,3 +24,11 @@ using System.Runtime.CompilerServices;
 // too and would be a worse answer: the core is an implementation detail of three
 // loops, not an API this app offers.
 [assembly: InternalsVisibleTo("ModernWigiDash.Hardware")]
+
+// The App grant is exactly one thing: the named-map acquire policy
+// (NamedMapAcquirePolicy), shared by the two adapters that read a producer-owned
+// named map - LibreHardwareService's sensors map (App) and the AIDA64 panel map
+// (Hardware). The producers live in different projects, so the leaf is the only
+// place both can reach without App depending on a Hardware-internal or
+// Hardware-internals being widened for it.
+[assembly: InternalsVisibleTo("ModernWigiDash.App")]

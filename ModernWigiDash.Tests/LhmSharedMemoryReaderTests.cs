@@ -321,13 +321,13 @@ public class LhmSharedMemoryReaderTests
     [TestMethod]
     public void Poll_MapSourceUnavailable_DisconnectedWithSourceError()
     {
-        var source = new StubLhmMapSource { Error = "LHS sensor mutex not acquired within 100ms (writer holds it)" };
+        var source = new StubLhmMapSource { Error = NamedMapAcquirePolicy.NotAcquiredMessage("LHS sensor mutex") };
         var reader = new LhmSharedMemoryReader(source);
 
         SensorSnapshotDto dto = reader.Poll();
 
         Assert.IsFalse(dto.IsConnected);
-        Assert.AreEqual("LHS sensor mutex not acquired within 100ms (writer holds it)", reader.LastError);
+        Assert.AreEqual(NamedMapAcquirePolicy.NotAcquiredMessage("LHS sensor mutex"), reader.LastError);
     }
 
     [TestMethod]

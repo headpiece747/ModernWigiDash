@@ -1,4 +1,5 @@
 using System.IO.MemoryMappedFiles;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.App.LibreHardwareService;
 
@@ -17,7 +18,6 @@ internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
     // Real LHS maps are hundreds of KB; 8MB caps a misbehaving writer's
     // claimed size so a transient copy never forces a 128MB LOH allocation.
     private const int MaxCopyBytes = 8 * 1024 * 1024;
-    private static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
     private readonly Func<string, Mutex> _openMutex;
     private readonly Func<string, MemoryMappedFile> _openMap;
@@ -49,18 +49,15 @@ internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
             byte[] mapBytes;
             try
             {
-                try
-                {
-                    acquired = mutex.WaitOne(MutexTimeout);
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true; // only the service writes; a dead writer's mutex is safe to continue under
-                }
+                // A wedged handle propagates out of the shared policy and lands
+                // in the outer catch below, which reports the map unavailable -
+                // this adapter's own answer to "what does an unusable handle
+                // mean", which the AIDA64 adapter gives the other way round.
+                acquired = NamedMapAcquirePolicy.TryAcquire(mutex);
 
                 if (!acquired)
                 {
-                    error = "LHS sensor mutex not acquired within 100ms (writer holds it)";
+                    error = NamedMapAcquirePolicy.NotAcquiredMessage("LHS sensor mutex");
                     return null;
                 }
 
@@ -72,14 +69,7 @@ internal sealed class MemoryMappedLhmMapSource : ILhmMapSource
             {
                 if (acquired)
                 {
-                    try
-                    {
-                        mutex.ReleaseMutex();
-                    }
-                    catch (ApplicationException)
-                    {
-                        // abandoned mutex — nothing to release
-                    }
+                    NamedMapAcquirePolicy.Release(mutex);
                 }
             }
 

@@ -1,4 +1,5 @@
 using System.IO.MemoryMappedFiles;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Hardware.Aida64;
 
@@ -14,7 +15,6 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
 {
     internal const string MapName = @"Global\Gskill_Frontier_Aida64Widget";
     internal const string MutexName = @"Global\Gskill_Frontier_Aida64WidgetMutex";
-    internal static readonly TimeSpan MutexTimeout = TimeSpan.FromMilliseconds(100);
 
     private readonly Func<string, Mutex?> _openMutex;
     private readonly Func<string, MemoryMappedFile> _openMap;
@@ -70,22 +70,22 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
             bool usable = true;
             try
             {
-                acquired = mutex.WaitOne(MutexTimeout);
+                acquired = NamedMapAcquirePolicy.TryAcquire(mutex);
             }
-            catch (AbandonedMutexException)
-            {
-                acquired = true;
-            }
-            catch
+            catch (Exception)
             {
                 // A wedged handle is not a map failure. Fall through to an
-                // unlocked copy.
+                // unlocked copy. (This is the one rule the LHM adapter reads the
+                // other way round, on purpose - the shared policy lets every
+                // exception except the abandoned one through precisely so each
+                // adapter keeps its own answer to "what does an unusable handle
+                // mean".)
                 usable = false;
             }
 
             if (usable && !acquired)
             {
-                error = "AIDA64 map mutex not acquired within 100 ms (writer holds it)";
+                error = NamedMapAcquirePolicy.NotAcquiredMessage("AIDA64 map mutex");
                 return false;
             }
         }
@@ -120,15 +120,7 @@ public sealed class MemoryMappedAidaMmapSource : IAidaMmapSource
         {
             if (acquired && mutex is not null)
             {
-                try
-                {
-                    mutex.ReleaseMutex();
-                }
-                catch (ApplicationException)
-                {
-                    // The writer's process may have exited while the mutex was
-                    // held. Releasing an orphaned mutex is best-effort.
-                }
+                NamedMapAcquirePolicy.Release(mutex);
             }
         }
     }

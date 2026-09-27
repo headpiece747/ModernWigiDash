@@ -575,6 +575,37 @@ public sealed class DebtGuardTests
     };
 
     [TestMethod]
+    public void HouseRules_NamedMapAdapters_ShareTheOneAcquirePolicy()
+    {
+        // "Bounded, mutex-guarded copy of a producer-owned named map" is one
+        // glossary name with one acquire budget, and it had two interfaces, two
+        // private 100 ms constants, two abandoned-mutex catches, two release
+        // catches and two diagnostics - the diagnostics already disagreeing in
+        // spelling ("100ms" vs "100 ms") and each retyping a number its own
+        // constant already held (found by the architecture review, 2026-09-27).
+        // The two adapters stay: two producers, two real shapes, and one genuine
+        // disagreement (what an unusable handle means) that each keeps on purpose.
+        var adapters = new[]
+        {
+            "ModernWigiDash.Hardware/Aida64/MemoryMappedAidaMmapSource.cs",
+            "ModernWigiDash.App/LibreHardwareService/MemoryMappedLhmMapSource.cs",
+        };
+        var retyped = new Regex(@"MutexTimeout|FromMilliseconds\(100\)|AbandonedMutexException|ReleaseMutex|not acquired within");
+        var offenders = new List<string>();
+        foreach (var adapter in adapters)
+        {
+            offenders.AddRange(RepoScan.ScanSrc(retyped)
+                .Where(hit => hit.StartsWith(adapter + ":", StringComparison.Ordinal))
+                .Select(hit => hit.Split(':', 3)[0].Replace('\\', '/') + ":" + hit.Split(':', 3)[1]));
+        }
+
+        Assert.AreEqual(0, offenders.Count,
+            "a named-map adapter must take its acquire budget, its abandoned-mutex rule, its release and its diagnostic from NamedMapAcquirePolicy, not spell them again. Found at: "
+            + string.Join("; ", offenders)
+            + ". Two producers, two real shapes - but the budget is one decision. A second spelling is how the two diagnostics drifted into disagreeing about the same 100 ms.");
+    }
+
+    [TestMethod]
     public void HouseRules_NetworkBudget_IsTheOnlySpellingOfA30SecondWait()
     {
         // The network wait was spelled 30 s in five places across four files

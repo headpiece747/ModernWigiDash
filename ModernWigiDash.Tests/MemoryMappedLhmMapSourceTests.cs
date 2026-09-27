@@ -71,7 +71,7 @@ public class MemoryMappedLhmMapSourceTests
             byte[]? bytes = source.TryReadSensorsMap(out string? error);
 
             Assert.IsNull(bytes);
-            Assert.AreEqual("LHS sensor mutex not acquired within 100ms (writer holds it)", error);
+            Assert.AreEqual(NamedMapAcquirePolicy.NotAcquiredMessage("LHS sensor mutex"), error);
         }
         finally
         {
