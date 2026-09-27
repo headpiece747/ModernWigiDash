@@ -14,3 +14,13 @@ using System.Runtime.CompilerServices;
 // documented "no test-only twin" shape); a test-built facade instance
 // would test the Sdk surface instead of the store surface.
 [assembly: InternalsVisibleTo("ModernWigiDash.Widgets")]
+
+// The Hardware grant is exactly one thing: the reconnect backoff core
+// (ReconnectBackoff), the pure doubling rule the display engine's policy and
+// the widget feed loops both compute through. Sdk is the only project both
+// reference, so the rule has to live here to have one owner; Hardware could see
+// it over the Widgets->Hardware edge instead, but that would make the layering
+// depend on a direction the transports do not otherwise need. Public would work
+// too and would be a worse answer: the core is an implementation detail of three
+// loops, not an API this app offers.
+[assembly: InternalsVisibleTo("ModernWigiDash.Hardware")]

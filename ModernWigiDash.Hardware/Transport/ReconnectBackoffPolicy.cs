@@ -1,3 +1,5 @@
+using ModernWigiDash.Sdk;
+
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
@@ -15,6 +17,8 @@ namespace ModernWigiDash.Hardware.Transport;
 ///
 /// A pure function of the attempt count — no clock, no timer, no state — so the
 /// whole policy is drivable from a test and the engine owns only the counter.
+/// The arithmetic is the shared <see cref="ReconnectBackoff.DelayFor"/>; the
+/// two numbers below are this display's own configuration.
 /// </summary>
 internal static class ReconnectBackoffPolicy
 {
@@ -30,25 +34,15 @@ internal static class ReconnectBackoffPolicy
     public static readonly TimeSpan MaxDelay = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// The delay before attempt number <paramref name="consecutiveFailures"/> + 1.
+    /// The delay before attempt number <paramref name="consecutiveFailures"/> + 1,
+    /// computed by the one shared rule (<see cref="ReconnectBackoff"/>). This
+    /// class owns the DISPLAY's two numbers and nothing else - the doubling
+    /// arithmetic used to be spelled here and, separately, in the widget feed
+    /// loops, in a different shape, and the two answers had drifted apart
+    /// (2026-09-27).
     /// </summary>
-    /// <param name="consecutiveFailures">Failures since the last success. Zero
-    /// (or anything below one) yields <see cref="FirstDelay"/>; the value
-    /// doubles per failure and saturates at <see cref="MaxDelay"/>, so a long
-    /// absence cannot overflow the interval into a negative or absurd delay.
-    /// </param>
+    /// <param name="consecutiveFailures">Failures since the last success, the
+    /// counter the engine owns.</param>
     public static TimeSpan DelayFor(int consecutiveFailures)
-    {
-        if (consecutiveFailures < 1)
-            return FirstDelay;
-
-        // Double from the first delay, saturating at the ceiling. Shifting by
-        // the exponent is safe up to 31; past that the ceiling clamp applies
-        // first, so the shift never runs off the end of the word.
-        int doublings = Math.Min(consecutiveFailures - 1, 31);
-        double scaled = FirstDelay.TotalMilliseconds * Math.Pow(2, doublings);
-        return scaled >= MaxDelay.TotalMilliseconds
-            ? MaxDelay
-            : TimeSpan.FromMilliseconds(scaled);
-    }
+        => ReconnectBackoff.DelayFor(consecutiveFailures, FirstDelay, MaxDelay);
 }

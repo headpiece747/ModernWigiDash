@@ -124,6 +124,13 @@ public sealed class PriceFeedManager : IDisposable
     /// </summary>
     private static readonly HttpClient SharedHttpClient = CreateSharedHttpClient();
 
+    /// <summary>The ceiling on a price feed's reconnect wait. 30 s, not the
+    /// display's 2 min: a chat socket can afford to be quiet for two minutes, a
+    /// price widget cannot - that is two minutes of the user staring at a stale
+    /// number. Long enough that a closed or rate-limiting exchange is not
+    /// re-dialled at full rate, short enough that it is picked up promptly.</summary>
+    private static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromSeconds(30);
+
     private static HttpClient CreateSharedHttpClient()
     {
         var client = new HttpClient();
@@ -141,7 +148,12 @@ public sealed class PriceFeedManager : IDisposable
     {
     }
 
-    /// <summary>Internal constructor with injectable seams: HttpClient, WebSocket feed factory, reconnect delay, loop delay.</summary>
+    /// <summary>Internal constructor with injectable seams: HttpClient, WebSocket
+    /// feed factory, reconnect delay, loop delay. The <c>reconnectDelay</c> seam
+    /// is the FIRST reconnect delay, not the only one: the loops back off from it
+    /// up to <see cref="MaxReconnectDelay"/>. A test passing a few milliseconds
+    /// gets a fast first retry and a still-fast second one, which is what the
+    /// socket-loop tests need.</summary>
     internal PriceFeedManager(
         HttpClient httpClient,
         string? finnhubApiKey = null,
@@ -531,7 +543,7 @@ public sealed class PriceFeedManager : IDisposable
         _feedFactory,
         (feed, ct) => feed.SendTextAsync(PriceFeedMessages.BuildBinanceSubscribe(_subscribedCrypto.Keys), ct),
         ParseBinanceTicker,
-        new FixedReconnectPolicy(_reconnectDelay));
+        new ExponentialBackoffReconnectPolicy(_reconnectDelay, MaxReconnectDelay));
 
     private FeedLoop CreateFinnhubLoop() => new(
         new Uri($"wss://ws.finnhub.io?token={_finnhubKey}"),
@@ -542,7 +554,7 @@ public sealed class PriceFeedManager : IDisposable
                 await feed.SendTextAsync(PriceFeedMessages.BuildFinnhubSubscribe(sym), ct).ConfigureAwait(false);
         },
         ParseFinnhubMessage,
-        new FixedReconnectPolicy(_reconnectDelay));
+        new ExponentialBackoffReconnectPolicy(_reconnectDelay, MaxReconnectDelay));
 
     /// <summary>One crypto-cycle hop: the leg's fetch → parse, then the
     /// price-map store.</summary>

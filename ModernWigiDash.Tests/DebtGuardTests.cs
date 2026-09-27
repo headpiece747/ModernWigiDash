@@ -558,6 +558,28 @@ public sealed class DebtGuardTests
     }
 
     [TestMethod]
+    public void HouseRules_PriceFeeds_DoNotReconnectAtAFlatRate()
+    {
+        // The price feeds rode FixedReconnectPolicy(5s) forever, while the display
+        // engine's reconnect grew to 2 minutes and the Twitch loop's to 30 -
+        // three loops, one failure mode, three answers, and nothing in the code,
+        // the glossary or a test saying the flat one was deliberate (found by the
+        // architecture review, 2026-09-27). A closed or rate-limiting exchange was
+        // re-dialled every 5 seconds indefinitely, which is exactly the "absent
+        // target re-probes forever at full rate" case the backoff rule exists to
+        // stop. The first retry is still 5 s, so this is not a latency change;
+        // it only makes the SECOND and later retries back off.
+        var hits = RepoScan.ScanSrc(
+            new Regex(@"FixedReconnectPolicy"), raw: true)
+            .Where(hit => hit.StartsWith("ModernWigiDash.Widgets/PriceFeedManager.cs", StringComparison.Ordinal))
+            .ToList();
+        Assert.AreEqual(0, hits.Count,
+            "the price feeds must hand their loops a backoff policy, not a constant delay: a flat rate re-probes a dead exchange at full rate forever, and it silently disagreed with the display engine and the Twitch loop about the same failure mode. Found at: "
+            + string.Join("; ", hits)
+            + ". Build one with ExponentialBackoffReconnectPolicy(first, MaxReconnectDelay) - it computes through the same ReconnectBackoff core the display uses. A constant delay remains legitimate for a caller that genuinely wants one; it was the production wiring of the price feeds that was wrong, not the type.");
+    }
+
+    [TestMethod]
     public void FindMainWindowCtors_InjectedViolations_StayVisibleToTheRule()
     {
         // Negative verification (the house shape): the extractor the window

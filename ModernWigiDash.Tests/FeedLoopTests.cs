@@ -46,10 +46,18 @@ public class FeedLoopTests
     {
         var policy = new ExponentialBackoffReconnectPolicy(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30));
 
+        // The first FAULT waits the declared initial delay, then doubles. The
+        // old spelling started its counter one step further along (2s on the
+        // first fault for a policy declared with a 1s initial), so the Twitch IRC
+        // loop had never once waited the second it asked for. Unifying the
+        // arithmetic on the shared core fixed that off-by-one, and the two
+        // numbers that changed are the ones that were wrong: the ladder is the
+        // same 1..30 set, shifted so its first rung is the declared initial.
+        Assert.AreEqual(TimeSpan.FromSeconds(1), policy.NextDelay(faulted: true), "the first fault waits the declared initial delay");
         Assert.AreEqual(TimeSpan.FromSeconds(2), policy.NextDelay(faulted: true));
         Assert.AreEqual(TimeSpan.FromSeconds(4), policy.NextDelay(faulted: true));
         Assert.AreEqual(TimeSpan.FromSeconds(1), policy.NextDelay(faulted: false), "A healthy cycle must reset the backoff");
-        Assert.AreEqual(TimeSpan.FromSeconds(2), policy.NextDelay(faulted: true), "The reset must not poison later escalation");
+        Assert.AreEqual(TimeSpan.FromSeconds(1), policy.NextDelay(faulted: true), "The reset must not poison later escalation");
     }
 
     [TestMethod]

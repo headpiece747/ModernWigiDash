@@ -19,23 +19,27 @@ internal sealed class FixedReconnectPolicy(TimeSpan delay) : IReconnectPolicy
 /// <summary>
 /// Reconnects with exponential backoff: a faulted cycle doubles the delay (up
 /// to the cap); a healthy cycle resets to the initial delay.
+///
+/// A thin adapter over the one shared rule (<see cref="ReconnectBackoff"/>),
+/// holding nothing but the fault count. The arithmetic used to be a second
+/// spelling of the display engine's, in this shape rather than the pure
+/// count-in/delay-out one, and the two had drifted into disagreeing answers
+/// (2026-09-27). The loop hands us a faulted FLAG rather than a count, so the
+/// counter lives here; the rule does not.
 /// </summary>
 internal sealed class ExponentialBackoffReconnectPolicy(TimeSpan initial, TimeSpan max) : IReconnectPolicy
 {
-    private readonly TimeSpan _initial = initial;
-    private readonly TimeSpan _max = max;
-    private TimeSpan _current = initial;
+    private int _consecutiveFaults;
 
     public TimeSpan NextDelay(bool faulted)
     {
         if (!faulted)
         {
-            _current = _initial;
-            return _initial;
+            _consecutiveFaults = 0;
+            return ReconnectBackoff.DelayFor(0, initial, max);
         }
 
-        _current = TimeSpan.FromSeconds(Math.Min(_current.TotalSeconds * 2, _max.TotalSeconds));
-        return _current;
+        return ReconnectBackoff.DelayFor(++_consecutiveFaults, initial, max);
     }
 }
 
