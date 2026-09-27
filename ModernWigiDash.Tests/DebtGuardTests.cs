@@ -575,6 +575,45 @@ public sealed class DebtGuardTests
     };
 
     [TestMethod]
+    public void HouseRules_AModuleNamedTestClass_DoesNotBuildAWindow()
+    {
+        // 12 test classes build a live MainWindow - an XAML tree, a profile load,
+        // a telemetry session, a tray icon, a hotkey registration, a temp
+        // settings store and a swapped FileLog path per construction. Some of
+        // them have to: the window's WIRING is only visible through the window.
+        //
+        // But a class named after a MODULE is testing the module, and the module
+        // takes its dependencies as arguments. AhkSpawnPolicyTests is the worked
+        // example: its five cases used to build a window each to assert a spawn
+        // count and one log line that the policy already owned, and its
+        // interface (settings, an interpreter-existence probe, the launch seam)
+        // made every one of those seams drivable with no window at all
+        // (2026-09-27). 5 windows became 0, and the one window test that stayed
+        // asserts the wiring - which is the only part the window owns.
+        //
+        // The markers are module-naming suffixes, so the rule is about intent: if
+        // the class says it is testing a Policy / Layout / Presentation / Funnel /
+        // Module / Sequence / Codec, it is not testing a Window.
+        var moduleNamed = new Regex(@"(Policy|Funnel|Layout|Presentation|Module|Sequence|Codec|Catalog|Provider|Wire)Tests\.cs$");
+        var offenders = new List<string>();
+        foreach (var file in Directory.GetFiles(RepoScan.GetRepoRoot(), "*Tests.cs", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(RepoScan.GetRepoRoot(), file).Replace('\\', '/');
+            if (relative.Contains("/obj/") || relative.Contains("/bin/")) continue;
+            if (!moduleNamed.IsMatch(Path.GetFileName(relative))) continue;
+            if (File.ReadAllText(file).Contains("new MainWindow(", StringComparison.Ordinal))
+            {
+                offenders.Add(relative);
+            }
+        }
+
+        Assert.AreEqual(0, offenders.Count,
+            "a test class named after a MODULE must drive that module, not build a window: the module takes its dependencies as arguments, so an XAML tree, a profile load, a telemetry session and a tray icon are startup the test never needed. Found: "
+            + string.Join("; ", offenders)
+            + ". Migrate the case to the module's own test class and leave the window to the wiring test.");
+    }
+
+    [TestMethod]
     public void HouseRules_TransportKeepsTheConnectLoop_NotTheWires()
     {
         // DisplayHidTransport was 671 lines holding four unrelated jobs: the
