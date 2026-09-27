@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
@@ -850,6 +851,9 @@ internal sealed class StaHost
         // InitializeComponent separately. Without it, Application resources
         // (e.g. the window's PrimaryFont StaticResource) are missing.
         ResetApplicationState();
+        // Bind the log/profile folder seam BEFORE the constructor runs: the ctor
+        // pins FileLog/CrashLog to it and writes a startup line of its own.
+        _ = TestLogDir;
         var app = new AppClass();
         app.InitializeComponent();
         // The test App must never auto-shutdown: a test window's close (the
@@ -873,6 +877,28 @@ internal sealed class StaHost
         var startupUriField = typeof(Application).GetField("_startupUri", BindingFlags.NonPublic | BindingFlags.Instance)
             ?? throw new InvalidOperationException("Application._startupUri field not found (WPF internal changed; the test-host orphan-window guard is off)");
         startupUriField.SetValue(app, null);
+    }
+
+    /// <summary>
+    /// The one log/profile folder the whole test process shares, created on
+    /// first use: under TEMP, never under the user's real profile folder.
+    /// Bound to <c>App.AppDataDirectory</c> before each test App is
+    /// constructed, because the App constructor itself pins
+    /// <c>FileLog.LogPath</c>/<c>CrashLog.LogPath</c> and writes a startup
+    /// line — on every window-test invoke — and nothing in the test host
+    /// restored them, so the suite used to append scripted-device lines
+    /// ("\\.\GLOBALROOT\Device\WigiDash", "scripted bulk transfer fault") to
+    /// the user's real diagnostic log.
+    /// </summary>
+    private static string TestLogDir
+    {
+        get
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "ModernWigiDash.Tests", "logs");
+            Directory.CreateDirectory(dir);
+            AppClass.AppDataDirectory = () => dir;
+            return dir;
+        }
     }
 
     /// <summary>
