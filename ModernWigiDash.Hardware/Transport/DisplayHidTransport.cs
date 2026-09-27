@@ -180,6 +180,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
             if (attempt.Backend is null)
             {
+                // The leg's own tag, from the record: this line and the
+                // open line below are the ONLY places a leg's name is spelled
+                // for the file log. A leg that re-types its own tag would emit
+                // under the old name forever after a rename, because its
+                // DiagLog is built per attempt.
+                legLog.Write($"Failed to open the {provider.DisplayName} device interface: {attempt.Failure}");
                 // Remember the most informative failure for the return value.
                 // A later leg failing for a different reason must not overwrite
                 // a "busy" verdict with a vaguer one: DeviceBusy is the fact
@@ -191,6 +197,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
             // Adopt the backend before init: SendInitCommands talks through it.
             _backend = attempt.Backend;
+            legLog.Write($"Direct {provider.DisplayName} connection opened");
 
             if (SendInitCommands())
             {
@@ -254,13 +261,15 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     /// the device under the swap lock (same rule as <see cref="Cleanup"/>).
     /// Both failure exits dispose the LOCAL device — never the adopted global
     /// backend, which belongs to a previous provider attempt.
+    ///
+    /// The leg speaks no log tag of its own: the loop binds the leg's tag once
+    /// and spells this attempt's open/fail lines from the verdict that comes
+    /// back, so a rename in the provider record cannot leave a leg emitting
+    /// under the old tag forever (CONTEXT.md:24 — "no call site composes its
+    /// own [TAG] prefix"; this method did exactly that, 2026-09-27).
     /// </summary>
     private ProviderAttempt TryCreateWinUsbBackend()
     {
-        // The leg's own file-log lines bind its tag once here; the device's
-        // Open diagnostics (WinUsbBulkDevice) emit the same tag through its
-        // own bound DiagLog — one vocabulary across the seam.
-        DiagLog legLog = new("USB-WINUSB", 1);
         var winUsb = new WinUsbBulkDevice();
         try
         {
@@ -270,17 +279,21 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             ConnectionState opened = winUsb.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
             if (opened == ConnectionState.Connected)
             {
-                legLog.Write("Direct WinUSB connection opened");
                 return ProviderAttempt.Opened(winUsb);
             }
 
-            legLog.Write($"Failed to open the WinUSB device interface: {opened}");
             TearDownWinUsb(winUsb);
             return ProviderAttempt.Failed(opened);
         }
         catch (Exception ex)
         {
-            legLog.Write($"Open exception: {ex.Message}");
+            // The device logs its own "Exception during Open" and returns a
+            // state, so anything arriving HERE came from this leg's teardown,
+            // not from the open. No line of its own: the loop's catch is
+            // unreachable for it (this catch is the outer one), and the teardown
+            // failure the user cares about is the connect verdict the loop
+            // prints.
+            _ = ex;
             lock (_swapLock)
             {
                 winUsb.Dispose();

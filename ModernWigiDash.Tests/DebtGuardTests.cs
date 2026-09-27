@@ -514,6 +514,50 @@ public sealed class DebtGuardTests
     }
 
     [TestMethod]
+    [DataRow("USB-WINUSB", "ModernWigiDash.Hardware/Transport/DisplayHidTransport.cs", "ModernWigiDash.Hardware/Transport/WinUsbBulkDevice.cs")]
+    [DataRow("USB-LIBUSB", "ModernWigiDash.Hardware/Transport/DisplayHidTransport.cs", "ModernWigiDash.Hardware/Transport/LibUsbTransferBackend.cs")]
+    public void HouseRules_ConnectLegTags_HaveExactlyTwoOwners(
+        string tag, string recordOwner, string adapterOwner)
+    {
+        // CONTEXT.md:24 — "the tag is declared once at construction instead of
+        // being hand-baked into each message string, so a category can never
+        // drift between its call sites" and "no call site composes its own
+        // [TAG] prefix". Two owners are legitimate and necessary: the
+        // ConnectProvider record (the loop spells the leg's open/fail lines from
+        // it) and the adapter's own bound DiagLog (its internal steps). A THIRD
+        // site is the drift the invariant exists to prevent, and it is silent:
+        // a leg body's DiagLog is built PER ATTEMPT, so after a rename the stale
+        // one keeps emitting under the old tag indefinitely with nothing to
+        // notice (2026-09-27, found by the architecture review).
+        // raw: true, because the subject of the scan IS a string literal — the
+        // default strip blanks literals, so the stripped scan finds zero sites
+        // and the pin would "pass" or "fail" on an empty set for reasons that
+        // have nothing to do with the rule.
+        //
+        // SITES, not files: counting distinct files is blind to the exact drift
+        // it exists to catch, because a re-spelled tag in a leg body lands in
+        // DisplayHidTransport.cs — the same file the record lives in — and the
+        // file set does not change. (That was this pin's first shape, and the
+        // mutation proved it: a third literal in the WinUSB leg stayed green.)
+        var hits = RepoScan.ScanSrc(new Regex(Regex.Escape($"\"{tag}\"")), raw: true);
+        var parts = hits.Select(hit => hit.Split(':', 3)).ToList();
+        // One entry per SITE, sorted - deliberately not Distinct, so a third
+        // literal in the record's own file shows up as a third entry and fails.
+        var siteFiles = parts
+            .Select(p => p[0].Replace('\\', '/'))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+        var annotated = string.Join("; ", parts
+            .Select(p => p.Length > 2 ? $"{p[0].Replace('\\', '/')}:{p[1]}" : p[0].Replace('\\', '/')));
+        CollectionAssert.AreEqual(
+            new[] { adapterOwner, recordOwner }.OrderBy(f => f, StringComparer.Ordinal).ToList(),
+            siteFiles,
+            $"the \"{tag}\" leg tag must have exactly two owners, one SITE each: the ConnectProvider record (which the loop spells the leg's open/fail lines from) and the adapter's own DiagLog. Found {siteFiles.Count}: "
+            + annotated
+            + ". Two ways to fail, both silent at run time: a third site re-types a tag, so a rename leaves it emitting under the old name forever (a leg's DiagLog is constructed per attempt, not per lifetime); or one owner was renamed and the other was not, so the leg and its adapter log under different names with nothing in the build noticing.");
+    }
+
+    [TestMethod]
     public void FindMainWindowCtors_InjectedViolations_StayVisibleToTheRule()
     {
         // Negative verification (the house shape): the extractor the window
