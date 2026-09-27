@@ -14,8 +14,21 @@ public class MainWindowConstructionTests
     /// </summary>
     private static readonly StaHost Host = new("MainWindowTests-STA");
 
+    /// <summary>
+    /// This class is the one place in #6 where the window IS the subject, so
+    /// every test here is a window test by definition and none of them migrate
+    /// to a module.
+    ///
+    /// The two construction claims are one construction. The XAML-init-order
+    /// test built a window, closed it, and asserted no error - which is
+    /// exactly what the title test did alongside its own title assertion, so
+    /// it was a second startup for a subset of the first. Its identity is kept
+    /// here because it is a real regression marker: a misordered XAML
+    /// InitializeComponent used to NRE during construction, and this is the
+    /// pin that went red when it did.
+    /// </summary>
     [TestMethod]
-    public void Construct_OnStaThread_SetsTitleAndDoesNotThrow()
+    public void Construct_OnStaThread_SetsTitleAndSurvivesTheXamlInitOrder()
     {
         var (title, error) = Host.Invoke(() =>
         {
@@ -34,26 +47,6 @@ public class MainWindowConstructionTests
 
         Assert.IsNull(error, error?.ToString());
         Assert.AreEqual("ModernWigiDash", title);
-    }
-
-    [TestMethod]
-    public void Construct_XamlInitOrder_DoesNotNre()
-    {
-        var (_, error) = Host.Invoke(() =>
-        {
-            var window = new MainWindow(new MainWindowTestOptions(new StubPresentMonNative(), ProfilePersistence.DefaultProfilePath(), new NoopPowerModeSource(), new FakeTraySurface(), UsbEngine: FakeTransport.InertEngine()));
-            try
-            {
-                window.Close();
-            }
-            catch (Exception)
-            {
-                // Close before Show is safe; if it throws, construction is what we verify.
-            }
-            return null;
-        });
-
-        Assert.IsNull(error, error?.ToString());
     }
 
     /// <summary>
