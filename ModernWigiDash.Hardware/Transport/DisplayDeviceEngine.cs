@@ -71,10 +71,15 @@ public sealed class DisplayDeviceEngine : IDisposable
     // shorter than the worst-case teardown, so the relation holds by
     // construction instead of by a cross-file pin. A healthy close completes
     // in well under a second, so the bounds only ever bite for a hung device
-    // (a leaked handle at exit beats a frozen window). Before the first
-    // connect, the engine uses the HID transport's bound as the default.
-    internal TimeSpan StandbyCloseBudget => (_transport ?? new DisplayHidTransport()).CloseBudgets.StandbyCloseBudget;
-    internal TimeSpan DisposeAbandonBudget => (_transport ?? new DisplayHidTransport()).CloseBudgets.DisposeAbandonBudget;
+    // (a leaked handle at exit beats a frozen window). Before the first connect
+    // there is no transport to ask, so the HID transport's shared default is
+    // read instead — a value, not a constructed transport. The old spelling
+    // (`?? new DisplayHidTransport()`) allocated a provider list and a logger
+    // on every read, on the reconnect path (2026-09-27).
+    private CloseBudgetPolicy EffectiveBudgets => _transport?.CloseBudgets ?? DisplayHidTransport.DefaultCloseBudgets;
+
+    internal TimeSpan StandbyCloseBudget => EffectiveBudgets.StandbyCloseBudget;
+    internal TimeSpan DisposeAbandonBudget => EffectiveBudgets.DisposeAbandonBudget;
 
     /// <summary>
     /// Test seam: inject a transport directly without going through the

@@ -84,6 +84,75 @@ public class CloseBudgetPolicyTests
     }
 
     [TestMethod]
+    public void Engine_BeforeAnyTransport_ReadsTheSharedDefaultWithoutConstructingOne()
+    {
+        // The pre-connect fallback used to be `?? new DisplayHidTransport()`,
+        // which built a provider list and a logger on EVERY budget read, on the
+        // reconnect path, to ask a value that is constant by construction. The
+        // two facts pinned here: the fallback is the SAME policy the transport
+        // hands out (no second spelling, so the two cannot drift), and it is
+        // reached without a transport.
+        using var engine = new DisplayDeviceEngine(() => throw new InvalidOperationException(
+            "the budget read must not construct a transport"));
+
+        // No transport has been adopted, so these read the fallback.
+        Assert.AreEqual(
+            DisplayHidTransport.DefaultCloseBudgets.StandbyCloseBudget,
+            engine.StandbyCloseBudget);
+        Assert.AreEqual(
+            DisplayHidTransport.DefaultCloseBudgets.DisposeAbandonBudget,
+            engine.DisposeAbandonBudget);
+    }
+
+    [TestMethod]
+    public void Engine_BudgetRead_AllocatesNothingOnTheReconnectPath()
+    {
+        // The direct proof for the allocating fallback: read each budget many
+        // times and measure the thread's allocation delta (the per-thread counter
+        // the frame-pipeline allocation budget already uses, for the same
+        // reason - the process-wide counter quantizes sub-8KB allocations).
+        // The old `?? new DisplayHidTransport()` built a provider list and a
+        // logger per read; this is on the reconnect path, inside the module
+        // whose whole job is never stalling on close.
+        using var engine = new DisplayDeviceEngine();
+
+        // Warm the JIT and the statics so the measured loop is the steady state.
+        for (int i = 0; i < 32; i++)
+        {
+            _ = engine.StandbyCloseBudget;
+            _ = engine.DisposeAbandonBudget;
+        }
+
+        const int reads = 512;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < reads; i++)
+        {
+            _ = engine.StandbyCloseBudget;
+            _ = engine.DisposeAbandonBudget;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.AreEqual(0, allocated,
+            $"{reads * 2} budget reads allocated {allocated} bytes; the close budgets are constants, so reading them must not construct a transport");
+    }
+
+    [TestMethod]
+    public void TheHidTransportsPolicyIsTheSharedDefaultDerivedFromTheStaticBound()
+    {
+        // One derivation, one value: the instance, the static default, and a
+        // FRESH derivation from the static bound must all agree — otherwise
+        // "the default" means two different things. Compared against a fresh
+        // Create(CloseBound), not against itself, which would prove nothing.
+        using var transport = new DisplayHidTransport();
+        CloseBudgetPolicy derived = CloseBudgetPolicy.Create(DisplayHidTransport.CloseBound);
+
+        Assert.AreEqual(derived, transport.CloseBudgets);
+        Assert.AreEqual(derived, DisplayHidTransport.DefaultCloseBudgets);
+        Assert.AreEqual(derived.StandbyCloseBudget, transport.CloseBudgets.StandbyCloseBudget);
+        Assert.AreEqual(derived.DisposeAbandonBudget, transport.CloseBudgets.DisposeAbandonBudget);
+    }
+
+    [TestMethod]
     public void FakeTransport_CarriesItsOwnBound()
     {
         // A fake transport carries its own bound; the engine reads it from

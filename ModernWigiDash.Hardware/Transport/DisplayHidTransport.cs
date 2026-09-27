@@ -69,13 +69,26 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         (long)ChunkedBulkWrite.WorstCaseWrite(DisplayGeometry.FrameBufferSize).TotalMilliseconds));
 
     /// <summary>
+    /// The production close-budget policy, derived ONCE from the static
+    /// <see cref="CloseBound"/>. It is constant by construction (the pipe
+    /// timeouts and the frame size are all constants), so the engine can read the
+    /// same value before it holds a transport instead of constructing a
+    /// throwaway one to ask it — that fallback allocated a provider list and a
+    /// logger on every read, on the reconnect path, inside the module whose
+    /// whole job is never stalling on close (2026-09-27).
+    /// </summary>
+    internal static readonly CloseBudgetPolicy DefaultCloseBudgets = CloseBudgetPolicy.Create(CloseBound);
+
+    /// <summary>
     /// The close-budget policy this transport hands to the engine: the
     /// worst-case teardown bound and the engine's two bounded close waits,
     /// derived together, so the never-stall-on-close relation (waits strictly
     /// shorter than the worst case) holds by construction. The engine reads
-    /// these values; it never hard-codes a second spelling.
+    /// these values; it never hard-codes a second spelling. An adapter with a
+    /// different bound overrides this; the HID transport is the constant case,
+    /// so it is the shared default too.
     /// </summary>
-    public CloseBudgetPolicy CloseBudgets => CloseBudgetPolicy.Create(CloseBound);
+    public CloseBudgetPolicy CloseBudgets => DefaultCloseBudgets;
 
     public DisplayHidTransport(ILogger<DisplayHidTransport>? logger = null)
     {
