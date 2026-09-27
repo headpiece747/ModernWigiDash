@@ -1303,6 +1303,32 @@ internal sealed class FakeHotkeyApi
 /// test seam (a window-level test binds its engine to this, so the
 /// test host's window construction never reaches for USB hardware).
 /// </summary>
+/// <summary>
+/// Reads a file that <c>FileLog</c> still holds open.
+/// </summary>
+/// <remarks>
+/// One helper for a trap hit three times in the 2026-09-27 session: FileLog
+/// keeps its writer open with <c>FileShare.ReadWrite</c>, and share modes must
+/// agree in BOTH directions, so the obvious <c>File.ReadAllText</c> /
+/// <c>File.ReadAllLines</c> — which request <c>FileShare.Read</c> — is refused
+/// with an IOException "being used by another process". Every test that
+/// asserts on log content must read through here.
+/// </remarks>
+internal static class TestFiles
+{
+    /// <summary>
+    /// Flushes the shared log, then reads <paramref name="path"/> without
+    /// disturbing the writer's open handle.
+    /// </summary>
+    internal static string ReadLogFile(string path)
+    {
+        FileLog.Flush();
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+}
+
 internal sealed class FakeTransport : IDisplayTransport
 {
     /// <summary>

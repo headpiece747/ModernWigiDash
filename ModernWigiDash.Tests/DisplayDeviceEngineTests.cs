@@ -580,13 +580,10 @@ public class DisplayDeviceEngineTests
     private string ReadEngineLog()
     {
         // The engine writes through the shared FileLog, redirected to this
-        // test's temp file by TestInitialize. Flush first: FileLog buffers on a
-        // cadence (8 KB / 250 ms), so a test that reads without flushing sees an
-        // empty file and would assert nothing.
-        FileLog.Flush();
-        using var stream = new FileStream(_logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        // test's temp file by TestInitialize. TestFiles flushes and reads
+        // through the writer's open handle (FileLog buffers on a cadence, and
+        // File.ReadAllText would be refused by the writer's share mode).
+        return TestFiles.ReadLogFile(_logPath);
     }
 
     [TestMethod]

@@ -423,6 +423,68 @@ public sealed class DebtGuardTests
             + ". The window's constructor starts its USB engine (the connect probe, the touch poll, the reconnect timer, the teardown standby), so a bare construction would wake, init, and put to sleep the user's attached display on every test run. Pass FakeTransport.InertEngine() (or an explicit DisplayDeviceEngine bound to a FakeTransport) as the test options record's UsbEngine property.");
     }
 
+    // --- the connect seam stays a typed outcome, never a bool ---
+
+    [TestMethod]
+    public void HouseRules_ConnectSeam_StaysATypedOutcomeNotABool()
+    {
+        // A bool from Connect() is what made every hardware fault read as "no
+        // physical device" (2026-09-27): absent, busy-because-another-client-
+        // owns-the-handle, and init-failed all collapsed into one false, so a
+        // PRESENT display was reported missing and the badge said "Simulated".
+        // The behaviour is pinned by the transport and engine tests; this pins
+        // the SHAPE, because "the enum quietly became a bool again" is a type
+        // change no behavioural test can see - every one of them still passes
+        // with a bool as long as it returns false at the right moments.
+        var boolHits = RepoScan.ScanSrc(new Regex(@"\bbool\s+Connect\s*\("))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+        CollectionAssert.AreEqual(
+            Array.Empty<string>(),
+            boolHits,
+            "the transport connect seam must not return bool: " + string.Join("; ", boolHits)
+            + ". A bool cannot carry which fault occurred, so DeviceBusy (the display is there, another client owns the handle) and DeviceNotFound (nothing is plugged in) become indistinguishable again and the engine reports the absent wording for a present device. Return ConnectionState and let the caller name the fault.");
+
+        var typedHits = RepoScan.ScanSrc(new Regex(@"\bConnectionState\s+Connect\s*\("))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "ModernWigiDash.Hardware/Transport/DisplayHidTransport.cs",
+                "ModernWigiDash.Hardware/Transport/IDisplayTransport.cs",
+            },
+            typedHits,
+            "the connect seam must be declared once and implemented once: " + string.Join("; ", typedHits)
+            + ". A second implementation (a new transport, a shim) answering with its own outcome type re-splits the vocabulary the engine publishes, and the fold in DisplayHidTransport.MoreSpecific stops covering every leg.");
+    }
+
+    [TestMethod]
+    public void HouseRules_ConnectFailureStates_AreNamedInTheEnumNotInferred()
+    {
+        // The three failure states are the point of the whole change, and each
+        // must keep a distinct name. A variant deleted or renamed silently
+        // re-merges two faults the user has to be able to tell apart, so the set
+        // is pinned by name rather than left to review. Pinned in the enum's own
+        // file: a definition that moves out of ConnectionState is the drift this
+        // catches, whether it was renamed, duplicated, or replaced by inference.
+        var declared = RepoScan.ScanSrc(new Regex(@"\b(DeviceNotFound|DeviceBusy|DeviceNotResponding)\b"))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+
+        const string enumFile = "ModernWigiDash.Hardware/Transport/ConnectionState.cs";
+        Assert.IsTrue(
+            declared.Contains(enumFile),
+            "the connect failure vocabulary must be declared in ConnectionState: " + string.Join("; ", declared)
+            + ". DeviceNotFound / DeviceBusy / DeviceNotResponding are the three facts the user acts on differently (check the cable / close the other app / the device is wedged); a variant that stops being declared there re-opens the collapse this change closed.");
+    }
+
     [TestMethod]
     public void FindMainWindowCtors_InjectedViolations_StayVisibleToTheRule()
     {

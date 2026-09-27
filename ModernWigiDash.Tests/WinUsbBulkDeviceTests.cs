@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using ModernWigiDash.Hardware.Transport;
@@ -296,6 +297,55 @@ public class WinUsbBulkDeviceTests
         ConnectionState outcome = device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid);
 
         Assert.AreEqual(ConnectionState.DeviceNotResponding, outcome);
+    }
+
+    [TestMethod]
+    public void Open_RepeatedFailures_DoNotFloodTheLogWithTheSetupApiTrace()
+    {
+        // The flood half of the 2026-09-27 fix, pinned BEHAVIOURALLY rather than
+        // by text: the enumeration writes eight lines per attempt and used to
+        // write them on EVERY reconnect (DiagLog cadence 1), so a 5 s timer
+        // buried the one line that mattered under hundreds of identical blocks.
+        //
+        // A behavioural bound is the stronger pin: it also fails if the cadence
+        // is loosened to 2, not just if it reverts to the exact old spelling,
+        // which a text scan for that spelling would miss. The bound holds
+        // wherever the process-wide cadence counter happens to be (other tests
+        // share it), so it cannot flake on test order: at most
+        // ceil(attempts / cadence) attempts get traced.
+        string originalLog = FileLog.LogPath;
+        string logPath = Path.Combine(Path.GetTempPath(), $"wmd-flood-{Guid.NewGuid():N}.log");
+        FileLog.LogPath = logPath;
+        try
+        {
+            const int attempts = 20;
+            for (int i = 0; i < attempts; i++)
+            {
+                // A failing open (no interface) is the cheap, real path: the
+                // trace runs up to the enumeration and stops, which is the exact
+                // sequence that used to repeat verbatim forever.
+                using var device = new WinUsbBulkDevice(new ApiScript { RequiredSize = 0 }.ToApi());
+                Assert.AreEqual(ConnectionState.DeviceNotFound, device.Open(DisplayProtocolConstants.WinUsbInterfaceGuid));
+            }
+
+            int traceLines = 0;
+            foreach (string line in TestFiles.ReadLogFile(logPath).Split('\n'))
+                if (line.Contains("[USB-WINUSB]", StringComparison.Ordinal))
+                    traceLines++;
+
+            // 20 attempts at the connect cadence of 5 trace at most 4 of them
+            // (plus the first), so this ceiling is generous on purpose: it only
+            // has to separate "cadenced" from "every attempt" (8 x 20 = 160
+            // lines), not to measure the cadence exactly.
+            Assert.IsTrue(
+                traceLines <= 48,
+                $"{attempts} failed opens wrote {traceLines} [USB-WINUSB] lines; the per-attempt SetupAPI trace must ride a cadence, not repeat on every reconnect. The verdict line is still logged once per attempt by ConnectVerdict, so nothing diagnosable is lost.");
+        }
+        finally
+        {
+            FileLog.LogPath = originalLog;
+            File.Delete(logPath);
+        }
     }
 
     [TestMethod]
