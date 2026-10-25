@@ -35,6 +35,13 @@ internal sealed class SteamLibraryService : IDisposable
     private string _favoritesJson = "[]";
     private volatile SteamLibrarySnapshot _current = SteamLibrarySnapshot.Empty;
 
+    private string _apiKey = "";
+    private string _steamId64 = "";
+    private string _avatarUrlForCurrent = "";
+    private volatile SteamPersona? _persona;
+    private volatile SKBitmap? _personaAvatar;
+    private readonly RetiredBitmapSet _avatarRetire = new();
+
     /// <summary>
     /// The service over injected seams: the library source, the process
     /// tracker, the poster cache, the (dormant-unless-configured) API client,
@@ -105,6 +112,121 @@ internal sealed class SteamLibraryService : IDisposable
     }
 
     /// <summary>
+    /// The owner's avatar texture (the showcase banner), or null (the banner
+    /// draws its placeholder disc). Read on the render thread.
+    /// </summary>
+    public SKBitmap? PersonaAvatar => _personaAvatar;
+
+    /// <summary>
+    /// Drains the retired avatar texture on the render thread (the UAF rule:
+    /// a replaced avatar is freed here, before the canvas draws).
+    /// </summary>
+    public void DisposeRetiredAvatar() => _avatarRetire.DisposeRetired();
+
+    /// <summary>
+    /// Sets the optional community-API credentials (the widget's
+    /// <c>SteamApiKey</c> + <c>SteamId64</c>). Both must be present for a
+    /// persona fetch; a blank pair clears the persona. A change re-runs the
+    /// persona leg immediately (the client's 5-minute cache bounds the HTTP).
+    /// </summary>
+    public void SetCredentials(string apiKey, string steamId64)
+    {
+        _apiKey = apiKey ?? "";
+        _steamId64 = steamId64 ?? "";
+        RefreshPersona();
+    }
+
+    /// <summary>Test seam: publishes a persona (and optional avatar) directly, bypassing the HTTP fetch.</summary>
+    internal void SetPersonaForTest(SteamPersona? persona, SKBitmap? avatar)
+    {
+        _persona = persona;
+        if (avatar is not null)
+        {
+            SetAvatar(avatar);
+            _avatarUrlForCurrent = "test";
+        }
+        else
+        {
+            RetireAvatar();
+            _avatarUrlForCurrent = "";
+        }
+
+        PublishWithPersona();
+    }
+
+    /// <summary>
+    /// Re-runs the persona leg: a blank credential pair clears the persona,
+    /// else a fire-and-forget fetch (persona, then the avatar only when its
+    /// URL changed) lands and publishes an updated snapshot. The client's
+    /// 5-minute cache keeps the persona HTTP bounded.
+    /// </summary>
+    private void RefreshPersona()
+    {
+        string apiKey = _apiKey;
+        string steamId64 = _steamId64;
+        if (string.IsNullOrWhiteSpace(apiKey) || !SteamWebApiClient.IsValidSteamId64(steamId64))
+        {
+            if (_persona is not null || _personaAvatar is not null)
+            {
+                _persona = null;
+                RetireAvatar();
+                _avatarUrlForCurrent = "";
+                PublishWithPersona();
+            }
+            return;
+        }
+
+        _ = FetchPersonaAndAvatarAsync(apiKey, steamId64);
+    }
+
+    private async Task FetchPersonaAndAvatarAsync(string apiKey, string steamId64)
+    {
+        SteamPersona? persona = await _api.FetchPersonaAsync(apiKey, steamId64, CancellationToken.None).ConfigureAwait(false);
+        _persona = persona;
+
+        string avatarUrl = persona?.AvatarUrl ?? "";
+        if (avatarUrl.Length > 0 && !string.Equals(avatarUrl, _avatarUrlForCurrent, StringComparison.Ordinal))
+        {
+            byte[]? avatarBytes = await _api.FetchAvatarAsync(avatarUrl, CancellationToken.None).ConfigureAwait(false);
+            SKBitmap? decoded = avatarBytes is { Length: > 0 } ? SteamPosterCache.DecodeScaled(avatarBytes, 64, 64) : null;
+            if (decoded is not null)
+            {
+                SetAvatar(decoded);
+                _avatarUrlForCurrent = avatarUrl;
+            }
+        }
+        else if (avatarUrl.Length == 0)
+        {
+            RetireAvatar();
+            _avatarUrlForCurrent = "";
+        }
+
+        PublishWithPersona();
+    }
+
+    private void SetAvatar(SKBitmap bitmap)
+    {
+        SKBitmap? previous = _personaAvatar;
+        _personaAvatar = bitmap;
+        _avatarRetire.Retire(previous);
+    }
+
+    private void RetireAvatar()
+    {
+        SKBitmap? previous = _personaAvatar;
+        _personaAvatar = null;
+        _avatarRetire.Retire(previous);
+    }
+
+    private void PublishWithPersona()
+    {
+        SteamLibrarySnapshot current = _current;
+        var updated = current with { Persona = _persona };
+        _current = updated;
+        _publish(updated);
+    }
+
+    /// <summary>
     /// Requests a background poster fetch (local file, then the CDN) for a
     /// cache miss. Fire-and-forget: the renderer draws a placeholder in the
     /// meantime and the fetched texture lands in the cache for the next tick.
@@ -134,6 +256,10 @@ internal sealed class SteamLibraryService : IDisposable
     {
         _loop.Dispose();
         _cache.Dispose();
+        SKBitmap? avatar = _personaAvatar;
+        _personaAvatar = null;
+        avatar?.Dispose();
+        _avatarRetire.DisposeAll();
     }
 
     private void RefreshTick()
@@ -141,10 +267,11 @@ internal sealed class SteamLibraryService : IDisposable
         IReadOnlyList<SteamAppManifest> manifests = _source.LoadManifests();
         List<SteamGameItem> games = manifests.Select(ToGameItem).ToList();
 
-        var snapshot = new SteamLibrarySnapshot(games, _source.SteamPath, _source.SteamPath is not null);
+        var snapshot = new SteamLibrarySnapshot(games, _source.SteamPath, _source.SteamPath is not null, _persona);
         _current = snapshot;
         _publish(snapshot);
         WarmupLocalPosters(snapshot);
+        RefreshPersona();
     }
 
     private SteamGameItem ToGameItem(SteamAppManifest manifest)

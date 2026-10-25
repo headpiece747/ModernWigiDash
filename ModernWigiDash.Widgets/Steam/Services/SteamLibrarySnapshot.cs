@@ -12,8 +12,9 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 internal sealed record SteamLibrarySnapshot(
     IReadOnlyList<SteamGameItem> Games,
     string? SteamPath,
-    bool IsSteamFound)
+    bool IsSteamFound,
+    SteamPersona? Persona)
 {
-    /// <summary>The empty snapshot (no Steam installation, no games).</summary>
-    public static SteamLibrarySnapshot Empty { get; } = new([], null, false);
+    /// <summary>The empty snapshot (no Steam installation, no games, no persona).</summary>
+    public static SteamLibrarySnapshot Empty { get; } = new([], null, false, null);
 }

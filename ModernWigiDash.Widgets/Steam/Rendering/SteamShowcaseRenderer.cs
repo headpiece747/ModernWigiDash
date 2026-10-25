@@ -34,6 +34,8 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         SteamGameItem? previous,
         SteamGameItem? next,
         SteamPosterCache cache,
+        SteamPersona? persona,
+        SKBitmap? avatar,
         SKColor accent,
         SKColor text)
     {
@@ -55,6 +57,9 @@ internal sealed class SteamShowcaseRenderer : IDisposable
             DrawFlank(canvas, geometry.RightCard, next, cache);
 
         DrawFocus(canvas, geometry.FocusCard, focus, cache, accent, text);
+
+        if (persona is not null)
+            DrawPersonaBanner(canvas, bounds, persona, avatar, text);
     }
 
     /// <summary>Releases the hoisted paints (call on widget teardown).</summary>
@@ -81,6 +86,50 @@ internal sealed class SteamShowcaseRenderer : IDisposable
             _placeholderPaint.Color = new SKColor(38, 42, 50, 255);
             canvas.DrawRoundRect(card, 6f, 6f, _placeholderPaint);
         }
+    }
+
+    /// <summary>
+    /// The owner's persona banner (top-right, clear of the centered focal card):
+    /// the avatar (or a placeholder disc), the persona name, and the
+    /// online-state dot. Drawn last so it stays visible.
+    /// </summary>
+    private void DrawPersonaBanner(SKCanvas canvas, SKRect bounds, SteamPersona persona, SKBitmap? avatar, SKColor text)
+    {
+        float pad = 12f;
+        float size = 44f;
+        SKRect avatarRect = new(bounds.Right - pad - size, bounds.Top + pad, bounds.Right - pad, bounds.Top + pad + size);
+
+        if (avatar is not null)
+        {
+            _posterPaint.Color = SKColors.White;
+            canvas.DrawRoundRect(avatarRect, 8f, 8f, _posterPaint);
+            canvas.DrawBitmap(avatar, avatarRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), _posterPaint);
+        }
+        else
+        {
+            _placeholderPaint.Color = new SKColor(38, 42, 50, 255);
+            canvas.DrawRoundRect(avatarRect, 8f, 8f, _placeholderPaint);
+        }
+
+        SKFont nameFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f);
+        _textPaint.Color = text;
+        canvas.DrawText(persona.PersonaName, avatarRect.Left - 8f, avatarRect.MidY, SKTextAlign.Right, nameFont, _textPaint);
+
+        _accentPaint.Color = PersonaStateColor(persona.PersonState);
+        canvas.DrawCircle(avatarRect.Right - 8f, avatarRect.Bottom - 8f, 5f, _accentPaint);
+    }
+
+    /// <summary>The online-state color for a community-API <c>personastate</c> ordinal.</summary>
+    private static SKColor PersonaStateColor(int personState)
+    {
+        return personState switch
+        {
+            1 => new SKColor(86, 199, 115, 255),   // Online
+            2 => new SKColor(95, 177, 255, 255),    // InGame
+            3 => new SKColor(255, 107, 107, 255),   // Busy
+            4 or 5 => new SKColor(255, 197, 91, 255), // Away / Snoozing
+            _ => new SKColor(144, 148, 153, 255),   // Offline / unknown
+        };
     }
 
     private void DrawFocus(SKCanvas canvas, SKRect card, SteamGameItem game, SteamPosterCache cache, SKColor accent, SKColor text)

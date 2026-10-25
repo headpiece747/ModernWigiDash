@@ -171,4 +171,45 @@ public sealed class SteamWebApiClientTests
 
         Assert.IsNull(apiClient.FetchPosterAsync(730u, CancellationToken.None).GetAwaiter().GetResult());
     }
+
+    [TestMethod]
+    public void FetchAvatarAsync_BlankUrl_ReturnsNullWithoutHttp()
+    {
+        var handler = new StubHandler(_ => JsonResponse("{}"));
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
+
+        Assert.IsNull(apiClient.FetchAvatarAsync("", CancellationToken.None).GetAwaiter().GetResult());
+        Assert.IsNull(apiClient.FetchAvatarAsync("   ", CancellationToken.None).GetAwaiter().GetResult());
+        Assert.IsEmpty(handler.RequestUrls);
+    }
+
+    [TestMethod]
+    public void FetchAvatarAsync_ValidUrl_ServesTheBytes()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent([9, 8, 7]),
+        });
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
+
+        byte[]? bytes = apiClient.FetchAvatarAsync("https://example.com/avatar.jpg", CancellationToken.None).GetAwaiter().GetResult();
+
+        CollectionAssert.AreEqual(new byte[] { 9, 8, 7 }, bytes!);
+        CollectionAssert.Contains(handler.RequestUrls, "https://example.com/avatar.jpg");
+    }
+
+    [TestMethod]
+    public void FetchAvatarAsync_OversizedAnswer_IsRefused()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[4 * 1024 * 1024 + 1]),
+        });
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
+
+        Assert.IsNull(apiClient.FetchAvatarAsync("https://example.com/avatar.jpg", CancellationToken.None).GetAwaiter().GetResult());
+    }
 }

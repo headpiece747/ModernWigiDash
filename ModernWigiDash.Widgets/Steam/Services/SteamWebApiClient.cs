@@ -91,6 +91,31 @@ internal sealed class SteamWebApiClient
     }
 
     /// <summary>
+    /// The owner's avatar image bytes, fetched from the community-API
+    /// <c>avatar_full</c> URL, bounded to the same 4 MB read as a poster
+    /// (a hostile URL is refused). Null on a blank URL or any failure.
+    /// </summary>
+    public async Task<byte[]?> FetchAvatarAsync(string avatarUrl, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(avatarUrl))
+            return null;
+
+        try
+        {
+            using HttpResponseMessage response = await _client.GetAsync(avatarUrl, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            return bytes.Length > MaxPosterBytes ? null : bytes;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The CDN poster bytes for an app id (the local-file-miss fallback leg),
     /// bounded to a 4 MB read (a library_600x900 poster is tens of KB; the
     /// cap refuses a hostile server's multi-megabyte answer). Null on any

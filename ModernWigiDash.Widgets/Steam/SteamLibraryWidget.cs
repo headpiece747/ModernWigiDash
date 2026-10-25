@@ -99,6 +99,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         var api = new SteamWebApiClient(clock, null);
         _service = new SteamLibraryService(source, tracker, cache, api, OnSnapshotPublished, msg => Context?.LogError(msg));
         _service.SetFavoritesJson(FavoritesJson);
+        _service.SetCredentials(SteamApiKey, SteamId64);
 
         if (_testSource is null)
             _service.Start();
@@ -126,13 +127,14 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         }
 
         service.PosterCache.DisposeRetired();
+        service.DisposeRetiredAvatar();
         IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
         (SKColor accent, SKColor text) = ResolveColors();
 
         if (IsShowcase)
         {
             (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
-            _showcaseRenderer.Render(canvas, bounds, focus, previous, next, service.PosterCache, accent, text);
+            _showcaseRenderer.Render(canvas, bounds, focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
         }
         else
         {
@@ -190,6 +192,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     {
         if (string.Equals(propertyName, nameof(FavoritesJson), StringComparison.Ordinal))
             _service?.SetFavoritesJson(FavoritesJson);
+        else if (string.Equals(propertyName, nameof(SteamApiKey), StringComparison.Ordinal)
+            || string.Equals(propertyName, nameof(SteamId64), StringComparison.Ordinal))
+            _service?.SetCredentials(SteamApiKey, SteamId64);
 
         base.OnPropertyChanged(propertyName, newValue);
     }
