@@ -141,7 +141,7 @@ public sealed class SteamProcessTrackerTests
         var bridge = new FakeBridge { CloseResult = true };
         var tracker = new SteamProcessTracker(bridge, _ => { });
 
-        bool verdict = tracker.TryClose(Manifest());
+        bool verdict = tracker.TryClose("game");
 
         Assert.IsTrue(verdict);
         CollectionAssert.AreEqual(new[] { ("game", SteamProcessTracker.CloseBudget) }, bridge.CloseCalls);
@@ -154,7 +154,7 @@ public sealed class SteamProcessTrackerTests
         var bridge = new FakeBridge { CloseResult = true };
         var tracker = new SteamProcessTracker(bridge, _ => { });
 
-        tracker.TryClose(Manifest(exec: ""));
+        tracker.TryClose("");
 
         CollectionAssert.AreEqual(new[] { ("", SteamProcessTracker.CloseBudget) }, bridge.CloseCalls);
     }

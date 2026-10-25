@@ -159,15 +159,13 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (IsShowcase)
         {
             (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
-            RequestPosterIfMissing(service, focus);
-            RequestPosterIfMissing(service, previous);
-            RequestPosterIfMissing(service, next);
+            service.RequestShowcasePosters(focus, previous, next);
             _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
         }
         else
         {
             SteamGridGeometry geometry = GridGeometry(bounds, games.Count);
-            RequestVisibleGridPosters(service, games, geometry);
+            service.RequestVisibleGridPosters(games, geometry);
             _gridRenderer.Render(canvas, bounds, games, geometry, service.PosterCache, accent, text);
         }
     }
@@ -236,29 +234,6 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
         SteamGridGeometry grid = GridGeometry(bounds, games.Count);
         return (SteamGridLayout.HitTest(grid, point), SteamShowcaseHit.None);
-    }
-
-    /// <summary>
-    /// Requests the poster for each visible grid cell that is not yet cached
-    /// (local file first, then the CDN; one in-flight per app). The 24-slot
-    /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
-    /// on demand instead of an all-games sweep evicting the visible ones.
-    /// </summary>
-    private static void RequestVisibleGridPosters(SteamLibraryService service, IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
-    {
-        for (int i = 0; i < geometry.CellCount; i++)
-        {
-            int index = geometry.Indexes[i];
-            if (index >= 0 && index < games.Count && !service.PosterCache.TryGet(games[index].AppId, out _))
-                service.RequestPoster(games[index].AppId);
-        }
-    }
-
-    /// <summary>Requests the poster for one visible showcase card when it is not yet cached.</summary>
-    private static void RequestPosterIfMissing(SteamLibraryService service, SteamGameItem? card)
-    {
-        if (card is not null && !service.PosterCache.TryGet(card.AppId, out _))
-            service.RequestPoster(card.AppId);
     }
 
     /// <summary>
@@ -445,7 +420,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (game.State == SteamGameState.Running)
             _ = service.Terminate(game.AppId);
         else if (game.IsLaunchable)
-            service.Tracker.Launch(game.AppId);
+            service.Launch(game.AppId);
     }
 
     private void ToggleFavoriteAt(SKPoint point, SteamLibraryService service)

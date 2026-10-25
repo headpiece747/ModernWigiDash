@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using ModernWigiDash.Widgets.Steam.Models;
 using ModernWigiDash.Widgets.Steam.Services;
 
@@ -217,6 +218,64 @@ public sealed class SteamLibraryServiceTests
         service.ToggleFavorite(730u);
         string again = service.ToggleFavorite(730u);
         Assert.AreEqual(on, again, "two toggles are the identity: the set, not the string, owns the state");
+    }
+
+    /// <summary>A stub poster CDN: records every requested URL and serves a valid poster.</summary>
+    private sealed class RecordingPosterHandler : HttpMessageHandler
+    {
+        public List<string> RequestedUrls { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestedUrls.Add(request.RequestUri!.ToString());
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(MakeJpegBytes()),
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    [TestMethod]
+    public async Task RequestShowcasePosters_RequestsOnlyTheMissingCards()
+    {
+        var handler = new RecordingPosterHandler();
+        var http = new HttpClient(handler);
+        var cache = new SteamPosterCache();
+        using var service = new SteamLibraryService(
+            new OneGameSource(),
+            new SteamProcessTracker(new RecordingBridge(), _ => { }),
+            cache,
+            new SteamWebApiClient(TimeProvider.System, http),
+            _ => { },
+            _ => { });
+
+        try
+        {
+            // The focal card is already cached: only the missing flank may be requested.
+            cache.InsertForTest(100u, new SKBitmap(8, 8, SKColorType.Rgb565, SKAlphaType.Opaque));
+            var focus = new SteamGameItem(100u, "Focus", "dir", SteamGameState.Idle, 1f, 10.0, null, false);
+            var previous = new SteamGameItem(99u, "Prev", "dir", SteamGameState.Idle, 1f, 10.0, null, false);
+
+            service.RequestShowcasePosters(focus, previous, next: null);
+
+            await UntilCacheHasAsync(cache, 99u);
+            CollectionAssert.AreEqual(
+                new[] { SteamPosterSource.CdnUrl(99u) },
+                handler.RequestedUrls,
+                "the cached focal and the absent next are not requested; only the missing flank is");
+        }
+        finally
+        {
+            http.Dispose();
+        }
+    }
+
+    /// <summary>Waits (bounded) until the cache holds a poster for the app id (the fire-and-forget fetch lands).</summary>
+    private static async Task UntilCacheHasAsync(SteamPosterCache cache, uint appId)
+    {
+        for (int i = 0; i < 200 && !cache.TryGet(appId, out _); i++)
+            await Task.Delay(25).ConfigureAwait(false);
     }
 
     /// <summary>A tiny valid JPEG (the poster decode must succeed for the cache to populate).</summary>

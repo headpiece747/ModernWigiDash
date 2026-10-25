@@ -257,13 +257,6 @@ internal sealed class SteamProcessTracker
     public void Launch(uint appId) => _launchSink(BuildLaunchUri(appId));
 
     /// <summary>
-    /// Terminates the game's process tree: the polite close, the 3-second
-    /// budget, then the whole-tree kill. Returns the bridge's verdict (true
-    /// when nothing is left running).
-    /// </summary>
-    public bool TryClose(SteamAppManifest manifest) => _bridge.TryClose(manifest.ProcessName, CloseBudget);
-
-    /// <summary>
     /// Terminates a process by name (the widget's tap-on-a-running-title path,
     /// where the display item carries the app id and the service owns the
     /// app-id → process-name map). Blocks up to <see cref="CloseBudget"/>;

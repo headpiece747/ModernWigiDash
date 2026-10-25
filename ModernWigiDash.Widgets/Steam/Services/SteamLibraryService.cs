@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Steam.Models;
+using ModernWigiDash.Widgets.Steam.Rendering;
 
 namespace ModernWigiDash.Widgets.Steam.Services;
 
@@ -80,8 +81,8 @@ internal sealed class SteamLibraryService : IDisposable
     /// <summary>The poster cache (the renderer's lookup owner).</summary>
     public SteamPosterCache PosterCache => _cache;
 
-    /// <summary>The process tracker (the widget's launch/terminate owner).</summary>
-    public SteamProcessTracker Tracker => _tracker;
+    /// <summary>Launches the game through the shell-exec sink (the steam://run URI).</summary>
+    public void Launch(uint appId) => _tracker.Launch(appId);
 
     /// <summary>The current favorites JSON (a uint app-id array).</summary>
     public string FavoritesJson
@@ -311,6 +312,38 @@ internal sealed class SteamLibraryService : IDisposable
             lock (_gate)
                 _posterInFlight.Remove(appId);
         });
+    }
+
+    /// <summary>
+    /// Requests the poster for each visible grid cell that is not yet cached
+    /// (local file first, then the CDN; one in-flight per app). The 24-slot
+    /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
+    /// on demand instead of an all-games sweep evicting the visible ones. The
+    /// try-get-then-request policy lives here, not in the widget.
+    /// </summary>
+    public void RequestVisibleGridPosters(IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
+    {
+        for (int i = 0; i < geometry.CellCount; i++)
+        {
+            int index = geometry.Indexes[i];
+            if (index >= 0 && index < games.Count)
+                RequestPosterIfMissing(games[index]);
+        }
+    }
+
+    /// <summary>Requests the poster for each visible showcase card (the focal card and its flanks) when not yet cached.</summary>
+    public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
+    {
+        RequestPosterIfMissing(focus);
+        RequestPosterIfMissing(previous);
+        RequestPosterIfMissing(next);
+    }
+
+    /// <summary>Requests one card's poster when it is not yet cached.</summary>
+    private void RequestPosterIfMissing(SteamGameItem? card)
+    {
+        if (card is not null && !_cache.TryGet(card.AppId, out _))
+            RequestPoster(card.AppId);
     }
 
     /// <summary>
