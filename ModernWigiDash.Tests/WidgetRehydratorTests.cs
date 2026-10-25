@@ -20,6 +20,12 @@ public class WidgetRehydratorTests
         [WidgetProperty("Label", WidgetPropertyType.Text, defaultValue: "default")]
         public string Label { get; set; } = "default";
 
+        /// <summary>State with no inspector row, written through
+        /// <c>SetProperty</c> in production (the Steam favorites shape): it
+        /// still has to survive a reload, because PropertyValues is the
+        /// persistence record and the attribute governs the inspector only.</summary>
+        public string PersistedState { get; set; } = "[]";
+
         public bool Disposed { get; private set; }
         public string? LastChange { get; private set; }
 
@@ -103,6 +109,22 @@ public class WidgetRehydratorTests
         Assert.AreEqual("custom-label", widget.Label, "the stored property value must be applied");
         Assert.AreEqual(nameof(RehydrateTestWidget.Label), widget.LastChange, "applying the property must raise the change");
         Assert.AreSame(widget, placed.ActiveInstance, "the new instance must become the placed's active instance");
+    }
+
+    [TestMethod]
+    public void Rehydrate_AppliesPersistedStateWithoutAnInspectorRow()
+    {
+        var loader = CreateLoader(typeof(RehydrateTestWidget));
+        var placed = new PlacedWidgetInstance { PluginId = "rehydrate_test_widget" };
+        placed.PropertyValues["PersistedState"] = "[100]";
+
+        var instance = WidgetRehydrator.Rehydrate(loader, new TestContext(), placed);
+
+        Assert.IsNotNull(instance, "Rehydration must succeed");
+        Assert.AreEqual(
+            "[100]",
+            ((RehydrateTestWidget)instance).PersistedState,
+            "a value persisted through SetProperty must survive a reload even though it has no [WidgetProperty] row");
     }
 
     [TestMethod]

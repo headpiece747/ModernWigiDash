@@ -11,10 +11,17 @@ namespace ModernWigiDash.Widgets.Steam.Rendering;
 /// only ever LOOKS UP a published texture, never decodes), and the per-cell
 /// name, playtime, progress, state, and favorite marks. The cell geometry
 /// comes from <see cref="SteamGridLayout"/> — the same record the touch path
-/// hit-tests, so the drawn cells and the tap targets never drift.
+/// hit-tests — and its <c>Indexes</c> map says which game each cell draws, so
+/// a scrolled grid renders later titles instead of the first page shifted
+/// off-screen.
 /// </summary>
 internal sealed class SteamGridRenderer : IDisposable
 {
+    /// <summary>The fitted-name cache ceiling: a bounded memo of the per-cell
+    /// truncation (a steady-state frame reuses every entry, so the render tick
+    /// allocates no strings).</summary>
+    private const int NameCacheLimit = 512;
+
     private readonly SKPaint _panelPaint = new() { IsAntialias = true };
     private readonly SKPaint _posterPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
@@ -22,6 +29,7 @@ internal sealed class SteamGridRenderer : IDisposable
     private readonly SKPaint _accentPaint = new() { IsAntialias = true };
     private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true };
+    private readonly Dictionary<(uint AppId, int FontPx, int Width), (string Source, string Fitted)> _nameCache = [];
 
     /// <summary>
     /// Draws the grid: the background panel, then every visible cell (poster
@@ -33,8 +41,8 @@ internal sealed class SteamGridRenderer : IDisposable
         SKCanvas canvas,
         SKRect bounds,
         IReadOnlyList<SteamGameItem> games,
+        SteamGridGeometry geometry,
         SteamPosterCache cache,
-        float scrollX,
         SKColor accent,
         SKColor text)
     {
@@ -47,11 +55,12 @@ internal sealed class SteamGridRenderer : IDisposable
             return;
         }
 
-        int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-        SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, scrollX);
-
-        for (int i = 0; i < geometry.CellCount && i < games.Count; i++)
-            DrawCell(canvas, geometry.Cells[i], games[i], cache, accent, text);
+        for (int i = 0; i < geometry.CellCount; i++)
+        {
+            int index = geometry.Indexes[i];
+            if (index >= 0 && index < games.Count)
+                DrawCell(canvas, geometry.Cells[i], games[index], cache, accent, text);
+        }
     }
 
     /// <summary>Releases the hoisted paints (call on widget teardown).</summary>
@@ -83,7 +92,8 @@ internal sealed class SteamGridRenderer : IDisposable
         float fontPx = Math.Max(8f, cell.Width * 0.11f);
         SKFont nameFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx);
         _textPaint.Color = text;
-        DrawFittedText(canvas, game.Name, cell.Left + 6f, cell.Bottom - 6f - fontPx * 0.8f, cell.Width - 12f, nameFont, _textPaint);
+        string name = FitName(game, fontPx, cell.Width - 12f);
+        canvas.DrawText(name, cell.Left + 6f, cell.Bottom - 6f - fontPx * 0.8f, SKTextAlign.Left, nameFont, _textPaint);
 
         if (game.State == SteamGameState.Updating)
         {
@@ -114,23 +124,51 @@ internal sealed class SteamGridRenderer : IDisposable
         SKFont font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 20f);
         _textPaint.Color = text.WithAlpha(160);
         string message = "No Steam games found";
-        float width = font.MeasureText(message);
+        float width = font.MeasureText(message, _textPaint);
         canvas.DrawText(message, bounds.MidX - width / 2f, bounds.MidY, SKTextAlign.Left, font, _textPaint);
     }
 
-    private static void DrawFittedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKFont font, SKPaint paint)
+    /// <summary>
+    /// The cached fitted name for a cell: the game's full name when it fits,
+    /// else a binary-search truncation with an ellipsis. The result is memoized
+    /// per (app id, font px, cell width) so a steady-state frame measures and
+    /// allocates nothing (the source name is compared to catch a rename).
+    /// </summary>
+    private string FitName(SteamGameItem game, float fontPx, float maxWidth)
     {
-        if (font.MeasureText(text) <= maxWidth)
+        var key = (game.AppId, (int)fontPx, (int)maxWidth);
+        if (_nameCache.TryGetValue(key, out (string Source, string Fitted) entry)
+            && string.Equals(entry.Source, game.Name, StringComparison.Ordinal))
         {
-            canvas.DrawText(text, x, y, SKTextAlign.Left, font, paint);
-            return;
+            return entry.Fitted;
         }
 
-        int length = text.Length;
-        while (length > 0 && font.MeasureText(text[..length] + "…") > maxWidth)
-            length--;
+        string fitted = FitText(game.Name, maxWidth, fontPx);
+        if (_nameCache.Count >= NameCacheLimit)
+            _nameCache.Clear();
+        _nameCache[key] = (game.Name, fitted);
+        return fitted;
+    }
 
-        string fitted = length <= 0 ? "…" : text[..Math.Max(0, length - 1)] + "…";
-        canvas.DrawText(fitted, x, y, SKTextAlign.Left, font, paint);
+    private string FitText(string text, float maxWidth, float fontPx)
+    {
+        SKFont font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx);
+        if (font.MeasureText(text, _textPaint) <= maxWidth)
+            return text;
+
+        const string Ellipsis = "…";
+        float ellipsisWidth = font.MeasureText(Ellipsis, _textPaint);
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int mid = (low + high + 1) / 2;
+            if (font.MeasureText(text.AsSpan(0, mid), _textPaint) + ellipsisWidth <= maxWidth)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+
+        return low <= 0 ? Ellipsis : string.Concat(text.AsSpan(0, low), Ellipsis.AsSpan());
     }
 }

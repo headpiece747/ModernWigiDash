@@ -92,6 +92,124 @@ internal static class SteamVdfTokenizer
     }
 
     /// <summary>
+    /// Finds the next <c>"key" { ... }</c> block at or after
+    /// <paramref name="fromIndex"/> and reports its content span (between the
+    /// braces). Leaf values are skipped correctly (a quote inside a value does
+    /// not restart the key scan). Used for the nested localconfig.vdf shape
+    /// (<c>"Steam" { "apps" { "730" { "Playtime" "123" } } }</c>).
+    /// </summary>
+    public static bool TryFindBlock(ReadOnlySpan<char> text, string key, int fromIndex, out int contentStart, out int contentEnd)
+    {
+        contentStart = 0;
+        contentEnd = 0;
+
+        int index = Math.Clamp(fromIndex, 0, text.Length);
+        while (index < text.Length)
+        {
+            int quote = text[index..].IndexOf('"');
+            if (quote < 0)
+                return false;
+
+            quote += index;
+            int keyEnd = ReadQuotedSpan(text, quote);
+            if (keyEnd < 0)
+                return false;
+
+            ReadOnlySpan<char> candidateKey = text[(quote + 1)..keyEnd];
+            if (!candidateKey.SequenceEqual(key.AsSpan()))
+            {
+                index = keyEnd + 1;
+                continue;
+            }
+
+            int valueOpen = SkipWhitespace(text, keyEnd + 1);
+            if (valueOpen >= text.Length)
+                return false;
+
+            if (text[valueOpen] == '"')
+            {
+                int valueEnd = ReadQuotedSpan(text, valueOpen);
+                if (valueEnd < 0)
+                    return false;
+                index = valueEnd + 1;
+                continue;
+            }
+
+            if (text[valueOpen] != '{')
+            {
+                index = valueOpen + 1;
+                continue;
+            }
+
+            int blockEnd = SkipBlock(text, valueOpen);
+            if (blockEnd < 0)
+                return false;
+
+            contentStart = valueOpen + 1;
+            contentEnd = blockEnd;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the next child block (<c>"key" { ... }</c>) at or after
+    /// <paramref name="fromIndex"/>, reporting the key and the content span.
+    /// Leaf entries are skipped (their quoted value is consumed whole), so a
+    /// caller iterating a block's children never mistakes a value for a key.
+    /// </summary>
+    public static bool TryFindChildBlock(ReadOnlySpan<char> text, int fromIndex, out string key, out int contentStart, out int contentEnd)
+    {
+        key = "";
+        contentStart = 0;
+        contentEnd = 0;
+
+        int index = Math.Clamp(fromIndex, 0, text.Length);
+        while (index < text.Length)
+        {
+            int quote = text[index..].IndexOf('"');
+            if (quote < 0)
+                return false;
+
+            quote += index;
+            int keyEnd = ReadQuotedSpan(text, quote);
+            if (keyEnd < 0)
+                return false;
+
+            int valueOpen = SkipWhitespace(text, keyEnd + 1);
+            if (valueOpen >= text.Length)
+                return false;
+
+            if (text[valueOpen] == '"')
+            {
+                int valueEnd = ReadQuotedSpan(text, valueOpen);
+                if (valueEnd < 0)
+                    return false;
+                index = valueEnd + 1;
+                continue;
+            }
+
+            if (text[valueOpen] != '{')
+            {
+                index = valueOpen + 1;
+                continue;
+            }
+
+            int blockEnd = SkipBlock(text, valueOpen);
+            if (blockEnd < 0)
+                return false;
+
+            key = text[(quote + 1)..keyEnd].ToString();
+            contentStart = valueOpen + 1;
+            contentEnd = blockEnd;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Parses a leaf value span as a uint (the ACF's appid / StateFlags
     /// shape). Zero-allocation (the span overload of the BCL parse); a
     /// non-numeric value yields false.

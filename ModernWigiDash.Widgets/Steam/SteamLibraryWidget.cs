@@ -10,12 +10,13 @@ namespace ModernWigiDash.Widgets.Steam;
 /// <summary>
 /// The native Steam Library widget: local game discovery (registry +
 /// libraryfolders.vdf + ACF), a bounded 24-slot poster texture cache, 3-second
-/// process tracking, and steam://run launch/terminate. The widget keeps only
+/// process tracking, and steam://run launch / terminate. The widget keeps only
 /// orchestration: the service lifecycle, the property surface, the touch
-/// routing (tap launches, a 600 ms long-press favorites, a drag scrolls),
-/// and the render dispatch to the grid/showcase renderers. The render tick
-/// reads the published snapshot and the poster cache only — no disk, no
-/// network, no per-tick allocation beyond the cached-font fast path.
+/// routing (tap launches an idle title and terminates a running one, a 600 ms
+/// long-press favorites, a drag scrolls), and the render dispatch to the
+/// grid/showcase renderers. The render tick reads the published snapshot and
+/// the poster cache only — no disk, no network, no per-tick allocation beyond
+/// the cached-font fast path.
 /// </summary>
 [WidgetMetadata("steam_library", "Steam Library", Category = "Games", DefaultGridSize = GridSizePreset.Size5x4)]
 public sealed class SteamLibraryWidget : ModernWidgetBase
@@ -59,6 +60,14 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private SKRect _lastBounds;
     private float _scrollX;
     private int _showcaseIndex;
+    private IReadOnlyList<SteamGameItem> _filteredGames = [];
+    private SteamLibrarySnapshot? _filteredSnapshot;
+    private bool _filteredShowUninstalled;
+    private SteamGridGeometry _gridGeometry;
+    private bool _gridGeometryValid;
+    private SKRect _gridBounds;
+    private float _gridScrollX;
+    private int _gridCount;
     private SKPoint? _touchDownPoint;
     private DateTimeOffset? _touchDownUtc;
     private bool _disposed;
@@ -90,6 +99,15 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
+
+        // A rehydrated instance re-runs this method: release the previous
+        // service (its loop, cache, and avatar) instead of orphaning it.
+        SteamLibraryService? previous = _service;
+        _service = null;
+        previous?.Dispose();
+        _snapshot = SteamLibrarySnapshot.Empty;
+        _filteredSnapshot = null;
+        _gridGeometryValid = false;
 
         ISteamLibrarySource source = _testSource ?? new SteamLibrarySource(msg => Context?.LogError(msg));
         Action<string> sink = _testLaunchSink ?? (Action<string>)LaunchViaShell;
@@ -134,14 +152,40 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (IsShowcase)
         {
             (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
-            RequestVisiblePosters(service, new[] { focus, previous, next });
+            RequestPosterIfMissing(service, focus);
+            RequestPosterIfMissing(service, previous);
+            RequestPosterIfMissing(service, next);
             _showcaseRenderer.Render(canvas, bounds, focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
         }
         else
         {
-            RequestVisibleGridPosters(service, games, bounds);
-            _gridRenderer.Render(canvas, bounds, games, service.PosterCache, _scrollX, accent, text);
+            SteamGridGeometry geometry = GridGeometry(bounds, games.Count);
+            RequestVisibleGridPosters(service, games, geometry);
+            _gridRenderer.Render(canvas, bounds, games, geometry, service.PosterCache, accent, text);
         }
+    }
+
+    /// <summary>The grid geometry, recomputed only when the bounds, the scroll
+    /// offset, or the game count changes (a steady-state frame reuses it, so
+    /// the render tick allocates no cell arrays).</summary>
+    private SteamGridGeometry GridGeometry(SKRect bounds, int gameCount)
+    {
+        SKRect rect = bounds.Width > 0f ? bounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        if (_gridGeometryValid
+            && _gridBounds == rect
+            && Math.Abs(_gridScrollX - _scrollX) < 1e-3f
+            && _gridCount == gameCount)
+        {
+            return _gridGeometry;
+        }
+
+        int columns = SteamGridLayout.ColumnsForWidth(rect.Width);
+        _gridGeometry = SteamGridLayout.Compute(rect, columns, _scrollX, gameCount);
+        _gridBounds = rect;
+        _gridScrollX = _scrollX;
+        _gridCount = gameCount;
+        _gridGeometryValid = true;
+        return _gridGeometry;
     }
 
     /// <summary>
@@ -150,27 +194,21 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
     /// on demand instead of an all-games sweep evicting the visible ones.
     /// </summary>
-    private void RequestVisibleGridPosters(SteamLibraryService service, IReadOnlyList<SteamGameItem> games, SKRect bounds)
+    private static void RequestVisibleGridPosters(SteamLibraryService service, IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
     {
-        SKRect rect = bounds.Width > 0f ? bounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        int columns = SteamGridLayout.ColumnsForWidth(rect.Width);
-        SteamGridGeometry geometry = SteamGridLayout.Compute(rect, columns, _scrollX);
-        int visible = Math.Min(geometry.CellCount, games.Count);
-        for (int i = 0; i < visible; i++)
+        for (int i = 0; i < geometry.CellCount; i++)
         {
-            if (!service.PosterCache.TryGet(games[i].AppId, out _))
-                service.RequestPoster(games[i].AppId);
+            int index = geometry.Indexes[i];
+            if (index >= 0 && index < games.Count && !service.PosterCache.TryGet(games[index].AppId, out _))
+                service.RequestPoster(games[index].AppId);
         }
     }
 
-    /// <summary>Requests the poster for each visible showcase card that is not yet cached.</summary>
-    private static void RequestVisiblePosters(SteamLibraryService service, SteamGameItem?[] cards)
+    /// <summary>Requests the poster for one visible showcase card when it is not yet cached.</summary>
+    private static void RequestPosterIfMissing(SteamLibraryService service, SteamGameItem? card)
     {
-        foreach (SteamGameItem? card in cards)
-        {
-            if (card is not null && !service.PosterCache.TryGet(card.AppId, out _))
-                service.RequestPoster(card.AppId);
-        }
+        if (card is not null && !service.PosterCache.TryGet(card.AppId, out _))
+            service.RequestPoster(card.AppId);
     }
 
     /// <summary>
@@ -264,17 +302,30 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
     private IReadOnlyList<SteamGameItem> FilterGames(IReadOnlyList<SteamGameItem> games)
     {
-        if (ShowUninstalled)
-            return games;
+        // Memoized per published snapshot: a steady-state render tick reuses
+        // the filtered list instead of allocating one every frame.
+        if (ReferenceEquals(_filteredSnapshot, _snapshot) && _filteredShowUninstalled == ShowUninstalled)
+            return _filteredGames;
 
-        List<SteamGameItem> installed = [];
-        foreach (SteamGameItem game in games)
+        if (ShowUninstalled)
         {
-            if (game.State != SteamGameState.Uninstalled)
-                installed.Add(game);
+            _filteredGames = games;
+        }
+        else
+        {
+            List<SteamGameItem> installed = [];
+            foreach (SteamGameItem game in games)
+            {
+                if (game.State != SteamGameState.Uninstalled)
+                    installed.Add(game);
+            }
+
+            _filteredGames = installed;
         }
 
-        return installed;
+        _filteredSnapshot = _snapshot;
+        _filteredShowUninstalled = ShowUninstalled;
+        return _filteredGames;
     }
 
     private (SteamGameItem? Focus, SteamGameItem? Previous, SteamGameItem? Next) ShowcaseSelection(IReadOnlyList<SteamGameItem> games)
@@ -298,12 +349,10 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private void ScrollGrid(float dragDelta)
     {
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
         int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-        float gap = 12f * (bounds.Width / SteamGridLayout.DesignWidth);
-        float cellWidth = (bounds.Width - 16f * 2f * (bounds.Width / SteamGridLayout.DesignWidth) - gap * (columns - 1)) / columns;
-        int visibleCells = columns * Math.Max(1, (int)((bounds.Height - 32f * (bounds.Width / SteamGridLayout.DesignWidth)) / (cellWidth * SteamGridLayout.PosterAspect + gap)));
-        float maxScroll = Math.Max(0f, (FilterGames(_snapshot.Games).Count - visibleCells) * (cellWidth + gap));
-        _scrollX = Math.Clamp(_scrollX - dragDelta, 0f, maxScroll);
+        SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
+        _scrollX = Math.Clamp(_scrollX - dragDelta, 0f, geometry.MaxScroll);
         Context?.RequestRender();
     }
 
@@ -326,8 +375,8 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
                     SnapShowcase(1);
                     break;
                 case SteamShowcaseHit.Focus:
-                    if (focus is not null && focus.IsLaunchable)
-                        service.Tracker.Launch(focus.AppId);
+                    if (focus is not null)
+                        Activate(service, focus);
                     break;
             }
             return;
@@ -335,10 +384,23 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
         int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-        SteamGridGeometry gridGeometry = SteamGridLayout.Compute(bounds, columns, _scrollX);
+        SteamGridGeometry gridGeometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
         int index = SteamGridLayout.HitTest(gridGeometry, point);
-        if (index >= 0 && index < games.Count && games[index].IsLaunchable)
-            service.Tracker.Launch(games[index].AppId);
+        if (index >= 0 && index < games.Count)
+            Activate(service, games[index]);
+    }
+
+    /// <summary>
+    /// The tap action for one title: a running game is terminated (the
+    /// CloseMainWindow → 3 s → kill-tree contract, run off the render thread),
+    /// anything installed and idle launches through <c>steam://run</c>.
+    /// </summary>
+    private static void Activate(SteamLibraryService service, SteamGameItem game)
+    {
+        if (game.State == SteamGameState.Running)
+            _ = service.Terminate(game.AppId);
+        else if (game.IsLaunchable)
+            service.Tracker.Launch(game.AppId);
     }
 
     private void ToggleFavoriteAt(SKPoint point, SteamLibraryService service)
@@ -359,7 +421,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         {
             SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
             int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-            SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, _scrollX);
+            SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
             int index = SteamGridLayout.HitTest(geometry, point);
             if (index >= 0 && index < games.Count)
                 appId = games[index].AppId;

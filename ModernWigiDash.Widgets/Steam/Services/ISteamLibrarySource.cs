@@ -7,7 +7,7 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 /// The Steam library source seam: the installation path and the manifest
 /// enumeration. The production implementation wraps
 /// <see cref="SteamLibraryLocator"/>; tests inject a fake so the service's
-/// refresh and poster-warmup logic run against a fixed library without a
+/// refresh and poster-request logic run against a fixed library without a
 /// real Steam installation.
 /// </summary>
 internal interface ISteamLibrarySource
@@ -47,6 +47,6 @@ internal sealed class SteamLibrarySource : ISteamLibrarySource
             return [];
 
         IReadOnlyList<string> roots = SteamLibraryLocator.GetLibraryRoots(path);
-        return SteamLibraryLocator.LoadManifests(roots, _log);
+        return SteamLibraryLocator.LoadManifests(roots, _log, path);
     }
 }

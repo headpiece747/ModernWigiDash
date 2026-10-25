@@ -124,6 +124,65 @@ public sealed class SteamLibraryServiceTests
         }
     }
 
+    /// <summary>A process bridge that records every close and reports nothing running.</summary>
+    private sealed class RecordingBridge : ISteamProcessBridge
+    {
+        public List<string> Closed { get; } = [];
+
+        public bool IsRunning(string processName) => false;
+
+        public bool TryClose(string processName, TimeSpan budget)
+        {
+            Closed.Add(processName);
+            return true;
+        }
+    }
+
+    /// <summary>A source over one installed manifest (the process-name map fixture).</summary>
+    private sealed class OneGameSource : ISteamLibrarySource
+    {
+        public string? SteamPath => null;
+
+        public IReadOnlyList<SteamAppManifest> LoadManifests()
+            => [new SteamAppManifest(730u, "Game", "gamedir", "game.exe", SteamAppState.FullyInstalled, 0, 0, 0, 10.0)];
+    }
+
+    [TestMethod]
+    public async Task Terminate_ClosesTheGamesProcessTree()
+    {
+        var bridge = new RecordingBridge();
+        using var service = new SteamLibraryService(
+            new OneGameSource(),
+            new SteamProcessTracker(bridge, _ => { }),
+            new SteamPosterCache(),
+            new SteamWebApiClient(),
+            _ => { },
+            _ => { });
+        service.RefreshNow();
+
+        await service.Terminate(730u);
+
+        CollectionAssert.AreEqual(new[] { "game" }, bridge.Closed, "the app id must resolve to its process name and close that tree");
+    }
+
+    [TestMethod]
+    public async Task Terminate_UnknownApp_DoesNotTouchAnyProcess()
+    {
+        var bridge = new RecordingBridge();
+        using var service = new SteamLibraryService(
+            new OneGameSource(),
+            new SteamProcessTracker(bridge, _ => { }),
+            new SteamPosterCache(),
+            new SteamWebApiClient(),
+            _ => { },
+            _ => { });
+        service.RefreshNow();
+
+        await service.Terminate(999u);
+
+        Assert.IsEmpty(bridge.Closed, "an app id with no process name must not close anything");
+    }
+
     /// <summary>A tiny valid JPEG (the poster decode must succeed for the cache to populate).</summary>
     private static byte[] MakeJpegBytes()
     {

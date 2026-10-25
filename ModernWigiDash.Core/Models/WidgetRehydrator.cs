@@ -99,8 +99,14 @@ public static class WidgetRehydrator
             var type = instance.GetType();
             foreach (var prop in type.GetProperties())
             {
-                var attr = prop.GetCustomAttribute<WidgetPropertyAttribute>();
-                if (attr is null) continue;
+                // Every persisted value is restored, not only the inspector's
+                // [WidgetProperty] rows: PropertyValues is written by
+                // ModernWidgetBase.SetProperty (the persistence opt-in), which
+                // widgets also use for state with no editor row (the Steam
+                // widget's FavoritesJson). The attribute governs the inspector
+                // only, so gating on it dropped such state on every reload.
+                if (!prop.CanWrite || prop.SetMethod is not { IsPublic: true }) continue;
+                if (prop.GetIndexParameters().Length > 0) continue;
                 if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
 
                 object? value = ConvertPropertyValue(raw, prop.PropertyType);

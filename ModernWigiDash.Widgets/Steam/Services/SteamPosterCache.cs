@@ -69,15 +69,21 @@ internal sealed class SteamPosterCache : IDisposable
     /// </summary>
     public void Store(uint appId, byte[] data, int maxWidth, int maxHeight)
     {
-        if (_disposed)
-            return;
-
         SKBitmap? decoded = DecodeScaled(data, maxWidth, maxHeight);
         if (decoded is null)
             return;
 
         lock (_gate)
         {
+            // Re-check inside the lock: a decode that started before Dispose
+            // must not insert into the cleared cache (which would leak the
+            // bitmap, since the disposal pass has already run).
+            if (_disposed)
+            {
+                decoded.Dispose();
+                return;
+            }
+
             if (_slots.TryGetValue(appId, out CacheSlot? existing))
             {
                 _retired.Retire(existing.Bitmap);
@@ -108,13 +114,13 @@ internal sealed class SteamPosterCache : IDisposable
     /// <summary>Teardown: disposes every cached texture and the pending retirements.</summary>
     public void Dispose()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-
         List<SKBitmap> cached;
         lock (_gate)
         {
+            if (_disposed)
+                return;
+            _disposed = true;
+
             cached = _slots.Values.Select(s => s.Bitmap).ToList();
             _slots.Clear();
             _recency.Clear();

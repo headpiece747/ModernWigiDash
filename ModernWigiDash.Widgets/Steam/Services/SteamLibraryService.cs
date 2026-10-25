@@ -9,10 +9,12 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 /// manifests, folds each into its display state (via the process tracker),
 /// applies the favorite set, and publishes an immutable
 /// <see cref="SteamLibrarySnapshot"/> the widget reads on the render tick.
-/// It also owns the poster warmup (local files on the tick, a bounded
-/// background CDN fetch on a renderer-requested cache miss) and the
-/// favorites JSON. The render tick never touches disk or the network — it
-/// reads the published snapshot and the poster cache only.
+/// It also owns the posters (a local file on the renderer's request, a
+/// bounded background CDN fetch on the local miss, at most
+/// <see cref="MaxPosterFetchConcurrency"/> in flight), the app-id to
+/// process-name map behind terminate, and the favorites JSON. The render
+/// tick never touches disk or the network — it reads the published snapshot
+/// and the poster cache only.
 /// </summary>
 internal sealed class SteamLibraryService : IDisposable
 {
@@ -21,6 +23,12 @@ internal sealed class SteamLibraryService : IDisposable
 
     /// <summary>The cached poster target height (the 2:3 aspect of the width).</summary>
     public const int PosterTargetHeight = 270;
+
+    /// <summary>The maximum concurrent background poster fetches: a fast scroll
+    /// can request many visible cells at once, and an unbounded burst would
+    /// hammer the disk/CDN. The renderer redraws a placeholder until a slot
+    /// frees.</summary>
+    private const int MaxPosterFetchConcurrency = 6;
 
     private readonly ISteamLibrarySource _source;
     private readonly SteamProcessTracker _tracker;
@@ -32,8 +40,10 @@ internal sealed class SteamLibraryService : IDisposable
     private readonly System.Threading.Lock _gate = new();
     private HashSet<uint> _favoriteApps = [];
     private readonly HashSet<uint> _posterInFlight = [];
+    private Dictionary<uint, string> _processNames = [];
     private string _favoritesJson = "[]";
     private volatile SteamLibrarySnapshot _current = SteamLibrarySnapshot.Empty;
+    private volatile bool _disposed;
 
     private string _apiKey = "";
     private string _steamId64 = "";
@@ -175,6 +185,9 @@ internal sealed class SteamLibraryService : IDisposable
     /// </summary>
     private void RefreshPersona()
     {
+        if (_disposed)
+            return;
+
         string apiKey = _apiKey;
         string steamId64 = _steamId64;
         if (string.IsNullOrWhiteSpace(apiKey) || !SteamWebApiClient.IsValidSteamId64(steamId64))
@@ -195,12 +208,18 @@ internal sealed class SteamLibraryService : IDisposable
     private async Task FetchPersonaAndAvatarAsync(string apiKey, string steamId64)
     {
         SteamPersona? persona = await _api.FetchPersonaAsync(apiKey, steamId64, CancellationToken.None).ConfigureAwait(false);
+        if (_disposed)
+            return;
+
         _persona = persona;
 
         string avatarUrl = persona?.AvatarUrl ?? "";
         if (avatarUrl.Length > 0 && !string.Equals(avatarUrl, _avatarUrlForCurrent, StringComparison.Ordinal))
         {
             byte[]? avatarBytes = await _api.FetchAvatarAsync(avatarUrl, CancellationToken.None).ConfigureAwait(false);
+            if (_disposed)
+                return;
+
             SKBitmap? decoded = avatarBytes is { Length: > 0 } ? SteamPosterCache.DecodeScaled(avatarBytes, 64, 64) : null;
             if (decoded is not null)
             {
@@ -233,6 +252,9 @@ internal sealed class SteamLibraryService : IDisposable
 
     private void PublishWithPersona()
     {
+        if (_disposed)
+            return;
+
         SteamLibrarySnapshot current = _current;
         var updated = current with { Persona = _persona };
         _current = updated;
@@ -251,6 +273,9 @@ internal sealed class SteamLibraryService : IDisposable
         bool start;
         lock (_gate)
         {
+            if (_posterInFlight.Count >= MaxPosterFetchConcurrency)
+                return;
+
             start = _posterInFlight.Add(appId);
         }
 
@@ -264,9 +289,33 @@ internal sealed class SteamLibraryService : IDisposable
         });
     }
 
+    /// <summary>
+    /// Terminates a running game by app id: the process tree gets the polite
+    /// close, the 3-second budget, then the whole-tree kill (the PRD's
+    /// contract). The close blocks, so it runs on the thread pool, never on
+    /// the render/touch thread; the returned task completes when the close
+    /// has finished (callers may discard it). A blank process name (an app
+    /// with no resolvable executable) is a completed no-op.
+    /// </summary>
+    public Task Terminate(uint appId)
+    {
+        string? processName;
+        lock (_gate)
+            _processNames.TryGetValue(appId, out processName);
+
+        if (string.IsNullOrEmpty(processName) || _disposed)
+            return Task.CompletedTask;
+
+        return Task.Run(() => _tracker.TryClose(processName));
+    }
+
     /// <summary>Stops the loop and disposes the poster cache.</summary>
     public void Dispose()
     {
+        if (_disposed)
+            return;
+        _disposed = true;
+
         _loop.Dispose();
         _cache.Dispose();
         SKBitmap? avatar = _personaAvatar;
@@ -278,9 +327,22 @@ internal sealed class SteamLibraryService : IDisposable
     private void RefreshTick()
     {
         IReadOnlyList<SteamAppManifest> manifests = _source.LoadManifests();
-        List<SteamGameItem> games = manifests.Select(ToGameItem).ToList();
+        var games = new List<SteamGameItem>(manifests.Count);
+        var processNames = new Dictionary<uint, string>(manifests.Count);
+        foreach (SteamAppManifest manifest in manifests)
+        {
+            games.Add(ToGameItem(manifest));
+            if (manifest.ProcessName.Length > 0)
+                processNames[manifest.AppId] = manifest.ProcessName;
+        }
 
-        var snapshot = new SteamLibrarySnapshot(games, _source.SteamPath, _source.SteamPath is not null, _persona);
+        lock (_gate)
+            _processNames = processNames;
+
+        // One Steam-path resolution per tick (the registry ladder is cheap but
+        // not free, and the path feeds both the snapshot and the found flag).
+        string? steamPath = _source.SteamPath;
+        var snapshot = new SteamLibrarySnapshot(games, steamPath, steamPath is not null, _persona);
         _current = snapshot;
         _publish(snapshot);
         RefreshPersona();

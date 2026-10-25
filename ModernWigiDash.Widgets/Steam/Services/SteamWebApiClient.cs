@@ -92,12 +92,15 @@ internal sealed class SteamWebApiClient
 
     /// <summary>
     /// The owner's avatar image bytes, fetched from the community-API
-    /// <c>avatar_full</c> URL, bounded to the same 4 MB read as a poster
-    /// (a hostile URL is refused). Null on a blank URL or any failure.
+    /// <c>avatar_full</c> URL, bounded to the same 4 MB read as a poster. Only
+    /// an https URL on a Steam-owned host is fetched: the URL comes from a
+    /// remote server, and following an arbitrary one would replay the client
+    /// into a third-party host (the server-supplied-URL rule). Null on a blank,
+    /// refused, or failing URL.
     /// </summary>
     public async Task<byte[]?> FetchAvatarAsync(string avatarUrl, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(avatarUrl))
+        if (!IsSteamImageUrl(avatarUrl))
             return null;
 
         try
@@ -106,8 +109,7 @@ internal sealed class SteamWebApiClient
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-            return bytes.Length > MaxPosterBytes ? null : bytes;
+            return await ReadBoundedAsync(response.Content, MaxPosterBytes, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -129,11 +131,58 @@ internal sealed class SteamWebApiClient
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-            if (bytes.Length > MaxPosterBytes)
+            return await ReadBoundedAsync(response.Content, MaxPosterBytes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the value is an https URL on a Steam-owned image host
+    /// (<c>steamstatic.com</c> or <c>steamcommunity.com</c>, subdomains
+    /// included) — the only origins the community API's avatar URL may point at.
+    /// </summary>
+    internal static bool IsSteamImageUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
+            return false;
+
+        return IsHostOrSubdomain(uri.Host, "steamstatic.com")
+            || IsHostOrSubdomain(uri.Host, "steamcommunity.com");
+    }
+
+    private static bool IsHostOrSubdomain(string host, string domain)
+        => string.Equals(host, domain, StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Reads a response body into a byte array, refusing anything over
+    /// <paramref name="maxBytes"/>. The declared Content-Length is checked
+    /// before reading, and the copy stops at the cap so a chunked answer
+    /// (no declared length) cannot grow unbounded. Null when the body is
+    /// missing, oversized, or unreadable.
+    /// </summary>
+    private static async Task<byte[]?> ReadBoundedAsync(HttpContent content, int maxBytes, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (content.Headers.ContentLength is long declared && declared > maxBytes)
                 return null;
 
-            return bytes;
+            using Stream stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var buffered = new MemoryStream();
+            byte[] chunk = new byte[81920];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffered.Length + read > maxBytes)
+                    return null;
+                await buffered.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+
+            return buffered.ToArray();
         }
         catch (Exception)
         {

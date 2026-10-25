@@ -1,21 +1,6 @@
 namespace ModernWigiDash.Widgets.Steam.Models;
 
 /// <summary>
-/// The Steam Library widget's layout modes (the inspector's "Display Layout"
-/// Choice property).
-/// </summary>
-public enum SteamLayoutMode
-{
-    /// <summary>Responsive multi-row poster grid with category rows
-    /// (Favorites / Installed / Updating), horizontal drag to scroll.</summary>
-    PosterGrid,
-
-    /// <summary>Centered focal card with flanking cards, swipe to snap to the
-    /// next title.</summary>
-    Showcase,
-}
-
-/// <summary>
 /// The Steam appmanifest (ACF) <c>StateFlags</c> bitmask, the Lutris Steam
 /// documentation's table (the reference every Steam tooling uses). The ACF
 /// stores the flags as a decimal uint; a missing key reads as

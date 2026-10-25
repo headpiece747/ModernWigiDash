@@ -14,12 +14,19 @@ namespace ModernWigiDash.Widgets.Steam.Rendering;
 /// </summary>
 internal sealed class SteamShowcaseRenderer : IDisposable
 {
+    /// <summary>The text-memo ceiling: the focused name and playtime labels are
+    /// refitted only when the focus changes, so a steady-state frame allocates
+    /// no strings.</summary>
+    private const int TextCacheLimit = 32;
+
     private readonly SKPaint _panelPaint = new() { IsAntialias = true };
     private readonly SKPaint _posterPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private readonly SKPaint _subTextPaint = new() { IsAntialias = true };
     private readonly SKPaint _accentPaint = new() { IsAntialias = true };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true };
+    private readonly Dictionary<(uint AppId, int FontPx, int Width), (string Source, string Fitted)> _nameCache = [];
+    private readonly Dictionary<uint, (double Hours, string Text)> _playtimeCache = [];
 
     /// <summary>
     /// Draws the showcase for the focused game: the background panel, the
@@ -149,11 +156,12 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         float fontPx = Math.Max(10f, card.Width * 0.13f);
         SKFont nameFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx);
         _textPaint.Color = text;
-        DrawFittedText(canvas, game.Name, card.Left + 8f, card.Bottom - 8f - fontPx, card.Width - 16f, nameFont, _textPaint);
+        string name = FitName(game, card.Width - 16f, fontPx);
+        canvas.DrawText(name, card.Left + 8f, card.Bottom - 8f - fontPx, SKTextAlign.Left, nameFont, _textPaint);
 
         if (game.HoursOnRecord > 0)
         {
-            string playtime = $"{game.HoursOnRecord:0}h";
+            string playtime = PlaytimeText(game);
             SKFont subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontPx * 0.7f);
             _subTextPaint.Color = text.WithAlpha(180);
             canvas.DrawText(playtime, card.Left + 8f, card.Bottom - 8f - fontPx * 0.7f, SKTextAlign.Left, subFont, _subTextPaint);
@@ -186,19 +194,68 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         canvas.DrawText(message, bounds.MidX - width / 2f, bounds.MidY, SKTextAlign.Left, font, _textPaint);
     }
 
-    private static void DrawFittedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKFont font, SKPaint paint)
+    /// <summary>
+    /// The fitted (ellipsized) name for a card, memoized per app id, font
+    /// size, and available width. A steady-state frame measures and allocates
+    /// nothing; the source name is compared so a renamed title refits.
+    /// </summary>
+    private string FitName(SteamGameItem game, float maxWidth, float fontPx)
     {
-        if (font.MeasureText(text) <= maxWidth)
+        var key = (game.AppId, (int)fontPx, (int)maxWidth);
+        if (_nameCache.TryGetValue(key, out (string Source, string Fitted) entry)
+            && string.Equals(entry.Source, game.Name, StringComparison.Ordinal))
         {
-            canvas.DrawText(text, x, y, SKTextAlign.Left, font, paint);
-            return;
+            return entry.Fitted;
         }
 
-        int length = text.Length;
-        while (length > 0 && font.MeasureText(text[..length] + "…") > maxWidth)
-            length--;
+        string fitted = FitText(game.Name, maxWidth, FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx));
+        if (_nameCache.Count >= TextCacheLimit)
+            _nameCache.Clear();
+        _nameCache[key] = (game.Name, fitted);
+        return fitted;
+    }
 
-        string fitted = length <= 0 ? "…" : text[..Math.Max(0, length - 1)] + "…";
-        canvas.DrawText(fitted, x, y, SKTextAlign.Left, font, paint);
+    /// <summary>The playtime label, memoized per app id (the hours only change
+    /// when a library refresh re-reads the playtime file).</summary>
+    private string PlaytimeText(SteamGameItem game)
+    {
+        if (_playtimeCache.TryGetValue(game.AppId, out (double Hours, string Text) entry)
+            && Math.Abs(entry.Hours - game.HoursOnRecord) < 1e-9)
+        {
+            return entry.Text;
+        }
+
+        string text = $"{game.HoursOnRecord:0}h";
+        if (_playtimeCache.Count >= TextCacheLimit)
+            _playtimeCache.Clear();
+        _playtimeCache[game.AppId] = (game.HoursOnRecord, text);
+        return text;
+    }
+
+    /// <summary>
+    /// The zero-allocation fit: the full string when it measures inside
+    /// <paramref name="maxWidth"/>, else a binary-search prefix plus an
+    /// ellipsis. Measuring runs through a span, so the search allocates only
+    /// the one result string.
+    /// </summary>
+    private string FitText(string text, float maxWidth, SKFont font)
+    {
+        if (font.MeasureText(text, _textPaint) <= maxWidth)
+            return text;
+
+        const string Ellipsis = "…";
+        float ellipsisWidth = font.MeasureText(Ellipsis, _textPaint);
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int mid = (low + high + 1) / 2;
+            if (font.MeasureText(text.AsSpan(0, mid), _textPaint) + ellipsisWidth <= maxWidth)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+
+        return low <= 0 ? Ellipsis : string.Concat(text.AsSpan(0, low), Ellipsis.AsSpan());
     }
 }

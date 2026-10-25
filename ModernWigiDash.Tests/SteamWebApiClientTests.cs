@@ -194,10 +194,31 @@ public sealed class SteamWebApiClientTests
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
 
-        byte[]? bytes = apiClient.FetchAvatarAsync("https://example.com/avatar.jpg", CancellationToken.None).GetAwaiter().GetResult();
+        const string Url = "https://avatars.steamstatic.com/0123456789abcdef_full.jpg";
+        byte[]? bytes = apiClient.FetchAvatarAsync(Url, CancellationToken.None).GetAwaiter().GetResult();
 
         CollectionAssert.AreEqual(new byte[] { 9, 8, 7 }, bytes!);
-        CollectionAssert.Contains(handler.RequestUrls, "https://example.com/avatar.jpg");
+        CollectionAssert.Contains(handler.RequestUrls, Url);
+    }
+
+    [TestMethod]
+    public void FetchAvatarAsync_NonSteamOrCleartextUrl_IsRefusedWithoutHttp()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent([9, 8, 7]),
+        });
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
+
+        // A server-supplied URL must stay on a Steam-owned https origin: an
+        // arbitrary host or a cleartext scheme would make the client a
+        // credential-bearing SSRF proxy.
+        Assert.IsNull(apiClient.FetchAvatarAsync("https://example.com/avatar.jpg", CancellationToken.None).GetAwaiter().GetResult());
+        Assert.IsNull(apiClient.FetchAvatarAsync("http://avatars.steamstatic.com/a.jpg", CancellationToken.None).GetAwaiter().GetResult());
+        Assert.IsNull(apiClient.FetchAvatarAsync("https://steamstatic.com.evil.test/a.jpg", CancellationToken.None).GetAwaiter().GetResult());
+
+        Assert.IsEmpty(handler.RequestUrls);
     }
 
     [TestMethod]
@@ -210,6 +231,6 @@ public sealed class SteamWebApiClientTests
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         var apiClient = new SteamWebApiClient(new FakeTimeProvider(), client);
 
-        Assert.IsNull(apiClient.FetchAvatarAsync("https://example.com/avatar.jpg", CancellationToken.None).GetAwaiter().GetResult());
+        Assert.IsNull(apiClient.FetchAvatarAsync("https://avatars.steamstatic.com/a.jpg", CancellationToken.None).GetAwaiter().GetResult());
     }
 }

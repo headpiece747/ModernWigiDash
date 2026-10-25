@@ -32,7 +32,13 @@ internal interface ISteamProcessBridge
 /// </summary>
 internal sealed class SteamProcessBridge : ISteamProcessBridge
 {
+    /// <summary>How long a process-name snapshot is trusted: one 3-second tick's
+    /// per-game checks share a single enumeration instead of one per game.</summary>
+    private static readonly TimeSpan NameCacheTtl = TimeSpan.FromMilliseconds(500);
+
     private readonly TimeProvider _clock;
+    private HashSet<string>? _runningNames;
+    private DateTimeOffset _runningNamesUtc;
 
     /// <summary>The production bridge over the system clock.</summary>
     public SteamProcessBridge() : this(TimeProvider.System)
@@ -52,22 +58,48 @@ internal sealed class SteamProcessBridge : ISteamProcessBridge
 
         try
         {
-            Process[] processes = Process.GetProcessesByName(processName);
-            try
+            DateTimeOffset now = _clock.GetUtcNow();
+            if (_runningNames is null || now - _runningNamesUtc > NameCacheTtl)
             {
-                return processes.Length > 0;
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Process process in Process.GetProcesses())
+                {
+                    using (process)
+                    {
+                        string? name = SafeProcessName(process);
+                        if (name is not null)
+                            names.Add(name);
+                    }
+                }
+
+                _runningNames = names;
+                _runningNamesUtc = now;
             }
-            finally
-            {
-                foreach (Process process in processes)
-                    process.Dispose();
-            }
+
+            return _runningNames.Contains(processName);
         }
         catch (Exception)
         {
             // The process table is unreadable (a blocked enumeration): the
             // state reads as not running, never a throw.
             return false;
+        }
+    }
+
+    /// <summary>
+    /// One process's name, or null when the process denies it (a protected
+    /// process cannot match a game, so it simply does not join the snapshot).
+    /// </summary>
+    private static string? SafeProcessName(Process process)
+    {
+        try
+        {
+            return process.ProcessName;
+        }
+        catch (Exception)
+        {
+            // A protected process denies its name; it cannot match a game.
+            return null;
         }
     }
 
@@ -167,8 +199,8 @@ internal sealed class SteamProcessBridge : ISteamProcessBridge
 /// Idle beats Uninstalled), the steam://run launch URI, and the launch
 /// (shell-exec sink) and terminate (process bridge) seams. Stateless across
 /// calls; the 3-second re-resolution lives in the service loop that calls
-/// <see cref="Resolve"/> each tick. <see cref="TryClose"/> blocks up to the
-/// close budget, so a caller must run it off the render thread.
+/// <see cref="Resolve"/> each tick. <see cref="TryClose(string)"/> blocks up to
+/// the close budget, so a caller must run it off the render thread.
 /// </summary>
 internal sealed class SteamProcessTracker
 {
@@ -199,6 +231,13 @@ internal sealed class SteamProcessTracker
         if (manifest.ProcessName.Length > 0 && _bridge.IsRunning(manifest.ProcessName))
             return SteamGameState.Running;
 
+        // The ACF's AppRunning bit is the fallback for a manifest with no
+        // resolvable executable name; it is only trusted when the live
+        // process check cannot be performed, because a stale flag would
+        // otherwise pin a crashed game to Running forever.
+        if (manifest.ProcessName.Length == 0 && manifest.StateFlags.HasFlag(SteamAppState.AppRunning))
+            return SteamGameState.Running;
+
         if (manifest.IsUpdating)
             return SteamGameState.Updating;
 
@@ -223,4 +262,12 @@ internal sealed class SteamProcessTracker
     /// when nothing is left running).
     /// </summary>
     public bool TryClose(SteamAppManifest manifest) => _bridge.TryClose(manifest.ProcessName, CloseBudget);
+
+    /// <summary>
+    /// Terminates a process by name (the widget's tap-on-a-running-title path,
+    /// where the display item carries the app id and the service owns the
+    /// app-id → process-name map). Blocks up to <see cref="CloseBudget"/>;
+    /// callers must run it off the render thread.
+    /// </summary>
+    public bool TryClose(string processName) => _bridge.TryClose(processName, CloseBudget);
 }

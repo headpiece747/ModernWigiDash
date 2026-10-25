@@ -38,14 +38,15 @@ public sealed class SteamLibraryWidgetTests
         => new(appId, name, $"dir-{appId}", "game.exe", flags, 0, 0, 0, 10.0);
 
     /// <summary>
-    /// The shared test rig: a widget over a two-title library (both installed
-    /// and launchable), a captured launch sink, and a controllable clock. The
-    /// snapshot is produced through the synchronous <c>RefreshNow</c> seam and
-    /// the bounds are fixed by one render, so the touch geometry is known.
+    /// The shared test rig: a widget over an installed, launchable library of
+    /// <paramref name="gameCount"/> titles (ids 100 upward), a captured launch
+    /// sink, and a controllable clock. The snapshot is produced through the
+    /// synchronous <c>RefreshNow</c> seam and the bounds are fixed by one
+    /// render, so the touch geometry is known.
     /// </summary>
-    private static async ValueTask<(SteamLibraryWidget Widget, List<string> Launched, FakeTimeProvider Clock)> RigAsync()
+    private static async ValueTask<(SteamLibraryWidget Widget, List<string> Launched, FakeTimeProvider Clock)> RigAsync(int gameCount = 2)
     {
-        var source = new FakeSource(Game(100, "Alpha"), Game(200, "Beta"));
+        var source = new FakeSource([.. Enumerable.Range(0, gameCount).Select(i => Game((uint)(100 + i), $"Game {i}"))]);
         List<string> launched = [];
         var clock = new FakeTimeProvider();
         var widget = new SteamLibraryWidget(source, launched.Add, clock);
@@ -56,11 +57,26 @@ public sealed class SteamLibraryWidgetTests
         return (widget, launched, clock);
     }
 
-    /// <summary>The grid cell center for index <paramref name="index"/> at the fixed bounds (scroll 0).</summary>
-    private static SKPoint GridCellCenter(int index)
+    /// <summary>The shared rig over an explicit manifest list (the state-fold fixtures).</summary>
+    private static async ValueTask<(SteamLibraryWidget Widget, List<string> Launched, FakeTimeProvider Clock)> RigManifestsAsync(params SteamAppManifest[] manifests)
+    {
+        var source = new FakeSource(manifests);
+        List<string> launched = [];
+        var clock = new FakeTimeProvider();
+        var widget = new SteamLibraryWidget(source, launched.Add, clock);
+        await widget.InitializeAsync(new TestContext()).ConfigureAwait(false);
+        widget.ServiceForTest!.RefreshNow();
+        using SKBitmap bitmap = new(1, 1);
+        widget.Render(new SKCanvas(bitmap), Bounds);
+        return (widget, launched, clock);
+    }
+
+    /// <summary>The grid cell center for cell <paramref name="index"/> at the fixed bounds
+    /// and <paramref name="scrollX"/>.</summary>
+    private static SKPoint GridCellCenter(int index, int gameCount, float scrollX = 0f)
     {
         int columns = SteamGridLayout.ColumnsForWidth(Bounds.Width);
-        SteamGridGeometry geometry = SteamGridLayout.Compute(Bounds, columns, 0f);
+        SteamGridGeometry geometry = SteamGridLayout.Compute(Bounds, columns, scrollX, gameCount);
         SKRect cell = geometry.Cells[index];
         return new SKPoint((cell.Left + cell.Right) / 2f, (cell.Top + cell.Bottom) / 2f);
     }
@@ -86,7 +102,7 @@ public sealed class SteamLibraryWidgetTests
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
 
-        Touch(widget, GridCellCenter(0), clock, TimeSpan.Zero);
+        Touch(widget, GridCellCenter(0, 2), clock, TimeSpan.Zero);
 
         CollectionAssert.AreEqual(new[] { "steam://run/100" }, launched);
         await widget.DisposeAsync();
@@ -97,9 +113,9 @@ public sealed class SteamLibraryWidgetTests
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
 
-        Touch(widget, GridCellCenter(1), clock, TimeSpan.Zero);
+        Touch(widget, GridCellCenter(1, 2), clock, TimeSpan.Zero);
 
-        CollectionAssert.AreEqual(new[] { "steam://run/200" }, launched);
+        CollectionAssert.AreEqual(new[] { "steam://run/101" }, launched);
         await widget.DisposeAsync();
     }
 
@@ -120,7 +136,7 @@ public sealed class SteamLibraryWidgetTests
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
 
-        Touch(widget, GridCellCenter(0), clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
+        Touch(widget, GridCellCenter(0, 2), clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
 
         // A long press favorites, it never launches.
         Assert.IsEmpty(launched);
@@ -133,7 +149,7 @@ public sealed class SteamLibraryWidgetTests
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
 
-        Touch(widget, GridCellCenter(0), clock, TimeSpan.FromMilliseconds(100));
+        Touch(widget, GridCellCenter(0, 2), clock, TimeSpan.FromMilliseconds(100));
 
         CollectionAssert.AreEqual(new[] { "steam://run/100" }, launched);
         Assert.AreEqual("[]", widget.ServiceForTest!.FavoritesJson);
@@ -146,10 +162,53 @@ public sealed class SteamLibraryWidgetTests
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
         widget.FavoritesJson = "[100]";
 
-        Touch(widget, GridCellCenter(0), clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
+        Touch(widget, GridCellCenter(0, 2), clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
 
         Assert.IsEmpty(launched);
         Assert.AreEqual("[]", widget.ServiceForTest!.FavoritesJson);
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask GridDrag_ScrollsToLaterTitles()
+    {
+        const int gameCount = 30;
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync(gameCount);
+
+        int columns = SteamGridLayout.ColumnsForWidth(Bounds.Width);
+        SteamGridGeometry atRest = SteamGridLayout.Compute(Bounds, columns, 0f, gameCount);
+        float step = atRest.Cells[1].Left - atRest.Cells[0].Left;
+        SKPoint from = GridCellCenter(0, gameCount);
+        SKPoint to = new(from.X - step, from.Y);
+
+        // Drag left by one cell step: the same screen position must now show a
+        // later title (the shelf scroll), not the first page shifted left.
+        widget.OnTouch(from, TouchEventType.TouchDown);
+        widget.OnTouch(to, TouchEventType.TouchUp);
+
+        int revealed = SteamGridLayout
+            .Compute(Bounds, columns, Math.Min(step, atRest.MaxScroll), gameCount)
+            .Indexes[0];
+        Assert.IsTrue(revealed > 0, "the drag must reveal a later title");
+
+        Touch(widget, from, clock, TimeSpan.Zero);
+
+        CollectionAssert.AreEqual(new[] { $"steam://run/{100 + revealed}" }, launched);
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask GridTap_RunningTitle_NeverRelaunchesIt()
+    {
+        // The ACF's AppRunning flag with no resolvable executable: the tracker
+        // folds the title to Running, and the tap must route to terminate (a
+        // blank process name makes that a no-op) instead of a second launch.
+        var manifest = new SteamAppManifest(100, "Alpha", "dir-100", "", SteamAppState.AppRunning, 0, 0, 0, 0);
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigManifestsAsync(manifest);
+
+        Touch(widget, GridCellCenter(0, 1), clock, TimeSpan.Zero);
+
+        Assert.IsEmpty(launched, "a tap on a running title must not launch it again");
         await widget.DisposeAsync();
     }
 }
