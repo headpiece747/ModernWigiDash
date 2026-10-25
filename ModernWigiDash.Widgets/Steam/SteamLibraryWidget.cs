@@ -134,11 +134,42 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (IsShowcase)
         {
             (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
+            RequestVisiblePosters(service, new[] { focus, previous, next });
             _showcaseRenderer.Render(canvas, bounds, focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
         }
         else
         {
+            RequestVisibleGridPosters(service, games, bounds);
             _gridRenderer.Render(canvas, bounds, games, service.PosterCache, _scrollX, accent, text);
+        }
+    }
+
+    /// <summary>
+    /// Requests the poster for each visible grid cell that is not yet cached
+    /// (local file first, then the CDN; one in-flight per app). The 24-slot
+    /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
+    /// on demand instead of an all-games sweep evicting the visible ones.
+    /// </summary>
+    private void RequestVisibleGridPosters(SteamLibraryService service, IReadOnlyList<SteamGameItem> games, SKRect bounds)
+    {
+        SKRect rect = bounds.Width > 0f ? bounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        int columns = SteamGridLayout.ColumnsForWidth(rect.Width);
+        SteamGridGeometry geometry = SteamGridLayout.Compute(rect, columns, _scrollX);
+        int visible = Math.Min(geometry.CellCount, games.Count);
+        for (int i = 0; i < visible; i++)
+        {
+            if (!service.PosterCache.TryGet(games[i].AppId, out _))
+                service.RequestPoster(games[i].AppId);
+        }
+    }
+
+    /// <summary>Requests the poster for each visible showcase card that is not yet cached.</summary>
+    private static void RequestVisiblePosters(SteamLibraryService service, SteamGameItem?[] cards)
+    {
+        foreach (SteamGameItem? card in cards)
+        {
+            if (card is not null && !service.PosterCache.TryGet(card.AppId, out _))
+                service.RequestPoster(card.AppId);
         }
     }
 

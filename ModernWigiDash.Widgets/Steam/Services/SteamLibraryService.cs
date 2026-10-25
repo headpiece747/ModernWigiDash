@@ -136,6 +136,19 @@ internal sealed class SteamLibraryService : IDisposable
         RefreshPersona();
     }
 
+    /// <summary>
+    /// Test seam: loads a poster synchronously from the local file (no CDN,
+    /// no fire-and-forget), so a test observes the cache population
+    /// deterministically.
+    /// </summary>
+    internal void LoadLocalPosterForTest(uint appId)
+    {
+        string? steamPath = _source.SteamPath;
+        byte[]? bytes = steamPath is null ? null : SteamPosterSource.TryReadLocalPoster(steamPath, appId);
+        if (bytes is { Length: > 0 })
+            _cache.Store(appId, bytes, PosterTargetWidth, PosterTargetHeight);
+    }
+
     /// <summary>Test seam: publishes a persona (and optional avatar) directly, bypassing the HTTP fetch.</summary>
     internal void SetPersonaForTest(SteamPersona? persona, SKBitmap? avatar)
     {
@@ -270,7 +283,6 @@ internal sealed class SteamLibraryService : IDisposable
         var snapshot = new SteamLibrarySnapshot(games, _source.SteamPath, _source.SteamPath is not null, _persona);
         _current = snapshot;
         _publish(snapshot);
-        WarmupLocalPosters(snapshot);
         RefreshPersona();
     }
 
@@ -292,26 +304,6 @@ internal sealed class SteamLibraryService : IDisposable
             manifest.HoursOnRecord,
             manifest.LastPlayedUtc,
             favorite);
-    }
-
-    private void WarmupLocalPosters(SteamLibrarySnapshot snapshot)
-    {
-        string? steamPath = snapshot.SteamPath;
-        if (steamPath is null)
-            return;
-
-        foreach (SteamGameItem game in snapshot.Games)
-            WarmupOnePoster(game, steamPath);
-    }
-
-    private void WarmupOnePoster(SteamGameItem game, string steamPath)
-    {
-        if (_cache.TryGet(game.AppId, out _))
-            return; // already cached.
-
-        byte[]? local = SteamPosterSource.TryReadLocalPoster(steamPath, game.AppId);
-        if (local is { Length: > 0 })
-            _cache.Store(game.AppId, local, PosterTargetWidth, PosterTargetHeight);
     }
 
     private async Task FetchPosterAsync(uint appId)
