@@ -183,6 +183,42 @@ public sealed class SteamLibraryServiceTests
         Assert.IsEmpty(bridge.Closed, "an app id with no process name must not close anything");
     }
 
+    [TestMethod]
+    public void ToggleFavorite_RoundTripsThroughTheCanonicalJson()
+    {
+        using var service = new SteamLibraryService(
+            new OneGameSource(),
+            new SteamProcessTracker(new RecordingBridge(), _ => { }),
+            new SteamPosterCache(),
+            new SteamWebApiClient(),
+            _ => { },
+            _ => { });
+
+        string json = service.ToggleFavorite(730u);
+        Assert.AreEqual("[730]", json, "one favorite is the canonical single-id array");
+
+        service.SetFavoritesJson(json);
+        json = service.ToggleFavorite(730u);
+        Assert.AreEqual("[]", json, "toggling off must return the empty canonical array");
+    }
+
+    [TestMethod]
+    public void ToggleFavorite_TwoTogglesRestoreTheOriginalState()
+    {
+        using var service = new SteamLibraryService(
+            new OneGameSource(),
+            new SteamProcessTracker(new RecordingBridge(), _ => { }),
+            new SteamPosterCache(),
+            new SteamWebApiClient(),
+            _ => { },
+            _ => { });
+
+        string on = service.ToggleFavorite(730u);
+        service.ToggleFavorite(730u);
+        string again = service.ToggleFavorite(730u);
+        Assert.AreEqual(on, again, "two toggles are the identity: the set, not the string, owns the state");
+    }
+
     /// <summary>A tiny valid JPEG (the poster decode must succeed for the cache to populate).</summary>
     private static byte[] MakeJpegBytes()
     {

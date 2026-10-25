@@ -132,6 +132,41 @@ public sealed class SteamLibraryWidgetTests
     }
 
     [TestMethod]
+    public async ValueTask GridTapAndLongPress_TheSamePoint_ActOnTheSameGame()
+    {
+        // One hit entry serves both gestures, so a tap and a long-press at the
+        // same point can never resolve to different games.
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
+        SKPoint point = GridCellCenter(1, 2);
+
+        Touch(widget, point, clock, TimeSpan.Zero);
+        CollectionAssert.AreEqual(new[] { "steam://run/101" }, launched);
+
+        Touch(widget, point, clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
+
+        CollectionAssert.AreEqual(new[] { "steam://run/101" }, launched, "a long press must not launch");
+        Assert.AreEqual("[101]", widget.ServiceForTest!.FavoritesJson, "a long press must favorite the game the tap would have launched");
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask ShowcaseTapAndLongPress_TheFocalCardActsOnTheFocusedGame()
+    {
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
+        widget.LayoutMode = "Showcase";
+        SKPoint point = ShowcaseFocusCenter();
+
+        Touch(widget, point, clock, TimeSpan.Zero);
+        CollectionAssert.AreEqual(new[] { "steam://run/100" }, launched);
+
+        Touch(widget, point, clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
+
+        CollectionAssert.AreEqual(new[] { "steam://run/100" }, launched, "a long press must not launch");
+        Assert.AreEqual("[100]", widget.ServiceForTest!.FavoritesJson);
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
     public async ValueTask LongPress_TogglesTheFavoriteUnderTheFinger()
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
@@ -160,12 +195,12 @@ public sealed class SteamLibraryWidgetTests
     public async ValueTask LongPress_TogglingOff_RemovesTheFavorite()
     {
         (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync();
-        widget.FavoritesJson = "[100]";
+        widget.ServiceForTest!.SetFavoritesJson("[100]");
 
         Touch(widget, GridCellCenter(0, 2), clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
 
         Assert.IsEmpty(launched);
-        Assert.AreEqual("[]", widget.ServiceForTest!.FavoritesJson);
+        Assert.AreEqual("[]", widget.ServiceForTest.FavoritesJson);
         await widget.DisposeAsync();
     }
 

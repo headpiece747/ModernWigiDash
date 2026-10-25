@@ -122,6 +122,30 @@ internal sealed class SteamLibraryService : IDisposable
     }
 
     /// <summary>
+    /// Toggles one app's favorite state and returns the canonical favorites
+    /// JSON (the sorted, distinct id array). The service owns the set: the
+    /// widget persists the returned value through its one <c>SetProperty</c>
+    /// path and never parses the JSON itself.
+    /// </summary>
+    public string ToggleFavorite(uint appId)
+    {
+        string json;
+        lock (_gate)
+        {
+            if (!_favoriteApps.Remove(appId))
+                _favoriteApps.Add(appId);
+
+            _favoritesJson = SerializeFavoriteIds(_favoriteApps);
+            json = _favoritesJson;
+        }
+        return json;
+    }
+
+    /// <summary>The canonical favorites JSON: a sorted, distinct uint array (one spelling the widget persists and the next reload parses).</summary>
+    private static string SerializeFavoriteIds(HashSet<uint> ids)
+        => JsonSerializer.Serialize(ids.OrderBy(id => id));
+
+    /// <summary>
     /// The owner's avatar texture (the showcase banner), or null (the banner
     /// draws its placeholder disc). Read on the render thread.
     /// </summary>

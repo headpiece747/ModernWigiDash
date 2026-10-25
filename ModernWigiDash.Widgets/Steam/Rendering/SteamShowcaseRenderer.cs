@@ -8,9 +8,11 @@ namespace ModernWigiDash.Widgets.Steam.Rendering;
 /// The Steam showcase's draw owner: the centered focal card (the focused
 /// title's poster, name, and playtime) and the flanking cards (visible only
 /// when a neighbor exists), plus the update progress bar and the running
-/// badge. The card geometry comes from <see cref="SteamShowcaseLayout"/> —
-/// the same record the touch path hit-tests. The poster bitmaps are looked
-/// up from the <see cref="SteamPosterCache"/> (the render tick never decodes).
+/// badge. The card geometry is the record the widget passes in
+/// (<see cref="SteamShowcaseLayout"/>'s output) — the same record the touch
+/// path hit-tests, so the drawn cards and the tap targets cannot drift
+/// apart. The poster bitmaps are looked up from the <see cref="SteamPosterCache"/>
+/// (the render tick never decodes).
 /// </summary>
 internal sealed class SteamShowcaseRenderer : IDisposable
 {
@@ -37,6 +39,7 @@ internal sealed class SteamShowcaseRenderer : IDisposable
     public void Render(
         SKCanvas canvas,
         SKRect bounds,
+        SteamShowcaseGeometry geometry,
         SteamGameItem? focus,
         SteamGameItem? previous,
         SteamGameItem? next,
@@ -54,8 +57,6 @@ internal sealed class SteamShowcaseRenderer : IDisposable
             DrawEmptyState(canvas, bounds, text);
             return;
         }
-
-        SteamShowcaseGeometry geometry = SteamShowcaseLayout.Compute(bounds, previous is not null, next is not null);
 
         if (previous is not null)
             DrawFlank(canvas, geometry.LeftCard, previous, cache);

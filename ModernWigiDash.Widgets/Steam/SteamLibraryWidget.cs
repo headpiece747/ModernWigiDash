@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Steam.Models;
 using ModernWigiDash.Widgets.Steam.Rendering;
@@ -46,7 +45,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// <summary>
     /// The persisted favorites (a uint app-id JSON array). Deliberately NOT a
     /// <c>[WidgetProperty]</c> — it is written by the long-press toggle through
-    /// the single <c>SetProperty</c> path, never edited in the inspector.
+    /// the single <c>SetProperty</c> path, never edited in the inspector. The
+    /// service owns the set and hands back the canonical JSON; this property
+    /// is its persisted fact, not a second owner.
     /// </summary>
     public string FavoritesJson { get; set; } = "[]";
 
@@ -68,6 +69,11 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private SKRect _gridBounds;
     private float _gridScrollX;
     private int _gridCount;
+    private SteamShowcaseGeometry _showcaseGeometry;
+    private bool _showcaseGeometryValid;
+    private SKRect _showcaseBounds;
+    private bool _showcaseHasPrevious;
+    private bool _showcaseHasNext;
     private SKPoint? _touchDownPoint;
     private DateTimeOffset? _touchDownUtc;
     private bool _disposed;
@@ -108,6 +114,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         _snapshot = SteamLibrarySnapshot.Empty;
         _filteredSnapshot = null;
         _gridGeometryValid = false;
+        _showcaseGeometryValid = false;
 
         ISteamLibrarySource source = _testSource ?? new SteamLibrarySource(msg => Context?.LogError(msg));
         Action<string> sink = _testLaunchSink ?? (Action<string>)LaunchViaShell;
@@ -155,7 +162,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             RequestPosterIfMissing(service, focus);
             RequestPosterIfMissing(service, previous);
             RequestPosterIfMissing(service, next);
-            _showcaseRenderer.Render(canvas, bounds, focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
+            _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
         }
         else
         {
@@ -186,6 +193,49 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         _gridCount = gameCount;
         _gridGeometryValid = true;
         return _gridGeometry;
+    }
+
+    /// <summary>The showcase geometry, recomputed only when the bounds or the
+    /// flank visibility changes (the grid cache's shape, for the showcase
+    /// record): render and touch read the same cached record, so the drawn
+    /// cards and the tap targets cannot drift apart.</summary>
+    private SteamShowcaseGeometry ShowcaseGeometry(bool hasPrevious, bool hasNext)
+    {
+        SKRect rect = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        if (_showcaseGeometryValid
+            && _showcaseBounds == rect
+            && _showcaseHasPrevious == hasPrevious
+            && _showcaseHasNext == hasNext)
+        {
+            return _showcaseGeometry;
+        }
+
+        _showcaseGeometry = SteamShowcaseLayout.Compute(rect, hasPrevious, hasNext);
+        _showcaseBounds = rect;
+        _showcaseHasPrevious = hasPrevious;
+        _showcaseHasNext = hasNext;
+        _showcaseGeometryValid = true;
+        return _showcaseGeometry;
+    }
+
+    /// <summary>
+    /// The one touch hit entry: which game a point hits (the grid's cell
+    /// index) and which showcase zone (the flanking-card snap targets and the
+    /// focal card). The geometry is the cached record, so the hit test reads
+    /// exactly what the render tick drew. The unused branch of the tuple
+    /// reads as a miss.
+    /// </summary>
+    private (int GridIndex, SteamShowcaseHit Showcase) HitAt(SKPoint point, IReadOnlyList<SteamGameItem> games)
+    {
+        if (IsShowcase)
+        {
+            (SteamGameItem? _, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
+            return (-1, SteamShowcaseLayout.HitTest(ShowcaseGeometry(previous is not null, next is not null), point));
+        }
+
+        SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        SteamGridGeometry grid = GridGeometry(bounds, games.Count);
+        return (SteamGridLayout.HitTest(grid, point), SteamShowcaseHit.None);
     }
 
     /// <summary>
@@ -349,9 +399,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private void ScrollGrid(float dragDelta)
     {
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
-        int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-        SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
+        SteamGridGeometry geometry = GridGeometry(bounds, FilterGames(_snapshot.Games).Count);
         _scrollX = Math.Clamp(_scrollX - dragDelta, 0f, geometry.MaxScroll);
         Context?.RequestRender();
     }
@@ -362,11 +410,12 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (games.Count == 0)
             return;
 
+        (int index, SteamShowcaseHit hit) = HitAt(point, games);
+
         if (IsShowcase)
         {
-            (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
-            SteamShowcaseGeometry geometry = SteamShowcaseLayout.Compute(_lastBounds, previous is not null, next is not null);
-            switch (SteamShowcaseLayout.HitTest(geometry, point))
+            (SteamGameItem? focus, _, _) = ShowcaseSelection(games);
+            switch (hit)
             {
                 case SteamShowcaseHit.Previous:
                     SnapShowcase(-1);
@@ -382,10 +431,6 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             return;
         }
 
-        SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-        SteamGridGeometry gridGeometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
-        int index = SteamGridLayout.HitTest(gridGeometry, point);
         if (index >= 0 && index < games.Count)
             Activate(service, games[index]);
     }
@@ -410,32 +455,22 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             return;
 
         uint? appId = null;
+        (int index, SteamShowcaseHit hit) = HitAt(point, games);
         if (IsShowcase)
         {
-            (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
-            SteamShowcaseGeometry geometry = SteamShowcaseLayout.Compute(_lastBounds, previous is not null, next is not null);
-            if (SteamShowcaseLayout.HitTest(geometry, point) == SteamShowcaseHit.Focus && focus is not null)
+            (SteamGameItem? focus, _, _) = ShowcaseSelection(games);
+            if (hit == SteamShowcaseHit.Focus && focus is not null)
                 appId = focus.AppId;
         }
-        else
+        else if (index >= 0 && index < games.Count)
         {
-            SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-            int columns = SteamGridLayout.ColumnsForWidth(bounds.Width);
-            SteamGridGeometry geometry = SteamGridLayout.Compute(bounds, columns, _scrollX, games.Count);
-            int index = SteamGridLayout.HitTest(geometry, point);
-            if (index >= 0 && index < games.Count)
-                appId = games[index].AppId;
+            appId = games[index].AppId;
         }
 
         if (appId is not { } id)
             return;
 
-        var set = new HashSet<uint>(ParseFavorites(FavoritesJson));
-        if (!set.Remove(id))
-            set.Add(id);
-
-        string json = SerializeFavorites(set);
-        service.SetFavoritesJson(json);
+        string json = service.ToggleFavorite(id);
         SetProperty(nameof(FavoritesJson), json);
     }
 
@@ -461,35 +496,5 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             IsAntialias = true,
         };
         canvas.DrawRoundRect(bounds, 12f, 12f, paint);
-    }
-
-    internal static HashSet<uint> ParseFavorites(string json)
-    {
-        var ids = new HashSet<uint>();
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "[]" : json);
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
-                return ids;
-
-            foreach (JsonElement element in document.RootElement.EnumerateArray())
-            {
-                if (element.TryGetUInt32(out uint id))
-                    ids.Add(id);
-            }
-        }
-        catch (Exception)
-        {
-            // A malformed favorites value reads as an empty set.
-            return ids;
-        }
-
-        return ids;
-    }
-
-    internal static string SerializeFavorites(IEnumerable<uint> ids)
-    {
-        List<uint> distinct = [.. ids.Distinct()];
-        return JsonSerializer.Serialize(distinct);
     }
 }
