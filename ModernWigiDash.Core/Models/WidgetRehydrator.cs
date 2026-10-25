@@ -97,6 +97,13 @@ public static class WidgetRehydrator
             }
 
             var type = instance.GetType();
+
+            // Phase 1: apply every persisted value (set, no fire). The change
+            // fires are deferred to phase 2 so an order-coupled handler (the
+            // Steam widget's SetCredentials, which reads BOTH credential
+            // properties) sees the FINAL state of every property, never a
+            // mixed pair where one is set and its sibling is still stale.
+            var applied = new List<(string Name, object? Value)>();
             foreach (var prop in type.GetProperties())
             {
                 // Every persisted value is restored, not only the inspector's
@@ -115,7 +122,7 @@ public static class WidgetRehydrator
                 try
                 {
                     prop.SetValue(instance, value);
-                    instance.OnPropertyChanged(prop.Name, value);
+                    applied.Add((prop.Name, value));
                 }
                 catch
                 {
@@ -123,6 +130,10 @@ public static class WidgetRehydrator
                     context.LogError($"Stored value incompatible with widget property '{prop.Name}' on '{placed.PluginId}' (ignored)");
                 }
             }
+
+            // Phase 2: fire every change (the handlers read the fully-applied state).
+            foreach ((string name, object? value) in applied)
+                instance.OnPropertyChanged(name, value);
 
             DisposeInstance(placed);
             placed.ActiveInstance = instance;

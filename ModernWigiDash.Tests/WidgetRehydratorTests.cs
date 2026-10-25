@@ -58,6 +58,25 @@ public class WidgetRehydratorTests
         public override void Render(SKCanvas canvas, SKRect bounds) { }
     }
 
+    /// <summary>Two order-coupled properties: each change handler reads the
+    /// OTHER property's value, so a correct rehydration must apply every value
+    /// before firing any change (the handler sees the final pair, never a
+    /// mixed one where the sibling is still stale).</summary>
+    [WidgetMetadata("order_coupled_widget", "Order Coupled")]
+    private sealed class OrderCoupledWidget : ModernWidgetBase
+    {
+        public string First { get; set; } = "f0";
+        public string Second { get; set; } = "s0";
+
+        /// <summary>The (First, Second) pair observed at the moment each property's change fired.</summary>
+        public List<(string First, string Second)> Observed { get; } = [];
+
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+
+        public override void OnPropertyChanged(string propertyName, object? newValue)
+            => Observed.Add((First, Second));
+    }
+
     private static WidgetPluginLoader CreateLoader(params Type[] widgets)
     {
         var loader = new WidgetPluginLoader();
@@ -125,6 +144,26 @@ public class WidgetRehydratorTests
             "[100]",
             ((RehydrateTestWidget)instance).PersistedState,
             "a value persisted through SetProperty must survive a reload even though it has no [WidgetProperty] row");
+    }
+
+    [TestMethod]
+    public void Rehydrate_OrderCoupledHandler_SeesTheFinalPair()
+    {
+        var loader = CreateLoader(typeof(OrderCoupledWidget));
+        var placed = new PlacedWidgetInstance { PluginId = "order_coupled_widget" };
+        placed.PropertyValues["First"] = "f1";
+        placed.PropertyValues["Second"] = "s1";
+
+        var instance = WidgetRehydrator.Rehydrate(loader, new TestContext(), placed);
+
+        Assert.IsNotNull(instance, "Rehydration must succeed");
+        var widget = (OrderCoupledWidget)instance;
+        // Every change fire must observe the FINAL pair (f1, s1): the two-phase
+        // apply (set all, then fire all) means a handler reading a sibling
+        // property never sees a mixed pair where the sibling is still stale.
+        Assert.IsNotEmpty(widget.Observed, "both property changes must fire");
+        foreach ((string first, string second) in widget.Observed)
+            Assert.AreEqual("f1/s1", $"{first}/{second}", "an order-coupled handler must see the fully-applied state, not a mixed pair");
     }
 
     [TestMethod]
