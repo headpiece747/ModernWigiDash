@@ -103,6 +103,8 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 | **Picture & GIF Viewer** | Static image and animated GIF playback |
 | **Weather Forecast** | Multi-day weather conditions with live refresh (optional hide-location) |
 | **Calendar** | Month grid + agenda view fed by ICS and CalDAV sources. Adaptive layout scales to placement size; Swiss-poster styling with week numbers and accent colors; scrollable detail page with tap-to-open meeting links; word-wrapped long URLs; feed inspector editor with password capture; notable-dates footer shows holidays for the viewed day |
+| **Steam Library** | Local Steam game discovery via ACF manifests and VDF tokenizer, Grid and Showcase views with a 24-slot LRU cached poster pipeline, live process tracking, playtime logging, one-touch launch/terminate, and Steam Community persona avatar |
+| **To-Do Companion** | Interactive desktop companion dragon with an affection/XP engine, local and SuperProductivity task syncing, Pomodoro focus timer, touch checkmarks, and streak tracking |
 | **Text** | Static or animated text banners |
 
 ---
