@@ -130,6 +130,10 @@ internal sealed class SteamLibraryService : IDisposable
     public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
         => _posterPolicy.RequestShowcasePosters(focus, previous, next);
 
+    /// <summary>Requests the posters for the active hero and visible shelf items in Hero Deck mode.</summary>
+    public void RequestHeroPosters(SteamGameItem? hero, IReadOnlyList<SteamGameItem> shelfGames, SteamHeroGeometry geometry)
+        => _posterPolicy.RequestHeroPosters(hero, shelfGames, geometry);
+
     /// <summary>Launches the game through the shell-exec sink (the steam://run URI).</summary>
     public void Launch(uint appId) => _tracker.Launch(appId);
 

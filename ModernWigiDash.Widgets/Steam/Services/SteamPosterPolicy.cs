@@ -135,6 +135,23 @@ internal sealed class SteamPosterPolicy : IDisposable
         RequestPosterIfMissing(next);
     }
 
+    /// <summary>Requests the posters for the active hero and visible shelf items in Hero Deck mode.</summary>
+    public void RequestHeroPosters(SteamGameItem? hero, IReadOnlyList<SteamGameItem> shelfGames, SteamHeroGeometry geometry)
+    {
+        RequestPosterIfMissing(hero);
+        for (int i = 0; i < geometry.ShelfItems.Length; i++)
+        {
+            SteamShelfItemGeometry item = geometry.ShelfItems[i];
+            if (item.Bounds.Bottom >= geometry.ShelfBounds.Top
+                && item.Bounds.Top <= geometry.ShelfBounds.Bottom
+                && item.Index >= 0
+                && item.Index < shelfGames.Count)
+            {
+                RequestPosterIfMissing(shelfGames[item.Index]);
+            }
+        }
+    }
+
     /// <summary>Requests one card's poster when it is not yet cached.</summary>
     private void RequestPosterIfMissing(SteamGameItem? card)
     {

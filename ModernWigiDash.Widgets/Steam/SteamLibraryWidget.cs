@@ -26,9 +26,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// <summary>The horizontal drag distance (design px) that counts as a scroll, not a tap.</summary>
     internal const float DragThreshold = 24f;
 
-    /// <summary>The "Display Layout" property: the poster grid or the showcase.</summary>
-    [WidgetProperty("Display Layout", WidgetPropertyType.Choice, "Poster grid (drag to scroll) or showcase (swipe to snap).", "Poster Grid", "Poster Grid", "Showcase")]
-    public string LayoutMode { get; set; } = "Poster Grid";
+    /// <summary>The "Display Layout" property: Hero Deck, Showcase, or Poster Grid.</summary>
+    [WidgetProperty("Display Layout", WidgetPropertyType.Choice, "Presentation layout: Hero Deck (tactile split), Showcase, or Poster Grid.", "Hero Deck", "Hero Deck", "Showcase", "Poster Grid")]
+    public string LayoutMode { get; set; } = "Hero Deck";
 
     /// <summary>The "Show Uninstalled" property: include not-installed titles in the library.</summary>
     [WidgetProperty("Show Uninstalled", WidgetPropertyType.Boolean, "Include titles that are not installed on any library volume.", false)]
@@ -51,6 +51,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// </summary>
     public string FavoritesJson { get; set; } = "[]";
 
+    private readonly SteamHeroRenderer _heroRenderer = new();
     private readonly SteamGridRenderer _gridRenderer = new();
     private readonly SteamShowcaseRenderer _showcaseRenderer = new();
     private readonly SteamNotReadyRenderer _notReadyRenderer = new();
@@ -61,6 +62,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private SteamLibraryService? _service;
     private SKRect _lastBounds;
     private float _scrollX;
+    private float _heroShelfScrollY;
+    private uint _selectedHeroAppId;
+    private SteamFilterMode _activeFilter = SteamFilterMode.All;
     private SKPoint? _touchDownPoint;
     private DateTimeOffset? _touchDownUtc;
     private bool _disposed;
@@ -147,20 +151,35 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         // (the render tick reads it; the render-view memo keys its filtered
         // list on the reference, so a fresh tick is a fresh content change).
         SteamLibrarySnapshot snapshot = service.Current;
-        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(snapshot, ShowUninstalled);
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(snapshot, ShowUninstalled, _activeFilter);
         (SKColor accent, SKColor text) = ResolveColors();
 
-        if (IsShowcase)
+        switch (ActiveMode)
         {
-            (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = _geometryMemo.Selection(games);
-            service.RequestShowcasePosters(focus, previous, next);
-            _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, frame.Posters, snapshot.Persona, frame.Avatar, accent, text);
-        }
-        else
-        {
-            SteamGridGeometry geometry = GridGeometry(bounds, games.Count);
-            service.RequestVisibleGridPosters(games, geometry);
-            _gridRenderer.Render(canvas, bounds, games, geometry, frame.Posters, accent, text);
+            case SteamLayoutMode.HeroDeck:
+                SteamGameItem? hero = null;
+                if (games.Count > 0)
+                {
+                    hero = games.FirstOrDefault(g => g.AppId == _selectedHeroAppId) ?? games[0];
+                    if (_selectedHeroAppId != hero.AppId)
+                        _selectedHeroAppId = hero.AppId;
+                }
+                SteamHeroGeometry heroGeom = _geometryMemo.Hero(bounds, games, _selectedHeroAppId, _heroShelfScrollY, DefaultSize);
+                service.RequestHeroPosters(hero, games, heroGeom);
+                _heroRenderer.Render(canvas, bounds, heroGeom, hero, games, frame.Posters, _activeFilter, accent, text);
+                break;
+
+            case SteamLayoutMode.Showcase:
+                (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = _geometryMemo.Selection(games);
+                service.RequestShowcasePosters(focus, previous, next);
+                _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, frame.Posters, snapshot.Persona, frame.Avatar, accent, text);
+                break;
+
+            default:
+                SteamGridGeometry geometry = GridGeometry(bounds, games.Count);
+                service.RequestVisibleGridPosters(games, geometry);
+                _gridRenderer.Render(canvas, bounds, games, geometry, frame.Posters, accent, text);
+                break;
         }
     }
 
@@ -187,7 +206,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// </summary>
     private (int GridIndex, SteamShowcaseHit Showcase) HitAt(SKPoint point, IReadOnlyList<SteamGameItem> games)
     {
-        if (IsShowcase)
+        if (ActiveMode == SteamLayoutMode.Showcase)
         {
             (SteamGameItem? _, SteamGameItem? previous, SteamGameItem? next) = _geometryMemo.Selection(games);
             return (-1, SteamShowcaseLayout.HitTest(ShowcaseGeometry(previous is not null, next is not null), point));
@@ -199,10 +218,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     }
 
     /// <summary>
-    /// Routes a touch: a horizontal drag scrolls the grid (or snaps the
-    /// showcase), a 600 ms long-press toggles the favorite under the finger,
-    /// and a short tap launches the hit title (grid cell or the showcase
-    /// focal card).
+    /// Routes a touch: a horizontal or vertical drag scrolls the view,
+    /// a 600 ms long-press toggles the favorite under the finger,
+    /// and a short tap activates action buttons, mode switches, or launches games.
     /// </summary>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
@@ -222,15 +240,30 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
         _touchDownPoint = null;
         _touchDownUtc = null;
-        float dragDelta = localPoint.X - down.X;
-        bool isDrag = Math.Abs(dragDelta) > DragThreshold;
+        float dragDeltaX = localPoint.X - down.X;
+        float dragDeltaY = localPoint.Y - down.Y;
+        bool isDrag = Math.Abs(dragDeltaX) > DragThreshold || Math.Abs(dragDeltaY) > DragThreshold;
 
         if (isDrag)
         {
-            if (IsShowcase)
-                SnapShowcase(service, dragDelta > 0f ? -1 : 1);
-            else
-                ScrollGrid(service, dragDelta);
+            switch (ActiveMode)
+            {
+                case SteamLayoutMode.HeroDeck:
+                    SKRect heroBounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+                    IReadOnlyList<SteamGameItem> currentGames = _geometryMemo.FilteredGames(service.Current, ShowUninstalled, _activeFilter);
+                    SteamHeroGeometry hGeom = _geometryMemo.Hero(heroBounds, currentGames, _selectedHeroAppId, _heroShelfScrollY, DefaultSize);
+                    _heroShelfScrollY = Math.Clamp(_heroShelfScrollY - dragDeltaY, 0f, hGeom.MaxScrollY);
+                    Context?.RequestRender();
+                    break;
+
+                case SteamLayoutMode.Showcase:
+                    SnapShowcase(service, dragDeltaX > 0f ? -1 : 1);
+                    break;
+
+                case SteamLayoutMode.Grid:
+                    ScrollGrid(service, dragDeltaX);
+                    break;
+            }
             return;
         }
 
@@ -262,6 +295,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             return;
         _disposed = true;
 
+        _heroRenderer.Dispose();
         _gridRenderer.Dispose();
         _showcaseRenderer.Dispose();
         _notReadyRenderer.Dispose();
@@ -274,7 +308,25 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    private bool IsShowcase => string.Equals(LayoutMode, "Showcase", StringComparison.Ordinal);
+    private SteamLayoutMode ActiveMode => LayoutMode switch
+    {
+        "Showcase" => SteamLayoutMode.Showcase,
+        "Poster Grid" => SteamLayoutMode.Grid,
+        _ => SteamLayoutMode.HeroDeck,
+    };
+
+    private void CycleLayoutMode()
+    {
+        string nextMode = LayoutMode switch
+        {
+            "Hero Deck" => "Showcase",
+            "Showcase" => "Poster Grid",
+            _ => "Hero Deck",
+        };
+        LayoutMode = nextMode;
+        SetProperty(nameof(LayoutMode), nextMode);
+        Context?.RequestRender();
+    }
 
     /// <summary>
     /// The accent and text colors for the render, resolved through the cached
@@ -283,14 +335,14 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     /// </summary>
     private (SKColor Accent, SKColor Text) ResolveColors()
     {
-        SKColor accent = ColorOf("#66C0F4", SKColors.White);
-        SKColor text = ColorOf("#E6E8EA", SKColors.White);
+        SKColor accent = ColorOf("#F59E0B", new SKColor(245, 158, 11));
+        SKColor text = ColorOf("#F3F4F6", SKColors.White);
         return (accent, text);
     }
 
     private void SnapShowcase(SteamLibraryService service, int direction)
     {
-        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled, _activeFilter);
         _geometryMemo.Snap(games, direction);
         Context?.RequestRender();
     }
@@ -298,23 +350,85 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     private void ScrollGrid(SteamLibraryService service, float dragDelta)
     {
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        SteamGridGeometry geometry = GridGeometry(bounds, _geometryMemo.FilteredGames(service.Current, ShowUninstalled).Count);
+        SteamGridGeometry geometry = GridGeometry(bounds, _geometryMemo.FilteredGames(service.Current, ShowUninstalled, _activeFilter).Count);
         _scrollX = Math.Clamp(_scrollX - dragDelta, 0f, geometry.MaxScroll);
         Context?.RequestRender();
     }
 
     private void TapAt(SKPoint point, SteamLibraryService service)
     {
-        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
+        SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+        float scale = bounds.Height > 0 ? bounds.Height / SteamHeroLayout.DesignHeight : 1f;
+        float pad = 12f * scale;
+        float pillY = bounds.Top + pad + (38f * scale - 32f * scale) / 2f;
+        SKRect layoutToggleBounds = new(bounds.Right - pad - 100f * scale, pillY, bounds.Right - pad, pillY + 32f * scale);
+
+        if (layoutToggleBounds.Contains(point))
+        {
+            CycleLayoutMode();
+            return;
+        }
+
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled, _activeFilter);
+
+        if (ActiveMode == SteamLayoutMode.HeroDeck)
+        {
+            SteamHeroGeometry geom = _geometryMemo.Hero(bounds, games, _selectedHeroAppId, _heroShelfScrollY, DefaultSize);
+            var (heroHit, shelfIndex) = SteamHeroLayout.HitTest(geom, point);
+
+            switch (heroHit)
+            {
+                case SteamHeroHit.LayoutToggle:
+                    CycleLayoutMode();
+                    return;
+
+                case SteamHeroHit.FilterAll:
+                    _activeFilter = SteamFilterMode.All;
+                    Context?.RequestRender();
+                    return;
+
+                case SteamHeroHit.FilterFavorites:
+                    _activeFilter = SteamFilterMode.Favorites;
+                    Context?.RequestRender();
+                    return;
+
+                case SteamHeroHit.FilterRecent:
+                    _activeFilter = SteamFilterMode.Recent;
+                    Context?.RequestRender();
+                    return;
+
+                case SteamHeroHit.HeroAction:
+                    if (games.Count > 0)
+                    {
+                        SteamGameItem? hero = games.FirstOrDefault(g => g.AppId == _selectedHeroAppId) ?? games[0];
+                        if (hero is not null)
+                            service.Activate(hero);
+                    }
+                    return;
+
+                case SteamHeroHit.ShelfItem:
+                    if (shelfIndex >= 0 && shelfIndex < games.Count)
+                    {
+                        _selectedHeroAppId = games[shelfIndex].AppId;
+                        Context?.RequestRender();
+                    }
+                    return;
+
+                case SteamHeroHit.HeroCard:
+                default:
+                    return;
+            }
+        }
+
         if (games.Count == 0)
             return;
 
-        (int index, SteamShowcaseHit hit) = HitAt(point, games);
+        (int index, SteamShowcaseHit showcaseHit) = HitAt(point, games);
 
-        if (IsShowcase)
+        if (ActiveMode == SteamLayoutMode.Showcase)
         {
             (SteamGameItem? focus, _, _) = _geometryMemo.Selection(games);
-            switch (hit)
+            switch (showcaseHit)
             {
                 case SteamShowcaseHit.Previous:
                     SnapShowcase(service, -1);
@@ -336,21 +450,39 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
     private void ToggleFavoriteAt(SKPoint point, SteamLibraryService service)
     {
-        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled, _activeFilter);
         if (games.Count == 0)
             return;
 
         uint? appId = null;
-        (int index, SteamShowcaseHit hit) = HitAt(point, games);
-        if (IsShowcase)
+
+        if (ActiveMode == SteamLayoutMode.HeroDeck)
+        {
+            SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
+            SteamHeroGeometry geom = _geometryMemo.Hero(bounds, games, _selectedHeroAppId, _heroShelfScrollY, DefaultSize);
+            var (heroHit, shelfIndex) = SteamHeroLayout.HitTest(geom, point);
+            if (heroHit == SteamHeroHit.ShelfItem && shelfIndex >= 0 && shelfIndex < games.Count)
+            {
+                appId = games[shelfIndex].AppId;
+            }
+            else if (heroHit is SteamHeroHit.HeroCard or SteamHeroHit.HeroAction)
+            {
+                SteamGameItem? hero = games.FirstOrDefault(g => g.AppId == _selectedHeroAppId) ?? games[0];
+                appId = hero.AppId;
+            }
+        }
+        else if (ActiveMode == SteamLayoutMode.Showcase)
         {
             (SteamGameItem? focus, _, _) = _geometryMemo.Selection(games);
-            if (hit == SteamShowcaseHit.Focus && focus is not null)
+            (int _, SteamShowcaseHit showcaseHit) = HitAt(point, games);
+            if (showcaseHit == SteamShowcaseHit.Focus && focus is not null)
                 appId = focus.AppId;
         }
-        else if (index >= 0 && index < games.Count)
+        else
         {
-            appId = games[index].AppId;
+            (int index, _) = HitAt(point, games);
+            if (index >= 0 && index < games.Count)
+                appId = games[index].AppId;
         }
 
         if (appId is not { } id)

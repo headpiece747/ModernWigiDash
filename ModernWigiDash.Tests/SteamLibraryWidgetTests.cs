@@ -44,12 +44,12 @@ public sealed class SteamLibraryWidgetTests
     /// synchronous <c>RefreshNow</c> seam and the bounds are fixed by one
     /// render, so the touch geometry is known.
     /// </summary>
-    private static async ValueTask<(SteamLibraryWidget Widget, List<string> Launched, FakeTimeProvider Clock)> RigAsync(int gameCount = 2)
+    private static async ValueTask<(SteamLibraryWidget Widget, List<string> Launched, FakeTimeProvider Clock)> RigAsync(int gameCount = 2, string layoutMode = "Poster Grid")
     {
         var source = new FakeSource([.. Enumerable.Range(0, gameCount).Select(i => Game((uint)(100 + i), $"Game {i}"))]);
         List<string> launched = [];
         var clock = new FakeTimeProvider();
-        var widget = new SteamLibraryWidget(source, launched.Add, clock);
+        var widget = new SteamLibraryWidget(source, launched.Add, clock) { LayoutMode = layoutMode };
         await widget.InitializeAsync(new TestContext()).ConfigureAwait(false);
         widget.ServiceForTest!.RefreshNow();
         using SKBitmap bitmap = new(1, 1);
@@ -63,7 +63,7 @@ public sealed class SteamLibraryWidgetTests
         var source = new FakeSource(manifests);
         List<string> launched = [];
         var clock = new FakeTimeProvider();
-        var widget = new SteamLibraryWidget(source, launched.Add, clock);
+        var widget = new SteamLibraryWidget(source, launched.Add, clock) { LayoutMode = "Poster Grid" };
         await widget.InitializeAsync(new TestContext()).ConfigureAwait(false);
         widget.ServiceForTest!.RefreshNow();
         using SKBitmap bitmap = new(1, 1);
@@ -244,6 +244,80 @@ public sealed class SteamLibraryWidgetTests
         Touch(widget, GridCellCenter(0, 1), clock, TimeSpan.Zero);
 
         Assert.IsEmpty(launched, "a tap on a running title must not launch it again");
+        await widget.DisposeAsync();
+    }
+
+    private static SteamGameItem GameItem(uint appId, string name = "Game", SteamGameState state = SteamGameState.Idle)
+        => new(appId, name, $"dir-{appId}", state, 0f, 10.0, null, false);
+
+    [TestMethod]
+    public async ValueTask HeroDeck_ActionTap_LaunchesTheHeroGame()
+    {
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync(2, "Hero Deck");
+
+        SteamHeroGeometry geom = SteamHeroLayout.Compute(Bounds, [GameItem(100), GameItem(101)], selectedAppId: 100);
+        SKPoint actionBtnCenter = new(geom.HeroActionButtonBounds.MidX, geom.HeroActionButtonBounds.MidY);
+
+        Touch(widget, actionBtnCenter, clock, TimeSpan.Zero);
+
+        CollectionAssert.AreEqual(new[] { "steam://run/100" }, launched);
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask HeroDeck_ModeToggleTap_CyclesLayouts()
+    {
+        (SteamLibraryWidget widget, _, FakeTimeProvider clock) = await RigAsync(2, "Hero Deck");
+
+        SteamHeroGeometry geom = SteamHeroLayout.Compute(Bounds, [GameItem(100), GameItem(101)], selectedAppId: 100);
+        SKPoint toggleCenter = new(geom.LayoutToggleBounds.MidX, geom.LayoutToggleBounds.MidY);
+
+        Touch(widget, toggleCenter, clock, TimeSpan.Zero);
+        Assert.AreEqual("Showcase", widget.LayoutMode);
+
+        Touch(widget, toggleCenter, clock, TimeSpan.Zero);
+        Assert.AreEqual("Poster Grid", widget.LayoutMode);
+
+        Touch(widget, toggleCenter, clock, TimeSpan.Zero);
+        Assert.AreEqual("Hero Deck", widget.LayoutMode);
+
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask HeroDeck_ShelfTap_ChangesHeroAndLaunches()
+    {
+        (SteamLibraryWidget widget, List<string> launched, FakeTimeProvider clock) = await RigAsync(2, "Hero Deck");
+
+        SteamHeroGeometry geom = SteamHeroLayout.Compute(Bounds, [GameItem(100), GameItem(101)], selectedAppId: 100);
+        SKPoint shelfRow1Center = new(geom.ShelfItems[1].Bounds.MidX, geom.ShelfItems[1].Bounds.MidY);
+
+        // Tap shelf item 1 (game 101)
+        Touch(widget, shelfRow1Center, clock, TimeSpan.Zero);
+
+        // Re-render so hero updates
+        using SKBitmap bitmap = new(1, 1);
+        widget.Render(new SKCanvas(bitmap), Bounds);
+
+        // Now tap action button
+        SKPoint actionBtnCenter = new(geom.HeroActionButtonBounds.MidX, geom.HeroActionButtonBounds.MidY);
+        Touch(widget, actionBtnCenter, clock, TimeSpan.Zero);
+
+        CollectionAssert.AreEqual(new[] { "steam://run/101" }, launched);
+        await widget.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async ValueTask HeroDeck_LongPress_TogglesFavorite()
+    {
+        (SteamLibraryWidget widget, _, FakeTimeProvider clock) = await RigAsync(2, "Hero Deck");
+
+        SteamHeroGeometry geom = SteamHeroLayout.Compute(Bounds, [GameItem(100), GameItem(101)], selectedAppId: 100);
+        SKPoint shelfRow0Center = new(geom.ShelfItems[0].Bounds.MidX, geom.ShelfItems[0].Bounds.MidY);
+
+        Touch(widget, shelfRow0Center, clock, SteamLibraryWidget.LongPress + TimeSpan.FromMilliseconds(50));
+
+        Assert.IsTrue(widget.FavoritesJson.Contains("100"), "Long press on shelf item must favorite it");
         await widget.DisposeAsync();
     }
 }
