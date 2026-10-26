@@ -178,6 +178,34 @@ public class SteamGeometryMemoTests
         Assert.AreEqual(two[1], memo.Selection(two).Focus, "snaps past the end clamp to the last card");
     }
 
+    [TestMethod]
+    public void Hero_SteadyState_ReusesCachedRecord()
+    {
+        var memo = new SteamGeometryMemo();
+        SKRect bounds = new(0, 0, 1016f, 592f);
+        var games = new[] { Game(100), Game(200) };
+
+        var first = memo.Hero(bounds, games, 100, 0f, Fallback);
+        var second = memo.Hero(bounds, games, 100, 0f, Fallback);
+
+        Assert.AreEqual(first, second, "a steady-state frame reuses the cached hero record");
+    }
+
+    [TestMethod]
+    public void Hero_ScrollOrSelectionChange_Recomputes()
+    {
+        var memo = new SteamGeometryMemo();
+        SKRect bounds = new(0, 0, 1016f, 592f);
+        var games = new[] { Game(100), Game(200) };
+
+        var first = memo.Hero(bounds, games, 100, 0f, Fallback);
+        var second = memo.Hero(bounds, games, 200, 0f, Fallback);
+        var third = memo.Hero(bounds, games, 100, 40f, Fallback);
+
+        Assert.AreNotEqual(first, second, "a selection change recomputes the hero record");
+        Assert.AreNotEqual(first, third, "a scroll change recomputes the hero record");
+    }
+
     private static SteamGameItem Game(uint appId, SteamGameState state = SteamGameState.Idle)
         => new(appId, "Game " + appId, "C:\\Games", state, 0f, 0.0, null, false);
 

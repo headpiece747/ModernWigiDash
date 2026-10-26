@@ -115,3 +115,33 @@ internal enum SteamGameState
     /// <summary>The game process is running (the ACTIVE badge renders).</summary>
     Running,
 }
+
+/// <summary>
+/// The presentation layout mode for the Steam library widget.
+/// </summary>
+internal enum SteamLayoutMode
+{
+    /// <summary>Tactile 60/40 hero card + shelf layout with direct PLAY/STOP action button.</summary>
+    HeroDeck,
+
+    /// <summary>Console showcase carousel with centered 3D focal card.</summary>
+    Showcase,
+
+    /// <summary>Multi-game tactical poster grid.</summary>
+    Grid,
+}
+
+/// <summary>
+/// The library category filter tab mode.
+/// </summary>
+internal enum SteamFilterMode
+{
+    /// <summary>All installed games.</summary>
+    All,
+
+    /// <summary>User-favorited games only.</summary>
+    Favorites,
+
+    /// <summary>Recently played games.</summary>
+    Recent,
+}

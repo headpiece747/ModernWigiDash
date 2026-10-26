@@ -28,10 +28,25 @@ internal sealed class SteamGeometryMemo
     // list (the reference key: a fresh snapshot record is a content change).
     private readonly MemoSlot<GridKey, SteamGridGeometry> _gridMemo = new(GridKeyComparer.Instance);
     private readonly MemoSlot<ShowcaseKey, SteamShowcaseGeometry> _showcaseMemo = new();
+    private readonly MemoSlot<HeroKey, SteamHeroGeometry> _heroMemo = new(HeroKeyComparer.Instance);
     private readonly MemoSlot<FilteredGamesKey, IReadOnlyList<SteamGameItem>> _filteredMemo = new(FilteredGamesKeyComparer.Instance);
 
     /// <summary>The showcase cursor (the focal card's index into the view's filtered list).</summary>
     private int _showcaseIndex;
+
+    /// <summary>The hero memo key: bounds + scroll offset + selected app id + game count.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct HeroKey(SKRect Bounds, float ScrollY, uint SelectedAppId, int Count);
+
+    private sealed class HeroKeyComparer : IEqualityComparer<HeroKey>
+    {
+        public static readonly HeroKeyComparer Instance = new();
+
+        public bool Equals(HeroKey x, HeroKey y)
+            => x.Count == y.Count && x.SelectedAppId == y.SelectedAppId && x.Bounds == y.Bounds && Math.Abs(x.ScrollY - y.ScrollY) < ScrollEpsilon;
+
+        public int GetHashCode(HeroKey key) => HashCode.Combine(key.Count, key.SelectedAppId, key.Bounds, key.ScrollY);
+    }
 
     /// <summary>The grid memo key: bounds + scroll offset + game count.</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -52,19 +67,19 @@ internal sealed class SteamGeometryMemo
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct ShowcaseKey(SKRect Bounds, bool HasPrevious, bool HasNext);
 
-    /// <summary>The filtered-list memo key: the snapshot reference + the Show-Uninstalled flag.</summary>
-    private readonly record struct FilteredGamesKey(SteamLibrarySnapshot Snapshot, bool ShowUninstalled);
+    /// <summary>The filtered-list memo key: the snapshot reference + the Show-Uninstalled flag + the category filter mode.</summary>
+    private readonly record struct FilteredGamesKey(SteamLibrarySnapshot Snapshot, bool ShowUninstalled, SteamFilterMode FilterMode);
 
-    /// <summary>The filtered-list key's equality: the snapshot compares by REFERENCE (the service publishes a fresh record each tick), the flag by value.</summary>
+    /// <summary>The filtered-list key's equality: the snapshot compares by REFERENCE (the service publishes a fresh record each tick), the flags by value.</summary>
     private sealed class FilteredGamesKeyComparer : IEqualityComparer<FilteredGamesKey>
     {
         public static readonly FilteredGamesKeyComparer Instance = new();
 
         public bool Equals(FilteredGamesKey x, FilteredGamesKey y)
-            => x.ShowUninstalled == y.ShowUninstalled && ReferenceEquals(x.Snapshot, y.Snapshot);
+            => x.ShowUninstalled == y.ShowUninstalled && x.FilterMode == y.FilterMode && ReferenceEquals(x.Snapshot, y.Snapshot);
 
         public int GetHashCode(FilteredGamesKey key)
-            => HashCode.Combine(key.ShowUninstalled, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key.Snapshot));
+            => HashCode.Combine(key.ShowUninstalled, key.FilterMode, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key.Snapshot));
     }
 
     /// <summary>
@@ -106,39 +121,62 @@ internal sealed class SteamGeometryMemo
         return value;
     }
 
+    /// <summary>
+    /// The Hero Deck geometry, recomputed only when the bounds, the scroll offset,
+    /// the selected app id, or the game count changes.
+    /// </summary>
+    public SteamHeroGeometry Hero(SKRect lastBounds, IReadOnlyList<SteamGameItem> games, uint selectedAppId, float scrollY, SKSize fallback)
+    {
+        SKRect rect = lastBounds.Width > 0f ? lastBounds : new SKRect(0, 0, fallback.Width, fallback.Height);
+        var key = new HeroKey(rect, scrollY, selectedAppId, games.Count);
+        if (_heroMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = SteamHeroLayout.Compute(rect, games, selectedAppId, scrollY);
+        _heroMemo.Set(key, value);
+        return value;
+    }
+
     // The filtered game list, keyed on the published snapshot reference (the
     // service publishes a fresh record each tick, so a reference change is a
-    // content change) and the Show-Uninstalled flag.
+    // content change), the Show-Uninstalled flag, and the category filter mode.
 
     /// <summary>
-    /// The render view's filtered game list: the snapshot's games as-is when
-    /// Show-Uninstalled holds, otherwise the installed-only list (recomputed
-    /// only on a snapshot-reference or flag change, so a steady-state tick
-    /// allocates nothing).
+    /// The render view's filtered game list: filtered by installation state and category tab,
+    /// recomputed only on a snapshot-reference or flag change, so a steady-state tick allocates nothing.
     /// </summary>
-    public IReadOnlyList<SteamGameItem> FilteredGames(SteamLibrarySnapshot snapshot, bool showUninstalled)
+    public IReadOnlyList<SteamGameItem> FilteredGames(SteamLibrarySnapshot snapshot, bool showUninstalled, SteamFilterMode filterMode = SteamFilterMode.All)
     {
-        var key = new FilteredGamesKey(snapshot, showUninstalled);
+        var key = new FilteredGamesKey(snapshot, showUninstalled, filterMode);
         if (_filteredMemo.TryGet(key, out var value))
         {
             return value;
         }
 
-        IReadOnlyList<SteamGameItem> list;
-        if (showUninstalled)
+        List<SteamGameItem> list = [];
+        foreach (SteamGameItem game in snapshot.Games)
         {
-            list = snapshot.Games;
-        }
-        else
-        {
-            List<SteamGameItem> installed = [];
-            foreach (SteamGameItem game in snapshot.Games)
-            {
-                if (game.State != SteamGameState.Uninstalled)
-                    installed.Add(game);
-            }
+            if (!showUninstalled && game.State == SteamGameState.Uninstalled)
+                continue;
 
-            list = installed;
+            if (filterMode == SteamFilterMode.Favorites && !game.IsFavorite)
+                continue;
+
+            list.Add(game);
+        }
+
+        if (filterMode == SteamFilterMode.Recent)
+        {
+            list.Sort((a, b) =>
+            {
+                if (a.State == SteamGameState.Running && b.State != SteamGameState.Running) return -1;
+                if (b.State == SteamGameState.Running && a.State != SteamGameState.Running) return 1;
+                DateTime aTime = a.LastPlayedUtc ?? DateTime.MinValue;
+                DateTime bTime = b.LastPlayedUtc ?? DateTime.MinValue;
+                return bTime.CompareTo(aTime);
+            });
         }
 
         _filteredMemo.Set(key, list);
@@ -170,6 +208,7 @@ internal sealed class SteamGeometryMemo
     {
         _gridMemo.Invalidate();
         _showcaseMemo.Invalidate();
+        _heroMemo.Invalidate();
         _filteredMemo.Invalidate();
     }
 }
