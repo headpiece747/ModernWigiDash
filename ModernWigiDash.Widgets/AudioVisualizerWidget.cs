@@ -4,13 +4,11 @@ namespace ModernWigiDash.Widgets;
 /// Live audio visualizer: draws the system audio output's spectrum as neon
 /// bars, an oscilloscope wave, or a radial pulse. The capture lifecycle and
 /// the double-buffered DSP live in the AudioCaptureLifecycle and
-/// AudioFrameBuffer modules; this widget drives them from Render and Dispose
-/// and draws one snapshot per frame.
+/// AudioFrameBuffer modules; rendering is delegated to <see cref="AudioVisualizerCanvas"/>.
 /// </summary>
 [WidgetMetadata("audio_visualizer", "Audio Visualizer", Category = "Media & Audio", DefaultGridSize = GridSizePreset.Size5x2)]
 public class AudioVisualizerWidget : ModernWidgetBase
 {
-
     /// <summary>The "Visualizer Style" property: bar spectrum or radial wave.</summary>
     [WidgetProperty("Visualizer Style", WidgetPropertyType.Choice, "Bar spectrum or radial wave", "Neon Bars", "Neon Bars", "Oscilloscope Wave", "Radial Pulse")]
     public string VisualizerStyle { get; set; } = "Neon Bars";
@@ -24,12 +22,9 @@ public class AudioVisualizerWidget : ModernWidgetBase
     public string PrimaryColorHex { get; set; } = "#F59E0B";
 
     private readonly AudioFrameBuffer _buffer = new();
-    // The capture lifecycle (when a source is alive, the lock protocol, the
-    // stale-render watchdog, the deferred-stop marshaling) is owned by the
-    // AudioCaptureLifecycle module; this widget drives it from Render and
-    // Dispose and draws one snapshot.
     private AudioCaptureLifecycle? _lifecycle;
     private bool _disposed;
+    private readonly AudioVisualizerCanvas _canvas = new();
 
     /// <summary>
     /// Test seam for the watchdog clock. Defaults to the system clock; tests
@@ -55,10 +50,6 @@ public class AudioVisualizerWidget : ModernWidgetBase
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
-        // Capture starts lazily on the first Render, not here; the lifecycle
-        // module owns the start/stop policy and the NAudio marshaling. The
-        // factory and clock are live reads so the test seams (settable after
-        // construction) take effect on every start.
         _lifecycle = new AudioCaptureLifecycle(_buffer, () => CaptureSourceFactory(), () => Time, () => (int)BarCount, context.LogError);
     }
 
@@ -71,127 +62,23 @@ public class AudioVisualizerWidget : ModernWidgetBase
     /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        // Capture runs only while this widget is being rendered (active page).
-        // The lifecycle module owns the start-on-render / stop-on-stale policy.
         _lifecycle?.OnRender();
 
         SKColor barColor = ColorOf(PrimaryColorHex, WidgetPalette.Accent);
-
-        // One locked copy per frame (smooth + double-buffered snapshot); the
-        // draw methods below read the copy without holding the gate.
         AudioFrame frame = _buffer.Snapshot();
         int bars = _buffer.ClampBars((int)BarCount);
+        AudioVisualizerMode mode = AudioVisualizerModeParser.Parse(VisualizerStyle);
 
-        switch (AudioVisualizerModeParser.Parse(VisualizerStyle))
-        {
-            case AudioVisualizerMode.Oscilloscope:
-                DrawOscilloscope(canvas, bounds, barColor, frame.Waveform);
-                break;
-            case AudioVisualizerMode.RadialPulse:
-                DrawRadialPulse(canvas, bounds, barColor, frame.Spectrum);
-                break;
-            default:
-                DrawNeonBars(canvas, bounds, barColor, frame.Spectrum, bars);
-                break;
-        }
+        _canvas.Render(canvas, bounds, mode, frame, bars, barColor);
     }
 
-    private void DrawNeonBars(SKCanvas canvas, SKRect bounds, SKColor barColor, ReadOnlySpan<float> spectrum, int bars)
-    {
-        float pad = 20f;
-        float availableWidth = bounds.Width - (pad * 2);
-        float barSpacing = 4f;
-        float barWidth = (availableWidth - ((bars - 1) * barSpacing)) / bars;
-        float maxBarHeight = bounds.Height - (pad * 2);
-
-        // One paint shared by every bar (hoisted, re-colored per render).
-        _barPaint.Color = barColor;
-
-        for (int i = 0; i < bars; i++)
-        {
-            float val = spectrum[i];
-            float h = val * maxBarHeight;
-            float x = pad + i * (barWidth + barSpacing);
-            float y = bounds.Bottom - pad - h;
-
-            var barBounds = new SKRect(x, y, x + barWidth, bounds.Bottom - pad);
-            canvas.DrawRoundRect(barBounds, 4f, 4f, _barPaint);
-        }
-    }
-
-    private void DrawOscilloscope(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> waveform)
-    {
-        float pad = 16f;
-        float midY = bounds.MidY;
-        float amp = (bounds.Height - pad * 2f) * 0.45f;
-
-        _oscilloscopeLinePaint.Color = color;
-
-        // The wave shape changes every frame, so the SKPath object is reused
-        // and re-lined instead of building + detaching a new one (SKPathBuilder
-        // has no reuse path — every Snapshot/Detach allocates a new SKPath).
-        _oscilloscopePath ??= new SKPath();
-#pragma warning disable CS0618 // SKPath.Rewind/MoveTo/LineTo are obsolete in favor of SKPathBuilder, whose Snapshot()/Detach() allocate a new SKPath per call — the wave path is reused and re-lined instead (zero-alloc hot path).
-        _oscilloscopePath.Rewind();
-        float stepX = (bounds.Width - pad * 2f) / (waveform.Length - 1f);
-        for (int i = 0; i < waveform.Length; i++)
-        {
-            float v = waveform[i];
-            float x = bounds.Left + pad + i * stepX;
-            float y = midY - v * amp;
-            if (i == 0)
-            {
-                _oscilloscopePath.MoveTo(x, y);
-            }
-            else
-            {
-                _oscilloscopePath.LineTo(x, y);
-            }
-        }
-#pragma warning restore CS0618
-        canvas.DrawPath(_oscilloscopePath, _oscilloscopeLinePaint);
-    }
-
-    private void DrawRadialPulse(SKCanvas canvas, SKRect bounds, SKColor color, ReadOnlySpan<float> spectrum)
-    {
-        float cx = bounds.MidX;
-        float cy = bounds.MidY;
-        float maxR = Math.Min(bounds.Width, bounds.Height) * 0.42f;
-        int n = spectrum.Length;
-
-        _radialLinePaint.Color = color;
-        _radialLinePaint.StrokeWidth = Math.Clamp(bounds.Width / 64f, 2f, 5f);
-
-        for (int i = 0; i < n; i++)
-        {
-            float v = spectrum[i];
-            float angle = (i / (float)n) * MathF.Tau;
-            float dirX = MathF.Cos(angle);
-            float dirY = MathF.Sin(angle);
-            float len = 10f + v * maxR;
-            canvas.DrawLine(cx + dirX * 6f, cy + dirY * 6f, cx + dirX * len, cy + dirY * len, _radialLinePaint);
-        }
-    }
-
-    /// <summary>Stops the capture lifecycle and disposes the widget's reused Skia surfaces.</summary>
+    /// <summary>Stops the capture lifecycle and disposes the canvas and Skia resources.</summary>
     public override ValueTask DisposeAsync()
     {
         if (_disposed) return ValueTask.CompletedTask;
         _disposed = true;
         _lifecycle?.Dispose();
-        _oscilloscopePath?.Dispose();
-        _barPaint.Dispose();
-        _oscilloscopeLinePaint.Dispose();
-        _radialLinePaint.Dispose();
+        _canvas.Dispose();
         return base.DisposeAsync();
     }
-
-    // The reused oscilloscope wave path (re-lined per frame, never reallocated).
-    private SKPath? _oscilloscopePath;
-
-    // Hoisted paints (the 30 FPS render allocates no SKPaint): one per draw
-    // role, colors and the radial width mutated per render.
-    private readonly SKPaint _barPaint = new() { IsAntialias = true };
-    private readonly SKPaint _oscilloscopeLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 2.5f, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round, IsAntialias = true };
-    private readonly SKPaint _radialLinePaint = new() { Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, IsAntialias = true };
 }

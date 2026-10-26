@@ -3,7 +3,7 @@ using ModernWigiDash.Core.Plugins;
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// Defines the default 6-page starter profile. The layout spec is pure,
+/// Defines the default 8-page starter profile. The layout spec is pure,
 /// immutable data (<see cref="Layout"/>): page names, plugin ids,
 /// coordinates. <see cref="Create"/> rehydrates it through the plugin loader.
 /// Tests and tooling can read <see cref="Layout"/> without instantiating
@@ -36,6 +36,11 @@ internal sealed class StarterProfile
             new StarterPlacement("text_label", 610, 148, 203, 148),
             new StarterPlacement("hotkey_button", 813, 0, 203, 148),
             new StarterPlacement("stopwatch_timer", 813, 148, 203, 148)
+        ]),
+
+        new StarterPage("To-Do Companion",
+        [
+            new StarterPlacement("cozy_todo", 0, 0, 1016, 592)
         ]),
 
         new StarterPage("Calendar",

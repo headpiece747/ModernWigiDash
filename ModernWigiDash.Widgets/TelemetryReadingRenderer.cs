@@ -40,6 +40,9 @@ internal sealed class TelemetryReadingRenderer : IDisposable
     /// <summary>Internal test accessor: how many history samples are buffered.</summary>
     internal int HistoryCountForTest => _history.Count;
 
+    /// <summary>Internal test accessor: whether Dispose has run.</summary>
+    internal bool IsDisposedForTest => _disposed;
+
     /// <summary>
     /// The highest buffered sample (0 when empty). The HWiNFO widget has no
     /// vendor-reported maximum, so it feeds this to the presentation's

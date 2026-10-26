@@ -8,6 +8,7 @@ namespace ModernWigiDash.Widgets;
 /// kind and its path/command) on release, with a label and description line,
 /// the button colors, and an optional Griddy or custom-SVG icon that edit
 /// mode can drag (the IWidgetIconGrab seam).
+/// Rendering is delegated to <see cref="HotkeyButtonCanvas"/> and geometry to <see cref="HotkeyIconGeometry"/>.
 /// </summary>
 [WidgetMetadata("hotkey_button", "Hotkey", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
 public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidgetIconGrab, IGlobalHotkeyProvider
@@ -64,98 +65,38 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     [WidgetProperty("Icon Offset Y", WidgetPropertyType.Number, "Vertical shift of the icon in px (negative = up)", 0)]
     public int IconOffsetY { get; set; } = 0;
 
-    // The icon geometry (0.62f max ratio, 0.4f auto-size, 0.31f anchor)
-    // lives exactly here, in the widget that draws the icon — Render, hit
-    // testing, and grab-move math all derive from one helper.
+    private readonly HotkeyButtonCanvas _canvas = new();
+
+    private bool HasIcon => !string.IsNullOrWhiteSpace(IconFile)
+        ? SvgIconLoader.TryGetPath(IconFile, out _)
+        : HasGriddyIcon;
 
     /// <summary>
     /// Whether the rotated-local point falls inside the drawn icon's hit
     /// circle (the edit-mode icon-grab region); false when no icon is drawn.
     /// </summary>
-    /// <param name="width">The widget's width in px.</param>
-    /// <param name="height">The widget's height in px.</param>
-    /// <param name="localX">The point's x in the widget's rotated-local coordinates.</param>
-    /// <param name="localY">The point's y in the widget's rotated-local coordinates.</param>
-    /// <returns>True when the point is inside the icon's hit circle.</returns>
     public bool IsPointOverIcon(float width, float height, float localX, float localY)
-    {
-        if (!ComputeIconGeometry(width, height, out var center, out float half))
-            return false;
-
-        float dx = localX - center.X;
-        float dy = localY - center.Y;
-        return dx * dx + dy * dy <= half * half;
-    }
+        => HotkeyIconGeometry.IsPointOver(width, height, IconSize, IconOffsetX, IconOffsetY, HasIcon, localX, localY);
 
     /// <summary>
     /// The icon's center and radius for the given bounds, so the input
     /// module can grab and move the icon; false when no icon is drawn.
     /// </summary>
-    /// <param name="width">The widget's width in px.</param>
-    /// <param name="height">The widget's height in px.</param>
-    /// <param name="center">The icon's center in widget coordinates.</param>
-    /// <param name="half">The icon's radius in px.</param>
-    /// <returns>True when an icon is drawn.</returns>
     public bool TryGetIconCenter(float width, float height, out SKPoint center, out float half)
-        => ComputeIconGeometry(width, height, out center, out half);
+        => HotkeyIconGeometry.Compute(width, height, IconSize, IconOffsetX, IconOffsetY, HasIcon, out center, out half);
 
     /// <summary>
     /// Persists the icon's new offset after an edit-mode grab-move (the
     /// center is clamped inside the widget bounds); commits through
     /// SetProperty so the move survives export.
     /// </summary>
-    /// <param name="placed">The placed instance being moved (its bounds).</param>
-    /// <param name="localX">The icon's center x in the widget's rotated-local coordinates.</param>
-    /// <param name="localY">The icon's center y in the widget's rotated-local coordinates.</param>
-    /// <param name="grabOffsetX">The x distance between the grab point and the icon center.</param>
-    /// <param name="grabOffsetY">The y distance between the grab point and the icon center.</param>
-    /// <returns>True when the offset changed and was persisted.</returns>
     public bool ApplyGrabMove(PlacedWidgetInstance placed, float localX, float localY, float grabOffsetX, float grabOffsetY)
     {
-        if (!ComputeIconGeometry(placed.Width, placed.Height, out _, out float half))
+        if (!HotkeyIconGeometry.TryCalculateGrabMove(placed.Width, placed.Height, IconSize, IconOffsetX, IconOffsetY, HasIcon, localX, localY, grabOffsetX, grabOffsetY, out int newX, out int newY))
             return false;
 
-        float cx = Math.Clamp(localX + grabOffsetX, half, placed.Width - half);
-        float cy = Math.Clamp(localY + grabOffsetY, half, placed.Height - half);
-        int newX = (int)Math.Round(cx - placed.Width / 2f);
-        int newY = (int)Math.Round(cy - placed.Height * 0.31f);
-        if (newX == IconOffsetX && newY == IconOffsetY)
-            return false;
-
-        // SetProperty covers instance + OnPropertyChanged + PropertyValues
-        // persistence — one write path for properties that must survive export.
         SetProperty(nameof(IconOffsetX), newX);
         SetProperty(nameof(IconOffsetY), newY);
-        return true;
-    }
-
-    /// <summary>Icon center and half-size for the given bounds; false when no icon is drawn.</summary>
-    private bool ComputeIconGeometry(float width, float height, out SKPoint center, out float half)
-    {
-        bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
-        bool hasIcon = useCustomFile
-            ? SvgIconLoader.TryGetPath(IconFile, out _)
-            : HasGriddyIcon;
-        if (!hasIcon)
-        {
-            center = default;
-            half = 0f;
-            return false;
-        }
-
-        float maxIconSize = Math.Min(width, height * 0.62f);
-        float iconSize = IconSize > 0 ? IconSize : Math.Min(width, height) * 0.4f;
-        iconSize = Math.Clamp(iconSize, 0f, maxIconSize);
-        half = iconSize / 2f;
-        if (half <= 0f)
-        {
-            center = default;
-            return false;
-        }
-
-        center = new SKPoint(
-            Math.Clamp(width / 2f + IconOffsetX, half, width - half),
-            Math.Clamp(height * 0.31f + IconOffsetY, half, height - half));
         return true;
     }
 
@@ -179,11 +120,27 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     }
 
     private bool _isPressed = false;
-    private readonly SemaphoreSlim _actionGate = new(1, 1);
-    private CancellationTokenSource? _actionCts;
+    // The action-fire ritual (gate + CTS + dispatch) in one module, driven
+    // through the providers: the touch-up and the global-hotkey trigger both
+    // call RunAsync; teardown runs DisposeAsync.
+    private readonly HotkeyActionRunner _runner;
     // The missing/unsupported icon-file error is reported once per path change
     // — Render runs at 30 FPS and a bad path must not spam the log every frame.
     private string? _lastIconErrorPath;
+
+    /// <summary>
+    /// The reflection-instantiated widget entry (the parameterless ctor the
+    /// App's plugin loader requires): wires the action-fire ritual to the
+    /// runner through the four provider seams.
+    /// </summary>
+    public HotkeyButtonWidget()
+    {
+        _runner = new(
+            () => HotkeyActionCatalog.Create(ActionType, ActionCommand),
+            () => ActionType,
+            () => Context,
+            () => ActionExecutor);
+    }
 
     /// <summary>
     /// Test seam for action execution. Defaults to
@@ -193,100 +150,53 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// </summary>
     internal Func<IReadOnlyList<HotkeyAction>, CancellationToken, Task>? ActionExecutor { get; set; }
 
-    // Hoisted paints: the colors mutate per render (property-driven), so the
-    // 30 FPS render allocates no SKPaint. DrawLabelOnly shares the text pair.
-    private readonly SKPaint _fillPaint = new() { IsAntialias = true };
-    private readonly SKPaint _textPaint = new() { IsAntialias = true };
-    private readonly SKPaint _descriptionPaint = new() { IsAntialias = true };
-
     /// <summary>
     /// Draws the button: the pressed-state glow, the label and description
     /// text, and the icon (custom SVG file or Griddy) in front of them.
     /// </summary>
-    /// <param name="canvas">The canvas to draw on.</param>
-    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
         SKColor btnColor = ColorOf(ButtonColorHex, WidgetPalette.Accent);
         SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         SKColor iconColor = ColorOf(IconColorHex, SKColors.White);
 
-        if (_isPressed)
-        {
-            _fillPaint.Color = btnColor.WithAlpha(180);
-            canvas.DrawRoundRect(bounds, 16f, 16f, _fillPaint);
-        }
-
-        string label = ButtonLabel;
-
         bool useCustomFile = !string.IsNullOrWhiteSpace(IconFile);
-        if (!ComputeIconGeometry(bounds.Width, bounds.Height, out var iconCenter, out float half))
-        {
-            if (useCustomFile && !string.Equals(_lastIconErrorPath, IconFile, StringComparison.Ordinal))
-            {
-                _lastIconErrorPath = IconFile;
-                Context?.LogError($"Hotkey custom icon file not found or unsupported: {IconFile}");
-            }
-            DrawLabelOnly(canvas, bounds, label, textColor, Description);
-            return;
-        }
-        if (useCustomFile) _lastIconErrorPath = null;
-        float iconSize = half * 2f;
+        bool hasGeometry = HotkeyIconGeometry.Compute(bounds.Width, bounds.Height, IconSize, IconOffsetX, IconOffsetY, HasIcon, out var iconCenter, out float half);
+
         SKPath? resolvedPath = null;
-        if (useCustomFile)
+        if (hasGeometry && useCustomFile)
+        {
             SvgIconLoader.TryGetPath(IconFile, out resolvedPath);
-
-        // Draw label and description first so the icon can render in front of them
-        float labelSize = Math.Min(bounds.Width / 7f, bounds.Height / 7f);
-        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, labelSize);
-        _textPaint.Color = textColor;
-        var textBounds = new SKRect();
-        font.MeasureText(label, out textBounds, _textPaint);
-        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f,
-            bounds.Top + bounds.Height * 0.78f, font, _textPaint);
-
-        if (!string.IsNullOrWhiteSpace(Description))
+        }
+        else if (!hasGeometry && useCustomFile && !string.Equals(_lastIconErrorPath, IconFile, StringComparison.Ordinal))
         {
-            var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, labelSize * 0.6f));
-            _descriptionPaint.Color = textColor.WithAlpha(180);
-            descriptionFont.MeasureText(Description, out var descriptionBounds, _descriptionPaint);
-            canvas.DrawTextWithFallback(Description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(8f, labelSize * 0.4f), descriptionFont, _descriptionPaint);
+            _lastIconErrorPath = IconFile;
+            Context?.LogError($"Hotkey custom icon file not found or unsupported: {IconFile}");
         }
 
-        // Icon drawn last so it stays in front of the text when overlapped
-        if (useCustomFile)
-            SvgIconLoader.Draw(canvas, resolvedPath!, iconCenter, iconSize, iconColor, 0, 0);
-        else
-            GriddyIcons.Draw(canvas, Icon, iconCenter, iconSize, iconColor, 0, 0);
-    }
+        if (hasGeometry && useCustomFile) _lastIconErrorPath = null;
 
-    private void DrawLabelOnly(SKCanvas canvas, SKRect bounds, string label, SKColor textColor, string description)
-    {
-        float fontSize = Math.Min(bounds.Width / 6f, bounds.Height / 5f);
-        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontSize);
-        _textPaint.Color = textColor;
-
-        var textBounds = new SKRect();
-        font.MeasureText(label, out textBounds, _textPaint);
-        canvas.DrawTextWithFallback(label, bounds.MidX - textBounds.Width / 2f, bounds.MidY - textBounds.Height / 4f, font, _textPaint);
-
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            var descriptionFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(10f, fontSize * 0.42f));
-            _descriptionPaint.Color = textColor.WithAlpha(180);
-            descriptionFont.MeasureText(description, out var descriptionBounds, _descriptionPaint);
-            canvas.DrawTextWithFallback(description, bounds.MidX - descriptionBounds.Width / 2f,
-                bounds.Bottom - Math.Max(12f, fontSize * 0.65f), descriptionFont, _descriptionPaint);
-        }
+        _canvas.Render(
+            canvas,
+            bounds,
+            _isPressed,
+            ButtonLabel,
+            Description,
+            hasGeometry,
+            iconCenter,
+            half,
+            useCustomFile,
+            resolvedPath,
+            Icon,
+            btnColor,
+            textColor,
+            iconColor);
     }
 
     /// <summary>
     /// Tracks the pressed state on TouchDown and runs the configured action
     /// fire-and-forget on TouchUp.
     /// </summary>
-    /// <param name="localPoint">The touch point in the widget's rotated-local coordinates.</param>
-    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType == TouchEventType.TouchDown)
@@ -297,82 +207,16 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         else if (eventType == TouchEventType.TouchUp)
         {
             _isPressed = false;
-            _ = ExecuteActionsAsync();
+            _ = _runner.RunAsync();
             Context?.RequestRender();
         }
     }
-
-    private async Task ExecuteActionsAsync()
-    {
-        // Zero-timeout try-acquire: returns immediately, so there is no wait to
-        // cancel; the per-run _actionCts is created after the gate is taken.
-        if (!await _actionGate.WaitAsync(0, CancellationToken.None).ConfigureAwait(false)) return;
-        if (_actionCts is { } prior)
-        {
-            await prior.CancelAsync().ConfigureAwait(false);
-            prior.Dispose();
-        }
-        _actionCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try
-        {
-            var action = HotkeyActionCatalog.Create(ActionType, ActionCommand);
-            if (action.Kind == HotkeyActionKind.PageNavigate
-                && int.TryParse(action.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int delta))
-            {
-                // The page-flip actions route through the context (the
-                // window's SwitchToPage, whose SetActivePageIndex gate clamps
-                // the boundary identically to a swipe), not the SendInput
-                // executor.
-                NavigationContext?.NavigatePage(delta);
-                Context?.RequestRender();
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(action.Value) && HotkeyActionCatalog.NeedsCommand(ActionType))
-            {
-                Context?.LogError("Hotkey action skipped: Action Path/Command is empty.");
-                return;
-            }
-            if (action.Kind == HotkeyActionKind.AhkScript)
-            {
-                // The AHK spawn is the host's (the context seam, ADR-0019): it
-                // resolves the user's interpreter from the machine-local
-                // settings and owns the kill-switch veto and the refusal
-                // lines. A blank script path is caught by the empty-command
-                // skip above (this type needs a command).
-                ScriptLaunchContext?.LaunchAutoHotkeyScript(action.Value);
-                Context?.RequestRender();
-                return;
-            }
-            var executor = ActionExecutor ?? HotkeyActionExecutor.ExecuteAsync;
-            await executor([action], _actionCts.Token).ConfigureAwait(false);
-            Context?.RequestRender();
-        }
-        catch (OperationCanceledException)
-        {
-            Context?.LogInfo("Hotkey action cancelled (30s timeout or shutdown)");
-        }
-        catch (Exception ex)
-        {
-            Context?.LogError($"Hotkey action failed: {ex.Message}", ex);
-        }
-        finally
-        {
-            _actionCts.Dispose();
-            _actionCts = null;
-            _actionGate.Release();
-        }
-    }
-
-    // The inspector renderer discovers these through the interface instead of
-    // branching on the widget type (no concrete-widget typeof checks).
 
     /// <summary>
     /// The special inspector editor for this widget's properties: the icon
     /// picker for IconFile, the action-command editor for ActionCommand, or
     /// null when the generic editor suffices.
     /// </summary>
-    /// <param name="property">The property being inspected.</param>
-    /// <returns>The editor kind, or null for the generic editor.</returns>
     public EditorKind? GetEditorKind(PropertyInfo property)
     {
         if (string.Equals(property.Name, nameof(IconFile), StringComparison.Ordinal)) return EditorKind.IconPicker;
@@ -386,8 +230,6 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// IconFile path property that overrides Icon, or null for other
     /// properties.
     /// </summary>
-    /// <param name="iconProperty">The named-icon property being edited.</param>
-    /// <returns>The companion file property, or null.</returns>
     public PropertyInfo? GetIconFileCompanion(PropertyInfo iconProperty)
         => string.Equals(iconProperty.Name, nameof(Icon), StringComparison.Ordinal)
             ? typeof(HotkeyButtonWidget).GetProperty(nameof(IconFile))
@@ -400,18 +242,10 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
     /// Whether the action-command editor is visible for the selected action
     /// type: only types that need a command (the HotkeyActionCatalog rule).
     /// </summary>
-    /// <param name="actionTypeValue">The selected action type value.</param>
-    /// <returns>True when the selected type needs a command.</returns>
     public bool IsActionCommandVisible(string? actionTypeValue)
         => actionTypeValue != null && HotkeyActionCatalog.NeedsCommand(actionTypeValue);
 
     // -- IGlobalHotkeyProvider (the window's discovery seam) -------------------
-    // The window (the HWND owner) registers the chord and routes WM_HOTKEY to
-    // the fire path; the widget keeps the chord vocabulary (the parse is the
-    // Widgets-layer policy) and the single fire entry (tap and hotkey share
-    // the gate, timeout, and failure logging).
-
-    /// <summary>The stored chord parsed into its RegisterHotKey operands (the GlobalHotkeyChordPolicy rules).</summary>
     bool IGlobalHotkeyProvider.TryGetGlobalHotkey(out int modFlags, out ushort virtualKey, out string chord)
     {
         if (GlobalHotkeyChordPolicy.TryParseChord(GlobalHotkey, out modFlags, out virtualKey))
@@ -425,26 +259,16 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
         return false;
     }
 
-    /// <summary>Fires the configured action - the same entry point as a touch-up.</summary>
-    void IGlobalHotkeyProvider.FireGlobalHotkey() => _ = ExecuteActionsAsync();
+    void IGlobalHotkeyProvider.FireGlobalHotkey() => _ = _runner.RunAsync();
 
-    /// <summary>Only the chord property changes the registered hotkey; every other property write leaves the OS registration untouched.</summary>
     bool IGlobalHotkeyProvider.AffectsGlobalHotkey(string propertyName)
         => string.Equals(propertyName, nameof(GlobalHotkey), StringComparison.Ordinal);
 
-
-    /// <summary>Cancels any in-flight action and disposes the hoisted paints and the action gate.</summary>
+    /// <summary>Disposes the hoisted paints and the action runner (which cancels any in-flight action and releases its gate).</summary>
     public override async ValueTask DisposeAsync()
     {
-        _fillPaint.Dispose();
-        _textPaint.Dispose();
-        _descriptionPaint.Dispose();
-        if (_actionCts is { } cts)
-        {
-            await cts.CancelAsync().ConfigureAwait(false);
-            cts.Dispose();
-        }
-        _actionGate.Dispose();
+        _canvas.Dispose();
+        await _runner.DisposeAsync().ConfigureAwait(false);
         await base.DisposeAsync().ConfigureAwait(false);
     }
 }

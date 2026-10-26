@@ -54,67 +54,28 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
 
     private readonly Lock _producerGate = new();
     private CalendarFeedProducer? _producer;
-    private CalendarGeometry _layout;
-
-    // The parsed feed count, read on the render tick: a zero-feed instance
-    // renders its own unavailable state instead of reading the shared
-    // process-wide store (see Render). Kept in sync with FeedsJson -- refreshed
-    // in RestartProducer (the inspector write-through path) and lazily on first
-    // render (a fresh or test-constructed instance whose FeedsJson was set
-    // directly, bypassing OnPropertyChanged). A null value means "not yet
-    // computed"; the 30 FPS steady-state path never re-parses because
-    // RestartProducer keeps it current after any feed edit.
+    // The feed count is a cached derived fact, never a per-frame parse: the
+    // render tick reads it without touching the JSON (a parse on the 30 FPS
+    // tick would allocate and log every frame). It is refreshed on the
+    // write-through path (RestartProducer, when the feeds config changes)
+    // and lazily on first render (the ??= in Render).
     private int? _feedCount;
+    private readonly CalendarCanvas _canvas = new();
 
-    // The per-mode draw paths live in the renderer (CalendarWidgetRenderer),
-    // which owns the hoisted paints and the detail view's word-wrap cache.
-    private readonly CalendarWidgetRenderer _renderer = new();
+    /// <summary>The last computed display facts (test seam): retained for test compatibility.</summary>
+    internal CalendarDisplay? LastDisplay => _canvas.LastDisplay;
 
-    // The touch-state module owns the viewed-day offset, the detail-view
-    // selection, the press point, and the agenda scroll position, and interprets
-    // each Down/Move/Up sample. The widget keeps only Render and the forward
-    // into Feed (the C1 extraction: "what does a tap do" has one owner).
-    private readonly CalendarGestureState _gesture = new();
+    /// <summary>How many times the display-facts compute actually ran (test seam).</summary>
+    internal int DisplayRecomputeCount => _canvas.DisplayRecomputeCount;
 
-    // The display-facts memo (the house MemoSlot pattern, like FrameTime's
-    // _memoDisplay): Build is expensive (LINQ ToList, records, strings) and was
-    // running every tick at 30 FPS. Its now-dependent facts (live/urgent flags,
-    // the countdown, the today highlight) change at most once per minute, so the
-    // cache key carries the minute-of-now plus the snapshot identity, view date,
-    // and row budget; 59 of 60 ticks per minute hit the cache and allocate nothing.
-    private readonly MemoSlot<CalendarDisplayKey, CalendarDisplay> _displayMemo = new();
+    /// <summary>The gesture module's current detail-mode event (null = agenda view). Test seam.</summary>
+    internal CalendarEvent? GestureDetailEventForTest => _canvas.DetailEvent;
 
-    /// <summary>The calendar display-facts cache key: the snapshot identity
-    /// (reference equality - a new poll is a new object), the viewed day, the
-    /// minute-of-now (live/urgent/countdown granularity), and the row budget.</summary>
-    private readonly record struct CalendarDisplayKey(
-        int SnapshotIdentity, DateTime ViewDate, int MinuteOfDay, int Rows);
-
-    /// <summary>The last computed display facts (test seam): lets a test observe
-    /// whether the render tick recomputed or reused the memoized value across a
-    /// minute boundary, without a production surface.</summary>
-    internal CalendarDisplay? LastDisplay => _displayMemo.LastValue;
-
-    /// <summary>How many times the display-facts compute actually ran (a cache
-    /// hit does not increment this). Test seam: distinguishes a memo hit from a
-    /// recompute that happens to produce an equal value.</summary>
-    internal int DisplayRecomputeCount => _displayMemo.RecomputeCount;
-
-    /// <summary>The gesture module's current detail-mode event (null = agenda
-    /// view). Test seam: lets a test observe whether a feed edit exited detail
-    /// mode, without a production surface.</summary>
-    internal CalendarEvent? GestureDetailEventForTest => _gesture.DetailEvent;
-
-    /// <summary>The shell-open seam: opens a meeting link in the default
-    /// browser. Production uses the OS default handler (the http/https/mailto
-    /// gate + Process.Start live in the gesture module); tests bind a recorder so
-    /// a tap is assertable without spawning a browser. The gesture module reads
-    /// this live at open time, so a test's post-construction swap is honored on
-    /// the next tap.</summary>
+    /// <summary>The shell-open seam: opens a meeting link in the default browser.</summary>
     internal Action<string>? OpenUrlSeam
     {
-        get => _gesture.OpenUrlSeam;
-        set => _gesture.OpenUrlSeam = value;
+        get => _canvas.OpenUrlSeam;
+        set => _canvas.OpenUrlSeam = value;
     }
 
     /// <summary>The clock seam (test-injectable; production is the system
@@ -135,31 +96,12 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     /// logs one line so the user knows why the feeds did not load.</summary>
     internal IReadOnlyList<CalendarFeed> ParseFeeds()
     {
-        IReadOnlyList<CalendarFeed> feeds = CalendarFeedsCodec.Parse(FeedsJson);
-        // The codec returns [] for both "no feeds" and "malformed"; only the
-        // latter deserves a log line (a blank or well-formed-empty value is the
-        // silent default state).
-        if (feeds.Count == 0 && !string.IsNullOrWhiteSpace(FeedsJson) && !IsWellFormedEmpty(FeedsJson))
+        FeedsResult result = CalendarFeedsCodec.Parse(FeedsJson);
+        // Only a malformed value deserves a log line (a blank or well-formed
+        // empty value is the silent default state).
+        if (result.Malformed)
             Context?.LogError($"Calendar: feeds JSON is malformed; rendering the unavailable display. Value: {LogSanitizer.Sanitize(FeedsJson)}");
-        return feeds;
-    }
-
-    /// <summary>Whether the value is well-formed JSON that simply holds no feeds
-    /// (an empty array or a non-array root) as opposed to malformed JSON. Used
-    /// to decide whether a zero-feed parse is the silent default or a logged
-    /// error.</summary>
-    private static bool IsWellFormedEmpty(string feedsJson)
-    {
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(feedsJson);
-            return doc.RootElement.ValueKind != JsonValueKind.Array
-                   || !doc.RootElement.EnumerateArray().Any();
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
+        return result.Feeds;
     }
 
     /// <summary>
@@ -169,19 +111,19 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
-        _gesture.Context = context;
+        _canvas.Context = context;
         RestartProducer();
     }
 
-    /// <summary>Stops the running producer and releases hoisted paints (teardown).</summary>
+    /// <summary>Stops the running producer and releases canvas resources (teardown).</summary>
     public override ValueTask DisposeAsync()
     {
+        _canvas.Dispose();
         lock (_producerGate)
         {
             _producer?.Dispose();
             _producer = null;
         }
-        _renderer.Dispose();
         return base.DisposeAsync();
     }
 
@@ -214,7 +156,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
                 // draws the agenda/unavailable view, so the gesture module must
                 // not keep interpreting taps through the now-invisible detail
                 // branch (the canvas and touch state would disagree).
-                _gesture.ExitDetail();
+                _canvas.ExitDetail();
                 return;
             }
 
@@ -246,110 +188,29 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     });
 
-    /// <summary>
-    /// Draws the calendar: either the normal agenda view (date header + month
-    /// grid + timed rows + all-day strip) or the detail view (a scrollable list
-    /// of all events for the selected day with full details). A no-data snapshot
-    /// renders the named unavailable display (ADR-0017).
-    /// </summary>
+    /// <inheritdoc/>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        float scale = Math.Min(bounds.Width / CalendarLayout.DesignWidth, bounds.Height / CalendarLayout.DesignHeight);
-        DateTime now = Clock.GetLocalNow().LocalDateTime;
-        DateTime viewDate = now.Date.AddDays(_gesture.ViewDateOffset);
-        CalendarSeasonalPalette palette = CalendarSeasonalPalettes.Resolve(viewDate, ThemeMode, AccentColorHex, TextColorHex);
-
-        var mode = CalendarLayout.ResolveViewMode(bounds.Width, bounds.Height, LayoutMode);
-        if (mode == CalendarViewMode.MinimalDateCard1x1)
-        {
-            _layout = CalendarLayout.Compute(bounds, scale, 0, false, LayoutMode);
-            _gesture.SetFrameFacts(_layout, null, now);
-            _renderer.RenderMinimalDateCard(canvas, bounds, palette, scale, viewDate);
-            return;
-        }
-
-        // A feed-less instance renders its OWN unavailable state, not whatever the
-        // process-wide store happens to hold (ADR-0011's static store is shared by
-        // every calendar instance, so a second, feeded calendar would otherwise
-        // bleed its events into this one). The feed count is cached (refreshed in
-        // RestartProducer, lazily here on first render) so the 30 FPS path never
-        // re-parses FeedsJson.
         int feedCount = _feedCount ??= ParseFeeds().Count;
-        if (feedCount == 0)
-        {
-            _layout = CalendarLayout.Compute(bounds, scale, 0, false, LayoutMode);
-            _gesture.SetFrameFacts(_layout, null, now);
-            var emptyDisplay = CalendarPresentation.Build(null, now, viewDate, 0);
-            _renderer.RenderAdaptiveView(canvas, bounds, _layout, emptyDisplay, palette, scale, now, viewDate, 0f, 0f);
-            return;
-        }
+        DateTime now = Clock.GetLocalNow().LocalDateTime;
+        CalendarSnapshot? snapshot = feedCount > 0 ? CalendarEventStore.ReadSnapshot() : null;
 
-        CalendarSnapshot? snapshot = CalendarEventStore.ReadSnapshot();
-
-        // Detail mode: the single event's detail view. The frame is MEASURED
-        // first, without a canvas, and handed to the gesture module before a
-        // pixel is drawn - so a touch arriving in the first frame of detail mode
-        // hit-tests the real geometry (a drag scrolls, a link tap opens) instead
-        // of finding nothing and falling through to "exit". The draw then takes
-        // the same frame, so what is drawn and what is hit-tested are one
-        // measurement rather than two that have to agree.
-        if (_gesture.DetailEvent is not null)
-        {
-            _gesture.SetFrameFacts(_layout, null, now);
-            CalendarDetailFrame detail = _renderer.MeasureDetail(
-                bounds, scale, _gesture.DetailEvent.Value, _gesture.DetailScrollY);
-            _gesture.SetDetailGeometry(detail.Geometry);
-            _renderer.RenderDetailView(
-                detail, canvas, bounds, scale, _gesture.DetailEvent.Value,
-                ColorOf(TextColorHex, SKColors.White),
-                ColorOf(AccentColorHex, WidgetPalette.Accent),
-                now);
-            return;
-        }
-
-        int rows = (mode == CalendarViewMode.FullEditorial5x4 || mode == CalendarViewMode.SplitBanner4x2)
-            ? 100
-            : CalendarFeedPolicy.ResolveTimedRows(TimedRows);
-
-        // Memoize the display facts: a new poll, a viewed-day change, a minute
-        // rollover, or a row-budget change recomputes; otherwise the cached
-        // CalendarDisplay is reused and the tick allocates nothing. A null
-        // snapshot (no data) keys on identity 0 - Build handles the unavailable
-        // state, and the memo still avoids rebuilding it every tick.
-        var displayKey = new CalendarDisplayKey(
-            snapshot is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(snapshot),
-            viewDate.Date,
-            now.Hour * 60 + now.Minute,
-            rows);
-        CalendarDisplay display = _displayMemo.GetOrCompute(displayKey, () => CalendarPresentation.Build(snapshot, now, viewDate, rows));
-
-        _layout = CalendarLayout.Compute(bounds, scale, display.Rows.Count, false, LayoutMode);
-
-        // The gesture module owns the agenda scroll state: it computes the max
-        // extent from the frame's row rects and clamps the current offset, then
-        // hands back the values the renderer draws with.
-        _gesture.SetFrameFacts(_layout, display, now, snapshot?.Events);
-        _gesture.UpdateScrollExtent();
-
-        if (_layout.Mode == CalendarViewMode.CompactPoster2x3 && bounds.Height < 280f)
-        {
-            _renderer.RenderClassicView(canvas, bounds, _layout, display, scale, ColorOf(TextColorHex, SKColors.White), ColorOf(AccentColorHex, WidgetPalette.Accent));
-            return;
-        }
-
-        _renderer.RenderAdaptiveView(canvas, bounds, _layout, display, palette, scale, now, viewDate, _gesture.AgendaScrollY, _gesture.MaxAgendaScrollY);
+        _canvas.Render(
+            canvas,
+            bounds,
+            LayoutMode,
+            ThemeMode,
+            AccentColorHex,
+            TextColorHex,
+            TimedRows,
+            feedCount,
+            snapshot,
+            now);
     }
 
-    /// <summary>
-    /// Touch handling for the calendar widget:
-    /// - In normal view: chevron tap changes viewed month;
-    ///   tapping a month-grid cell jumps to that day;
-    ///   vertical drag inside the agenda section scrolls upcoming events;
-    ///   tapping a row or hero event opens the detail view for that event.
-    /// - In detail view: tap on URL opens meeting link; tap elsewhere exits back.
-    /// </summary>
+    /// <inheritdoc/>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-        => _gesture.Feed(localPoint, eventType);
+        => _canvas.OnTouch(localPoint, eventType);
 
     /// <summary>
     /// The special inspector editor for this widget's properties: the calendar

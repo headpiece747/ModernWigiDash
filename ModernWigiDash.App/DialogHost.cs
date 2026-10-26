@@ -1,4 +1,3 @@
-using System.Windows.Shapes;
 using Microsoft.Win32;
 using ModernWigiDash.App.Theming;
 using ModernWigiDash.App.Update;

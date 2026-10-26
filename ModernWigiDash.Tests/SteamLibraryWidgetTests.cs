@@ -30,7 +30,7 @@ public sealed class SteamLibraryWidgetTests
 
         public string? SteamPath => null;
 
-        public IReadOnlyList<SteamAppManifest> LoadManifests() => _manifests;
+        public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath) => _manifests;
     }
 
     /// <summary>An installed app manifest (idle, launchable); the ACF's executable drives the process key.</summary>

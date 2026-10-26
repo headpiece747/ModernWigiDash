@@ -65,6 +65,92 @@ internal sealed class NowPlayingRenderer : IDisposable
 
     private static readonly SKSamplingOptions HighQualitySampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
+    // Single-slot string memos (the house model): the media's text facts
+    // change per track, not per tick, so the 30 FPS render reformats them
+    // only on a track change. Each key is the slow-changing input the
+    // formatted string is a pure function of.
+    private readonly MemoSlot<string, string> _appNameMemo = new();
+
+    /// <summary>The meta-line memo key: the three metadata facts the line is a pure function of. The genres list compares by reference (a fresh snapshot list is a content change).</summary>
+    private readonly record struct MediaMetaKey(int TrackNumber, int AlbumTrackCount, IReadOnlyList<string>? Genres);
+
+    private readonly MemoSlot<MediaMetaKey, string> _metaMemo = new();
+    private readonly MemoSlot<int, string> _positionMemo = new();
+    private readonly MemoSlot<int, string> _durationMemo = new();
+    private readonly MemoSlot<long, string?> _rateMemo = new();
+
+    private string AppName(string appId)
+    {
+        if (_appNameMemo.TryGet(appId, out var value))
+        {
+            return value;
+        }
+
+        value = NowPlayingPresentation.FriendlyAppName(appId);
+        _appNameMemo.Set(appId, value);
+        return value;
+    }
+
+    private string MetaLine(MediaSnapshot snap)
+    {
+        var key = new MediaMetaKey(snap.TrackNumber, snap.AlbumTrackCount, snap.Genres);
+        if (_metaMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = NowPlayingPresentation.MetaLine(snap.TrackNumber, snap.AlbumTrackCount, snap.Genres);
+        _metaMemo.Set(key, value);
+        return value;
+    }
+
+    private string PositionString(double seconds)
+    {
+        // The position string changes ~1/s while playing; the key is the
+        // TRUNCATED whole second, exactly the value FormatTime reads
+        // (ts.Minutes/ts.Seconds), so a key hit always serves a correct string.
+        int key = (int)Math.Floor(seconds);
+        if (_positionMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = NowPlayingPresentation.FormatTime(seconds);
+        _positionMemo.Set(key, value);
+        return value;
+    }
+
+    private string DurationString(double seconds)
+    {
+        // The duration is stable per track; the key is the truncated whole
+        // second (the FormatTime input), so a key hit always serves a correct
+        // string.
+        int key = (int)Math.Floor(seconds);
+        if (_durationMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = NowPlayingPresentation.FormatTime(seconds);
+        _durationMemo.Set(key, value);
+        return value;
+    }
+
+    private string? RateText(double rate)
+    {
+        // The playback rate is stable per session; the bit-exact key avoids a
+        // float equality (the house float-memo-key pattern).
+        long key = BitConverter.DoubleToInt64Bits(rate);
+        if (_rateMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = NowPlayingPresentation.PlaybackRateText(rate);
+        _rateMemo.Set(key, value);
+        return value;
+    }
+
     /// <summary>Releases the hoisted paints' and cached paths' native Skia handles - the owning widget's DisposeAsync calls this.</summary>
     public void Dispose()
     {
@@ -157,7 +243,7 @@ internal sealed class NowPlayingRenderer : IDisposable
         var pill = layout.SourceBadgeRect;
         float h = pill.Height;
         float x = pill.Left;
-        string name = NowPlayingPresentation.FriendlyAppName(snap.SourceAppId);
+        string name = AppName(snap.SourceAppId);
         var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
 
         canvas.DrawRoundRect(pill, h / 2f, h / 2f, _pillBgPaint);
@@ -281,7 +367,7 @@ internal sealed class NowPlayingRenderer : IDisposable
             currentY += albumH + 5f * scale;
         }
 
-        string meta = NowPlayingPresentation.MetaLine(snap.TrackNumber, snap.AlbumTrackCount, snap.Genres);
+        string meta = MetaLine(snap);
         if (!string.IsNullOrEmpty(meta))
         {
             canvas.DrawTextWithFallback(meta, textX, currentY - metaFont.Metrics.Top, metaFont, _metaPaint);
@@ -307,14 +393,14 @@ internal sealed class NowPlayingRenderer : IDisposable
         // Time labels above progress bar track
         var timeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 16f * scale);
         _timePaint.Color = text.WithAlpha(210);
-        canvas.DrawTextWithFallback(NowPlayingPresentation.FormatTime(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, _timePaint);
+        canvas.DrawTextWithFallback(PositionString(Math.Clamp(posSec, 0, Math.Max(0, durSec))), left, timeY, timeFont, _timePaint);
 
-        string durStr = NowPlayingPresentation.FormatTime(durSec);
+        string durStr = DurationString(durSec);
         var db = new SKRect();
         timeFont.MeasureText(durStr, out db, _timePaint);
         canvas.DrawTextWithFallback(durStr, right - db.Width, timeY, timeFont, _timePaint);
 
-        if (NowPlayingPresentation.PlaybackRateText(snap.PlaybackRate) is { } rate)
+        if (RateText(snap.PlaybackRate) is { } rate)
         {
             canvas.DrawTextWithFallback(rate, left + db.Width + 20f * scale, timeY, timeFont, _timePaint);
         }

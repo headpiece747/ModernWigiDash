@@ -265,7 +265,7 @@ public class FontAndTextTests
         List<string> wrapped = ["one", "two", "three", "four", "five", "six", "seven", "eight"];
 
         // 8 lines at 24*1.25=30px each = 240px; only 3 fit in 100px.
-        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
+        var display = TextLabelCanvas.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
 
         Assert.AreEqual(3, display.Count, "only the lines that fit may be drawn");
         StringAssert.EndsWith(display[^1], "…", "the cut must be signaled with an ellipsis on the last visible line");
@@ -279,7 +279,7 @@ public class FontAndTextTests
         var font = FontHelper.GetCachedFont("Arial", SKFontStyle.Normal, 24f);
         List<string> wrapped = ["one", "two"];
 
-        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
+        var display = TextLabelCanvas.FitLinesToBounds(wrapped, font, maxWidth: 300f, lineHeight: 30f, availableHeight: 100f);
 
         CollectionAssert.AreEqual(new[] { "one", "two" }, display.ToArray());
     }
@@ -292,7 +292,7 @@ public class FontAndTextTests
         // own line).
         List<string> wrapped = ["Supercalifragilisticexpialidocious"];
 
-        var display = TextLabelWidget.FitLinesToBounds(wrapped, font, maxWidth: 80f, lineHeight: 30f, availableHeight: 100f);
+        var display = TextLabelCanvas.FitLinesToBounds(wrapped, font, maxWidth: 80f, lineHeight: 30f, availableHeight: 100f);
 
         Assert.AreEqual(1, display.Count);
         StringAssert.EndsWith(display[0], "…", "an over-wide word must be truncated, not spill past the width");

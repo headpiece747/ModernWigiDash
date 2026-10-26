@@ -28,11 +28,10 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     // ── SMTC state (all mutated on the UI thread) ─────────────────────────
     private readonly Func<MediaSessionMonitor>? _monitorFactory;
     private MediaSessionMonitor? _mediaMonitor;
-    private ArtworkLoader? _artworkLoader;
-    private SKPoint? _touchDownPoint;
+    private readonly NowPlayingCanvas _canvas = new();
     private bool _disposed;
 
-    /// <summary>Production constructor; the media monitor and the artwork loader are created in InitializeAsync over the context.</summary>
+    /// <summary>Production constructor; the media monitor and the canvas are bound in InitializeAsync over the context.</summary>
     public NowPlayingWidget()
     {
     }
@@ -46,176 +45,64 @@ public sealed class NowPlayingWidget : ModernWidgetBase
     /// <summary>Test seam: injectable clock for the progress estimate.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
 
-    // One layout record per frame: Render draws from it, OnTouch hit-tests
-    // the same record, so the drawn controls and the tap targets can never
-    // drift apart.
-    private NowPlayingGeometry _layout;
-
-    // The draw module owns every paint, hoisted paint, cached icon path, and
-    // the album clip path; the widget disposes it at teardown.
-    private readonly NowPlayingRenderer _renderer = new();
+    /// <summary>Test seam: access to the last computed layout geometry.</summary>
+    internal NowPlayingGeometry LastLayout => _canvas.LastLayout;
 
     /// <summary>
-    /// Binds the context, creates the artwork loader and the media session
-    /// monitor over it, and starts the SMTC bootstrap.
+    /// Binds the context, initializes the canvas and the media session monitor over it,
+    /// and starts the SMTC bootstrap.
     /// </summary>
-    /// <param name="context">The widget host context.</param>
-    /// <param name="cancellationToken">Cancels the initialization.</param>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
-        _artworkLoader = new ArtworkLoader(Context.LogError);
-        _artworkLoader.ArtworkChanged += OnArtworkChanged;
+        _canvas.Initialize(Context.LogError);
+        _canvas.ArtworkChanged += OnArtworkChanged;
         _mediaMonitor = (_monitorFactory ?? (() => new MediaSessionMonitor(Context.LogError)))();
         _mediaMonitor.SnapshotChanged += OnMediaSnapshotChanged;
         _ = _mediaMonitor.InitializeAsync();
     }
 
-    /// <summary>
-    /// Forwards snapshot updates to the <see cref="ArtworkLoader"/>, which owns
-    /// key-change detection, the reload decision, the load pipeline, and the
-    /// retire-and-publish discipline. The loader raises <see cref="ArtworkLoader.ArtworkChanged"/>
-    /// after each completed load (success, skipped, or failed).
-    /// </summary>
     private void OnMediaSnapshotChanged(MediaSessionUpdate? update)
-    {
-        _artworkLoader?.NotifySnapshotChanged(update);
-    }
+        => _canvas.NotifySnapshotChanged(update);
 
     private void OnArtworkChanged()
-    {
-        Context?.RequestRender();
-    }
+        => Context?.RequestRender();
 
     /// <summary>
-    /// Draws the now-playing view (artwork, title/artist meta, progress, and
-    /// the control row) from the monitor's latest snapshot and the per-frame
-    /// layout record, or the idle panel when no session is playing. All paints
-    /// route through <see cref="NowPlayingRenderer"/>.
+    /// Draws the now-playing view or idle panel via <see cref="NowPlayingCanvas"/>.
     /// </summary>
-    /// <param name="canvas">The frame canvas.</param>
-    /// <param name="bounds">The widget's placement bounds.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        _artworkLoader?.DisposeRetired();
-
-        float scale = Math.Min(bounds.Width / NowPlayingLayout.DesignWidth, bounds.Height / NowPlayingLayout.DesignHeight);
-
-        var artState = _artworkLoader?.Current;
-        _renderer.DrawBackground(canvas, bounds, scale, artState?.BackgroundColor);
-
-        var snap = _mediaMonitor?.CurrentSnapshot;
-        if (NowPlayingPresentation.IsIdle(snap))
-        {
-            _renderer.DrawIdle(canvas, bounds, scale, ColorOf(AccentColorHex, WidgetPalette.Accent), ColorOf(TextColorHex, SKColors.White));
-            return;
-        }
-
-        _layout = NowPlayingLayout.Compute(bounds, scale, ShowSourceBadge, MeasureBadgeTextWidth(snap, scale));
-
-        // Snapshot the artwork once before handing it to the renderer: background
-        // SMTC refreshes can replace (or null) the published artwork between two
-        // reads, which would NRE the render mid-draw. The retired-list discipline
-        // guarantees the snapshot stays alive for this draw even if a refresh
-        // retires it right after.
-        _renderer.DrawActiveScene(
-            canvas, bounds, scale, _layout, snap,
-            artState?.Bitmap,
-            ColorOf(AccentColorHex, WidgetPalette.Accent),
-            ColorOf(TextColorHex, SKColors.White),
+        _canvas.Render(
+            canvas,
+            bounds,
+            _mediaMonitor?.CurrentSnapshot,
+            AccentColorHex,
+            TextColorHex,
+            ShowSourceBadge,
             Clock.GetUtcNow());
     }
 
     /// <summary>
-    /// The badge label's measured width — the one font-dependent input to the
-    /// frame layout. Measured only when the badge is shown; the layout module
-    /// computes the rect unconditionally but gates hit-testing on visibility.
+    /// Routes a tap to the hit-tested control via <see cref="NowPlayingCanvas"/>.
     /// </summary>
-    private float MeasureBadgeTextWidth(MediaSnapshot snap, float scale)
-    {
-        if (!ShowSourceBadge) return 0f;
-        var font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 14f * scale);
-        return FontHelper.MeasureTextWithFallback(NowPlayingPresentation.FriendlyAppName(snap.SourceAppId), font);
-    }
-
-    /// <summary>
-    /// Routes a tap to the hit-tested control (shuffle, previous, play/pause,
-    /// next, repeat, source badge, or seek) as an intent to the media monitor.
-    /// </summary>
-    /// <param name="localPoint">The touch point in the widget's rotated-local space.</param>
-    /// <param name="eventType">The touch event type.</param>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
-    {
-        if (eventType == TouchEventType.TouchDown)
-        {
-            _touchDownPoint = localPoint;
-            return;
-        }
+        => _canvas.OnTouch(localPoint, eventType, _mediaMonitor);
 
-        if (eventType != TouchEventType.TouchUp) return;
-        var monitor = _mediaMonitor;
-        if (monitor is null)
-        {
-            _touchDownPoint = null;
-            return;
-        }
-
-        // Use the contact point rather than the release point so minor touch
-        // movement does not turn a valid button press into a miss.
-        SKPoint hitPoint = _touchDownPoint ?? localPoint;
-        _touchDownPoint = null;
-
-        // The widget sends intents; the monitor decides can-run and argument
-        // from its own latest snapshot, so no tap path reads a snapshot the
-        // widget held (a stale-toggle command is unrepresentable here). The
-        // prev/next taps send a fixed command the session itself refuses
-        // when its capability is off, so they need no veto of their own.
-        switch (NowPlayingLayout.GetAction(_layout, hitPoint))
-        {
-            case NowPlayingHitAction.Shuffle:
-                monitor.ToggleShuffle();
-                break;
-            case NowPlayingHitAction.Previous:
-                monitor.Previous();
-                break;
-            case NowPlayingHitAction.PlayPause:
-                monitor.TogglePlayPause();
-                break;
-            case NowPlayingHitAction.Next:
-                monitor.Next();
-                break;
-            case NowPlayingHitAction.Repeat:
-                monitor.CycleRepeat();
-                break;
-            case NowPlayingHitAction.SourceBadge:
-                monitor.CycleSession();
-                break;
-            case NowPlayingHitAction.Seek:
-                double ratio = NowPlayingPresentation.SeekRatio(hitPoint.X, _layout.ProgressLeft, _layout.ProgressWidth);
-                monitor.SeekToRatio(ratio);
-                break;
-        }
-    }
-
-    /// <summary>Unsubscribes, disposes the media monitor and the artwork loader, and releases the widget's Skia surfaces.</summary>
+    /// <summary>Unsubscribes, disposes the media monitor and the canvas resources.</summary>
     public override async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
 
-        _renderer.Dispose();
+        _canvas.ArtworkChanged -= OnArtworkChanged;
+        _canvas.Dispose();
 
         if (_mediaMonitor is not null)
         {
             _mediaMonitor.SnapshotChanged -= OnMediaSnapshotChanged;
             await _mediaMonitor.DisposeAsync().ConfigureAwait(false);
             _mediaMonitor = null;
-        }
-        if (_artworkLoader is not null)
-        {
-            _artworkLoader.ArtworkChanged -= OnArtworkChanged;
-            _artworkLoader.DisposeAll();
-            _artworkLoader = null;
         }
 
         await base.DisposeAsync().ConfigureAwait(false);

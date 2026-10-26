@@ -30,10 +30,24 @@ internal sealed class FeedKindWiring
     public required SeedLeg? Seed { get; init; }
 
     /// <summary>
+    /// The live source label the WS path stores its records under (null when the
+    /// kind has no socket): the SAME label the kind's REST leg uses, so the
+    /// store's freshness guard sees one source, not two drifting strings.
+    /// </summary>
+    public string? LiveSourceLabel { get; init; }
+
+    /// <summary>
     /// The WS loop this row starts: created lazily on the first claim and
     /// disposed at shutdown. Null while no claim has started it.
     /// </summary>
     public FeedLoop? Loop { get; set; }
+
+    /// <summary>
+    /// The REST poll task this row starts: created lazily on the first claim
+    /// and retired at shutdown, so the row owns BOTH feed lifetimes (the socket
+    /// and the poll) at both ends. Null while no claim has started it.
+    /// </summary>
+    public Task? RestTask { get; set; }
 }
 
 /// <summary>

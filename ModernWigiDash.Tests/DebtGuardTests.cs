@@ -597,8 +597,7 @@ public sealed class DebtGuardTests
     private static readonly Dictionary<string, (int Count, string Reason)> ThirtySecondWaitSites = new()
     {
         ["ModernWigiDash.Widgets/NetworkBudget.cs"] = (1, "the budget itself - the one owner"),
-        ["ModernWigiDash.Widgets/HotkeyButtonWidget.cs"] = (1, "the action CTS (a widget action bound), not a network wait"),
-        ["ModernWigiDash.Widgets/PictureAndGifWidget.cs"] = (1, "the folder rescan period (a filesystem poll), not a network wait"),
+        ["ModernWigiDash.Widgets/PictureMediaSession.cs"] = (1, "the folder rescan period (a filesystem poll), not a network wait"),
         ["ModernWigiDash.Widgets/PriceFeedManager.cs"] = (3, "the REST poll cadence, the reconnect ceiling, and the retired-CTS grace - three different policies that happen to share the number"),
         ["ModernWigiDash.Widgets/Twitch/TwitchChatConnection.cs"] = (1, "the IRC reconnect ceiling, not a per-request wait"),
     };
@@ -737,6 +736,36 @@ public sealed class DebtGuardTests
     }
 
     [TestMethod]
+    public void HouseRules_WidgetDraw_OwnedByTheDrawOwnerNotInline()
+    {
+        // The one-draw-owner rule (CONTEXT.md): every widget delegates its draw
+        // to exactly one owned draw-owner field (a *Canvas or *Renderer), so a
+        // screen's paints and their disposal live in one place. A widget
+        // regrowing an inline canvas.Draw re-splits the draw across two owners
+        // (the paint is declared in the widget, missed by the draw-owner's
+        // Dispose, and the glossary's "the widget's draw paths" claim goes false).
+        //
+        // The allow-list was the not-yet-migrated set (widgets that still drew
+        // inline, with no draw-owner field); it is now empty, so the pin is a
+        // pure forward ratchet: any widget with an inline canvas.Draw fails the
+        // gate. A new entry is a deliberate edit with a reason.
+        var hits = RepoScan.ScanSrc(new Regex(@"canvas\.Draw\w*\s*\("))
+            .Where(hit => hit.Contains("Widget.cs:", StringComparison.Ordinal))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
+
+        var allowed = Array.Empty<string>();
+
+        var offenders = hits.Where(hit => !allowed.Contains(hit)).ToList();
+        Assert.AreEqual(0, offenders.Count,
+            "a widget regrew an inline canvas.Draw: the one-draw-owner rule says every widget delegates its draw to one owned draw-owner field. Found at: "
+            + string.Join("; ", offenders)
+            + ". Migrate the draw to the widget's draw-owner (or add one); the allow-list is the not-yet-migrated set, and a new entry is a deliberate edit with a reason.");
+    }
+
+    [TestMethod]
     public void HouseRules_NamedMapAdapters_ShareTheOneAcquirePolicy()
     {
         // "Bounded, mutex-guarded copy of a producer-owned named map" is one
@@ -810,6 +839,7 @@ public sealed class DebtGuardTests
             ["ModernWigiDash.Widgets/CalDavFetcher.cs"] = 1,
             ["ModernWigiDash.Widgets/IcsUrlFetcher.cs"] = 1,
             ["ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs"] = 1,
+            ["ModernWigiDash.Widgets/Steam/Services/SteamWebApiClient.cs"] = 1, // the Steam cluster's shared client Timeout (the one-wait shape)
         };
         // Stripped mode, so a doc <see cref="NetworkBudget.Wait"/> or a comment
         // naming the constant does not count as a leg budgeting from it.
@@ -904,6 +934,53 @@ public sealed class DebtGuardTests
             "the code after the literal must survive (the surplus closing quote must not open a phantom string)");
         Assert.IsFalse(code.Contains("x"),
             "the string after the literal must be stripped like any other string");
+    }
+
+    // --- the color parse has one owner ---
+
+    /// <summary>
+    /// Every raw <c>SKColor.TryParse</c> in src, with its reason. The one owner
+    /// is <c>SkColorCache</c> in the Sdk: a process-wide cache keyed by the hex
+    /// string, so the per-frame parse sites (the widget base, the canvas draw
+    /// owners, the seasonal palette, the compositor) run at most once per
+    /// distinct value. A new render site routes through <c>SkColorCache</c>
+    /// (or the widget base's <c>ColorOf</c> over it); a raw parse is a
+    /// deliberate allow-list edit with a reason, and a retired site is a
+    /// deliberate allow-list edit too.
+    /// </summary>
+    private static readonly Dictionary<string, (int Count, string Reason)> ColorParseSites = new()
+    {
+        ["ModernWigiDash.Sdk/SkColorCache.cs"] = (1, "the one owner - the process-wide hex-to-SKColor cache"),
+        ["ModernWigiDash.Widgets/Twitch/TwitchChatConnection.cs"] = (1, "the per-IRC-message user colors are unbounded; the process-wide cache would grow without bound, so this site parses raw"),
+    };
+
+    [TestMethod]
+    public void HouseRules_ColorParsing_RoutesThroughTheOneOwner()
+    {
+        // The canvas extraction (rounds 1-7) re-spelled an uncached static
+        // ColorOf in six canvas modules and left raw per-tick parses in the
+        // seasonal palette and the compositor: the base class's cache doc said
+        // the fallback rule was "declared once", but the move was mechanical
+        // and the discipline did not travel (architecture review, round 8,
+        // 2026-10-25). The fix was the one Sdk owner, SkColorCache, and every
+        // site routed through it. Stripped mode (the default), so this counts
+        // CODE references: a comment that mentions the parse is prose about
+        // the owner, not a site bypassing it.
+        var actual = RepoScan.ScanSrc(new Regex(@"SKColor\.TryParse"))
+            .GroupBy(hit => hit.Split(':', 3)[0].Replace('\\', '/'))
+            .ToDictionary(g => g.Key, g => g.Count());
+        var expected = ColorParseSites
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Count);
+
+        CollectionAssert.AreEquivalent(
+            expected,
+            actual,
+            "the raw color parses in src must match the allow-list exactly. Allowed today:"
+            + Environment.NewLine + string.Join(Environment.NewLine,
+                ColorParseSites.OrderBy(kv => kv.Key)
+                    .Select(kv => $"  {kv.Key} x{kv.Value.Count} - {kv.Value.Reason}"))
+            + Environment.NewLine + "A new render site that parses a hex is the drift this pin exists to stop: route it through SkColorCache (or the widget base's ColorOf over it), or, if the value domain genuinely is unbounded, add it here with its reason. A retired site is a deliberate allow-list edit, not a silent shrink."
+            + Environment.NewLine + $"Found: {(actual.Count == 0 ? "(none)" : string.Join(", ", actual.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key} x{kv.Value}")))}");
     }
 
     // --- shared helpers ---

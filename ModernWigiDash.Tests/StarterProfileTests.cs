@@ -10,7 +10,7 @@ public class StarterProfileTests
 
     private static readonly string[] ExpectedPageNames =
     [
-        "Main Dashboard", "Calendar", "Now Playing", "Weather Forecast",
+        "Main Dashboard", "To-Do Companion", "Calendar", "Now Playing", "Weather Forecast",
         "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time"
     ];
 

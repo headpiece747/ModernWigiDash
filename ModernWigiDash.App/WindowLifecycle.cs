@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Windows;
 
 namespace ModernWigiDash.App;
 
@@ -14,19 +15,9 @@ namespace ModernWigiDash.App;
 /// forward into this module; the policy lives here.
 /// </summary>
 internal sealed class WindowLifecycle(
-    Func<bool> wiredProvider,
-    Func<string?> closeBehaviorProvider,
-    Func<bool> trayLiveProvider,
-    Func<bool> isEnabledProvider,
-    Func<bool> isVisibleProvider,
-    Func<WindowState> windowStateProvider,
-    Action hide,
-    Action show,
-    Action activate,
-    Action forceNormal,
-    Action close,
-    Action shutdown,
-    Func<bool> runSessionEndStandby)
+    WindowStateProbes probes,
+    WindowSurface surface,
+    WindowLifecycleHooks lifecycle)
 {
     private bool _quitting;
     private StartupMinimizeLatchPolicy.LatchState _startupMinimizeLatch = new(false);
@@ -38,7 +29,7 @@ internal sealed class WindowLifecycle(
     public void QuitClose()
     {
         _quitting = true;
-        close();
+        surface.Close();
     }
 
     /// <summary>The tray menu's "Quit" (ADR-0018): the explicit-quit path through
@@ -50,7 +41,7 @@ internal sealed class WindowLifecycle(
     public void QuitFromTray()
     {
         QuitClose();
-        shutdown();
+        surface.Shutdown();
     }
 
     /// <summary>The tray/second-launch activation: shows a hidden window
@@ -59,9 +50,9 @@ internal sealed class WindowLifecycle(
     /// single-instance guard hops through the App's dispatcher).</summary>
     public void ShowFromTray()
     {
-        if (!isVisibleProvider())
+        if (!probes.IsVisible())
         {
-            show();
+            surface.Show();
         }
 
         // The minimize-intercept leg leaves the window Minimized: force
@@ -71,12 +62,12 @@ internal sealed class WindowLifecycle(
         // The close-intercept leg preserves the window's own state (a maximized
         // window comes back maximized), so only the Minimized state needs
         // the repair.
-        if (windowStateProvider() == WindowState.Minimized)
+        if (probes.State() == WindowState.Minimized)
         {
-            forceNormal();
+            surface.ForceNormal();
         }
 
-        activate();
+        surface.Activate();
     }
 
     /// <summary>The close intercept (ADR-0018): a window close (X, Alt+F4) hides
@@ -87,14 +78,14 @@ internal sealed class WindowLifecycle(
     /// leaving it.</summary>
     public void OnWindowClosing(CancelEventArgs e)
     {
-        if (!wiredProvider() || _quitting)
+        if (!probes.Wired() || _quitting)
         {
             return;
         }
-        if (CloseInterceptPolicy.ShouldHide(closeBehaviorProvider(), trayLiveProvider()))
+        if (CloseInterceptPolicy.ShouldHide(probes.CloseBehavior(), probes.TrayLive()))
         {
             e.Cancel = true;
-            hide();
+            surface.Hide();
         }
     }
 
@@ -116,13 +107,43 @@ internal sealed class WindowLifecycle(
         var (veto, next) = StartupMinimizeLatchPolicy.Consume(_startupMinimizeLatch);
         _startupMinimizeLatch = next;
         if (veto) return;
-        if (!wiredProvider() || _quitting || !isEnabledProvider() || windowStateProvider() != WindowState.Minimized)
+        if (!probes.Wired() || _quitting || !probes.IsEnabled() || probes.State() != WindowState.Minimized)
         {
             return;
         }
-        if (CloseInterceptPolicy.ShouldHide(closeBehaviorProvider(), trayLiveProvider()))
+        if (CloseInterceptPolicy.ShouldHide(probes.CloseBehavior(), probes.TrayLive()))
         {
-            hide();
+            surface.Hide();
+        }
+    }
+
+    /// <summary>
+    /// The startup state sequence (ADR-0019): the arm-latch, state-write,
+    /// clear-latch ritual, one owner for both startup paths. The autostart
+    /// path (the --startup flag) minimizes now (the StartupUri window is
+    /// shown by WPF after the ctor returns, so the state write lands
+    /// pre-Show); the minimize-to-tray path (machine-local) hides from a
+    /// Loaded handler, because Hide must run after Show. The latch vetoes
+    /// the minimize-to-tray intercept for the startup state change; the
+    /// explicit clear keeps the latch one-shot if WPF raises no state
+    /// change for the write. The two compose: both on, the hide wins.
+    /// </summary>
+    public void RunStartupState(bool startMinimized, bool minimizeToTray, Action<Action> subscribeLoaded)
+    {
+        if (startMinimized)
+        {
+            ArmStartupMinimizeLatch();
+            surface.Minimize();
+            ClearStartupMinimizeLatch();
+        }
+        if (minimizeToTray)
+        {
+            subscribeLoaded(() =>
+            {
+                ArmStartupMinimizeLatch();
+                surface.Hide();
+                ClearStartupMinimizeLatch();
+            });
         }
     }
 
@@ -141,5 +162,5 @@ internal sealed class WindowLifecycle(
     /// App's SessionEnding event. A system shutdown or logoff kills the process
     /// mid-frame-stream, and this is the one chance to run the display's standby
     /// ritual before the process dies. Returns the truthful verdict.</summary>
-    public bool RunSessionEndStandby() => runSessionEndStandby();
+    public bool RunSessionEndStandby() => lifecycle.RunSessionEndStandby();
 }

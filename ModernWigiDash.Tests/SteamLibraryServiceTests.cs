@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using ModernWigiDash.Widgets.Steam.Models;
@@ -18,7 +19,24 @@ public sealed class SteamLibraryServiceTests
     private sealed class EmptySource : ISteamLibrarySource
     {
         public string? SteamPath => null;
-        public IReadOnlyList<SteamAppManifest> LoadManifests() => [];
+        public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath) => [];
+    }
+
+    /// <summary>A source whose games list grows one app per call (a clobber is a size regression).</summary>
+    private sealed class GrowingSource : ISteamLibrarySource
+    {
+        private int _call;
+
+        public string? SteamPath => null;
+
+        public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath)
+        {
+            int count = ++_call;
+            var manifests = new List<SteamAppManifest>(count);
+            for (int i = 0; i < count; i++)
+                manifests.Add(new SteamAppManifest((uint)(1000 + i), "Game", "dir", "g.exe", SteamAppState.FullyInstalled, 0, 0, 0, 1.0));
+            return manifests;
+        }
     }
 
     /// <summary>A process bridge that reports nothing running and closes cleanly.</summary>
@@ -32,7 +50,7 @@ public sealed class SteamLibraryServiceTests
     private sealed class TempSource(string steamPath) : ISteamLibrarySource
     {
         public string? SteamPath => steamPath;
-        public IReadOnlyList<SteamAppManifest> LoadManifests()
+        public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath)
             => [new SteamAppManifest(730u, "Game", "gamedir", "game.exe", SteamAppState.FullyInstalled, 0, 0, 0, 10.0)];
     }
 
@@ -40,11 +58,12 @@ public sealed class SteamLibraryServiceTests
     private static (SteamLibraryService Service, List<SteamLibrarySnapshot> Published) Create()
     {
         List<SteamLibrarySnapshot> published = [];
+        var source = new EmptySource();
+        var api = new SteamWebApiClient();
         var service = new SteamLibraryService(
-            new EmptySource(),
+            source,
             new SteamProcessTracker(new NoOpBridge(), _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
+            api,
             published.Add,
             _ => { });
         return (service, published);
@@ -60,7 +79,7 @@ public sealed class SteamLibraryServiceTests
         service.SetPersonaForTest(persona, avatar);
 
         Assert.AreEqual(persona, service.Current.Persona);
-        Assert.AreSame(avatar, service.PersonaAvatar);
+        Assert.AreSame(avatar, service.BeginRenderFrame().Avatar);
         Assert.AreEqual(persona, published[^1].Persona);
     }
 
@@ -76,7 +95,7 @@ public sealed class SteamLibraryServiceTests
         service.SetPersonaForTest(null, null);
 
         Assert.IsNull(service.Current.Persona);
-        Assert.IsNull(service.PersonaAvatar);
+        Assert.IsNull(service.BeginRenderFrame().Avatar);
     }
 
     [TestMethod]
@@ -91,7 +110,65 @@ public sealed class SteamLibraryServiceTests
         service.SetCredentials("", "");
 
         Assert.IsNull(service.Current.Persona);
-        Assert.IsNull(service.PersonaAvatar);
+        Assert.IsNull(service.BeginRenderFrame().Avatar);
+    }
+
+    [TestMethod]
+    public void PersonaFold_OverlaysTheLatestSnapshot_NotAStaleTick()
+    {
+        var source = new GrowingSource();
+        var api = new SteamWebApiClient();
+        using var service = new SteamLibraryService(
+            source,
+            new SteamProcessTracker(new NoOpBridge(), _ => { }),
+            api,
+            _ => { },
+            _ => { });
+        var persona = new SteamPersona("https://example.com/a.jpg", "Tester", 2);
+        using var avatar = new SKBitmap(8, 8);
+
+        service.RefreshNow();
+        service.RefreshNow();
+        service.SetPersonaForTest(persona, avatar);
+
+        Assert.AreEqual(2, service.Current.Games.Count, "the persona fold overlays the LATEST tick, not a stale one");
+        Assert.AreEqual(persona, service.Current.Persona);
+    }
+
+    [TestMethod]
+    public void TickAndPersonaFold_NeverClobberThePublishedGamesList()
+    {
+        var source = new GrowingSource();
+        var api = new SteamWebApiClient();
+        var sizes = new List<int>();
+        var sizesGate = new System.Threading.Lock();
+        using var service = new SteamLibraryService(
+            source,
+            new SteamProcessTracker(new NoOpBridge(), _ => { }),
+            api,
+            snapshot =>
+            {
+                lock (sizesGate)
+                    sizes.Add(snapshot.Games.Count);
+            },
+            _ => { });
+        var persona = new SteamPersona("https://example.com/a.jpg", "Tester", 2);
+        using var avatar = new SKBitmap(8, 8);
+
+        const int rounds = 4000;
+        var ticker = Task.Run(() => { for (int i = 0; i < rounds; i++) service.RefreshNow(); });
+        var folder = Task.Run(() => { for (int i = 0; i < rounds; i++) service.SetPersonaForTest(persona, avatar); });
+        Task.WaitAll(ticker, folder);
+
+        lock (sizesGate)
+        {
+            int previous = 0;
+            foreach (int size in sizes)
+            {
+                Assert.IsTrue(size >= previous, "a stale tick must never be re-published over a newer one (the single-writer invariant)");
+                previous = size;
+            }
+        }
     }
 
     [TestMethod]
@@ -102,25 +179,21 @@ public sealed class SteamLibraryServiceTests
         Directory.CreateDirectory(posterDir);
         File.WriteAllBytes(Path.Combine(posterDir, SteamPosterSource.PosterFileName), MakeJpegBytes());
 
-        var service = new SteamLibraryService(
-            new TempSource(temp),
-            new SteamProcessTracker(new NoOpBridge(), _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
-            _ => { },
-            _ => { });
+        var source = new TempSource(temp);
+        var cache = new SteamPosterCache();
+        var policy = new SteamPosterPolicy(source, cache, new SteamWebApiClient(), _ => { });
 
         try
         {
-            Assert.IsFalse(service.PosterCache.TryGet(730u, out _), "no poster before the load");
+            Assert.IsFalse(cache.TryGet(730u, out _), "no poster before the load");
 
-            service.LoadLocalPosterForTest(730u);
+            policy.LoadLocalPosterForTest(730u);
 
-            Assert.IsTrue(service.PosterCache.TryGet(730u, out _), "the local poster must land in the cache");
+            Assert.IsTrue(cache.TryGet(730u, out _), "the local poster must land in the cache");
         }
         finally
         {
-            service.Dispose();
+            policy.Dispose();
             Directory.Delete(temp, true);
         }
     }
@@ -144,7 +217,7 @@ public sealed class SteamLibraryServiceTests
     {
         public string? SteamPath => null;
 
-        public IReadOnlyList<SteamAppManifest> LoadManifests()
+        public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath)
             => [new SteamAppManifest(730u, "Game", "gamedir", "game.exe", SteamAppState.FullyInstalled, 0, 0, 0, 10.0)];
     }
 
@@ -152,11 +225,12 @@ public sealed class SteamLibraryServiceTests
     public async Task Terminate_ClosesTheGamesProcessTree()
     {
         var bridge = new RecordingBridge();
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
         using var service = new SteamLibraryService(
-            new OneGameSource(),
+            source,
             new SteamProcessTracker(bridge, _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
+            api,
             _ => { },
             _ => { });
         service.RefreshNow();
@@ -170,11 +244,12 @@ public sealed class SteamLibraryServiceTests
     public async Task Terminate_UnknownApp_DoesNotTouchAnyProcess()
     {
         var bridge = new RecordingBridge();
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
         using var service = new SteamLibraryService(
-            new OneGameSource(),
+            source,
             new SteamProcessTracker(bridge, _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
+            api,
             _ => { },
             _ => { });
         service.RefreshNow();
@@ -184,14 +259,69 @@ public sealed class SteamLibraryServiceTests
         Assert.IsEmpty(bridge.Closed, "an app id with no process name must not close anything");
     }
 
+    /// <summary>One service over a recording bridge + launch-URI sink (the tap decision's two legs).</summary>
+    private static (SteamLibraryService Service, RecordingBridge Bridge, List<string> LaunchUris) MakeActivateService()
+    {
+        var bridge = new RecordingBridge();
+        var launchUris = new List<string>();
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
+        var service = new SteamLibraryService(source, new SteamProcessTracker(bridge, launchUris.Add), api, _ => { }, _ => { });
+        service.RefreshNow();
+        return (service, bridge, launchUris);
+    }
+
+    private static SteamGameItem Game(SteamGameState state)
+        => new(730u, "Game", "dir", state, 0f, 0, null, false);
+
+    [TestMethod]
+    public async Task Activate_RunningGame_TerminatesIt()
+    {
+        (SteamLibraryService service, RecordingBridge bridge, List<string> launchUris) = MakeActivateService();
+
+        service.Activate(Game(SteamGameState.Running));
+
+        // The close is fire-and-forget (the off-render contract): a bounded wait lets it land.
+        var elapsed = Stopwatch.StartNew();
+        while (bridge.Closed.Count == 0 && elapsed.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(10).ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(new[] { "game" }, bridge.Closed, "a running game is terminated (the close contract)");
+        Assert.AreEqual(0, launchUris.Count, "a running game is not launched");
+    }
+
+    [TestMethod]
+    public void Activate_LaunchableGame_LaunchesIt()
+    {
+        (SteamLibraryService service, RecordingBridge bridge, List<string> launchUris) = MakeActivateService();
+
+        service.Activate(Game(SteamGameState.Idle));
+
+        Assert.AreEqual(1, launchUris.Count, "an idle (launchable) game launches");
+        Assert.IsTrue(launchUris[0].Contains("730"), "the launch URI carries the app id");
+        Assert.AreEqual(0, bridge.Closed.Count, "an idle game is not terminated");
+    }
+
+    [TestMethod]
+    public void Activate_UnlaunchableGame_DoesNothing()
+    {
+        (SteamLibraryService service, RecordingBridge bridge, List<string> launchUris) = MakeActivateService();
+
+        service.Activate(Game(SteamGameState.Uninstalled));
+
+        Assert.AreEqual(0, bridge.Closed.Count, "an uninstalled game is not terminated");
+        Assert.AreEqual(0, launchUris.Count, "an uninstalled game is not launched");
+    }
+
     [TestMethod]
     public void ToggleFavorite_RoundTripsThroughTheCanonicalJson()
     {
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
         using var service = new SteamLibraryService(
-            new OneGameSource(),
+            source,
             new SteamProcessTracker(new RecordingBridge(), _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
+            api,
             _ => { },
             _ => { });
 
@@ -206,11 +336,12 @@ public sealed class SteamLibraryServiceTests
     [TestMethod]
     public void ToggleFavorite_TwoTogglesRestoreTheOriginalState()
     {
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
         using var service = new SteamLibraryService(
-            new OneGameSource(),
+            source,
             new SteamProcessTracker(new RecordingBridge(), _ => { }),
-            new SteamPosterCache(),
-            new SteamWebApiClient(),
+            api,
             _ => { },
             _ => { });
 
@@ -218,6 +349,33 @@ public sealed class SteamLibraryServiceTests
         service.ToggleFavorite(730u);
         string again = service.ToggleFavorite(730u);
         Assert.AreEqual(on, again, "two toggles are the identity: the set, not the string, owns the state");
+    }
+
+    [TestMethod]
+    public void ToggleFavorite_RefreshesThePublishedStar_WithoutWaitingATick()
+    {
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient();
+        using var service = new SteamLibraryService(
+            source,
+            new SteamProcessTracker(new RecordingBridge(), _ => { }),
+            api,
+            _ => { },
+            _ => { });
+
+        service.RefreshNow();
+        Assert.IsFalse(service.Current.Games.Single(g => g.AppId == 730u).IsFavorite, "a fresh library has no favorites");
+
+        string json = service.ToggleFavorite(730u);
+
+        Assert.IsTrue(service.Current.Games.Single(g => g.AppId == 730u).IsFavorite, "the toggle refreshes the published snapshot's star immediately (no 3s tick)");
+
+        // The widget's push-back adopts the service's own canonical string (no re-derive to empty).
+        service.SetFavoritesJson(json);
+        Assert.IsTrue(service.Current.Games.Single(g => g.AppId == 730u).IsFavorite, "the push-back adopts the canonical string, it does not re-derive to empty");
+
+        service.ToggleFavorite(730u);
+        Assert.IsFalse(service.Current.Games.Single(g => g.AppId == 730u).IsFavorite, "a second toggle un-favorites");
     }
 
     /// <summary>A stub poster CDN: records every requested URL and serves a valid poster.</summary>
@@ -241,17 +399,19 @@ public sealed class SteamLibraryServiceTests
     {
         var handler = new RecordingPosterHandler();
         var http = new HttpClient(handler);
-        var cache = new SteamPosterCache();
+        var source = new OneGameSource();
+        var api = new SteamWebApiClient(TimeProvider.System, http);
         using var service = new SteamLibraryService(
-            new OneGameSource(),
+            source,
             new SteamProcessTracker(new RecordingBridge(), _ => { }),
-            cache,
-            new SteamWebApiClient(TimeProvider.System, http),
+            api,
             _ => { },
             _ => { });
 
         try
         {
+            // The render facade: the poster request is the service's name; the fetch rule stays the policy's (the test drives the cache through its concrete test seam).
+            var cache = service.PosterCacheForTest;
             // The focal card is already cached: only the missing flank may be requested.
             cache.InsertForTest(100u, new SKBitmap(8, 8, SKColorType.Rgb565, SKAlphaType.Opaque));
             var focus = new SteamGameItem(100u, "Focus", "dir", SteamGameState.Idle, 1f, 10.0, null, false);

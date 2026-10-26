@@ -9,7 +9,11 @@ namespace ModernWigiDash.Widgets;
 /// owned here: the fill/stroke/text/card pair behind every cell, row, and panel
 /// is one shared set, colors swapped via Paint.Color mutation (hoisted out of
 /// the per-cell loops). Colors are resolved by the widget before the call so
-/// this module never parses a hex string (the house renderer pattern).
+/// this module never parses a hex string (the house renderer pattern). The
+/// date-keyed strings (the minimal card's year/month/day/weekday, the poster
+/// header's "/year") are memoized on the viewed date, and the day numbers /
+/// week badges are finite-domain statics, so a steady-state tick reformats
+/// nothing.
 /// </summary>
 internal sealed class CalendarWidgetRenderer : IDisposable
 {
@@ -20,6 +24,60 @@ internal sealed class CalendarWidgetRenderer : IDisposable
 
     private static readonly string[] StatLabels = ["12M", "52W", "365D"];
     private static readonly string[] WeekdayLabels = ["M", "T", "W", "T", "F", "S", "S"];
+
+    // The day numbers and ISO week badges are finite domains: the strings for
+    // 1..31 and W01..W53 never change, so they are built once, not formatted
+    // per tick.
+    private static readonly string[] DayNumbers = BuildDayNumbers();
+    private static readonly string[] WeekBadges = BuildWeekBadges();
+
+    // The date-keyed single-slot memo (the ClockCanvas.DigitalStrings house
+    // model): the minimal card's year/month/day/weekday strings and the
+    // poster header's "/year" change once a day (the viewed date), so the
+    // 30 FPS tick reformats once a day, not once per frame. The shared memo
+    // slot owns the key-compare.
+    private readonly MemoSlot<DateTime, CalendarDateStrings> _dateMemo = new();
+
+    /// <summary>The date-string memo value: the five formatted date strings.</summary>
+    private readonly record struct CalendarDateStrings(string Year, string Month, string Day, string DOW, string SlashYear);
+
+    private CalendarDateStrings DateStrings(DateTime viewDate)
+    {
+        var key = viewDate.Date;
+        if (_dateMemo.TryGet(key, out var value))
+        {
+            return value;
+        }
+
+        value = new CalendarDateStrings(
+            viewDate.Year.ToString(CultureInfo.InvariantCulture),
+            viewDate.ToString("MMMM", CultureInfo.InvariantCulture).ToUpperInvariant(),
+            viewDate.Day.ToString(CultureInfo.InvariantCulture),
+            viewDate.ToString("dddd", CultureInfo.InvariantCulture).ToUpperInvariant(),
+            $"/{viewDate.Year}");
+        _dateMemo.Set(key, value);
+        return value;
+    }
+
+    private static string[] BuildDayNumbers()
+    {
+        var numbers = new string[32];
+        for (int d = 1; d <= 31; d++)
+        {
+            numbers[d] = d.ToString(CultureInfo.InvariantCulture);
+        }
+        return numbers;
+    }
+
+    private static string[] BuildWeekBadges()
+    {
+        var badges = new string[54];
+        for (int w = 1; w <= 53; w++)
+        {
+            badges[w] = $"W{w:D2}";
+        }
+        return badges;
+    }
 
     // The detail view's line pitches and pads used to live here, shared by this
     // file's measure and draw passes. They moved to CalendarLayout with the
@@ -62,29 +120,27 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         float h = rect.Height;
         float w = rect.Width;
 
+        (string yearStr, string monthStr, string dayStr, string dowStr, _) = DateStrings(viewDate);
+
         // Year at top - sized to fill width
-        string yearStr = viewDate.Year.ToString(CultureInfo.InvariantCulture);
         var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.12f, w * 0.25f));
         _textPaint.Color = palette.Text.WithAlpha(170);
         float yearW = FontHelper.MeasureTextWithFallback(yearStr, yearFont);
         canvas.DrawTextWithFallback(yearStr, midX - yearW / 2f, rect.Top + h * 0.15f, yearFont, _textPaint);
 
         // Month name - sized to fill width
-        string monthStr = viewDate.ToString("MMMM", CultureInfo.InvariantCulture).ToUpperInvariant();
         var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.15f, w * 0.35f));
         _textPaint.Color = palette.Text;
         float monthW = FontHelper.MeasureTextWithFallback(monthStr, monthFont);
         canvas.DrawTextWithFallback(monthStr, midX - monthW / 2f, rect.Top + h * 0.35f, monthFont, _textPaint);
 
         // Day number - largest element, fills most of the space
-        string dayStr = viewDate.Day.ToString(CultureInfo.InvariantCulture);
         var dayFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.45f, w * 0.6f));
         _textPaint.Color = palette.Text;
         float dayW = FontHelper.MeasureTextWithFallback(dayStr, dayFont);
         canvas.DrawTextWithFallback(dayStr, midX - dayW / 2f, rect.Top + h * 0.65f, dayFont, _textPaint);
 
         // Weekday at bottom - sized to fill width
-        string dowStr = viewDate.ToString("dddd", CultureInfo.InvariantCulture).ToUpperInvariant();
         var dowFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Min(h * 0.1f, w * 0.3f));
         _textPaint.Color = palette.Text.WithAlpha(180);
         float dowW = FontHelper.MeasureTextWithFallback(dowStr, dowFont);
@@ -138,7 +194,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         int weekNum = System.Globalization.ISOWeek.GetWeekOfYear(viewDate);
         var weekFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 5.5f * scale);
         _textPaint.Color = palette.Accent;
-        string weekStr = $"W{weekNum:D2}";
+        string weekStr = WeekBadges[weekNum];
         float ww = FontHelper.MeasureTextWithFallback(weekStr, weekFont);
         canvas.DrawTextWithFallback(weekStr, rect.MidX - ww / 2f, rect.Top + 16f * scale, weekFont, _textPaint);
 
@@ -180,9 +236,10 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         SKRect headerRect = layout.HeaderRect;
         if (!headerRect.IsEmpty)
         {
+            (_, _, _, _, string slashYear) = DateStrings(viewDate);
             var yearFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 11f * scale);
             _textPaint.Color = palette.Text.WithAlpha(170);
-            canvas.DrawTextWithFallback($"/{viewDate.Year}", headerRect.Left + 2f * scale, headerRect.Top + 13f * scale, yearFont, _textPaint);
+            canvas.DrawTextWithFallback(slashYear, headerRect.Left + 2f * scale, headerRect.Top + 13f * scale, yearFont, _textPaint);
 
             var monthFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 26f * scale);
             _textPaint.Color = palette.Text;
@@ -221,7 +278,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 if (!cell.IsCurrentMonth)
                 {
                     // Overflow days from adjacent months rendered at muted contrast
-                    string numStr = cell.Day.ToString(CultureInfo.InvariantCulture);
+                    string numStr = DayNumbers[cell.Day];
                     _textPaint.Color = palette.Text.WithAlpha(55);
                     float nw = FontHelper.MeasureTextWithFallback(numStr, dayFont);
                     canvas.DrawTextWithFallback(numStr, cx - nw / 2f, cy - dayFont.Metrics.Top * 0.4f, dayFont, _textPaint);
@@ -252,7 +309,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                     _textPaint.Color = palette.Text.WithAlpha(210);
                 }
 
-                string curNumStr = cell.Day.ToString(CultureInfo.InvariantCulture);
+                string curNumStr = DayNumbers[cell.Day];
                 float curNw = FontHelper.MeasureTextWithFallback(curNumStr, dayFont);
                 canvas.DrawTextWithFallback(curNumStr, cx - curNw / 2f, cy - dayFont.Metrics.Top * 0.4f, dayFont, _textPaint);
 
@@ -268,8 +325,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 }
             }
         }
-
-        DrawNotableDatesFooter(canvas, layout.NotableDatesRect, display, palette, scale, viewDate);
     }
 
     private void DrawChevron(SKCanvas canvas, SKRect rect, string text, SKColor color, float scale)
@@ -285,57 +340,6 @@ internal sealed class CalendarWidgetRenderer : IDisposable
         _textPaint.Color = color;
         float tw = FontHelper.MeasureTextWithFallback(text, font);
         canvas.DrawTextWithFallback(text, rect.MidX - tw / 2f, rect.MidY - font.Metrics.Top * 0.42f, font, _textPaint);
-    }
-
-    private void DrawNotableDatesFooter(SKCanvas canvas, SKRect rect, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime viewDate)
-    {
-        if (rect.IsEmpty || rect.Height < 14f * scale)
-            return;
-
-        _strokePaint.Color = palette.Text.WithAlpha(30);
-        _strokePaint.StrokeWidth = 1f * scale;
-        canvas.DrawLine(rect.Left, rect.Top, rect.Right, rect.Top, _strokePaint);
-
-        // Only show holidays for the viewed day (not feed events)
-        IReadOnlyList<NotableDateItem> allItems = display.SafeNotableDates;
-        var viewedDayHolidays = allItems
-            .Where(item => item.Day == viewDate.Day && !item.IsFeedEvent)
-            .ToList();
-
-        if (viewedDayHolidays.Count == 0)
-            return;
-
-        var labelFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 9f * scale);
-        float y = rect.Top + 13f * scale;
-        float curX = rect.Left;
-
-        for (int i = 0; i < viewedDayHolidays.Count && i < 3; i++)
-        {
-            NotableDateItem item = viewedDayHolidays[i];
-            string entry = $"{item.Tag}  {item.Label}";
-            if (i < viewedDayHolidays.Count - 1 && i < 2) entry += "   \u00B7   ";
-
-            // Truncate entry to fit within remaining width
-            float availableW = rect.Right - curX;
-            if (availableW <= 0) break;
-
-            float entryW = FontHelper.MeasureTextWithFallback(entry, labelFont);
-            if (entryW > availableW)
-            {
-                // Truncate with ellipsis
-                while (entry.Length > 3 && FontHelper.MeasureTextWithFallback(entry + "...", labelFont) > availableW)
-                    entry = entry[..^1];
-                entry += "...";
-                entryW = FontHelper.MeasureTextWithFallback(entry, labelFont);
-            }
-
-            if (curX + entryW > rect.Right && i > 0)
-                break;
-
-            _textPaint.Color = palette.Text.WithAlpha(200);
-            canvas.DrawTextWithFallback(entry, curX, y, labelFont, _textPaint);
-            curX += entryW;
-        }
     }
 
     private void DrawAgendaPanel(SKCanvas canvas, CalendarGeometry layout, CalendarDisplay display, CalendarSeasonalPalette palette, float scale, DateTime now, DateTime viewDate, float agendaScrollY, float maxAgendaScrollY)
@@ -578,7 +582,7 @@ internal sealed class CalendarWidgetRenderer : IDisposable
                 numColor = textColor.WithAlpha(180);
 
             _textPaint.Color = numColor;
-            string dayStr = cell.Day.ToString(CultureInfo.InvariantCulture);
+            string dayStr = DayNumbers[cell.Day];
             float dayW = FontHelper.MeasureTextWithFallback(dayStr, font);
             canvas.DrawTextWithFallback(dayStr, cx - dayW / 2f, cy - font.Metrics.Top * 0.5f, font, _textPaint);
 

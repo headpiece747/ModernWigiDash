@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipTelemetry,
+    [switch]$Clean,
     [string]$Version = "",
     [string]$LhsVersion = "",
     [string]$PresentMonVersion = "",
@@ -178,6 +179,7 @@ Copy-Item (Join-Path $Root "LICENSE") (Join-Path $ZipDir "LICENSE-ModernWigiDash
 
 # --- 5. Zip (root folder included inside) ---
 Write-Host "Zipping..."
+if ($Clean) { Get-ChildItem -Path $Root -Filter 'ModernWigiDash-*.zip' -File | Remove-Item -Force }
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path $ZipDir -DestinationPath $ZipPath
 if (-not (Test-Path $ZipPath)) { throw "Zip creation failed" }

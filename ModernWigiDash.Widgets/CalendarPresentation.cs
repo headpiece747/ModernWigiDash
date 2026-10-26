@@ -49,9 +49,6 @@ internal sealed record CalendarDisplay(
     string NextUpcomingCountdown = "",
     IReadOnlyList<CalendarRow>? TomorrowRows = null)
 {
-    /// <summary>Safe notable dates accessor.</summary>
-    public IReadOnlyList<NotableDateItem> SafeNotableDates => NotableDates ?? [];
-
     /// <summary>Safe tomorrow rows accessor.</summary>
     public IReadOnlyList<CalendarRow> SafeTomorrowRows => TomorrowRows ?? [];
 }

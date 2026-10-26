@@ -410,6 +410,7 @@ ModernWigiDash-app-only-win-x64.zip
 .pytest_cache/
 /.slopwatch/
 /scorecard.png
+/repomix-output.xml
 
 # Windows reserved device name: a literal `nul` file at the repo root
 # (stray redirect, 7/25-8/4) made `git add -A` abort with "invalid path 'nul'".

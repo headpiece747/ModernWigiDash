@@ -53,25 +53,15 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     [WidgetProperty("Max Messages", WidgetPropertyType.Number, "Number of chat messages to keep on screen", 30)]
     public int MaxMessages { get; set; } = 30;
 
-    private readonly WrapCache _wrapCache = new();
     private readonly SemaphoreSlim _authActionGate = new(1, 1);
     private volatile bool _disposed;
+    private readonly TwitchChatCanvas _canvas = new();
     // The chat connection module: the IRC endpoint, the anonymous credentials,
     // the handshake, the PONG keepalive, the reconnect loop, the ChatState
     // transition, and the message buffer all live there behind the
     // IWebSocketFeed seam. The widget keeps the property surface, the
     // rendering, and the touch, and drives the module from its properties.
     private readonly TwitchChatConnection _connection;
-
-    // Hoisted paints: every color is computed per render (theme/status-driven),
-    // so each paint is one field reused via Color mutation - the 30 FPS render
-    // allocates no SKPaint.
-    private readonly SKPaint _bgPaint = new() { IsAntialias = true };
-    private readonly SKPaint _badgePaint = new() { IsAntialias = true };
-    private readonly SKPaint _statusPaint = new() { IsAntialias = true };
-    private readonly SKPaint _emptyPaint = new() { IsAntialias = true };
-    private readonly SKPaint _userPaint = new() { Color = SKColors.White, IsAntialias = true };
-    private readonly SKPaint _msgPaint = new() { IsAntialias = true };
 
     /// <summary>
     /// Test seam for the IRC socket. Defaults to the shared
@@ -81,17 +71,33 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     internal Func<IWebSocketFeed> FeedFactory { get; set; } = () => new ClientWebSocketFeed();
 
     /// <summary>
-    /// The Twitch session (one process-wide singleton by default). Test seam in
-    /// the <see cref="FeedFactory"/> image: InitializeAsync restores the session
-    /// fire-and-forget, and the shared session's real token store + client must
-    /// never be reached from a test host - a valid stored token would perform a
-    /// real network restore and mutate the singleton's followed-channel state.
+    /// The Twitch session factory seam (the <see cref="FeedFactory"/> shape):
+    /// the production default returns the process-wide shared session; a test
+    /// injects a factory that returns an inert session, so a test host never
+    /// reaches the shared session's real token store + client (a valid stored
+    /// token would perform a real network restore and mutate the singleton's
+    /// followed-channel state). The factory is consulted EXACTLY ONCE, at the
+    /// widget's first session use: the result is published through a
+    /// <see cref="Lazy{T}"/> (the <c>??=</c> it replaces was non-atomic, so a
+    /// concurrent first read - the fire-and-forget restore racing the UI
+    /// thread - created two sessions). A swap before first use is honored; a
+    /// swap after it is ignored by design (the widget owns one session for
+    /// its lifetime). A factory that THROWS on first use is cached by the
+    /// <see cref="Lazy{T}"/>: every later <c>Session</c> read rethrows the
+    /// same fault (the settable property the seam replaces allowed a
+    /// re-set-and-retry; the production default, <c>TwitchSession.Shared</c>,
+    /// cannot throw, so the cache is observable only with a throwing test
+    /// factory).
     /// </summary>
-    internal TwitchSession Session { get; set; } = TwitchSession.Shared;
+    internal Func<TwitchSession> SessionFactory { get; set; } = () => TwitchSession.Shared;
+
+    private readonly Lazy<TwitchSession> _session;
+    private TwitchSession Session => _session.Value;
 
     /// <summary>Binds the connection module to the widget's live properties (feed factory, MaxMessages, Auto Connect, logging, repaint request).</summary>
     public TwitchChatStreamWidget()
     {
+        _session = new(() => SessionFactory(), LazyThreadSafetyMode.ExecutionAndPublication);
         // The live reads (MaxMessages, AutoConnect, Context) keep the module bound
         // to the widget's current facts: a test's post-ctor FeedFactory swap
         // and an inspector write both take effect.
@@ -259,132 +265,20 @@ public class TwitchChatStreamWidget : ModernWidgetBase, IWidgetActionInvoker, IW
     /// <see cref="FeedFactory"/> seam).</summary>
     internal int MessageCountForTest => _connection.MessageCount;
 
-    // The header strings are memoized per input (the shared MemoSlot shape):
-    // Render composes the badge and status line every frame, but both change
-    // only via the inspector or the IRC loop. Single-slot memos keyed by the
-    // source value, so the per-frame path allocates nothing for the static
-    // header.
-    private readonly MemoSlot<string, string> _badgeMemo = new();
-    private readonly MemoSlot<(ChatStatus Status, string Detail), string> _statusMemo = new();
-
-    private string ChannelBadge()
-        => _badgeMemo.GetOrCompute(ChannelName, () => "#" + TwitchIrcMessages.NormalizeChannel(ChannelName).ToUpperInvariant());
-
-    private string StatusLine(TwitchChatPresentation.ChatState state)
-    {
-        return _statusMemo.GetOrCompute(
-            (state.Status, state.Detail),
-            () => TwitchChatPresentation.StatusText(state));
-    }
-
-    /// <summary>
-    /// Draws the chat: the rounded background, the channel badge and status
-    /// header, and the message list (the connection's whole snapshot, newest
-    /// at the bottom, wrapped and clipped to the content bounds).
-    /// </summary>
-    /// <param name="canvas">The canvas to draw on.</param>
-    /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
+    /// <inheritdoc />
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        var scale = Math.Clamp(Math.Min(bounds.Width / DefaultSize.Width, bounds.Height / DefaultSize.Height), 0.4f, 3f);
-        if (float.IsNaN(scale) || scale <= 0) scale = 1f;
-
-        var bg = ColorOf(BackgroundHex, WidgetPalette.ChatBackground);
-        var headerColor = ColorOf(HeaderColorHex, SKColors.White);
-        var msgColor = ColorOf(MessageColorHex, new SKColor(248, 250, 252));
-
-        _bgPaint.Color = bg;
-        canvas.DrawRoundRect(bounds, 14f * scale, 14f * scale, _bgPaint);
-
-        float pad = 12f * scale;
-        float baseFontSize = Math.Max(10f, Math.Min(32f, FontSize));
-        float titleSize = (baseFontSize + 2f) * scale;
-        float statusSize = 13f * scale;
-
-        var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, titleSize);
-        var statusFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, statusSize);
-        _badgePaint.Color = headerColor;
-
-        float top = bounds.Top + pad;
-        string channelBadge = ChannelBadge();
-        canvas.DrawTextWithFallback(channelBadge, bounds.Left + pad, top + titleSize, badgeFont, _badgePaint, SKTextAlign.Left);
-
-        // One read of the module's state for the whole frame: the status
-        // color, the status line, and the empty hint all agree.
-        var state = _connection.State;
-        string statusText = StatusLine(state);
-
-        _statusPaint.Color = TwitchChatPresentation.StatusColor(state.Status);
-        canvas.DrawTextWithFallback(statusText, bounds.Right - pad, top + titleSize, statusFont, _statusPaint, SKTextAlign.Right);
-
-        float headerBottom = top + titleSize + 8f * scale;
-
-        var contentBounds = new SKRect(bounds.Left + pad, headerBottom, bounds.Right - pad, bounds.Bottom - pad);
-        if (contentBounds.Width <= 0 || contentBounds.Height <= 0)
-        {
-            return;
-        }
-
-        canvas.Save();
-        canvas.ClipRect(contentBounds);
-
-        // The render snapshot is replaced wholesale on every mutation, so no
-        // per-frame allocation under a lock is needed.
-        var snapshot = _connection.Messages;
-
-        float msgSize = baseFontSize * scale;
-        float userSize = (Math.Max(10f, baseFontSize - 2f)) * scale;
-        float lineHeight = msgSize * 1.4f;
-        float userLineHeight = userSize * 1.35f;
-
-        if (snapshot.Count == 0)
-        {
-            var emptyFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
-            _emptyPaint.Color = headerColor.WithAlpha(130);
-            var hint = TwitchChatPresentation.EmptyHint(state.Status, AutoConnect);
-            canvas.DrawTextWithFallback(hint, contentBounds.Left, contentBounds.Top + msgSize, emptyFont, _emptyPaint, SKTextAlign.Left);
-            canvas.Restore();
-            return;
-        }
-
-        float cursor = contentBounds.Bottom;
-
-        var userFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, userSize);
-        var msgFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, msgSize);
-        _msgPaint.Color = msgColor;
-
-        for (int i = snapshot.Count - 1; i >= 0; i--)
-        {
-            var m = snapshot[i];
-            var lines = _wrapCache.GetOrWrap(m.Text, msgFont, msgSize, contentBounds.Width);
-
-            float blockH = userLineHeight + lines.Count * lineHeight + 4f * scale;
-            cursor -= blockH;
-            if (cursor < contentBounds.Top - userLineHeight) break;
-
-            _userPaint.Color = m.Color;
-            canvas.DrawTextWithFallback(m.Username, contentBounds.Left, cursor + userSize, userFont, _userPaint, SKTextAlign.Left);
-
-            float msgY = cursor + userLineHeight;
-            for (int li = 0; li < lines.Count; li++)
-            {
-                canvas.DrawTextWithFallback(lines[li], contentBounds.Left, msgY + (li + 1) * lineHeight - (lineHeight - msgSize) * 0.5f, msgFont, _msgPaint, SKTextAlign.Left);
-            }
-        }
-
-        canvas.Restore();
+        // The visual facts are one frame (a struct: the per-frame build is
+        // free); the connection's live facts keep their own places.
+        var frame = new TwitchChatFrame(DefaultSize, ChannelName, BackgroundHex, HeaderColorHex, MessageColorHex, FontSize, AutoConnect);
+        _canvas.Render(canvas, bounds, frame, _connection.State, _connection.Messages);
     }
 
-    /// <summary>Stops the connection (loop cancel, feed abort, PONG token retirement) and disposes the hoisted paints.</summary>
+    /// <summary>Stops the connection (loop cancel, feed abort, PONG token retirement) and disposes the canvas.</summary>
     public override async ValueTask DisposeAsync()
     {
         _disposed = true;
-        _bgPaint.Dispose();
-        _badgePaint.Dispose();
-        _statusPaint.Dispose();
-        _emptyPaint.Dispose();
-        _userPaint.Dispose();
-        _msgPaint.Dispose();
+        _canvas.Dispose();
         await _connection.DisposeAsync().ConfigureAwait(false); // cancels the loop, aborts the feed, retires the PONG token
         await base.DisposeAsync().ConfigureAwait(false);
     }

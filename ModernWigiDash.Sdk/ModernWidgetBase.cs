@@ -97,26 +97,13 @@ public abstract class ModernWidgetBase : IModernWidget
         Context?.RequestRender();
     }
 
-    private readonly Dictionary<string, SKColor> _colorCache = new(StringComparer.Ordinal);
-
     /// <summary>
-    /// Parses a hex color string, caching the result per distinct value, so
-    /// the per-frame <c>SKColor.TryParse</c> sites across the widget layer run
-    /// at most once per value. The cache is bounded by the number of distinct
-    /// rendered color values a widget can have (a handful), not by call sites;
-    /// fallback semantics are declared once instead of at 27 sites.
+    /// The widget-layer entry over the one hex-parse owner (<see cref="SkColorCache"/>):
+    /// the per-frame parse sites run at most once per distinct value, so the
+    /// fallback semantics are declared once instead of at every call site.
     /// </summary>
     protected SKColor ColorOf(string hex, SKColor fallback)
-    {
-        if (_colorCache.TryGetValue(hex, out SKColor cached))
-        {
-            return cached;
-        }
-
-        SKColor color = SKColor.TryParse(hex, out SKColor parsed) ? parsed : fallback;
-        _colorCache[hex] = color;
-        return color;
-    }
+        => SkColorCache.ColorOf(hex, fallback);
 
     /// <summary>
     /// Cached reflection lookup per (type, property name): SetProperty runs on

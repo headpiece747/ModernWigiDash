@@ -89,9 +89,6 @@ public sealed class PriceFeedManager : IDisposable
     private readonly TimeSpan _reconnectDelay;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private CancellationTokenSource _cts = new();
-    private Task? _stockRestTask;
-    private Task? _cryptoRestTask;
-    private Task? _fxRestTask;
     // The first-claim startup (the ??= create + Start) and the last-release
     // teardown (cancel + dispose + null) are two non-atomic field sequences
     // over the same fields; the gate makes them one serialized unit, so a
@@ -217,7 +214,7 @@ public sealed class PriceFeedManager : IDisposable
                 // ConcurrentDictionary.Keys is a snapshot per call, but the
                 // view is re-read per cycle): a coin subscribed after the
                 // first claim is polled on the next cycle, never frozen out.
-                _cryptoRestTask ??= RestPollLoop.RunAsync(
+                cryptoWiring.RestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
                     () => _subscribedCrypto.Keys,
                     PollCryptoAsync,
@@ -228,6 +225,8 @@ public sealed class PriceFeedManager : IDisposable
             // The crypto one-shot seed: the CoinGecko leg (its id resolution
             // from the single catalog table rides along as the guard).
             Seed = new(CoinGeckoRestLeg.SourceLabel, "$", (key, ct) => CoinGeckoLeg.FetchAsync(key, ct)),
+            // The WS ticker stores under the REST leg's label (one source, one label).
+            LiveSourceLabel = BinanceUsRestLeg.SourceLabel,
         };
         _cryptoWiring = cryptoWiring;
         FeedKindWiring stockWiring = null!;
@@ -243,7 +242,7 @@ public sealed class PriceFeedManager : IDisposable
                 if (string.IsNullOrEmpty(_finnhubKey)) return;
                 stockWiring.Loop ??= CreateFinnhubLoop();
                 stockWiring.Loop.Start();
-                _stockRestTask ??= RestPollLoop.RunAsync(
+                stockWiring.RestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
                     () => _subscribedStocks.Keys,
                     PollStockAsync,
@@ -253,15 +252,18 @@ public sealed class PriceFeedManager : IDisposable
             // The stock one-shot seed: the Yahoo chart leg (its symbol guard
             // is the only validation the seed path has).
             Seed = new(YahooRestLeg.SourceLabel, YahooRestLeg.CurrencySymbol, (key, ct) => YahooRestLeg.FetchAsync(key, ct)),
+            // The WS trade stores under the REST leg's label (one source, one label).
+            LiveSourceLabel = FinnhubRestLeg.SourceLabel,
         };
         _stockWiring = stockWiring;
-        _fxWiring = new FeedKindWiring
+        FeedKindWiring fxWiring = null!;
+        fxWiring = new FeedKindWiring
         {
             IsValid = symbol => SymbolCatalog.IsValidFxInput(symbol, out _),
             Subscriptions = _subscribedFx,
             OnFirstClaim = () =>
             {
-                _fxRestTask ??= RestPollLoop.RunAsync(
+                fxWiring.RestTask ??= RestPollLoop.RunAsync(
                     RestInterval, () => !_disposed, _cts.Token,
                     () => _subscribedFx.Keys,
                     PollFxAsync,
@@ -274,6 +276,7 @@ public sealed class PriceFeedManager : IDisposable
             // no single best quote to seed from).
             Seed = null,
         };
+        _fxWiring = fxWiring;
     }
 
     private readonly FeedKindWiring _cryptoWiring;
@@ -479,20 +482,21 @@ public sealed class PriceFeedManager : IDisposable
     {
         _cts.Cancel();
         DisposeLoops();
-        _stockRestTask = null;
-        _cryptoRestTask = null;
-        _fxRestTask = null;
     }
 
-    /// <summary>The one loop-teardown both shutdown paths route through: each
-    /// wiring row disposes (and nulls) the WS loop it owns, so the loop's
-    /// lifetime is keyed by the row at both its ends.</summary>
+    /// <summary>The one teardown both shutdown paths route through: each wiring
+    /// row retires (and nulls) the feed lifetimes it owns — the WS loop (disposed)
+    /// and the REST poll task — so a kind's feeds are keyed by the row at both
+    /// ends, not scattered across the manager's per-kind fields.</summary>
     private void DisposeLoops()
     {
         _cryptoWiring.Loop?.Dispose();
         _cryptoWiring.Loop = null;
+        _cryptoWiring.RestTask = null;
         _stockWiring.Loop?.Dispose();
         _stockWiring.Loop = null;
+        _stockWiring.RestTask = null;
+        _fxWiring.RestTask = null;
     }
 
     /// <summary>
@@ -549,7 +553,7 @@ public sealed class PriceFeedManager : IDisposable
         new Uri("wss://stream.binance.us:9443/ws"),
         _feedFactory,
         (feed, ct) => feed.SendTextAsync(PriceFeedMessages.BuildBinanceSubscribe(_subscribedCrypto.Keys), ct),
-        ParseBinanceTicker,
+        json => ParseBinanceTicker(json, _cryptoWiring.LiveSourceLabel ?? BinanceUsRestLeg.SourceLabel),
         new ExponentialBackoffReconnectPolicy(_reconnectDelay, MaxReconnectDelay));
 
     private FeedLoop CreateFinnhubLoop() => new(
@@ -560,7 +564,7 @@ public sealed class PriceFeedManager : IDisposable
             foreach (var sym in _subscribedStocks.Keys)
                 await feed.SendTextAsync(PriceFeedMessages.BuildFinnhubSubscribe(sym), ct).ConfigureAwait(false);
         },
-        ParseFinnhubMessage,
+        json => ParseFinnhubMessage(json, _stockWiring.LiveSourceLabel ?? FinnhubRestLeg.SourceLabel),
         new ExponentialBackoffReconnectPolicy(_reconnectDelay, MaxReconnectDelay));
 
     /// <summary>One crypto-cycle hop: the leg's fetch → parse, then the
@@ -607,17 +611,17 @@ public sealed class PriceFeedManager : IDisposable
         }
     }
 
-    private void ParseBinanceTicker(string json)
+    private void ParseBinanceTicker(string json, string sourceLabel)
     {
         if (!PriceFeedMessages.TryParseBinanceTicker(json, out var coin, out var price, out var change))
         {
             _failLog.Write("Failed to parse Binance ticker message; ignoring");
             return;
         }
-        _store.ApplyLive(coin, price, change, "Binance");
+        _store.ApplyLive(coin, price, change, sourceLabel);
     }
 
-    private void ParseFinnhubMessage(string json)
+    private void ParseFinnhubMessage(string json, string sourceLabel)
     {
         if (!PriceFeedMessages.TryParseFinnhubTrades(json, out var trades))
         {
@@ -629,7 +633,7 @@ public sealed class PriceFeedManager : IDisposable
         // zeroing it.
         foreach (var trade in trades)
         {
-            _store.ApplyLive(trade.Symbol, trade.Price, null, "Finnhub");
+            _store.ApplyLive(trade.Symbol, trade.Price, null, sourceLabel);
         }
     }
 

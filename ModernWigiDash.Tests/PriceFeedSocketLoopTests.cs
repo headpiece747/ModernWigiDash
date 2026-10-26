@@ -28,7 +28,7 @@ public class PriceFeedSocketLoopTests
         var price = manager.GetPrice("BTC", AssetKind.Crypto)!;
         Assert.AreEqual(65432.10m, price.Price);
         Assert.AreEqual(1.23m, price.ChangePercent);
-        Assert.AreEqual("Binance", price.Source);
+        Assert.AreEqual(BinanceUsRestLeg.SourceLabel, price.Source, "the WS path stores under the REST leg's label (one source, one label)");
         Assert.IsTrue(feed.Sent.Count > 0, "The loop must send the connect-time subscription payload");
     }
 

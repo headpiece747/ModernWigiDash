@@ -13,7 +13,7 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 /// drawing is freed on the render thread's next drain, never by the
 /// background thread that replaced it (the ArtworkLoader UAF rule).
 /// </summary>
-internal sealed class SteamPosterCache : IDisposable
+internal sealed class SteamPosterCache : ISteamPosterLookup, IDisposable
 {
     /// <summary>The cache capacity: 24 downscaled textures (the PRD's LRU
     /// limit).</summary>

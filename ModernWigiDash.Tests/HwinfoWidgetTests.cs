@@ -87,7 +87,7 @@ public class HwinfoWidgetTests
     [TestMethod]
     public void TryParseKey_RoundTripsComposeKey()
     {
-        Assert.IsTrue(HwinfoWidget.TryParseKey(HwinfoWidget.ComposeKey(6, 12, 3), out int rt, out int id1, out int id2));
+        Assert.IsTrue(VendorSensorRefresh.TryParseKey(VendorSensorRefresh.ComposeKey(6, 12, 3), out int rt, out int id1, out int id2));
         Assert.AreEqual(6, rt);
         Assert.AreEqual(12, id1);
         Assert.AreEqual(3, id2);
@@ -96,9 +96,9 @@ public class HwinfoWidgetTests
     [TestMethod]
     public void TryParseKey_EmptyOrGarbage_ReturnsFalse()
     {
-        Assert.IsFalse(HwinfoWidget.TryParseKey("", out _, out _, out _));
-        Assert.IsFalse(HwinfoWidget.TryParseKey("not-a-key", out _, out _, out _));
-        Assert.IsFalse(HwinfoWidget.TryParseKey("1:2", out _, out _, out _));
+        Assert.IsFalse(VendorSensorRefresh.TryParseKey("", out _, out _, out _));
+        Assert.IsFalse(VendorSensorRefresh.TryParseKey("not-a-key", out _, out _, out _));
+        Assert.IsFalse(VendorSensorRefresh.TryParseKey("1:2", out _, out _, out _));
     }
 
     [TestMethod]
@@ -135,6 +135,23 @@ public class HwinfoWidgetTests
         }
 
         Assert.AreEqual(TelemetryReadingRenderer.HistoryCapacity, widget.HistoryCountForTest, "The history buffer must cap at its capacity");
+    }
+
+    [TestMethod]
+    public async Task DisposeAsync_ReleasesTheRenderer_TheHostChannelReachesThePaints()
+    {
+        // The host's only teardown channel is DisposeAsync (the rehydrator's
+        // DisposeInstance). The old spelling hid the renderer's paints behind
+        // an IDisposable face nothing in the tree called, so every teardown
+        // leaked the native SKPaints; the bridge in the base is the fix, and
+        // this pin is the proof the channel reaches them.
+        var widget = new HwinfoWidget();
+        Assert.IsFalse(widget.Renderer.IsDisposedForTest);
+
+        await widget.DisposeAsync();
+
+        Assert.IsTrue(widget.Renderer.IsDisposedForTest,
+            "the host's DisposeAsync channel must release the renderer's paints");
     }
 
     private static WigiDashServiceClient CreateFakeClient(

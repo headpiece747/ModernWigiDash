@@ -17,18 +17,20 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal static class CalendarFeedsCodec
 {
-    /// <summary>Parses the persisted <c>FeedsJson</c> value into feed records.
-    /// A malformed or absent value yields an empty list, never a throw.</summary>
-    public static IReadOnlyList<CalendarFeed> Parse(string? feedsJson)
+    /// <summary>Parses the persisted <c>FeedsJson</c> value into the codec
+    /// outcome: the feed records plus the malformed flag. A blank value, a
+    /// non-array root, or an empty array is the silent no-feeds state; only
+    /// unparseable JSON sets the malformed flag. Never a throw.</summary>
+    public static FeedsResult Parse(string? feedsJson)
     {
         if (string.IsNullOrWhiteSpace(feedsJson))
-            return [];
+            return new FeedsResult([], false);
 
         try
         {
             using JsonDocument doc = JsonDocument.Parse(feedsJson);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return [];
+                return new FeedsResult([], false);
 
             List<CalendarFeed> feeds = [];
             foreach (JsonElement el in doc.RootElement.EnumerateArray())
@@ -65,11 +67,11 @@ internal static class CalendarFeedsCodec
                     };
                 feeds.Add(feed);
             }
-            return feeds;
+            return new FeedsResult(feeds, false);
         }
         catch (JsonException)
         {
-            return [];
+            return new FeedsResult([], true);
         }
     }
 
@@ -164,3 +166,12 @@ internal static class CalendarFeedsCodec
         return parts;
     }
 }
+
+/// <summary>
+/// The calendar feeds codec's outcome: the parsed feed records plus the one
+/// non-derivable fact about the value, whether it was malformed JSON (the
+/// logged state) as opposed to the silent no-feeds states (a blank value,
+/// an empty array, or a non-array root). A single parse carries the
+/// distinction, so a caller never re-parses to recover it.
+/// </summary>
+internal sealed record FeedsResult(IReadOnlyList<CalendarFeed> Feeds, bool Malformed);

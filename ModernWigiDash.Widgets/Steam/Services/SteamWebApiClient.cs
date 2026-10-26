@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ModernWigiDash.Widgets;
+using ModernWigiDash.Widgets.Steam.Models;
 
 namespace ModernWigiDash.Widgets.Steam.Services;
 
@@ -11,14 +12,10 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 /// </summary>
 internal sealed record SteamPersona(string AvatarUrl, string PersonaName, int PersonState)
 {
-    /// <summary>The Steam persona-state vocabulary (the community API's
-    /// personastate ordinals).</summary>
-    public static readonly string[] StateNames = ["Offline", "Online", "InGame", "Busy", "Away", "Snoozing"];
-
-    /// <summary>The state's display label (unknown ordinals read as the
-    /// ordinal itself, so a new Steam state is never a silent blank).</summary>
-    public string StateLabel
-        => PersonState >= 0 && PersonState < StateNames.Length ? StateNames[PersonState] : PersonState.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>The state's display label (the persona-state table's facet;
+    /// unknown ordinals read as the ordinal itself, so a new Steam state is
+    /// never a silent blank).</summary>
+    public string StateLabel => SteamPersonaState.Label(PersonState);
 }
 
 /// <summary>

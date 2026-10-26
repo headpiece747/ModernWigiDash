@@ -94,7 +94,9 @@ public sealed class AidaMmapReader : IDisposable
                 return null;
             }
 
-            return new AidaFrameSnapshot(_bitmapBuffer, BmpPixelOffset, payloadLength, width, height);
+            return new AidaFrameSnapshot(
+                _bitmapBuffer, BmpPixelOffset, payloadLength, width, height,
+                ComputeBufferVersion(_bitmapBuffer, BmpPixelOffset, payloadLength, width, height));
         }
         catch (Exception ex)
         {
@@ -109,6 +111,33 @@ public sealed class AidaMmapReader : IDisposable
     public void Dispose()
     {
         _mapSource.Dispose();
+    }
+
+    /// <summary>
+    /// The frame's version token (the one stamp the <see cref="AidaFrameSnapshot"/>
+    /// carries): FNV-1a over the WHOLE pixel payload, seeded with the geometry.
+    /// The former sampled XOR folded 1.2 MB into 8 bits (it ignored the green
+    /// channel and every unsampled byte, and collided about 1/256), so a
+    /// redraw could leave the previous panel on screen. The full hash is kept
+    /// because a cheaper token would re-introduce that collision: it runs on
+    /// every <see cref="TryReadFrame"/> (a few hundred microseconds over the
+    /// ~1.2 MB payload at 30 reads/s), not only when a frame arrives - the
+    /// draw owner reads the token to skip a blit, so the cost is paid even
+    /// for an unchanged frame.
+    /// </summary>
+    private static long ComputeBufferVersion(byte[] buffer, int offset, int length, int width, int height)
+    {
+        const uint fnvOffset = 2166136261u;
+        const uint fnvPrime = 16777619u;
+        uint hash = fnvOffset;
+        hash = (hash ^ (uint)width) * fnvPrime;
+        hash = (hash ^ (uint)height) * fnvPrime;
+        for (int i = offset; i < offset + length; i++)
+        {
+            hash = (hash ^ buffer[i]) * fnvPrime;
+        }
+
+        return hash;
     }
 
     internal static bool TryValidateMapHeader(byte[] header, out int width, out int height, out int bitmapSize, out int bitmapOffset)

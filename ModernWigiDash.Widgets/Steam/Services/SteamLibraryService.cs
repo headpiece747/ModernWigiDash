@@ -10,79 +10,143 @@ namespace ModernWigiDash.Widgets.Steam.Services;
 /// manifests, folds each into its display state (via the process tracker),
 /// applies the favorite set, and publishes an immutable
 /// <see cref="SteamLibrarySnapshot"/> the widget reads on the render tick.
-/// It also owns the posters (a local file on the renderer's request, a
-/// bounded background CDN fetch on the local miss, at most
-/// <see cref="MaxPosterFetchConcurrency"/> in flight), the app-id to
-/// process-name map behind terminate, and the favorites JSON. The render
-/// tick never touches disk or the network — it reads the published snapshot
-/// and the poster cache only.
+/// It also owns the app-id to process-name map behind terminate, the
+/// favorites JSON, and the persona facade (credentials, avatar, retirement).
+/// The poster policy (cache, in-flight set, fetch rule) is a module the
+/// service composes and re-exposes as the render face: the widget's render
+/// tick takes a <see cref="SteamRenderFrame"/> (the retired-texture drain,
+/// the poster lookup seam, the avatar) and the poster requests through the
+/// service's names, never through the policy handle. The render tick never
+/// touches disk or the network — it reads the published snapshot and the
+/// poster cache only.
 /// </summary>
 internal sealed class SteamLibraryService : IDisposable
 {
-    /// <summary>The cached poster target width (the showcase focal size, the larger of the two layouts).</summary>
-    public const int PosterTargetWidth = 180;
-
-    /// <summary>The cached poster target height (the 2:3 aspect of the width).</summary>
-    public const int PosterTargetHeight = 270;
-
-    /// <summary>The maximum concurrent background poster fetches: a fast scroll
-    /// can request many visible cells at once, and an unbounded burst would
-    /// hammer the disk/CDN. The renderer redraws a placeholder until a slot
-    /// frees.</summary>
-    private const int MaxPosterFetchConcurrency = 6;
-
     private readonly ISteamLibrarySource _source;
     private readonly SteamProcessTracker _tracker;
-    private readonly SteamPosterCache _cache;
-    private readonly SteamWebApiClient _api;
+    private readonly SteamPosterPolicy _posterPolicy;
     private readonly PollLoop _loop;
     private readonly Action<SteamLibrarySnapshot> _publish;
-    private readonly Action<string> _log;
     private readonly System.Threading.Lock _gate = new();
     private HashSet<uint> _favoriteApps = [];
-    private readonly HashSet<uint> _posterInFlight = [];
     private Dictionary<uint, string> _processNames = [];
     private string _favoritesJson = "[]";
     private volatile SteamLibrarySnapshot _current = SteamLibrarySnapshot.Empty;
     private volatile bool _disposed;
 
-    private string _apiKey = "";
-    private string _steamId64 = "";
-    private string _avatarUrlForCurrent = "";
-    private volatile SteamPersona? _persona;
-    private volatile SKBitmap? _personaAvatar;
-    private readonly RetiredBitmapSet _avatarRetire = new();
+    private readonly SteamPersonaProvider _personaProvider;
 
     /// <summary>
     /// The service over injected seams: the library source, the process
-    /// tracker, the poster cache, the (dormant-unless-configured) API client,
-    /// the snapshot publish sink, and the log sink.
+    /// tracker, the (dormant-unless-configured) API client, the snapshot
+    /// publish sink, and the log sink. The poster policy is composed here
+    /// (the service is the composition root: the widget never builds it).
     /// </summary>
     public SteamLibraryService(
         ISteamLibrarySource source,
         SteamProcessTracker tracker,
-        SteamPosterCache cache,
         SteamWebApiClient api,
         Action<SteamLibrarySnapshot> publish,
         Action<string> log)
     {
         _source = source;
         _tracker = tracker;
-        _cache = cache;
-        _api = api;
+        _posterPolicy = new SteamPosterPolicy(source, new SteamPosterCache(), api, log);
         _publish = publish;
-        _log = log;
+        _personaProvider = new SteamPersonaProvider(api, persona =>
+        {
+            if (_disposed)
+                return;
+
+            PublishPersona(persona);
+        });
         _loop = new PollLoop("STEAM", TimeSpan.FromSeconds(3), () => true, RefreshTick, () => { }, log);
     }
 
     /// <summary>The most recently published snapshot (the render tick's read).</summary>
     public SteamLibrarySnapshot Current => _current;
 
-    /// <summary>The poster cache (the renderer's lookup owner).</summary>
-    public SteamPosterCache PosterCache => _cache;
+    /// <summary>
+    /// The tick's publish: folds the games facet onto the LATEST snapshot
+    /// under the gate (the read, the write, and the wake-up are one critical
+    /// section, the sink being a cheap thread-safe wake-up), preserving the
+    /// persona facet — which <see cref="PublishPersona"/> alone owns — so a
+    /// persona fold landing just before cannot be clobbered by a blind tick
+    /// write. The tick and the persona fold are the two owners of
+    /// <c>_current</c>, each a gated read-modify-write, so a lost update on
+    /// either facet is unrepresentable.
+    /// </summary>
+    private void PublishTick(IReadOnlyList<SteamGameItem> games, string? steamPath, bool found)
+    {
+        SteamLibrarySnapshot updated;
+        lock (_gate)
+        {
+            updated = _current with { Games = games, SteamPath = steamPath, IsSteamFound = found };
+            _current = updated;
+            _publish(updated);
+        }
+    }
+
+    /// <summary>
+    /// The persona fold: overlays the persona fact onto the LATEST snapshot
+    /// under the gate (the read, the write, and the wake-up are one critical
+    /// section, so a refresh tick landing between them cannot be clobbered),
+    /// then publishes.
+    /// </summary>
+    private void PublishPersona(SteamPersona? persona)
+    {
+        SteamLibrarySnapshot updated;
+        lock (_gate)
+        {
+            updated = _current with { Persona = persona };
+            _current = updated;
+            _publish(updated);
+        }
+    }
+
+    /// <summary>
+    /// The render tick's face: owns the retired-texture drain (the poster
+    /// cache's and the avatar's — a texture a background tick retired is
+    /// freed on the render thread, before the canvas draws) and returns the
+    /// frame (the poster lookup seam + the live avatar). The render thread
+    /// no longer spells the paired drain ritual.
+    /// </summary>
+    public SteamRenderFrame BeginRenderFrame()
+    {
+        _posterPolicy.Cache.DisposeRetired();
+        _personaProvider.DisposeRetired();
+        return new SteamRenderFrame(_posterPolicy.Cache, _personaProvider.Avatar);
+    }
+
+    /// <summary>Test seam: the concrete poster cache (the render face is the
+    /// lookup seam; the tests drive the cache's internal retirement set).</summary>
+    internal SteamPosterCache PosterCacheForTest => _posterPolicy.Cache;
+
+    /// <summary>Requests the posters for each visible grid cell that is not yet cached (the policy's try-get-then-request rule, delegated).</summary>
+    public void RequestVisibleGridPosters(IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
+        => _posterPolicy.RequestVisibleGridPosters(games, geometry);
+
+    /// <summary>Requests the posters for each visible showcase card when not yet cached (the policy's try-get-then-request rule, delegated).</summary>
+    public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
+        => _posterPolicy.RequestShowcasePosters(focus, previous, next);
 
     /// <summary>Launches the game through the shell-exec sink (the steam://run URI).</summary>
     public void Launch(uint appId) => _tracker.Launch(appId);
+
+    /// <summary>
+    /// The tap action for one title: a running game is terminated (the close
+    /// contract, run off the render thread), anything installed and idle
+    /// launches through the shell-exec sink, and an unlaunchable game does
+    /// nothing. The state→action rule lives here with its facts (the
+    /// process-tracker fold, the off-render close contract), not in the widget.
+    /// </summary>
+    public void Activate(SteamGameItem game)
+    {
+        if (game.State == SteamGameState.Running)
+            _ = Terminate(game.AppId);
+        else if (game.IsLaunchable)
+            Launch(game.AppId);
+    }
 
     /// <summary>The current favorites JSON (a uint app-id array).</summary>
     public string FavoritesJson
@@ -138,25 +202,31 @@ internal sealed class SteamLibraryService : IDisposable
 
             _favoritesJson = SerializeFavoriteIds(_favoriteApps);
             json = _favoritesJson;
+
+            // A toggle is a user action, not a 3s tick: refresh the affected
+            // game's star in the published snapshot (the read, the write, and
+            // the wake-up are one critical section, so a landing tick cannot
+            // clobber it).
+            bool nowFavorite = _favoriteApps.Contains(appId);
+            SteamLibrarySnapshot updated = _current with { Games = FlipFavorite(_current.Games, appId, nowFavorite) };
+            _current = updated;
+            _publish(updated);
         }
         return json;
+    }
+
+    /// <summary>The snapshot's games list with one app's favorite flag set (the toggle's immediate star refresh, no 3s tick).</summary>
+    private static IReadOnlyList<SteamGameItem> FlipFavorite(IReadOnlyList<SteamGameItem> games, uint appId, bool nowFavorite)
+    {
+        var updated = new List<SteamGameItem>(games.Count);
+        foreach (SteamGameItem game in games)
+            updated.Add(game.AppId == appId ? game with { IsFavorite = nowFavorite } : game);
+        return updated;
     }
 
     /// <summary>The canonical favorites JSON: a sorted, distinct uint array (one spelling the widget persists and the next reload parses).</summary>
     private static string SerializeFavoriteIds(HashSet<uint> ids)
         => JsonSerializer.Serialize(ids.OrderBy(id => id));
-
-    /// <summary>
-    /// The owner's avatar texture (the showcase banner), or null (the banner
-    /// draws its placeholder disc). Read on the render thread.
-    /// </summary>
-    public SKBitmap? PersonaAvatar => _personaAvatar;
-
-    /// <summary>
-    /// Drains the retired avatar texture on the render thread (the UAF rule:
-    /// a replaced avatar is freed here, before the canvas draws).
-    /// </summary>
-    public void DisposeRetiredAvatar() => _avatarRetire.DisposeRetired();
 
     /// <summary>
     /// Sets the optional community-API credentials (the widget's
@@ -165,186 +235,11 @@ internal sealed class SteamLibraryService : IDisposable
     /// persona leg immediately (the client's 5-minute cache bounds the HTTP).
     /// </summary>
     public void SetCredentials(string apiKey, string steamId64)
-    {
-        _apiKey = apiKey ?? "";
-        _steamId64 = steamId64 ?? "";
-        RefreshPersona();
-    }
-
-    /// <summary>
-    /// Test seam: loads a poster synchronously from the local file (no CDN,
-    /// no fire-and-forget), so a test observes the cache population
-    /// deterministically.
-    /// </summary>
-    internal void LoadLocalPosterForTest(uint appId)
-    {
-        string? steamPath = _source.SteamPath;
-        byte[]? bytes = steamPath is null ? null : SteamPosterSource.TryReadLocalPoster(steamPath, appId);
-        if (bytes is { Length: > 0 })
-            _cache.Store(appId, bytes, PosterTargetWidth, PosterTargetHeight);
-    }
+        => _personaProvider.SetCredentials(apiKey, steamId64);
 
     /// <summary>Test seam: publishes a persona (and optional avatar) directly, bypassing the HTTP fetch.</summary>
     internal void SetPersonaForTest(SteamPersona? persona, SKBitmap? avatar)
-    {
-        _persona = persona;
-        if (avatar is not null)
-        {
-            SetAvatar(avatar);
-            _avatarUrlForCurrent = "test";
-        }
-        else
-        {
-            RetireAvatar();
-            _avatarUrlForCurrent = "";
-        }
-
-        PublishWithPersona();
-    }
-
-    /// <summary>
-    /// Re-runs the persona leg: a blank credential pair clears the persona,
-    /// else a fire-and-forget fetch (persona, then the avatar only when its
-    /// URL changed) lands and publishes an updated snapshot. The client's
-    /// 5-minute cache keeps the persona HTTP bounded.
-    /// </summary>
-    private void RefreshPersona()
-    {
-        if (_disposed)
-            return;
-
-        string apiKey = _apiKey;
-        string steamId64 = _steamId64;
-        if (string.IsNullOrWhiteSpace(apiKey) || !SteamWebApiClient.IsValidSteamId64(steamId64))
-        {
-            if (_persona is not null || _personaAvatar is not null)
-            {
-                _persona = null;
-                RetireAvatar();
-                _avatarUrlForCurrent = "";
-                PublishWithPersona();
-            }
-            return;
-        }
-
-        _ = FetchPersonaAndAvatarAsync(apiKey, steamId64);
-    }
-
-    private async Task FetchPersonaAndAvatarAsync(string apiKey, string steamId64)
-    {
-        SteamPersona? persona = await _api.FetchPersonaAsync(apiKey, steamId64, CancellationToken.None).ConfigureAwait(false);
-        if (_disposed)
-            return;
-
-        _persona = persona;
-
-        string avatarUrl = persona?.AvatarUrl ?? "";
-        if (avatarUrl.Length > 0 && !string.Equals(avatarUrl, _avatarUrlForCurrent, StringComparison.Ordinal))
-        {
-            byte[]? avatarBytes = await _api.FetchAvatarAsync(avatarUrl, CancellationToken.None).ConfigureAwait(false);
-            if (_disposed)
-                return;
-
-            SKBitmap? decoded = avatarBytes is { Length: > 0 } ? SteamPosterCache.DecodeScaled(avatarBytes, 64, 64) : null;
-            if (decoded is not null)
-            {
-                SetAvatar(decoded);
-                _avatarUrlForCurrent = avatarUrl;
-            }
-        }
-        else if (avatarUrl.Length == 0)
-        {
-            RetireAvatar();
-            _avatarUrlForCurrent = "";
-        }
-
-        PublishWithPersona();
-    }
-
-    private void SetAvatar(SKBitmap bitmap)
-    {
-        SKBitmap? previous = _personaAvatar;
-        _personaAvatar = bitmap;
-        _avatarRetire.Retire(previous);
-    }
-
-    private void RetireAvatar()
-    {
-        SKBitmap? previous = _personaAvatar;
-        _personaAvatar = null;
-        _avatarRetire.Retire(previous);
-    }
-
-    private void PublishWithPersona()
-    {
-        if (_disposed)
-            return;
-
-        SteamLibrarySnapshot current = _current;
-        var updated = current with { Persona = _persona };
-        _current = updated;
-        _publish(updated);
-    }
-
-    /// <summary>
-    /// Requests a background poster fetch (local file, then the CDN) for a
-    /// cache miss. Fire-and-forget: the renderer draws a placeholder in the
-    /// meantime and the fetched texture lands in the cache for the next tick.
-    /// One fetch per app at a time (a second request while one is in flight
-    /// is dropped).
-    /// </summary>
-    public void RequestPoster(uint appId)
-    {
-        bool start;
-        lock (_gate)
-        {
-            if (_posterInFlight.Count >= MaxPosterFetchConcurrency)
-                return;
-
-            start = _posterInFlight.Add(appId);
-        }
-
-        if (!start)
-            return;
-
-        _ = FetchPosterAsync(appId).ContinueWith(_ =>
-        {
-            lock (_gate)
-                _posterInFlight.Remove(appId);
-        });
-    }
-
-    /// <summary>
-    /// Requests the poster for each visible grid cell that is not yet cached
-    /// (local file first, then the CDN; one in-flight per app). The 24-slot
-    /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
-    /// on demand instead of an all-games sweep evicting the visible ones. The
-    /// try-get-then-request policy lives here, not in the widget.
-    /// </summary>
-    public void RequestVisibleGridPosters(IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
-    {
-        for (int i = 0; i < geometry.CellCount; i++)
-        {
-            int index = geometry.Indexes[i];
-            if (index >= 0 && index < games.Count)
-                RequestPosterIfMissing(games[index]);
-        }
-    }
-
-    /// <summary>Requests the poster for each visible showcase card (the focal card and its flanks) when not yet cached.</summary>
-    public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
-    {
-        RequestPosterIfMissing(focus);
-        RequestPosterIfMissing(previous);
-        RequestPosterIfMissing(next);
-    }
-
-    /// <summary>Requests one card's poster when it is not yet cached.</summary>
-    private void RequestPosterIfMissing(SteamGameItem? card)
-    {
-        if (card is not null && !_cache.TryGet(card.AppId, out _))
-            RequestPoster(card.AppId);
-    }
+        => _personaProvider.SetPersonaForTest(persona, avatar);
 
     /// <summary>
     /// Terminates a running game by app id: the process tree gets the polite
@@ -366,7 +261,7 @@ internal sealed class SteamLibraryService : IDisposable
         return Task.Run(() => _tracker.TryClose(processName));
     }
 
-    /// <summary>Stops the loop and disposes the poster cache.</summary>
+    /// <summary>Stops the loop and disposes the poster policy and the persona provider.</summary>
     public void Dispose()
     {
         if (_disposed)
@@ -374,16 +269,17 @@ internal sealed class SteamLibraryService : IDisposable
         _disposed = true;
 
         _loop.Dispose();
-        _cache.Dispose();
-        SKBitmap? avatar = _personaAvatar;
-        _personaAvatar = null;
-        avatar?.Dispose();
-        _avatarRetire.DisposeAll();
+        _posterPolicy.Dispose();
+        _personaProvider.Dispose();
     }
 
     private void RefreshTick()
     {
-        IReadOnlyList<SteamAppManifest> manifests = _source.LoadManifests();
+        // One Steam-path resolution per tick (the registry ladder is cheap
+        // but not free): the path feeds the snapshot, the found flag, and the
+        // manifest enumeration (the source no longer re-resolves it inside).
+        string? steamPath = _source.SteamPath;
+        IReadOnlyList<SteamAppManifest> manifests = _source.LoadManifests(steamPath);
         var games = new List<SteamGameItem>(manifests.Count);
         var processNames = new Dictionary<uint, string>(manifests.Count);
         foreach (SteamAppManifest manifest in manifests)
@@ -396,13 +292,8 @@ internal sealed class SteamLibraryService : IDisposable
         lock (_gate)
             _processNames = processNames;
 
-        // One Steam-path resolution per tick (the registry ladder is cheap but
-        // not free, and the path feeds both the snapshot and the found flag).
-        string? steamPath = _source.SteamPath;
-        var snapshot = new SteamLibrarySnapshot(games, steamPath, steamPath is not null, _persona);
-        _current = snapshot;
-        _publish(snapshot);
-        RefreshPersona();
+        PublishTick(games, steamPath, steamPath is not null);
+        _personaProvider.Refresh();
     }
 
     private SteamGameItem ToGameItem(SteamAppManifest manifest)
@@ -423,24 +314,6 @@ internal sealed class SteamLibraryService : IDisposable
             manifest.HoursOnRecord,
             manifest.LastPlayedUtc,
             favorite);
-    }
-
-    private async Task FetchPosterAsync(uint appId)
-    {
-        try
-        {
-            string? steamPath = _source.SteamPath;
-            byte[]? bytes = steamPath is null ? null : SteamPosterSource.TryReadLocalPoster(steamPath, appId);
-            if (bytes is null)
-                bytes = await _api.FetchPosterAsync(appId, CancellationToken.None).ConfigureAwait(false);
-
-            if (bytes is { Length: > 0 })
-                _cache.Store(appId, bytes, PosterTargetWidth, PosterTargetHeight);
-        }
-        catch (Exception ex)
-        {
-            _log($"Steam: poster fetch failed ({appId}): {ex.Message}");
-        }
     }
 
     private static List<uint> ParseFavoriteIds(string json)

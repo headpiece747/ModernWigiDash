@@ -116,7 +116,7 @@ public static class WidgetRehydrator
                 if (prop.GetIndexParameters().Length > 0) continue;
                 if (!placed.PropertyValues.TryGetValue(prop.Name, out object? raw)) continue;
 
-                object? value = ConvertPropertyValue(raw, prop.PropertyType);
+                object? value = ProfileOps.ConvertPropertyValue(raw, prop.PropertyType);
                 if (value is null) continue;
 
                 try
@@ -189,13 +189,6 @@ public static class WidgetRehydrator
         }
         placed.ActiveInstance = null;
     }
-
-    /// <summary>
-    /// Imported JSON dictionaries arrive as JsonElement values; deserialize
-    /// them into the real type. Shared with the sanitizer's cross-call use.
-    /// </summary>
-    public static object? ConvertPropertyValue(object? raw, Type targetType)
-        => ProfileOps.ConvertPropertyValue(raw, targetType);
 
     /// <summary>
     /// Completes the skipped widget's yielded initialization (on a background

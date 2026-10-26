@@ -53,27 +53,14 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
     private readonly SteamGridRenderer _gridRenderer = new();
     private readonly SteamShowcaseRenderer _showcaseRenderer = new();
+    private readonly SteamNotReadyRenderer _notReadyRenderer = new();
+    private readonly SteamGeometryMemo _geometryMemo = new();
     private readonly ISteamLibrarySource? _testSource;
     private readonly Action<string>? _testLaunchSink;
     private readonly TimeProvider? _testClock;
     private SteamLibraryService? _service;
-    private volatile SteamLibrarySnapshot _snapshot = SteamLibrarySnapshot.Empty;
     private SKRect _lastBounds;
     private float _scrollX;
-    private int _showcaseIndex;
-    private IReadOnlyList<SteamGameItem> _filteredGames = [];
-    private SteamLibrarySnapshot? _filteredSnapshot;
-    private bool _filteredShowUninstalled;
-    private SteamGridGeometry _gridGeometry;
-    private bool _gridGeometryValid;
-    private SKRect _gridBounds;
-    private float _gridScrollX;
-    private int _gridCount;
-    private SteamShowcaseGeometry _showcaseGeometry;
-    private bool _showcaseGeometryValid;
-    private SKRect _showcaseBounds;
-    private bool _showcaseHasPrevious;
-    private bool _showcaseHasNext;
     private SKPoint? _touchDownPoint;
     private DateTimeOffset? _touchDownUtc;
     private bool _disposed;
@@ -85,6 +72,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
     /// <summary>Test seam: an injectable library source, launch sink, and clock (the 3s loop is not started; tests drive RefreshNow).</summary>
     internal SteamLibraryWidget(ISteamLibrarySource source, Action<string> launchSink, TimeProvider clock)
+        : this()
     {
         _testSource = source;
         _testLaunchSink = launchSink;
@@ -107,22 +95,21 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
 
         // A rehydrated instance re-runs this method: release the previous
-        // service (its loop, cache, and avatar) instead of orphaning it.
+        // service (its loop, poster policy, and avatar) instead of orphaning
+        // it.
         SteamLibraryService? previous = _service;
         _service = null;
         previous?.Dispose();
-        _snapshot = SteamLibrarySnapshot.Empty;
-        _filteredSnapshot = null;
-        _gridGeometryValid = false;
-        _showcaseGeometryValid = false;
+        _geometryMemo.Invalidate();
 
         ISteamLibrarySource source = _testSource ?? new SteamLibrarySource(msg => Context?.LogError(msg));
         Action<string> sink = _testLaunchSink ?? (Action<string>)LaunchViaShell;
         TimeProvider clock = _testClock ?? TimeProvider.System;
         var tracker = new SteamProcessTracker(new SteamProcessBridge(clock), sink);
-        var cache = new SteamPosterCache();
         var api = new SteamWebApiClient(clock, null);
-        _service = new SteamLibraryService(source, tracker, cache, api, OnSnapshotPublished, msg => Context?.LogError(msg));
+        // The service is the composition root: it builds the poster policy
+        // itself, so the widget drives the render facade, never the policy handle.
+        _service = new SteamLibraryService(source, tracker, api, OnSnapshotPublished, msg => Context?.LogError(msg));
         _service.SetFavoritesJson(FavoritesJson);
         _service.SetCredentials(SteamApiKey, SteamId64);
 
@@ -130,16 +117,17 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             _service.Start();
     }
 
-    private void OnSnapshotPublished(SteamLibrarySnapshot snapshot)
-    {
-        _snapshot = snapshot;
-        Context?.RequestRender();
-    }
+    // The publish sink is the render wake-up only: the service owns the
+    // snapshot fact (the render tick reads service.Current), so the sink
+    // carries no copy — a second owner of the fact is unrepresentable.
+    private void OnSnapshotPublished(SteamLibrarySnapshot _)
+        => Context?.RequestRender();
 
     /// <summary>
     /// Draws the grid or the showcase from the published snapshot. The
-    /// poster-cache drain runs on the render thread (the UAF rule): a texture
-    /// a background tick retired is freed here, before the canvas draws.
+    /// service's render frame owns the retired-texture drain (the UAF rule:
+    /// a texture a background tick retired is freed on the render thread,
+    /// before the canvas draws) and hands back the poster lookup + avatar.
     /// </summary>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
@@ -147,74 +135,48 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         SteamLibraryService? service = _service;
         if (service is null)
         {
-            DrawNotReady(canvas, bounds);
+            _notReadyRenderer.Draw(canvas, bounds);
             return;
         }
 
-        service.PosterCache.DisposeRetired();
-        service.DisposeRetiredAvatar();
-        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
+        // The render frame owns the retired-texture drain (the UAF rule: a
+        // texture a background tick retired is freed here, before the canvas
+        // draws) and hands back the poster lookup seam + the live avatar.
+        SteamRenderFrame frame = service.BeginRenderFrame();
+        // The snapshot fact has one owner: the service's published reference
+        // (the render tick reads it; the render-view memo keys its filtered
+        // list on the reference, so a fresh tick is a fresh content change).
+        SteamLibrarySnapshot snapshot = service.Current;
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(snapshot, ShowUninstalled);
         (SKColor accent, SKColor text) = ResolveColors();
 
         if (IsShowcase)
         {
-            (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
+            (SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next) = _geometryMemo.Selection(games);
             service.RequestShowcasePosters(focus, previous, next);
-            _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, service.PosterCache, _snapshot.Persona, service.PersonaAvatar, accent, text);
+            _showcaseRenderer.Render(canvas, bounds, ShowcaseGeometry(previous is not null, next is not null), focus, previous, next, frame.Posters, snapshot.Persona, frame.Avatar, accent, text);
         }
         else
         {
             SteamGridGeometry geometry = GridGeometry(bounds, games.Count);
             service.RequestVisibleGridPosters(games, geometry);
-            _gridRenderer.Render(canvas, bounds, games, geometry, service.PosterCache, accent, text);
+            _gridRenderer.Render(canvas, bounds, games, geometry, frame.Posters, accent, text);
         }
     }
 
     /// <summary>The grid geometry, recomputed only when the bounds, the scroll
     /// offset, or the game count changes (a steady-state frame reuses it, so
-    /// the render tick allocates no cell arrays).</summary>
+    /// the render tick allocates no cell arrays). The memo owns the
+    /// recompute-on-change decision; the widget holds only the record.</summary>
     private SteamGridGeometry GridGeometry(SKRect bounds, int gameCount)
-    {
-        SKRect rect = bounds.Width > 0f ? bounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        if (_gridGeometryValid
-            && _gridBounds == rect
-            && Math.Abs(_gridScrollX - _scrollX) < 1e-3f
-            && _gridCount == gameCount)
-        {
-            return _gridGeometry;
-        }
-
-        int columns = SteamGridLayout.ColumnsForWidth(rect.Width);
-        _gridGeometry = SteamGridLayout.Compute(rect, columns, _scrollX, gameCount);
-        _gridBounds = rect;
-        _gridScrollX = _scrollX;
-        _gridCount = gameCount;
-        _gridGeometryValid = true;
-        return _gridGeometry;
-    }
+        => _geometryMemo.Grid(bounds, _scrollX, gameCount, DefaultSize);
 
     /// <summary>The showcase geometry, recomputed only when the bounds or the
-    /// flank visibility changes (the grid cache's shape, for the showcase
+    /// flank visibility changes (the grid memo's shape, for the showcase
     /// record): render and touch read the same cached record, so the drawn
     /// cards and the tap targets cannot drift apart.</summary>
     private SteamShowcaseGeometry ShowcaseGeometry(bool hasPrevious, bool hasNext)
-    {
-        SKRect rect = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        if (_showcaseGeometryValid
-            && _showcaseBounds == rect
-            && _showcaseHasPrevious == hasPrevious
-            && _showcaseHasNext == hasNext)
-        {
-            return _showcaseGeometry;
-        }
-
-        _showcaseGeometry = SteamShowcaseLayout.Compute(rect, hasPrevious, hasNext);
-        _showcaseBounds = rect;
-        _showcaseHasPrevious = hasPrevious;
-        _showcaseHasNext = hasNext;
-        _showcaseGeometryValid = true;
-        return _showcaseGeometry;
-    }
+        => _geometryMemo.Showcase(_lastBounds, hasPrevious, hasNext, DefaultSize);
 
     /// <summary>
     /// The one touch hit entry: which game a point hits (the grid's cell
@@ -227,7 +189,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
     {
         if (IsShowcase)
         {
-            (SteamGameItem? _, SteamGameItem? previous, SteamGameItem? next) = ShowcaseSelection(games);
+            (SteamGameItem? _, SteamGameItem? previous, SteamGameItem? next) = _geometryMemo.Selection(games);
             return (-1, SteamShowcaseLayout.HitTest(ShowcaseGeometry(previous is not null, next is not null), point));
         }
 
@@ -266,9 +228,9 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         if (isDrag)
         {
             if (IsShowcase)
-                SnapShowcase(dragDelta > 0f ? -1 : 1);
+                SnapShowcase(service, dragDelta > 0f ? -1 : 1);
             else
-                ScrollGrid(dragDelta);
+                ScrollGrid(service, dragDelta);
             return;
         }
 
@@ -302,6 +264,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
         _gridRenderer.Dispose();
         _showcaseRenderer.Dispose();
+        _notReadyRenderer.Dispose();
 
         SteamLibraryService? service = _service;
         _service = null;
@@ -325,63 +288,24 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         return (accent, text);
     }
 
-    private IReadOnlyList<SteamGameItem> FilterGames(IReadOnlyList<SteamGameItem> games)
+    private void SnapShowcase(SteamLibraryService service, int direction)
     {
-        // Memoized per published snapshot: a steady-state render tick reuses
-        // the filtered list instead of allocating one every frame.
-        if (ReferenceEquals(_filteredSnapshot, _snapshot) && _filteredShowUninstalled == ShowUninstalled)
-            return _filteredGames;
-
-        if (ShowUninstalled)
-        {
-            _filteredGames = games;
-        }
-        else
-        {
-            List<SteamGameItem> installed = [];
-            foreach (SteamGameItem game in games)
-            {
-                if (game.State != SteamGameState.Uninstalled)
-                    installed.Add(game);
-            }
-
-            _filteredGames = installed;
-        }
-
-        _filteredSnapshot = _snapshot;
-        _filteredShowUninstalled = ShowUninstalled;
-        return _filteredGames;
-    }
-
-    private (SteamGameItem? Focus, SteamGameItem? Previous, SteamGameItem? Next) ShowcaseSelection(IReadOnlyList<SteamGameItem> games)
-    {
-        if (games.Count == 0)
-            return (null, null, null);
-
-        _showcaseIndex = Math.Clamp(_showcaseIndex, 0, games.Count - 1);
-        SteamGameItem? previous = _showcaseIndex > 0 ? games[_showcaseIndex - 1] : null;
-        SteamGameItem? next = _showcaseIndex < games.Count - 1 ? games[_showcaseIndex + 1] : null;
-        return (games[_showcaseIndex], previous, next);
-    }
-
-    private void SnapShowcase(int direction)
-    {
-        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
-        _showcaseIndex = Math.Clamp(_showcaseIndex + direction, 0, Math.Max(0, games.Count - 1));
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
+        _geometryMemo.Snap(games, direction);
         Context?.RequestRender();
     }
 
-    private void ScrollGrid(float dragDelta)
+    private void ScrollGrid(SteamLibraryService service, float dragDelta)
     {
         SKRect bounds = _lastBounds.Width > 0f ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
-        SteamGridGeometry geometry = GridGeometry(bounds, FilterGames(_snapshot.Games).Count);
+        SteamGridGeometry geometry = GridGeometry(bounds, _geometryMemo.FilteredGames(service.Current, ShowUninstalled).Count);
         _scrollX = Math.Clamp(_scrollX - dragDelta, 0f, geometry.MaxScroll);
         Context?.RequestRender();
     }
 
     private void TapAt(SKPoint point, SteamLibraryService service)
     {
-        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
         if (games.Count == 0)
             return;
 
@@ -389,43 +313,30 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
 
         if (IsShowcase)
         {
-            (SteamGameItem? focus, _, _) = ShowcaseSelection(games);
+            (SteamGameItem? focus, _, _) = _geometryMemo.Selection(games);
             switch (hit)
             {
                 case SteamShowcaseHit.Previous:
-                    SnapShowcase(-1);
+                    SnapShowcase(service, -1);
                     break;
                 case SteamShowcaseHit.Next:
-                    SnapShowcase(1);
+                    SnapShowcase(service, 1);
                     break;
                 case SteamShowcaseHit.Focus:
                     if (focus is not null)
-                        Activate(service, focus);
+                        service.Activate(focus);
                     break;
             }
             return;
         }
 
         if (index >= 0 && index < games.Count)
-            Activate(service, games[index]);
-    }
-
-    /// <summary>
-    /// The tap action for one title: a running game is terminated (the
-    /// CloseMainWindow → 3 s → kill-tree contract, run off the render thread),
-    /// anything installed and idle launches through <c>steam://run</c>.
-    /// </summary>
-    private static void Activate(SteamLibraryService service, SteamGameItem game)
-    {
-        if (game.State == SteamGameState.Running)
-            _ = service.Terminate(game.AppId);
-        else if (game.IsLaunchable)
-            service.Launch(game.AppId);
+            service.Activate(games[index]);
     }
 
     private void ToggleFavoriteAt(SKPoint point, SteamLibraryService service)
     {
-        IReadOnlyList<SteamGameItem> games = FilterGames(_snapshot.Games);
+        IReadOnlyList<SteamGameItem> games = _geometryMemo.FilteredGames(service.Current, ShowUninstalled);
         if (games.Count == 0)
             return;
 
@@ -433,7 +344,7 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         (int index, SteamShowcaseHit hit) = HitAt(point, games);
         if (IsShowcase)
         {
-            (SteamGameItem? focus, _, _) = ShowcaseSelection(games);
+            (SteamGameItem? focus, _, _) = _geometryMemo.Selection(games);
             if (hit == SteamShowcaseHit.Focus && focus is not null)
                 appId = focus.AppId;
         }
@@ -461,15 +372,5 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
             // handler) is logged once, never thrown into the touch path.
             Context?.LogError($"Steam launch failed for {uri}", ex);
         }
-    }
-
-    private void DrawNotReady(SKCanvas canvas, SKRect bounds)
-    {
-        using var paint = new SKPaint
-        {
-            Color = new SKColor(18, 20, 24, 255),
-            IsAntialias = true,
-        };
-        canvas.DrawRoundRect(bounds, 12f, 12f, paint);
     }
 }

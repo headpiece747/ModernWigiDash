@@ -16,7 +16,9 @@ public enum EditorKind
     /// <summary>The key-capture editor (the hotkey widget's global-hotkey chord).</summary>
     KeyCapture,
     /// <summary>The calendar-feed editor (the calendar widget's list of .ics / CalDAV feeds).</summary>
-    CalendarFeeds
+    CalendarFeeds,
+    /// <summary>The task-manager editor (the cozy companion task list editor).</summary>
+    TodoManager
 }
 
 /// <summary>

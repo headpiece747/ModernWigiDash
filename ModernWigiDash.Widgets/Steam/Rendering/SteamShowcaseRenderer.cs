@@ -11,8 +11,8 @@ namespace ModernWigiDash.Widgets.Steam.Rendering;
 /// badge. The card geometry is the record the widget passes in
 /// (<see cref="SteamShowcaseLayout"/>'s output) — the same record the touch
 /// path hit-tests, so the drawn cards and the tap targets cannot drift
-/// apart. The poster bitmaps are looked up from the <see cref="SteamPosterCache"/>
-/// (the render tick never decodes).
+/// apart. The poster bitmaps are looked up through the <see cref="ISteamPosterLookup"/>
+/// seam (the render tick never decodes).
 /// </summary>
 internal sealed class SteamShowcaseRenderer : IDisposable
 {
@@ -21,13 +21,15 @@ internal sealed class SteamShowcaseRenderer : IDisposable
     /// no strings.</summary>
     private const int TextCacheLimit = 32;
 
+    private static readonly SKSamplingOptions LinearSampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
+
     private readonly SKPaint _panelPaint = new() { IsAntialias = true };
     private readonly SKPaint _posterPaint = new() { IsAntialias = true };
     private readonly SKPaint _textPaint = new() { IsAntialias = true };
     private readonly SKPaint _subTextPaint = new() { IsAntialias = true };
     private readonly SKPaint _accentPaint = new() { IsAntialias = true };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true };
-    private readonly Dictionary<(uint AppId, int FontPx, int Width), (string Source, string Fitted)> _nameCache = [];
+    private readonly SteamTextFitter _textFitter = new(TextCacheLimit);
     private readonly Dictionary<uint, (double Hours, string Text)> _playtimeCache = [];
 
     /// <summary>
@@ -43,7 +45,7 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         SteamGameItem? focus,
         SteamGameItem? previous,
         SteamGameItem? next,
-        SteamPosterCache cache,
+        ISteamPosterLookup cache,
         SteamPersona? persona,
         SKBitmap? avatar,
         SKColor accent,
@@ -81,13 +83,13 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         _placeholderPaint.Dispose();
     }
 
-    private void DrawFlank(SKCanvas canvas, SKRect card, SteamGameItem game, SteamPosterCache cache)
+    private void DrawFlank(SKCanvas canvas, SKRect card, SteamGameItem game, ISteamPosterLookup cache)
     {
         if (cache.TryGet(game.AppId, out SKBitmap? poster) && poster is not null)
         {
             _posterPaint.Color = SKColors.White.WithAlpha(160);
             canvas.DrawRoundRect(card, 6f, 6f, _posterPaint);
-            canvas.DrawBitmap(poster, card, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), _posterPaint);
+            canvas.DrawBitmap(poster, card, LinearSampling, _posterPaint);
         }
         else
         {
@@ -111,7 +113,7 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         {
             _posterPaint.Color = SKColors.White;
             canvas.DrawRoundRect(avatarRect, 8f, 8f, _posterPaint);
-            canvas.DrawBitmap(avatar, avatarRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), _posterPaint);
+            canvas.DrawBitmap(avatar, avatarRect, LinearSampling, _posterPaint);
         }
         else
         {
@@ -123,30 +125,17 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         _textPaint.Color = text;
         canvas.DrawText(persona.PersonaName, avatarRect.Left - 8f, avatarRect.MidY, SKTextAlign.Right, nameFont, _textPaint);
 
-        _accentPaint.Color = PersonaStateColor(persona.PersonState);
+        _accentPaint.Color = SteamPersonaState.Color(persona.PersonState);
         canvas.DrawCircle(avatarRect.Right - 8f, avatarRect.Bottom - 8f, 5f, _accentPaint);
     }
 
-    /// <summary>The online-state color for a community-API <c>personastate</c> ordinal.</summary>
-    private static SKColor PersonaStateColor(int personState)
-    {
-        return personState switch
-        {
-            1 => new SKColor(86, 199, 115, 255),   // Online
-            2 => new SKColor(95, 177, 255, 255),    // InGame
-            3 => new SKColor(255, 107, 107, 255),   // Busy
-            4 or 5 => new SKColor(255, 197, 91, 255), // Away / Snoozing
-            _ => new SKColor(144, 148, 153, 255),   // Offline / unknown
-        };
-    }
-
-    private void DrawFocus(SKCanvas canvas, SKRect card, SteamGameItem game, SteamPosterCache cache, SKColor accent, SKColor text)
+    private void DrawFocus(SKCanvas canvas, SKRect card, SteamGameItem game, ISteamPosterLookup cache, SKColor accent, SKColor text)
     {
         if (cache.TryGet(game.AppId, out SKBitmap? poster) && poster is not null)
         {
             _posterPaint.Color = SKColors.White;
             canvas.DrawRoundRect(card, 10f, 10f, _posterPaint);
-            canvas.DrawBitmap(poster, card, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), _posterPaint);
+            canvas.DrawBitmap(poster, card, LinearSampling, _posterPaint);
         }
         else
         {
@@ -157,7 +146,7 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         float fontPx = Math.Max(10f, card.Width * 0.13f);
         SKFont nameFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx);
         _textPaint.Color = text;
-        string name = FitName(game, card.Width - 16f, fontPx);
+        string name = _textFitter.FitName(game, nameFont, _textPaint, fontPx, card.Width - 16f);
         canvas.DrawText(name, card.Left + 8f, card.Bottom - 8f - fontPx, SKTextAlign.Left, nameFont, _textPaint);
 
         if (game.HoursOnRecord > 0)
@@ -187,34 +176,7 @@ internal sealed class SteamShowcaseRenderer : IDisposable
     }
 
     private void DrawEmptyState(SKCanvas canvas, SKRect bounds, SKColor text)
-    {
-        SKFont font = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 20f);
-        _textPaint.Color = text.WithAlpha(160);
-        string message = "No Steam games found";
-        float width = font.MeasureText(message);
-        canvas.DrawText(message, bounds.MidX - width / 2f, bounds.MidY, SKTextAlign.Left, font, _textPaint);
-    }
-
-    /// <summary>
-    /// The fitted (ellipsized) name for a card, memoized per app id, font
-    /// size, and available width. A steady-state frame measures and allocates
-    /// nothing; the source name is compared so a renamed title refits.
-    /// </summary>
-    private string FitName(SteamGameItem game, float maxWidth, float fontPx)
-    {
-        var key = (game.AppId, (int)fontPx, (int)maxWidth);
-        if (_nameCache.TryGetValue(key, out (string Source, string Fitted) entry)
-            && string.Equals(entry.Source, game.Name, StringComparison.Ordinal))
-        {
-            return entry.Fitted;
-        }
-
-        string fitted = FitText(game.Name, maxWidth, FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx));
-        if (_nameCache.Count >= TextCacheLimit)
-            _nameCache.Clear();
-        _nameCache[key] = (game.Name, fitted);
-        return fitted;
-    }
+        => _textFitter.DrawEmptyState(canvas, bounds, text, _textPaint);
 
     /// <summary>The playtime label, memoized per app id (the hours only change
     /// when a library refresh re-reads the playtime file).</summary>
@@ -233,30 +195,4 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         return text;
     }
 
-    /// <summary>
-    /// The zero-allocation fit: the full string when it measures inside
-    /// <paramref name="maxWidth"/>, else a binary-search prefix plus an
-    /// ellipsis. Measuring runs through a span, so the search allocates only
-    /// the one result string.
-    /// </summary>
-    private string FitText(string text, float maxWidth, SKFont font)
-    {
-        if (font.MeasureText(text, _textPaint) <= maxWidth)
-            return text;
-
-        const string Ellipsis = "…";
-        float ellipsisWidth = font.MeasureText(Ellipsis, _textPaint);
-        int low = 0;
-        int high = text.Length;
-        while (low < high)
-        {
-            int mid = (low + high + 1) / 2;
-            if (font.MeasureText(text.AsSpan(0, mid), _textPaint) + ellipsisWidth <= maxWidth)
-                low = mid;
-            else
-                high = mid - 1;
-        }
-
-        return low <= 0 ? Ellipsis : string.Concat(text.AsSpan(0, low), Ellipsis.AsSpan());
-    }
 }

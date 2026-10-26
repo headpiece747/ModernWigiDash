@@ -153,6 +153,36 @@ public sealed class AidaMmapReaderTests
         Assert.AreEqual(frame.Width * frame.Height * 2, frame.PayloadLength);
     }
 
+    [TestMethod]
+    public void TryReadFrame_StampedVersion_IsStableForAnIdenticalPayload()
+    {
+        var map = BuildValidMap(64, 32);
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource(map));
+
+        var first = reader.TryReadFrame();
+        var second = reader.TryReadFrame();
+
+        Assert.IsNotNull(first);
+        Assert.IsNotNull(second);
+        Assert.AreNotEqual(0L, first.Version, "a payload always carries a non-zero FNV-1a stamp");
+        Assert.AreEqual(first.Version, second.Version, "an identical payload stamps the same version");
+    }
+
+    [TestMethod]
+    public void TryReadFrame_StampedVersion_ChangesWhenThePayloadChanges()
+    {
+        var map = BuildValidMap(64, 32);
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource(map));
+
+        var before = reader.TryReadFrame();
+        map[BitmapOffset + 66] ^= 0x01; // flip one pixel bit
+        var after = reader.TryReadFrame();
+
+        Assert.IsNotNull(before);
+        Assert.IsNotNull(after);
+        Assert.AreNotEqual(before.Version, after.Version, "a changed payload stamps a new version");
+    }
+
     /// <summary>Builds a vendor-shaped map: header, first widget info, a 66-byte RGB565 BMP header, and pixels.</summary>
     private static byte[] BuildValidMap(int width, int height)
     {

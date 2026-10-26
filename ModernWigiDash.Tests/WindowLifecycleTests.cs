@@ -38,6 +38,7 @@ public class WindowLifecycleTests
         public bool StandbyVerdict { get; set; } = true;
 
         public int HideCalls { get; private set; }
+        public int MinimizeCalls { get; private set; }
         public int ShowCalls { get; private set; }
         public int ActivateCalls { get; private set; }
         public int ForceNormalCalls { get; private set; }
@@ -45,21 +46,34 @@ public class WindowLifecycleTests
         public int ShutdownCalls { get; private set; }
         public int StandbyCalls { get; private set; }
 
+        public List<Action> LoadedHandlers { get; } = [];
+
         public WindowLifecycle Build() => new(
-            wiredProvider: () => Wired,
-            closeBehaviorProvider: () => CloseBehavior,
-            trayLiveProvider: () => TrayLive,
-            isEnabledProvider: () => Enabled,
-            isVisibleProvider: () => Visible,
-            windowStateProvider: () => State,
+            new WindowStateProbes(
+                Wired: () => Wired,
+                CloseBehavior: () => CloseBehavior,
+                TrayLive: () => TrayLive,
+                IsEnabled: () => Enabled,
+                IsVisible: () => Visible,
+                State: () => State),
             // WPF: Hide() clears IsVisible; the module's hide is the tray hide.
-            hide: () => { HideCalls++; Visible = false; },
-            show: () => { ShowCalls++; Visible = true; },
-            activate: () => ActivateCalls++,
-            forceNormal: () => { ForceNormalCalls++; State = WindowState.Normal; },
-            close: () => CloseCalls++,
-            shutdown: () => ShutdownCalls++,
-            runSessionEndStandby: () => { StandbyCalls++; return StandbyVerdict; });
+            new WindowSurface(
+                Hide: () => { HideCalls++; Visible = false; },
+                Minimize: () => { MinimizeCalls++; State = WindowState.Minimized; },
+                Show: () => { ShowCalls++; Visible = true; },
+                Activate: () => ActivateCalls++,
+                ForceNormal: () => { ForceNormalCalls++; State = WindowState.Normal; },
+                Close: () => CloseCalls++,
+                Shutdown: () => ShutdownCalls++),
+            new WindowLifecycleHooks(
+                RunSessionEndStandby: () => { StandbyCalls++; return StandbyVerdict; }));
+
+        /// <summary>Stands in for the window's <c>Loaded</c> event (the handler the minimize-to-tray startup path subscribes).</summary>
+        public void RaiseLoaded()
+        {
+            foreach (Action handler in LoadedHandlers)
+                handler();
+        }
     }
 
     private static CancelEventArgs ClosingArgs() => new();
@@ -220,6 +234,49 @@ public class WindowLifecycleTests
         lifecycle.OnWindowStateChanged();
 
         Assert.AreEqual(0, h.HideCalls, "only a minimize is intercepted");
+    }
+
+    [TestMethod]
+    public void RunStartupState_AutostartMinimized_MinimizesNowAndClearsTheLatch()
+    {
+        var h = new LifecycleHarness();
+        var lifecycle = h.Build();
+
+        lifecycle.RunStartupState(startMinimized: true, minimizeToTray: false, subscribeLoaded: h.LoadedHandlers.Add);
+
+        Assert.AreEqual(1, h.MinimizeCalls, "the autostart path minimizes the window at startup");
+        Assert.AreEqual(WindowState.Minimized, h.State);
+        Assert.AreEqual(0, h.LoadedHandlers.Count, "the autostart path defers nothing (the tray path is the one that subscribes Loaded)");
+        lifecycle.OnWindowStateChanged();
+        Assert.AreEqual(1, h.HideCalls, "the latch cleared with the write, so the first real minimize still intercepts");
+    }
+
+    [TestMethod]
+    public void RunStartupState_MinimizeToTray_HidesFromTheLoadedHandlerUnderTheLatch()
+    {
+        var h = new LifecycleHarness { State = WindowState.Minimized };
+        var lifecycle = h.Build();
+
+        lifecycle.RunStartupState(startMinimized: false, minimizeToTray: true, subscribeLoaded: h.LoadedHandlers.Add);
+        Assert.AreEqual(0, h.HideCalls, "the hide is deferred to Loaded (Hide must run after Show)");
+
+        h.RaiseLoaded();
+        Assert.AreEqual(1, h.HideCalls, "the Loaded handler hides the window behind the tray icon");
+        lifecycle.OnWindowStateChanged();
+        Assert.AreEqual(2, h.HideCalls, "the latch cleared with the hide, so a real minimize after startup still intercepts");
+    }
+
+    [TestMethod]
+    public void RunStartupState_BothPaths_ComposeWithTheHideWinning()
+    {
+        var h = new LifecycleHarness();
+        var lifecycle = h.Build();
+
+        lifecycle.RunStartupState(startMinimized: true, minimizeToTray: true, subscribeLoaded: h.LoadedHandlers.Add);
+
+        Assert.AreEqual(1, h.MinimizeCalls, "the autostart minimize runs at startup");
+        h.RaiseLoaded();
+        Assert.AreEqual(1, h.HideCalls, "and the tray flag's hide runs after Show (Hide wins over Minimized)");
     }
 
     [TestMethod]

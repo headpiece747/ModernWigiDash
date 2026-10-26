@@ -166,4 +166,28 @@ public class PageManagementTests
         Assert.AreEqual(PageOpVerdict.Applied, verdict);
         Assert.AreEqual(0, profile.ActivePageIndex);
     }
+
+    [TestMethod]
+    public void Apply_LandedOp_InvokesTheStructuralFunnel()
+    {
+        var profile = TwoPages();
+        var module = new PageManagement(() => profile, new FakeDialogs());
+        int funnelRuns = 0;
+
+        module.Apply(() => module.Add(), () => funnelRuns++);
+
+        Assert.AreEqual(1, funnelRuns, "a landed op triggers the structural refresh exactly once");
+    }
+
+    [TestMethod]
+    public void Apply_RefusedOp_LeavesTheWindowUntouched()
+    {
+        var profile = new ProfileLayout(); // one page: delete is refused (LastPage)
+        var module = new PageManagement(() => profile, new FakeDialogs());
+        int funnelRuns = 0;
+
+        module.Apply(() => module.Delete(0), () => funnelRuns++);
+
+        Assert.AreEqual(0, funnelRuns, "a refused op never triggers the structural refresh");
+    }
 }

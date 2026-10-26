@@ -9,8 +9,9 @@ namespace ModernWigiDash.App;
 /// through the two getters, routes the one swap site, the theme-restore
 /// confirm, and the theme apply through the named members, and reaches the
 /// user's dialog surface only through <see cref="ShowError"/>, so the flow's
-/// sequence is testable against an in-memory fake host and the window is the
-/// production host (a thin adapter over its state and dialog host).
+/// sequence is testable against an in-memory fake host and the window's
+/// production host is the named <c>ProfileImportAdapter</c> module (the
+/// swap and theme-apply logic live there, not in the window).
 /// </summary>
 internal interface IProfileImportHost
 {

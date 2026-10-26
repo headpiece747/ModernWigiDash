@@ -2,8 +2,8 @@ namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// The Stock &amp; Crypto ticker widget: tracks one symbol through the shared
-/// PriceFeedManager (crypto, stock, or FX), renders the label, price, and
-/// change badge, and seeds the one-shot fallback when the live feed has no
+/// PriceFeedManager (crypto, stock, or FX), delegates typography and badge drawing
+/// to <see cref="CryptoStockTickerCanvas"/>, and seeds the one-shot fallback when the live feed has no
 /// price yet.
 /// </summary>
 [WidgetMetadata("ticker_stock", "Stock & Crypto", Category = "Utilities", DefaultGridSize = GridSizePreset.Size1x1)]
@@ -22,7 +22,6 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     public string DisplayName { get; set; } = "";
 
     private string Price = "";
-
     private string ChangeBadge = "";
 
     /// <summary>The "Show Change" toggle: show or hide the change percentage badge.</summary>
@@ -54,6 +53,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     private bool _disposed;
     private readonly TickerFallbackPolicy _fallbackPolicy;
     private bool _lastChangePositive;
+    private readonly CryptoStockTickerCanvas _canvas = new();
 
     /// <summary>Builds the feed-identity subscription tracker and the fallback-seed cadence policy bound to the Clock seam.</summary>
     public CryptoStockTickerWidget()
@@ -105,58 +105,14 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         _disposed = true;
         // Stop polling this widget's symbol once it is removed from the canvas.
         _subscription.Untrack();
-        _symbolPaint.Dispose();
-        _pricePaint.Dispose();
-        _badgePaint.Dispose();
-        _placeholderTitlePaint.Dispose();
-        _placeholderHintPaint.Dispose();
+        _canvas.Dispose();
         return base.DisposeAsync();
     }
 
     private AssetKind AssetKindValue => SymbolCatalog.DetectAssetKind(Symbol, AssetType);
     private bool IsFxAsset => AssetKindValue == AssetKind.Fx;
 
-    // Hoisted paints (the 30 FPS render allocates no SKPaint).
-    private readonly SKPaint _symbolPaint = new() { IsAntialias = true };
-    private readonly SKPaint _pricePaint = new() { IsAntialias = true };
-    private readonly SKPaint _badgePaint = new() { IsAntialias = true };
-    private readonly SKPaint _placeholderTitlePaint = new() { IsAntialias = true };
-    private readonly SKPaint _placeholderHintPaint = new() { IsAntialias = true };
-
-    // The label and formatted price are memoized per input: Render composes
-    // them every frame, but the inputs change only via the inspector (label
-    // keys) or the feed's ~1×/s price updates. Single-slot caches keyed by the
-    // source values, so identical inputs produce identical strings with no
-    // per-frame formatting work.
-    private string _labelKeySymbol = "";
-    private string _labelKeyType = "";
-    private string _labelKeyName = "";
-    private string _labelText = "";
-
-    private string DisplayLabel
-    {
-        get
-        {
-            if (!string.Equals(Symbol, _labelKeySymbol, StringComparison.Ordinal) || !string.Equals(AssetType, _labelKeyType, StringComparison.Ordinal) || !string.Equals(DisplayName, _labelKeyName, StringComparison.Ordinal))
-            {
-                _labelKeySymbol = Symbol;
-                _labelKeyType = AssetType;
-                _labelKeyName = DisplayName;
-                string? fxLabel = IsFxAsset && SymbolCatalog.TryParseFxPair(Symbol, out string baseCur, out string quoteCur)
-                    ? $"{baseCur} / {quoteCur}"
-                    : null;
-                _labelText = TickerPresentation.DisplayLabel(DisplayName, fxLabel, SymbolCatalog.NormalizeSymbol(Symbol));
-            }
-            return _labelText;
-        }
-    }
-
-    private readonly MemoSlot<(decimal Price, string Decimals, string Currency), string> _priceMemo = new();
-
-    private string FormatPrice(decimal rawPrice, string currencySymbol = "$")
-        => _priceMemo.GetOrCompute(
-            (rawPrice, PriceDecimals, currencySymbol),
-            () => TickerPresentation.FormatPrice(rawPrice, PriceDecimals, currencySymbol));
+    private string DisplayLabel => _canvas.GetDisplayLabel(Symbol, AssetType, DisplayName, IsFxAsset);
 
     /// <summary>
     /// Draws the symbol label, the price, and the change badge (stale prices
@@ -168,9 +124,11 @@ public class CryptoStockTickerWidget : ModernWidgetBase
     /// <param name="bounds">The widget's bounds in canvas coordinates.</param>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
+        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
+
         if (string.IsNullOrWhiteSpace(Symbol))
         {
-            DrawPlaceholder(canvas, bounds);
+            _canvas.RenderPlaceholder(canvas, bounds, textColor);
             return;
         }
 
@@ -182,7 +140,7 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         bool isStale = TickerStalenessPresentation.IsStale(info, Clock.GetUtcNow().UtcDateTime);
         if (info != null)
         {
-            Price = FormatPrice(info.Price, info.CurrencySymbol);
+            Price = _canvas.FormatPrice(info.Price, PriceDecimals, info.CurrencySymbol);
             ChangeBadge = info.FormattedChange;
             _lastChangePositive = info.IsPositive;
         }
@@ -195,47 +153,10 @@ public class CryptoStockTickerWidget : ModernWidgetBase
         }
 
         bool isPositive = info?.IsPositive ?? _lastChangePositive;
-        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
         SKColor posColor = ColorOf(PositiveColorHex, new SKColor(34, 197, 94));
         SKColor negColor = ColorOf(NegativeColorHex, new SKColor(239, 68, 68));
 
-        float pad = 14f;
-        float priceSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
-
-        var symFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-        _symbolPaint.Color = textColor;
-        string symbolText = TextRenderHelper.TruncateText(DisplayLabel, symFont, _symbolPaint, bounds.Width - pad * 2f);
-        canvas.DrawTextWithFallback(symbolText, pad, pad + priceSize * 0.8f, symFont, _symbolPaint);
-
-        var priceFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-        _pricePaint.Color = textColor;
-        canvas.DrawTextWithFallback(Price, pad, bounds.MidY + priceSize * 0.35f, priceFont, _pricePaint);
-
-        if (ShowChange)
-        {
-            // Stale prices render in a neutral gray with a freshness dot so the
-            // last-known value is never mistaken for live data.
-            SKColor badgeColor = isPositive ? posColor : negColor;
-            if (isStale) badgeColor = textColor.WithAlpha(TickerStalenessPresentation.StaleBadgeAlpha);
-            var badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, priceSize);
-            _badgePaint.Color = badgeColor;
-            string badgeText = TickerStalenessPresentation.BadgeText(ChangeBadge, isStale);
-            canvas.DrawTextWithFallback(badgeText, pad, bounds.Bottom - pad, badgeFont, _badgePaint);
-        }
-    }
-
-    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds)
-    {
-        SKColor textColor = ColorOf(TextColorHex, SKColors.White);
-        float mainSize = Math.Min(bounds.Width / 6f, bounds.Height / 3.5f);
-
-        var titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, Math.Max(mainSize * 0.55f, 13f));
-        _placeholderTitlePaint.Color = textColor;
-        TextRenderHelper.DrawCenteredText(canvas, "Enter a symbol", bounds.MidX, bounds.MidY - 4f, titleFont, _placeholderTitlePaint);
-
-        var hintFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, Math.Max(mainSize * 0.4f, 11f));
-        _placeholderHintPaint.Color = textColor.WithAlpha(160);
-        TextRenderHelper.DrawCenteredText(canvas, "e.g. BTC, ETH, AAPL, MSFT", bounds.MidX, bounds.MidY + 16f, hintFont, _placeholderHintPaint);
+        _canvas.RenderTicker(canvas, bounds, DisplayLabel, Price, ChangeBadge, isPositive, isStale, ShowChange, textColor, posColor, negColor);
     }
 
     /// <summary>

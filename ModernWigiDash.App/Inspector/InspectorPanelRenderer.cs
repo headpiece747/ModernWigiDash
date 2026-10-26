@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Widgets;
+using ModernWigiDash.Widgets.Todo;
 
 namespace ModernWigiDash.App.Inspector;
 
@@ -192,6 +193,9 @@ internal static class InspectorPanelRenderer
                 break;
             case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.CalendarFeeds:
                 panel.Children.Add(BuildCalendarFeedEditor(desc, callbacks));
+                break;
+            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.TodoManager:
+                panel.Children.Add(BuildTodoManagerEditor(widget, desc, callbacks));
                 break;
             default:
                 // Text or Number
@@ -457,6 +461,133 @@ internal static class InspectorPanelRenderer
         RebuildRows();
         return host;
     }
+
+    /// <summary>
+    /// Builds the Task Manager editor panel: draft task rows and an add button.
+    /// </summary>
+    private static UIElement BuildTodoManagerEditor(PlacedWidgetInstance widget, EditorDescription desc, InspectorCallbacks callbacks)
+    {
+        var rows = new TodoTaskEditorRows(
+            desc.CurrentValue?.ToString(),
+            json =>
+            {
+                // The commit funnel is the widget's commit capability (the
+                // ITaskCommitter seam): it owns the order (provider write,
+                // state set, refresh) off the persisted string. The persist
+                // leg writes that same string to the profile (the
+                // one-directional rule: the cache never propagates to a
+                // provider, so the funnel is the only task-write path). The
+                // mapper talks to the capability, never a concrete widget type.
+                if (widget.ActiveInstance is not ITaskCommitter committer) return;
+                committer.CommitTasks(json);
+                callbacks.ApplyInspectorPropertyValue(desc.Property, json);
+            });
+
+        var addBtn = new Button
+        {
+            Content = "Add task",
+            Padding = new Thickness(8, 4, 8, 4),
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+
+        var host = new StackPanel();
+
+        void RebuildRows()
+        {
+            host.Children.Clear();
+            for (int i = 0; i < rows.Drafts.Count; i++)
+            {
+                int index = i;
+                host.Children.Add(BuildTodoTaskRow(rows, index, RebuildRows));
+            }
+            host.Children.Add(addBtn);
+        }
+
+        addBtn.Click += (_, _) =>
+        {
+            rows.Add();
+            RebuildRows();
+        };
+
+        RebuildRows();
+        return host;
+    }
+
+    private static UIElement BuildTodoTaskRow(TodoTaskEditorRows rows, int index, Action rebuild)
+    {
+        var draft = rows.Drafts[index];
+        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+
+        var top = new DockPanel();
+        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal };
+        DockPanel.SetDock(btnPanel, Dock.Right);
+
+        var upBtn = new Button
+        {
+            Content = "▲",
+            Padding = new Thickness(6, 2, 6, 2),
+            Margin = new Thickness(2, 0, 0, 0),
+            IsEnabled = index > 0,
+        };
+        AutomationProperties.SetAutomationId(upBtn, $"TodoUp_{index}");
+        upBtn.Click += (_, _) =>
+        {
+            rows.MoveUp(index);
+            rebuild();
+        };
+
+        var downBtn = new Button
+        {
+            Content = "▼",
+            Padding = new Thickness(6, 2, 6, 2),
+            Margin = new Thickness(2, 0, 0, 0),
+            IsEnabled = index < rows.Drafts.Count - 1,
+        };
+        AutomationProperties.SetAutomationId(downBtn, $"TodoDown_{index}");
+        downBtn.Click += (_, _) =>
+        {
+            rows.MoveDown(index);
+            rebuild();
+        };
+
+        var removeBtn = new Button
+        {
+            Content = "Remove",
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(4, 0, 0, 0),
+        };
+        AutomationProperties.SetAutomationId(removeBtn, $"TodoRemove_{index}");
+        removeBtn.Click += (_, _) =>
+        {
+            rows.Remove(index);
+            rebuild();
+        };
+
+        btnPanel.Children.Add(upBtn);
+        btnPanel.Children.Add(downBtn);
+        btnPanel.Children.Add(removeBtn);
+
+        var check = new CheckBox
+        {
+            Content = "Done",
+            IsChecked = draft.IsDone,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Brushes.White,
+        };
+        AutomationProperties.SetAutomationId(check, $"TodoDone_{index}");
+        check.Checked += (_, _) => rows.SetDone(index, true);
+        check.Unchecked += (_, _) => rows.SetDone(index, false);
+
+        top.Children.Add(check);
+        top.Children.Add(btnPanel);
+        row.Children.Add(top);
+
+        row.Children.Add(BuildConnField("Title", draft.Title, v => rows.SetTitle(index, v), $"TodoTitle_{index}"));
+        row.Children.Add(BuildConnField("Category (optional)", draft.Category, v => rows.SetCategory(index, v), $"TodoCategory_{index}"));
+
+        return row;
+    }
+
 
     /// <summary>One feed row: the kind combo, the label box, the kind's
     /// connection field(s), a masked password field (CalDAV only, machine-local),

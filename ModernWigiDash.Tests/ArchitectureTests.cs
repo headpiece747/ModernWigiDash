@@ -255,6 +255,8 @@ public sealed class ArchitectureTests
             "ModernWigiDash.Widgets/Twitch/TwitchApiClient.cs",
             "ModernWigiDash.Widgets/WeatherClient.cs",
             "ModernWigiDash.Widgets/CalendarWidget.cs",
+            "ModernWigiDash.Widgets/Todo/SuperProductivityTaskProvider.cs",
+            "ModernWigiDash.Widgets/Steam/Services/SteamWebApiClient.cs",
         };
         var hits = RepoScan.ScanSrc(new Regex(@"new\s+HttpClient\s*\("))
             .Concat(RepoScan.ScanSrc(new Regex(@"\bHttpClient\b[^;=\n]*=\s*new\s*\(")))

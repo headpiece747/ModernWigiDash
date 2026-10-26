@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using ModernWigiDash.App.Hotkey;
@@ -19,7 +18,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileImportHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -160,18 +159,22 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // behind the ISettingsHubHost seam. Built at construction with live providers,
     // so it reads whatever the AppSettings / ProfileLoad wiring steps have loaded.
     private SettingsCommitModule _settingsCommits;
+    // The profile-import host adapter (the ADR-0008 image): owns the swap and
+    // theme-apply logic behind the flow's host seam, so the flow's production
+    // host is the named module, not the window. Built at construction with
+    // live providers for the same reason.
+    private ProfileImportAdapter _profileImport;
     // The AHK spawn seam (ADR-0019): production is Process.Start, tests
     // inject a recorder the way they swap the hotkey API.
     private readonly AhkLaunchApi _ahkApi;
     private Hotkey.AhkSpawnPolicy _ahkSpawnPolicy;
 
-    // The global-hotkey integration (ADR-0019): the P/Invoke seam (the test
-    // registration owner (wired by the GlobalHotkeys step; inert until the
-    // window's SourceInitialized hands it the HWND), and the window handle
-    // the registrations ride on (zero until Show creates it).
+    // The global-hotkey integration (ADR-0019): the P/Invoke seam and the
+    // attachment module (wired by the GlobalHotkeys step; owns the window
+    // handle, the WM_HOTKEY hook, and the refresh trigger; inert until the
+    // window's SourceInitialized hands it the HWND).
     private readonly HotkeyApi _hotkeyApi;
-    private GlobalHotkeyManager? _globalHotkeyManager;
-    private IntPtr _hotkeyHwnd = IntPtr.Zero;
+    private GlobalHotkeyAttachment? _hotkeyAttachment;
 
     // Profile persistence: loads the saved profile at startup and owns the
     // debounced save of the current profile (wired by the startup artifact
@@ -243,23 +246,37 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             refreshGlobalHotkeys: RefreshGlobalHotkeys,
             startupLog: _startupLog,
             hotkeyLog: _hotkeyLog);
+        // The profile-import host adapter (the ADR-0008 image): the flow's
+        // production host. The dialog host is read live (the wiring steps run
+        // after construction, so a capture would be null at import time).
+        _profileImport = new ProfileImportAdapter(
+            profileProvider: () => _profile,
+            profileSetter: p => _profile = p,
+            applyRawWrite: () => ApplyProfileMutation(ProfileMutationShape.RawWrite, null),
+            dialogHostProvider: () => _dialogHost,
+            themeApplicator: _themeApplicator,
+            window: this);
         // The window's lifecycle module (ADR-0018/0019): owns the hide-to-tray
         // intercepts, the restore-from-tray state rule, the explicit-quit latch,
         // and the session-end standby. Live providers read the window's WPF state.
         _lifecycle = new WindowLifecycle(
-            wiredProvider: () => _wired,
-            closeBehaviorProvider: () => _profile.CloseBehavior,
-            trayLiveProvider: () => _tray.IsLive,
-            isEnabledProvider: () => IsEnabled,
-            isVisibleProvider: () => IsVisible,
-            windowStateProvider: () => WindowState,
-            hide: Hide,
-            show: Show,
-            activate: () => { _ = Activate(); },
-            forceNormal: () => WindowState = WindowState.Normal,
-            close: Close,
-            shutdown: () => Application.Current?.Shutdown(),
-            runSessionEndStandby: () => _sessionEndStandby is { } probe ? probe() : _usbDevice!.TryGoToStandby());
+            new WindowStateProbes(
+                Wired: () => _wired,
+                CloseBehavior: () => _profile.CloseBehavior,
+                TrayLive: () => _tray.IsLive,
+                IsEnabled: () => IsEnabled,
+                IsVisible: () => IsVisible,
+                State: () => WindowState),
+            new WindowSurface(
+                Hide: Hide,
+                Minimize: () => WindowState = WindowState.Minimized,
+                Show: Show,
+                Activate: () => { _ = Activate(); },
+                ForceNormal: () => WindowState = WindowState.Normal,
+                Close: Close,
+                Shutdown: () => Application.Current?.Shutdown()),
+            new WindowLifecycleHooks(
+                RunSessionEndStandby: () => _sessionEndStandby is { } probe ? probe() : _usbDevice!.TryGoToStandby()));
         _usbDevice = options.UsbEngine ?? new DisplayDeviceEngine();
         // The engine is inert until Start: construction never probes USB,
         // the window only allocates (or adopts the injected) engine here.
@@ -272,7 +289,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         InitializeComponent();
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
         SourceInitialized += OnUpdateCheckAtStartup;
-        SourceInitialized += OnHotkeysSourceInitialized;
+        SourceInitialized += (_, _) => _hotkeyAttachment?.Attach(this, () => GlobalHotkeyPolicy.CollectCandidates(_profile), () => _appSettings.KillSwitch);
         PreviewMouseDown += OnWindowPreviewMouseDown;
 
         // The startup wiring is one named artifact (BuildStartupWiring),
@@ -288,38 +305,17 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             step.Run();
         }
 
-        // The autostart path (ADR-0019): a launch carrying the --startup flag
-        // (the HKCU Run entry's command line) opens the window minimized - the
-        // user sees the window they just signed in with, and the display
-        // streams either way. The latch (armed around the write below) keeps
-        // the minimize-to-tray intercept from hiding it at sign-in; the
-        // explicit clear keeps the latch one-shot if WPF raises no state
-        // change for the startup write.
-        if (ProcessLifecycle.StartMinimized)
-        {
-            _lifecycle.ArmStartupMinimizeLatch();
-            WindowState = WindowState.Minimized;
-            _lifecycle.ClearStartupMinimizeLatch();
-        }
-
-        // The minimize-to-tray-on-startup path (machine-local, ADR-0019): a
-        // launch with the flag opens the window hidden behind the tray icon -
-        // the display streams either way, and the user's only exits are the
-        // tray icon's show/quit. Hide() must run after Show (the StartupUri
-        // window is shown by WPF after the ctor returns), so the Loaded
-        // handler carries it. The latch vetoes the minimize-to-tray intercept
-        // for the startup state change; the explicit clear keeps the latch
-        // one-shot. This composes with the autostart minimize: --startup +
-        // the flag hides instead of minimizing (Hide wins over Minimized).
-        if (_appSettings.MinimizeToTrayOnStartup && _tray.IsLive)
-        {
-            Loaded += (_, _) =>
-            {
-                _lifecycle.ArmStartupMinimizeLatch();
-                Hide();
-                _lifecycle.ClearStartupMinimizeLatch();
-            };
-        }
+        // The startup state sequence (ADR-0019): the autostart path (the
+        // --startup flag from the HKCU Run entry) opens the window minimized,
+        // and the machine-local minimize-to-tray flag opens it hidden behind
+        // the tray icon. The arm-latch, state-write, clear-latch ritual for
+        // both paths is owned by the lifecycle module (the minimize now, the
+        // hide from a Loaded handler - Hide must run after Show), so the
+        // ctor keeps only the two inputs and the Loaded subscription.
+        _lifecycle.RunStartupState(
+            ProcessLifecycle.StartMinimized,
+            _appSettings.MinimizeToTrayOnStartup && _tray.IsLive,
+            subscribeLoaded: handler => Loaded += (_, _) => handler());
     }
 
     /// <summary>
@@ -576,16 +572,18 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         _appSettings = _appSettingsStore.Load();
     }
 
-    /// <summary>Global-hotkey registration owner (ADR-0019): inert until SourceInitialized hands it the HWND.</summary>
+    /// <summary>Global-hotkey attachment (ADR-0019): inert until SourceInitialized hands it the HWND.</summary>
     private void WireGlobalHotkeys()
     {
-        // The global-hotkey registration owner (ADR-0019): inert until
-        // the window's SourceInitialized hands it the HWND (the handle
-        // exists only after Show; the wiring runs in the constructor).
-        // The first idempotent refresh runs there; every later trigger
-        // (a profile mutation, a chord edit, the kill switch, the
-        // interpreter path) re-runs the same pass.
-        _globalHotkeyManager = new GlobalHotkeyManager(_hotkeyApi, _hotkeyLog);
+        // The global-hotkey attachment (ADR-0019): the window handle, the
+        // WM_HOTKEY hook, and the refresh trigger in one module, the
+        // registration/diff core inside it. Inert until the window's
+        // SourceInitialized hands it the HWND (the handle exists only after
+        // Show; the wiring runs in the constructor). The first idempotent
+        // refresh runs there; every later trigger (a profile mutation, a
+        // chord edit, the kill switch, the interpreter path) re-runs the
+        // same pass.
+        _hotkeyAttachment = new GlobalHotkeyAttachment(_hotkeyApi, _hotkeyLog);
     }
 
     /// <summary>Snap-to-grid resync from the loaded profile; guarded because _wired is still off.</summary>
@@ -809,14 +807,14 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         new TeardownStep("DeviceAuthorization", _dialogHost.CloseDeviceAuthorization),
         // The global hotkeys are released before the tray icon goes (ADR-0019):
         // a tray Quit must not leave the OS holding the app's chords after the
-        // message loop dies. The manager is nulled and the handle zeroed with
+        // message loop dies. The attachment's dispose releases the manager's
+        // registrations and unhooks the WndProc, and the module is nulled with
         // the dispose, so a post-teardown RefreshGlobalHotkeys or WM_HOTKEY
-        // hits the guards above instead of a disposed manager on a dead HWND.
+        // hits the null guards instead of a disposed module on a dead HWND.
         new TeardownStep("GlobalHotkeys", () =>
         {
-            _globalHotkeyManager?.Dispose();
-            _globalHotkeyManager = null;
-            _hotkeyHwnd = IntPtr.Zero;
+            _hotkeyAttachment?.Dispose();
+            _hotkeyAttachment = null;
         }),
         // The tray icon is removed after the profile state has landed (the
         // persist-first guarantee covers the exit affordance: the user who
@@ -1081,63 +1079,30 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>The rename seam: the module's gate + prompt + rename; a
     /// structural refresh only when it lands.</summary>
     private void RenamePage(int index)
-    {
-        if (_pageManagement.Rename(index) != PageOpVerdict.Applied) return;
-        ApplyProfileMutation(ProfileMutationShape.Structural, _selectedWidget);
-    }
+        => _pageManagement.Apply(() => _pageManagement.Rename(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, _selectedWidget));
 
     /// <summary>The switch seam: the module's SetActivePageIndex gate; a
     /// structural refresh only when it lands (an out-of-range step is a no-op,
     /// never a wrap).</summary>
     private void SwitchToPage(int index)
-    {
-        if (_pageManagement.Switch(index) != PageOpVerdict.Applied) return;
-        ApplyProfileMutation(ProfileMutationShape.Structural, null);
-    }
+        => _pageManagement.Apply(() => _pageManagement.Switch(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
 
     #region Global Hotkeys (ADR-0019)
 
     /// <summary>
-    /// The global-hotkey attach: the window's HWND is created at Show (the
-    /// wiring ran in the constructor, before the handle existed), so the
-    /// attach adds the WM_HOTKEY hook to the window's HwndSource and runs
-    /// the first idempotent registration pass. A hidden or minimized window
-    /// keeps pumping its message loop, so the hotkeys work while the app
-    /// is tray-hidden.
-    /// </summary>
-    private void OnHotkeysSourceInitialized(object? sender, EventArgs e)
-    {
-        _hotkeyHwnd = new WindowInteropHelper(this).Handle;
-        HwndSource.FromHwnd(_hotkeyHwnd)?.AddHook(OnHotkeyWndProc);
-        RefreshGlobalHotkeys();
-    }
-
-    /// <summary>
-    /// The WM_HOTKEY hook (0x0312): the message's wParam is the registered
-    /// hotkey's id; the manager routes it to the owning widget's fire path
-    /// (the same entry point as a tap). An unknown id leaves the message
-    /// for the default handler.
-    /// </summary>
-    private IntPtr OnHotkeyWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == 0x0312 && _globalHotkeyManager is { } manager && manager.Fire(wParam.ToInt32()))
-            handled = true;
-        return IntPtr.Zero;
-    }
-
-    /// <summary>
     /// The global-hotkey registration trigger (ADR-0019): hands the profile's
     /// provider widgets (the policy's profile-order walk) and the machine-
-    /// local kill switch to the manager's pass, which resolves the desired
-    /// set, logs the duplicate conflicts, and runs the register/unregister
-    /// diff. Runs on the first Show (SourceInitialized), every profile
-    /// mutation, a chord edit (the PersistProperty tail), a kill-switch
-    /// toggle, and an interpreter-path change.
+    /// local kill switch to the attachment module's pass, which resolves the
+    /// desired set, logs the duplicate conflicts, and runs the
+    /// register/unregister diff. Runs on the first Show (SourceInitialized),
+    /// every profile mutation, a chord edit (the PersistProperty tail), a
+    /// kill-switch toggle, and an interpreter-path change.
     /// </summary>
     internal void RefreshGlobalHotkeys()
     {
-        if (_hotkeyHwnd == IntPtr.Zero || _globalHotkeyManager is not { } manager) return;
-        manager.RefreshPass(_hotkeyHwnd, GlobalHotkeyPolicy.CollectCandidates(_profile), _appSettings.KillSwitch);
+        GlobalHotkeyAttachment? attachment = _hotkeyAttachment;
+        if (attachment is null) return;
+        attachment.Refresh(() => GlobalHotkeyPolicy.CollectCandidates(_profile), () => _appSettings.KillSwitch);
     }
 
     #endregion
@@ -1150,16 +1115,10 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// degrades to a no-op instead of throwing in the window.
     /// </summary>
     internal void DeletePage(int index)
-    {
-        if (_pageManagement.Delete(index) != PageOpVerdict.Applied) return;
-        ApplyProfileMutation(ProfileMutationShape.Structural, null);
-    }
+        => _pageManagement.Apply(() => _pageManagement.Delete(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
 
     private void BtnAddPage_Click(object _, RoutedEventArgs e)
-    {
-        _pageManagement.Add();
-        ApplyProfileMutation(ProfileMutationShape.Structural, null);
-    }
+        => _pageManagement.Apply(() => _pageManagement.Add(), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
 
     private void ChkSnapToGrid_Changed(object _, RoutedEventArgs e)
     {
@@ -1190,57 +1149,15 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             // The import flow owns the verdict sequence (the close-behavior
             // merge, the one swap site, the post-swap theme offer); the
             // boundary's size guard and parse are ProfileOps' one funnel, and
-            // the window is the flow's production host.
-            ProfileImportFlow.Run(ProfileOps.ImportProfileFile(dlg.FileName, _loader, this), this);
+            // the adapter is the flow's production host.
+            ProfileImportFlow.Run(ProfileOps.ImportProfileFile(dlg.FileName, _loader, this), _profileImport);
         }
     }
 
-    // IProfileImportHost (the manual import flow's named host seam, the
-    // ADR-0008 image): the window is the production host. The flow's
-    // sequence (the merge, the swap, the post-swap theme offer) is pinned
-    // at the module's interface; these members are the window-side
-    // implementation the flow drives.
-    string? IProfileImportHost.LocalCloseBehavior => _profile.CloseBehavior;
-
-    ThemeSettings IProfileImportHost.CurrentTheme => ThemeStore.Current;
-
-    bool IProfileImportHost.SwapProfile(ProfileLayout imported)
-    {
-        try
-        {
-            // One swap site: ReplaceProfile disposes the old profile's widget
-            // instances and returns the imported profile active.
-            _profile = ProfileOps.ReplaceProfile(_profile, imported);
-
-            // The funnel owns everything after the swap - tab strip, picker,
-            // and the snap-to-grid resync (a RawWrite): the old force-write of
-            // the checkbox is gone.
-            ApplyProfileMutation(ProfileMutationShape.RawWrite, null);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _dialogHost.Error("Import Error", $"Error importing profile: {ex.Message}");
-            return false;
-        }
-    }
-
-    bool IProfileImportHost.ConfirmThemeRestore()
-        => _dialogHost.Confirm("Restore Theme", "The imported profile includes a theme. Apply it to this machine?");
-
-    void IProfileImportHost.ApplyTheme(ThemeSettings theme)
-    {
-        ThemeStore.Replace(theme);
-        if (!ThemeStore.SaveCurrent())
-        {
-            _dialogHost.Error(
-                "Theme Save Failed",
-                "Could not write app_theme.json to the user state directory. The colors apply for this session only.");
-        }
-        _themeApplicator.Apply(this);
-    }
-
-    void IProfileImportHost.ShowError(string title, string message) => _dialogHost.Error(title, message);
+    // The import flow's host seam (the ADR-0008 image): the adapter module is
+    // the production host, so the window carries no host members of its own.
+    // The test seam drives the swap through the same production path.
+    internal bool SwapProfileForTest(ProfileLayout imported) => _profileImport.SwapProfile(imported);
 
     // The export flow's host seam (the ADR-0008 image): the window is the
     // production host, a thin adapter over its profile, theme, and dialog host.
@@ -1306,32 +1223,20 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
     /// <summary>
     /// Opens the settings hub (ADR-0018): the close-behavior radios read the
-    /// profile's raw persisted value and write it back through
-    /// <see cref="CommitCloseBehavior"/> the moment they are checked; the
-    /// Profile group's export/import buttons route to the window's file
-    /// flows.
+    /// profile's raw persisted value and write it back through the commit
+    /// module's <see cref="SettingsCommitModule.CommitCloseBehavior"/> the
+    /// moment they are checked; the Profile group's export/import buttons
+    /// route to the window's file flows.
     /// </summary>
     private void ShowSettingsDialog()
     {
         new Dialogs.SettingsDialog(this, _themeApplicator, this).ShowDialog();
     }
 
-    // The settings hub's write-throughs (ADR-0018/0019) forward to the commit
-    // module, which owns the read-mutate-save-log shape and the hotkey re-run.
-    private void CommitCloseBehavior(string value) => _settingsCommits.CommitCloseBehavior(value);
-
-    private void CommitAutostart(bool enabled) => _settingsCommits.CommitAutostart(enabled);
-
-    private void CommitKillSwitch(bool killSwitch) => _settingsCommits.CommitKillSwitch(killSwitch);
-
-    private void CommitAhkInterpreter(string path) => _settingsCommits.CommitAhkInterpreter(path);
-
-    private void CommitMinimizeToTrayOnStartup(bool enabled) => _settingsCommits.CommitMinimizeToTrayOnStartup(enabled);
-
     /// <summary>
     /// The AHK interpreter Browse from the settings hub: the window owns
     /// the file dialog (the dialog-host pattern); a chosen path commits
-    /// through <see cref="CommitAhkInterpreter"/> and is returned so the
+    /// through the commit module's write-through and is returned so the
     /// hub's box can display it (the box and the persisted path cannot
     /// drift); a cancel returns null and leaves the setting untouched.
     /// </summary>
@@ -1343,16 +1248,18 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             Filter = "AutoHotkey|autohotkey.exe|Executables (*.exe)|*.exe"
         };
         if (dialog.ShowDialog(this) != true) return null;
-        CommitAhkInterpreter(dialog.FileName);
+        _settingsCommits.CommitAhkInterpreter(dialog.FileName);
         return dialog.FileName;
     }
 
     // ISettingsHubHost (the settings hub's named host seam, the ADR-0008
     // image): the window is the production host. The seeds read the
     // persisted state live at open time (the dialog reads Seed once in its
-    // ctor), and the commit members forward to the existing write-through
-    // seams above, so the hub and the window cannot drift on what an open
-    // hub sees or a check writes.
+    // ctor), and the commit members forward straight to the commit module,
+    // which owns the read-mutate-save-log shape and the hotkey re-run (two
+    // layers, not three: no private wrapper layer in between), so the hub
+    // and the window cannot drift on what an open hub sees or a check
+    // writes.
     SettingsHubSeed ISettingsHubHost.Seed => new(
         _profile.CloseBehavior,
         AutostartStore.TryGetCommandLine() is not null,
@@ -1361,13 +1268,13 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         _profile.ActivePage.BackgroundHexColor,
         _appSettings.MinimizeToTrayOnStartup);
 
-    void ISettingsHubHost.CommitCloseBehavior(string value) => CommitCloseBehavior(value);
+    void ISettingsHubHost.CommitCloseBehavior(string value) => _settingsCommits.CommitCloseBehavior(value);
 
-    void ISettingsHubHost.CommitAutostart(bool enabled) => CommitAutostart(enabled);
+    void ISettingsHubHost.CommitAutostart(bool enabled) => _settingsCommits.CommitAutostart(enabled);
 
-    void ISettingsHubHost.CommitKillSwitch(bool tripped) => CommitKillSwitch(tripped);
+    void ISettingsHubHost.CommitKillSwitch(bool tripped) => _settingsCommits.CommitKillSwitch(tripped);
 
-    void ISettingsHubHost.CommitAhkInterpreter(string path) => CommitAhkInterpreter(path);
+    void ISettingsHubHost.CommitAhkInterpreter(string path) => _settingsCommits.CommitAhkInterpreter(path);
 
     string? ISettingsHubHost.BrowseAhkInterpreter() => BrowseAhkInterpreter();
 
@@ -1377,7 +1284,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 
     void ISettingsHubHost.CommitPageBackground(string hex) => CommitPageBackground(hex);
 
-    void ISettingsHubHost.CommitMinimizeToTrayOnStartup(bool enabled) => CommitMinimizeToTrayOnStartup(enabled);
+    void ISettingsHubHost.CommitMinimizeToTrayOnStartup(bool enabled) => _settingsCommits.CommitMinimizeToTrayOnStartup(enabled);
 
     private static void Log(string msg) => FileLog.Write(msg);
 }

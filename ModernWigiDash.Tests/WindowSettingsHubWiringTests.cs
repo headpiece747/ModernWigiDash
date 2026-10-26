@@ -25,10 +25,11 @@ namespace ModernWigiDash.Tests;
 /// is null, so an eager capture is a NullReferenceException. The second is the
 /// SILENT half: after an import has REPLACED the profile object, a
 /// stale-but-non-null capture commits to the profile the window no longer uses,
-/// and nothing throws. <c>IProfileImportHost.SwapProfile</c> is an explicit
-/// interface implementation, so the swap is reachable by casting - the same
-/// trick <c>ISettingsHubHost</c> gives the first test - and no production seam
-/// was needed for either.
+/// and nothing throws. The swap runs through the window's internal test seam
+/// (<c>SwapProfileForTest</c>, a forward into the import host adapter - the
+/// flow's production host, not the window itself), so the test drives the
+/// same production path the import flow does, and no production seam change
+/// was needed for either test.
 ///
 /// STA DISCIPLINE, learned the hard way writing the second test: the swap
 /// rebuilds the tab strip, so it touches WPF controls and MUST run on the
@@ -134,7 +135,7 @@ public class WindowSettingsHubWiringTests
             ((ISettingsHubHost)window).CommitCloseBehavior(CloseBehaviorPolicy.Quit);
             string? replacedAfterFirstCommit = replaced.CloseBehavior;
 
-            bool swapped = ((IProfileImportHost)window).SwapProfile(imported);
+            bool swapped = window.SwapProfileForTest(imported);
             bool liveIsImported = ReferenceEquals(window.Profile, imported);
             ((ISettingsHubHost)window).CommitCloseBehavior(CloseBehaviorPolicy.HideToTray);
 

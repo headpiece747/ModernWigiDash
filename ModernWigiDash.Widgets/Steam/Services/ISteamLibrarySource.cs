@@ -17,16 +17,20 @@ internal interface ISteamLibrarySource
 
     /// <summary>
     /// The library manifests for every mounted volume (empty when Steam is
-    /// not installed or no manifests are readable).
+    /// not installed or no manifests are readable), enumerated from the path
+    /// the caller resolved once per tick (the source does not re-resolve it,
+    /// so a tick costs one registry ladder, not two).
     /// </summary>
-    IReadOnlyList<SteamAppManifest> LoadManifests();
+    IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath);
 }
 
 /// <summary>
 /// The production <see cref="ISteamLibrarySource"/> over
 /// <see cref="SteamLibraryLocator"/>. The path is re-resolved on every
 /// <see cref="SteamPath"/> read (a cheap registry ladder) so a Steam
-/// installation that appears after startup is picked up on the next tick.
+/// installation that appears after startup is picked up on the next tick;
+/// the manifest enumeration takes the resolved path as a parameter, so a
+/// tick resolves the ladder exactly once.
 /// </summary>
 internal sealed class SteamLibrarySource : ISteamLibrarySource
 {
@@ -40,13 +44,12 @@ internal sealed class SteamLibrarySource : ISteamLibrarySource
 
     public string? SteamPath => SteamLibraryLocator.TryFindSteamPath();
 
-    public IReadOnlyList<SteamAppManifest> LoadManifests()
+    public IReadOnlyList<SteamAppManifest> LoadManifests(string? steamPath)
     {
-        string? path = SteamPath;
-        if (path is null)
+        if (steamPath is null)
             return [];
 
-        IReadOnlyList<string> roots = SteamLibraryLocator.GetLibraryRoots(path);
-        return SteamLibraryLocator.LoadManifests(roots, _log, path);
+        IReadOnlyList<string> roots = SteamLibraryLocator.GetLibraryRoots(steamPath);
+        return SteamLibraryLocator.LoadManifests(roots, _log, steamPath);
     }
 }

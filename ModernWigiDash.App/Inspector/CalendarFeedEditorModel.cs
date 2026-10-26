@@ -70,7 +70,7 @@ internal static class CalendarFeedEditorModel
     public static IReadOnlyList<CalendarFeedDraft> Parse(string? feedsJson)
     {
         List<CalendarFeedDraft> drafts = [];
-        foreach (CalendarFeed feed in CalendarFeedsCodec.Parse(feedsJson))
+        foreach (CalendarFeed feed in CalendarFeedsCodec.Parse(feedsJson).Feeds)
         {
             switch (feed)
             {

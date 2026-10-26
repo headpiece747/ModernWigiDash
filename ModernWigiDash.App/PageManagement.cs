@@ -115,6 +115,20 @@ internal sealed class PageManagement(Func<ProfileLayout> profileProvider, IPageD
         return PageOpVerdict.Applied;
     }
 
+    /// <summary>
+    /// The verdict-to-funnel rule (the one owner of "only a landed op
+    /// triggers a structural refresh"): runs the named page op and, only when
+    /// it lands, invokes the caller's structural-mutation callback. A
+    /// refused op (last page, stale index, cancelled confirm, blank rename
+    /// name) leaves the window untouched, so the four window page handlers
+    /// each reduce to one call of this instead of re-spelling the gate.
+    /// </summary>
+    public void Apply(Func<PageOpVerdict> op, Action onApplied)
+    {
+        if (op() is PageOpVerdict.Applied)
+            onApplied();
+    }
+
     /// <summary>The production dialog-seam adapter: routes the module's two
     /// prompts to the host's <see cref="DialogHost"/>.</summary>
     internal sealed class DialogHostAdapter(DialogHost host) : IPageDialogs

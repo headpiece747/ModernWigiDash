@@ -682,10 +682,14 @@ public class CalendarFeedsCodecTests
     [TestMethod]
     public void Parse_EmptyOrMalformed_ReturnsNoFeeds()
     {
-        Assert.AreEqual(0, CalendarFeedsCodec.Parse(null).Count);
-        Assert.AreEqual(0, CalendarFeedsCodec.Parse("   ").Count);
-        Assert.AreEqual(0, CalendarFeedsCodec.Parse("{not json").Count);
-        Assert.AreEqual(0, CalendarFeedsCodec.Parse("""{"kind":"ics"}""").Count, "a non-array root yields no feeds");
+        Assert.IsFalse(CalendarFeedsCodec.Parse(null).Malformed, "an absent value is the silent no-feeds state");
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse(null).Feeds.Count);
+        Assert.IsFalse(CalendarFeedsCodec.Parse("   ").Malformed, "a blank value is the silent no-feeds state");
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("   ").Feeds.Count);
+        Assert.IsTrue(CalendarFeedsCodec.Parse("{not json").Malformed, "unparseable JSON is the malformed state");
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("{not json").Feeds.Count);
+        Assert.IsFalse(CalendarFeedsCodec.Parse("""{"kind":"ics"}""").Malformed, "a non-array root is the silent no-feeds state");
+        Assert.AreEqual(0, CalendarFeedsCodec.Parse("""{"kind":"ics"}""").Feeds.Count, "a non-array root yields no feeds");
     }
 
     [TestMethod]
@@ -693,7 +697,7 @@ public class CalendarFeedsCodecTests
     {
         string json = """[{"kind":"ics","feedId":"g","label":"Google","color":"#FF0000","url":"https://cal.example/ics","enabled":false}]""";
 
-        IReadOnlyList<CalendarFeed> feeds = CalendarFeedsCodec.Parse(json);
+        IReadOnlyList<CalendarFeed> feeds = CalendarFeedsCodec.Parse(json).Feeds;
 
         Assert.AreEqual(1, feeds.Count);
         var f = (IcsUrlFeed)feeds[0];
@@ -710,7 +714,7 @@ public class CalendarFeedsCodecTests
         // port and enabled are absent: the codec applies its defaults (443, true).
         string json = """[{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","principalPath":"/calendars/me/","username":"me"}]""";
 
-        CalDavFeed f = (CalDavFeed)CalendarFeedsCodec.Parse(json)[0];
+        CalDavFeed f = (CalDavFeed)CalendarFeedsCodec.Parse(json).Feeds[0];
 
         Assert.AreEqual(443, f.Port, "an absent port defaults to 443");
         Assert.IsTrue(f.Enabled, "an absent enabled defaults to true");
@@ -723,9 +727,9 @@ public class CalendarFeedsCodecTests
     {
         string original = """[{"kind":"ics","feedId":"g","label":"Google","color":"#FF0000","url":"https://cal.example/ics","enabled":true},{"kind":"caldav","feedId":"icloud","label":"iCloud","server":"https://caldav.icloud.com","port":8443,"principalPath":"/p/","username":"me","enabled":false}]""";
 
-        IReadOnlyList<CalendarFeed> parsed = CalendarFeedsCodec.Parse(original);
+        IReadOnlyList<CalendarFeed> parsed = CalendarFeedsCodec.Parse(original).Feeds;
         string serialized = CalendarFeedsCodec.Serialize(parsed);
-        IReadOnlyList<CalendarFeed> reparsed = CalendarFeedsCodec.Parse(serialized);
+        IReadOnlyList<CalendarFeed> reparsed = CalendarFeedsCodec.Parse(serialized).Feeds;
 
         Assert.AreEqual(parsed.Count, reparsed.Count, "parse -> serialize -> parse keeps the same feed count");
         for (int i = 0; i < parsed.Count; i++)

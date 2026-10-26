@@ -92,8 +92,8 @@ public static class CalendarSeasonalPalettes
     /// <returns>The custom-mode palette.</returns>
     public static CalendarSeasonalPalette ResolveCustom(DateTime viewDate, string customAccent, string customText)
     {
-        SKColor text = SKColor.TryParse(customText, out var t) ? t : SKColors.White;
-        SKColor accent = SKColor.TryParse(customAccent, out var a) ? a : new SKColor(79, 140, 255);
+        SKColor text = SkColorCache.ColorOf(customText, SKColors.White);
+        SKColor accent = SkColorCache.ColorOf(customAccent, new SKColor(79, 140, 255));
         // Deep dark slate background for custom mode
         SKColor bg = new(18, 20, 29);
         int m = Math.Clamp(viewDate.Month, 1, 12) - 1;

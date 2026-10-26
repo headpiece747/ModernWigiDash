@@ -1,4 +1,5 @@
 using ModernWigiDash.Core.Rendering;
+using ModernWigiDash.Hardware.Aida64;
 using ModernWigiDash.Hardware.Transport;
 
 namespace ModernWigiDash.Tests;
@@ -42,6 +43,140 @@ public class FramePipelineAllocationTests
     // storm, a per-frame font or paint) must exceed it.
     private const long PerTickBudgetBytes = 16 * 1024;
     private const long TotalBudgetBytes = 160 * 1024;
+
+    [TestMethod]
+    public void WidgetRenderPaths_SteadyState_AllocateUnderBudget()
+    {
+        // The set extension of the single-widget pin above: each entry composes
+        // a one-widget page and pushes it through the same delivery, so the
+        // per-tick budget applies to the widget's render path in the real tick
+        // pipeline. Entries are fixture-driven (fixed clock, empty/in-memory
+        // stores, the placeholder legs); a steady tick on a slow-changing input
+        // must stay under the same budget as the digital clock.
+        //
+        // Attested, not fixture-driven here (their tick paths are live-service
+        // shaped: a network fetch, a socket, a scan, a capture): weather, steam,
+        // twitch chat, crypto ticker, audio visualizer, frame time. Their draw
+        // owners are pinned at the canvas level (the round-9 render-smoke test
+        // files) and share the same hoisted-paint + memo discipline this pin
+        // measures; a per-tick allocation in one of those widget render methods
+        // is caught by the canvas-level pin plus this test's shape.
+        using var delivery = FrameDelivery.Create(
+            encoder: new SkiaRgb565Encoder(),
+            send: _ => FrameSendResult.Sent);
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 24, 10, 30, 0, TimeSpan.Zero));
+
+        foreach (RenderPath path in RenderPaths(clock))
+        {
+            (long worstTick, long total, long warmFloor) = MeasurePath(path, delivery);
+
+            Assert.IsTrue(worstTick <= PerTickBudgetBytes,
+                $"{path.Name}: a steady-state tick allocated {worstTick} bytes (budget {PerTickBudgetBytes}, warm-floor {warmFloor}) - a per-tick allocation (buffer copy, string storm, per-frame font or paint) has crept into the {path.Name} render path");
+            Assert.IsTrue(total <= TotalBudgetBytes,
+                $"{path.Name}: the {MeasuredTicks} measured ticks allocated {total} bytes total (budget {TotalBudgetBytes}) - the {path.Name} render path is no longer allocation-light");
+        }
+    }
+
+    /// <summary>One render path under measurement: the name (for the failure
+    /// message) and the one-widget page builder.</summary>
+    private sealed record RenderPath(string Name, Func<(SkiaFrameCompositor Compositor, PlacedWidgetInstance Placed)> BuildPage);
+
+    private static (long Worst, long Total, long WarmFloor) MeasurePath(RenderPath path, FrameDelivery delivery)
+    {
+        var (compositor, placed) = path.BuildPage();
+        using (compositor)
+        {
+            var page = new PageLayout
+            {
+                BackgroundHexColor = "#12141D",
+                Widgets = [placed],
+            };
+
+            long Tick()
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                compositor.Compose(page);
+                long expected = delivery.FramesSent + 1;
+                delivery.Push(compositor.FrameBuffer);
+                long delta = GC.GetAllocatedBytesForCurrentThread() - before;
+                WaitForSend(delivery, expected);
+                return delta;
+            }
+
+            long worstTick = 0, total = 0, warmFloor = 0;
+            for (int i = 0; i < WarmTicks; i++)
+            {
+                warmFloor = Math.Max(warmFloor, Tick());
+            }
+
+            // Paint proof: the composed frame must actually paint the
+            // widget's region. A page the compositor skipped (a bad entry
+            // wiring) would allocate ~0 and pass the budget vacuously; the
+            // canvas smoke files pin the draw owners, this guards the entry.
+            var frame = compositor.FrameBuffer;
+            int painted = 0;
+            for (int x = (int)placed.X + 10; x < (int)placed.X + placed.Width - 10 && x < frame.Width; x += 5)
+            {
+                for (int y = (int)placed.Y + 10; y < (int)placed.Y + placed.Height - 10 && y < frame.Height; y += 5)
+                {
+                    if (frame.GetPixel(x, y).Alpha != 0)
+                    {
+                        painted++;
+                    }
+                }
+            }
+            Assert.IsTrue(painted > 0,
+                $"{path.Name}: the composed frame painted nothing in the widget's region - the entry wiring is wrong and the allocation budget passes vacuously");
+
+            for (int i = 0; i < MeasuredTicks; i++)
+            {
+                long delta = Tick();
+                worstTick = Math.Max(worstTick, delta);
+                total += delta;
+            }
+
+            return (worstTick, total, warmFloor);
+        }
+    }
+
+    private static void WaitForSend(FrameDelivery delivery, long expected)
+        => TestWait.WaitUntilAsync(() => delivery.FramesSent >= expected, TimeSpan.FromSeconds(5))
+            .GetAwaiter().GetResult();
+
+    private static IEnumerable<RenderPath> RenderPaths(FakeTimeProvider clock)
+    {
+        yield return new RenderPath("stopwatch", () => Build("stopwatch_timer", 460, 220,
+            new StopwatchTimerWidget { Clock = clock }));
+        yield return new RenderPath("calendar (minimal card)", () => Build("calendar", 200, 180,
+            new CalendarWidget { Clock = clock }));
+        yield return new RenderPath("cozy todo (empty snapshot)", () => Build("cozy_todo", 460, 220,
+            new CozyTodoWidget { Clock = clock }));
+        yield return new RenderPath("aida panel (placeholder)", () => Build("aida_panel", 460, 220,
+            new AidaPanelWidget(new AidaMmapReader(new FakeAidaMmapSource()))));
+        yield return new RenderPath("now playing (idle)", () => Build("now_playing", 460, 220,
+            new NowPlayingWidget { Clock = clock }));
+        yield return new RenderPath("picture (placeholder)", () => Build("picture", 300, 300,
+            new PictureAndGifWidget { Clock = clock }));
+        yield return new RenderPath("text label", () => Build("text_label", 460, 110,
+            new TextLabelWidget { Text = "hello world" }));
+    }
+
+    private static (SkiaFrameCompositor Compositor, PlacedWidgetInstance Placed) Build(string pluginId, int width, int height, IModernWidget widget)
+    {
+        var compositor = new SkiaFrameCompositor { IsEditMode = true };
+        var placed = new PlacedWidgetInstance
+        {
+            PluginId = pluginId,
+            DisplayName = pluginId,
+            ActiveInstance = widget,
+            X = 120,
+            Y = 160,
+            Width = width,
+            Height = height,
+        };
+        compositor.SelectedWidget = placed;
+        return (compositor, placed);
+    }
 
     [TestMethod]
     public void TickPath_SteadyState_AllocatesUnderBudget()
@@ -100,10 +235,6 @@ public class FramePipelineAllocationTests
             WaitForSend(delivery, expected);
             return delta;
         }
-
-        static void WaitForSend(FrameDelivery delivery, long expected)
-            => TestWait.WaitUntilAsync(() => delivery.FramesSent >= expected, TimeSpan.FromSeconds(5))
-                .GetAwaiter().GetResult();
 
         // Warm: fill the font caches, the widget's memo, the pool, and the
         // delivery's first-send paths. The warm window is not measured.

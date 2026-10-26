@@ -22,13 +22,11 @@ public class SkiaFrameCompositor : IDisposable
     private readonly HashSet<PlacedWidgetInstance> _loggedRenderFailures = [];
 
     // Zero-alloc render path: the buffer never changes, so the canvas is
-    // created once and reused per compose; the background parse is hoisted
-    // (reparsed only when the page's hex changes); the alpha layer paint is
-    // cached and re-colored per widget instead of allocated per frame.
+    // created once and reused per compose; the page-background hex routes
+    // through the one color owner (a steady-state compose costs a cache
+    // hit); the alpha layer paint is cached and re-colored per widget
+    // instead of allocated per frame.
     private readonly SKPaint _alphaPaint = new();
-    private string? _lastBgHex;
-    private SKColor _lastBgColor = ParseDefaultBackground();
-
     /// <summary>Creates the compositor and its one reused frame buffer and canvas.</summary>
     public SkiaFrameCompositor()
     {
@@ -50,12 +48,6 @@ public class SkiaFrameCompositor : IDisposable
         set => _selectedWidget = value;
     }
 
-    /// <summary>The page-background fallback — parses the one shared default.</summary>
-    private static SKColor ParseDefaultBackground()
-        => SKColor.TryParse(PageLayout.DefaultBackgroundHexColor, out var fallback)
-            ? fallback
-            : new SKColor(18, 20, 29);
-
     /// <summary>
     /// Composes the page into the frame buffer: the background, the edit
     /// overlay, then the placed widgets in ZIndex order.
@@ -65,16 +57,9 @@ public class SkiaFrameCompositor : IDisposable
     {
         SKCanvas canvas = _canvas;
 
-        // Clear the page background (the string parse is hoisted: reparse only
-        // when the hex changes).
-        if (!string.Equals(page.BackgroundHexColor, _lastBgHex, StringComparison.Ordinal))
-        {
-            _lastBgHex = page.BackgroundHexColor;
-            _lastBgColor = SKColor.TryParse(page.BackgroundHexColor, out var parsed)
-                ? parsed
-                : ParseDefaultBackground();
-        }
-        canvas.Clear(_lastBgColor);
+        // Clear the page background (the hex routes through the one color
+        // owner, so a steady-state compose costs a cache hit).
+        canvas.Clear(SkColorCache.ColorOf(page.BackgroundHexColor, new SKColor(18, 20, 29)));
 
         _editOverlay.DrawGrid(canvas, page, _isEditMode);
 

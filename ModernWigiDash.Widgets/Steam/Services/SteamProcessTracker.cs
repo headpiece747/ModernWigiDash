@@ -185,6 +185,13 @@ internal sealed class SteamProcessBridge : ISteamProcessBridge
 
             return true;
         }
+        catch (Exception)
+        {
+            // A fault in the close legs (a process in a bad state) degrades to
+            // "nothing left running", never a throw into the caller (the
+            // fire-and-forget terminate task must not swallow a fault silently).
+            return true;
+        }
         finally
         {
             foreach (Process process in processes)

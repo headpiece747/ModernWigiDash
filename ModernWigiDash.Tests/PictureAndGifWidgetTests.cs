@@ -136,7 +136,7 @@ public class PictureAndGifWidgetTests
 
             widget.Render(canvas, bounds);
             await AwaitDecodeTask(widget);
-            Assert.IsTrue(widget.InstalledMediaForTest.Still is not null,
+            Assert.IsTrue(widget.MediaSessionForTest.InstalledMediaForTest.Still is not null,
                 "the good file must install before the refusal is asserted");
 
             // The property change resets the media (version bump); the new
@@ -145,7 +145,7 @@ public class PictureAndGifWidgetTests
             widget.Render(canvas, bounds);
             await AwaitDecodeTask(widget);
 
-            var (frames, still) = widget.InstalledMediaForTest;
+            var (frames, still) = widget.MediaSessionForTest.InstalledMediaForTest;
             Assert.IsNull(frames, "a None decode must not install frames");
             Assert.IsNull(still, "a None decode must retire the previous still");
 
@@ -160,7 +160,7 @@ public class PictureAndGifWidgetTests
 
     private static async Task AwaitDecodeTask(PictureAndGifWidget widget)
     {
-        Task? task = widget.PendingDecodeTaskForTest;
+        Task? task = widget.MediaSessionForTest.PendingDecodeTaskForTest;
         if (task is not null)
         {
             await task.ConfigureAwait(false);
@@ -196,7 +196,7 @@ public class PictureAndGifWidgetTests
 
             widget.Render(canvas, bounds);
 
-            Assert.IsTrue(widget._folderImagesForTest.Any(f => f.EndsWith("b.png", StringComparison.OrdinalIgnoreCase)),
+            Assert.IsTrue(widget.MediaSessionForTest.FolderImagesForTest.Any(f => f.EndsWith("b.png", StringComparison.OrdinalIgnoreCase)),
                 "a cycling folder must rescan for files added while running");
         }
         finally
@@ -232,15 +232,15 @@ public class PictureAndGifWidgetTests
             };
             widget.Render(canvas, bounds);
             await AwaitDecodeTask(widget);
-            Assert.AreEqual(0, widget.GifFrameIndexForTest, "a fresh publish must start at frame 0");
+            Assert.AreEqual(0, widget.MediaSessionForTest.GifFrameIndexForTest, "a fresh publish must start at frame 0");
 
             widget.Render(canvas, bounds);
-            Assert.AreEqual(0, widget.GifFrameIndexForTest, "the index must hold before the first frame's duration");
+            Assert.AreEqual(0, widget.MediaSessionForTest.GifFrameIndexForTest, "the index must hold before the first frame's duration");
 
             // delta.gif: frame 0 is 100 ms.
             clock.Advance(TimeSpan.FromMilliseconds(100));
             widget.Render(canvas, bounds);
-            Assert.AreEqual(1, widget.GifFrameIndexForTest, "the render must advance the frame once the clock passes the duration");
+            Assert.AreEqual(1, widget.MediaSessionForTest.GifFrameIndexForTest, "the render must advance the frame once the clock passes the duration");
         }
         finally
         {
