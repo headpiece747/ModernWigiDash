@@ -39,7 +39,7 @@ public class FrameTimeWidget : ModernWidgetBase
         SKColor accent = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor text = ColorOf(TextColorHex, SKColors.White);
 
-        FrameTimeSnapshotDto? snapshot = FrameTimeStore.TryReadFresh();
+        FrameTimeSnapshotDto? snapshot = (Context as IWidgetTelemetryContext)?.TryReadFrameTime() ?? FrameTimeStore.TryReadFresh();
         if (snapshot is null || !snapshot.IsAvailable)
         {
             _canvas.RenderPlaceholder(canvas, bounds, "Frame capture unavailable", "Install and run the PresentMon Service", text);

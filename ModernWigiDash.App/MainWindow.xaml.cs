@@ -19,9 +19,10 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext, IInputHostContext
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext, IInputHostContext, IWidgetTelemetryContext
 {
     private readonly WidgetPluginLoader _loader = new();
+    private ModernWigiDashHostContext _hostContext = new();
     private readonly SkiaFrameCompositor _compositor = new();
     private readonly DisplayDeviceEngine _usbDevice;
 
@@ -449,6 +450,20 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>Host modules (input, dialog host, inspector, page tabs): built BEFORE the profile load so a widget's init-time context callback finds them.</summary>
     private void WireHostModules()
     {
+        _hostContext = new ModernWigiDashHostContext(
+            onUiThread: OnUiThread,
+            requestRender: () => SkiaCanvas?.InvalidateVisual(),
+            requestInspectorRefresh: () => _inspector?.Refresh(),
+            showDeviceAuth: (service, uri, code, exp) => _dialogHost?.ShowDeviceAuthorization(service, uri, code, exp),
+            closeDeviceAuth: () => _dialogHost?.CloseDeviceAuthorization(),
+            profileProvider: () => _profile,
+            markProfileDirty: () => _profilePersistence?.MarkDirty(),
+            refreshGlobalHotkeys: RefreshGlobalHotkeys,
+            navigatePage: delta => { if (_profile is { } p) SwitchToPage(p.ActivePageIndex + delta); },
+            launchAhkScript: path => _ahkSpawnPolicy.TryLaunch(path, _appSettings),
+            saveCalendarCredential: (feedId, pass) => CalendarCredentials.SavePassword(feedId, pass),
+            sensorProvider: LhmSensorStore.TryReadFresh,
+            frameTimeProvider: FrameTimeStore.TryReadFresh);
         // Build the host modules (input, inspector, dialog host) BEFORE
         // the profile load. Widget InitializeAsync runs synchronously
         // inside the load and may call back into the context (e.g.

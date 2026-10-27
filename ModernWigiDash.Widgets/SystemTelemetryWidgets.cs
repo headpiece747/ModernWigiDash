@@ -45,7 +45,7 @@ public class HardwareMonitorWidget : TelemetrySensorWidgetBase
 
         // The store owns the staleness decision; a stale or disconnected
         // snapshot renders the unavailable state instead of frozen data.
-        SensorSnapshotDto? snapshot = LhmSensorStore.TryReadFresh();
+        SensorSnapshotDto? snapshot = (Context as IWidgetTelemetryContext)?.TryReadSensors() ?? LhmSensorStore.TryReadFresh();
         if (snapshot is null || !snapshot.IsConnected)
         {
             DrawPlaceholder(canvas, bounds, SystemTelemetryPresentation.NoSensorData(), text);
