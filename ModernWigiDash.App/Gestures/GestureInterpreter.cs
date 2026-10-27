@@ -70,18 +70,19 @@ internal sealed class GestureInterpreter
 
     private GestureOutcome HandleDown(float x, float y)
     {
-        // Only record the start position on the first Down; the hardware
-        // sends Down(1) for both contact and intermediate movement points.
+        // Only emit TouchDown on the initial contact; the hardware reports
+        // Down(1) for both contact and all intermediate samples while the finger
+        // remains on the display. Subsequent samples while active route as
+        // TouchMove so widgets receive a canonical Down -> Move* -> Up sequence.
         if (!_active)
         {
             _startX = x;
             _startY = y;
             _active = true;
+            return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchDown);
         }
 
-        bool moved = Math.Abs(_startX - x) > MoveSensitivity || Math.Abs(_startY - y) > MoveSensitivity;
-        return new GestureOutcome(GesturePageAction.None, true,
-            moved ? TouchEventType.TouchMove : TouchEventType.TouchDown);
+        return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchMove);
     }
 
     private GestureOutcome HandleUp(float x, float y, int pageCount, int activePageIndex)

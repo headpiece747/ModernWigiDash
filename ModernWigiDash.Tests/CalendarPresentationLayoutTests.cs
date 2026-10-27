@@ -135,6 +135,16 @@ public class CalendarPresentationTests
     }
 
     [TestMethod]
+    public void Build_WithHasFeedsTrue_AndNoDataYet_ShowsLoadingCalendar()
+    {
+        CalendarDisplay d = CalendarPresentation.Build(CalendarSnapshot.Empty, Now, Now.Date, 2, hasFeeds: true);
+
+        Assert.IsFalse(d.HasData);
+        Assert.AreEqual("Loading calendar...", d.StalenessHint);
+        Assert.AreEqual(0, d.Rows.Count);
+    }
+
+    [TestMethod]
     public void Build_NoData_WithLastUpdate_ShowsStaleHint()
     {
         var snap = new CalendarSnapshot

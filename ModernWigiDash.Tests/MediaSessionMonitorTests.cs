@@ -144,6 +144,25 @@ public class MediaSessionMonitorTests
     }
 
     [TestMethod]
+    public async Task CycleSession_WithDistinctManagedObjectsMatchingAppId_CyclesBackAndForth()
+    {
+        // Models production C#/WinRT where GetSessions() returns fresh RCW wrappers
+        // whose Identity objects are not ReferenceEqual, but SourceAppUserModelId matches.
+        var a = CreateSession("chrome.exe", "YouTube Video");
+        var b = CreateSession("foobar2000.exe", "Local Song");
+        var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a, b] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.AreEqual("YouTube Video", monitor.CurrentSnapshot?.Title);
+
+        monitor.CycleSession();
+        Assert.AreEqual("Local Song", monitor.CurrentSnapshot?.Title);
+
+        monitor.CycleSession();
+        Assert.AreEqual("YouTube Video", monitor.CurrentSnapshot?.Title);
+    }
+
+    [TestMethod]
     public async Task CycleSession_WithSingleSession_StaysOnSameSession()
     {
         var a = CreateSession("one.exe", "Only");

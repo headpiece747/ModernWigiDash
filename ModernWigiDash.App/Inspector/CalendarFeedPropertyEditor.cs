@@ -86,12 +86,22 @@ internal sealed class CalendarFeedPropertyEditor : ICustomPropertyEditor
         top.Children.Add(removeBtn);
         row.Children.Add(top);
 
-        // Label.
-        var labelBox = new TextBox { Margin = new Thickness(0, 4, 0, 0) };
-        AutomationProperties.SetAutomationId(labelBox, $"CalFeedLabel_{index}");
-        labelBox.Text = draft.Label;
-        labelBox.TextChanged += (_, _) => rows.SetLabel(index, labelBox.Text);
-        row.Children.Add(labelBox);
+        // Label with caption.
+        row.Children.Add(InspectorFieldBuilder.BuildConnField("Feed Label (optional)", draft.Label, v =>
+        {
+            if (string.Equals(draft.Kind, "ics", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(draft.Url)
+                && (v.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || v.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    || v.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase)))
+            {
+                rows.SetUrl(index, v.Trim());
+                rows.SetLabel(index, "");
+                rebuild();
+                return;
+            }
+            rows.SetLabel(index, v);
+        }, $"CalFeedLabel_{index}"));
 
         // Connection fields: swap between the .ics URL and the CalDAV triple as
         // the kind changes. A single content host keeps the row stable.

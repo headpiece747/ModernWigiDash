@@ -31,8 +31,19 @@ internal static class CalendarFeedCompleteness
     public static bool IsComplete(CalDavFeed feed)
         => IsAbsoluteHttpUrl(feed.Server) && feed.Username.Trim().Length > 0;
 
+    public static string NormalizeWebcal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        string trimmed = value.Trim();
+        if (trimmed.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https://" + trimmed[9..];
+        }
+        return trimmed;
+    }
+
     private static bool IsAbsoluteHttpUrl(string value)
-        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        => Uri.TryCreate(NormalizeWebcal(value), UriKind.Absolute, out var uri)
            && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
                || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal));
 }

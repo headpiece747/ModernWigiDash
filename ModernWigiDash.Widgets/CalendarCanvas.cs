@@ -140,7 +140,7 @@ internal sealed class CalendarCanvas : IDisposable
         CalendarDisplay display;
         if (!_displayMemo.TryGet(displayKey, out display))
         {
-            display = CalendarPresentation.Build(snapshot, now, viewDate, rows);
+            display = CalendarPresentation.Build(snapshot, now, viewDate, rows, hasFeeds: true);
             _displayMemo.Set(displayKey, display);
         }
 

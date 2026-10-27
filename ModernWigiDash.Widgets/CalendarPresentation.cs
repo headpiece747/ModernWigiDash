@@ -69,10 +69,10 @@ internal static class CalendarPresentation
     /// Builds the widget's display facts from one snapshot for the viewed day
     /// at the current instant.
     /// </summary>
-    public static CalendarDisplay Build(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate, int timedRows)
+    public static CalendarDisplay Build(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate, int timedRows, bool hasFeeds = false)
     {
         if (snapshot is null || !snapshot.HasData)
-            return UnavailableDisplay(snapshot, now, viewDate);
+            return UnavailableDisplay(snapshot, now, viewDate, hasFeeds);
 
         // Filter events to the viewed day.
         List<CalendarEvent> dayTimed = snapshot.Events
@@ -147,11 +147,17 @@ internal static class CalendarPresentation
             TomorrowRows: tomorrowEvents);
     }
 
-    private static CalendarDisplay UnavailableDisplay(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate)
+    private static CalendarDisplay UnavailableDisplay(CalendarSnapshot? snapshot, DateTime now, DateTime viewDate, bool hasFeeds)
     {
-        string hint = snapshot is { HasData: false } && snapshot.LastUpdate != default
-            ? "Last known schedule"
-            : "No calendars configured";
+        string hint;
+        if (snapshot is { HasData: false } && snapshot.LastUpdate != default)
+        {
+            hint = "Last known schedule";
+        }
+        else
+        {
+            hint = hasFeeds ? "Loading calendar..." : "No calendars configured";
+        }
         var notable = CalendarNotableDates.GetForMonth(viewDate.Year, viewDate.Month, []);
         var (grid, monthTitle) = BuildMonthGrid(viewDate, now, [], notable.Select(n => n.Day).ToHashSet());
         return new CalendarDisplay(

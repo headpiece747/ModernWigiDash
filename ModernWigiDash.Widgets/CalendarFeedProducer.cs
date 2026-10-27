@@ -23,6 +23,7 @@ internal sealed class CalendarFeedProducer : IDisposable
     private readonly Func<DateTime> _now;
     private readonly Action<string> _log;
     private readonly TimeSpan _interval;
+    private readonly Action? _onRequestRender;
     private readonly LoopLifetime _lifetime = new(TimeSpan.FromSeconds(5));
 
     // Per-feed state: the last ETag (for conditional fetch) and the last body
@@ -47,18 +48,21 @@ internal sealed class CalendarFeedProducer : IDisposable
     /// <param name="interval">The poll cadence (the widget's choice, resolved
     /// through CalendarFeedPolicy).</param>
     /// <param name="log">Log sink.</param>
+    /// <param name="onRequestRender">Optional callback to request a render when new data is published.</param>
     public CalendarFeedProducer(
         Func<IFeedFetcher> fetcherFactory,
         CalendarCredentialStore credentials,
         Func<DateTime> now,
         TimeSpan interval,
-        Action<string> log)
+        Action<string> log,
+        Action? onRequestRender = null)
     {
         _fetcherFactory = fetcherFactory;
         _credentials = credentials;
         _now = now;
         _log = log;
         _interval = interval;
+        _onRequestRender = onRequestRender;
     }
 
     /// <summary>The test seam: drives one poll synchronously (no background
@@ -161,6 +165,7 @@ internal sealed class CalendarFeedProducer : IDisposable
             LastUpdate = _now()
         };
         CalendarEventStore.UpdateFromDto(snapshot);
+        _onRequestRender?.Invoke();
     }
 
     /// <summary>Drives the background poll loop with the current feed set.</summary>

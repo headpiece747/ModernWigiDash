@@ -50,6 +50,8 @@ public class StopwatchTimerWidget : ModernWidgetBase
         _canvas.Render(canvas, bounds, total, _isRunning, textColor, accentColor);
     }
 
+    private DateTime _lastTouchTime;
+
     /// <summary>
     /// A TouchDown toggles the stopwatch (a pause accumulates the elapsed
     /// time, a resume restarts the start stamp).
@@ -60,14 +62,21 @@ public class StopwatchTimerWidget : ModernWidgetBase
     {
         if (eventType == TouchEventType.TouchDown)
         {
+            var now = Now;
+            if (now - _lastTouchTime < TimeSpan.FromMilliseconds(100))
+            {
+                return;
+            }
+            _lastTouchTime = now;
+
             if (_isRunning)
             {
-                _elapsed += Now - _startTime;
+                _elapsed += now - _startTime;
                 _isRunning = false;
             }
             else
             {
-                _startTime = Now;
+                _startTime = now;
                 _isRunning = true;
             }
             Context?.RequestRender();

@@ -1,3 +1,5 @@
+using ModernWigiDash.Widgets;
+
 namespace ModernWigiDash.App.Inspector;
 
 /// <summary>
@@ -31,7 +33,7 @@ internal sealed class CalendarFeedEditorRows : ListPropertyEditorRows<CalendarFe
     public void SetLabel(int index, string label) => Mutate(index, draft => draft.Label = label);
 
     /// <summary>Sets the .ics URL for an ics row and commits.</summary>
-    public void SetUrl(int index, string url) => Mutate(index, draft => draft.Url = url);
+    public void SetUrl(int index, string url) => Mutate(index, draft => draft.Url = CalendarFeedCompleteness.NormalizeWebcal(url));
 
     /// <summary>Sets the CalDAV server base and commits.</summary>
     public void SetServer(int index, string server) => Mutate(index, draft => draft.Server = server);

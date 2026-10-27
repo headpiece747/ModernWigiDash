@@ -36,14 +36,14 @@ public class GestureInterpreterTests
     }
 
     [TestMethod]
-    public void SubPixelMovement_RoutesTouchDown()
+    public void SubsequentDown_WhileActive_RoutesTouchMove()
     {
         var g = NewInterpreter();
         g.Feed(TouchEventType.TouchDown, 500, 300, TwoPages, FirstPage);
 
         var o = g.Feed(TouchEventType.TouchDown, 500.2f, 300.1f, TwoPages, FirstPage);
 
-        Assert.AreEqual(TouchEventType.TouchDown, o.WidgetTouchType);
+        Assert.AreEqual(TouchEventType.TouchMove, o.WidgetTouchType);
     }
 
     [TestMethod]

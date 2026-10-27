@@ -8,7 +8,7 @@ namespace ModernWigiDash.Widgets.Todo;
 internal sealed class CozyTodoGestureState
 {
     /// <summary>Tolerance radius in pixels distinguishing a tap from a drag.</summary>
-    public const float TapDragTolerance = 15f;
+    public const float TapDragTolerance = 24f;
 
     private struct ActiveTouch
     {
@@ -76,6 +76,22 @@ internal sealed class CozyTodoGestureState
                     break;
 
                 case TouchEventType.TouchDown:
+                    // Check if an existing contact is already tracked near this point
+                    int existingIdx = -1;
+                    for (int i = 0; i < _touches.Length; i++)
+                    {
+                        if (_touches[i].InUse && SKPoint.Distance(_touches[i].PressPoint, localPoint) <= TapDragTolerance)
+                        {
+                            existingIdx = i;
+                            break;
+                        }
+                    }
+                    if (existingIdx >= 0)
+                    {
+                        // Redundant Down for active contact; retain original press point
+                        break;
+                    }
+
                     int freeIdx = -1;
                     for (int i = 0; i < _touches.Length; i++)
                     {

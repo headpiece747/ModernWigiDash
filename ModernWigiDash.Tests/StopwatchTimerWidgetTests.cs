@@ -72,4 +72,18 @@ public class StopwatchTimerWidgetTests
 
         Assert.AreEqual(TimeSpan.Zero, widget.ElapsedForTest, "A never-started stopwatch renders its idle zero state");
     }
+
+    [TestMethod]
+    public void TouchDown_WithinDebounceWindow_IsIgnored()
+    {
+        var clock = new FakeTimeProvider();
+        var widget = new StopwatchTimerWidget { Clock = clock };
+
+        widget.OnTouch(default, TouchEventType.TouchDown); // start
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        widget.OnTouch(default, TouchEventType.TouchDown); // within 100ms debounce -> ignored
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.IsTrue(widget.ElapsedForTest >= TimeSpan.FromSeconds(2), "The stopwatch should still be running because the rapid second touch was debounced");
+    }
 }

@@ -212,4 +212,26 @@ public class CalendarFeedProducerTests
         Assert.AreEqual(0, fetcher.EtagsSeen.Count, "a disabled feed makes no fetch");
         Assert.IsFalse(CalendarEventStore.ReadSnapshot().HasData);
     }
+
+    [TestMethod]
+    public async Task PollTickAsync_InvokesOnRequestRender()
+    {
+        var fetcher = new FakeFetcher(_ => new FeedFetchResult(
+            IcsBody("Event 1", Now.AddHours(1), Now.AddHours(2)),
+            "\"e1\""));
+
+        bool rendered = false;
+        var creds = new CalendarCredentialStore();
+        var producer = new CalendarFeedProducer(
+            () => fetcher,
+            creds,
+            () => Now,
+            TimeSpan.FromMinutes(30),
+            _ => { },
+            onRequestRender: () => rendered = true);
+
+        await producer.PollTickAsync([Ics("cal1")]);
+
+        Assert.IsTrue(rendered, "producer must notify onRequestRender after updating the event store");
+    }
 }

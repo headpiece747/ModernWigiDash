@@ -94,7 +94,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         int idx = -1;
         for (int i = 0; i < sessions.Count; i++)
         {
-            if (ReferenceEquals(sessions[i].Identity, _session?.Identity))
+            if (IsSameSession(sessions[i], _session))
             {
                 idx = i;
                 break;
@@ -115,6 +115,20 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             if (i != nextIdx && !ReferenceEquals(sessions[i], old)) sessions[i].Dispose();
         }
         AttachSession(sessions[nextIdx]);
+    }
+
+    private static bool IsSameSession(IMediaSessionSourceSession? a, IMediaSessionSourceSession? b)
+    {
+        if (a is null || b is null) return false;
+        if (ReferenceEquals(a, b)) return true;
+        if (ReferenceEquals(a.Identity, b.Identity)) return true;
+        if (a.Identity?.Equals(b.Identity) == true) return true;
+        if (!string.IsNullOrEmpty(a.SourceAppUserModelId) &&
+            string.Equals(a.SourceAppUserModelId, b.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return false;
     }
 
     /// <summary>Sends the play command to the current session.</summary>
@@ -246,7 +260,7 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         // A fresh wrapper for a session we already hold (the WinRT seam
         // builds one per call): tear down its subscriptions and keep the
         // adapter we already own.
-        if (session is not null && ReferenceEquals(_session?.Identity, session.Identity))
+        if (session is not null && IsSameSession(_session, session))
         {
             session.Dispose();
             return;

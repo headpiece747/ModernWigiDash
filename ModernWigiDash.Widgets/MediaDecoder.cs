@@ -14,7 +14,7 @@ internal static class MediaDecoder
 {
     // Decompression-bomb caps: refuse media whose raw byte size, frame count,
     // or decoded pixel footprint would exhaust memory.
-    public const int MaxFileBytes = 32 * 1024 * 1024;
+    public const int MaxFileBytes = 100 * 1024 * 1024;
     public const int MaxFrames = 256;
     public const long MaxPixelsPerFrame = 4096L * 4096;
     public const long MaxTotalFrameBytes = 512L * 1024 * 1024;

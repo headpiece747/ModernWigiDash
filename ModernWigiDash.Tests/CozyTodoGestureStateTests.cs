@@ -112,4 +112,28 @@ public class CozyTodoGestureStateTests
 
         Assert.IsTrue(feedTapped, "a tap on the feed button dispatches the feed callback");
     }
+
+    [TestMethod]
+    public void Feed_RepeatedTouchDown_DoesNotExhaustSlotsAndDispatchesTap()
+    {
+        var tasks = new List<TodoItem> { new("t-1", "Task One", false) };
+        var geometry = MakeGeometry(tasks);
+        var gesture = new CozyTodoGestureState();
+        gesture.SetFrameGeometry(geometry);
+
+        string? toggledId = null;
+        gesture.OnTaskToggled = id => toggledId = id;
+
+        var row = geometry.TaskRows[0];
+        var tapPoint = new SKPoint((row.RowRect.Left + row.RowRect.Right) / 2f, (row.RowRect.Top + row.RowRect.Bottom) / 2f);
+
+        // Simulate hardware sending 12 repeated TouchDowns during contact
+        for (int i = 0; i < 12; i++)
+        {
+            gesture.Feed(tapPoint, TouchEventType.TouchDown);
+        }
+        gesture.Feed(tapPoint, TouchEventType.TouchUp);
+
+        Assert.AreEqual("t-1", toggledId, "repeated TouchDowns for the same contact must not drop the tap on TouchUp");
+    }
 }

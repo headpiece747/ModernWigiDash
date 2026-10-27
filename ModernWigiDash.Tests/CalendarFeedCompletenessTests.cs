@@ -16,6 +16,8 @@ public class CalendarFeedCompletenessTests
     {
         Assert.IsTrue(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "https://x.example/ics" }));
         Assert.IsTrue(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "http://x.example/ics" }));
+        Assert.IsTrue(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "webcal://x.example/ics" }));
+        Assert.AreEqual("https://x.example/ics", CalendarFeedCompleteness.NormalizeWebcal("webcal://x.example/ics"));
         Assert.IsFalse(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "file:///etc/passwd" }), "a non-http(s) URL is incomplete");
         Assert.IsFalse(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "" }), "a blank URL is incomplete");
         Assert.IsFalse(CalendarFeedCompleteness.IsComplete(new IcsUrlFeed { FeedId = "g", Label = "G", Url = "not a url" }), "a non-absolute value is incomplete");

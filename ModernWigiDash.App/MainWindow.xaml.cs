@@ -273,6 +273,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         // reflects the real connection state.
         _usbDevice.Start();
         InitializeComponent();
+        AppVersionBadge.Text = ModernWigiDash.App.Update.AppVersion.Current is not null ? $"v{ModernWigiDash.App.Update.AppVersion.Current}" : "dev";
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
         SourceInitialized += OnUpdateCheckAtStartup;
         SourceInitialized += (_, _) => _hotkeyAttachment?.Attach(this, () => GlobalHotkeyPolicy.CollectCandidates(_profile), () => _appSettings.KillSwitch);
