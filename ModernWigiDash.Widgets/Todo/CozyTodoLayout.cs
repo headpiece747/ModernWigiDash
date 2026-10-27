@@ -213,14 +213,22 @@ internal static class CozyTodoLayout
     /// <summary>
     /// Pure hit-testing logic for touch points.
     /// </summary>
+    internal static SKRect ExpandTouchTarget(SKRect rect, float minDimension = 44f)
+    {
+        if (rect.IsEmpty) return rect;
+        float dx = Math.Max(0f, (minDimension - rect.Width) / 2f);
+        float dy = Math.Max(0f, (minDimension - rect.Height) / 2f);
+        return SKRect.Inflate(rect, dx, dy);
+    }
+
     public static CozyTodoHitAction HitTest(CozyTodoGeometry geom, SKPoint point)
     {
-        if (geom.FeedButtonRect.Contains(point))
+        if (ExpandTouchTarget(geom.FeedButtonRect).Contains(point))
         {
             return CozyTodoHitAction.Feed;
         }
 
-        if (geom.PomodoroButtonRect.Contains(point))
+        if (ExpandTouchTarget(geom.PomodoroButtonRect).Contains(point))
         {
             return CozyTodoHitAction.Focus;
         }

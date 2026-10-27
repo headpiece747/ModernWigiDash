@@ -636,17 +636,25 @@ public static class CalendarLayout
         return -1;
     }
 
+    internal static SKRect ExpandTouchTarget(SKRect rect, float minDimension = 44f)
+    {
+        if (rect.IsEmpty) return rect;
+        float dx = Math.Max(0f, (minDimension - rect.Width) / 2f);
+        float dy = Math.Max(0f, (minDimension - rect.Height) / 2f);
+        return SKRect.Inflate(rect, dx, dy);
+    }
+
     /// <summary>
     /// Returns true if the point is within the previous month chevron touch target.
     /// </summary>
     public static bool IsPrevChevronHit(CalendarGeometry geo, float x, float y)
-        => !geo.PrevChevronRect.IsEmpty && geo.PrevChevronRect.Contains(x, y);
+        => !geo.PrevChevronRect.IsEmpty && ExpandTouchTarget(geo.PrevChevronRect).Contains(x, y);
 
     /// <summary>
     /// Returns true if the point is within the next month chevron touch target.
     /// </summary>
     public static bool IsNextChevronHit(CalendarGeometry geo, float x, float y)
-        => !geo.NextChevronRect.IsEmpty && geo.NextChevronRect.Contains(x, y);
+        => !geo.NextChevronRect.IsEmpty && ExpandTouchTarget(geo.NextChevronRect).Contains(x, y);
 
     /// <summary>
     /// Computes the agenda scrollbar thumb geometry from the scroll area, the

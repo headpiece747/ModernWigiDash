@@ -31,6 +31,12 @@ $Staging    = Join-Path ([System.IO.Path]::GetTempPath()) "wmd-release-staging"
 $ZipDir     = Join-Path $Staging "ModernWigiDash-win-x64"
 $ZipPath    = Join-Path $Root $OutputZip
 
+# --- Pre-flight validation: check for hardcoded versions in XAML ---
+$xamlMatches = & git grep -n -E "\bv[0-9]+\.[0-9]+" -- "*.xaml" 2>$null
+if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($xamlMatches)) {
+    throw "Pre-flight failed: hardcoded version strings found in XAML markup:`n$xamlMatches"
+}
+
 # --- 0. Auto-resolve upstream telemetry versions (when pins are empty) ---
 # Runs before the download map below so the map uses the resolved versions.
 # Gated behind -SkipTelemetry: that switch is the documented offline dev path,
@@ -246,6 +252,40 @@ if ($SkipTelemetry) {
 
 Write-Host ""
 Write-Host "Built $SlimZipPath"
+
+# --- 5d. Unpack and smoke-verify release artifacts in sandbox ---
+Write-Host "Verifying release package integrity in sandbox..."
+$smokeDir = Join-Path $Staging "smoke-verify"
+if (Test-Path $smokeDir) { Remove-Item $smokeDir -Recurse -Force }
+New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
+
+Expand-Archive -LiteralPath $ZipPath -DestinationPath $smokeDir -Force
+$unpackedExe = Join-Path $smokeDir "ModernWigiDash-win-x64\ModernWigiDash.App.exe"
+if (-not (Test-Path $unpackedExe)) {
+    throw "Release package verification failed: ModernWigiDash.App.exe missing from unpacked full zip!"
+}
+
+$unpackedVersion = (Get-Item $unpackedExe).VersionInfo.FileVersion
+if (-not [string]::IsNullOrWhiteSpace($Version) -and $unpackedVersion -ne $Version) {
+    throw "Release package verification failed: unpacked exe FileVersion is '$unpackedVersion', expected '$Version'"
+}
+
+$unpackedResources = Join-Path $smokeDir "ModernWigiDash-win-x64\Resources"
+$unpackedReadme = Join-Path $smokeDir "ModernWigiDash-win-x64\README.txt"
+if (-not (Test-Path $unpackedResources) -or -not (Test-Path $unpackedReadme)) {
+    throw "Release package verification failed: Resources or README.txt missing from unpacked full zip!"
+}
+
+if (-not $SkipTelemetry) {
+    $unpackedLhs = Join-Path $smokeDir "ModernWigiDash-win-x64\telemetry\LibreHardwareService\LibreHardwareService.msi"
+    $unpackedPm = Join-Path $smokeDir "ModernWigiDash-win-x64\telemetry\PresentMon\$pmMsiName"
+    if (-not (Test-Path $unpackedLhs) -or -not (Test-Path $unpackedPm)) {
+        throw "Release package verification failed: Bundled telemetry installers missing from unpacked full zip!"
+    }
+}
+
+Remove-Item $smokeDir -Recurse -Force
+Write-Host "Release package sandbox smoke verification PASSED." -ForegroundColor Green
 
 # --- 6. Contents manifest + size ---
 Write-Host ""

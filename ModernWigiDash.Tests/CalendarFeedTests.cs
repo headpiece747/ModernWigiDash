@@ -58,6 +58,21 @@ public class CalendarFeedTests
     }
 
     [TestMethod]
+    public void IcsUrl_WebcalScheme_AutoNormalizesToHttps()
+    {
+        IcsUrlFeed feed = new()
+        {
+            FeedId = "apple",
+            Label = "iCloud",
+            ColorHex = "#00FF00",
+            Url = "webcal://p123-caldav.icloud.com/published/2/xyz?token=123"
+        };
+
+        Assert.AreEqual("https://p123-caldav.icloud.com/published/2/xyz?token=123", feed.Url,
+            "webcal:// URLs must automatically normalize to https:// on feed creation");
+    }
+
+    [TestMethod]
     public void IcsUrl_FeedIdChange_IsAnIdentityChange()
     {
         IcsUrlFeed a = MakeIcs(feedId: "one");

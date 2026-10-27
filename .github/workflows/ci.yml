@@ -41,8 +41,8 @@ jobs:
           # shared runner the thread pool can be starved past any fixed
           # ceiling. It runs in a fresh test host with a bounded retry: a
           # real regression fails every attempt, while a runner-load flake
-          # lands on a less-loaded moment and passes. The other 2024 tests
-          # run once, unmasked, in the step above.
+          # lands on a less-loaded moment and passes. The rest of the test
+          # suite runs once, unmasked, in the step above.
           $filter = 'FullyQualifiedName~Primary_ActivationSignal_FiresTheCallbackAndReParks'
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             dotnet test ModernWigiDash.Tests/ModernWigiDash.Tests.csproj --configuration Release --no-build --no-restore --filter $filter

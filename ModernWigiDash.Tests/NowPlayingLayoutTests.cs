@@ -121,4 +121,16 @@ public class NowPlayingLayoutTests
         Assert.AreEqual(new SKColor(20, 40, 60, 200), NowPlayingLayout.BlendToward(from, to, 1.5f), "amounts above 1 clamp to the target RGB");
         Assert.AreEqual(from, NowPlayingLayout.BlendToward(from, to, -0.5f), "amounts below 0 clamp to the source");
     }
+
+    [TestMethod]
+    public void GetAction_ScaledDownButtons_HitWithinExpanded44pxTouchFloor()
+    {
+        // At half-scale, ShuffleButton is 24x24 at (307, 256, 331, 280).
+        // Center is (319, 268). A touch at (300, 268) is 7px outside the visual button
+        // but well inside the 44px physical finger touch floor (width 44 => [297, 341]).
+        var layout = NowPlayingLayout.Compute(new SKRect(0, 0, 508, 296), 0.5f, showSourceBadge: true, badgeTextWidth: 100f);
+
+        Assert.AreEqual(NowPlayingHitAction.Shuffle, NowPlayingLayout.GetAction(layout, new SKPoint(300, 268)),
+            "touch just outside the small 24px visual button must hit thanks to the 44px touch floor");
+    }
 }

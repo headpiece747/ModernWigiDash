@@ -121,12 +121,9 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     {
         if (a is null || b is null) return false;
         if (ReferenceEquals(a, b)) return true;
-        if (ReferenceEquals(a.Identity, b.Identity)) return true;
-        if (a.Identity?.Equals(b.Identity) == true) return true;
-        if (!string.IsNullOrEmpty(a.SourceAppUserModelId) &&
-            string.Equals(a.SourceAppUserModelId, b.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase))
+        if (a.Identity is not null && b.Identity is not null)
         {
-            return true;
+            return ReferenceEquals(a.Identity, b.Identity) || a.Identity.Equals(b.Identity);
         }
         return false;
     }

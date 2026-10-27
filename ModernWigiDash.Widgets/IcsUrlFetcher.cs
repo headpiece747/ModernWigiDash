@@ -70,7 +70,8 @@ internal sealed class IcsUrlFetcher : IFeedFetcher
         if (feed is not IcsUrlFeed ics)
             throw new ArgumentException("IcsUrlFetcher only fetches IcsUrlFeed feeds.", nameof(feed));
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, ics.Url);
+        string resolvedUrl = CalendarFeedCompleteness.NormalizeWebcal(ics.Url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, resolvedUrl);
         // Best-effort conditional fetch: send the validator when we have one. A
         // provider that honors it answers 304 (no body); one that ignores it
         // answers 200 with the body, which the producer's hash dedupe absorbs.

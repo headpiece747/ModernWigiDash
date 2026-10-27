@@ -163,6 +163,25 @@ public class MediaSessionMonitorTests
     }
 
     [TestMethod]
+    public async Task CycleSession_WithMultipleSessionsSharingSameAppUserModelId_CyclesBetweenThem()
+    {
+        // Two browser tabs or windows share the exact same SourceAppUserModelId ("chrome.exe")
+        // but have distinct session objects. Cycling must cycle between them rather than aborting.
+        var a = CreateSession("chrome.exe", "YouTube Video");
+        var b = CreateSession("chrome.exe", "SoundCloud Track");
+        var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a, b] };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+        Assert.AreEqual("YouTube Video", monitor.CurrentSnapshot?.Title);
+
+        monitor.CycleSession();
+        Assert.AreEqual("SoundCloud Track", monitor.CurrentSnapshot?.Title, "Cycle must advance to the second session even when AppUserModelId is identical");
+
+        monitor.CycleSession();
+        Assert.AreEqual("YouTube Video", monitor.CurrentSnapshot?.Title, "Cycle must wrap back to the first session");
+    }
+
+    [TestMethod]
     public async Task CycleSession_WithSingleSession_StaysOnSameSession()
     {
         var a = CreateSession("one.exe", "Only");

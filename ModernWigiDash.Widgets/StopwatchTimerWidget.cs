@@ -35,6 +35,9 @@ public class StopwatchTimerWidget : ModernWidgetBase
     /// <summary>Internal test accessor for the accumulated elapsed time.</summary>
     internal TimeSpan ElapsedForTest => _isRunning ? _elapsed + (Now - _startTime) : _elapsed;
 
+    /// <summary>Internal test accessor for running state.</summary>
+    internal bool IsRunningForTest => _isRunning;
+
     /// <summary>
     /// Draws the elapsed time (StopwatchPresentation format) with its status
     /// dot and status line (running or paused).
@@ -50,10 +53,10 @@ public class StopwatchTimerWidget : ModernWidgetBase
         _canvas.Render(canvas, bounds, total, _isRunning, textColor, accentColor);
     }
 
-    private DateTime _lastTouchTime;
+    private SKPoint? _touchDownPoint;
 
     /// <summary>
-    /// A TouchDown toggles the stopwatch (a pause accumulates the elapsed
+    /// A tap release (TouchUp) toggles the stopwatch (a pause accumulates the elapsed
     /// time, a resume restarts the start stamp).
     /// </summary>
     /// <param name="localPoint">The touch point in the widget's rotated-local coordinates.</param>
@@ -62,13 +65,22 @@ public class StopwatchTimerWidget : ModernWidgetBase
     {
         if (eventType == TouchEventType.TouchDown)
         {
-            var now = Now;
-            if (now - _lastTouchTime < TimeSpan.FromMilliseconds(100))
-            {
-                return;
-            }
-            _lastTouchTime = now;
+            _touchDownPoint = localPoint;
+            return;
+        }
 
+        if (eventType == TouchEventType.TouchCancel)
+        {
+            _touchDownPoint = null;
+            return;
+        }
+
+        if (eventType == TouchEventType.TouchUp)
+        {
+            if (_touchDownPoint is null) return;
+            _touchDownPoint = null;
+
+            var now = Now;
             if (_isRunning)
             {
                 _elapsed += now - _startTime;

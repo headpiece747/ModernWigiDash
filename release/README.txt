@@ -24,8 +24,8 @@ ModernWigiDash — G.Skill WigiDash widget stack
 == Do I need the telemetry? ==
 
    No. Everything works with just the app:
-     - Clock, Stopwatch, Audio Visualizer, Now Playing, Twitch, Hotkey,
-       Stock & Crypto, Picture & GIF, Weather, Calendar, Text, To-Do Companion,
+     - Clock, Stopwatch & Timer, Audio Visualizer, Now Playing, Twitch, Hotkey,
+       Stock & Crypto, Picture & GIF Viewer, Weather Forecast, Calendar, Text,
        Steam Library — all fine.
      - Three widgets need a background service:
          Hardware Monitor   <- needs LibreHardwareService

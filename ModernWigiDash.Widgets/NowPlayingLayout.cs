@@ -132,6 +132,14 @@ public static class NowPlayingLayout
             pad, artGap);
     }
 
+    internal static SKRect ExpandTouchTarget(SKRect rect, float minDimension = 44f)
+    {
+        if (rect.IsEmpty) return rect;
+        float dx = Math.Max(0f, (minDimension - rect.Width) / 2f);
+        float dy = Math.Max(0f, (minDimension - rect.Height) / 2f);
+        return SKRect.Inflate(rect, dx, dy);
+    }
+
     /// <summary>
     /// Hit-tests a touch point against the control row, the source badge (only
     /// when visible), and the progress band, in the widget's precedence order.
@@ -140,12 +148,12 @@ public static class NowPlayingLayout
     /// </summary>
     public static NowPlayingHitAction GetAction(NowPlayingGeometry layout, SKPoint point)
     {
-        if (layout.ShuffleButton.Contains(point)) return NowPlayingHitAction.Shuffle;
-        if (layout.PreviousButton.Contains(point)) return NowPlayingHitAction.Previous;
-        if (layout.PlayPauseButton.Contains(point)) return NowPlayingHitAction.PlayPause;
-        if (layout.NextButton.Contains(point)) return NowPlayingHitAction.Next;
-        if (layout.RepeatButton.Contains(point)) return NowPlayingHitAction.Repeat;
-        if (layout.SourceBadgeVisible && layout.SourceBadgeRect.Contains(point)) return NowPlayingHitAction.SourceBadge;
+        if (ExpandTouchTarget(layout.ShuffleButton).Contains(point)) return NowPlayingHitAction.Shuffle;
+        if (ExpandTouchTarget(layout.PreviousButton).Contains(point)) return NowPlayingHitAction.Previous;
+        if (ExpandTouchTarget(layout.PlayPauseButton).Contains(point)) return NowPlayingHitAction.PlayPause;
+        if (ExpandTouchTarget(layout.NextButton).Contains(point)) return NowPlayingHitAction.Next;
+        if (ExpandTouchTarget(layout.RepeatButton).Contains(point)) return NowPlayingHitAction.Repeat;
+        if (layout.SourceBadgeVisible && ExpandTouchTarget(layout.SourceBadgeRect).Contains(point)) return NowPlayingHitAction.SourceBadge;
         if (layout.ProgressWidth > 0f
             && Math.Abs(point.Y - layout.ProgressY) <= layout.SeekTolerance
             && point.X >= layout.ProgressLeft

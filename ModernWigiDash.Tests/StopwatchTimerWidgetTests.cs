@@ -1,14 +1,16 @@
 namespace ModernWigiDash.Tests;
 
-/// <summary>
-/// The stopwatch's timing math, driven by an injectable clock — the widget
-/// was previously untestable (TimeProvider.System hardcoded).
-/// </summary>
 [TestClass]
 public class StopwatchTimerWidgetTests
 {
     private static SKCanvas CreateCanvas()
         => SKSurface.Create(new SKImageInfo(203, 148)).Canvas;
+
+    private static void Tap(StopwatchTimerWidget widget)
+    {
+        widget.OnTouch(default, TouchEventType.TouchDown);
+        widget.OnTouch(default, TouchEventType.TouchUp);
+    }
 
     [TestMethod]
     public void Start_ThenPause_AccumulatesElapsed()
@@ -17,9 +19,9 @@ public class StopwatchTimerWidgetTests
         var widget = new StopwatchTimerWidget { Clock = clock };
         widget.InitializeAsync(new TestContext()).AsTask().GetAwaiter().GetResult();
 
-        widget.OnTouch(default, TouchEventType.TouchDown); // start
+        Tap(widget); // start
         clock.Advance(TimeSpan.FromSeconds(5));
-        widget.OnTouch(default, TouchEventType.TouchDown); // pause
+        Tap(widget); // pause
 
         Assert.AreEqual(TimeSpan.FromSeconds(5), widget.ElapsedForTest);
     }
@@ -30,7 +32,7 @@ public class StopwatchTimerWidgetTests
         var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
 
-        widget.OnTouch(default, TouchEventType.TouchDown); // start
+        Tap(widget); // start
         clock.Advance(TimeSpan.FromSeconds(3));
 
         Assert.AreEqual(TimeSpan.FromSeconds(3), widget.ElapsedForTest, "A running stopwatch must track the clock");
@@ -42,9 +44,9 @@ public class StopwatchTimerWidgetTests
         var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
 
-        widget.OnTouch(default, TouchEventType.TouchDown); // start
+        Tap(widget); // start
         clock.Advance(TimeSpan.FromSeconds(2));
-        widget.OnTouch(default, TouchEventType.TouchDown); // pause
+        Tap(widget); // pause
         clock.Advance(TimeSpan.FromSeconds(10));
 
         Assert.AreEqual(TimeSpan.FromSeconds(2), widget.ElapsedForTest, "A paused stopwatch must not advance with the clock");
@@ -55,7 +57,7 @@ public class StopwatchTimerWidgetTests
     {
         var clock = new FakeTimeProvider();
         var widget = new StopwatchTimerWidget { Clock = clock };
-        widget.OnTouch(default, TouchEventType.TouchDown);
+        Tap(widget);
         clock.Advance(TimeSpan.FromSeconds(1));
 
         widget.Render(CreateCanvas(), new SKRect(0, 0, 203, 148));
@@ -74,16 +76,39 @@ public class StopwatchTimerWidgetTests
     }
 
     [TestMethod]
-    public void TouchDown_WithinDebounceWindow_IsIgnored()
+    public void TouchDown_Alone_DoesNotStartStopwatch()
     {
-        var clock = new FakeTimeProvider();
-        var widget = new StopwatchTimerWidget { Clock = clock };
+        var widget = new StopwatchTimerWidget();
+        widget.OnTouch(default, TouchEventType.TouchDown);
 
-        widget.OnTouch(default, TouchEventType.TouchDown); // start
-        clock.Advance(TimeSpan.FromMilliseconds(50));
-        widget.OnTouch(default, TouchEventType.TouchDown); // within 100ms debounce -> ignored
+        Assert.IsFalse(widget.IsRunningForTest, "TouchDown alone must not trigger actions (actions occur on TouchUp)");
+    }
 
-        clock.Advance(TimeSpan.FromSeconds(2));
-        Assert.IsTrue(widget.ElapsedForTest >= TimeSpan.FromSeconds(2), "The stopwatch should still be running because the rapid second touch was debounced");
+    [TestMethod]
+    public void StationaryHold_RepeatedTouchDown_DoesNotToggle()
+    {
+        var widget = new StopwatchTimerWidget();
+
+        // 16ms hardware loop reports Down repeatedly while finger is held
+        widget.OnTouch(default, TouchEventType.TouchDown);
+        widget.OnTouch(default, TouchEventType.TouchDown);
+        widget.OnTouch(default, TouchEventType.TouchDown);
+
+        Assert.IsFalse(widget.IsRunningForTest, "Stationary hold with repeated Down events must not toggle");
+
+        widget.OnTouch(default, TouchEventType.TouchUp);
+        Assert.IsTrue(widget.IsRunningForTest, "Release must start the stopwatch exactly once");
+    }
+
+    [TestMethod]
+    public void TouchCancel_AbortsPendingTap()
+    {
+        var widget = new StopwatchTimerWidget();
+
+        widget.OnTouch(default, TouchEventType.TouchDown);
+        widget.OnTouch(default, TouchEventType.TouchCancel);
+        widget.OnTouch(default, TouchEventType.TouchUp);
+
+        Assert.IsFalse(widget.IsRunningForTest, "TouchCancel must abort the pending tap");
     }
 }

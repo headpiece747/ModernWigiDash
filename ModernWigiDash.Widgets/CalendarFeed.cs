@@ -62,8 +62,14 @@ internal abstract record CalendarFeed
 /// </summary>
 internal sealed record IcsUrlFeed : CalendarFeed
 {
-    /// <summary>The absolute https:// subscribe URL.</summary>
-    public required string Url { get; init; }
+    private readonly string _url = string.Empty;
+
+    /// <summary>The absolute https:// subscribe URL (webcal:// automatically normalized to https://).</summary>
+    public required string Url
+    {
+        get => _url;
+        init => _url = CalendarFeedCompleteness.NormalizeWebcal(value);
+    }
 
     public override string Kind => "ics";
 

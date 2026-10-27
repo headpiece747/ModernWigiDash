@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace ModernWigiDash.Tests;
@@ -1154,5 +1155,58 @@ public sealed class DebtGuardTests
         return candidates
             .Where(c => !alive.Contains((c.File, c.Name)))
             .ToList();
+    }
+
+    [TestMethod]
+    public void HouseRules_ViewsAndMarkup_NoHardcodedVersionStrings()
+    {
+        var root = RepoScan.GetRepoRoot();
+        var xamlFiles = Directory.GetFiles(root, "*.xaml", SearchOption.AllDirectories);
+        var versionPattern = new System.Text.RegularExpressions.Regex(@"\b[vV]\d+\.\d+(\.\d+)?\b");
+        var violations = new List<string>();
+
+        foreach (var file in xamlFiles)
+        {
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (versionPattern.IsMatch(lines[i]))
+                {
+                    var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+                    violations.Add($"{rel}:{i + 1}: hardcoded version string in XAML markup ({lines[i].Trim()}). UI versions must bind dynamically to AppVersion.Current.");
+                }
+            }
+        }
+
+        Assert.AreEqual(0, violations.Count,
+            "hardcoded version strings found in XAML markup:\n" + string.Join("\n", violations));
+    }
+
+    [TestMethod]
+    public void HouseRules_ReleaseReadme_ListsAllCatalogWidgets()
+    {
+        var root = RepoScan.GetRepoRoot();
+        var readmePath = Path.Combine(root, "release", "README.txt");
+        Assert.IsTrue(File.Exists(readmePath), "release/README.txt must exist");
+        var readmeText = File.ReadAllText(readmePath);
+
+        var widgetMetas = typeof(CalendarWidget).Assembly.GetTypes()
+            .Select(t => t.GetCustomAttribute<WidgetMetadataAttribute>())
+            .Where(meta => meta is not null)
+            .Select(meta => meta!)
+            .ToList();
+
+        var missing = new List<string>();
+        foreach (var meta in widgetMetas)
+        {
+            if (!readmeText.Contains(meta.DisplayName, StringComparison.OrdinalIgnoreCase) &&
+                !readmeText.Contains(meta.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                missing.Add($"{meta.DisplayName} ({meta.Id})");
+            }
+        }
+
+        Assert.AreEqual(0, missing.Count,
+            "release/README.txt is missing catalog widgets:\n" + string.Join("\n", missing));
     }
 }

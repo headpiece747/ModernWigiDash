@@ -266,4 +266,19 @@ public class CalendarAdaptiveLayoutTests
         Assert.IsTrue(large < small, "a longer agenda yields a shorter thumb");
         Assert.IsTrue(small >= 20f, "the thumb never drops below the 20*scale floor");
     }
+
+    [TestMethod]
+    public void ChevronHit_NearChevronBoundary_HitsExpandedTouchTarget()
+    {
+        var bounds = new SKRect(0, 0, 508, 296);
+        var geo = CalendarLayout.Compute(bounds, 0.5f, 1, false, "Compact Poster");
+        if (!geo.NextChevronRect.IsEmpty)
+        {
+            // Point 5px to the right of the visual chevron rect hits the expanded 44px touch target
+            float nearX = geo.NextChevronRect.Right + 5f;
+            float nearY = geo.NextChevronRect.MidY;
+            Assert.IsTrue(CalendarLayout.IsNextChevronHit(geo, nearX, nearY),
+                "touch near the visual chevron must hit within the expanded 44px touch floor");
+        }
+    }
 }
