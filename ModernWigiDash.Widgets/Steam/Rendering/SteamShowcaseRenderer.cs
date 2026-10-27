@@ -29,14 +29,16 @@ internal sealed class SteamShowcaseRenderer : IDisposable
     private readonly SKPaint _subTextPaint = new() { IsAntialias = true };
     private readonly SKPaint _accentPaint = new() { IsAntialias = true };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true };
+    private readonly SKPaint _pillFillPaint = new() { IsAntialias = true };
+    private readonly SKPaint _pillBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
+    private readonly SKPaint _scrimPaint = new() { IsAntialias = true };
+    private readonly SteamHeaderRenderer _headerRenderer = new();
     private readonly SteamTextFitter _textFitter = new(TextCacheLimit);
     private readonly Dictionary<uint, (double Hours, string Text)> _playtimeCache = [];
 
     /// <summary>
-    /// Draws the showcase for the focused game: the background panel, the
-    /// flanking cards (a neighbor's poster at reduced size, only when a
-    /// neighbor exists), and the focal card (poster, name, playtime, the
-    /// update progress bar, and the running badge).
+    /// Draws the showcase for the focused game: the header bar, the flanking chevrons,
+    /// the flanking cards, and the focal card with legible text.
     /// </summary>
     public void Render(
         SKCanvas canvas,
@@ -48,11 +50,16 @@ internal sealed class SteamShowcaseRenderer : IDisposable
         ISteamPosterLookup cache,
         SteamPersona? persona,
         SKBitmap? avatar,
+        SteamFilterMode filter,
+        int gameCount,
         SKColor accent,
         SKColor text)
     {
         _panelPaint.Color = new SKColor(18, 20, 24, 255);
         canvas.DrawRoundRect(bounds, 12f, 12f, _panelPaint);
+
+        // 1. Shared Header Bar
+        _headerRenderer.DrawHeader(canvas, geometry.Header, filter, SteamLayoutMode.Showcase, gameCount, accent, text);
 
         if (focus is null)
         {
@@ -60,12 +67,18 @@ internal sealed class SteamShowcaseRenderer : IDisposable
             return;
         }
 
+        // 2. Navigation Chevrons
+        DrawChevron(canvas, geometry.LeftChevron, "<", previous is not null, accent, text);
+        DrawChevron(canvas, geometry.RightChevron, ">", next is not null, accent, text);
+
+        // 3. Flanking Cards
         if (previous is not null)
             DrawFlank(canvas, geometry.LeftCard, previous, cache);
 
         if (next is not null)
             DrawFlank(canvas, geometry.RightCard, next, cache);
 
+        // 4. Focal Card
         DrawFocus(canvas, geometry.FocusCard, focus, cache, accent, text);
 
         if (persona is not null)
@@ -75,12 +88,28 @@ internal sealed class SteamShowcaseRenderer : IDisposable
     /// <summary>Releases the hoisted paints (call on widget teardown).</summary>
     public void Dispose()
     {
+        _headerRenderer.Dispose();
         _panelPaint.Dispose();
         _posterPaint.Dispose();
         _textPaint.Dispose();
         _subTextPaint.Dispose();
         _accentPaint.Dispose();
         _placeholderPaint.Dispose();
+        _pillFillPaint.Dispose();
+        _pillBorderPaint.Dispose();
+        _scrimPaint.Dispose();
+    }
+
+    private void DrawChevron(SKCanvas canvas, SKRect btn, string symbol, bool enabled, SKColor accent, SKColor text)
+    {
+        _pillFillPaint.Color = enabled ? new SKColor(255, 255, 255, 24) : new SKColor(255, 255, 255, 8);
+        canvas.DrawRoundRect(btn, btn.Height / 2f, btn.Height / 2f, _pillFillPaint);
+        _pillBorderPaint.Color = enabled ? accent.WithAlpha(180) : new SKColor(255, 255, 255, 20);
+        canvas.DrawRoundRect(btn, btn.Height / 2f, btn.Height / 2f, _pillBorderPaint);
+
+        SKFont font = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, btn.Height * 0.44f);
+        _textPaint.Color = enabled ? text : text.WithAlpha(60);
+        canvas.DrawText(symbol, btn.MidX, btn.MidY + font.Size * 0.35f, SKTextAlign.Center, font, _textPaint);
     }
 
     private void DrawFlank(SKCanvas canvas, SKRect card, SteamGameItem game, ISteamPosterLookup cache)
@@ -131,30 +160,45 @@ internal sealed class SteamShowcaseRenderer : IDisposable
 
     private void DrawFocus(SKCanvas canvas, SKRect card, SteamGameItem game, ISteamPosterLookup cache, SKColor accent, SKColor text)
     {
-        if (cache.TryGet(game.AppId, out SKBitmap? poster) && poster is not null)
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(card, 12f, 12f), SKClipOperation.Intersect, antialias: true);
+
+        if (cache.TryGet(game.AppId, out SKBitmap? poster) && poster is not null && poster.Width > 0 && poster.Height > 0)
         {
             _posterPaint.Color = SKColors.White;
-            canvas.DrawRoundRect(card, 10f, 10f, _posterPaint);
-            canvas.DrawBitmap(poster, card, LinearSampling, _posterPaint);
+            float scale = Math.Min(card.Width / poster.Width, card.Height / poster.Height);
+            float drawW = poster.Width * scale;
+            float drawH = poster.Height * scale;
+            float drawX = card.Left + (card.Width - drawW) / 2f;
+            float drawY = card.Top + (card.Height - drawH) / 2f;
+            canvas.DrawBitmap(poster, new SKRect(drawX, drawY, drawX + drawW, drawY + drawH), LinearSampling, _posterPaint);
         }
         else
         {
             _placeholderPaint.Color = new SKColor(38, 42, 50, 255);
-            canvas.DrawRoundRect(card, 10f, 10f, _placeholderPaint);
+            canvas.DrawRoundRect(card, 12f, 12f, _placeholderPaint);
         }
 
-        float fontPx = Math.Max(10f, card.Width * 0.13f);
+        // Dark gradient scrim behind text to ensure 100% legibility and prevent collision with cover art
+        float scrimHeight = 80f;
+        _scrimPaint.Color = new SKColor(12, 14, 18, 220);
+        canvas.DrawRect(new SKRect(card.Left, card.Bottom - scrimHeight, card.Right, card.Bottom), _scrimPaint);
+        canvas.Restore();
+
+        // 1. Game Title (Bottom - 34f)
+        float fontPx = Math.Max(12f, card.Width * 0.088f);
         SKFont nameFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, fontPx);
         _textPaint.Color = text;
-        string name = _textFitter.FitName(game, nameFont, _textPaint, fontPx, card.Width - 16f);
-        canvas.DrawText(name, card.Left + 8f, card.Bottom - 8f - fontPx, SKTextAlign.Left, nameFont, _textPaint);
+        string name = _textFitter.FitName(game, nameFont, _textPaint, fontPx, card.Width - 20f);
+        canvas.DrawText(name, card.Left + 10f, card.Bottom - 32f, SKTextAlign.Left, nameFont, _textPaint);
 
+        // 2. Playtime (Bottom - 12f) - vertically separated below Title
         if (game.HoursOnRecord > 0)
         {
             string playtime = PlaytimeText(game);
-            SKFont subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontPx * 0.7f);
-            _subTextPaint.Color = text.WithAlpha(180);
-            canvas.DrawText(playtime, card.Left + 8f, card.Bottom - 8f - fontPx * 0.7f, SKTextAlign.Left, subFont, _subTextPaint);
+            SKFont subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, fontPx * 0.78f);
+            _subTextPaint.Color = accent;
+            canvas.DrawText(playtime, card.Left + 10f, card.Bottom - 12f, SKTextAlign.Left, subFont, _subTextPaint);
         }
 
         if (game.State == SteamGameState.Updating)

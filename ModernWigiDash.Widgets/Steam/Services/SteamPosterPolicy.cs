@@ -1,6 +1,4 @@
-using System.Runtime.InteropServices;
 using ModernWigiDash.Widgets.Steam.Models;
-using ModernWigiDash.Widgets.Steam.Rendering;
 
 namespace ModernWigiDash.Widgets.Steam.Services;
 
@@ -30,28 +28,9 @@ internal sealed class SteamPosterPolicy : IDisposable
     private readonly Action<string> _log;
     private readonly System.Threading.Lock _gate = new();
     private readonly HashSet<uint> _posterInFlight = [];
-    private readonly MemoSlot<GridRequestKey, bool> _gridRequestMemo = new(GridRequestKeyComparer.Instance);
+    private object? _lastToken;
+    private uint[] _lastRequestedAppIds = [];
     private volatile bool _disposed;
-
-    /// <summary>The grid-request memo key: the games-list reference + the geometry value.</summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct GridRequestKey(IReadOnlyList<SteamGameItem> Games, SteamGridGeometry Geometry);
-
-    /// <summary>
-    /// The grid-request key's equality: the games list compares by REFERENCE
-    /// (a fresh list each tick is a content change), the geometry by value (a
-    /// scrolled layout is a new visible set).
-    /// </summary>
-    private sealed class GridRequestKeyComparer : IEqualityComparer<GridRequestKey>
-    {
-        public static readonly GridRequestKeyComparer Instance = new();
-
-        public bool Equals(GridRequestKey x, GridRequestKey y)
-            => ReferenceEquals(x.Games, y.Games) && x.Geometry.Equals(y.Geometry);
-
-        public int GetHashCode(GridRequestKey key)
-            => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key.Games), key.Geometry);
-    }
 
     /// <summary>
     /// The policy over injected seams: the library source (the local poster
@@ -98,65 +77,45 @@ internal sealed class SteamPosterPolicy : IDisposable
         {
             lock (_gate)
                 _posterInFlight.Remove(appId);
-        });
+        }, TaskScheduler.Default);
     }
 
     /// <summary>
-    /// Requests the poster for each visible grid cell that is not yet cached
-    /// (local file first, then the CDN; one in-flight per app). The 24-slot
-    /// LRU then tracks what is on screen, so a scrolled-into-view cell loads
-    /// on demand instead of an all-games sweep evicting the visible ones. The
-    /// try-get-then-request policy lives here, not in the widget. The request
-    /// is memo-gated on the visible set (the games-list reference + the
-    /// geometry): a steady tick is a no-op, and a fetch is re-requested only
-    /// when the visible set changes (a scroll, a new tick's list).
+    /// Requests posters for each visible AppId that is not yet cached.
+    /// The request is gated on the token (reference equality on the games list or context)
+    /// and the sequence of visible AppIds, so steady-state frames re-request nothing and allocate nothing.
     /// </summary>
-    public void RequestVisibleGridPosters(IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
+    public void RequestPosters(object? contextToken, ReadOnlySpan<uint> visibleAppIds)
     {
-        var key = new GridRequestKey(games, geometry);
-        if (_gridRequestMemo.TryGet(key, out _))
-            return;
-
-        for (int i = 0; i < geometry.CellCount; i++)
+        if (ReferenceEquals(_lastToken, contextToken)
+            && MemoryExtensions.SequenceEqual(_lastRequestedAppIds.AsSpan(), visibleAppIds))
         {
-            int index = geometry.Indexes[i];
-            if (index >= 0 && index < games.Count)
-                RequestPosterIfMissing(games[index]);
+            return;
         }
 
-        _gridRequestMemo.Set(key, true);
+        _lastToken = contextToken;
+        if (_lastRequestedAppIds.Length != visibleAppIds.Length)
+            _lastRequestedAppIds = new uint[visibleAppIds.Length];
+
+        visibleAppIds.CopyTo(_lastRequestedAppIds);
+
+        for (int i = 0; i < visibleAppIds.Length; i++)
+        {
+            uint appId = visibleAppIds[i];
+            if (appId != 0 && !_cache.TryGet(appId, out _))
+                RequestPoster(appId);
+        }
     }
 
     /// <summary>Requests the poster for each visible showcase card (the focal card and its flanks) when not yet cached.</summary>
     public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
     {
-        RequestPosterIfMissing(focus);
-        RequestPosterIfMissing(previous);
-        RequestPosterIfMissing(next);
-    }
-
-    /// <summary>Requests the posters for the active hero and visible shelf items in Hero Deck mode.</summary>
-    public void RequestHeroPosters(SteamGameItem? hero, IReadOnlyList<SteamGameItem> shelfGames, SteamHeroGeometry geometry)
-    {
-        RequestPosterIfMissing(hero);
-        for (int i = 0; i < geometry.ShelfItems.Length; i++)
-        {
-            SteamShelfItemGeometry item = geometry.ShelfItems[i];
-            if (item.Bounds.Bottom >= geometry.ShelfBounds.Top
-                && item.Bounds.Top <= geometry.ShelfBounds.Bottom
-                && item.Index >= 0
-                && item.Index < shelfGames.Count)
-            {
-                RequestPosterIfMissing(shelfGames[item.Index]);
-            }
-        }
-    }
-
-    /// <summary>Requests one card's poster when it is not yet cached.</summary>
-    private void RequestPosterIfMissing(SteamGameItem? card)
-    {
-        if (card is not null && !_cache.TryGet(card.AppId, out _))
-            RequestPoster(card.AppId);
+        Span<uint> ids = stackalloc uint[3];
+        int count = 0;
+        if (focus is not null) ids[count++] = focus.AppId;
+        if (previous is not null) ids[count++] = previous.AppId;
+        if (next is not null) ids[count++] = next.AppId;
+        RequestPosters(null, ids[..count]);
     }
 
     /// <summary>

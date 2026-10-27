@@ -30,8 +30,10 @@ internal sealed class SteamHeroRenderer : IDisposable
     private readonly SKPaint _glowPaint = new() { IsAntialias = true };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true, Color = new SKColor(38, 42, 50, 255) };
 
+    private readonly SteamHeaderRenderer _headerRenderer = new();
     private readonly Dictionary<uint, (double Hours, string Text)> _playtimeCache = [];
-    private readonly Dictionary<int, string> _countCache = [];
+    private readonly Dictionary<uint, (DateTime? LastPlayed, string Text)> _subtitleCache = [];
+    private readonly SteamTextFitter _textFitter = new(128);
 
     /// <summary>
     /// Renders the complete Hero Deck layout for the active selection.
@@ -51,7 +53,20 @@ internal sealed class SteamHeroRenderer : IDisposable
         canvas.DrawRoundRect(bounds, 12f, 12f, _panelPaint);
 
         // 2. Header Bar
-        DrawHeader(canvas, geometry, activeFilter, shelfGames.Count, accent, text);
+        _headerRenderer.DrawHeader(
+            canvas,
+            new SteamHeaderGeometry(
+                geometry.HeaderBounds,
+                geometry.FilterAllBounds,
+                geometry.FilterFavoritesBounds,
+                geometry.FilterRecentBounds,
+                geometry.GameCountBounds,
+                geometry.LayoutToggleBounds),
+            activeFilter,
+            SteamLayoutMode.HeroDeck,
+            shelfGames.Count,
+            accent,
+            text);
 
         if (hero is null || shelfGames.Count == 0)
         {
@@ -66,59 +81,6 @@ internal sealed class SteamHeroRenderer : IDisposable
         DrawShelf(canvas, geometry, shelfGames, posterLookup, accent, text);
     }
 
-    private void DrawHeader(
-        SKCanvas canvas,
-        SteamHeroGeometry geom,
-        SteamFilterMode filter,
-        int gameCount,
-        SKColor accent,
-        SKColor text)
-    {
-        SKFont pillFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 13f);
-
-        // Filter Pills: All, Favorites, Recent
-        DrawFilterPill(canvas, geom.FilterAllBounds, "All", filter == SteamFilterMode.All, pillFont, accent, text);
-        DrawFilterPill(canvas, geom.FilterFavoritesBounds, "★ Favorites", filter == SteamFilterMode.Favorites, pillFont, accent, text);
-        DrawFilterPill(canvas, geom.FilterRecentBounds, "⏱ Recent", filter == SteamFilterMode.Recent, pillFont, accent, text);
-
-        // Game Count Badge
-        string countText = GetCachedCountString(gameCount);
-        canvas.DrawRoundRect(geom.GameCountBounds, 8f, 8f, _pillFillPaint);
-        _subTextPaint.Color = text.WithAlpha(170);
-        canvas.DrawText(countText, geom.GameCountBounds.MidX, geom.GameCountBounds.MidY + 4f, SKTextAlign.Center, pillFont, _subTextPaint);
-
-        // Mode Switch Pill: [ ▣ Hero ]
-        canvas.DrawRoundRect(geom.LayoutToggleBounds, 8f, 8f, _pillFillPaint);
-        canvas.DrawRoundRect(geom.LayoutToggleBounds, 8f, 8f, _pillBorderPaint);
-        _accentPaint.Color = accent;
-        canvas.DrawText("▣ Hero", geom.LayoutToggleBounds.MidX, geom.LayoutToggleBounds.MidY + 4f, SKTextAlign.Center, pillFont, _accentPaint);
-    }
-
-    private void DrawFilterPill(
-        SKCanvas canvas,
-        SKRect bounds,
-        string label,
-        bool isActive,
-        SKFont font,
-        SKColor accent,
-        SKColor text)
-    {
-        if (isActive)
-        {
-            canvas.DrawRoundRect(bounds, 8f, 8f, _activeTabPaint);
-            canvas.DrawRoundRect(bounds, 8f, 8f, _activeTabBorderPaint);
-            _textPaint.Color = accent;
-        }
-        else
-        {
-            canvas.DrawRoundRect(bounds, 8f, 8f, _pillFillPaint);
-            canvas.DrawRoundRect(bounds, 8f, 8f, _pillBorderPaint);
-            _textPaint.Color = text.WithAlpha(180);
-        }
-
-        canvas.DrawText(label, bounds.MidX, bounds.MidY + 4f, SKTextAlign.Center, font, _textPaint);
-    }
-
     private void DrawHeroCard(
         SKCanvas canvas,
         SteamHeroGeometry geom,
@@ -131,25 +93,29 @@ internal sealed class SteamHeroRenderer : IDisposable
         canvas.DrawRoundRect(geom.HeroCardBounds, 12f, 12f, _cardPaint);
         canvas.DrawRoundRect(geom.HeroCardBounds, 12f, 12f, _cardBorderPaint);
 
-        // Hero Artwork / Ambient Backdrop
-        if (posterLookup.TryGet(hero.AppId, out SKBitmap? poster) && poster is not null)
+        // Hero Artwork / Ambient Backdrop (100% Proportional, Never Stretched)
+        _glowPaint.Color = accent.WithAlpha(35);
+        canvas.DrawRoundRect(geom.HeroArtBounds, 10f, 10f, _glowPaint);
+
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(geom.HeroArtBounds, 10f, 10f), SKClipOperation.Intersect, antialias: true);
+        canvas.DrawRoundRect(geom.HeroArtBounds, 10f, 10f, _placeholderPaint);
+
+        if (posterLookup.TryGet(hero.AppId, out SKBitmap? poster) && poster is not null && poster.Width > 0 && poster.Height > 0)
         {
-            // Ambient Aura Glow behind the art
-            _glowPaint.Color = accent.WithAlpha(40);
-            canvas.DrawRoundRect(geom.HeroArtBounds, 10f, 10f, _glowPaint);
+            float scale = Math.Min(geom.HeroArtBounds.Width / poster.Width, geom.HeroArtBounds.Height / poster.Height);
+            float drawW = poster.Width * scale;
+            float drawH = poster.Height * scale;
+            float drawX = geom.HeroArtBounds.Left + (geom.HeroArtBounds.Width - drawW) / 2f;
+            float drawY = geom.HeroArtBounds.Top + (geom.HeroArtBounds.Height - drawH) / 2f;
+            SKRect fittedRect = new(drawX, drawY, drawX + drawW, drawY + drawH);
 
             _posterPaint.Color = SKColors.White;
-            canvas.Save();
-            canvas.ClipRoundRect(new SKRoundRect(geom.HeroArtBounds, 10f, 10f), SKClipOperation.Intersect, antialias: true);
-            canvas.DrawBitmap(poster, geom.HeroArtBounds, LinearSampling, _posterPaint);
-            canvas.Restore();
+            canvas.DrawBitmap(poster, fittedRect, LinearSampling, _posterPaint);
         }
-        else
-        {
-            canvas.DrawRoundRect(geom.HeroArtBounds, 10f, 10f, _placeholderPaint);
-        }
+        canvas.Restore();
 
-        // Status Pill (Top-Left of Hero Art)
+        // Status Pill (Top of right info column)
         SKFont badgeFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 12f);
         if (hero.State == SteamGameState.Running)
         {
@@ -167,7 +133,7 @@ internal sealed class SteamHeroRenderer : IDisposable
             canvas.DrawText("Ready to Play", geom.HeroStatusPillBounds.MidX, geom.HeroStatusPillBounds.MidY + 4f, SKTextAlign.Center, badgeFont, _subTextPaint);
         }
 
-        // Playtime Pill (Top-Right of Hero Art)
+        // Playtime Pill (Top-Right beside status pill)
         string playtime = GetCachedPlaytimeString(hero);
         canvas.DrawRoundRect(geom.HeroPlaytimePillBounds, 6f, 6f, _pillFillPaint);
         canvas.DrawRoundRect(geom.HeroPlaytimePillBounds, 6f, 6f, _pillBorderPaint);
@@ -177,13 +143,14 @@ internal sealed class SteamHeroRenderer : IDisposable
         // Title
         SKFont titleFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Bold, 22f);
         _textPaint.Color = text;
-        canvas.DrawText(hero.Name, geom.HeroTitleBounds.Left, geom.HeroTitleBounds.Top + 22f, SKTextAlign.Left, titleFont, _textPaint);
+        string title = _textFitter.FitName(hero, titleFont, _textPaint, 22f, geom.HeroTitleBounds.Width);
+        canvas.DrawText(title, geom.HeroTitleBounds.Left, geom.HeroTitleBounds.Top + 24f, SKTextAlign.Left, titleFont, _textPaint);
 
         // Subtitle / Last Played
         SKFont subFont = FontHelper.GetCachedFont("Geist", SKFontStyle.Normal, 13f);
         _subTextPaint.Color = text.WithAlpha(160);
-        string subtitle = hero.LastPlayedUtc.HasValue ? $"Last played: {hero.LastPlayedUtc.Value:yyyy-MM-dd}" : "Never played";
-        canvas.DrawText(subtitle, geom.HeroSubtitleBounds.Left, geom.HeroSubtitleBounds.Top + 13f, SKTextAlign.Left, subFont, _subTextPaint);
+        string subtitle = GetCachedSubtitleString(hero);
+        canvas.DrawText(subtitle, geom.HeroSubtitleBounds.Left, geom.HeroSubtitleBounds.Top + 14f, SKTextAlign.Left, subFont, _subTextPaint);
 
         // Primary Action CTA Button (Tactile 54px touch target)
         if (hero.State == SteamGameState.Running)
@@ -253,7 +220,8 @@ internal sealed class SteamHeroRenderer : IDisposable
 
             // Title
             _textPaint.Color = row.IsSelected ? accent : text;
-            canvas.DrawText(game.Name, row.TitleBounds.Left, row.TitleBounds.Top + 14f, SKTextAlign.Left, rowTitleFont, _textPaint);
+            string rowTitle = _textFitter.FitName(game, rowTitleFont, _textPaint, 13f, row.TitleBounds.Width);
+            canvas.DrawText(rowTitle, row.TitleBounds.Left, row.TitleBounds.Top + 14f, SKTextAlign.Left, rowTitleFont, _textPaint);
 
             // Sub text / Running indicator
             if (game.State == SteamGameState.Running)
@@ -302,20 +270,25 @@ internal sealed class SteamHeroRenderer : IDisposable
         return str;
     }
 
-    private string GetCachedCountString(int count)
+    private string GetCachedSubtitleString(SteamGameItem game)
     {
-        if (_countCache.TryGetValue(count, out string? cached))
-            return cached;
+        if (_subtitleCache.TryGetValue(game.AppId, out (DateTime? LastPlayed, string Text) cached)
+            && cached.LastPlayed == game.LastPlayedUtc)
+        {
+            return cached.Text;
+        }
 
-        string str = $"{count} Games";
-        if (_countCache.Count >= TextCacheLimit)
-            _countCache.Clear();
-        _countCache[count] = str;
+        string str = game.LastPlayedUtc.HasValue ? $"Last played: {game.LastPlayedUtc.Value:yyyy-MM-dd}" : "Never played";
+        if (_subtitleCache.Count >= TextCacheLimit)
+            _subtitleCache.Clear();
+
+        _subtitleCache[game.AppId] = (game.LastPlayedUtc, str);
         return str;
     }
 
     public void Dispose()
     {
+        _headerRenderer.Dispose();
         _panelPaint.Dispose();
         _cardPaint.Dispose();
         _cardBorderPaint.Dispose();

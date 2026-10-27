@@ -31,10 +31,11 @@ internal sealed class SteamGridRenderer : IDisposable
     private readonly SKPaint _accentPaint = new() { IsAntialias = true };
     private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _placeholderPaint = new() { IsAntialias = true };
+    private readonly SteamHeaderRenderer _headerRenderer = new();
     private readonly SteamTextFitter _textFitter = new(NameCacheLimit);
 
     /// <summary>
-    /// Draws the grid: the background panel, then every visible cell (poster
+    /// Draws the grid: the background panel, the shared header bar, then every visible cell (poster
     /// or placeholder, name, playtime, the update progress bar, the running
     /// badge, and the favorite mark). A cell with no cached poster draws its
     /// placeholder — the background fetch lands the texture for a later tick.
@@ -45,11 +46,16 @@ internal sealed class SteamGridRenderer : IDisposable
         IReadOnlyList<SteamGameItem> games,
         SteamGridGeometry geometry,
         ISteamPosterLookup cache,
+        SteamFilterMode filter,
+        int gameCount,
         SKColor accent,
         SKColor text)
     {
         _panelPaint.Color = new SKColor(18, 20, 24, 255);
         canvas.DrawRoundRect(bounds, 12f, 12f, _panelPaint);
+
+        // 1. Shared Header Bar
+        _headerRenderer.DrawHeader(canvas, geometry.Header, filter, SteamLayoutMode.Grid, gameCount, accent, text);
 
         if (games.Count == 0)
         {
@@ -68,6 +74,7 @@ internal sealed class SteamGridRenderer : IDisposable
     /// <summary>Releases the hoisted paints (call on widget teardown).</summary>
     public void Dispose()
     {
+        _headerRenderer.Dispose();
         _panelPaint.Dispose();
         _posterPaint.Dispose();
         _textPaint.Dispose();

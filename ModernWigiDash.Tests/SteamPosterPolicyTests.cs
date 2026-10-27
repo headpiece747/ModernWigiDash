@@ -1,15 +1,14 @@
 using System.Diagnostics;
 using System.Net.Http;
 using ModernWigiDash.Widgets.Steam.Models;
-using ModernWigiDash.Widgets.Steam.Rendering;
 using ModernWigiDash.Widgets.Steam.Services;
 
 namespace ModernWigiDash.Tests;
 
 /// <summary>
 /// The poster policy's visible-set gate: a steady tick (the same games-list
-/// reference + the same geometry) re-requests nothing, while a changed
-/// visible set (a new games list, a scrolled geometry) re-requests the
+/// reference + the same visible AppId sequence) re-requests nothing, while a changed
+/// visible set (a new games list, a scrolled sequence) re-requests the
 /// on-demand fetches. The gate is the per-tick no-op the render loop needs;
 /// the fetches are observed through the CDN leg (the local-file path is
 /// absent, so every request is one CDN GET).
@@ -47,13 +46,6 @@ public sealed class SteamPosterPolicyTests
     private static SteamGameItem Game(uint appId)
         => new(appId, "Game", "dir", SteamGameState.Idle, 0f, 0, null, false);
 
-    /// <summary>A two-cell grid geometry (the <paramref name="indexes"/> map cells to games).</summary>
-    private static SteamGridGeometry TwoCellGeometry(int[] indexes)
-        => new(2, 1,
-            [new SKRect(0, 0, 100, 150), new SKRect(100, 0, 200, 150)],
-            indexes,
-            100f, 150f, 0f, 0f);
-
     /// <summary>
     /// The fire-and-forget fetches are async: a bounded wait lets them drain
     /// before a count is read. The settle after reaching the count lets the
@@ -79,15 +71,14 @@ public sealed class SteamPosterPolicyTests
         using var policy = MakePolicy(handler);
 
         IReadOnlyList<SteamGameItem> games = [Game(100), Game(200)];
-        var geometry = TwoCellGeometry([0, 1]);
 
-        policy.RequestVisibleGridPosters(games, geometry);
+        policy.RequestPosters(games, [100, 200]);
         Drain(handler, 2);
         Assert.AreEqual(2, handler.Count, "the first tick requests the two uncached visible posters");
 
-        policy.RequestVisibleGridPosters(games, geometry);
+        policy.RequestPosters(games, [100, 200]);
         Drain(handler, 2);
-        Assert.AreEqual(2, handler.Count, "a steady tick (the same games list + geometry) re-requests nothing");
+        Assert.AreEqual(2, handler.Count, "a steady tick (the same games list + visible sequence) re-requests nothing");
     }
 
     [TestMethod]
@@ -96,33 +87,32 @@ public sealed class SteamPosterPolicyTests
         var handler = new CountingHandler();
         using var policy = MakePolicy(handler);
 
-        var geometry = TwoCellGeometry([0, 1]);
         IReadOnlyList<SteamGameItem> first = [Game(100), Game(200)];
         IReadOnlyList<SteamGameItem> second = [Game(100), Game(200)];
 
-        policy.RequestVisibleGridPosters(first, geometry);
+        policy.RequestPosters(first, [100, 200]);
         Drain(handler, 2);
         Assert.AreEqual(2, handler.Count);
 
-        policy.RequestVisibleGridPosters(second, geometry);
+        policy.RequestPosters(second, [100, 200]);
         Drain(handler, 4);
         Assert.AreEqual(4, handler.Count, "a new games-list reference is a new visible set: the fetches re-run");
     }
 
     [TestMethod]
-    public void ChangedGeometry_ReRequestsTheVisibleSet()
+    public void ChangedVisibleIds_ReRequestsTheVisibleSet()
     {
         var handler = new CountingHandler();
         using var policy = MakePolicy(handler);
 
         IReadOnlyList<SteamGameItem> games = [Game(100), Game(200)];
 
-        policy.RequestVisibleGridPosters(games, TwoCellGeometry([0, 1]));
+        policy.RequestPosters(games, [100, 200]);
         Drain(handler, 2);
         Assert.AreEqual(2, handler.Count);
 
-        policy.RequestVisibleGridPosters(games, TwoCellGeometry([1, 0]));
+        policy.RequestPosters(games, [200, 100]);
         Drain(handler, 4);
-        Assert.AreEqual(4, handler.Count, "a scrolled geometry (a new Indexes array) is a new visible set: the fetches re-run");
+        Assert.AreEqual(4, handler.Count, "a changed visible id sequence is a new visible set: the fetches re-run");
     }
 }

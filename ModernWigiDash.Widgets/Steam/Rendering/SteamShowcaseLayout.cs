@@ -25,15 +25,18 @@ public enum SteamShowcaseHit
 /// rects, so the drawn cards and the tap targets can never drift apart.
 /// </summary>
 public readonly record struct SteamShowcaseGeometry(
+    SteamHeaderGeometry Header,
     SKRect FocusCard,
     SKRect LeftCard,
     SKRect RightCard,
+    SKRect LeftChevron,
+    SKRect RightChevron,
     bool LeftVisible,
     bool RightVisible);
 
 /// <summary>
 /// Pure layout rules for the Steam showcase: the centered focal card, the
-/// flanking cards (visible only when a neighbor exists), and the hit test.
+/// flanking cards (visible only when a neighbor exists), chevron navigation, and the hit test.
 /// The design constants live only here, never re-derived at a draw site.
 /// </summary>
 public static class SteamShowcaseLayout
@@ -54,34 +57,47 @@ public static class SteamShowcaseLayout
     /// </summary>
     public static SteamShowcaseGeometry Compute(SKRect bounds, bool hasPrevious, bool hasNext)
     {
-        float pad = 24f * (bounds.Height / DesignHeight);
-        float focusWidth = Math.Min((bounds.Width - pad * 2f) * 0.5f, (bounds.Height - pad * 2f) / PosterAspect);
+        float scale = bounds.Height > 0 ? bounds.Height / DesignHeight : 1f;
+        float pad = 16f * scale;
+
+        SteamHeaderGeometry header = SteamHeaderLayout.Compute(bounds);
+
+        float contentTop = header.HeaderBounds.Bottom + 10f * scale;
+        float contentBottom = bounds.Bottom - pad;
+        float contentHeight = Math.Max(1f, contentBottom - contentTop);
+        float contentMidY = contentTop + contentHeight / 2f;
+
+        float focusWidth = Math.Min((bounds.Width - pad * 2f) * 0.45f, contentHeight / PosterAspect);
         focusWidth = Math.Max(1f, focusWidth);
         float focusHeight = focusWidth * PosterAspect;
         float focusX = bounds.MidX - focusWidth / 2f;
-        float focusY = bounds.MidY - focusHeight / 2f;
+        float focusY = contentMidY - focusHeight / 2f;
         var focus = new SKRect(focusX, focusY, focusX + focusWidth, focusY + focusHeight);
 
-        float flankWidth = focusWidth * 0.6f;
+        float flankWidth = focusWidth * 0.62f;
         float flankHeight = flankWidth * PosterAspect;
-        float gap = 16f * (bounds.Height / DesignHeight);
-        float flankY = bounds.MidY - flankHeight / 2f;
+        float gap = 20f * scale;
+        float flankY = contentMidY - flankHeight / 2f;
         var left = new SKRect(focusX - gap - flankWidth, flankY, focusX - gap, flankY + flankHeight);
         var right = new SKRect(focus.Right + gap, flankY, focus.Right + gap + flankWidth, flankY + flankHeight);
 
-        return new SteamShowcaseGeometry(focus, left, right, hasPrevious, hasNext);
+        float chevronSize = 48f * scale;
+        float chevronY = contentMidY - chevronSize / 2f;
+        var leftChevron = new SKRect(bounds.Left + pad, chevronY, bounds.Left + pad + chevronSize, chevronY + chevronSize);
+        var rightChevron = new SKRect(bounds.Right - pad - chevronSize, chevronY, bounds.Right - pad, chevronY + chevronSize);
+
+        return new SteamShowcaseGeometry(header, focus, left, right, leftChevron, rightChevron, hasPrevious, hasNext);
     }
 
     /// <summary>
-    /// Hit-tests a touch point against the flanking cards (only when visible)
-    /// and the focal card, in precedence order.
+    /// Hit-tests a touch point against chevrons, flanking cards, and the focal card, in precedence order.
     /// </summary>
     public static SteamShowcaseHit HitTest(SteamShowcaseGeometry geometry, SKPoint point)
     {
-        if (geometry.LeftVisible && geometry.LeftCard.Contains(point))
+        if (geometry.LeftVisible && (geometry.LeftChevron.Contains(point) || geometry.LeftCard.Contains(point)))
             return SteamShowcaseHit.Previous;
 
-        if (geometry.RightVisible && geometry.RightCard.Contains(point))
+        if (geometry.RightVisible && (geometry.RightChevron.Contains(point) || geometry.RightCard.Contains(point)))
             return SteamShowcaseHit.Next;
 
         if (geometry.FocusCard.Contains(point))

@@ -31,31 +31,11 @@ internal static class SteamHeroLayout
         float pad = 12f * scale;
 
         // 1. Header Bar
-        float headerHeight = 38f * scale;
-        SKRect headerBounds = new(bounds.Left + pad, bounds.Top + pad, bounds.Right - pad, bounds.Top + pad + headerHeight);
-
-        float pillHeight = 32f * scale;
-        float pillY = headerBounds.Top + (headerHeight - pillHeight) / 2f;
-
-        float allWidth = 64f * scale;
-        SKRect filterAllBounds = new(headerBounds.Left, pillY, headerBounds.Left + allWidth, pillY + pillHeight);
-
-        float favWidth = 88f * scale;
-        SKRect filterFavBounds = new(filterAllBounds.Right + 8f * scale, pillY, filterAllBounds.Right + 8f * scale + favWidth, pillY + pillHeight);
-
-        float recWidth = 78f * scale;
-        SKRect filterRecBounds = new(filterFavBounds.Right + 8f * scale, pillY, filterFavBounds.Right + 8f * scale + recWidth, pillY + pillHeight);
-
-        float modeWidth = 100f * scale;
-        SKRect layoutToggleBounds = new(headerBounds.Right - modeWidth, pillY, headerBounds.Right, pillY + pillHeight);
-
-        float countWidth = 72f * scale;
-        SKRect gameCountBounds = new(layoutToggleBounds.Left - 8f * scale - countWidth, pillY, layoutToggleBounds.Left - 8f * scale, pillY + pillHeight);
+        SteamHeaderGeometry header = SteamHeaderLayout.Compute(bounds);
 
         // 2. Main Work Area Split (Hero on Left ~58%, Shelf on Right ~42%)
-        float contentTop = headerBounds.Bottom + 10f * scale;
+        float contentTop = header.HeaderBounds.Bottom + 10f * scale;
         float contentBottom = bounds.Bottom - pad;
-        float contentHeight = Math.Max(1f, contentBottom - contentTop);
         float totalWidth = Math.Max(1f, bounds.Width - pad * 2f);
 
         float heroWidth = (totalWidth - pad) * 0.58f;
@@ -64,29 +44,43 @@ internal static class SteamHeroLayout
         float shelfLeft = heroCardBounds.Right + pad;
         SKRect shelfBounds = new(shelfLeft, contentTop, bounds.Right - pad, contentBottom);
 
-        // 3. Hero Card Internals
+        // 3. Hero Card Internals: Proportional 2:3 vertical cover poster on left, game details + action CTA on right
         float heroPad = 14f * scale;
-        float artHeight = Math.Max(1f, contentHeight * 0.44f);
-        SKRect heroArtBounds = new(heroCardBounds.Left + heroPad, heroCardBounds.Top + heroPad, heroCardBounds.Right - heroPad, heroCardBounds.Top + heroPad + artHeight);
+        float availHeight = heroCardBounds.Height - heroPad * 2f;
+        float availWidth = heroCardBounds.Width - heroPad * 2f;
 
-        float statusPillWidth = 110f * scale;
-        float statusPillHeight = 26f * scale;
-        SKRect heroStatusPillBounds = new(heroArtBounds.Left + 8f * scale, heroArtBounds.Top + 8f * scale, heroArtBounds.Left + 8f * scale + statusPillWidth, heroArtBounds.Top + 8f * scale + statusPillHeight);
+        float posterWidth = Math.Min(250f * scale, availWidth * 0.46f);
+        float posterHeight = posterWidth * PosterAspect;
+        if (posterHeight > availHeight)
+        {
+            posterHeight = availHeight;
+            posterWidth = posterHeight / PosterAspect;
+        }
 
-        float playtimeWidth = 86f * scale;
-        SKRect heroPlaytimePillBounds = new(heroArtBounds.Right - 8f * scale - playtimeWidth, heroArtBounds.Top + 8f * scale, heroArtBounds.Right - 8f * scale, heroArtBounds.Top + 8f * scale + statusPillHeight);
+        float posterTop = heroCardBounds.Top + heroPad + (availHeight - posterHeight) / 2f;
+        SKRect heroArtBounds = new(heroCardBounds.Left + heroPad, posterTop, heroCardBounds.Left + heroPad + posterWidth, posterTop + posterHeight);
 
-        float titleTop = heroArtBounds.Bottom + 14f * scale;
-        float titleHeight = 32f * scale;
-        SKRect heroTitleBounds = new(heroCardBounds.Left + heroPad, titleTop, heroCardBounds.Right - heroPad, titleTop + titleHeight);
+        float infoLeft = heroArtBounds.Right + 14f * scale;
+        float infoRight = heroCardBounds.Right - heroPad;
 
-        float subtitleHeight = 20f * scale;
-        SKRect heroSubtitleBounds = new(heroCardBounds.Left + heroPad, heroTitleBounds.Bottom + 4f * scale, heroCardBounds.Right - heroPad, heroTitleBounds.Bottom + 4f * scale + subtitleHeight);
+        float pillHeight = 28f * scale;
+        float statusPillWidth = 104f * scale;
+        SKRect heroStatusPillBounds = new(infoLeft, heroArtBounds.Top, infoLeft + statusPillWidth, heroArtBounds.Top + pillHeight);
+
+        float playtimeWidth = 82f * scale;
+        SKRect heroPlaytimePillBounds = new(heroStatusPillBounds.Right + 8f * scale, heroArtBounds.Top, Math.Min(infoRight, heroStatusPillBounds.Right + 8f * scale + playtimeWidth), heroArtBounds.Top + pillHeight);
+
+        float titleTop = heroStatusPillBounds.Bottom + 16f * scale;
+        float titleHeight = 52f * scale;
+        SKRect heroTitleBounds = new(infoLeft, titleTop, infoRight, titleTop + titleHeight);
+
+        float subTop = heroTitleBounds.Bottom + 6f * scale;
+        float subHeight = 22f * scale;
+        SKRect heroSubtitleBounds = new(infoLeft, subTop, infoRight, subTop + subHeight);
 
         float actionBtnHeight = 52f * scale;
-        float actionBtnWidth = 170f * scale;
-        float actionBtnY = heroCardBounds.Bottom - heroPad - actionBtnHeight;
-        SKRect heroActionBtnBounds = new(heroCardBounds.Left + heroPad, actionBtnY, heroCardBounds.Left + heroPad + actionBtnWidth, actionBtnY + actionBtnHeight);
+        float actionBtnY = heroArtBounds.Bottom - actionBtnHeight;
+        SKRect heroActionBtnBounds = new(infoLeft, actionBtnY, infoRight, actionBtnY + actionBtnHeight);
 
         // 4. Shelf Rows
         float rowHeight = 64f * scale;
@@ -119,12 +113,12 @@ internal static class SteamHeroLayout
 
         return new SteamHeroGeometry(
             bounds,
-            headerBounds,
-            filterAllBounds,
-            filterFavBounds,
-            filterRecBounds,
-            gameCountBounds,
-            layoutToggleBounds,
+            header.HeaderBounds,
+            header.FilterAllBounds,
+            header.FilterFavoritesBounds,
+            header.FilterRecentBounds,
+            header.GameCountBounds,
+            header.LayoutToggleBounds,
             heroCardBounds,
             heroArtBounds,
             heroStatusPillBounds,

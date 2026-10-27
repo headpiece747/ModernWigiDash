@@ -1,7 +1,6 @@
 using System.Text.Json;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets.Steam.Models;
-using ModernWigiDash.Widgets.Steam.Rendering;
 
 namespace ModernWigiDash.Widgets.Steam.Services;
 
@@ -122,17 +121,13 @@ internal sealed class SteamLibraryService : IDisposable
     /// lookup seam; the tests drive the cache's internal retirement set).</summary>
     internal SteamPosterCache PosterCacheForTest => _posterPolicy.Cache;
 
-    /// <summary>Requests the posters for each visible grid cell that is not yet cached (the policy's try-get-then-request rule, delegated).</summary>
-    public void RequestVisibleGridPosters(IReadOnlyList<SteamGameItem> games, SteamGridGeometry geometry)
-        => _posterPolicy.RequestVisibleGridPosters(games, geometry);
+    /// <summary>Requests the posters for each visible AppId that is not yet cached (the policy's try-get-then-request rule, delegated).</summary>
+    public void RequestPosters(object? contextToken, ReadOnlySpan<uint> visibleAppIds)
+        => _posterPolicy.RequestPosters(contextToken, visibleAppIds);
 
     /// <summary>Requests the posters for each visible showcase card when not yet cached (the policy's try-get-then-request rule, delegated).</summary>
     public void RequestShowcasePosters(SteamGameItem? focus, SteamGameItem? previous, SteamGameItem? next)
         => _posterPolicy.RequestShowcasePosters(focus, previous, next);
-
-    /// <summary>Requests the posters for the active hero and visible shelf items in Hero Deck mode.</summary>
-    public void RequestHeroPosters(SteamGameItem? hero, IReadOnlyList<SteamGameItem> shelfGames, SteamHeroGeometry geometry)
-        => _posterPolicy.RequestHeroPosters(hero, shelfGames, geometry);
 
     /// <summary>Launches the game through the shell-exec sink (the steam://run URI).</summary>
     public void Launch(uint appId) => _tracker.Launch(appId);

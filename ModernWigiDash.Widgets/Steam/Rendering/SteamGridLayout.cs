@@ -11,6 +11,7 @@ namespace ModernWigiDash.Widgets.Steam.Rendering;
 /// (the NowPlayingLayout house rule).
 /// </summary>
 public readonly record struct SteamGridGeometry(
+    SteamHeaderGeometry Header,
     int Columns,
     int Rows,
     SKRect[] Cells,
@@ -22,12 +23,28 @@ public readonly record struct SteamGridGeometry(
 {
     /// <summary>The total cell count (columns × rows).</summary>
     public int CellCount => Cells.Length;
+
+    /// <summary>
+    /// Constructs a grid geometry with a default header geometry (useful in tests and isolated layouts).
+    /// </summary>
+    public SteamGridGeometry(
+        int columns,
+        int rows,
+        SKRect[] cells,
+        int[] indexes,
+        float cellWidth,
+        float cellHeight,
+        float scrollX,
+        float maxScroll)
+        : this(default, columns, rows, cells, indexes, cellWidth, cellHeight, scrollX, maxScroll)
+    {
+    }
 }
 
 /// <summary>
 /// Pure layout rules for the Steam poster grid: the responsive column count
 /// for a width, the cell size from the 2:3 poster aspect, the row count that
-/// fits AND keeps the visible cells inside the poster-cache budget, and the
+/// fits below the shared header bar AND keeps the visible cells inside the poster-cache budget, and the
 /// cell rects + game indexes offset by the horizontal scroll. The design
 /// constants live only here, never re-derived at a draw site.
 /// </summary>
@@ -76,7 +93,7 @@ public static class SteamGridLayout
 
     /// <summary>
     /// The grid geometry for a placement: the cell size (from the 2:3 aspect),
-    /// the row count that fits the height and the cache budget, and every
+    /// the row count that fits below the header and the cache budget, and every
     /// visible cell's rect plus the game index it displays. The list is laid
     /// out as horizontal shelves (one per row), so a horizontal scroll reveals
     /// later games instead of sliding the first page off-screen.
@@ -87,15 +104,20 @@ public static class SteamGridLayout
     /// <param name="gameCount">The number of games the grid can draw.</param>
     public static SteamGridGeometry Compute(SKRect bounds, int columns, float scrollX, int gameCount)
     {
+        float scale = bounds.Height > 0 ? bounds.Height / DesignHeight : 1f;
         columns = Math.Max(1, columns);
-        float pad = 16f * (bounds.Width / DesignWidth);
-        float gap = 12f * (bounds.Width / DesignWidth);
+        float pad = 16f * scale;
+        float gap = 12f * scale;
+
+        SteamHeaderGeometry header = SteamHeaderLayout.Compute(bounds);
+        float contentTop = header.HeaderBounds.Bottom + 10f * scale;
+        float contentHeight = Math.Max(1f, bounds.Bottom - pad - contentTop);
 
         float cellWidth = (bounds.Width - pad * 2f - gap * (columns - 1)) / columns;
         cellWidth = Math.Max(1f, cellWidth);
         float cellHeight = cellWidth * PosterAspect;
 
-        int fitRows = Math.Max(1, (int)((bounds.Height - pad * 2f) / (cellHeight + gap)));
+        int fitRows = Math.Max(1, (int)(contentHeight / (cellHeight + gap)));
         int rows = Math.Min(fitRows, Math.Max(1, MaxVisibleCells / columns));
 
         // Each row is an independent shelf of the library; the shelf length
@@ -113,7 +135,7 @@ public static class SteamGridLayout
         var indexes = new int[cells.Length];
         for (int row = 0; row < rows; row++)
         {
-            float y = bounds.Top + pad + row * (cellHeight + gap);
+            float y = contentTop + row * (cellHeight + gap);
             for (int col = 0; col < columns; col++)
             {
                 float x = bounds.Left + pad + col * step - fractional;
@@ -125,7 +147,7 @@ public static class SteamGridLayout
             }
         }
 
-        return new SteamGridGeometry(columns, rows, cells, indexes, cellWidth, cellHeight, clampedScroll, maxScroll);
+        return new SteamGridGeometry(header, columns, rows, cells, indexes, cellWidth, cellHeight, clampedScroll, maxScroll);
     }
 
     /// <summary>
