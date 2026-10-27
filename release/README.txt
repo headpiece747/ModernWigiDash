@@ -25,7 +25,8 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
    No. Everything works with just the app:
      - Clock, Stopwatch, Audio Visualizer, Now Playing, Twitch, Hotkey,
-       Stock & Crypto, Picture & GIF, Weather, Calendar, Text  — all fine.
+       Stock & Crypto, Picture & GIF, Weather, Calendar, Text, To-Do Companion,
+       Steam Library — all fine.
      - Three widgets need a background service:
          Hardware Monitor   <- needs LibreHardwareService
          FPS / Frame Time   <- needs PresentMon Service
@@ -46,19 +47,31 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
-== What's new in v0.8.0 ==
+== What's new in v0.9.0 ==
 
-  - New widgets from the vendor integration: HWiNFO Sensor (pick any sensor the
-    vendor's WigiDash service exposes) and AIDA64 Panel (shows your AIDA64 sensor
-    panel live on the display).
-  - Both telemetry widgets (Hardware Monitor and HWiNFO Sensor) now draw in
-    Gauge / Bar / Value / Graph modes, with text that always fits the widget.
-  - The AIDA64 Panel is placed full-screen by default.
-  - Removed the Spotify widget (Spotify's 2025 Web-API changes gate it behind a
-    paid Premium subscription; the free Now Playing widget covers now-playing).
-  - Reliability: the vendor connection recovers on its own when the service
-    starts or restarts, vendor reads never block the UI, and a broken widget can
-    no longer take the app down.
+  - Native Steam Library Widget:
+      * Discover games automatically from local Steam installations (ACF manifests
+        and VDF libraryfolders parser).
+      * 3 distinct layout strategies: Hero Deck (horizontal scrolling carousel with
+        live process playtime & hero banners), Showcase, and Poster Grid.
+      * Fast zero-allocation Skia rendering with 24-slot LRU cached poster pipeline.
+      * Live tracking of running Steam processes, one-touch launch / terminate.
+      * Persona avatar and profile status display via Steam Community XML feed.
+  - To-Do Companion Widget:
+      * Cozy desktop dragon companion with task management, XP/affection progression,
+        and integrated Pomodoro focus timer.
+  - Swipe Navigation & Gesture Claimant Arbitration:
+      * Page navigation on the display is now purely swipe-driven, removing accidental
+        edge tap triggers.
+      * Intelligent horizontal drag arbitration (IGestureClaimant) allows horizontally
+        scrollable widgets (Steam Library, To-Do Companion, Calendar) to scroll
+        smoothly without accidentally switching pages.
+  - Deep Architecture Modernization:
+      * Unified hardware lifecycle (DisplayDeviceSession) and app shell lifecycle
+        (AppShellLifecycle).
+      * Decoupled telemetry ingestion (TelemetryFeedCoordinator) and weather runtime
+        engine (WeatherRuntimeEngine).
+      * Modernized inspector editor registry and profile workspace architecture.
 
 
 == Data locations & reset ==
@@ -98,19 +111,6 @@ ModernWigiDash — G.Skill WigiDash widget stack
   1. (If you installed telemetry) remove both programs:
      Settings -> Apps -> Installed apps ->
        "LibreHardwareService"     -> Uninstall
-       "Intel PresentMon"         -> Uninstall
-  2. (If you enabled Start with Windows) untick it in the settings hub,
-     or delete the  ModernWigiDash  value under
-     HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
-  3. Delete the ModernWigiDash-win-x64 folder.
-
-== License & credits ==
-
-  ModernWigiDash            MIT  (LICENSE-ModernWigiDash.txt)
-  LibreHardwareService      MPL-2.0  — https://github.com/epinter/LibreHardwareService
-  PresentMon Service        MIT  — https://github.com/GameTechDev/PresentMon
-  See  telemetry\third-party-licenses\NOTICES.txt  for full texts + sources.
-
-  Thanks to ElmorLabs, whose WigiDash service the HWiNFO Sensor and AIDA64
-  Panel widgets read, and who helped with both integrations:
-    https://github.com/ElmorLabs-WigiDash
+       "PresentMon Shared Service" -> Uninstall
+  2. Delete the ModernWigiDash folder.
+  3. (Optional) delete %LOCALAPPDATA%\ModernWigiDash to remove settings.

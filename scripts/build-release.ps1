@@ -56,9 +56,26 @@ if (-not $SkipTelemetry) {
 $LhsRelease = "https://github.com/epinter/LibreHardwareService/releases/download/v$LhsVersion"
 $PmRelease  = "https://github.com/GameTechDev/PresentMon/releases/download/v$PresentMonVersion"
 
+# PresentMon asset names: v2.5.1 and earlier used PresentMon-v<version>.msi,
+# while v2.6.0+ dropped the 'v' in asset filenames (PresentMon-<version>.msi).
+# Probe which asset name exists to guarantee download success.
+$pmMsiName = "PresentMon-$PresentMonVersion.msi"
+$pmMsiUrl  = "$PmRelease/PresentMon-$PresentMonVersion.msi"
+if (-not $SkipTelemetry) {
+    try {
+        $probeV = & curl.exe -I -s -o NUL -w "%{http_code}" -L "$PmRelease/PresentMon-v$PresentMonVersion.msi"
+        if ($probeV -eq "200") {
+            $pmMsiName = "PresentMon-v$PresentMonVersion.msi"
+            $pmMsiUrl  = "$PmRelease/PresentMon-v$PresentMonVersion.msi"
+        }
+    }
+    # Best-effort probe: fallback to un-prefixed asset if probe fails.
+    catch { }
+}
+
 $Downloads = [ordered]@{
     "LibreHardwareService.msi"             = "$LhsRelease/LibreHardwareService.msi"
-    "PresentMon-v$PresentMonVersion.msi"   = "$PmRelease/PresentMon-v$PresentMonVersion.msi"
+    $pmMsiName                             = $pmMsiUrl
     "PresentMon-$PresentMonVersion-x64.exe" = "$PmRelease/PresentMon-$PresentMonVersion-x64.exe"
     "LHS-LICENSE.txt"                      = "https://raw.githubusercontent.com/epinter/LibreHardwareService/main/LICENSE"
     "PresentMon-LICENSE.txt"               = "https://raw.githubusercontent.com/GameTechDev/PresentMon/main/LICENSE.txt"
@@ -131,7 +148,7 @@ if (-not $SkipTelemetry) {
     }
 
     Copy-Item (Join-Path $CacheDir "LibreHardwareService.msi") $lhsDir
-    Copy-Item (Join-Path $CacheDir "PresentMon-v$PresentMonVersion.msi") $pmDir
+    Copy-Item (Join-Path $CacheDir $pmMsiName) $pmDir
     Copy-Item (Join-Path $CacheDir "PresentMon-$PresentMonVersion-x64.exe") $pmDir
     Copy-Item (Join-Path $CacheDir "LHS-LICENSE.txt") $lhsDir
     Copy-Item (Join-Path $CacheDir "PresentMon-LICENSE.txt") $pmDir
@@ -149,7 +166,7 @@ ModernWigiDash redistributes the following third-party components:
 2. PresentMon Service    v$PresentMonVersion
    License: MIT
    Source:  https://github.com/GameTechDev/PresentMon
-   Files:   PresentMon-v$PresentMonVersion.msi, PresentMon-$PresentMonVersion-x64.exe,
+   Files:   $pmMsiName, PresentMon-$PresentMonVersion-x64.exe,
             LICENSE.txt (in PresentMon/)
 
 Full license texts are included next to each component and in this folder.

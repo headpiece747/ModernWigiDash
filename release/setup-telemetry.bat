@@ -5,7 +5,7 @@ title ModernWigiDash - Telemetry Setup
 rem ============================================================
 rem  Installs the two optional telemetry services:
 rem    LibreHardwareService.msi   -> LibreHardwareService service
-rem    PresentMon-v2.5.1.msi      -> PresentMon Shared Service
+rem    PresentMon*.msi            -> PresentMon Shared Service
 rem  Safe to re-run (msiexec repair/upgrade semantics).
 rem ============================================================
 
@@ -20,8 +20,10 @@ if errorlevel 1 (
 cd /d "%~dp0"
 
 set "LHS_MSI=%~dp0telemetry\LibreHardwareService\LibreHardwareService.msi"
-set "PM_MSI=%~dp0telemetry\PresentMon\PresentMon-v2.5.1.msi"
-set "PM_BOOT=%~dp0telemetry\PresentMon\PresentMon-2.5.1-x64.exe"
+set "PM_MSI="
+set "PM_BOOT="
+for %%F in ("%~dp0telemetry\PresentMon\PresentMon*.msi") do set "PM_MSI=%%F"
+for %%F in ("%~dp0telemetry\PresentMon\PresentMon*-x64.exe") do set "PM_BOOT=%%F"
 
 echo.
 echo Installing LibreHardwareService...
@@ -37,14 +39,17 @@ if "!LHS_RC!"=="0" (echo   [OK] LibreHardwareService installed) else (echo   [FA
 
 echo.
 echo Installing PresentMon Shared Service...
-if not exist "%PM_MSI%" (
+if not defined PM_MSI (
+    echo   [FAIL] PresentMon - installer not found in telemetry\PresentMon\
+    set "PM_RC=2"
+) else if not exist "%PM_MSI%" (
     echo   [FAIL] PresentMon - installer not found:
     echo          %PM_MSI%
     set "PM_RC=2"
 ) else (
     start /wait "" msiexec.exe /i "%PM_MSI%" /qn /norestart
     set "PM_RC=!errorlevel!"
-    if not "!PM_RC!"=="0" if exist "%PM_BOOT%" (
+    if not "!PM_RC!"=="0" if defined PM_BOOT if exist "%PM_BOOT%" (
         echo   msiexec exit code !PM_RC! - retrying with the bootstrapper...
         start /wait "" "%PM_BOOT%" /quiet /norestart
         set "PM_RC=!errorlevel!"
@@ -58,8 +63,7 @@ if "!LHS_RC!"=="0" if "!PM_RC!"=="0" (
     echo Start the app and add the Hardware Monitor / FPS + Frame Time widgets.
 ) else (
     echo One or both installers did not complete. Re-run this script after
-    echo resolving the problem, or see the Troubleshooting section of README.txt.
+    echo checking any error messages above.
 )
 echo.
 pause
-endlocal
