@@ -11,7 +11,7 @@ namespace ModernWigiDash.App;
 /// arm only after every module exists) — pinned against this real list by
 /// <c>StartupWiringTests</c>, the way <c>TeardownPlanTests</c> pins the
 /// teardown sequence. The context's module-deref callbacks are null-tolerant
-/// for the pre-module window (MainWindow.Context.cs), so a future reorder
+/// for the pre-module window (WidgetHostEnvironment), so a future reorder
 /// degrades to a benign no-op instead of the historical startup NRE.
 /// </summary>
 internal sealed record StartupWiring(IReadOnlyList<WiringStep> OrderedSteps);

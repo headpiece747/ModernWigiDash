@@ -19,10 +19,10 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext, IInputHostContext, IWidgetTelemetryContext
+public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, IInputHostContext
 {
     private readonly WidgetPluginLoader _loader = new();
-    private ModernWigiDashHostContext _hostContext = new();
+    private WidgetHostEnvironment _hostEnvironment = new();
     private FramePipeline _framePipeline = null!;
     private SkiaFrameCompositor _compositor => _framePipeline.Compositor;
     private FramePump _framePump => _framePipeline.Pump;
@@ -461,10 +461,24 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             log: _profileLog.Write);
     }
 
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread: synchronously when the
+    /// caller is already there, otherwise posted to the dispatcher (fire-and-forget).
+    /// </summary>
+    private void OnUiThread(Action action)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+        _ = Dispatcher.InvokeAsync(action);
+    }
+
     /// <summary>Host modules (input, dialog host, inspector, page tabs): built BEFORE the profile load so a widget's init-time context callback finds them.</summary>
     private void WireHostModules()
     {
-        _hostContext = new ModernWigiDashHostContext(
+        _hostEnvironment = new WidgetHostEnvironment(
             onUiThread: OnUiThread,
             requestRender: () => SkiaCanvas?.InvalidateVisual(),
             requestInspectorRefresh: () => _inspector?.Refresh(),
@@ -497,7 +511,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // receives this instance (it must never build its own — a second
         // instance could never show the device-authorization window it
         // owns).
-        _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, LogError);
+        _dialogHost = new DialogHost(this, _themeApplicator, TryFindResource, _hostEnvironment.LogError);
 
         _inspector = new Inspector.InspectorController(
             new Inspector.TransformFieldBindings(
@@ -518,7 +532,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
                 tryFindResource: TryFindResource),
             () => _selectedWidget,
             _dialogHost,
-            this,
+            _hostEnvironment,
             onProfileChanged: () => _profilePersistence.MarkDirty(),
             commitLocationPick: candidate =>
             {
@@ -557,8 +571,8 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // synchronously here and may call back into the context — the
         // modules must exist (the ordering fact this step's position
         // pins).
-        var loaded = _profilePersistence.Load(_loader, this);
-        _profile = loaded ?? new StarterProfile(_loader, this).Create();
+        var loaded = _profilePersistence.Load(_loader, _hostEnvironment);
+        _profile = loaded ?? new StarterProfile(_loader, _hostEnvironment).Create();
         if (loaded is null)
         {
             _profilePersistence.Save();
@@ -583,7 +597,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             _mutationFunnel,
             _pageManagement,
             _loader,
-            this,
+            _hostEnvironment,
             () => _selectedWidget);
 
         _profileWorkspace = new ProfileWorkspace(
@@ -593,7 +607,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             () => _profile,
             () => _dialogHost,
             _loader,
-            this);
+            _hostEnvironment);
     }
 
     /// <summary>Machine-local settings (ADR-0019): the kill switch + AHK interpreter path, deliberately outside the profile.</summary>
@@ -1163,6 +1177,17 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     void IProfileExportHost.ShowSuccess(string title, string message) => _profileWorkspace.ShowSuccess(title, message);
 
     void IProfileExportHost.ShowError(string title, string message) => _profileWorkspace.ShowError(title, message);
+
+    // ── Widget Host Environment Seams ─────────────────────────
+
+    /// <summary>The decoupled host environment instance.</summary>
+    internal WidgetHostEnvironment HostEnvironment => _hostEnvironment;
+
+    /// <summary>Navigates active page by delta. Delegates to <see cref="WidgetHostEnvironment.NavigatePage"/>.</summary>
+    internal void NavigatePage(int delta) => _hostEnvironment.NavigatePage(delta);
+
+    /// <summary>Launches an AutoHotkey script. Delegates to <see cref="WidgetHostEnvironment.LaunchAutoHotkeyScript"/>.</summary>
+    internal void LaunchAutoHotkeyScript(string scriptPath) => _hostEnvironment.LaunchAutoHotkeyScript(scriptPath);
 
     private void BtnClear_Click(object _, RoutedEventArgs e)
     {
