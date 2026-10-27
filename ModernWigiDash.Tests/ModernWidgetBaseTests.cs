@@ -114,4 +114,49 @@ public class ModernWidgetBaseTests
             }
         }
     }
+    [TestMethod]
+    public async Task LogDiagnostic_InformationalMessage_RoutesToLogInfo()
+    {
+        var context = new TestContext();
+        var widget = new TestWidget();
+        await widget.InitializeAsync(context);
+
+        widget.LogDiagnosticForTest("[CALENDAR] polling started (1800s, background thread)");
+        widget.LogDiagnosticForTest("[TODO] polling started (2000ms, background thread)");
+        widget.LogDiagnosticForTest("[STEAM] polling started (3000ms, background thread)");
+
+        Assert.AreEqual(0, context.Errors.Count, "informational messages must not be logged as errors");
+        Assert.AreEqual(3, context.Infos.Count);
+        StringAssert.Contains(context.Infos[0], "[CALENDAR] polling started");
+        StringAssert.Contains(context.Infos[1], "[TODO] polling started");
+        StringAssert.Contains(context.Infos[2], "[STEAM] polling started");
+    }
+
+    [TestMethod]
+    public async Task LogDiagnostic_FailureMessage_RoutesToLogError()
+    {
+        var context = new TestContext();
+        var widget = new TestWidget();
+        await widget.InitializeAsync(context);
+
+        widget.LogDiagnosticForTest("[CALENDAR] Google: fetch failed, keeping last-known events (Timeout)");
+        widget.LogDiagnosticForTest("CozyTodo: refresh failed (Network error); keeping the last snapshot");
+        widget.LogDiagnosticForTest("Steam: ACF unreadable (appmanifest.acf): Access denied");
+
+        Assert.AreEqual(3, context.Errors.Count, "failure/error messages must route to LogError");
+        Assert.AreEqual(0, context.Infos.Count);
+        StringAssert.Contains(context.Errors[0], "fetch failed");
+        StringAssert.Contains(context.Errors[1], "refresh failed");
+        StringAssert.Contains(context.Errors[2], "ACF unreadable");
+    }
+
+    [TestMethod]
+    public void LogDiagnostic_WithoutContext_DoesNotThrow()
+    {
+        var widget = new TestWidget();
+        // Null Context before initialization: must be null-safe
+        widget.LogDiagnosticForTest("[STEAM] polling started");
+        widget.LogDiagnosticForTest("Steam: poster fetch failed");
+        Assert.IsNotNull(widget);
+    }
 }

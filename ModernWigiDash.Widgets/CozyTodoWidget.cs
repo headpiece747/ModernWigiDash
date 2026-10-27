@@ -93,7 +93,7 @@ public sealed class CozyTodoWidget : ModernWidgetBase, IWidgetEditorProvider, IW
 
         _refresh = new TodoRefreshOwner(
             new TodoProviderFactory(Clock, ProviderFactory),
-            msg => Context?.LogError(msg),
+            LogDiagnostic,
             () => Context?.RequestRender());
         _refresh.Initialize(Provider, TasksJson, CompanionName);
     }

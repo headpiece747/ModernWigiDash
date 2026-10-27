@@ -78,6 +78,32 @@ public abstract class ModernWidgetBase : IModernWidget
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Routes a diagnostic message from background tasks or services: messages
+    /// indicating an error or failure route to <see cref="IModernWigiDashContext.LogError"/>;
+    /// normal lifecycle and progress messages route to <see cref="IModernWigiDashContext.LogInfo"/>.
+    /// Null-safe when called before <see cref="InitializeAsync"/> or after teardown.
+    /// </summary>
+    protected void LogDiagnostic(string message)
+    {
+        if (message.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("rejected", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("unreadable", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("unparseable", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("skipped", StringComparison.OrdinalIgnoreCase))
+        {
+            Context?.LogError(message);
+        }
+        else
+        {
+            Context?.LogInfo(message);
+        }
+    }
+
+    /// <summary>Test seam: routes a diagnostic message through <see cref="LogDiagnostic"/>.</summary>
+    internal void LogDiagnosticForTest(string message) => LogDiagnostic(message);
+
     /// <summary>Draws the widget into the placement rect (see
     /// <see cref="IModernWidget.Render"/>).</summary>
     public abstract void Render(SKCanvas canvas, SKRect bounds);

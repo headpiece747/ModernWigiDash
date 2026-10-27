@@ -168,7 +168,7 @@ public sealed class CalendarWidget : ModernWidgetBase, IWidgetEditorProvider
                 credentials,
                 () => Clock.GetLocalNow().LocalDateTime,
                 TimeSpan.FromMinutes(interval),
-                msg => Context.LogError(msg),
+                LogDiagnostic,
                 () => Context?.RequestRender());
             producer.Start(feeds);
             _producer = producer;

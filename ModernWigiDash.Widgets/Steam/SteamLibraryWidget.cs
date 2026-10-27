@@ -112,13 +112,13 @@ public sealed class SteamLibraryWidget : ModernWidgetBase, IGestureClaimant
         foreach (ISteamLayoutStrategy strategy in _strategies.Values)
             strategy.Invalidate();
 
-        ISteamLibrarySource source = _testSource ?? new SteamLibrarySource(msg => Context?.LogError(msg));
+        ISteamLibrarySource source = _testSource ?? new SteamLibrarySource(LogDiagnostic);
         Action<string> sink = _testLaunchSink ?? (Action<string>)LaunchViaShell;
         TimeProvider clock = _testClock ?? TimeProvider.System;
         var tracker = new SteamProcessTracker(new SteamProcessBridge(clock), sink);
         var api = new SteamWebApiClient(clock, null);
 
-        _service = new SteamLibraryService(source, tracker, api, OnSnapshotPublished, msg => Context?.LogError(msg));
+        _service = new SteamLibraryService(source, tracker, api, OnSnapshotPublished, LogDiagnostic);
         _service.SetFavoritesJson(FavoritesJson);
         _service.SetCredentials(SteamApiKey, SteamId64);
 
