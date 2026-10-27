@@ -511,3 +511,6 @@
 2026-10-27T09:56:40Z	51a5c44	manual	ok	22	0	ok	2936	0	ok
 2026-10-27T10:11:55Z	c6f57a1	manual	ok	22	0	ok	2941	0	ok
 2026-10-27T10:23:27Z	3c79e19	manual	ok	22	0	ok	2943	0	ok
+2026-10-27T11:56:07Z	5652fc1	manual	FAIL	22	1	SKIP	n/a	n/a	SKIP
+2026-10-27T11:57:46Z	5652fc1	manual - FAILED: OnWindowStateChanged_WhenMinimizedAndHideToTray_HidesWindow	ok	22	0	FAIL	2952	1	SKIP
+2026-10-27T11:59:49Z	5652fc1	manual	ok	22	0	ok	2954	0	ok

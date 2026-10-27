@@ -68,10 +68,10 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     // ctor statement.
     private bool _wired;
 
-    /// <summary>The window's lifecycle module (ADR-0018/0019): owns the
+    /// <summary>The window's shell lifecycle module (ADR-0018/0019): owns the
     /// hide-to-tray intercepts, the restore-from-tray state rule, the explicit-quit
-    /// latch, and the session-end standby. The WPF event handlers forward into it.</summary>
-    private WindowLifecycle _lifecycle;
+    /// latch, the notification tray icon, and the session-end standby.</summary>
+    private AppShellLifecycle _shellLifecycle;
 
 #pragma warning disable S125 // input-handling documentation, not commented-out code
     // Mouse & Swipe Gesture Interaction State. The gesture machine, its outcome
@@ -123,12 +123,6 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     private ProfileMutationFunnel _mutationFunnel = null!;
     private ProfileSession _profileSession = null!;
     private ProfileWorkspace _profileWorkspace = null!;
-
-    /// <summary>The notification-area icon (ADR-0018): the show/quit routing
-    /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
-    /// reads (a dead tray falls the close through to a normal exit). Wired by
-    /// the startup Tray step, removed by the plan's TrayDispose step.</summary>
-    private TrayIconController _tray = null!;
 
     /// <summary>The tray surface the Tray wiring step hands to the
     /// controller: null in production (the controller creates the WinForms
@@ -259,27 +253,16 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             dialogHostProvider: () => _dialogHost,
             themeApplicator: _themeApplicator,
             window: this);
-        // The window's lifecycle module (ADR-0018/0019): owns the hide-to-tray
-        // intercepts, the restore-from-tray state rule, the explicit-quit latch,
-        // and the session-end standby. Live providers read the window's WPF state.
-        _lifecycle = new WindowLifecycle(
-            new WindowStateProbes(
-                Wired: () => _wired,
-                CloseBehavior: () => _profile.CloseBehavior,
-                TrayLive: () => _tray.IsLive,
-                IsEnabled: () => IsEnabled,
-                IsVisible: () => IsVisible,
-                State: () => WindowState),
-            new WindowSurface(
-                Hide: Hide,
-                Minimize: () => WindowState = WindowState.Minimized,
-                Show: Show,
-                Activate: () => { _ = Activate(); },
-                ForceNormal: () => WindowState = WindowState.Normal,
-                Close: Close,
-                Shutdown: () => Application.Current?.Shutdown()),
-            new WindowLifecycleHooks(
-                RunSessionEndStandby: () => _sessionEndStandby is { } probe ? probe() : _usbDevice!.TryGoToStandby()));
+        // Deep shell lifecycle module (ADR-0018/0019, Candidate 1): encapsulates
+        // the window state intercepts, tray icon lifecycle, restore rules,
+        // explicit-quit latch, and session-end standby in a unified coordinator.
+        _shellLifecycle = new AppShellLifecycle(
+            window: this,
+            isWired: () => _wired,
+            closeBehavior: () => _profile.CloseBehavior,
+            runSessionEndStandby: () => _sessionEndStandby is { } probe ? probe() : _usbDevice!.TryGoToStandby(),
+            traySurface: _traySurface,
+            trayLog: _trayLog);
         _usbDevice = options.UsbEngine ?? new DisplayDeviceEngine();
         // The engine is inert until Start: construction never probes USB,
         // the window only allocates (or adopts the injected) engine here.
@@ -315,9 +298,9 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         // both paths is owned by the lifecycle module (the minimize now, the
         // hide from a Loaded handler - Hide must run after Show), so the
         // ctor keeps only the two inputs and the Loaded subscription.
-        _lifecycle.RunStartupState(
+        _shellLifecycle.RunStartupState(
             ProcessLifecycle.StartMinimized,
-            _appSettings.MinimizeToTrayOnStartup && _tray.IsLive,
+            _appSettings.MinimizeToTrayOnStartup && _shellLifecycle.IsTrayLive,
             subscribeLoaded: handler => Loaded += (_, _) => handler());
     }
 
@@ -748,19 +731,9 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     /// <summary>Tray icon (ADR-0018): always present, show/quit route to the window seams; BEFORE the wired arm.</summary>
     private void WireTray()
     {
-        // The notification-area icon (ADR-0018): always present, the
-        // single-click and the menu's show item route to ShowFromTray,
-        // the menu's Quit closes through the normal close sequence
-        // (teardown + standby) and then shuts the app down explicitly -
-        // a hidden window's Close does not trip OnLastWindowClose.
-        // BEFORE the wired arm: its handlers forward to the window like
-        // every other module.
-        _tray = new TrayIconController(
-            onShow: ShowFromTray,
-            onQuit: QuitFromTray,
-            log: _trayLog,
-            surface: _traySurface);
-        _tray.Start();
+        // Notification-area icon (ADR-0018, Candidate 1): delegates to
+        // AppShellLifecycle which starts the underlying tray controller and surface.
+        _shellLifecycle.StartTray();
     }
 
     /// <summary>Close intercept (ADR-0018): X/Alt+F4/minimize hide to the tray when opted in and the tray is live.</summary>
@@ -843,7 +816,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         // The tray icon is removed after the profile state has landed (the
         // persist-first guarantee covers the exit affordance: the user who
         // saw the icon go can trust the profile was saved).
-        new TeardownStep("TrayDispose", _tray.Dispose),
+        new TeardownStep("TrayDispose", _shellLifecycle.DisposeTray),
         new TeardownStep("Compositor", _compositor.Dispose)
     ],
     // The engine dispose is the one step that must never be skipped:
@@ -1225,20 +1198,22 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         ShowSettingsDialog();
     }
 
-    // The window's lifecycle (ADR-0018/0019) forwards to the lifecycle module,
+    // Shell lifecycle (ADR-0018/0019, Candidate 1) forwards to AppShellLifecycle,
     // which owns the hide-to-tray intercepts, the restore-from-tray state rule,
     // the explicit-quit latch, and the session-end standby.
-    internal void ShowFromTray() => _lifecycle.ShowFromTray();
+    internal void ShowFromTray() => _shellLifecycle.ShowFromTray();
 
-    internal void QuitFromTray() => _lifecycle.QuitFromTray();
+    internal void QuitFromTray() => _shellLifecycle.QuitFromTray();
 
-    internal void QuitClose() => _lifecycle.QuitClose();
+    internal void QuitClose() => _shellLifecycle.QuitClose();
 
-    private void OnWindowClosing(object? sender, CancelEventArgs e) => _lifecycle.OnWindowClosing(e);
+    private void OnWindowClosing(object? sender, CancelEventArgs e) => _shellLifecycle.OnWindowClosing(e);
 
-    private void OnWindowStateChanged(object? sender, EventArgs e) => _lifecycle.OnWindowStateChanged();
+    private void OnWindowStateChanged(object? sender, EventArgs e) => _shellLifecycle.OnWindowStateChanged();
 
-    internal bool RunSessionEndStandby() => _lifecycle.RunSessionEndStandby();
+    internal bool RunSessionEndStandby() => _shellLifecycle.RunSessionEndStandby();
+
+    internal AppShellLifecycle ShellLifecycle => _shellLifecycle;
 
     /// <summary>
     /// Opens the settings hub (ADR-0018): the close-behavior radios read the
