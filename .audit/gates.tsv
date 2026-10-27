@@ -504,3 +504,5 @@
 2026-10-27T03:37:41Z	3113128	manual	ok	22	0	ok	2912	0	ok
 2026-10-27T03:47:50Z	b76b842	manual	FAIL	22	1	SKIP	n/a	n/a	SKIP
 2026-10-27T03:50:36Z	b76b842	manual	ok	22	0	ok	2923	0	ok
+2026-10-27T09:39:21Z	3acf17f	manual - FAILED: Render_RoutesActionCommand_ToCommandPathEditor, Render_ColorProperty_BuildsColorPickerEditor_AndWritesBackThroughSeam, Render_LocationSearchWidget_BuildsSearchEditorAndCommitsPick, Render_LocationSearchWidget_ResultsListShowsCandidatesWhenPopulated, Render_LocationSearchWidget_PopupPress_SuppressesLostFocusCommit, +3 more	ok	22	0	FAIL	2922	8	SKIP
+2026-10-27T09:41:56Z	3acf17f	manual	ok	22	0	ok	2930	0	ok

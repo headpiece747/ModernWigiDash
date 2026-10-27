@@ -23,11 +23,10 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
 {
     private readonly WidgetPluginLoader _loader = new();
     private ModernWigiDashHostContext _hostContext = new();
-    private readonly SkiaFrameCompositor _compositor = new();
+    private FramePipeline _framePipeline = null!;
+    private SkiaFrameCompositor _compositor => _framePipeline.Compositor;
+    private FramePump _framePump => _framePipeline.Pump;
     private readonly DisplayDeviceEngine _usbDevice;
-
-    /// <summary>Owns the 30 FPS compose→send→repaint cadence (see <see cref="FramePump"/>).</summary>
-    private FramePump _framePump = null!;
 
     /// <summary>The Windows power-mode source wired by WirePowerLifecycle:
     /// paused on suspend, restarted (plus a forced USB reconnect) on resume.
@@ -93,7 +92,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     // with the single encode→pool→coalesce→pace policy and the 33ms pacing the
     // engine's USB writes used; the production encoder (SkiaRgb565Encoder)
     // binds at this one Create site.
-    private FrameDelivery _delivery = null!;
+    private FrameDelivery _delivery => _framePipeline.Delivery;
 
     // The App's file-log vocabulary: one bound DiagLog per log area — the tag
     // binds once at construction (the DiagLog module) instead of being
@@ -383,11 +382,25 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>Frame delivery: the encode + pool + pace pipeline bound to the USB engine's send seam.</summary>
     private void WireFrameDelivery()
     {
-        _delivery = FrameDelivery.Create(
+        var delivery = FrameDelivery.Create(
             encoder: new SkiaRgb565Encoder(),
             send: _usbDevice.SendFrameBytes,
             isReady: () => _usbDevice.CanSendFrames,
             log: _hwLog.Write);
+
+        _framePipeline = new FramePipeline(
+            activePageProvider: () => _profile?.ActivePage,
+            delivery: delivery,
+            requestRepaint: () =>
+            {
+                // The display keeps streaming while the window is hidden to the
+                // tray; only the desktop preview needs the WPF invalidation.
+                // Skipping it when invisible stops 30 FPS of layout/render work
+                // in the background. A repaint fires on the next visible tick,
+                // so a restored window never shows a stale frame.
+                if (IsVisible) SkiaCanvas.InvalidateVisual();
+            },
+            onTick: UpdateUsbBadge);
     }
 
     /// <summary>Telemetry producers: the two direct poll loops (sensor + frame-time) start immediately and stop on close.</summary>
@@ -632,33 +645,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// <summary>Frame pump: the 30 FPS compose + send loop, started after ProfileLoad and FrameDelivery.</summary>
     private void WireFramePump()
     {
-        // Start 30 FPS Skia Render Loop & Hardware Frame Streamer. The
-        // pump composes + sends once per tick, then repaints so the
-        // window draws the same buffer it sent; the badge refresh rides
-        // the tick. The compose gate skips the tick while the delivery is
-        // still writing the previous frame (~55ms bulk write vs 33ms
-        // tick) — the display can't take another frame anyway, so
-        // composing during the write is dead CPU. AFTER ProfileLoad: the
-        // compose reads _profile; AFTER FrameDelivery: it pushes into
-        // _delivery.
-        _framePump = new FramePump(
-            composeAndSend: () =>
-            {
-                _compositor.Compose(_profile.ActivePage);
-                _delivery.Push(_compositor.FrameBuffer);
-            },
-            requestRepaint: () =>
-            {
-                // The display keeps streaming while the window is hidden to the
-                // tray; only the desktop preview needs the WPF invalidation.
-                // Skipping it when invisible stops 30 FPS of layout/render work
-                // in the background. A repaint fires on the next visible tick,
-                // so a restored window never shows a stale frame.
-                if (IsVisible) SkiaCanvas.InvalidateVisual();
-            },
-            onTick: UpdateUsbBadge,
-            composeGate: () => !_delivery.IsSendInFlight);
-        _framePump.Start();
+        _framePipeline.Start();
     }
 
     /// <summary>Power lifecycle: suspend stops the pump, resume restarts it and forces a USB reconnect.</summary>
