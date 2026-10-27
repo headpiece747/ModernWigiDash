@@ -4,657 +4,106 @@
 // </copyright>
 
 using SkiaSharp;
-using System.Runtime.InteropServices;
 
 namespace ModernWigiDash.Hardware.Transport;
 
 /// <summary>
 /// Unified hardware engine for the USB display device.
-/// Uses DisplayHidTransport for all USB communication - no vendor DLL dependencies.
-/// All state is instance-owned: each engine owns its transport and connection
-/// lifecycle. Callers that need one device per process create exactly
-/// one engine (MainWindow does).
-///
-/// Frame delivery (encode → pool → coalesce → paced send) does NOT live here:
-/// the App binds a <see cref="FrameDelivery"/> instance to
-/// <see cref="SendFrameBytes"/> and the engine only owns connection, standby,
-/// and touch. One delivery policy, every transport.
+/// Acts as the primary facade and composition root over <see cref="DisplayDeviceSession"/>.
+/// All state is instance-owned: each engine delegates its transport and connection
+/// lifecycle to a dedicated <see cref="DisplayDeviceSession"/>.
 /// </summary>
 public sealed class DisplayDeviceEngine : IDisposable
 {
-    // -- Connection State --
-    private readonly Func<IDisplayTransport> _transportFactory;
+    private readonly DisplayDeviceSession _session;
+
+    // Preserved for test reflection access in CloseBudgetPolicyTests
+#pragma warning disable CS0649 // Field is assigned via reflection in CloseBudgetPolicyTests
+#pragma warning disable IDE0044 // Add readonly modifier
     private IDisplayTransport? _transport;
-    private volatile ConnectionState _state = ConnectionState.Disconnected;
-    private bool _connecting; // Prevent concurrent connection attempts
-    private readonly Lock _lock = new();
+#pragma warning restore IDE0044
+#pragma warning restore CS0649
 
-    // -- Lifecycle State --
-    private int _isDisposed;
-    private readonly Timer _reconnectTimer;
-
-    // The engine's file-log vocabulary: one DiagLog per connect area, each
-    // binding its tag once at construction (the DiagLog module) so a category
-    // can never drift between the engine's call sites.
-    private readonly DiagLog _tryConnectLog = new("TryConnect", 1);
-    private readonly DiagLog _connectLog = new("Connect", 1);
-    private readonly DiagLog _reconnectLog = new("Reconnect", 1);
-    private readonly DiagLog _disposeLog = new("Dispose", 1);
-    // The standby verdict joins the area vocabulary: the 2026-08-21 on-device
-    // incident made the NOT-confirmed lines load-bearing, and the tag must
-    // match the transport's own STANDBY lines (its GoToStandby writes through
-    // a bound DiagLog of the same tag) — one spelling of the verdict tag.
-    private readonly DiagLog _standbyLog = new("STANDBY", 1);
-
-    /// <summary>
-    /// Test seam: the reconnect timer period (see <see cref="Start"/>).
-    /// Defaults to the backoff policy's first delay — the cadence for the first
-    /// retry after a failure. A successful connect and every failure past the
-    /// first re-arm the timer from <see cref="ReconnectBackoffPolicy"/> instead,
-    /// so this is the floor, not the fixed period.
-    /// </summary>
-    internal TimeSpan ReconnectPeriod { get; set; } = ReconnectBackoffPolicy.FirstDelay;
-
-    /// <summary>
-    /// Connect attempts that failed since the last success. The only state the
-    /// backoff owns: the policy is a pure function of this count, so the engine
-    /// carries a counter rather than a timer, a clock, or a schedule.
-    ///
-    /// Written only inside <see cref="TryConnect"/> and read from the timer
-    /// thread, so it needs no interlocked add: TryConnect's <c>_connecting</c>
-    /// gate admits one attempt at a time, and the read is a Volatile.Read.
-    /// </summary>
-    private int _consecutiveFailures;
-
-    // The never-stall-on-close budgets: read from the transport's close-budget
-    // policy (IDisplayTransport.CloseBudgets), where they are derived strictly
-    // shorter than the worst-case teardown, so the relation holds by
-    // construction instead of by a cross-file pin. A healthy close completes
-    // in well under a second, so the bounds only ever bite for a hung device
-    // (a leaked handle at exit beats a frozen window). Before the first connect
-    // there is no transport to ask, so the HID transport's shared default is
-    // read instead — a value, not a constructed transport. The old spelling
-    // (`?? new DisplayHidTransport()`) allocated a provider list and a logger
-    // on every read, on the reconnect path (2026-09-27).
-    private CloseBudgetPolicy EffectiveBudgets => _transport?.CloseBudgets ?? DisplayHidTransport.DefaultCloseBudgets;
-
-    internal TimeSpan StandbyCloseBudget => EffectiveBudgets.StandbyCloseBudget;
-    internal TimeSpan DisposeAbandonBudget => EffectiveBudgets.DisposeAbandonBudget;
-
-    /// <summary>
-    /// Test seam: inject a transport directly without going through the
-    /// factory (for tests that need to verify the budget reads before a
-    /// connect attempt).
-    /// </summary>
-    internal void SetTransportForTest(IDisplayTransport transport)
+    internal TimeSpan ReconnectPeriod
     {
-        lock (_lock)
-        {
-            _transport = transport;
-        }
+        get => _session.ReconnectPeriod;
+        set => _session.ReconnectPeriod = value;
     }
 
-    // Direct-USB touch polling: the engine owns the transport, reads the touch
-    // report at a 16ms cadence, and normalizes it once via
-    // TouchReport.ToEventType. Idle while not connected (simulation mode) —
-    // the direct-USB loop is the only touch owner.
-    private readonly PollLoop _touchPoll;
+    internal TimeSpan StandbyCloseBudget => _transport?.CloseBudgets.StandbyCloseBudget ?? _session.StandbyCloseBudget;
+    internal TimeSpan DisposeAbandonBudget => _transport?.CloseBudgets.DisposeAbandonBudget ?? _session.DisposeAbandonBudget;
 
-    // -- Public State --
-    /// <summary>The single connection truth — see <see cref="ConnectionState"/>.</summary>
-    public ConnectionState State { get => _state; private set => _state = value; }
+    internal void SetTransportForTest(IDisplayTransport transport)
+    {
+        _transport = transport;
+        _session.SetTransportForTest(transport);
+    }
 
     /// <summary>
-    /// The frame-readiness policy: delivery may push only while the engine is
-    /// Connected. The predicate lives here — with the connection truth it
-    /// describes — not at the app's bind site, so a readiness change (e.g.
-    /// buffering during Connecting) edits one owner.
+    /// Gets the current connection state.
     /// </summary>
-    public bool CanSendFrames => State == ConnectionState.Connected;
+    public ConnectionState State => _session.State;
 
-    // -- Events --
     /// <summary>
-    /// Raised for each normalized hardware touch report. Fired from the
-    /// engine's 16ms touch-poll background thread (a <see cref="PollLoop"/>
-    /// tick), never the UI thread — handlers must marshal (e.g. via
-    /// Dispatcher) before touching WPF state. See <see cref="SimulateTouch"/>
-    /// for the test-driven counterpart.
+    /// Gets a value indicating whether frames can currently be dispatched.
     /// </summary>
-    public event Action<SKPoint, TouchEventType>? OnTouchEvent;
+    public bool CanSendFrames => _session.CanSendFrames;
 
     /// <summary>
-    /// Creates the engine. The constructor is deliberately inert: no connect
-    /// attempt, no background loops — construction must never reach for
-    /// hardware (window field initializers, test hosts). Call <see cref="Start"/>
-    /// to begin connection and touch polling. The transport is constructed
-    /// lazily per connect attempt by the default factory (the real hardware
-    /// transport), so the connect state machine stays drivable by the internal
-    /// factory ctor's fake-transport seam in tests.
+    /// Raised when a normalized touch report is received.
+    /// </summary>
+    public event Action<SKPoint, TouchEventType>? OnTouchEvent
+    {
+        add => _session.OnTouchEvent += value;
+        remove => _session.OnTouchEvent -= value;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DisplayDeviceEngine"/> class.
     /// </summary>
     public DisplayDeviceEngine() : this((Func<IDisplayTransport>?)null)
     {
     }
 
-    /// <summary>
-    /// Creates the engine. The transport is constructed lazily per connect
-    /// attempt via <paramref name="transportFactory"/> (defaults to the real
-    /// hardware transport), so the connect state machine is drivable with a
-    /// fake transport end-to-end.
-    /// </summary>
     internal DisplayDeviceEngine(Func<IDisplayTransport>? transportFactory)
     {
-        _transportFactory = transportFactory ?? (() => new DisplayHidTransport());
-        Log("=== Display Hardware Engine Initializing ===");
-
-        // Direct-USB touch polling: active only while the engine owns the
-        // device (connected, not simulation). One loop module, every hop.
-        _touchPoll = CreateTouchPollLoop();
-
-        // Reconnect timer is created but disarmed until Start().
-        _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
+        _session = new DisplayDeviceSession(transportFactory);
     }
 
-    /// <summary>
-    /// Test seam: an engine bound to an injected transport, without auto-connect
-    /// or background loops. The touch poll loop is created but not started —
-    /// tests drive <see cref="TouchPollTick"/> directly (or call
-    /// <see cref="Start"/> to exercise the loop wiring). The initial state is
-    /// seeded by the caller through <paramref name="initialState"/> — the
-    /// engine's ConnectionState is the one truth; the transport's own
-    /// connection state is only meaningful after a Connect the engine
-    /// observed. The transport
-    /// factory returns this same transport, so a Start() that reaches
-    /// TryConnect reconnects through it instead of NRE-ing.
-    /// </summary>
     internal DisplayDeviceEngine(IDisplayTransport transport, ConnectionState initialState = ConnectionState.Disconnected)
     {
         _transport = transport;
-        _transportFactory = () => transport;
-        State = initialState;
-        _touchPoll = CreateTouchPollLoop();
-        _reconnectTimer = new Timer(ReconnectTick, null, Timeout.Infinite, Timeout.Infinite);
+        _session = new DisplayDeviceSession(transport, initialState);
     }
 
     /// <summary>
-    /// Starts the engine's background work: the 16ms touch poll, the initial
-    /// connection attempt, and the reconnect timer (period:
-    /// <see cref="ReconnectPeriod"/>). Called once by the window after
-    /// construction; calling it again is harmless (the poll loop, the
-    /// connection gate, and the timer are each guarded) but not required.
+    /// Starts the engine's background touch polling loop and initiates connection attempts.
     /// </summary>
-    public void Start()
-    {
-        if (Volatile.Read(ref _isDisposed) != 0) return;
+    public void Start() => _session.Start();
 
-        _touchPoll.Start();
+    internal void ReconnectTick(object? state) => _session.ReconnectTick(state);
 
-        // The transport is deliberately synchronous (ADR-0001), so the initial
-        // connect (WinUSB probe + init, ~100-150ms) must run off the calling
-        // thread — Start() is invoked from the window ctor on the UI thread.
-        // ReconnectTick below already runs on the Timer thread.
-        RunConnectAttempt(_connectLog, "Initial connection failed, will retry via reconnect timer");
+    internal void TouchPollTick() => _session.TouchPollTick();
 
-        // One owner for the reconnect schedule: the same backoff that re-arms it
-        // after every later attempt, so the initial arm cannot drift from it.
-        ArmReconnectTimer();
-    }
-
-#pragma warning disable S1172 // timer callback signature requires the state parameter
-    /// <summary>
-    /// One reconnect-timer tick: reconnects when the engine is alive, not
-    /// connected, and no connect attempt is in flight. Internal so tests can
-    /// drive the gate directly (the <see cref="Start"/>-armed timer is the
-    /// production caller).
-    /// </summary>
-    internal void ReconnectTick(object? _)
-    {
-        bool shouldReconnect;
-        lock (_lock)
-        {
-            shouldReconnect = Volatile.Read(ref _isDisposed) == 0
-                && State != ConnectionState.Connected
-                && !_connecting;
-        }
-        if (!shouldReconnect) return;
-
-        // Re-arm the timer from the backoff BEFORE the attempt: the attempt is
-        // fire-and-forget, so arming afterwards would race the next tick (and
-        // with a doubling period the race would compound). Success re-arms it
-        // again from the reset counter, so a recovered device goes straight
-        // back to the fast first-retry cadence.
-        ArmReconnectTimer();
-
-        RunConnectAttempt(_reconnectLog);
-    }
-#pragma warning restore S1172
+    internal bool TryConnect() => _session.TryConnect();
 
     /// <summary>
-    /// Sets the next reconnect delay from the current failure count. The
-    /// interval (not just the due time) is re-armed too, so the delay grows with
-    /// each failure instead of the timer firing every tick and being ignored.
+    /// Sends an already encoded RGB565 frame to the display.
     /// </summary>
-    private void ArmReconnectTimer()
-    {
-        if (Volatile.Read(ref _isDisposed) != 0) return;
-        TimeSpan delay = ReconnectBackoffPolicy.DelayFor(Volatile.Read(ref _consecutiveFailures));
-        try
-        {
-            _reconnectTimer.Change(delay, delay);
-        }
-        catch (ObjectDisposedException)
-        {
-            // A dispose raced the arm: there is no timer left to re-arm, which
-            // is the outcome the dispose wanted anyway.
-        }
-    }
+    /// <param name="rgb565">Raw RGB565 byte buffer.</param>
+    /// <returns>Verdict of the send operation.</returns>
+    public FrameSendResult SendFrameBytes(ReadOnlyMemory<byte> rgb565) => _session.SendFrameBytes(rgb565);
 
-    /// <summary>One fire-and-forget connect attempt with fault logging — the
-    /// Start and reconnect-timer scaffolding share this shape (the connect
-    /// itself is synchronous per ADR-0001, so it runs off the caller's
-    /// thread). The caller passes the area's bound <paramref name="faultLog"/>
-    /// (Connect for the initial attempt, Reconnect for the timer), so the
-    /// fault and failure lines carry the area's tag instead of a hand-baked
-    /// prefix.</summary>
-    private void RunConnectAttempt(DiagLog faultLog, string? failureMessage = null)
-        => _ = Task.Run(() => TryConnect()).ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                faultLog.Write($"attempt faulted: {t.Exception?.GetBaseException().Message}");
-            }
-            else if (failureMessage is not null && !t.GetAwaiter().GetResult())
-            {
-                faultLog.Write(failureMessage);
-            }
-        }, TaskContinuationOptions.ExecuteSynchronously);
-
-    private PollLoop CreateTouchPollLoop() => new(
-        "TOUCH-DIRECT",
-        TimeSpan.FromMilliseconds(16),
-        ready: () => State == ConnectionState.Connected,
-        tick: TouchPollTick,
-        onTickFailure: () => Log("Touch poll tick failed"),
-        log: msg => Log(msg));
+    internal void SimulateTouch(float x, float y, TouchEventType eventType) => _session.SimulateTouch(x, y, eventType);
 
     /// <summary>
-    /// One direct-USB touch probe: reads the transport's pending report and
-    /// raises <see cref="OnTouchEvent"/> with the SDK-normalized type. This is
-    /// the App-side transport seam — vendor protocol bytes never leave it.
+    /// Attempts to place the display into standby mode under a bounded timeout.
     /// </summary>
-    internal void TouchPollTick()
-    {
-        // Snapshot under the lock: the connect thread swaps/disposes the
-        // transport (SendFrameBytes's pattern) — a lock-free read could probe
-        // a transport mid-dispose.
-        IDisplayTransport? transport;
-        lock (_lock)
-        {
-            transport = _transport;
-        }
-
-        if (transport?.ReadTouch() is not TouchReport report)
-            return;
-
-        OnTouchEvent?.Invoke(new SKPoint(report.X, report.Y), TouchReport.ToEventType(report.Type));
-    }
+    /// <returns><c>true</c> if standby was confirmed; otherwise, <c>false</c>.</returns>
+    public bool TryGoToStandby() => _session.TryGoToStandby();
 
     /// <summary>
-    /// Attempts to connect to the physical device. Deliberately synchronous
-    /// (ADR-0001) — callers run it off the UI thread (see <see cref="Start"/>).
-    /// Guards against concurrent connection attempts to prevent connection churn.
-    /// Internal: the only production driver is the engine's own connect state
-    /// machine (Start, the reconnect timer, the power-resume hop) — no app
-    /// call site pokes it directly.
+    /// Releases all managed and unmanaged resources held by this engine.
     /// </summary>
-    internal bool TryConnect()
-    {
-        // Fast-path: already connected
-        if (State == ConnectionState.Connected)
-        {
-            _tryConnectLog.Write("Already connected, skipping");
-            return true;
-        }
-
-        // Guard against concurrent connection attempts
-        lock (_lock)
-        {
-            if (_connecting || Volatile.Read(ref _isDisposed) != 0)
-            {
-                _tryConnectLog.Write($"Connection in progress or disposed, skipping (state={State})");
-                return State == ConnectionState.Connected;
-            }
-            _connecting = true;
-        }
-
-        try
-        {
-            State = ConnectionState.Connecting;
-
-            // Disconnect any existing transport before attempting new connection
-            DisconnectInternal();
-
-            IDisplayTransport? transport = null;
-            ConnectionState reached = ConnectionState.DeviceNotFound;
-            bool disposedDuringConnect = false;
-
-            try
-            {
-                transport = _transportFactory();
-                reached = transport.Connect();
-            }
-            catch (Exception ex)
-            {
-                _connectLog.Write($"Connection exception: {ex.Message}");
-                reached = ConnectionState.DeviceNotResponding;
-            }
-
-            if (reached == ConnectionState.Connected)
-            {
-                // Dispose() can run while this connect is in flight (the
-                // entry guard predates the assignment). Re-check under the
-                // lock: a disposed engine must not adopt a live transport —
-                // it would never reach standby and the handle would leak.
-                lock (_lock)
-                {
-                    disposedDuringConnect = Volatile.Read(ref _isDisposed) != 0;
-                    if (!disposedDuringConnect)
-                    {
-                        _transport = transport;
-                    }
-                }
-
-                if (disposedDuringConnect)
-                {
-                    DisposeTransport(transport);
-                    reached = ConnectionState.Disconnected;
-                }
-                else
-                {
-                    // Connect() is the single init owner: it already ran
-                    // SendInitCommands (PING + SetBrightness + ClearPage +
-                    // AddWidget + blank framebuffer + GoToScreen) on both the
-                    // WinUSB and LibUsb paths.
-                    State = ConnectionState.Connected;
-                    _consecutiveFailures = 0;
-                    // A recovered device goes straight back to the fast first
-                    // retry cadence instead of waiting out the backoff it had
-                    // accumulated while it was away.
-                    ArmReconnectTimer();
-                    Log("Hardware connection successful!");
-                }
-            }
-            else
-            {
-                // The un-adopted transport is released whether Connect()
-                // returned a failure state or the attempt threw — the orphan rule
-                // a transport that would never reach standby must not leak its
-                // handle (the production transport self-cleans on a failure
-                // return; Dispose is idempotent for it, and the rule holds for
-                // any future transport that allocates on connect).
-                DisposeTransport(transport);
-            }
-
-            if (reached != ConnectionState.Connected && !disposedDuringConnect)
-            {
-                lock (_lock)
-                {
-                    _transport = null;
-                }
-                // The state IS the verdict now: the engine publishes the reason
-                // the transport named instead of flattening every failure to
-                // "no physical device". The badge and this line are the only two
-                // places the four outcomes are spelled, and they spell the same
-                // words.
-                State = reached;
-                _consecutiveFailures++;
-                Log(ConnectVerdict.Line(reached, _consecutiveFailures));
-            }
-
-            return reached == ConnectionState.Connected;
-        }
-        finally
-        {
-            lock (_lock)
-            {
-                _connecting = false;
-            }
-        }
-    }
-
-    /// <summary>Releases an un-adopted transport (the orphan rule): a
-    /// transport the engine never took ownership of must be disposed — it
-    /// would never reach standby and its handle would leak. Safe on null.</summary>
-    private static void DisposeTransport(IDisplayTransport? transport)
-    {
-        transport?.Dispose();
-    }
-
-    /// <summary>
-    /// Sends an already-encoded RGB565 frame to the device. The frame delivery
-    /// policy (pooling, coalescing, pacing) lives in <see cref="FrameDelivery"/>;
-    /// this is the engine's plain transport seam. Takes a
-    /// <see cref="ReadOnlyMemory{T}"/> so the send chain (delivery seam,
-    /// engine, transport) shares one buffer type with zero copies at the
-    /// boundaries.
-    /// </summary>
-    /// <returns>The transport's truthful send result — <see cref="Sdk.FrameSendResult.Refused"/>
-    /// when the engine cannot carry the frame (disposed, no live connection, no
-    /// adopted transport, or an unbacked buffer — the null shape of the
-    /// ReadOnlyMemory seam is a <see cref="ReadOnlyMemory{T}"/> with no backing
-    /// array). The SIZE contract belongs to the
-    /// transport, which alone knows <c>DisplayProtocolConstants.FrameBufferSize</c>
-    /// — the engine forwards what it is handed and relays the transport's
-    /// verdict, so the size rule has one owner.</returns>
-    public FrameSendResult SendFrameBytes(ReadOnlyMemory<byte> rgb565)
-    {
-        // An unbacked memory (the default/null shape) has no array; a backed
-        // but empty buffer is still a frame the transport's size contract
-        // adjudicates — the engine filters only "no buffer at all".
-        if (Volatile.Read(ref _isDisposed) != 0 || State != ConnectionState.Connected || !MemoryMarshal.TryGetArray(rgb565, out _))
-            return FrameSendResult.Refused;
-
-        IDisplayTransport? transport;
-        lock (_lock)
-        {
-            transport = _transport;
-        }
-
-        if (transport == null)
-            return FrameSendResult.Refused;
-
-        return transport.SendFrame(rgb565);
-    }
-
-    /// <summary>
-    /// Simulates a touch event for testing (internal test seam — production
-    /// touch flows through the 16ms poll loop).
-    /// </summary>
-    internal void SimulateTouch(float x, float y, TouchEventType eventType)
-    {
-        OnTouchEvent?.Invoke(new SKPoint(x, y), eventType);
-    }
-
-    /// <summary>
-    /// Disconnects from the device and cleans up resources.
-    /// </summary>
-    private void DisconnectInternal()
-    {
-        IDisplayTransport? oldTransport;
-        lock (_lock)
-        {
-            State = ConnectionState.Disconnected;
-            oldTransport = _transport;
-            _transport = null;
-        }
-
-        // Dispose outside the lock to avoid holding it during I/O — and bounded
-        // off-thread: an in-flight frame write holds the transport's lock for
-        // up to the transport's CloseBound (DisplayHidTransport.CloseBound —
-        // the backend's worst-case stall budget) on a hung device, and close
-        // must never stall on that (the standby pattern — a leaked handle at
-        // exit beats a frozen window); DisposeAbandonBudget is the abandon
-        // point, derived shorter than CloseBound. The timer thread may
-        // also reach this via the reconnect path, where an abandoned dispose
-        // is equally fine.
-        if (oldTransport != null)
-        {
-            // The engine's one bounded-wait sequence (RunBounded): an
-            // abandoned dispose is acceptable on every caller (the reconnect
-            // replaces the transport), so the verdict is logged only when
-            // the disposal itself threw.
-            BoundedWaitVerdict verdict = RunBounded(() => { oldTransport.Dispose(); return true; }, DisposeAbandonBudget);
-            if (verdict.Error is not null)
-            {
-                _disposeLog.Write($"Transport disposal failed or timed out: {verdict.Error.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Writes a log message to the log file.
-    /// </summary>
-    private static void Log(string msg) => FileLog.Write(msg);
-
-    /// <summary>
-    /// The verdict of the engine's one bounded off-thread wait: whether the
-    /// work finished inside the budget (<see cref="Settled"/>), the bool
-    /// verdict it returned (meaningful only when settled), and the exception
-    /// that escaped the work or the wait.
-    /// </summary>
-    private sealed record BoundedWaitVerdict(bool Settled, bool Confirmed, Exception? Error);
-
-    /// <summary>
-    /// The engine's one bounded off-thread wait: runs a blocking vendor call
-    /// on a threadpool thread under an explicit budget and returns the
-    /// truthful verdict. The device's verdict is read from the task's
-    /// <c>Result</c> only once <see cref="Task.Wait(TimeSpan)"/> confirms
-    /// completion (the 2026-08-21 rule: Wait(timeout) reports completion,
-    /// not the result), so the completion-versus-result invariant has one
-    /// owner and the call sites keep only their own log lines.
-    /// </summary>
-    private static BoundedWaitVerdict RunBounded(Func<bool> work, TimeSpan budget)
-    {
-        try
-        {
-            var task = Task.Run(work);
-            bool settled = task.Wait(budget);
-            bool confirmed = false;
-            if (settled)
-            {
-                confirmed = task.Result;
-            }
-            return new BoundedWaitVerdict(settled, confirmed, null);
-        }
-        catch (Exception ex)
-        {
-            // The wait wraps the work's exception in an AggregateException.
-            // The verdict's Error feeds the caller's failure lines, which
-            // want the vendor's own wording (the GetBaseException precedent
-            // in RunConnectAttempt).
-            Exception error = ex is AggregateException { InnerExceptions.Count: > 0 } aggregate
-                ? aggregate.GetBaseException()
-                : ex;
-            return new BoundedWaitVerdict(false, false, error);
-        }
-    }
-
-    /// <summary>
-    /// The non-disposing standby: the dispose path's bounded-wait,
-    /// verdict-reading sequence for a caller that wants the display in its
-    /// vendor sleep state WITHOUT tearing the engine down. The session-end
-    /// path is the production caller: a system shutdown while the display is
-    /// live kills the process mid-frame-stream, the documented wedge case
-    /// (the display has no auto-sleep, stays lit, and the next connect can
-    /// hang on the init blank-frame write until a physical unplug), so the
-    /// standby ritual runs while the session ends. Returns the truthful
-    /// verdict — true only when the transport confirmed the standby writes;
-    /// false when there is no live transport (nothing to standby), the
-    /// bounded wait expired, or the standby threw. Every non-confirmed
-    /// verdict logs through the shared STANDBY vocabulary. Safe to call
-    /// concurrently with <see cref="Dispose"/>: the transport's own
-    /// connection gate degrades a mid-dispose call to a false verdict.
-    /// </summary>
-    public bool TryGoToStandby()
-    {
-        if (Volatile.Read(ref _isDisposed) != 0)
-        {
-            return false;
-        }
-
-        IDisplayTransport? transport;
-        lock (_lock)
-        {
-            transport = _transport;
-        }
-        if (transport is null)
-        {
-            // No device (never connected, or removed): nothing to put to
-            // standby — the expected no-device state, not a failure.
-            return false;
-        }
-
-        // The engine's one bounded-wait sequence (RunBounded): off-thread
-        // under the StandbyCloseBudget (a hung device holds the control
-        // transfer out to its pipe timeout), the verdict read from the
-        // task's Result only once Wait confirms completion — the 2026-08-21
-        // rule owned by the routine, so the call site cannot re-derive it.
-        BoundedWaitVerdict verdict = RunBounded(() => transport.GoToStandby(), StandbyCloseBudget);
-        string? line = verdict.Error is null
-            ? StandbyVerdict.NotConfirmedLine(verdict.Settled, verdict.Confirmed, hasTransport: true, duringDispose: false)
-            : StandbyVerdict.FailureLine(verdict.Error, duringDispose: false);
-        if (line is not null)
-        {
-            _standbyLog.Write(line);
-        }
-        return verdict.Confirmed;
-    }
-
-    /// <summary>
-    /// Releases all resources used by the engine.
-    /// </summary>
-    public void Dispose()
-    {
-        if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
-
-        _touchPoll.Dispose();
-        _reconnectTimer.Dispose();
-
-        // Direct-USB mode owns the device, so the app is responsible for putting
-        // the display into standby when it exits (the standby path's sleep command
-        // turns the backlight off). When the transport is null (no device
-        // attached), there is nothing to put to standby.
-        IDisplayTransport? transport;
-        lock (_lock)
-        {
-            transport = _transport;
-        }
-
-        // The engine's one bounded-wait sequence (RunBounded): a hung device
-        // can hold a control transfer out to its pipe timeout (worst case the
-        // transport's CloseBound), and standby is exactly such a control
-        // transfer. StandbyCloseBudget is the abandon point, derived strictly
-        // shorter than CloseBound, so close can never stall on a hung pipe —
-        // a leaked handle at exit beats a frozen window; on the abandon path
-        // the hung standby is left to run out. (The old rationale — waiting
-        // out an in-flight frame write behind the transport's coarse lock —
-        // retired with that lock: the hot paths no longer serialize, and the
-        // transport's teardown drains in-flight transfers before freeing the
-        // backend.)
-        BoundedWaitVerdict standbyVerdict = RunBounded(() => transport?.GoToStandby() ?? false, StandbyCloseBudget);
-        // The standby verdict is observable: a standby that did not confirm
-        // (no live connection, the control writes failed, or the bounded
-        // wait expired) must not go silent — the display may stay lit on
-        // the Welcome screen, and that is a fact the log must carry. A
-        // throwing standby is the failure line instead. One spelling for
-        // both entry points (the StandbyVerdict module).
-        string? line = standbyVerdict.Error is null
-            ? StandbyVerdict.NotConfirmedLine(standbyVerdict.Settled, standbyVerdict.Confirmed, hasTransport: transport is not null, duringDispose: true)
-            : StandbyVerdict.FailureLine(standbyVerdict.Error, duringDispose: true);
-        if (line is not null)
-        {
-            _standbyLog.Write(line);
-        }
-
-        DisconnectInternal();
-    }
+    public void Dispose() => _session.Dispose();
 }

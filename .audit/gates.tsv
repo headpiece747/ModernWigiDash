@@ -518,3 +518,5 @@
 2026-10-27T12:25:50Z	89f7ad3	manual	FAIL	22	8	SKIP	n/a	n/a	SKIP
 2026-10-27T12:28:08Z	89f7ad3	manual - FAILED: FetchLiveWeatherAsync_WithStubHttp_UpdatesSnapshotStateAndResolvedIdentity, Invalidate_Location_ClearsIdentityAndForcesFetchCadence	ok	22	0	FAIL	2962	2	SKIP
 2026-10-27T12:31:37Z	89f7ad3	manual	ok	22	0	ok	2964	0	ok
+2026-10-27T12:43:35Z	cfeb9f0	manual - FAILED: FakeTransport_CarriesItsOwnBound	ok	22	0	FAIL	2976	1	SKIP
+2026-10-27T12:46:09Z	cfeb9f0	manual	ok	22	0	ok	2977	0	ok

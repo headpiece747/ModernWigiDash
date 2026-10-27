@@ -32,7 +32,7 @@ public sealed class DebtGuardTests
         // before the gate can pass.
         var allowed = new Dictionary<string, string>
         {
-            ["ModernWigiDash.Hardware/Transport/DisplayDeviceEngine.cs"] =
+            ["ModernWigiDash.Hardware/Transport/DisplayDeviceSession.cs"] =
                 "the standby verdict is read only once Wait confirms completion (CONTEXT.md DisplayDeviceEngine), the dispose-abandon budget reads the transport CloseBudgets, and the connect-fault continuation runs on a threadpool thread",
             ["ModernWigiDash.Core/Models/WidgetRehydrator.cs"] =
                 "the profile load runs the widget InitializeAsync/Dispose synchronously inside the load (CONTEXT.md StartupWiring): a synchronous user action, not a tick",
