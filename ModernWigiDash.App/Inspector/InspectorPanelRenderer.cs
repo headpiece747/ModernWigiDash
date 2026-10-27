@@ -1,14 +1,16 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
-using System.Windows.Automation;
+using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
-using System.Windows.Input;
-using System.Windows.Threading;
+using System.Windows.Media;
 using ModernWigiDash.App.Controls;
 using ModernWigiDash.Core.Rendering;
 using ModernWigiDash.Widgets;
-using ModernWigiDash.Widgets.Todo;
 
 namespace ModernWigiDash.App.Inspector;
 
@@ -56,7 +58,8 @@ internal sealed class InspectorCallbacks
 /// changes call <see cref="InspectorCallbacks.ApplyInspectorPropertyValue"/>
 /// — one seam for every property type — and dialogs live behind the callbacks.
 /// Widgets that need special editors implement <see cref="IWidgetEditorProvider"/>
-/// (icon pickers, action-command paths); the renderer never branches on widget types.
+/// (icon pickers, action-command paths); the renderer delegates custom editors
+/// to the pluggable <see cref="InspectorEditorRegistry"/>.
 /// </summary>
 internal static class InspectorPanelRenderer
 {
@@ -177,25 +180,8 @@ internal static class InspectorPanelRenderer
             case WidgetPropertyType.SensorSelector:
                 panel.Children.Add(BuildSensorSelector(desc, callbacks));
                 break;
-            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.LocationSearch:
-                if (widget.ActiveInstance is IWidgetLocationSearch search)
-                {
-                    panel.Children.Add(BuildLocationSearchEditor(desc, search, callbacks));
-                    break;
-                }
-                // The widget advertises the location-search editor without
-                // implementing the contract: degrade to the plain text
-                // editor.
-                panel.Children.Add(BuildTextEditor(desc, callbacks));
-                break;
-            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.KeyCapture:
-                panel.Children.Add(BuildKeyCaptureEditor(desc, callbacks).Editor);
-                break;
-            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.CalendarFeeds:
-                panel.Children.Add(BuildCalendarFeedEditor(desc, callbacks));
-                break;
-            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) == EditorKind.TodoManager:
-                panel.Children.Add(BuildTodoManagerEditor(widget, desc, callbacks));
+            case WidgetPropertyType.Text when provider?.GetEditorKind(desc.Property) is { } kind && InspectorEditorRegistry.Default.TryGetEditor(kind, out var customEditor):
+                panel.Children.Add(customEditor!.BuildEditor(widget, desc, callbacks));
                 break;
             default:
                 // Text or Number
@@ -278,9 +264,6 @@ internal static class InspectorPanelRenderer
         combo.SelectionChanged += (_, _) =>
         {
             string? selectedValue = combo.SelectedValue?.ToString();
-            // Empty values are valid selections (e.g. the weather widget's
-            // "Automatic (by ranking)" Location Match entry) — only a null
-            // selection (nothing chosen) is skipped.
             if (selectedValue is not null)
                 callbacks.ApplyInspectorPropertyValue(desc.Property, selectedValue);
         };
@@ -412,540 +395,34 @@ internal static class InspectorPanelRenderer
         return txt;
     }
 
-    /// <summary>
-    /// The calendar feed editor: one row per feed (kind toggle, label, the
-    /// kind's connection field(s), an enable checkbox, and a remove button) plus
-    /// an "Add feed" button. Every mutation updates the live draft list and
-    /// commits the whole list as a single <c>FeedsJson</c> string through the
-    /// write-back funnel -- the model owns the serialize rule (incomplete feeds
-    /// are dropped), so a half-entered row never persists a broken feed. The
-    /// rows are rebuilt from the persisted value on every inspector refresh, so
-    /// the editor is stateless across rebuilds.
-    /// </summary>
-    private static UIElement BuildCalendarFeedEditor(EditorDescription desc, InspectorCallbacks callbacks)
-    {
-        var rows = new CalendarFeedEditorRows(
-            desc.CurrentValue?.ToString(),
-            commit => callbacks.ApplyInspectorPropertyValue(desc.Property, commit),
-            callbacks.SaveCalendarCredential);
-
-        var addBtn = new Button
-        {
-            Content = "Add feed",
-            Padding = new Thickness(8, 4, 8, 4),
-            Margin = new Thickness(0, 6, 0, 0)
-        };
-
-        var host = new StackPanel();
-
-        void RebuildRows()
-        {
-            // Drop every child (the rows AND the add button), then re-add the
-            // rows followed by the button. The button is re-created each pass so
-            // its handler always closes over the current draft list.
-            host.Children.Clear();
-            for (int i = 0; i < rows.Drafts.Count; i++)
-            {
-                int index = i;
-                host.Children.Add(BuildFeedRow(rows, index, RebuildRows));
-            }
-            host.Children.Add(addBtn);
-        }
-
-        addBtn.Click += (_, _) =>
-        {
-            rows.Add();
-            RebuildRows();
-        };
-
-        RebuildRows();
-        return host;
-    }
+    // ── Preserved Test Seams ─────────────────────────────────
 
     /// <summary>
-    /// Builds the Task Manager editor panel: draft task rows and an add button.
-    /// </summary>
-    private static UIElement BuildTodoManagerEditor(PlacedWidgetInstance widget, EditorDescription desc, InspectorCallbacks callbacks)
-    {
-        var rows = new TodoTaskEditorRows(
-            desc.CurrentValue?.ToString(),
-            json =>
-            {
-                // The commit funnel is the widget's commit capability (the
-                // ITaskCommitter seam): it owns the order (provider write,
-                // state set, refresh) off the persisted string. The persist
-                // leg writes that same string to the profile (the
-                // one-directional rule: the cache never propagates to a
-                // provider, so the funnel is the only task-write path). The
-                // mapper talks to the capability, never a concrete widget type.
-                if (widget.ActiveInstance is not ITaskCommitter committer) return;
-                committer.CommitTasks(json);
-                callbacks.ApplyInspectorPropertyValue(desc.Property, json);
-            });
-
-        var addBtn = new Button
-        {
-            Content = "Add task",
-            Padding = new Thickness(8, 4, 8, 4),
-            Margin = new Thickness(0, 6, 0, 0)
-        };
-
-        var host = new StackPanel();
-
-        void RebuildRows()
-        {
-            host.Children.Clear();
-            for (int i = 0; i < rows.Drafts.Count; i++)
-            {
-                int index = i;
-                host.Children.Add(BuildTodoTaskRow(rows, index, RebuildRows));
-            }
-            host.Children.Add(addBtn);
-        }
-
-        addBtn.Click += (_, _) =>
-        {
-            rows.Add();
-            RebuildRows();
-        };
-
-        RebuildRows();
-        return host;
-    }
-
-    private static UIElement BuildTodoTaskRow(TodoTaskEditorRows rows, int index, Action rebuild)
-    {
-        var draft = rows.Drafts[index];
-        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-
-        var top = new DockPanel();
-        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal };
-        DockPanel.SetDock(btnPanel, Dock.Right);
-
-        var upBtn = new Button
-        {
-            Content = "▲",
-            Padding = new Thickness(6, 2, 6, 2),
-            Margin = new Thickness(2, 0, 0, 0),
-            IsEnabled = index > 0,
-        };
-        AutomationProperties.SetAutomationId(upBtn, $"TodoUp_{index}");
-        upBtn.Click += (_, _) =>
-        {
-            rows.MoveUp(index);
-            rebuild();
-        };
-
-        var downBtn = new Button
-        {
-            Content = "▼",
-            Padding = new Thickness(6, 2, 6, 2),
-            Margin = new Thickness(2, 0, 0, 0),
-            IsEnabled = index < rows.Drafts.Count - 1,
-        };
-        AutomationProperties.SetAutomationId(downBtn, $"TodoDown_{index}");
-        downBtn.Click += (_, _) =>
-        {
-            rows.MoveDown(index);
-            rebuild();
-        };
-
-        var removeBtn = new Button
-        {
-            Content = "Remove",
-            Padding = new Thickness(8, 2, 8, 2),
-            Margin = new Thickness(4, 0, 0, 0),
-        };
-        AutomationProperties.SetAutomationId(removeBtn, $"TodoRemove_{index}");
-        removeBtn.Click += (_, _) =>
-        {
-            rows.Remove(index);
-            rebuild();
-        };
-
-        btnPanel.Children.Add(upBtn);
-        btnPanel.Children.Add(downBtn);
-        btnPanel.Children.Add(removeBtn);
-
-        var check = new CheckBox
-        {
-            Content = "Done",
-            IsChecked = draft.IsDone,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Brushes.White,
-        };
-        AutomationProperties.SetAutomationId(check, $"TodoDone_{index}");
-        check.Checked += (_, _) => rows.SetDone(index, true);
-        check.Unchecked += (_, _) => rows.SetDone(index, false);
-
-        top.Children.Add(check);
-        top.Children.Add(btnPanel);
-        row.Children.Add(top);
-
-        row.Children.Add(BuildConnField("Title", draft.Title, v => rows.SetTitle(index, v), $"TodoTitle_{index}"));
-        row.Children.Add(BuildConnField("Category (optional)", draft.Category, v => rows.SetCategory(index, v), $"TodoCategory_{index}"));
-
-        return row;
-    }
-
-
-    /// <summary>One feed row: the kind combo, the label box, the kind's
-    /// connection field(s), a masked password field (CalDAV only, machine-local),
-    /// the enable checkbox, and the remove button. Field edits route through the
-    /// row-state module (which commits the whole list); the password routes
-    /// through the credential seam, never into the persisted JSON.</summary>
-    private static UIElement BuildFeedRow(CalendarFeedEditorRows rows, int index, Action rebuild)
-    {
-        var draft = rows.Drafts[index];
-        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-
-        // Kind + remove on the first line.
-        var top = new DockPanel();
-        var removeBtn = new Button { Content = "Remove", Padding = new Thickness(8, 2, 8, 2) };
-        AutomationProperties.SetAutomationId(removeBtn, $"CalFeedRemove_{index}");
-        DockPanel.SetDock(removeBtn, Dock.Right);
-        removeBtn.Click += (_, _) =>
-        {
-            rows.Remove(index);
-            rebuild();
-        };
-        var kindCombo = new ComboBox
-        {
-            ItemsSource = new[] { "ics", "caldav" },
-            SelectedItem = draft.Kind,
-            Width = 110,
-            HorizontalAlignment = HorizontalAlignment.Left
-        };
-        AutomationProperties.SetAutomationId(kindCombo, $"CalFeedKind_{index}");
-        kindCombo.SelectionChanged += (_, _) =>
-        {
-            if (kindCombo.SelectedItem is string kind)
-                rows.SetKind(index, kind);
-        };
-        top.Children.Add(kindCombo);
-        top.Children.Add(removeBtn);
-        row.Children.Add(top);
-
-        // Label.
-        var labelBox = new TextBox { Margin = new Thickness(0, 4, 0, 0) };
-        AutomationProperties.SetAutomationId(labelBox, $"CalFeedLabel_{index}");
-        labelBox.Text = draft.Label;
-        labelBox.TextChanged += (_, _) => rows.SetLabel(index, labelBox.Text);
-        row.Children.Add(labelBox);
-
-        // Connection fields: swap between the .ics URL and the CalDAV triple as
-        // the kind changes. A single content host keeps the row stable.
-        var connHost = new ContentControl { Margin = new Thickness(0, 4, 0, 0) };
-        void RebuildConn()
-        {
-            if (string.Equals(draft.Kind, "caldav", StringComparison.Ordinal))
-            {
-                var grid = new StackPanel();
-                grid.Children.Add(BuildConnField("Server", draft.Server, v => rows.SetServer(index, v), $"CalFeedServer_{index}"));
-                grid.Children.Add(BuildConnField("Principal path", draft.PrincipalPath, v => rows.SetPrincipalPath(index, v), $"CalFeedPrincipal_{index}"));
-                grid.Children.Add(BuildConnField("Username", draft.Username, v => rows.SetUsername(index, v), $"CalFeedUsername_{index}"));
-                // The password is machine-local: it never rides the persisted JSON
-                // (the profile travels between machines), so it commits through
-                // the credential seam instead of the draft serialize.
-                grid.Children.Add(BuildPasswordField(index, rows, $"CalFeedPassword_{index}"));
-                connHost.Content = grid;
-            }
-            else
-            {
-                connHost.Content = BuildConnField(".ics URL", draft.Url, v => rows.SetUrl(index, v), $"CalFeedUrl_{index}");
-            }
-        }
-        RebuildConn();
-        kindCombo.SelectionChanged += (_, _) => RebuildConn();
-        row.Children.Add(connHost);
-
-        // Enable toggle.
-        var enable = new CheckBox { Content = "Enabled", IsChecked = draft.Enabled, Foreground = Brushes.White, Margin = new Thickness(0, 4, 0, 0) };
-        AutomationProperties.SetAutomationId(enable, $"CalFeedEnabled_{index}");
-        enable.Checked += (_, _) => rows.SetEnabled(index, true);
-        enable.Unchecked += (_, _) => rows.SetEnabled(index, false);
-        row.Children.Add(enable);
-
-        return row;
-    }
-
-    /// <summary>A labeled single-line field: a caption plus a text box that
-    /// pushes its text through <paramref name="onEdit"/> as it changes. The
-    /// handler is wired after the seed text is set, so the initial population
-    /// does not fire a spurious commit.</summary>
-    private static UIElement BuildConnField(string caption, string seed, Action<string> onEdit, string automationId)
-    {
-        var panel = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
-        panel.Children.Add(new TextBlock { Text = caption, FontSize = 10, Foreground = Brushes.Gray, Margin = new Thickness(0, 0, 0, 2) });
-        var box = new TextBox();
-        AutomationProperties.SetAutomationId(box, automationId);
-        box.Text = seed;
-        box.TextChanged += (_, _) => onEdit(box.Text);
-        panel.Children.Add(box);
-        return panel;
-    }
-
-    /// <summary>A masked CalDAV password field: a caption plus a
-    /// <see cref="PasswordBox"/> that commits its text through the credential
-    /// seam (machine-local, never the persisted JSON) as it changes. The box is
-    /// not seeded (the store holds the secret, not the editor), so typing saves
-    /// immediately and a rebuild shows an empty box with a "saved" hint.</summary>
-    private static UIElement BuildPasswordField(int index, CalendarFeedEditorRows rows, string automationId)
-    {
-        var panel = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
-        panel.Children.Add(new TextBlock { Text = "Password (stored on this machine)", FontSize = 10, Foreground = Brushes.Gray, Margin = new Thickness(0, 0, 0, 2) });
-        var box = new PasswordBox();
-        AutomationProperties.SetAutomationId(box, automationId);
-        box.PasswordChanged += (_, _) => rows.SavePassword(index, box.Password);
-        panel.Children.Add(box);
-        return panel;
-    }
-
-    /// <summary>
-    /// The key-capture editor (the hotkey widget's global-hotkey chord): the
-    /// chord's text box (typed chords commit through the single funnel like
-    /// the plain text editor; the chord vocabulary validates them at
-    /// registration time) plus the "Press keys..." capture. While capturing,
-    /// the box's PreviewKeyDown routes the press through the pure
-    /// <see cref="KeyCaptureModel"/> rules (the modifier order, the
-    /// no-modifier refusal, the modifier-key-as-main-key refusal) and a
-    /// recorded chord writes the box (the TextChanged commit is the single
-    /// write path). Every press during capture is swallowed - a refused press
-    /// never types into the box and corrupts the stored chord; the
-    /// vocabulary's main keys (letters, digits, F1-F24) map to a name, a
-    /// symbol, modifier, or numpad press stays armed (a numpad digit's name
-    /// would spell the same chord as the number row but register a different
-    /// virtual key), Escape cancels, and a focus loss cancels the capture.
+    /// Builds the key capture editor tuple (Editor element and underlying model).
+    /// Preserved test seam delegating to <see cref="KeyCapturePropertyEditor"/>.
     /// </summary>
     internal static (UIElement Editor, KeyCaptureModel Model) BuildKeyCaptureEditor(EditorDescription desc, InspectorCallbacks callbacks)
-    {
-        var model = new KeyCaptureModel(desc.CurrentValue?.ToString() ?? "");
-        var box = new TextBox { Text = model.Chord };
-        box.TextChanged += (_, _) => callbacks.ApplyInspectorPropertyValue(desc.Property, box.Text);
-
-        var btn = new Button
-        {
-            Content = "Press keys...",
-            Padding = new Thickness(8, 2, 8, 2),
-            Margin = new Thickness(4, 0, 0, 0)
-        };
-        btn.Click += (_, _) =>
-        {
-            model.BeginCapture();
-            if (!box.Focus())
-            {
-                // A box that cannot take focus can never receive the press:
-                // the armed capture would be a zombie (no LostFocus can fire),
-                // so the failed focus cancels it.
-                model.CancelCapture();
-            }
-        };
-
-        box.PreviewKeyDown += (_, e) =>
-        {
-            if (!model.IsCapturing) return;
-            Key key = KeyCaptureModel.ResolvePressKey(e.Key, e.SystemKey);
-            if (key == Key.Escape)
-            {
-                e.Handled = true;
-                model.CancelCapture();
-                return;
-            }
-            string? name = KeyCaptureModel.ChordKeyName(key);
-            if (name is null)
-            {
-                // A symbol, modifier, or numpad press: swallowed (the
-                // capture stays armed, the box keeps its text).
-                e.Handled = true;
-                return;
-            }
-            bool captured = model.CaptureKey(
-                name,
-                Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
-                Keyboard.Modifiers.HasFlag(ModifierKeys.Alt),
-                Keyboard.Modifiers.HasFlag(ModifierKeys.Shift),
-                Keyboard.Modifiers.HasFlag(ModifierKeys.Windows));
-            e.Handled = true; // every press during capture stays out of the box
-            if (captured)
-                box.Text = model.Chord; // the TextChanged commit is the write
-        };
-        box.LostFocus += (_, _) => model.CancelCapture();
-
-        var row = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        DockPanel.SetDock(btn, Dock.Right);
-        row.Children.Add(btn);
-        row.Children.Add(box);
-        return (row, model);
-    }
+        => KeyCapturePropertyEditor.BuildKeyCaptureEditor(desc, callbacks);
 
     /// <summary>
-    /// The search-as-you-type Location editor: a TextBox with a results popup,
-    /// debounced (300 ms), stale responses discarded by a version token. Enter or
-    /// focus loss commits the typed text as the property value (the ambiguity
-    /// gate then decides whether it may fetch); picking a result commits the
-    /// candidate's label through <see cref="InspectorCallbacks.CommitLocationPick"/>.
-    /// </summary>
-    private static StackPanel BuildLocationSearchEditor(EditorDescription desc, IWidgetLocationSearch search, InspectorCallbacks callbacks)
-    {
-        // The box seeds from the Location label plus the last resolved
-        // population's compact suffix ("New York, New York, United States ·
-        // 8.4M") — the same shared formatter the search list's lines use, so
-        // the field and the list can never disagree about a population. The
-        // suffix is display-only: an empty label never seeds " · 8.4M" with no
-        // label, and the base label is what commits and searches while the box
-        // still holds the seeded text (a real user edit takes over verbatim).
-        string baseLabel = desc.CurrentValue?.ToString() ?? "";
-        string seed = LocationSearchModel.SeedText(baseLabel, search.CurrentPopulation);
-        var box = new TextBox { Text = seed };
-        var results = new ListBox
-        {
-            MaxHeight = 160,
-            Visibility = Visibility.Collapsed,
-            ItemTemplate = BuildCandidateLineTemplate()
-        };
-        var content = new Border
-        {
-            Background = Brushes.White,
-            BorderBrush = Brushes.Gray,
-            BorderThickness = new Thickness(1),
-            Child = results
-        };
-        var popup = new Popup
-        {
-            PlacementTarget = box,
-            Placement = PlacementMode.Bottom,
-            StaysOpen = false,
-            AllowsTransparency = true,
-            Child = content
-        };
-
-        var version = new SearchVersionToken();
-        bool popupPressed = false;
-        bool syncingText = false;
-        // A mouse press inside the popup (a pick gesture) steals focus from the
-        // box BEFORE the ListBox processes the click — mark it so the LostFocus
-        // commit is skipped (committing would overwrite the pending pick and
-        // close the popup mid-gesture). Refocusing the box clears the mark.
-        content.AddHandler(UIElement.PreviewMouseDownEvent, new MouseButtonEventHandler((_, _) => popupPressed = true), handledEventsToo: true);
-        box.GotFocus += (_, _) => popupPressed = false;
-
-        var debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-        debounce.Tick += async (_, _) =>
-        {
-            debounce.Stop();
-            // The tick's query is the model's rule: the seed's population
-            // suffix searches the base label while the box still holds the
-            // seeded text (no real user edit yet).
-            string query = LocationSearchModel.QueryFor(box.Text, seed, baseLabel);
-            var (outcome, candidates) = await LocationSearchModel.RunSearchTickAsync(search, query, version);
-            ApplySearchResults(results, popup, outcome, candidates);
-        };
-        box.TextChanged += (_, _) =>
-        {
-            if (syncingText) return; // a pick-sync must not restart the search debounce
-            debounce.Stop();
-            debounce.Start();
-        };
-        results.SelectionChanged += (_, _) =>
-        {
-            if (results.SelectedItem is GeocodeCandidate picked)
-            {
-                popup.IsOpen = false;
-                results.Visibility = Visibility.Collapsed;
-                // Keep the box in sync with the pick so a later focus-loss
-                // commit writes the picked label, not the stale typed query.
-                syncingText = true;
-                try { box.Text = picked.Label; }
-                finally { syncingText = false; }
-                callbacks.CommitLocationPick?.Invoke(picked);
-            }
-        };
-        void CommitTypedText()
-        {
-            // The commit rule is the model's: the seeded suffix is
-            // display-only — committing it verbatim would persist "label ·
-            // 9.4k" and degrade the next resolution to a bare-name tie.
-            string committed = LocationSearchModel.CommitText(box.Text, seed, baseLabel);
-            callbacks.ApplyInspectorPropertyValue(desc.Property, committed);
-            popup.IsOpen = false;
-            results.Visibility = Visibility.Collapsed;
-        }
-        box.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Enter) CommitTypedText();
-        };
-        // Focus loss commits too: without it, typed-but-unfocused text would be
-        // silently discarded by the next inspector refresh and the ambiguity
-        // gate would never evaluate the typed name.
-        box.LostFocus += (_, _) =>
-        {
-            // A click inside the popup is a pick in progress (an IsMouseOver
-            // focus steal arrives without one, e.g. keyboard navigation): the
-            // model vetoes the commit so the ListBox can finish the selection.
-            if (!LocationSearchModel.ShouldCommitOnLostFocus(popupPressed, popup.IsOpen && popup.IsMouseOver)) return;
-            CommitTypedText();
-        };
-
-        return new StackPanel { Children = { box, popup } };
-    }
-
-    /// <summary>
-    /// The results list's item template: the candidate label plus a compact
-    /// population suffix when the geocoder reported one ("Berlin, New
-    /// Hampshire, United States · 9.4k") — never the record's ToString dump.
-    /// </summary>
-    private static DataTemplate BuildCandidateLineTemplate()
-    {
-        var template = new DataTemplate();
-        var text = new FrameworkElementFactory(typeof(TextBlock));
-        text.SetBinding(TextBlock.TextProperty, new MultiBinding
-        {
-            Converter = new CandidateLineConverter(),
-            Bindings = { new Binding(nameof(GeocodeCandidate.Label)), new Binding(nameof(GeocodeCandidate.Population)) }
-        });
-        text.SetValue(TextBlock.ForegroundProperty, Brushes.Black);
-        text.SetValue(TextBlock.FontSizeProperty, 12.0);
-        text.SetValue(TextBlock.PaddingProperty, new Thickness(4, 2, 4, 2));
-        template.VisualTree = text;
-        return template;
-    }
-
-    /// <summary>
-    /// Applies one tick decision to the results list and popup: Visible + open
-    /// when candidates arrived, Collapsed + closed otherwise. A stale response
-    /// (a newer tick owns the UI) touches nothing.
+    /// Applies one tick decision to the results list and popup.
+    /// Preserved test seam delegating to <see cref="LocationSearchPropertyEditor"/>.
     /// </summary>
     internal static void ApplySearchResults(ListBox results, Popup popup, LocationSearchTick outcome, IReadOnlyList<GeocodeCandidate>? candidates)
-    {
-        if (outcome == LocationSearchTick.Stale) return;
-        if (outcome == LocationSearchTick.NoSearch || candidates is null || candidates.Count == 0)
-        {
-            results.ItemsSource = null;
-            results.Visibility = Visibility.Collapsed;
-            popup.IsOpen = false;
-            return;
-        }
-
-        results.ItemsSource = candidates;
-        results.Visibility = Visibility.Visible;
-        popup.IsOpen = true;
-    }
+        => LocationSearchPropertyEditor.ApplySearchResults(results, popup, outcome, candidates);
 
     /// <summary>
-    /// Formats one search result line: the candidate label plus a compact
-    /// population suffix when the geocoder reported one ("Berlin, New
-    /// Hampshire, United States · 9.4k"); the bare label when population is 0.
+    /// Formats one search result line with label and compact population suffix.
+    /// Preserved test seam delegating to <see cref="LocationSearchPropertyEditor.CandidateLineConverter"/>.
     /// </summary>
     internal sealed class CandidateLineConverter : IMultiValueConverter
     {
+        private readonly LocationSearchPropertyEditor.CandidateLineConverter _inner = new();
+
         public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
-        {
-            string label = values[0] as string ?? "";
-            double population = values[1] is double p ? p : 0;
-            return population > 0 ? $"{label} · {LocationSearchModel.FormatPopulation(population)}" : label;
-        }
+            => _inner.Convert(values, targetType, parameter, culture);
 
         public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture)
-            => throw new NotSupportedException();
+            => _inner.ConvertBack(value, targetTypes, parameter, culture);
     }
 }
