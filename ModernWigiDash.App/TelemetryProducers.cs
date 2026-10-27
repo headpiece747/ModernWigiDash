@@ -1,119 +1,35 @@
+using System;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
-using ModernWigiDash.Widgets;
 
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// Owns the telemetry producer cluster: the two direct poll loops — sensors
-/// via LibreHardwareService shared memory (ADR-0004), frame-time via the
-/// PresentMon Service (ADR-0003) — with their producer, reader, and
-/// error-dedup state. The window keeps one Start() and one Stop(); the whole
-/// cluster is testable without WPF.
+/// Telemetry producer cluster (ADR-0003/0004): retained as a specialized facade over
+/// <see cref="TelemetryFeedCoordinator"/> for backward compatibility.
 /// </summary>
 internal sealed class TelemetryProducers : IDisposable
 {
-    private readonly LhmSharedMemoryReader _lhsReader;
-    private readonly PresentMonFrameTimeProducer _presentMonProducer;
-    private readonly PollLoop _sensorPoll;
-    private readonly PollLoop _frameTimePoll;
-    private readonly Action<string> _log;
+    private readonly TelemetryFeedCoordinator _coordinator;
 
-    // Message-change dedup for the two error surfaces — one rule, two uses.
-    private readonly LogOnChange _sensorErrors = new();
-    private readonly LogOnChange _frameTimeErrors = new();
-    private readonly LogOnChange _frameTimeDiag = new();
-
-    /// <param name="presentMonNative">The runtime-loaded PresentMon interop
-    /// (injected so tests never load the real DLL).</param>
-    /// <param name="log">Log sink (the window's FileLog line writer).</param>
-    /// <param name="lhsMapSource">The LHS shared-memory map source seam
-    /// (injectable so tests drive the poll tick with an in-memory map); null
-    /// selects the real memory-mapped adapter — the one default, chosen here.</param>
-    /// <param name="targetResolver">The PresentMon tracking-target resolver
-    /// (injectable so tests can stub the foreground window).</param>
     public TelemetryProducers(
         IPresentMonNative presentMonNative,
         Action<string> log,
         ILhmMapSource? lhsMapSource = null,
         TrackedTargetResolver? targetResolver = null)
     {
-        _log = log;
-        _lhsReader = new LhmSharedMemoryReader(lhsMapSource ?? new MemoryMappedLhmMapSource());
-        _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, targetResolver ?? new TrackedTargetResolver());
-
-        // One poll loop per direct producer. The frame-time loop is gated on
-        // the runtime-loaded API library being available; the producer owns
-        // its tracking-target resolution (foreground process + descendants).
-        _sensorPoll = new PollLoop(
-            "SENSOR", TimeSpan.FromSeconds(1), () => true, SensorPollTick, () => { }, log);
-        _frameTimePoll = new PollLoop(
-            "FRAMETIME", TimeSpan.FromSeconds(1), () => presentMonNative.IsAvailable, FrameTimePollTick, () => { }, log);
+        _coordinator = new TelemetryFeedCoordinator(presentMonNative, log, lhsMapSource, targetResolver);
     }
 
-    public void Start()
-    {
-        _sensorPoll.Start();
-        _frameTimePoll.Start();
-    }
+    public void Start() => _coordinator.Start();
 
-    public void Stop()
-    {
-        _sensorPoll.Stop();
-        _frameTimePoll.Stop();
-    }
+    public void Stop() => _coordinator.Stop();
 
-    /// <summary>
-    /// One LHS sensor probe (ADR-0004): reads the LibreHardwareService
-    /// shared-memory map and caches the snapshot in <see cref="LhmSensorStore"/>
-    /// so widgets read it without a service round-trip.
-    /// </summary>
-    internal void SensorPollTick()
-    {
-        var dto = _lhsReader.Poll();
-        string? error = _lhsReader.LastError;
-        if (_sensorErrors.Changed(error) && error != null) _log($"[SENSOR] {error}");
-        LhmSensorStore.UpdateFromDto(dto);
-    }
+    public void Dispose() => _coordinator.Dispose();
 
-    /// <summary>
-    /// One PresentMon probe (ADR-0003): polls the frame-time producer and
-    /// caches the snapshot in <see cref="FrameTimeStore"/> for widgets to read.
-    /// </summary>
-    internal void FrameTimePollTick()
-    {
-        var dto = _presentMonProducer.Poll();
-        // Surface capture-health failures (service ETW dead) alongside the
-        // unavailable state, once per message change.
-        string? error = !dto.IsAvailable || !dto.CaptureHealthy ? dto.ErrorMessage : null;
-        if (_frameTimeErrors.Changed(error) && error != null)
-        {
-            _log($"[FRAMETIME] frame capture unavailable: {error}");
-        }
+    internal void SensorPollTick() => _coordinator.SensorPollTick();
 
-        // Target-transition diagnostics: the structured poll record (resolver
-        // report + trust-policy state + outcome) formatted here, once, and
-        // logged on change only (quiet by design). The outcome distinguishes
-        // the settling window from the frozen-data hold — the two Idle shapes
-        // the DTO alone conflates.
-        var diag = _presentMonProducer.LastDiagnostics;
-        string line = $"fg='{diag.ForegroundTitle}' candidates=[{string.Join(',', diag.Candidates)}] liveRoot={diag.LiveRootPid} streak={diag.ForeignStreak} guard={diag.CheckingAdopted} outcome={diag.Outcome} → pid={dto.ProcessId} fps={dto.Fps:F1} disp={dto.DisplayedFps:F1} avail={dto.IsAvailable} healthy={dto.CaptureHealthy}";
-        if (_frameTimeDiag.Changed(line))
-        {
-            _log($"[FRAMETIME-DIAG] {line}");
-        }
+    internal void FrameTimePollTick() => _coordinator.FrameTimePollTick();
 
-        FrameTimeStore.UpdateFromDto(dto);
-    }
-
-    public void Dispose()
-    {
-        // Join both loops before freeing the native session: PollLoop.Dispose
-        // cancels AND waits (bounded) for an in-flight tick, so a FRAMETIME
-        // tick can never reach PollDynamic after the producer frees its native
-        // query handles below.
-        _sensorPoll.Dispose();
-        _frameTimePoll.Dispose();
-        _presentMonProducer.Dispose();
-    }
+    internal TelemetryFeedCoordinator Coordinator => _coordinator;
 }

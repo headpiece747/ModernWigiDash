@@ -33,10 +33,10 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     /// Held so teardown can dispose it and drop the subscription.</summary>
     private IPowerModeSource _powerModeSource = null!;
 
-    /// <summary>Owns the telemetry producers (sensor + frame-time poll loops).
-    /// The PresentMon interop is injected as a ctor parameter so the window
-    /// can be constructed with a fake in tests (no real DLL load).</summary>
-    private TelemetryProducers _telemetry = null!;
+    /// <summary>Deep telemetry feed coordinator (Candidate 2, ADR-0011): unifies
+    /// sensor polling, frame-time polling, and vendor service access behind
+    /// <see cref="IWidgetTelemetryContext"/>.</summary>
+    private TelemetryFeedCoordinator _telemetry = null!;
 
     /// <summary>The vendor WigiDash service client (ADR-0022): one connection
     /// lifecycle over the vendor's local WCF endpoint, exposing the HWiNFO
@@ -387,13 +387,12 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             onTick: UpdateUsbBadge);
     }
 
-    /// <summary>Telemetry producers: the two direct poll loops (sensor + frame-time) start immediately and stop on close.</summary>
+    /// <summary>Telemetry coordinator: unified poll loops and caches start immediately and stop on close.</summary>
     private void WireTelemetry(IPresentMonNative presentMonNative)
     {
-        // One poll loop per direct producer, owned by the telemetry
-        // module: SENSOR (LHS shared memory, ADR-0004) and FRAMETIME
-        // (PresentMon, ADR-0003) start immediately and stop on close.
-        _telemetry = new TelemetryProducers(presentMonNative, Log);
+        // Deep telemetry feed coordinator (Candidate 2, ADR-0011): unifies
+        // hardware sensor polling, frame-time polling, and vendor service access.
+        _telemetry = new TelemetryFeedCoordinator(presentMonNative, Log);
         _telemetry.Start();
 
         // The engine's Start() above fires the initial connect. Do NOT
@@ -417,7 +416,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         var factory = _vendorServiceFactory ?? (() => new ModernWigiDash.Hardware.Service.WigiDashServiceClient());
         var client = factory();
         _vendorService = client;
-        ModernWigiDash.Hardware.Service.VendorService.SetInstance(client);
+        _telemetry.SetVendorService(client);
     }
 
     /// <summary>Widget catalog: attribute-driven registration plus the catalog UI refresh.</summary>
@@ -473,8 +472,10 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             navigatePage: delta => { if (_profile is { } p) SwitchToPage(p.ActivePageIndex + delta); },
             launchAhkScript: path => _ahkSpawnPolicy.TryLaunch(path, _appSettings),
             saveCalendarCredential: (feedId, pass) => CalendarCredentials.SavePassword(feedId, pass),
-            sensorProvider: LhmSensorStore.TryReadFresh,
-            frameTimeProvider: FrameTimeStore.TryReadFresh);
+            telemetryContext: _telemetry,
+            sensorProvider: _telemetry.TryReadSensors,
+            frameTimeProvider: _telemetry.TryReadFrameTime,
+            vendorServiceProvider: () => _telemetry.VendorClient);
         // Build the host modules (input, inspector, dialog host) BEFORE
         // the profile load. Widget InitializeAsync runs synchronously
         // inside the load and may call back into the context (e.g.
@@ -795,7 +796,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         // disposed client. Null-safe: an absent vendor service is a no-op.
         new TeardownStep("VendorService", () =>
         {
-            ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            _telemetry.SetVendorService(null);
             _vendorService?.Dispose();
             _vendorService = null;
         }),
@@ -1214,6 +1215,8 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     internal bool RunSessionEndStandby() => _shellLifecycle.RunSessionEndStandby();
 
     internal AppShellLifecycle ShellLifecycle => _shellLifecycle;
+
+    internal TelemetryFeedCoordinator TelemetryCoordinator => _telemetry;
 
     /// <summary>
     /// Opens the settings hub (ADR-0018): the close-behavior radios read the

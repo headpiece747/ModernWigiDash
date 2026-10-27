@@ -35,8 +35,10 @@ internal class WidgetHostEnvironment :
     private readonly Action<int>? _navigatePage;
     private readonly Action<string>? _launchAhkScript;
     private readonly Action<string, string>? _saveCalendarCredential;
+    private readonly IWidgetTelemetryContext? _telemetryContext;
     private readonly Func<SensorSnapshotDto?>? _sensorProvider;
     private readonly Func<FrameTimeSnapshotDto?>? _frameTimeProvider;
+    private readonly Func<object?>? _vendorServiceProvider;
     private readonly Action<string>? _logInfoSink;
     private readonly Action<string, Exception?>? _logErrorSink;
 
@@ -59,7 +61,9 @@ internal class WidgetHostEnvironment :
         Func<SensorSnapshotDto?>? sensorProvider = null,
         Func<FrameTimeSnapshotDto?>? frameTimeProvider = null,
         Action<string>? logInfoSink = null,
-        Action<string, Exception?>? logErrorSink = null)
+        Action<string, Exception?>? logErrorSink = null,
+        Func<object?>? vendorServiceProvider = null,
+        IWidgetTelemetryContext? telemetryContext = null)
     {
         _onUiThread = onUiThread ?? (action => action());
         _requestRender = requestRender;
@@ -74,6 +78,8 @@ internal class WidgetHostEnvironment :
         _saveCalendarCredential = saveCalendarCredential;
         _sensorProvider = sensorProvider;
         _frameTimeProvider = frameTimeProvider;
+        _vendorServiceProvider = vendorServiceProvider;
+        _telemetryContext = telemetryContext;
         _logInfoSink = logInfoSink;
         _logErrorSink = logErrorSink;
     }
@@ -182,8 +188,11 @@ internal class WidgetHostEnvironment :
     // ── IWidgetTelemetryContext ─────────────────────────────
 
     /// <inheritdoc/>
-    public SensorSnapshotDto? TryReadSensors() => _sensorProvider?.Invoke();
+    public SensorSnapshotDto? TryReadSensors() => _telemetryContext?.TryReadSensors() ?? _sensorProvider?.Invoke();
 
     /// <inheritdoc/>
-    public FrameTimeSnapshotDto? TryReadFrameTime() => _frameTimeProvider?.Invoke();
+    public FrameTimeSnapshotDto? TryReadFrameTime() => _telemetryContext?.TryReadFrameTime() ?? _frameTimeProvider?.Invoke();
+
+    /// <inheritdoc/>
+    public object? TryGetVendorService() => _telemetryContext?.TryGetVendorService() ?? _vendorServiceProvider?.Invoke();
 }

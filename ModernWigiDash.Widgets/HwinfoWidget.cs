@@ -32,7 +32,8 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
     {
         var (accent, text) = ResolveColors();
 
-        var client = VendorService.Instance;
+        var client = (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient
+            ?? VendorService.Instance;
         if (client == null)
         {
             DrawPlaceholder(canvas, bounds, serviceReady: false);
@@ -79,7 +80,9 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         if (!string.Equals(propertyName, nameof(SensorKey), StringComparison.Ordinal))
             return [];
 
-        var sensors = VendorService.Instance?.Sensors.GetSensorList();
+        var client = (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient
+            ?? VendorService.Instance;
+        var sensors = client?.Sensors.GetSensorList();
         if (sensors == null)
             return [];
 
