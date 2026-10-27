@@ -122,6 +122,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// ordering fact is pinned by StartupWiringTests.</summary>
     private ProfileMutationFunnel _mutationFunnel = null!;
     private ProfileSession _profileSession = null!;
+    private ProfileWorkspace _profileWorkspace = null!;
 
     /// <summary>The notification-area icon (ADR-0018): the show/quit routing
     /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
@@ -584,6 +585,15 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             _loader,
             this,
             () => _selectedWidget);
+
+        _profileWorkspace = new ProfileWorkspace(
+            _profilePersistence,
+            _profileSession,
+            _profileImport,
+            () => _profile,
+            () => _dialogHost,
+            _loader,
+            this);
     }
 
     /// <summary>Machine-local settings (ADR-0019): the kill switch + AHK interpreter path, deliberately outside the profile.</summary>
@@ -1128,7 +1138,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         var dlg = new SaveFileDialog { Filter = "Display Profile (*.json)|*.json", FileName = "MyDisplayProfile.json" };
         if (dlg.ShowDialog() == true)
-            ProfileExportFlow.Run(dlg.FileName, this);
+            _profileWorkspace.ExportToFile(dlg.FileName);
     }
 
     private void ImportProfile()
@@ -1136,28 +1146,23 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         var dlg = new OpenFileDialog { Filter = "Display Profile (*.json)|*.json" };
         if (dlg.ShowDialog() == true)
         {
-            // The import flow owns the verdict sequence (the close-behavior
-            // merge, the one swap site, the post-swap theme offer); the
-            // boundary's size guard and parse are ProfileOps' one funnel, and
-            // the adapter is the flow's production host.
-            ProfileImportFlow.Run(ProfileOps.ImportProfileFile(dlg.FileName, _loader, this), _profileImport);
+            _profileWorkspace.ImportFromFile(dlg.FileName);
         }
     }
 
     // The import flow's host seam (the ADR-0008 image): the adapter module is
     // the production host, so the window carries no host members of its own.
     // The test seam drives the swap through the same production path.
-    internal bool SwapProfileForTest(ProfileLayout imported) => _profileImport.SwapProfile(imported);
+    internal bool SwapProfileForTest(ProfileLayout imported) => _profileWorkspace.SwapProfile(imported);
 
-    // The export flow's host seam (the ADR-0008 image): the window is the
-    // production host, a thin adapter over its profile, theme, and dialog host.
-    ProfileLayout IProfileExportHost.Profile => _profile;
+    // The export flow's host seam (the ADR-0008 image): forwards directly to the workspace.
+    ProfileLayout IProfileExportHost.Profile => _profileWorkspace.ActiveProfile;
 
     ThemeSettings IProfileExportHost.CurrentTheme => ThemeStore.Current;
 
-    void IProfileExportHost.ShowSuccess(string title, string message) => _dialogHost.Info(title, message);
+    void IProfileExportHost.ShowSuccess(string title, string message) => _profileWorkspace.ShowSuccess(title, message);
 
-    void IProfileExportHost.ShowError(string title, string message) => _dialogHost.Error(title, message);
+    void IProfileExportHost.ShowError(string title, string message) => _profileWorkspace.ShowError(title, message);
 
     private void BtnClear_Click(object _, RoutedEventArgs e)
     {
