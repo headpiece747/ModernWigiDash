@@ -47,6 +47,35 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
+== What's new in v0.9.2 ==
+
+  - Physical Hardware Touch & Ergonomics:
+      * Stationary finger hold resilience: continuous raw hardware digitizer polling
+        no longer triggers re-entrancy or touch flapping.
+      * Hardware touch target minimum floor (>= 44x44px) across Calendar chevrons,
+        Now Playing controls, and To-Do Companion tasks.
+      * Strict touch lifecycle: actions execute solely on TouchUp within bounds,
+        preventing contact bounce triggers on TouchDown.
+  - Media Session Cycling:
+      * Reliable cycling across multiple sessions sharing the same browser or app
+        (e.g., YouTube and SoundCloud tabs in Chrome).
+  - Robust Calendar Feeds:
+      * Universal auto-normalization of webcal:// schemes to https:// across UI input,
+        profile imports, and JSON feed configurations.
+  - Universal Widget Touch Contracts:
+      * Architectural contract test suite covering all 10 touch-enabled widgets.
+  - Release Pipeline Hardening:
+      * Pre-flight XAML version validation and post-packaging sandbox smoke tests.
+
+== What's new in v0.9.1 ==
+
+  - Large Media & GIF Decoder:
+      * Support for 100MB+ high-resolution animated GIFs with dynamic frame budgeting.
+  - Physical Touch Gesture Interpreter:
+      * Calibrated tap and drag arbitration for the physical WigiDash digitizer.
+  - Real-Time Dynamic Version Display:
+      * Dynamic version reporting from informational assembly metadata.
+
 == What's new in v0.9.0 ==
 
   - Native Steam Library Widget:
