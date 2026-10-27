@@ -16,7 +16,7 @@ internal enum GesturePageAction
 /// the three fields, so the per-sample outcome is a value, never a heap
 /// allocation on the touch path.
 /// </summary>
-/// <param name="PageAction">Swipe/edge-tap navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
+/// <param name="PageAction">Swipe navigation to apply, or <see cref="GesturePageAction.None"/>.</param>
 /// <param name="RouteToWidgets">True when the sample should be forwarded to the widget compositor.</param>
 /// <param name="WidgetTouchType">Touch type to route to widgets (Down/Move/Up mapping).</param>
 internal readonly record struct GestureOutcome(
@@ -26,12 +26,12 @@ internal readonly record struct GestureOutcome(
 
 /// <summary>
 /// Pure gesture state machine shared by every input source on the WigiDash
-/// display. Owns the swipe/edge-tap/page-switch thresholds and the Down→Move
+/// display. Owns the swipe thresholds and the Down->Move
 /// remapping so the USB-direct touch path and the desktop
 /// mouse all apply one canonical gesture vocabulary.
 ///
 /// Hardware protocol: the display reports Down(1) for initial contact AND
-/// intermediate movement points, and Up(2) for release — a single physical tap
+/// intermediate movement points, and Up(2) for release -- a single physical tap
 /// therefore yields one Down followed by repeated Up samples. The mouse feeds
 /// the same normalized Down/Move/Up sequence.
 /// </summary>
@@ -39,29 +39,11 @@ internal sealed class GestureInterpreter
 {
     public const float SwipeThresholdX = 70f;
     public const float SwipeToleranceY = 80f;
-    public const float TapThreshold = 30f;
-    public const float EdgeLeftX = 60f;
-
-    /// <summary>Derived from the framebuffer geometry: 1016 − 52 (the right
-    /// edge margin) — the mirror of the device's pixel width.</summary>
-    public const float EdgeRightX = ModernWigiDash.Sdk.DisplayGeometry.FramebufferWidth - 52f;
-    public const float EdgeTopY = 200f;
-    public const float EdgeBottomY = 400f;
     public const float MoveSensitivity = 0.5f;
 
     private bool _active;
     private float _startX;
     private float _startY;
-
-    /// <summary>
-    /// True when the point falls in a left/right arrow-tap zone (the canonical
-    /// 60/964 edge columns within the 200–400 y-band). Exposes the zone so
-    /// callers and tests can query it without duplicating the constants.
-    /// </summary>
-    public bool IsInArrowTapZone(float x, float y)
-    {
-        return (x <= EdgeLeftX || x >= EdgeRightX) && y >= EdgeTopY && y <= EdgeBottomY;
-    }
 
     /// <summary>
     /// Feeds one input sample and returns the gesture decision.
@@ -122,12 +104,6 @@ internal sealed class GestureInterpreter
             {
                 return new GestureOutcome(swipe, false, TouchEventType.TouchUp);
             }
-
-            GesturePageAction arrowTap = ArrowTapAction(x, y, deltaX, deltaY, pageCount, activePageIndex);
-            if (arrowTap != GesturePageAction.None)
-            {
-                return new GestureOutcome(arrowTap, false, TouchEventType.TouchUp);
-            }
         }
 
         return new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchUp);
@@ -144,20 +120,6 @@ internal sealed class GestureInterpreter
         }
         if (deltaX < -SwipeThresholdX && activePageIndex < pageCount - 1) return GesturePageAction.NextPage;
         if (deltaX > SwipeThresholdX && activePageIndex > 0) return GesturePageAction.PrevPage;
-        return GesturePageAction.None;
-    }
-
-    /// <summary>Arrow-tap fallback: stationary tap in the left/right edge zones
-    /// (the canonical 60/964 × 200–400 band owned by <see cref="IsInArrowTapZone"/>),
-    /// page-bounded like the swipe.</summary>
-    private GesturePageAction ArrowTapAction(float x, float y, float deltaX, float deltaY, int pageCount, int activePageIndex)
-    {
-        if (Math.Abs(deltaX) >= TapThreshold || Math.Abs(deltaY) >= TapThreshold || !IsInArrowTapZone(x, y))
-        {
-            return GesturePageAction.None;
-        }
-        if (x <= EdgeLeftX && activePageIndex > 0) return GesturePageAction.PrevPage;
-        if (x >= EdgeRightX && activePageIndex < pageCount - 1) return GesturePageAction.NextPage;
         return GesturePageAction.None;
     }
 }

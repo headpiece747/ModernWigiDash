@@ -13,7 +13,9 @@ public enum TouchEventType
     /// <summary>Finger lifted — the tap completion event.</summary>
     TouchUp,
     /// <summary>Finger moved while pressed (drag tracking).</summary>
-    TouchMove
+    TouchMove,
+    /// <summary>Touch session cancelled by the host (e.g. gesture arbitration, page swipe). Widgets must abort active press/drag state without firing actions.</summary>
+    TouchCancel
 }
 
 /// <summary>

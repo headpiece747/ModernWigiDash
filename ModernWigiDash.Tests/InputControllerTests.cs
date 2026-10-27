@@ -63,7 +63,7 @@ public class InputControllerTests
     }
 
     [TestMethod]
-    public void Feed_ArrowRightTap_NavigatesToNextPage()
+    public void Feed_ArrowRightTap_DoesNotNavigate()
     {
         int? navigated = null;
         var page = TwoPages();
@@ -72,11 +72,11 @@ public class InputControllerTests
         controller.Feed(TouchEventType.TouchDown, 990, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 990, 300, suppressWidgetRouting: false);
 
-        Assert.AreEqual(1, navigated);
+        Assert.IsNull(navigated);
     }
 
     [TestMethod]
-    public void Feed_ArrowLeftTap_NavigatesToPreviousPage()
+    public void Feed_ArrowLeftTap_DoesNotNavigate()
     {
         int? navigated = null;
         var page = TwoPages();
@@ -85,7 +85,7 @@ public class InputControllerTests
         controller.Feed(TouchEventType.TouchDown, 30, 300, suppressWidgetRouting: false);
         controller.Feed(TouchEventType.TouchUp, 30, 300, suppressWidgetRouting: false);
 
-        Assert.AreEqual(0, navigated);
+        Assert.IsNull(navigated);
     }
 
     [TestMethod]
@@ -610,4 +610,193 @@ public class InputControllerTests
 
         Assert.AreEqual(0, funnelCalls, "Device touches never manipulate, so the funnel never fires");
     }
+
+
+    private sealed class TrackingWidget : ModernWidgetBase
+    {
+        public List<TouchEventType> ReceivedEvents { get; } = [];
+        public override void OnTouch(SKPoint localPoint, TouchEventType eventType) => ReceivedEvents.Add(eventType);
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+    }
+
+    private sealed class ClaimingWidget : ModernWidgetBase, IGestureClaimant
+    {
+        public bool ClaimsHorizontalDrag => true;
+        public List<TouchEventType> ReceivedEvents { get; } = [];
+        public override void OnTouch(SKPoint localPoint, TouchEventType eventType) => ReceivedEvents.Add(eventType);
+        public override void Render(SKCanvas canvas, SKRect bounds) { }
+    }
+
+    [TestMethod]
+    public void Feed_Swipe_SynthesizesTouchCancelToCapturedWidget()
+    {
+        var tracker = new TrackingWidget();
+        var placed = PlaceWidget(0, 0, 500, 500, tracker);
+        var page = PageWith(placed);
+        int? navigated = null;
+
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 2),
+            () => false,
+            navigateTo: i => navigated = i);
+
+        // Press down on the widget, then swipe left exceeding threshold
+        controller.Feed(TouchEventType.TouchDown, 300, 200, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchUp, 100, 200, suppressWidgetRouting: false);
+
+        Assert.AreEqual(1, navigated, "Swipe must trigger page navigation");
+        CollectionAssert.AreEqual(
+            new[] { TouchEventType.TouchDown, TouchEventType.TouchCancel },
+            tracker.ReceivedEvents,
+            "Captured widget must receive TouchCancel on swipe promotion, never TouchUp");
+    }
+
+    [TestMethod]
+    public void Feed_GestureClaimantWidget_SuppressesPageSwipe()
+    {
+        var claimer = new ClaimingWidget();
+        var placed = PlaceWidget(0, 0, 500, 500, claimer);
+        var page = PageWith(placed);
+        int? navigated = null;
+
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 2),
+            () => false,
+            navigateTo: i => navigated = i);
+
+        // Press down on claiming widget and drag horizontally > 70px
+        controller.Feed(TouchEventType.TouchDown, 300, 200, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchUp, 100, 200, suppressWidgetRouting: false);
+
+        Assert.IsNull(navigated, "Claimant widget must suppress page swipe navigation");
+        CollectionAssert.AreEqual(
+            new[] { TouchEventType.TouchDown, TouchEventType.TouchUp },
+            claimer.ReceivedEvents,
+            "Claimant widget must receive TouchUp since swipe was suppressed");
+    }
+
+    private sealed class FakeInputHost : IInputHostContext
+    {
+        private readonly InputState _state;
+        public int NavigatedTo { get; private set; } = -1;
+        public int Renders { get; private set; }
+
+        public FakeInputHost(InputState state) => _state = state;
+
+        public InputState GetState() => _state;
+        public bool IsDesktopEditMode() => false;
+        public void NavigateTo(int pageIndex) => NavigatedTo = pageIndex;
+        public void RequestRender() => Renders++;
+        public void RouteTouch(PageLayout page, float x, float y, TouchEventType eventType) { }
+        public PlacedWidgetInstance? HitTest(PageLayout page, float x, float y) => null;
+        public void SelectWidget(PlacedWidgetInstance? widget) { }
+        public void OnManipulation(ManipulationChange change) { }
+    }
+
+    [TestMethod]
+    public void InputController_HostContextConstructor_OperatesCorrectly()
+    {
+        var page = TwoPages();
+        var host = new FakeInputHost(StateOf(page, 0, count: 2));
+        var controller = new InputController(host);
+
+        controller.Feed(TouchEventType.TouchDown, 800, 300, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchUp, 550, 300, suppressWidgetRouting: false);
+
+        Assert.AreEqual(1, host.NavigatedTo, "InputController instantiated via IInputHostContext navigates cleanly");
+    }
+
+    [TestMethod]
+    public void Feed_DragOutsideWidget_StillDeliversTouchUpToCapturedWidget()
+    {
+        var tracker = new TrackingWidget();
+        var placed = PlaceWidget(0, 0, 100, 100, tracker);
+        var page = PageWith(placed);
+
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 2),
+            () => false);
+
+        // TouchDown inside widget at (50, 50)
+        controller.Feed(TouchEventType.TouchDown, 50, 50, suppressWidgetRouting: false);
+        // Move outside widget to (150, 150)
+        controller.Feed(TouchEventType.TouchMove, 150, 150, suppressWidgetRouting: false);
+        // Release outside widget at (150, 150)
+        controller.Feed(TouchEventType.TouchUp, 150, 150, suppressWidgetRouting: false);
+
+        CollectionAssert.AreEqual(
+            new[] { TouchEventType.TouchDown, TouchEventType.TouchMove, TouchEventType.TouchUp },
+            tracker.ReceivedEvents,
+            "Captured widget must receive TouchUp even when released outside its bounds");
+    }
+
+    [TestMethod]
+    public void Feed_IntermediateHardwareDownPoints_DoNotOverwriteCapturedWidget()
+    {
+        var tracker = new TrackingWidget();
+        var placed = PlaceWidget(0, 0, 100, 100, tracker);
+        var page = PageWith(placed);
+        int? navigated = null;
+
+        var controller = new InputController(
+            () => StateOf(page, 1, count: 2),
+            () => false,
+            navigateTo: i => navigated = i);
+
+        // First Down inside widget at (50, 50)
+        controller.Feed(TouchEventType.TouchDown, 50, 50, suppressWidgetRouting: false);
+        // Intermediate hardware Down points (hardware protocol sends Down for movements)
+        controller.Feed(TouchEventType.TouchDown, 120, 50, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchDown, 180, 50, suppressWidgetRouting: false);
+        // Release causing swipe (50 to 200 = delta 150 > 70 => PrevPage from page 1 to 0)
+        controller.Feed(TouchEventType.TouchUp, 200, 50, suppressWidgetRouting: false);
+
+        Assert.AreEqual(0, navigated, "Swipe must navigate to page 0");
+        CollectionAssert.Contains(
+            tracker.ReceivedEvents,
+            TouchEventType.TouchCancel,
+            "Widget captured on initial Down must receive TouchCancel even after intermediate hardware Down points");
+    }
+
+    [TestMethod]
+    public void Feed_EdgeSwipe_NavigatesPageEvenOnClaimingWidget()
+    {
+        var claimer = new ClaimingWidget();
+        var placed = PlaceWidget(0, 0, 1016, 592, claimer);
+        var page = PageWith(placed);
+        int? navigated = null;
+
+        // On page 1: edge swipe from left edge (X=20 < EdgeSwipeThreshold=40) towards right (X=150)
+        var controller = new InputController(
+            () => StateOf(page, 1, count: 2),
+            () => false,
+            navigateTo: i => navigated = i);
+
+        controller.Feed(TouchEventType.TouchDown, 20, 300, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchUp, 150, 300, suppressWidgetRouting: false);
+
+        Assert.AreEqual(0, navigated, "Edge swipe must navigate to previous page even on full-screen claimant widget");
+    }
+
+    [TestMethod]
+    public void Feed_PressEmptySpace_DragReleaseOverWidget_DoesNotDeliverTouchUpToWidget()
+    {
+        var tracker = new TrackingWidget();
+        var placed = PlaceWidget(200, 200, 100, 100, tracker);
+        var page = PageWith(placed);
+
+        var controller = new InputController(
+            () => StateOf(page, 0, count: 2),
+            () => false);
+
+        // Press down on empty space at (50, 50)
+        controller.Feed(TouchEventType.TouchDown, 50, 50, suppressWidgetRouting: false);
+        // Drag over the widget and release at (250, 250)
+        controller.Feed(TouchEventType.TouchMove, 250, 250, suppressWidgetRouting: false);
+        controller.Feed(TouchEventType.TouchUp, 250, 250, suppressWidgetRouting: false);
+
+        Assert.AreEqual(0, tracker.ReceivedEvents.Count,
+            "Widget must never receive touch events from a gesture that originated outside it");
+    }
+
 }

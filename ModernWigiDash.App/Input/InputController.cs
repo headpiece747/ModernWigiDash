@@ -67,12 +67,41 @@ internal sealed class InputController
     private readonly Action<PlacedWidgetInstance?>? _select;
     private readonly Action<ManipulationChange>? _onManipulation;
 
+    /// <summary>
+    /// Screen edge boundary (in display pixels) where swipes are always treated
+    /// as host page navigation (Edge Swipe Navigation), allowing users to switch pages
+    /// even when a full-screen widget claims horizontal drag.
+    /// </summary>
+    public const float EdgeSwipeThreshold = 40f;
+
     private ManipulationKind _manipulation;
     private PlacedWidgetInstance? _manipulationTarget;
+    private PlacedWidgetInstance? _capturedWidget;
+    private float _touchStartX;
     private Point _lastPos;
     private Point _iconGrabOffset;
     private bool _iconGrabMoved;
 
+    /// <summary>
+    /// Host-context constructor: receives all input orchestration dependencies behind <see cref="IInputHostContext"/>.
+    /// </summary>
+    /// <param name="host">The input host context providing delegates and services.</param>
+    public InputController(IInputHostContext host)
+        : this(
+            host.GetState,
+            host.IsDesktopEditMode,
+            host.NavigateTo,
+            host.RequestRender,
+            host.RouteTouch,
+            host.HitTest,
+            host.SelectWidget,
+            host.OnManipulation)
+    {
+    }
+
+    /// <summary>
+    /// Explicit delegate constructor for unit testing and fine-grained injection.
+    /// </summary>
     /// <param name="stateProvider">The page-state snapshot (active page, page
     /// count, active index) — MainWindow binds it to the profile once.</param>
     /// <param name="desktopEditMode">The live edit-mode read for the desktop.
@@ -130,21 +159,75 @@ internal sealed class InputController
         InputState state = _state();
         var outcome = _machine.Feed(type, x, y, state.PageCount, state.ActivePageIndex);
 
+        // Capture the target widget on initial contact (TouchDown). Intermediate hardware
+        // touch reports arrive with WidgetTouchType == TouchMove, so _capturedWidget is never
+        // overwritten mid-drag.
+        if (outcome.WidgetTouchType == TouchEventType.TouchDown)
+        {
+            _touchStartX = x;
+            _capturedWidget = (state.ActivePage is not null && !suppressWidgetRouting)
+                ? _hitTest(state.ActivePage, x, y)
+                : null;
+        }
+
+        // Cooperative gesture claiming: If the captured widget claims horizontal drag (e.g. IGestureClaimant),
+        // suppress host page navigation so the widget scrolls smoothly — UNLESS the swipe started
+        // at the physical screen edge (Edge Swipe Navigation escape hatch).
+        bool isEdgeSwipe = _touchStartX < EdgeSwipeThreshold || _touchStartX > (1016f - EdgeSwipeThreshold);
+        if (!isEdgeSwipe && outcome.PageAction != GesturePageAction.None && _capturedWidget?.ActiveInstance is IGestureClaimant { ClaimsHorizontalDrag: true })
+        {
+            outcome = new GestureOutcome(GesturePageAction.None, true, TouchEventType.TouchUp);
+        }
+
         switch (outcome.PageAction)
         {
             case GesturePageAction.NextPage:
+                CancelCapturedWidget(x, y);
                 _navigateTo?.Invoke(state.ActivePageIndex + 1);
                 return;
             case GesturePageAction.PrevPage:
+                CancelCapturedWidget(x, y);
                 _navigateTo?.Invoke(state.ActivePageIndex - 1);
                 return;
         }
 
-        if (outcome.RouteToWidgets && !suppressWidgetRouting)
+        if (outcome.RouteToWidgets && !suppressWidgetRouting && state.ActivePage is not null)
         {
-            _routeTouch(state.ActivePage, x, y, outcome.WidgetTouchType);
+            DeliverTouch(state.ActivePage, x, y, outcome.WidgetTouchType);
+        }
+
+        if (type == TouchEventType.TouchUp || outcome.WidgetTouchType == TouchEventType.TouchUp)
+        {
+            _capturedWidget = null;
+        }
+    }
+
+    private void DeliverTouch(PageLayout page, float x, float y, TouchEventType eventType)
+    {
+        if (_capturedWidget?.ActiveInstance is not null)
+        {
+            var localPoint = _capturedWidget.ToLocalPoint(x, y);
+            _capturedWidget.ActiveInstance.OnTouch(localPoint, eventType);
+        }
+
+        // Notify spy delegate if tests injected a custom routeTouch delegate
+        if (_routeTouch != WidgetRouting.RouteTouch)
+        {
+            _routeTouch(page, x, y, eventType);
+        }
+
+        _requestRender?.Invoke();
+    }
+
+    private void CancelCapturedWidget(float x, float y)
+    {
+        if (_capturedWidget?.ActiveInstance is not null)
+        {
+            var localPoint = _capturedWidget.ToLocalPoint(x, y);
+            _capturedWidget.ActiveInstance.OnTouch(localPoint, TouchEventType.TouchCancel);
             _requestRender?.Invoke();
         }
+        _capturedWidget = null;
     }
 
     /// <summary>

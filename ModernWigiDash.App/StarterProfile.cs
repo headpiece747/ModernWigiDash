@@ -3,7 +3,7 @@ using ModernWigiDash.Core.Plugins;
 namespace ModernWigiDash.App;
 
 /// <summary>
-/// Defines the default 8-page starter profile. The layout spec is pure,
+/// Defines the default 9-page starter profile. The layout spec is pure,
 /// immutable data (<see cref="Layout"/>): page names, plugin ids,
 /// coordinates. <see cref="Create"/> rehydrates it through the plugin loader.
 /// Tests and tooling can read <see cref="Layout"/> without instantiating
@@ -75,6 +75,11 @@ internal sealed class StarterProfile
         new StarterPage("FPS / Frame Time",
         [
             new StarterPlacement("frame_time", 0, 0, 1016, 592)
+        ]),
+
+        new StarterPage("Steam Library",
+        [
+            new StarterPlacement("steam_library", 0, 0, 1016, 592)
         ])
     ];
 

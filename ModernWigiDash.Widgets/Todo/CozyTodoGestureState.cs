@@ -68,6 +68,13 @@ internal sealed class CozyTodoGestureState
         {
             switch (eventType)
             {
+                case TouchEventType.TouchCancel:
+                    for (int i = 0; i < _touches.Length; i++)
+                    {
+                        _touches[i].InUse = false;
+                    }
+                    break;
+
                 case TouchEventType.TouchDown:
                     int freeIdx = -1;
                     for (int i = 0; i < _touches.Length; i++)
@@ -78,6 +85,13 @@ internal sealed class CozyTodoGestureState
                             break;
                         }
                     }
+                    if (freeIdx < 0)
+                    {
+                        // Fail-safe: clear stuck slots so widget never permanently exhausts touches
+                        for (int i = 0; i < _touches.Length; i++) _touches[i].InUse = false;
+                        freeIdx = 0;
+                    }
+
                     if (freeIdx >= 0)
                     {
                         _touches[freeIdx] = new ActiveTouch

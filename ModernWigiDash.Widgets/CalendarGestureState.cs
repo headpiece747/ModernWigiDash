@@ -166,6 +166,14 @@ internal sealed class CalendarGestureState
     /// gesture; a release without its contact is not a gesture.</summary>
     public void Feed(SKPoint localPoint, TouchEventType eventType)
     {
+        if (eventType == TouchEventType.TouchCancel)
+        {
+            _touchDown = null;
+            _isDraggingDetail = false;
+            _isDraggingAgenda = false;
+            return;
+        }
+
         if (eventType == TouchEventType.TouchDown)
         {
             _touchDown = localPoint;

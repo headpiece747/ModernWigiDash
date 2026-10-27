@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using ModernWigiDash.App.Hotkey;
+using ModernWigiDash.App.Input;
 using ModernWigiDash.App.Power;
 using ModernWigiDash.App.PresentMon;
 using ModernWigiDash.App.Theming;
@@ -18,7 +19,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace ModernWigiDash.App;
 
-public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
+public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHost, IProfileExportHost, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext, IInputHostContext
 {
     private readonly WidgetPluginLoader _loader = new();
     private readonly SkiaFrameCompositor _compositor = new();
@@ -460,19 +461,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         // edit-mode manipulation + the press orchestration. All input
         // sources cross its source-aware surface; page-switch UI work
         // stays here.
-        _inputController = new Input.InputController(
-            // _profile is assigned by the ProfileLoad step below, before
-            // any input event can run — the lambda only dereferences it
-            // at invoke time.
-            () => new Input.InputState(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex),
-            // The desktop's live edit-mode read: the controller derives
-            // the manipulation/routing veto from the source, so the call
-            // sites pass coordinates and the source only.
-            () => _compositor.IsEditMode,
-            navigateTo: SwitchToPage,
-            requestRender: () => SkiaCanvas.InvalidateVisual(),
-            select: SelectWidget,
-            onManipulation: HandleManipulationChange);
+        _inputController = new Input.InputController(this);
 
         // One stateful DialogHost for the whole window: the inspector
         // receives this instance (it must never build its own — a second
@@ -1287,4 +1276,15 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     void ISettingsHubHost.CommitMinimizeToTrayOnStartup(bool enabled) => _settingsCommits.CommitMinimizeToTrayOnStartup(enabled);
 
     private static void Log(string msg) => FileLog.Write(msg);
+
+    // ── IInputHostContext implementation ──────────────────────
+    InputState IInputHostContext.GetState() => new(_profile.ActivePage, _profile.Pages.Count, _profile.ActivePageIndex);
+    bool IInputHostContext.IsDesktopEditMode() => _compositor.IsEditMode;
+    void IInputHostContext.NavigateTo(int pageIndex) => SwitchToPage(pageIndex);
+    void IInputHostContext.RequestRender() => SkiaCanvas.InvalidateVisual();
+    void IInputHostContext.RouteTouch(Core.Models.PageLayout page, float x, float y, TouchEventType eventType) => WidgetRouting.RouteTouch(page, x, y, eventType);
+    PlacedWidgetInstance? IInputHostContext.HitTest(Core.Models.PageLayout page, float x, float y) => WidgetRouting.HitTest(page, x, y);
+    void IInputHostContext.SelectWidget(PlacedWidgetInstance? widget) => SelectWidget(widget);
+    void IInputHostContext.OnManipulation(ManipulationChange change) => HandleManipulationChange(change);
+
 }

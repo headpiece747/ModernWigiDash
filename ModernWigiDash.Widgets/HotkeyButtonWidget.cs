@@ -204,10 +204,13 @@ public class HotkeyButtonWidget : ModernWidgetBase, IWidgetEditorProvider, IWidg
             _isPressed = true;
             Context?.RequestRender();
         }
-        else if (eventType == TouchEventType.TouchUp)
+        else if (eventType is TouchEventType.TouchUp or TouchEventType.TouchCancel)
         {
             _isPressed = false;
-            _ = _runner.RunAsync();
+            if (eventType == TouchEventType.TouchUp)
+            {
+                _ = _runner.RunAsync();
+            }
             Context?.RequestRender();
         }
     }

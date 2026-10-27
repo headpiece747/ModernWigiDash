@@ -11,13 +11,13 @@ public class StarterProfileTests
     private static readonly string[] ExpectedPageNames =
     [
         "Main Dashboard", "To-Do Companion", "Calendar", "Now Playing", "Weather Forecast",
-        "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time"
+        "Twitch & Picture", "Hardware Monitor", "FPS / Frame Time", "Steam Library"
     ];
 
     // ── layout spec (pure data — no widget instantiation, no loader/context) ──
 
     [TestMethod]
-    public void Layout_DefinesSevenPagesInExpectedOrder()
+    public void Layout_DefinesExpectedPagesInOrder()
     {
         CollectionAssert.AreEqual(ExpectedPageNames, StarterProfile.Layout.Select(p => p.Name).ToArray());
     }
@@ -70,6 +70,19 @@ public class StarterProfileTests
                 "ticker_stock", "text_label", "hotkey_button", "stopwatch_timer"
             },
             dashboard.Placements.Select(p => p.PluginId).ToArray());
+    }
+
+    [TestMethod]
+    public void SteamLibraryPage_ContainsSteamLibraryPlacement()
+    {
+        var steamPage = StarterProfile.Layout.FirstOrDefault(p => p.Name == "Steam Library");
+        Assert.IsNotNull(steamPage, "StarterProfile must include a 'Steam Library' page");
+        Assert.AreEqual(1, steamPage.Placements.Count);
+        Assert.AreEqual("steam_library", steamPage.Placements[0].PluginId);
+        Assert.AreEqual(0f, steamPage.Placements[0].X);
+        Assert.AreEqual(0f, steamPage.Placements[0].Y);
+        Assert.AreEqual(CanvasWidth, steamPage.Placements[0].Width);
+        Assert.AreEqual(CanvasHeight, steamPage.Placements[0].Height);
     }
 
     // ── Create(): rehydration through the loader/context seam ──

@@ -15,8 +15,10 @@ namespace ModernWigiDash.Widgets.Steam;
 /// lifecycle, property configuration, and header command arbitration.
 /// </summary>
 [WidgetMetadata("steam_library", "Steam Library", Category = "Games", DefaultGridSize = GridSizePreset.Size5x4)]
-public sealed class SteamLibraryWidget : ModernWidgetBase
+public sealed class SteamLibraryWidget : ModernWidgetBase, IGestureClaimant
 {
+    /// <summary>Claims horizontal drag gestures for Poster Grid and Showcase modes so page swipes do not hijack scrolling.</summary>
+    public bool ClaimsHorizontalDrag => ActiveMode is SteamLayoutMode.Grid or SteamLayoutMode.Showcase;
     /// <summary>The long-press duration that toggles a favorite (a shorter press is a launch tap).</summary>
     internal static readonly TimeSpan LongPress = TimeSpan.FromMilliseconds(600);
 
@@ -157,6 +159,13 @@ public sealed class SteamLibraryWidget : ModernWidgetBase
         SteamLibraryService? service = _service;
         if (service is null)
             return;
+
+        if (eventType == TouchEventType.TouchCancel)
+        {
+            _touchDownPoint = null;
+            _touchDownUtc = null;
+            return;
+        }
 
         if (eventType == TouchEventType.TouchDown)
         {

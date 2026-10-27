@@ -120,27 +120,27 @@ public class GestureInterpreterTests
     }
 
     [TestMethod]
-    public void TapLeftEdge_GoesBackToPreviousPage()
+    public void TapLeftEdge_DoesNotNavigate_RoutesToWidgets()
     {
         var g = NewInterpreter();
         g.Feed(TouchEventType.TouchDown, 30, 300, TwoPages, LastPage);
 
         var o = g.Feed(TouchEventType.TouchUp, 30, 300, TwoPages, LastPage);
 
-        Assert.AreEqual(GesturePageAction.PrevPage, o.PageAction);
-        Assert.IsFalse(o.RouteToWidgets);
+        Assert.AreEqual(GesturePageAction.None, o.PageAction);
+        Assert.IsTrue(o.RouteToWidgets);
     }
 
     [TestMethod]
-    public void TapRightEdge_AdvancesToNextPage()
+    public void TapRightEdge_DoesNotNavigate_RoutesToWidgets()
     {
         var g = NewInterpreter();
         g.Feed(TouchEventType.TouchDown, 990, 300, TwoPages, FirstPage);
 
         var o = g.Feed(TouchEventType.TouchUp, 990, 300, TwoPages, FirstPage);
 
-        Assert.AreEqual(GesturePageAction.NextPage, o.PageAction);
-        Assert.IsFalse(o.RouteToWidgets);
+        Assert.AreEqual(GesturePageAction.None, o.PageAction);
+        Assert.IsTrue(o.RouteToWidgets);
     }
 
     [TestMethod]
@@ -268,72 +268,26 @@ public class GestureInterpreterTests
     }
 
     [TestMethod]
-    public void ArrowTap_AtLeftEdgeBoundary_Navigates()
+    public void StationaryTap_AtLeftEdgeBoundary_DoesNotNavigate()
     {
         var g = NewInterpreter();
         g.Feed(TouchEventType.TouchDown, 60, 200, TwoPages, LastPage);
 
         var o = g.Feed(TouchEventType.TouchUp, 60, 200, TwoPages, LastPage);
 
-        Assert.AreEqual(GesturePageAction.PrevPage, o.PageAction);
-    }
-
-    [TestMethod]
-    public void ArrowTap_JustOutsideLeftEdge_DoesNotNavigate()
-    {
-        var g = NewInterpreter();
-        g.Feed(TouchEventType.TouchDown, 61, 300, TwoPages, LastPage);
-
-        var o = g.Feed(TouchEventType.TouchUp, 61, 300, TwoPages, LastPage);
-
         Assert.AreEqual(GesturePageAction.None, o.PageAction);
         Assert.IsTrue(o.RouteToWidgets);
     }
 
-    // ------------------------------------------------------------------
-    // Arrow-tap zone helper: MainWindow uses it to decide whether an edit-mode
-    // press should start a widget manipulation or be fed to the machine.
-    // ------------------------------------------------------------------
-
     [TestMethod]
-    public void IsInArrowTapZone_LeftEdgeCenterY_True()
+    public void StationaryTap_AtRightEdgeBoundary_DoesNotNavigate()
     {
-        Assert.IsTrue(NewInterpreter().IsInArrowTapZone(30, 300));
-    }
+        var g = NewInterpreter();
+        g.Feed(TouchEventType.TouchDown, 964, 300, TwoPages, FirstPage);
 
-    [TestMethod]
-    public void IsInArrowTapZone_RightEdgeCenterY_True()
-    {
-        Assert.IsTrue(NewInterpreter().IsInArrowTapZone(990, 300));
-    }
+        var o = g.Feed(TouchEventType.TouchUp, 964, 300, TwoPages, FirstPage);
 
-    [TestMethod]
-    public void IsInArrowTapZone_Center_False()
-    {
-        Assert.IsFalse(NewInterpreter().IsInArrowTapZone(500, 300));
-    }
-
-    [TestMethod]
-    public void IsInArrowTapZone_LeftEdgeAboveZone_False()
-    {
-        Assert.IsFalse(NewInterpreter().IsInArrowTapZone(30, 199));
-    }
-
-    [TestMethod]
-    public void IsInArrowTapZone_LeftEdgeBelowZone_False()
-    {
-        Assert.IsFalse(NewInterpreter().IsInArrowTapZone(30, 401));
-    }
-
-    [TestMethod]
-    public void IsInArrowTapZone_JustInsideLeftBoundary_True()
-    {
-        Assert.IsTrue(NewInterpreter().IsInArrowTapZone(60, 200));
-    }
-
-    [TestMethod]
-    public void IsInArrowTapZone_JustOutsideLeftBoundary_False()
-    {
-        Assert.IsFalse(NewInterpreter().IsInArrowTapZone(61, 200));
+        Assert.AreEqual(GesturePageAction.None, o.PageAction);
+        Assert.IsTrue(o.RouteToWidgets);
     }
 }
