@@ -1,27 +1,28 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using ModernWigiDash.Core.Models;
+using ModernWigiDash.Sdk;
 
 namespace ModernWigiDash.Widgets;
 
 /// <summary>
 /// Live weather widget: current conditions, humidity, wind, feels-like, and
-/// high/low, plus the multi-day and hourly forecast strips. The place
-/// resolves from a city name, a ZIP code, or explicit coordinates through the
-/// Open-Meteo cluster (the client, the geocoder, the fetch flow, and the
-/// gated display state).
+/// high/low, plus the multi-day and hourly forecast strips. Presentation layer
+/// driven by the deep <see cref="WeatherRuntimeEngine"/> (Candidate 4).
 /// </summary>
 [WidgetMetadata("weather_forecast", "Weather Forecast", Category = "Social & Visual", DefaultGridSize = GridSizePreset.Size5x4)]
-public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider, IWeatherFetchHost
+public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider, IWidgetLocationSearch, IWidgetEditorProvider
 {
     /// <summary>The "Location Type" property: city name, ZIP code, or lat,lon pair.</summary>
     [WidgetProperty("Location Type", WidgetPropertyType.Choice, "City name, ZIP code, or lat,lon pair", "Fixed Location", "Fixed Location")]
     public string LocationType { get; set; } = "Fixed Location";
 
-    // The default carries a state suffix on purpose: a bare city name (the old
-    // "New York") ties across many exact-name geocoder candidates, so the
-    // ambiguity gate leaves it unresolved and the widget starts blank.
-    // "Miami, Florida" is the single unique top scorer — it fetches out of the
-    // box on a fresh profile.
     /// <summary>The "Location" property: city name, ZIP/postal code, or lat,lon pair.</summary>
     [WidgetProperty("Location", WidgetPropertyType.Text, "City name, ZIP/postal code, or lat,lon (e.g. 40.71,-74.00)", "Miami, Florida")]
     public string Location { get; set; } = "Miami, Florida";
@@ -83,413 +84,125 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
     public string CountryCode { get; set; } = "";
 
     /// <summary>
-    /// Pick from the geocoder's candidates when a city name resolves
-    /// ambiguously (e.g. "Victoria" matches Canada, Seychelles, ...). Options
-    /// are populated from the last geocode via <see cref="IWidgetPropertyOptionsProvider"/>;
-    /// an empty value means "let the automatic ranking decide".
+    /// Pick from the geocoder's candidates when a city name resolves ambiguously.
     /// </summary>
     [WidgetProperty("Location Match", WidgetPropertyType.Choice, "Pick the exact place when the city name is ambiguous. Leave empty for automatic.", "")]
     public string LocationMatch { get; set; } = "";
 
+    private readonly WeatherRuntimeEngine _engine;
+    private readonly WeatherWidgetRenderer _renderer = new();
+    private static readonly string CacheDir = Path.Combine(AppContext.BaseDirectory, "weather_cache");
+    private SKRect _lastBounds;
+    internal WeatherRenderModel? _renderModel;
+
     /// <summary>
-    /// The inspector's dynamic choice list for Location Match: the last
-    /// geocode's candidates plus the empty automatic entry.
+    /// Constructs the weather forecast widget bound to its deep runtime engine.
     /// </summary>
-    /// <param name="propertyName">The property the inspector is editing.</param>
+    public WeatherForecastWidget()
+    {
+        _engine = new WeatherRuntimeEngine(
+            cacheDir: CacheDir,
+            instanceIdProvider: () => InstanceId,
+            locationProvider: BuildLocation,
+            isStaticSnapshotProvider: () => StaticSnapshot,
+            onRepaint: () => Context?.RequestRender(),
+            onInspectorRefresh: () => Context?.RequestInspectorRefresh(),
+            onWriteback: label => SetProperty(nameof(Location), label),
+            logError: (message, exception) => Context?.LogError(message, exception),
+            logInfo: message => Context?.LogInfo(message));
+    }
+
+    /// <inheritdoc/>
     public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
     {
         if (!string.Equals(propertyName, nameof(LocationMatch), StringComparison.Ordinal)) return [];
 
-        // One gated snapshot: the empty-check and the enumeration must see the
-        // SAME candidates (an apply or an invalidation landing between two
-        // reads would transiently disagree).
-        var identity = _displayState.Identity;
-        if (identity.Candidates.Count == 0) return [];
+        var candidates = _engine.Candidates;
+        if (candidates.Count == 0) return [];
 
-        // The empty "Automatic (by ranking)" entry lets a pick be cleared.
         return
         [
             new WidgetPropertyOption("", "Automatic (by ranking)"),
-            .. identity.Candidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
+            .. candidates.Select(c => new WidgetPropertyOption(c.Query, c.Label))
         ];
     }
 
-    private readonly WeatherClient _client;
-    private readonly WeatherFetchFlow _flow;
-
-    // The widget's gated display state is ONE module: the single gate, the
-    // snapshot state, the resolved-identity twin (taken from the Fetched
-    // outcome or the boot cache load — the client reports the identity once
-    // per fetch, and the widget owns the dropdown, population, header title,
-    // and the render-model cache key from it, so it never re-reads the
-    // client's resolution state on the render path), the pending label
-    // write-back, the last-success stamp, and the forecast render copies.
-    // Every read and mutation runs under the module's one gate, so the seam
-    // bodies and the render tick's lock region are forwards — the "one
-    // consistent view" is a type, not a discipline repeated at every call
-    // site. The UI-thread flush of the write-back stays here (it persists).
-    private readonly WeatherDisplayState _displayState;
-
-    // The non-invalidating write-back mode flag (the rule is spelled at the
-    // named seam, SuppressLocationWriteback): private because the mode has
-    // exactly two readers (the display-state take's live source, the edit
-    // path's veto) and one seam; reaching the flag directly re-spells the
-    // rule at the call site.
-    private bool _locationWritebackSuppressed;
-
-    // -- IWidgetLocationSearch ------------------------------------------------
-
-    /// <summary>Geocodes the location search query (forwards to the client's city search).</summary>
-    /// <param name="query">The search text.</param>
-    /// <param name="ct">Cancels the search.</param>
+    /// <summary>Geocodes the location search query (forwards to the engine's city search).</summary>
     public Task<IReadOnlyList<GeocodeCandidate>> SearchAsync(string query, CancellationToken ct)
-        => _client.SearchCitiesAsync(query, ct);
+        => _engine.SearchCitiesAsync(query, ct);
 
     /// <summary>Commits a pick from the search results: writes the candidate's label into Location.</summary>
-    /// <param name="candidate">The picked geocode candidate.</param>
     public void CommitPick(GeocodeCandidate candidate)
     {
-        // The name is the truth: a pick writes only the label. Latitude/Longitude
-        // stay manual-only — the label resolves deterministically (multi-component
-        // suffix matching).
         SetProperty(nameof(Location), candidate.Label);
     }
 
-    /// <summary>The resolved location's population (null when the resolution has none).</summary>
-    public double? CurrentPopulation
-    {
-        get
-        {
-            // One gated snapshot: the predicate and the value come from the same
-            // read (an invalidation between the two reads would return 0.0 where
-            // null — "no data" — is the intent).
-            var identity = _displayState.Identity;
-            return identity.Population > 0 ? identity.Population : null;
-        }
-    }
+    /// <summary>The resolved location's population (null when none).</summary>
+    public double? CurrentPopulation => _engine.CurrentPopulation;
 
-    // -- IWidgetEditorProvider ------------------------------------------------
-
-    /// <summary>The editor kind the inspector uses for a property (the location-search editor for Location, none for the rest).</summary>
-    /// <param name="property">The property the inspector is editing.</param>
+    /// <inheritdoc/>
     public EditorKind? GetEditorKind(PropertyInfo property)
         => string.Equals(property.Name, nameof(Location), StringComparison.Ordinal) ? EditorKind.LocationSearch : null;
 
-    // -- IWeatherFetchHost (the flow's host seam) ------------------------------
-    // The flow owns the fetch sequence; these members carry the host
-    // concerns across the seam. The gate discipline lives in the
-    // display-state module — the apply, the version read, and the write-back
-    // guard's check + set all run under its one gate — so these bodies are
-    // forwards. Explicit implementations: the seam is for the flow, not for
-    // callers.
-
-    /// <summary>The flow's location read: the property → identity-input
-    /// coercion (blank → null, trim of the optional fields).</summary>
-    WeatherLocation IWeatherFetchHost.CurrentLocation => BuildLocation();
-
-    /// <summary>The display state's data version (the module reads it under
-    /// its gate — the apply writes it under the same gate).</summary>
-    int IWeatherFetchHost.DataVersion => _displayState.DataVersion;
-
-    /// <summary>The Static Snapshot property — the cadence gate's veto
-    /// input.</summary>
-    bool IWeatherFetchHost.IsStaticSnapshot => StaticSnapshot;
-
-    /// <summary>The fetch cancellation token (teardown).</summary>
-    CancellationToken IWeatherFetchHost.RunToken => _pollCts?.Token ?? CancellationToken.None;
-
-    /// <summary>Queues a resolved-label write-back for the UI thread (the
-    /// module applies the identity guard's check + set under its gate — one
-    /// critical section).</summary>
-    void IWeatherFetchHost.QueueLabelWriteback(Func<bool> identityGuard, string value)
-        => _client.QueueLabelWriteback(identityGuard, value);
-
-    /// <summary>Requests a canvas repaint.</summary>
-    void IWeatherFetchHost.RequestRender() => Context?.RequestRender();
-
-    /// <summary>Requests an inspector refresh (the Location Match candidates
-    /// changed).</summary>
-    void IWeatherFetchHost.RequestInspectorRefresh() => Context?.RequestInspectorRefresh();
-
-    /// <summary>
-    /// Constructs the client (the cache file name resolves lazily from the
-    /// rehydrated InstanceId), the gated display state, and the fetch flow.
-    /// </summary>
-    public WeatherForecastWidget()
-    {
-        // The cache name is resolved lazily from the CURRENT InstanceId, not
-        // baked at construction: RehydrateWidget assigns the placed InstanceId
-        // only after the widget is built, so a baked name would key every
-        // load/save by a fresh never-reused GUID (the cache would never round
-        // trip across restarts). Defense in depth: the profile-import boundary
-        // already regenerates unsafe ids, but the name builder also refuses
-        // one here so a cache file can never escape the cache directory.
-        _client = new WeatherClient(CacheDir, () => $"weather_{SafeCacheToken(InstanceId)}.json", logError: (message, exception) => Context?.LogError(message, exception));
-        // The display-state module's clock seam is the CLIENT's clock, resolved
-        // at stamp time (not captured at construction) — a test clock swap is
-        // observed by the last-success stamp. The display state and the client
-        // share the cluster's ONE identity owner (the client's resolution
-        // module), so the two sides cannot drift.
-        _displayState = new(_client, WeatherPresentation.UnknownLocationLabel, () => Clock.GetUtcNow().UtcDateTime);
-        // The fetch flow owns the sequence; the host concerns travel across
-        // the IWeatherFetchHost seam. This widget IS the production host
-        // adapter: the display-state module carries the gate discipline
-        // (the IWeatherFetchHost section below forwards to it), and the
-        // flow's tests wrap the same module.
-        _flow = new WeatherFetchFlow(_client, this);
-    }
-
-    /// <summary>Test seam: injectable clock for fetch throttling and cache timestamps (forwards to the client).</summary>
-    internal TimeProvider Clock { get => _client.Clock; set => _client.Clock = value; }
-
-    /// <summary>Test seam: substitute HTTP transport for fetch tests (forwards to the client).</summary>
-    internal HttpClient? TestHttpClient { get => _client.TestHttpClient; set => _client.TestHttpClient = value; }
-
-    /// <summary>The last resolved display name (test/UI seam: the widget's own
-    /// copy of the identity the Fetched outcome reported).</summary>
-    internal string ResolvedCityName => _displayState.Identity.ResolvedName;
-
-    /// <summary>The client's cache file name as currently resolved (test seam:
-    /// pins the placed-InstanceId keying — the name must follow the InstanceId
-    /// assigned by rehydration, never the construction-time default GUID).</summary>
-    internal string CacheFileName => _client.CacheFileName;
-
-    /// <summary>The InstanceId is a cache-file key; a foreign value with path
-    /// segments must never reach the name builder (defense in depth behind the
-    /// import boundary's regeneration rule). The fallback is a PER-INSTANCE
-    /// token — a shared literal would collide two widgets' cache files if the
-    /// guard were ever reached by more than one widget.</summary>
-    private readonly string _safeCacheFallbackToken = Guid.NewGuid().ToString();
-
-    private string SafeCacheToken(string? instanceId)
-        => ProfileImportSanitizer.IsSafeInstanceId(instanceId) ? instanceId! : _safeCacheFallbackToken;
-
-    /// <summary>Completed-fetch count (test seam: wait on fetch completion, not call start).</summary>
-    internal int FetchCompletedCount => _client.FetchCompletedCount;
-
-    /// <summary>The one in-flight fact the display's staleness line reads — the
-    /// client's single-flight claim, forwarded alongside the other client seams
-    /// (a test seam: pins that "Updating…" is the claim, so a fetch that did not
-    /// go through <see cref="RequestRefresh"/> still reports in-flight).</summary>
-    internal bool IsFetchInFlight => _client.IsFetchInFlight;
-
-    /// <summary>The snapshot display state (forwarded from the display-state
-    /// module, whose gate owns the swap): the widget tests read the forecast
-    /// lists and the version through it.</summary>
-    internal WeatherSnapshotState _snapshotState => _displayState.State;
-
-    // The per-mode draw paths live in the renderer (WeatherWidgetRenderer),
-    // which owns the card/pill/row paints — one shared pair behind every
-    // card, colors swapped via Paint.Color mutation (hoisted out of the
-    // per-card loops). The header's two paints (title, unit badge) follow the
-    // same hoisted pattern here — the 30 FPS render path allocates no paints.
-    private readonly WeatherWidgetRenderer _renderer = new();
-    private SKRect _lastBounds;
-
-    // The render-model cache: every formatted string the draw paths need is
-    // rebuilt only when (data version, bounds, property snapshot) changes —
-    // weather data moves at most every 15 minutes, so the static scene
-    // allocates nothing on the 30 FPS render path.
-    /// <summary>The cached render model (internal test seam: the invalidation
-    /// matrix pins which keys force a rebuild).</summary>
-    internal WeatherRenderModel? _renderModel;
-
-    private static readonly string CacheDir = Path.Combine(AppContext.BaseDirectory, "weather_cache");
-    private PollLoop? _refreshPoll;
-    /// <summary>The fetch-cancellation CTS (internal test seam: direct-drive
-    /// tests inject a cancelled token to pin the silent-teardown path).</summary>
-    internal CancellationTokenSource? _pollCts;
-
-    /// <summary>
-    /// Binds the context, loads the cached weather, starts the refresh
-    /// PollLoop, and fires the boot fetch (the pre-hydration default location,
-    /// dropped by the identity guard if it is stale on return).
-    /// </summary>
-    /// <param name="context">The widget host context.</param>
-    /// <param name="cancellationToken">Cancels the initialization.</param>
+    /// <inheritdoc/>
     public override async ValueTask InitializeAsync(IModernWigiDashContext context, CancellationToken cancellationToken = default)
     {
         await base.InitializeAsync(context, cancellationToken).ConfigureAwait(false);
-        // The poll CTS is created before the boot cache load so the load can
-        // take the same teardown token every other fetch leg gets.
-        _pollCts = new CancellationTokenSource();
-        _ = LoadCachedWeatherAsync(_pollCts.Token);
-        // The refresh loop rides the repo's one loop shape at the client's
-        // fetch-window cadence — the one cadence constant (visible pages are
-        // driven by the render kick at the same window; the loop is the sole
-        // driver for hidden pages, whose reveal-kick then refreshes anyway).
-        _refreshPoll = new PollLoop(
-            "WEATHER", WeatherClient.FetchWindow, () => true,
-            WeatherRefreshTick, () => { }, msg => Context?.LogInfo(msg));
-        _refreshPoll.Start();
-        // The boot fetch: InitializeAsync runs BEFORE the profile applies
-        // this widget's properties (RehydrateWidget), so this fetch uses the
-        // pre-hydration default location. That is deliberate:
-        //   - hidden-page widgets (fresh starter profiles) have no render
-        //     kick and no hydration kick — the boot fetch is their only
-        //     immediate driver (the poll tick comes 5 minutes later)
-        //   - the identity guard below drops any result whose location no
-        //     longer matches when it returns, so the pre-hydration fetch can
-        //     never DISPLAY the wrong city — at most it transiently writes
-        //     the default's cache, which the hydration kick overwrites
-        _ = FetchLiveWeatherAsync();
+        _engine.Start();
     }
 
-    private void WeatherRefreshTick() => RequestRefresh();
-
-    /// <summary>
-    /// The single "fetch if due" entry for every cadence source: the refresh
-    /// PollLoop, the per-frame render kick, the touch refresh, and the
-    /// edit-time force paths all call this. The gate (static-snapshot rule +
-    /// the client's throttle window) is applied ONCE inside the flow module —
-    /// this host method neither re-derives the policy nor reads the client's
-    /// throttle state; the client's atomic in-flight claim remains the
-    /// authority (see <see cref="WeatherClient.FetchCurrentAsync"/>).
-    /// </summary>
-    private void RequestRefresh(bool force = false)
+    /// <inheritdoc/>
+    public override ValueTask DisposeAsync()
     {
-        if (!_flow.CanFetch(force)) return;
-        _ = TrackFetchAsync(force);
-    }
-
-    private async Task TrackFetchAsync(bool force)
-    {
-        try
-        {
-            await _flow.RunFetchAsync(force).ConfigureAwait(false);
-        }
-        finally
-        {
-            Context?.RequestRender();
-        }
-    }
-
-    /// <summary>Stops the refresh loop, cancels and disposes the poll CTS, and releases the widget's Skia surfaces.</summary>
-    public override async ValueTask DisposeAsync()
-    {
-        _refreshPoll?.Dispose();
-        if (_pollCts != null)
-        {
-            await _pollCts.CancelAsync().ConfigureAwait(false);
-            _pollCts.Dispose();
-        }
-        // Every hoisted SKPaint on this screen - the header's four and the content
-        // paths' thirteen - is the draw module's, so one call releases them all
-        // (profile reloads / edits recreate widgets, and finalizer-driven
-        // reclamation would accumulate). The widget holds none of its own.
+        _engine.Dispose();
         _renderer.Dispose();
-        await base.DisposeAsync().ConfigureAwait(false);
+        return base.DisposeAsync();
     }
 
-    /// <summary>
-    /// Routes a resolution-input edit through the invalidation rule (the
-    /// identity owner drops at the kind the rule declares) and force-refreshes
-    /// when the kind is not None.
-    /// </summary>
-    /// <param name="propertyName">The property that changed.</param>
-    /// <param name="newValue">The property's new value.</param>
+
+    /// <inheritdoc/>
     public override void OnPropertyChanged(string propertyName, object? newValue)
     {
-        // The drop granularity is the rule's decision (WeatherInvalidation):
-        // a Location Match pick keeps the candidates it was offered from,
-        // every other resolution input voids the whole identity (a stale pick
-        // can never win). There is ONE owner and ONE gated entry: the client's
-        // `Invalidate`, which the display state composes with. The clear is
-        // atomic against an in-flight fetch's assignment (either the assignment
-        // lands before the clear and is erased, or the guard re-reads the new
-        // location and the assignment never happens; the edit can never be
-        // resurrected over). It also drops a PENDING resolved-label write-back
-        // (the race a completed-but-unflushed fetch leaves) — strictly stronger
-        // under the gate, safe because the identity re-check is also under it.
-        // (The display state's own transitions still take ITS gate first and
-        // then the client's, in that one order; that nesting is the atomic
-        // apply, and it is not a second owner of the identity.)
         WeatherInvalidationKind kind = WeatherInvalidation.KindForProperty(propertyName);
-        if (kind == WeatherInvalidationKind.Location && _locationWritebackSuppressed)
+        if (kind == WeatherInvalidationKind.Location && _engine.IsLocationWritebackSuppressed)
         {
-            // The resolved-label write-back skips the forced re-fetch: the
-            // label was just resolved by the fetch that wrote it, so fetching
-            // again would loop (the write-back converges after one extra
-            // resolution at most).
             kind = WeatherInvalidationKind.None;
         }
 
         if (kind != WeatherInvalidationKind.None)
         {
-            // The client IS the identity owner and the one gated entry for an
-            // invalidation; the display state is a forward onto it. Calling both
-            // ran the drop rule twice per edit (idempotent, so it was never
-            // wrong - but it meant the pass-through had a production caller, so
-            // nobody could tell the forward was redundant, and the widget's own
-            // comment described two independently-gated "twins" that no longer
-            // exist).
-            _client.Invalidate(kind);
-            RequestRefresh(force: true);
+            _engine.Invalidate(kind);
         }
 
         base.OnPropertyChanged(propertyName, newValue);
     }
 
-    /// <summary>
-    /// Draws the active layout mode from the cached render model (rebuilt
-    /// only when its key changes), kicking the fetch through the single
-    /// cadence gate.
-    /// </summary>
-    /// <param name="canvas">The frame canvas.</param>
-    /// <param name="bounds">The widget's placement bounds.</param>
+    /// <inheritdoc/>
     public override void Render(SKCanvas canvas, SKRect bounds)
     {
-        // The UI-thread flush of a deferred resolved-label write-back: the
-        // fetch continuation only sets the pending field, so Context.
-        // PersistProperty runs here on the UI thread (see
-        // ApplyPendingLocationWriteback).
-        ApplyPendingLocationWriteback();
+        _engine.ApplyPendingLocationWriteback();
 
         SKColor accentColor = ColorOf(AccentColorHex, WidgetPalette.Accent);
         SKColor textPrimary = SKColors.White;
         SKColor textSecondary = SKColors.White;
 
-        // Kick the fetch through the one cadence gate: the static-snapshot
-        // rule and the client's throttle window are applied in RequestRefresh,
-        // so the per-frame async allocation is skipped while the window is
-        // open, and the render tick never re-derives the fetch policy.
-        RequestRefresh();
+        _engine.RequestRefresh();
 
         _lastBounds = bounds;
 
-        // Per-frame geometry: the scale and the header layout are computed
-        // ONCE here and shared by the draw path and the render-model build —
-        // one site reaches the layout module per frame.
         var (sx, sy, s) = WeatherLayout.Scale(bounds);
         var header = WeatherLayout.ComputeHeader(bounds, s, sy);
-        // The badge draws the temperature unit; the build module derives the pair
-        // from the key's UnitSystem (one rule, not two).
         var (tempUnit, _) = WeatherPresentation.ParseUnitSystem(UnitSystem);
 
-        // One consistent view: the display-state module captures the state scalars,
-        // the resolved identity, the last-success stamp (sharing its gate
-        // with the apply's write — the stale-elapsed display value is one
-        // consistent view, not a cross-thread struct read), and the
-        // version-gated forecast copies, and hands the whole render-model
-        // input back — the build module receives a torn-write-free view.
-        var (buildInputs, lastSuccessFetchTime) = _displayState.CaptureRenderView(
+        var (buildInputs, lastSuccessFetchTime) = _engine.DisplayState.CaptureRenderView(
             bounds, header, s,
             LayoutMode, UnitSystem, CustomLabel, HideLocation,
             ShowFeelsLike, ShowHumidity, ShowWind, ShowHighLow, ShowForecast,
             Location);
 
-        // The render model owns every formatted string; the draw paths only
-        // measure and paint. The build module is the ONE place the model is
-        // composed — on a key hit it returns the cached model and the
-        // per-frame path allocates nothing.
         var model = WeatherRenderModelFactory.Resolve(_renderModel, buildInputs);
         if (!ReferenceEquals(_renderModel, model)) _renderModel = model;
 
-        // The header is drawn by the same module that draws the five content
-        // modes, and it hands back the rect those modes draw into. The header's
-        // own height feeds that rect (the subtitle pushes it down, the staleness
-        // line pushes its bottom up), so composing it here would mean holding a
-        // second notion of the header than the one just painted.
         SKRect contentBounds = _renderer.RenderHeader(
             canvas, bounds, header, s, sy, model, tempUnit,
             IsFetchInFlight, lastSuccessFetchTime, Clock.GetUtcNow().UtcDateTime,
@@ -515,16 +228,11 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
         }
     }
 
-    /// <summary>A tap toggles the unit on the unit badge, cycles the layout mode on the layout badge, or force-refreshes the weather.</summary>
-    /// <param name="localPoint">The touch point in the widget's rotated-local space.</param>
-    /// <param name="eventType">The touch event type.</param>
+    /// <inheritdoc/>
     public override void OnTouch(SKPoint localPoint, TouchEventType eventType)
     {
         if (eventType != TouchEventType.TouchUp) return;
 
-        // Hit-test against the last rendered bounds so touches line up with the
-        // drawn controls at any widget size, not just the design size. The zones
-        // come from WeatherLayout — the same geometry the render path draws.
         var b = _lastBounds.Width > 0 ? _lastBounds : new SKRect(0, 0, DefaultSize.Width, DefaultSize.Height);
         var scale = WeatherLayout.Scale(b);
 
@@ -538,125 +246,56 @@ public class WeatherForecastWidget : ModernWidgetBase, IWidgetPropertyOptionsPro
                     WeatherLayout.NextMode(LayoutMode)));
                 return;
             default:
-                RequestRefresh(force: true);
-                break;
+                _engine.RequestRefresh(force: true);
+                return;
         }
     }
 
-    // The inspector-candidates stamp (refresh only when the pickable options
-    // changed, never on every fetch) moved with the sequence into the flow
-    // module — the host keeps only the refresh request itself.
-
-    /// <summary>
-    /// The non-invalidating write-back mode (the named test-drive seam): while
-    /// on, the display-state take refuses the resolved-label write-back (the
-    /// value stays queued: a "not yet" that never lands while the mode holds,
-    /// so the mode cannot be cleared by the write-back's own finally) and any
-    /// Location write carries no forced refetch. The write-back path's scoped
-    /// write and a directly driven test fetch route through the one flag, so
-    /// a test observes its fetch without the fetch's own write-back
-    /// re-entering the fetch path (write -> OnPropertyChanged -> forced
-    /// refetch).
-    /// </summary>
-    internal void SuppressLocationWriteback() => _locationWritebackSuppressed = true;
-
-    /// <summary>
-    /// The widget's fetch entry (the direct-drive seam the tests and the edit
-    /// paths use). The whole sequence — key capture, outcome verification,
-    /// the post-await re-validation, drop-and-refetch routing, the guarded
-    /// apply, and the write-back gating — lives in
-    /// <see cref="WeatherFetchFlow"/>, so the host carries no part of the
-    /// flow policy: this method is a forward.
-    /// </summary>
-    internal Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
-        => _flow.RunFetchAsync(force);
-
-    /// <summary>
-    /// Performs the deferred resolved-label write-back on the UI thread (called
-    /// by <see cref="Render"/> at 30 FPS; also an internal test seam for
-    /// direct-drive tests). The take — and with it the whole eligibility
-    /// decision (the CustomLabel veto, the no-op write, the non-invalidating
-    /// write-back mode) — runs under the display-state gate, so a host edit
-    /// landing between the queue and this flush is seen at the take (a veto
-    /// refuses and keeps the value queued for the next frame, never lost); the
-    /// take clears before the write, so a re-entrant render cannot double-write;
-    /// and the scoped write's mode span keeps the write's own OnPropertyChanged
-    /// from re-firing a fetch.
-    /// </summary>
-    internal void ApplyPendingLocationWriteback()
-    {
-        if (_client.TakePendingWriteback(BuildLocation(), () => _locationWritebackSuppressed) is not { } pending) return;
-
-        _locationWritebackSuppressed = true;
-        try
-        {
-            SetProperty(nameof(Location), pending);
-        }
-        finally
-        {
-            _locationWritebackSuppressed = false;
-        }
-    }
-
-    /// <summary>
-    /// The property → identity-input coercion (blank → null, trim of the
-    /// optional fields): the host owns its properties, so this shaping lives
-    /// here and crosses the seam through <c>IWeatherFetchHost.CurrentLocation</c>.
-    /// One read per fetch step — the flow never re-derives the shape.
-    /// </summary>
     private WeatherLocation BuildLocation()
         => new(LocationType, Location, Latitude, Longitude, CustomLabel, string.IsNullOrWhiteSpace(CountryCode) ? null : CountryCode.Trim())
         {
             LocationMatch = string.IsNullOrWhiteSpace(LocationMatch) ? null : LocationMatch.Trim()
         };
 
-    /// <summary>
-    /// The flow's apply seam (a forward): applies a fetched/cached snapshot
-    /// to the display state, keeping the "response omitted this section —
-    /// keep the previous value" semantics. The guard (version-then-identity)
-    /// and the merge (null-keeps + per-list version bump) live in
-    /// <see cref="WeatherSnapshotApplyPolicy"/>; the gate discipline lives in
-    /// the display-state module — under its one lock it asks the guard, swaps
-    /// in the merge's new state, and applies the resolved-identity copies
-    /// under the SAME lock, so an edit landing between the guard and the
-    /// copies can no longer be resurrected over by the old identity's state
-    /// (the edit's clear takes the same gate). The request's population field
-    /// follows the client's no-data sentinel: 0 clears the resolved
-    /// population (the fetch reported none), non-zero replaces — "no data"
-    /// and "keep previous" are distinguishable by null vs. provided. Returns
-    /// whether the snapshot was applied.
-    /// </summary>
-    bool IWeatherFetchHost.TryApply(WeatherApplyRequest request)
-        => _displayState.TryApply(request);
+    // ── Test & Seam Forwards ────────────────────────────────
 
-    /// <summary>
-    /// The host apply for a same-name tie (a forward): the display-state
-    /// module runs the identity guard and the placeholder reset under its one
-    /// gate (an edit that changed the resolution inputs since the fetch wins
-    /// — the tie's candidates and header must not belong to the OLD
-    /// identity), and this host supplies the queried-location read (the
-    /// property coercion) that the module evaluates under the same lock.
-    /// </summary>
-    bool IWeatherFetchHost.TryApplyTie(IReadOnlyList<GeocodeCandidate> candidates, Func<bool> identityGuard)
-        => _displayState.TryApplyTie(candidates, identityGuard, () => BuildLocation().Location);
+    internal WeatherRuntimeEngine Engine => _engine;
 
-    /// <summary>Test seam: replaces the client cache-load leg so the boot-race
-    /// version guard is drivable deterministically (forwards to the client's
-    /// seam; defaults to the client's identity-checked load).</summary>
-    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride
+    internal TimeProvider Clock { get => _engine.Clock; set => _engine.Clock = value; }
+
+    internal HttpClient? TestHttpClient { get => _engine.TestHttpClient; set => _engine.TestHttpClient = value; }
+
+    internal string ResolvedCityName => _engine.ResolvedCityName;
+
+    internal string CacheFileName => _engine.CacheFileName;
+
+    internal int FetchCompletedCount => _engine.FetchCompletedCount;
+
+    internal bool IsFetchInFlight => _engine.IsFetchInFlight;
+
+    internal WeatherSnapshotState _snapshotState => _engine.SnapshotState;
+
+    internal CancellationTokenSource? _pollCts
     {
-        get => _client.CacheLoadOverride;
-        set => _client.CacheLoadOverride = value;
+        get => _engine.PollCts;
+        set => _engine.PollCts = value;
     }
 
-    /// <summary>
-    /// The boot cache load (InitializeAsync fires it before the boot fetch).
-    /// The guarded sequence — version + identity re-checks, the atomic
-    /// check-and-apply, and the discarded-load rollback of the client's
-    /// committed identity state — lives in
-    /// <see cref="WeatherFetchFlow"/>, so the host carries no part of it:
-    /// this method is a forward.
-    /// </summary>
+    internal void RequestRefresh(bool force = false) => _engine.RequestRefresh(force);
+
+    internal void SuppressLocationWriteback() => _engine.SuppressLocationWriteback();
+
+    internal Task<WeatherFetchFlowOutcome> FetchLiveWeatherAsync(bool force = false)
+        => _engine.FetchLiveWeatherAsync(force);
+
+    internal void ApplyPendingLocationWriteback() => _engine.ApplyPendingLocationWriteback();
+
+    internal Func<WeatherLocation, CancellationToken, Task<WeatherSnapshot?>>? CacheLoadOverride
+    {
+        get => _engine.CacheLoadOverride;
+        set => _engine.CacheLoadOverride = value;
+    }
+
     internal Task LoadCachedWeatherAsync(CancellationToken cancellationToken)
-        => _flow.RunBootLoadAsync(cancellationToken);
+        => _engine.LoadCachedWeatherAsync(cancellationToken);
 }
