@@ -121,6 +121,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// mark). The window's forwarding handlers cross its interface; the
     /// ordering fact is pinned by StartupWiringTests.</summary>
     private ProfileMutationFunnel _mutationFunnel = null!;
+    private ProfileSession _profileSession = null!;
 
     /// <summary>The notification-area icon (ADR-0018): the show/quit routing
     /// plus the <see cref="TrayIconController.IsLive"/> guard the close path
@@ -253,7 +254,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
         _profileImport = new ProfileImportAdapter(
             profileProvider: () => _profile,
             profileSetter: p => _profile = p,
-            applyRawWrite: () => ApplyProfileMutation(ProfileMutationShape.RawWrite, null),
+            applyRawWrite: () => _profileSession.ApplyRawWrite(),
             dialogHostProvider: () => _dialogHost,
             themeApplicator: _themeApplicator,
             window: this);
@@ -547,6 +548,14 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
             MarkDirty: () => _profilePersistence.MarkDirty(),
             RefreshGlobalHotkeys: RefreshGlobalHotkeys,
             ApplySelection: SelectWidget));
+
+        _profileSession = new ProfileSession(
+            () => _profile,
+            _mutationFunnel,
+            _pageManagement,
+            _loader,
+            this,
+            () => _selectedWidget);
     }
 
     /// <summary>Machine-local settings (ADR-0019): the kill switch + AHK interpreter path, deliberately outside the profile.</summary>
@@ -883,8 +892,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// The post-conditions ride the mutation funnel.</summary>
     private void CommitPageBackground(string hex)
     {
-        _profile.ActivePage.BackgroundHexColor = hex;
-        ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
+        _profileSession.SetPageBackground(hex);
     }
 
     #region Skia Canvas Rendering & Mouse Interaction
@@ -1021,8 +1029,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         if (_selectedWidget != null)
         {
-            ProfileOps.RemoveWidget(_profile.ActivePage, _selectedWidget);
-            ApplyProfileMutation(ProfileMutationShape.Transform, null);
+            _profileSession.RemoveWidget(_selectedWidget);
         }
     }
 
@@ -1058,23 +1065,18 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         if (sender is Button btn && btn.Tag is string pluginId)
         {
-            var placed = ProfileOps.PlaceCentered(_profile, _loader, this, pluginId);
-            if (placed == null) return;
-
-            ApplyProfileMutation(ProfileMutationShape.Transform, placed);
+            _profileSession.PlaceWidgetCentered(pluginId);
         }
     }
 
     /// <summary>The rename seam: the module's gate + prompt + rename; a
     /// structural refresh only when it lands.</summary>
-    private void RenamePage(int index)
-        => _pageManagement.Apply(() => _pageManagement.Rename(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, _selectedWidget));
+    private void RenamePage(int index) => _profileSession.RenamePage(index);
 
     /// <summary>The switch seam: the module's SetActivePageIndex gate; a
     /// structural refresh only when it lands (an out-of-range step is a no-op,
     /// never a wrap).</summary>
-    private void SwitchToPage(int index)
-        => _pageManagement.Apply(() => _pageManagement.Switch(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
+    private void SwitchToPage(int index) => _profileSession.SwitchToPage(index);
 
     #region Global Hotkeys (ADR-0019)
 
@@ -1103,17 +1105,14 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     /// only when it lands. Internal so tests can pin that a stale index
     /// degrades to a no-op instead of throwing in the window.
     /// </summary>
-    internal void DeletePage(int index)
-        => _pageManagement.Apply(() => _pageManagement.Delete(index), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
+    internal void DeletePage(int index) => _profileSession.DeletePage(index);
 
-    private void BtnAddPage_Click(object _, RoutedEventArgs e)
-        => _pageManagement.Apply(() => _pageManagement.Add(), () => ApplyProfileMutation(ProfileMutationShape.Structural, null));
+    private void BtnAddPage_Click(object _, RoutedEventArgs e) => _profileSession.AddPage();
 
     private void ChkSnapToGrid_Changed(object _, RoutedEventArgs e)
     {
         if (!_wired) return;
-        _profile.ActivePage.SnapToGrid = ChkSnapToGrid.IsChecked == true;
-        ApplyProfileMutation(ProfileMutationShape.Transform, _selectedWidget);
+        _profileSession.SetSnapToGrid(ChkSnapToGrid.IsChecked == true);
     }
 
     private void ChkEditMode_Changed(object _, RoutedEventArgs e)
@@ -1162,8 +1161,7 @@ public partial class MainWindow : Window, IModernWigiDashContext, ISettingsHubHo
     {
         if (_dialogHost.Confirm("Confirm Clear", "Are you sure you want to clear all widgets from the current page?"))
         {
-            ProfileOps.ClearPage(_profile.ActivePage);
-            ApplyProfileMutation(ProfileMutationShape.Transform, null);
+            _profileSession.ClearActivePage();
         }
     }
 

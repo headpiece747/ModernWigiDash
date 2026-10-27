@@ -1,5 +1,16 @@
 namespace ModernWigiDash.App;
 
+using ModernWigiDash.Core.Models;
+
+/// <summary>
+/// Interface for the profile mutation funnel: applies the mutation shape's refresh bundle
+/// to the application UI and persistent state.
+/// </summary>
+internal interface IProfileMutationFunnel
+{
+    void Apply(ProfileMutationShape shape, ProfileLayout profile, PlacedWidgetInstance? selection);
+}
+
 /// <summary>
 /// The narrow face of the window the profile-mutation funnel writes to: the
 /// structural resync (tab strip), the RawWrite snap-toggle resync (routed
@@ -37,7 +48,7 @@ internal sealed record ProfileMutationBindings(
 /// onProfileChanged callback instead — exactly one invocation per landed
 /// write-back, and the window's forwarding handlers add none.
 /// </summary>
-internal sealed class ProfileMutationFunnel(ProfileMutationBindings bindings)
+internal sealed class ProfileMutationFunnel(ProfileMutationBindings bindings) : IProfileMutationFunnel
 {
     /// <summary>Apply the shape's refresh bundle plus the shared tail
     /// (selection, count, repaint, single dirty mark, hotkey refresh). The
