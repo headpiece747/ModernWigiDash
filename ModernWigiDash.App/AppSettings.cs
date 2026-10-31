@@ -35,6 +35,11 @@ internal sealed record AppSettings
     /// imported profile can never change how this machine launches.
     /// </summary>
     public bool MinimizeToTrayOnStartup { get; init; }
+
+    /// <summary>
+    /// Telemetry sensor and frame-time polling interval in milliseconds (default 500ms).
+    /// </summary>
+    public int TelemetryPollPeriodMs { get; init; } = 500;
 }
 
 /// <summary>
@@ -80,7 +85,12 @@ internal sealed class AppSettingsStore
             if (!File.Exists(_path)) return new AppSettings();
             using var stream = File.OpenRead(_path);
             var settings = JsonSerializer.Deserialize<AppSettings>(stream) ?? new AppSettings();
-            return settings with { AhkInterpreterPath = settings.AhkInterpreterPath ?? "" };
+            int normalizedPollPeriod = SettingsModel.ResolveTelemetryPollingRate(settings.TelemetryPollPeriodMs);
+            return settings with
+            {
+                AhkInterpreterPath = settings.AhkInterpreterPath ?? "",
+                TelemetryPollPeriodMs = normalizedPollPeriod
+            };
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PathTooLongException or JsonException or NotSupportedException)
         {

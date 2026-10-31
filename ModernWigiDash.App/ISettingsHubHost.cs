@@ -52,4 +52,8 @@ internal interface ISettingsHubHost
     /// <summary>The minimize-to-tray-on-startup write-through (the host
     /// persists the machine-local setting; the next launch opens hidden).</summary>
     void CommitMinimizeToTrayOnStartup(bool enabled);
+
+    /// <summary>The telemetry polling rate write-through (the host persists
+    /// the machine-local setting and updates active background loops live).</summary>
+    void CommitTelemetryPollingRate(int periodMs);
 }

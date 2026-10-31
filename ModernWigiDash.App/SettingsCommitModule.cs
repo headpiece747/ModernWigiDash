@@ -17,7 +17,8 @@ internal sealed class SettingsCommitModule(
     IAutostartStore autostartStore,
     Action refreshGlobalHotkeys,
     DiagLog startupLog,
-    DiagLog hotkeyLog)
+    DiagLog hotkeyLog,
+    Action<int>? onTelemetryPollingRateChanged = null)
 {
     /// <summary>The close-behavior write-through (ADR-0018): the radio's check
     /// is the change, so the profile is committed and marked dirty in place -
@@ -92,5 +93,17 @@ internal sealed class SettingsCommitModule(
         startupLog.Write(() => enabled
             ? "Minimize to tray on startup: ON (next launch opens hidden)"
             : "Minimize to tray on startup: OFF (next launch opens normally)");
+    }
+
+    /// <summary>The telemetry polling rate write-through: the machine-local
+    /// setting commits in place, falls back to 500ms if invalid, updates
+    /// app_settings.json, and notifies the live telemetry coordinator.</summary>
+    public void CommitTelemetryPollingRate(int periodMs)
+    {
+        int resolved = SettingsModel.ResolveTelemetryPollingRate(periodMs);
+        var updated = appSettingsProvider() with { TelemetryPollPeriodMs = resolved };
+        saveAppSettings(updated);
+        startupLog.Write(() => $"Telemetry polling rate set to {resolved}ms");
+        onTelemetryPollingRateChanged?.Invoke(resolved);
     }
 }

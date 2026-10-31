@@ -54,6 +54,7 @@ public class SettingsDialogTests
         public List<string> Clicked { get; } = [];
         public List<string> PageBgCommits { get; } = [];
         public List<bool> MinimizeToTrayCommits { get; } = [];
+        public List<int> TelemetryPollingRateCommits { get; } = [];
 
         public void CommitCloseBehavior(string value) => CloseBehaviorCommits.Add(value);
         public void CommitAutostart(bool enabled) => AutostartCommits.Add(enabled);
@@ -64,6 +65,7 @@ public class SettingsDialogTests
         public void ImportProfile() => Clicked.Add("import");
         public void CommitPageBackground(string hex) => PageBgCommits.Add(hex);
         public void CommitMinimizeToTrayOnStartup(bool enabled) => MinimizeToTrayCommits.Add(enabled);
+        public void CommitTelemetryPollingRate(int periodMs) => TelemetryPollingRateCommits.Add(periodMs);
     }
 
     private static (SettingsDialog Dialog, List<string> Commits, List<bool> AutostartCommits, List<bool> KillSwitchCommits, List<string> AhkCommits, List<string> Clicked, List<string> PageBgCommits, List<bool> MinimizeToTrayCommits) Build(

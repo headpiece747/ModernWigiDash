@@ -16,4 +16,5 @@ internal sealed record SettingsHubSeed(
     bool KillSwitch,
     string AhkInterpreterPath,
     string PageBackground,
-    bool MinimizeToTrayOnStartup);
+    bool MinimizeToTrayOnStartup,
+    int TelemetryPollPeriodMs = 500);

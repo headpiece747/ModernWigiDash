@@ -16,10 +16,15 @@ namespace ModernWigiDash.App;
 /// </summary>
 internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDisposable
 {
+    private readonly System.Threading.Lock _pollGate = new();
+    private readonly IPresentMonNative _presentMonNative;
     private readonly LhmSharedMemoryReader _lhsReader;
     private readonly PresentMonFrameTimeProducer _presentMonProducer;
-    private readonly PollLoop _sensorPoll;
-    private readonly PollLoop _frameTimePoll;
+    private PollLoop _sensorPoll;
+    private PollLoop _frameTimePoll;
+    private TimeSpan _currentPeriod;
+    private bool _running;
+    private bool _disposed;
     private readonly Action<string> _log;
 
     private readonly LogOnChange _sensorErrors = new();
@@ -36,15 +41,19 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
     /// <param name="targetResolver">Tracked target resolver (injectable for testing).</param>
     /// <param name="timeProvider">Optional time provider for freshness evaluation.</param>
     /// <param name="vendorClient">Optional initial vendor WCF client.</param>
+    /// <param name="initialPeriod">Optional initial polling cadence (defaults to 500ms).</param>
     public TelemetryFeedCoordinator(
         IPresentMonNative presentMonNative,
         Action<string> log,
         ILhmMapSource? lhsMapSource = null,
         TrackedTargetResolver? targetResolver = null,
         TimeProvider? timeProvider = null,
-        WigiDashServiceClient? vendorClient = null)
+        WigiDashServiceClient? vendorClient = null,
+        TimeSpan? initialPeriod = null)
     {
         _log = log;
+        _presentMonNative = presentMonNative;
+        _currentPeriod = initialPeriod ?? TimeSpan.FromMilliseconds(500);
         _vendorClient = vendorClient;
         _lhsReader = new LhmSharedMemoryReader(lhsMapSource ?? new MemoryMappedLhmMapSource());
         _presentMonProducer = new PresentMonFrameTimeProducer(presentMonNative, targetResolver ?? new TrackedTargetResolver());
@@ -67,23 +76,67 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
         }
 
         _sensorPoll = new PollLoop(
-            "SENSOR", TimeSpan.FromSeconds(1), () => true, SensorPollTick, () => { }, log);
+            "SENSOR", _currentPeriod, () => true, SensorPollTick, () => { }, log);
         _frameTimePoll = new PollLoop(
-            "FRAMETIME", TimeSpan.FromSeconds(1), () => presentMonNative.IsAvailable, FrameTimePollTick, () => { }, log);
+            "FRAMETIME", _currentPeriod, () => presentMonNative.IsAvailable, FrameTimePollTick, () => { }, log);
     }
 
     /// <summary>Starts background telemetry poll loops.</summary>
     public void Start()
     {
-        _sensorPoll.Start();
-        _frameTimePoll.Start();
+        lock (_pollGate)
+        {
+            _running = true;
+            _sensorPoll.Start();
+            _frameTimePoll.Start();
+        }
     }
 
     /// <summary>Stops background telemetry poll loops.</summary>
     public void Stop()
     {
-        _sensorPoll.Stop();
-        _frameTimePoll.Stop();
+        lock (_pollGate)
+        {
+            _running = false;
+            _sensorPoll.Stop();
+            _frameTimePoll.Stop();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safely updates the telemetry polling cadence for both sensor and
+    /// frame-time background poll loops without restarting the application.
+    /// </summary>
+    public void UpdatePollingPeriod(TimeSpan newPeriod)
+    {
+        lock (_pollGate)
+        {
+            if (_disposed) return;
+            if (_currentPeriod == newPeriod) return;
+
+            _currentPeriod = newPeriod;
+            _sensorPoll.Dispose();
+            _frameTimePoll.Dispose();
+
+            _sensorPoll = new PollLoop(
+                "SENSOR", _currentPeriod, () => true, SensorPollTick, () => { }, _log);
+            _frameTimePoll = new PollLoop(
+                "FRAMETIME", _currentPeriod, () => _presentMonNative.IsAvailable, FrameTimePollTick, () => { }, _log);
+
+            if (_running)
+            {
+                _sensorPoll.Start();
+                _frameTimePoll.Start();
+            }
+
+            _log($"[TELEMETRY] Polling cadence updated to {(int)newPeriod.TotalMilliseconds}ms");
+        }
+    }
+
+    /// <summary>Current active polling period (for diagnostics/tests).</summary>
+    public TimeSpan CurrentPollingPeriod
+    {
+        get { lock (_pollGate) return _currentPeriod; }
     }
 
     /// <summary>Current vendor WCF service client, or null.</summary>
@@ -152,8 +205,13 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
     /// <inheritdoc/>
     public void Dispose()
     {
-        _sensorPoll.Dispose();
-        _frameTimePoll.Dispose();
-        _presentMonProducer.Dispose();
+        lock (_pollGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _sensorPoll.Dispose();
+            _frameTimePoll.Dispose();
+            _presentMonProducer.Dispose();
+        }
     }
 }

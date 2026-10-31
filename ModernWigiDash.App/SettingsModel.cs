@@ -53,4 +53,22 @@ new(
     /// default radio.</summary>
     public string CheckedCloseBehaviorFor(string? persisted)
         => CloseBehaviors.Single(o => string.Equals(o.Value, CloseBehaviorPolicy.Resolve(persisted), StringComparison.Ordinal)).Value;
+
+    /// <summary>One telemetry polling rate option: the millisecond interval plus display label and description.</summary>
+    public sealed record PollingRateOption(int Milliseconds, string Label, string Description);
+
+    /// <summary>The supported telemetry polling rates.</summary>
+    public static readonly IReadOnlyList<PollingRateOption> TelemetryPollingRates =
+    [
+        new(250, "Fast (250 ms)", "Updates 4 times per second. Highest responsiveness, slightly higher background CPU usage."),
+        new(500, "Responsive (500 ms, Recommended)", "Updates 2 times per second (default). Balanced for smooth real-time monitoring."),
+        new(1000, "Standard (1000 ms)", "Updates once per second."),
+        new(2000, "Eco (2000 ms)", "Updates every 2 seconds. Lowest background CPU and system overhead.")
+    ];
+
+    /// <summary>
+    /// Resolves a persisted millisecond value to a valid polling rate option, falling back to 500ms default.
+    /// </summary>
+    public static int ResolveTelemetryPollingRate(int persistedMs)
+        => TelemetryPollingRates.Any(o => o.Milliseconds == persistedMs) ? persistedMs : 500;
 }

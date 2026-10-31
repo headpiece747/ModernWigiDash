@@ -57,7 +57,7 @@ internal sealed class SettingsDialog : Window
         FontFamily = Application.Current.Resources["PrimaryFont"] as FontFamily ?? SystemFonts.MessageFontFamily;
         SourceInitialized += (_, _) => _themeApplicator.Apply(this);
 
-        Content = BuildUi(seed.CloseBehavior, seed.Autostart, seed.KillSwitch, seed.AhkInterpreterPath, seed.PageBackground, seed.MinimizeToTrayOnStartup);
+        Content = BuildUi(seed.CloseBehavior, seed.Autostart, seed.KillSwitch, seed.AhkInterpreterPath, seed.PageBackground, seed.MinimizeToTrayOnStartup, seed.TelemetryPollPeriodMs);
 
         PreviewKeyDown += (_, e) =>
         {
@@ -69,7 +69,7 @@ internal sealed class SettingsDialog : Window
         };
     }
 
-    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, string currentPageBackground, bool currentMinimizeToTray)
+    private Grid BuildUi(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, string currentPageBackground, bool currentMinimizeToTray, int currentTelemetryPollPeriod)
     {
         var root = new Grid { Margin = new Thickness(16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
@@ -95,7 +95,7 @@ internal sealed class SettingsDialog : Window
         var sections = new (SettingsModel.Group Group, UIElement Content)[]
         {
             (SettingsModel.Groups[0], BuildAppearanceGroup(currentPageBackground)),
-            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath, currentMinimizeToTray)),
+            (SettingsModel.Groups[1], BuildBehaviorGroup(currentCloseBehavior, currentAutostart, currentKillSwitch, currentAhkPath, currentMinimizeToTray, currentTelemetryPollPeriod)),
             (SettingsModel.Groups[2], BuildProfileGroup())
         };
         foreach (var (group, content) in sections)
@@ -161,7 +161,7 @@ internal sealed class SettingsDialog : Window
         return row;
     }
 
-    private UIElement BuildBehaviorGroup(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, bool currentMinimizeToTray)
+    private UIElement BuildBehaviorGroup(string? currentCloseBehavior, bool currentAutostart, bool currentKillSwitch, string currentAhkPath, bool currentMinimizeToTray, int currentTelemetryPollPeriod)
     {
 #pragma warning disable S125 // layout-vs-routing split documentation, not commented-out code
         // The Behavior group's rows are pure layout over SettingsModel facts;
@@ -254,6 +254,34 @@ internal sealed class SettingsDialog : Window
         ahkRow.Children.Add(browse);
         row.Children.Add(ahkRow);
         WireBehaviorRow(ahkPath, browse, _host);
+
+        // Telemetry Polling Rate row
+        row.Children.Add(BuildRowLabel("Telemetry Polling Rate", topMargin: 12));
+        row.Children.Add(BuildRowHint(
+            "How often hardware sensors and telemetry are polled. 500 ms (2x/sec) is the recommended default."));
+
+        var rateCombo = new ComboBox
+        {
+            Width = 260,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 6, 0, 0),
+            DisplayMemberPath = nameof(SettingsModel.PollingRateOption.Label),
+            ItemsSource = SettingsModel.TelemetryPollingRates
+        };
+
+        var selectedRate = SettingsModel.TelemetryPollingRates.FirstOrDefault(o => o.Milliseconds == currentTelemetryPollPeriod)
+            ?? SettingsModel.TelemetryPollingRates.First(o => o.Milliseconds == 500);
+        rateCombo.SelectedItem = selectedRate;
+
+        rateCombo.SelectionChanged += (_, _) =>
+        {
+            if (rateCombo.SelectedItem is SettingsModel.PollingRateOption option)
+            {
+                _host.CommitTelemetryPollingRate(option.Milliseconds);
+            }
+        };
+
+        row.Children.Add(rateCombo);
 
         return row;
     }

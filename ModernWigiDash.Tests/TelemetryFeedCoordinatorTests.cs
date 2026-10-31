@@ -143,4 +143,29 @@ public class TelemetryFeedCoordinatorTests
         Assert.IsNotNull(sample);
         Assert.AreEqual(60.0, sample.Fps, 0.001);
     }
+
+    [TestMethod]
+    public void PollingPeriod_InitialAndDynamicUpdate_WorksSafely()
+    {
+        List<string> logs = [];
+        using var coordinator = new TelemetryFeedCoordinator(
+            new StubPresentMonNative(),
+            logs.Add,
+            initialPeriod: TimeSpan.FromMilliseconds(250));
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), coordinator.CurrentPollingPeriod);
+
+        coordinator.Start();
+        coordinator.UpdatePollingPeriod(TimeSpan.FromMilliseconds(1000));
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(1000), coordinator.CurrentPollingPeriod);
+        Assert.IsTrue(logs.Any(l => l.Contains("Polling cadence updated to 1000ms")));
+
+        // Calling with same period is idempotent
+        int logCount = logs.Count;
+        coordinator.UpdatePollingPeriod(TimeSpan.FromMilliseconds(1000));
+        Assert.AreEqual(logCount, logs.Count);
+
+        coordinator.Stop();
+    }
 }

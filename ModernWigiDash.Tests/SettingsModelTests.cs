@@ -50,4 +50,34 @@ public class SettingsModelTests
         Assert.AreEqual(CloseBehaviorPolicy.Default, _model.CheckedCloseBehaviorFor("QUIT"));
         Assert.AreEqual(CloseBehaviorPolicy.Default, _model.CheckedCloseBehaviorFor("bogus"));
     }
+
+    [TestMethod]
+    public void TelemetryPollingRates_ExposeSupportedIntervals_InOrder()
+    {
+        var periods = SettingsModel.TelemetryPollingRates.Select(o => o.Milliseconds).ToList();
+        CollectionAssert.AreEqual(new[] { 250, 500, 1000, 2000 }, periods);
+        foreach (var option in SettingsModel.TelemetryPollingRates)
+        {
+            Assert.IsFalse(string.IsNullOrWhiteSpace(option.Label));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(option.Description));
+        }
+    }
+
+    [TestMethod]
+    public void ResolveTelemetryPollingRate_KnownValuesRoundTrip()
+    {
+        Assert.AreEqual(250, SettingsModel.ResolveTelemetryPollingRate(250));
+        Assert.AreEqual(500, SettingsModel.ResolveTelemetryPollingRate(500));
+        Assert.AreEqual(1000, SettingsModel.ResolveTelemetryPollingRate(1000));
+        Assert.AreEqual(2000, SettingsModel.ResolveTelemetryPollingRate(2000));
+    }
+
+    [TestMethod]
+    public void ResolveTelemetryPollingRate_UnknownOrInvalidLandsOnDefault500()
+    {
+        Assert.AreEqual(500, SettingsModel.ResolveTelemetryPollingRate(0));
+        Assert.AreEqual(500, SettingsModel.ResolveTelemetryPollingRate(-1));
+        Assert.AreEqual(500, SettingsModel.ResolveTelemetryPollingRate(300));
+        Assert.AreEqual(500, SettingsModel.ResolveTelemetryPollingRate(9999));
+    }
 }

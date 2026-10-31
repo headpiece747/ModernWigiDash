@@ -18,8 +18,8 @@ internal sealed class VendorSensorRefresh(Func<long>? tickProvider = null)
     /// <summary>How long a fetched sensor list is trusted before a refetch (the list is stable).</summary>
     private const long SensorListRefreshMs = 5000;
 
-    /// <summary>Minimum gap between vendor reads; matches the vendor's own ~1 Hz display cadence.</summary>
-    private const long ReadingRefreshMs = 500;
+    /// <summary>Minimum gap between vendor reads; allows fast 250ms polling.</summary>
+    private const long ReadingRefreshMs = 250;
 
     private readonly Func<long> _tick = tickProvider ?? (() => Environment.TickCount64);
 

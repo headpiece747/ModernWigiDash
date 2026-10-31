@@ -119,4 +119,35 @@ public class SettingsCommitModuleTests
         Assert.AreEqual(0, h.HotkeyRefreshes, "the flag only affects the next launch, not the live session");
         StringAssert.Contains(h.StartupLog[0], "ON");
     }
+
+    [TestMethod]
+    public void CommitTelemetryPollingRate_PersistsAndNotifiesLiveCallback()
+    {
+        var h = new Harness();
+        int notifiedRate = 0;
+        var startup = new DiagLog("STARTUP", 1, true, h.StartupLog.Add);
+        var hotkey = new DiagLog("HOTKEY", 1, true, h.HotkeyLog.Add);
+        var module = new SettingsCommitModule(
+            profileProvider: () => h.Profile,
+            markDirty: () => h.DirtyMarks.Add("dirty"),
+            appSettingsProvider: () => h.AppSettings,
+            saveAppSettings: s => { h.AppSettings = s; h.Saved.Add(s); },
+            autostartStore: h.Autostart,
+            refreshGlobalHotkeys: () => h.HotkeyRefreshes++,
+            startupLog: startup,
+            hotkeyLog: hotkey,
+            onTelemetryPollingRateChanged: r => notifiedRate = r);
+
+        module.CommitTelemetryPollingRate(250);
+
+        Assert.AreEqual(250, h.AppSettings.TelemetryPollPeriodMs);
+        Assert.AreEqual(250, notifiedRate);
+        StringAssert.Contains(h.StartupLog[^1], "250ms");
+
+        // Invalid period falls back to 500ms
+        module.CommitTelemetryPollingRate(9999);
+        Assert.AreEqual(500, h.AppSettings.TelemetryPollPeriodMs);
+        Assert.AreEqual(500, notifiedRate);
+        StringAssert.Contains(h.StartupLog[^1], "500ms");
+    }
 }

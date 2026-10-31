@@ -151,7 +151,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     // never overwrite them. The store is inert (path + log only) until the
     // AppSettings wiring step loads the settings.
     private readonly AppSettingsStore _appSettingsStore;
-    private AppSettings _appSettings = new();
+    private AppSettings _appSettings;
     // The settings hub's commit module (ADR-0018/0019): owns the five write-throughs
     // behind the ISettingsHubHost seam. Built at construction with live providers,
     // so it reads whatever the AppSettings / ProfileLoad wiring steps have loaded.
@@ -231,6 +231,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             ? Path.Combine(settingsDir, AppSettingsStore.FileName)
             : AppSettingsStore.DefaultPath();
         _appSettingsStore = options.AppSettingsStore ?? new AppSettingsStore(settingsPath, log: msg => _hotkeyLog.Write($"[SETTINGS] {msg}"));
+        _appSettings = _appSettingsStore.Load();
         // The settings hub's commit module (ADR-0018/0019): the five write-throughs
         // behind ISettingsHubHost, owned here instead of scattered across the window.
         // Live providers read whatever ProfileLoad / AppSettings have loaded.
@@ -242,7 +243,8 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             autostartStore: AutostartStore,
             refreshGlobalHotkeys: RefreshGlobalHotkeys,
             startupLog: _startupLog,
-            hotkeyLog: _hotkeyLog);
+            hotkeyLog: _hotkeyLog,
+            onTelemetryPollingRateChanged: ms => _telemetry?.UpdatePollingPeriod(TimeSpan.FromMilliseconds(ms)));
         // The profile-import host adapter (the ADR-0008 image): the flow's
         // production host. The dialog host is read live (the wiring steps run
         // after construction, so a capture would be null at import time).
@@ -393,7 +395,10 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     {
         // Deep telemetry feed coordinator (Candidate 2, ADR-0011): unifies
         // hardware sensor polling, frame-time polling, and vendor service access.
-        _telemetry = new TelemetryFeedCoordinator(presentMonNative, Log);
+        _telemetry = new TelemetryFeedCoordinator(
+            presentMonNative,
+            Log,
+            initialPeriod: TimeSpan.FromMilliseconds(_appSettings.TelemetryPollPeriodMs));
         _telemetry.Start();
 
         // The engine's Start() above fires the initial connect. Do NOT
@@ -605,6 +610,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         // convenience, not a dependency); the global-hotkey wiring
         // below reads them.
         _appSettings = _appSettingsStore.Load();
+        _telemetry?.UpdatePollingPeriod(TimeSpan.FromMilliseconds(_appSettings.TelemetryPollPeriodMs));
     }
 
     /// <summary>Global-hotkey attachment (ADR-0019): inert until SourceInitialized hands it the HWND.</summary>
@@ -1264,7 +1270,8 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         _appSettings.KillSwitch,
         _appSettings.AhkInterpreterPath,
         _profile.ActivePage.BackgroundHexColor,
-        _appSettings.MinimizeToTrayOnStartup);
+        _appSettings.MinimizeToTrayOnStartup,
+        _appSettings.TelemetryPollPeriodMs);
 
     void ISettingsHubHost.CommitCloseBehavior(string value) => _settingsCommits.CommitCloseBehavior(value);
 
@@ -1283,6 +1290,8 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     void ISettingsHubHost.CommitPageBackground(string hex) => CommitPageBackground(hex);
 
     void ISettingsHubHost.CommitMinimizeToTrayOnStartup(bool enabled) => _settingsCommits.CommitMinimizeToTrayOnStartup(enabled);
+
+    void ISettingsHubHost.CommitTelemetryPollingRate(int periodMs) => _settingsCommits.CommitTelemetryPollingRate(periodMs);
 
     private static void Log(string msg) => FileLog.Write(msg);
 

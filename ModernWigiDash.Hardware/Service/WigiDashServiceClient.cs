@@ -57,7 +57,7 @@ public sealed class WigiDashServiceClient : IDisposable
     private DateTimeOffset _lastRefreshAttemptUtc = DateTimeOffset.MinValue;
 
     /// <summary>Minimum gap between background refresh attempts (a wedged service backoff).</summary>
-    private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
     /// Deduplicated log for the untrusted-input read failures (the project's
@@ -70,7 +70,7 @@ public sealed class WigiDashServiceClient : IDisposable
     private static readonly TimeSpan SensorListTtl = TimeSpan.FromSeconds(2);
 
     /// <summary>How long a cached sensor reading is served before a refresh is scheduled.</summary>
-    private static readonly TimeSpan SensorValueTtl = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan SensorValueTtl = TimeSpan.FromMilliseconds(250);
 
     /// <summary>The HWiNFO sensor read facet.</summary>
     public ISensorValues Sensors { get; }
@@ -362,6 +362,7 @@ public sealed class WigiDashServiceClient : IDisposable
     {
         IReadOnlyList<VendorSensorItem>? list = null;
         var readings = new Dictionary<(int, int, int), VendorSensorReading>();
+        bool fetchFailed = false;
         try
         {
             lock (_gate)
@@ -371,32 +372,46 @@ public sealed class WigiDashServiceClient : IDisposable
                 EnsureConnectedLocked();
                 if (_channel == null) return;
 
-                var raw = GetRawSensorList();
-                if (raw == null)
+                var now = _clock.GetUtcNow();
+                bool listStale;
+                lock (_cacheLock)
                 {
-                    CloseChannelLocked();
-                    return;
+                    listStale = _cachedSensors == null || now - _cachedSensorsAtUtc >= SensorListTtl;
                 }
 
-                if (raw.Count == 0)
+                if (listStale)
                 {
-                    // Empty means the shared provider was torn down; re-init and re-read.
-                    ReinitSensorProviderLocked();
-                    raw = GetRawSensorList();
+                    var raw = GetRawSensorList();
                     if (raw == null)
                     {
                         CloseChannelLocked();
+                        fetchFailed = true;
                         return;
                     }
+
+                    if (raw.Count == 0)
+                    {
+                        // Empty means the shared provider was torn down; re-init and re-read.
+                        ReinitSensorProviderLocked();
+                        raw = GetRawSensorList();
+                        if (raw == null)
+                        {
+                            CloseChannelLocked();
+                            fetchFailed = true;
+                            return;
+                        }
+                    }
+
+                    list = ProjectSensors(raw);
                 }
 
-                list = ProjectSensors(raw);
                 foreach (var key in RequestedKeys())
                 {
                     var value = GetRawSensorValue(key.ReadingType, key.SensorId1, key.SensorId2);
                     if (value == null)
                     {
                         CloseChannelLocked();
+                        fetchFailed = true;
                         break;
                     }
 
@@ -406,11 +421,12 @@ public sealed class WigiDashServiceClient : IDisposable
         }
         catch
         {
+            fetchFailed = true;
             // Best-effort: a failed refresh publishes null and backs off via the TTL stamps.
         }
         finally
         {
-            PublishSnapshot(list, readings);
+            PublishSnapshot(list, readings, fetchFailed);
             Interlocked.Exchange(ref _refreshInFlight, 0);
         }
     }
@@ -425,7 +441,8 @@ public sealed class WigiDashServiceClient : IDisposable
 
     private void PublishSnapshot(
         IReadOnlyList<VendorSensorItem>? list,
-        IReadOnlyDictionary<(int, int, int), VendorSensorReading> readings)
+        IReadOnlyDictionary<(int, int, int), VendorSensorReading> readings,
+        bool fetchFailed)
     {
         lock (_cacheLock)
         {
@@ -435,16 +452,15 @@ public sealed class WigiDashServiceClient : IDisposable
             if (list != null)
             {
                 _cachedSensors = list;
+                _cachedSensorsAtUtc = now;
             }
-            else
+            else if (fetchFailed)
             {
                 // A failed refresh: drop the readings so the widget degrades to
                 // its placeholder instead of showing a stale value.
                 _cachedReadings.Clear();
+                _cachedSensorsAtUtc = now;
             }
-
-            // Stamp the list attempt either way (the failure backoff).
-            _cachedSensorsAtUtc = now;
 
             if (readings.Count > 0)
             {
@@ -452,10 +468,6 @@ public sealed class WigiDashServiceClient : IDisposable
                 {
                     _cachedReadings[kv.Key] = kv.Value;
                 }
-            }
-
-            if (list != null && readings.Count > 0)
-            {
                 _cachedReadingsAtUtc = now;
             }
 
