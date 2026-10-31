@@ -47,6 +47,22 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
+== What's new in v0.9.3 ==
+
+  - Configurable Telemetry Polling Rate & Nyquist Beat Elimination:
+      * Machine-local polling rate selector added to Settings Hub (Behavior group):
+        250 ms (Fast), 500 ms (Normal) [Default], 1000 ms (Relaxed), 2000 ms (Eco).
+      * Default telemetry polling cadence updated from 1.0s to 500ms (matching official
+        G.Skill WigiDashManager cadence), eliminating Nyquist phase-beat freeze against
+        LibreHardwareService (1.0s update window) that previously caused 2-second UI stalls.
+      * Live dynamic update: changing the rate in Settings applies immediately to active
+        background polling loops without requiring an application restart.
+  - HWiNFO & Vendor Service Ingestion Optimization:
+      * Reduced WigiDashServiceClient minimum refresh throttle and sensor value TTL to 250ms.
+      * Eliminated redundant full 600+ item SOAP sensor list fetching inside the reading
+        loop, drastically lowering WCF communication latency and CPU overhead.
+      * Lowered VendorSensorRefresh widget throttle to 250ms for Fast mode compatibility.
+
 == What's new in v0.9.2 ==
 
   - Physical Hardware Touch & Ergonomics:
