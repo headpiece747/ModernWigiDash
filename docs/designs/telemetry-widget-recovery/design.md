@@ -394,7 +394,8 @@ code queued behind `_gate`).
   `ModernWigiDash.Widgets/VendorSensorRefresh.cs`,
   `ModernWigiDash.Sdk/Attributes.cs`,
   `ModernWigiDash.App/Inspector/{EditorDescription,InspectorModelBuilder,InspectorPanelRenderer}.cs`,
-  `ModernWigiDash.App/{ProcessLifecycle,ExitReasonPolicy,AppShellLifecycle,App}.cs`,
+  `ModernWigiDash.App/{ProcessLifecycle,ExitReasonPolicy,AppShellLifecycle}.cs`,
+  `ModernWigiDash.App/App.xaml.cs`,
   `ModernWigiDash.App/MainWindow.xaml.cs`, `ModernWigiDash.App/MainWindow.Update.cs`.
 - Tests: `ModernWigiDash.Tests/{AidaPanelMasterTests,AidaPanelServiceTests,WigiDashServiceClientTests,HwinfoWidgetTests,InspectorModelBuilderTests,InspectorPanelRendererTests,TeardownPlanTests,AppShellLifecycleTests,TestDoubles,DebtGuardTests,ExitReasonPolicyTests}.cs`.
 - User docs: `README.md` (Vendor Integration, HWiNFO Sensor, AIDA64 Panel,
