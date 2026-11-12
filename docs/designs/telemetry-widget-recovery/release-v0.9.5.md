@@ -1,6 +1,6 @@
 # Release v0.9.5
 
-Status: pre-flight complete, ready to tag
+Status: released (v0.9.5, run 43147307869); post-release checks and the v0.9.4 to v0.9.5 end-to-end update passed. The tag carries this checklist with the result appended in a follow-up docs commit.
 
 ## Target
 
@@ -153,4 +153,28 @@ section, run `scripts\run-gates.ps1` again (HEAD moved since the release commit,
 so the commit guard's sha check needs a fresh row), then commit the doc and push
 `master`.
 
-(pending)
+- Run `43147307869`: success in 9m20s; gates, build, publish, size verify, and
+  credit steps all green.
+- Readback: tag `v0.9.5`, `draft=false`, `prerelease=false`,
+  `author=github-actions[bot]`, body begins with the ElmorLabs credit;
+  `releases/latest` returns `v0.9.5`.
+- Assets:
+  - `ModernWigiDash-v0.9.5-win-x64.zip`: 343,417,206 bytes,
+    `sha256:20e59999cc901197bbece1f86c5e12b87e6471821b86339ac84db198c4cfda14`.
+  - `ModernWigiDash-v0.9.5-app-only.zip`: 114,695,324 bytes,
+    `sha256:7eae84acd682aac81647115d3716a84c00524c5872c18fde817f312bbcfb6a4c`.
+  - The run log's verified lines match (343,417,206 and 114,695,324).
+- Tag object `55153de8eb30387c12599ebd57169f833f0690d4` dereferences to
+  `def2ffc`, the fix and checklist commit.
+- Shipped telemetry, read from the downloaded full zip's
+  `telemetry-versions.txt`: `LibreHardwareService=0.3.4`, `PresentMon=2.6.0`.
+  It matches the run log's auto-resolved pair and the local pre-flight.
+- End-to-end update from v0.9.4: app start 03:28:26; early updater 03:28:44,
+  timed out 03:29:47; restart 03:30:00, `swap complete` 03:30:02; v0.9.5 start
+  03:30:02 with `app=0.9.5`. v0.9.4 wrote
+  `[SHELL] window closed (reason=update-restart, trayLive=True)` and
+  `[App] === Application exiting === reason=update-restart`. Scratch install
+  removed, profile restored.
+- The single launch is not exercised by this leg (it ran v0.9.4's updater code).
+  The one-versus-two `updater start args:` check is deferred to the first update
+  started by v0.9.5, per the procedure.
