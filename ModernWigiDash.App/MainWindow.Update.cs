@@ -88,7 +88,7 @@ public partial class MainWindow
         ApplyUpdateState(_updateFlow.BeginDownload(info));
         var progress = new Progress<double>(p =>
             UpdateButton.ToolTip = UpdateFlow.DownloadingTooltip(info, p));
-        bool ok = await _updateService.RunInstallPhase(info, progress, AppContext.BaseDirectory);
+        bool ok = await _updateService.DownloadAndStageAsync(info, progress);
         ApplyUpdateState(_updateFlow.DownloadComplete(info, ok));
     }
 

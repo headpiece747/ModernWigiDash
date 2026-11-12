@@ -154,25 +154,19 @@ internal sealed class UpdateService
         TryDeleteFile(Path.Combine(_updatesRoot, "apply-update-live.cmd"));
     }
 
-    /// <summary>One startup recovery call: heal an interrupted swap and clear
-    /// stale stages/downloads. The protocol orders itself: cleanup before
-    /// recovery, so a stale stage never masks an interrupted swap.</summary>
+    /// <summary>One startup recovery call: heal an interrupted swap, clear
+    /// stale stages/downloads, and drop any swap lock left behind. The protocol
+    /// orders itself: cleanup before recovery, so a stale stage never masks an
+    /// interrupted swap. The lock cleanup is deliberately unconditional: a
+    /// crashed updater's lock is dropped here, and a manual app launch inside a
+    /// running swap window can also drop a live one. The script's
+    /// validate-before-move and restore-on-copyfail bound that case to a
+    /// redundant swap, never a missing exe.</summary>
     public void RunStartupPhase(string installDir)
     {
         CleanupStale();
+        TryDeleteDirectory(Path.Combine(installDir, ".update-running"));
         RecoverInterruptedSwap(installDir);
-    }
-
-    /// <summary>One install phase: downloads the slim zip, verifies SHA-256,
-    /// extracts to staged/{version}, writes the cmd, and launches the updater.
-    /// The protocol orders itself: stage-before-launch, so a failed launch
-    /// never leaves a half-staged update that the next startup would treat as
-    /// stale and delete.</summary>
-    public async Task<bool> RunInstallPhase(UpdateInfo info, IProgress<double> progress, string installDir, CancellationToken ct = default)
-    {
-        bool staged = await DownloadAndStageAsync(info, progress, ct).ConfigureAwait(false);
-        if (!staged) return false;
-        return LaunchUpdater(info, installDir);
     }
 
     /// <summary>

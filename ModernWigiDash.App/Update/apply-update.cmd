@@ -46,13 +46,33 @@ powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%~
 exit /b 0
 :writable
 
-rem ---- 3. Rename-aside swap (crash-safe) ----
-if not exist "%INSTALL%\%EXE%.old" (
-  move /Y "%INSTALL%\%EXE%" "%INSTALL%\%EXE%.old" >nul
-)
+rem ---- 3. Serialize, validate, then rename-aside (crash-safe) ----
+rem mkdir is atomic on NTFS, so it is the swap lock: a second updater that
+rem lost the race exits before starting a swap. The app clears any leftover
+rem lock at startup (RunStartupPhase).
+set "LOCK=%INSTALL%\.update-running"
+mkdir "%LOCK%" 2>nul
+if errorlevel 1 goto updater_busy
+rem Validate the staged payload BEFORE renaming the live exe. The old order
+rem moved the exe aside first and then aborted when the stage was missing,
+rem leaving the install directory without an exe.
 if not exist "%STAGE%\ModernWigiDash-win-x64\%EXE%" (
   echo [%date% %time%] ERROR: staged exe missing >> "%LOG%"
+  rd "%LOCK%" 2>nul
   exit /b 3
+)
+if not exist "%INSTALL%\%EXE%" (
+  echo [%date% %time%] ERROR: install exe missing >> "%LOG%"
+  rd "%LOCK%" 2>nul
+  exit /b 3
+)
+if not exist "%INSTALL%\%EXE%.old" (
+  move /Y "%INSTALL%\%EXE%" "%INSTALL%\%EXE%.old" >nul
+  if errorlevel 1 (
+    echo [%date% %time%] ERROR: could not rename the exe aside >> "%LOG%"
+    rd "%LOCK%" 2>nul
+    exit /b 3
+  )
 )
 
 rem Retry loop for file-in-use (AV scanning etc.)
@@ -66,6 +86,10 @@ ping -n 2 127.0.0.1 >nul
 goto copyloop
 :copyfail
 echo [%date% %time%] ERROR: could not copy new exe after 10 tries >> "%LOG%"
+rem Restore the previous exe: a failed swap must never leave the install
+rem directory without a runnable exe.
+if exist "%INSTALL%\%EXE%.old" move /Y "%INSTALL%\%EXE%.old" "%INSTALL%\%EXE%" >nul
+rd "%LOCK%" 2>nul
 exit /b 4
 :copied
 
@@ -79,6 +103,11 @@ del "%INSTALL%\%EXE%.old" 2>nul
 del /Q "%STAGE%\ModernWigiDash-win-x64\%EXE%" 2>nul
 rd /S /Q "%STAGE%\ModernWigiDash-win-x64\Resources" 2>nul
 rd /S /Q "%STAGE%" 2>nul
+rd "%LOCK%" 2>nul
 echo [%date% %time%] swap complete >> "%LOG%"
 {{RELAUNCH}}
+exit /b 0
+
+:updater_busy
+echo [%date% %time%] another updater is already running; nothing to do >> "%LOG%"
 exit /b 0

@@ -230,6 +230,22 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
+    public void RunStartupPhase_RemovesAStaleSwapLock()
+    {
+        // A crashed updater can leave the swap lock behind; startup clears it
+        // before any update check, so it can never block a future update.
+        string dir = NewDir();
+        string installDir = Path.Combine(dir, "install");
+        string lockDir = Path.Combine(installDir, ".update-running");
+        Directory.CreateDirectory(lockDir);
+        var service = new UpdateService(updatesRoot: dir);
+
+        service.RunStartupPhase(installDir);
+
+        Assert.IsFalse(Directory.Exists(lockDir), "startup must drop a stale swap lock");
+    }
+
+    [TestMethod]
     public void RecoverInterruptedSwap_RestoresOldWhenNewMissing()
     {
         string dir = NewDir();
@@ -367,10 +383,11 @@ public class UpdateServiceTests
     }
 
     [TestMethod]
-    public async Task RunInstallPhase_StagesThenLaunches()
+    public async Task DownloadAndStage_DoesNotLaunchTheUpdater()
     {
-        // A successful stage + launch: the install phase returns true only when
-        // both the download/stage and the launch succeed.
+        // The download path must never launch the updater: the restart prompt
+        // is the single launch site, and a second launcher races the swap
+        // (the v0.9.3/v0.9.4 double-updater defect).
         string dir = NewDir();
         string zipPath = Path.Combine(dir, "slim.zip");
         Directory.CreateDirectory(dir);
@@ -393,27 +410,85 @@ public class UpdateServiceTests
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", digest);
 
-        bool ok = await service.RunInstallPhase(info, new Progress<double>(), Path.Combine(Path.GetTempPath(), "wmd-install")).ConfigureAwait(false);
+        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
 
-        Assert.IsTrue(ok, "a clean stage + launch must report success");
-        Assert.AreEqual(1, spawns, "the launch seam must be invoked exactly once");
+        Assert.IsTrue(ok, "a clean download must stage");
+        Assert.AreEqual(0, spawns, "the download path must not launch the updater");
     }
 
     [TestMethod]
-    public async Task RunInstallPhase_FailedStage_DoesNotLaunch()
+    public async Task DownloadAndStage_FailedStage_DoesNotLaunch()
     {
-        // A failed stage (sha mismatch) must short-circuit before the launch.
         string dir = NewDir();
+        int spawns = 0;
         var service = new UpdateService(
             downloadFile: async (_, dest, _, _) => await File.WriteAllTextAsync(dest, "corrupt").ConfigureAwait(false),
             sha256Matches: (_, _) => false,
-            startProcess: _ => throw new InvalidOperationException("must not launch"),
+            startProcess: _ => { spawns++; return null; },
             updatesRoot: dir);
         var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
 
-        bool ok = await service.RunInstallPhase(info, new Progress<double>(), Path.Combine(Path.GetTempPath(), "wmd-install")).ConfigureAwait(false);
+        bool ok = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
 
-        Assert.IsFalse(ok, "a failed stage must fail the install phase without launching");
+        Assert.IsFalse(ok, "a failed stage must not report success");
+        Assert.AreEqual(0, spawns, "a failed stage must never launch");
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_LeavesTheSwapLockAlone()
+    {
+        // Startup clears a leftover swap lock; the launch path must not clear a
+        // live one, or a second updater could swap beside the running one.
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+        File.WriteAllText(UpdateService.StagedCmdHashPath(stagedCmd), UpdateService.ComputeSha256(stagedCmd));
+        string installDir = Path.Combine(Path.GetTempPath(), $"wmd-install-{Guid.NewGuid():N}");
+        string lockDir = Path.Combine(installDir, ".update-running");
+        Directory.CreateDirectory(lockDir);
+        try
+        {
+            var service = new UpdateService(
+                updatesRoot: dir,
+                startProcess: _ => null);
+            var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+
+            Assert.IsTrue(service.LaunchUpdater(info, installDir));
+            Assert.IsTrue(Directory.Exists(lockDir), "the launch path must never remove a live swap lock");
+        }
+        finally
+        {
+            try { Directory.Delete(installDir, true); } catch (IOException) { /* best-effort */ }
+        }
+    }
+
+    [TestMethod]
+    public void ApplyUpdateCmd_ValidatesStageBeforeRenamingAndRestoresOnFailure()
+    {
+        // A lost race must not leave the install directory without an exe:
+        // validate the staged payload before the rename-aside, and restore the
+        // .old on a failed copy.
+        using var stream = typeof(UpdateService).Assembly
+            .GetManifestResourceStream("ModernWigiDash.App.Update.apply-update.cmd");
+        Assert.IsNotNull(stream, "the updater cmd resource must be embedded");
+        using var reader = new StreamReader(stream);
+        string script = reader.ReadToEnd();
+
+        int validate = script.IndexOf("if not exist \"%STAGE%\\ModernWigiDash-win-x64\\%EXE%\"", StringComparison.Ordinal);
+        int moveAside = script.IndexOf("move /Y \"%INSTALL%\\%EXE%\" \"%INSTALL%\\%EXE%.old\"", StringComparison.Ordinal);
+        int copyFail = script.IndexOf(":copyfail", StringComparison.Ordinal);
+        int restore = script.IndexOf(
+            "if exist \"%INSTALL%\\%EXE%.old\" move /Y \"%INSTALL%\\%EXE%.old\" \"%INSTALL%\\%EXE%\"",
+            StringComparison.Ordinal);
+
+        Assert.IsTrue(validate >= 0, "the staged-exe validation must exist");
+        Assert.IsTrue(moveAside >= 0, "the rename-aside must exist");
+        Assert.IsTrue(validate < moveAside, "the stage must be validated before the live exe is moved");
+        Assert.IsTrue(restore > copyFail, "a failed copy must restore the previous exe");
+        Assert.IsTrue(restore < script.IndexOf("exit /b 4", copyFail),
+            "the restore must run before the copy-failure exit, not after it");
     }
 
     [TestMethod]

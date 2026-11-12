@@ -47,6 +47,19 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
+== What's new in v0.9.5 ==
+
+  - Updater restart hardening:
+      * The update now stages on download and launches the updater exactly
+        once, when "Restart to apply" is confirmed. Before, the download path
+        also launched one, so a quick restart could run two swaps; the loser
+        could leave the install folder without an exe.
+      * The swap checks the staged exe before moving the installed one aside,
+        restores the previous exe if the copy fails, and takes a swap lock so
+        a second updater exits without starting a swap.
+      * The fix takes effect for updates started by this build: the updater
+        that performs an update is the one already installed.
+
 == What's new in v0.9.4 ==
 
   - AIDA64 Panel no longer freezes the app:

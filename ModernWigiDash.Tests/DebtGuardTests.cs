@@ -219,6 +219,31 @@ public sealed class DebtGuardTests
             + ". The pool is the one buffer owner behind FrameDelivery (CONTEXT.md FrameDelivery); a second consumer means the tick (or a widget) allocates its own frame buffer and the pool is no longer the single allocation path.");
     }
 
+    // --- updater launch ownership ---
+
+    [TestMethod]
+    public void HouseRules_UpdaterLaunch_HasOneProductionCallSite()
+    {
+        // The restart prompt is the only launch site. The download path must
+        // never compose a stage-and-launch: two updaters race the swap and the
+        // loser can leave the install directory without an exe (the
+        // v0.9.3/v0.9.4 double-updater defect).
+        var launchCalls = RepoScan.ScanSrc(new Regex(@"\.LaunchUpdater\s*\("))
+            .Select(hit => hit.Split(':', 2)[0].Replace('\\', '/'))
+            .Distinct()
+            .OrderBy(f => f)
+            .ToList();
+        CollectionAssert.AreEqual(
+            new[] { "ModernWigiDash.App/MainWindow.Update.cs" },
+            launchCalls,
+            "updater launched outside the restart prompt: " + string.Join("; ", launchCalls)
+            + ". The download path stages only; the restart prompt is the one launch site, so a second updater cannot race the swap and leave the install directory without an exe.");
+
+        var compositions = RepoScan.ScanSrc(new Regex(@"\bRunInstallPhase\b"));
+        Assert.AreEqual(0, compositions.Count,
+            "RunInstallPhase was the stage-and-launch composition that launched an updater during download; it must not come back.");
+    }
+
     // --- dead helper methods ---
 
     [TestMethod]
