@@ -190,9 +190,12 @@ source is public at the URLs above.
 $readme = Get-Content (Join-Path $ReleaseDir "README.txt") -Raw -Encoding UTF8
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     # Stamp the version into the user-facing doc so the zip is self-describing.
-    # (Match on the ASCII prefix so the em-dash in the template never matters;
-    # regex Replace with count 1 - the -replace operator takes only two args.)
-    $readme = [regex]::Replace($readme, "ModernWigiDash ", "ModernWigiDash v$Version ", 1)
+    # (Match on the ASCII prefix so the em-dash in the template never matters.
+    # The instance Replace's third argument is the COUNT; the static
+    # Regex.Replace's fourth argument is RegexOptions, so the old call passed 1
+    # there and silently replaced every occurrence, version-stamping the
+    # uninstall paths too.)
+    $readme = ([regex]"ModernWigiDash ").Replace($readme, "ModernWigiDash v$Version ", 1)
     $readme = $readme -replace "== Quick Start \(3 steps\) ==",
         "== Version ==`r`n`r`n  This is release v$Version.`r`n`r`n== Quick Start (3 steps) =="
 }
