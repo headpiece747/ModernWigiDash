@@ -178,3 +178,13 @@ so the commit guard's sha check needs a fresh row), then commit the doc and push
 - The single launch is not exercised by this leg (it ran v0.9.4's updater code).
   The one-versus-two `updater start args:` check is deferred to the first update
   started by v0.9.5, per the procedure.
+- Packaged README, read from the published full zip: title
+  `ModernWigiDash v0.9.5`, `== What's new in v0.9.5 ==` present, and the
+  uninstall and `%LOCALAPPDATA%` paths stay unversioned.
+- State restore after the leg: `profile.json` restored byte-identical (12,274
+  bytes, original timestamp). `app_theme.json` and `calendar-credentials.bin`
+  did not exist before the leg and do not exist after it; the default-profile
+  run created neither, so there was nothing else to restore.
+- Carried forward: the v0.9.6 release checklist must count `updater start args:`
+  (per-user install) or `swap complete` (elevated install) across the v0.9.5 to
+  v0.9.6 restart and record both counts. Owner: `release-v0.9.6.md`.
