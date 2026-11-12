@@ -418,6 +418,42 @@ public class InspectorPanelRendererTests
         public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
     }
 
+    [TestMethod]
+    public void Render_SensorSelectorWithoutOptions_KeepsTheServiceInstruction()
+    {
+        // The shared empty-state builder must not replace the store-backed
+        // selector's actionable text with its generic property description.
+        StaRunner.Run(() =>
+        {
+            var widget = new SensorSelectorWidget();
+            var placed = new PlacedWidgetInstance { PluginId = "hardware_monitor", DisplayName = "Hardware Monitor", ActiveInstance = widget };
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+            Assert.IsTrue(
+                VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text.Contains("Start LibreHardwareService", StringComparison.Ordinal)),
+                "the selector's empty state must keep the service instruction");
+        });
+    }
+
+    private sealed class SensorSelectorWidget : ModernWidgetBase
+    {
+        [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector, "Select a live sensor reading from LibreHardwareService")]
+        public string SensorLabel { get; set; } = "";
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
     private sealed class RequiredChoiceWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
     {
         public const string Hint = "Start the vendor service, then reopen settings.";

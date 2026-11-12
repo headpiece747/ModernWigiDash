@@ -1234,8 +1234,6 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
     // the explicit-quit latch, and the session-end standby.
     internal void ShowFromTray() => _shellLifecycle.ShowFromTray();
 
-    internal void QuitFromTray() => _shellLifecycle.QuitFromTray();
-
     internal void QuitClose() => _shellLifecycle.QuitClose();
 
     private void OnWindowClosing(object? sender, CancelEventArgs e)

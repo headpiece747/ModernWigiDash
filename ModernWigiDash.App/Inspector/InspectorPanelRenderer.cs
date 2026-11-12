@@ -154,7 +154,8 @@ internal static class InspectorPanelRenderer
                 // degrade to a text box, because the persisted value is a code
                 // (the HWiNFO sensor key), not user-typable text.
                 panel.Children.Add(BuildEmptyOptionsHint(desc, callbacks,
-                    "No options available yet. Reopen settings once the source is connected."));
+                    "No options available yet. Reopen settings once the source is connected.",
+                    useDescription: true));
                 break;
             case WidgetPropertyType.Font:
                 IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
@@ -381,14 +382,15 @@ internal static class InspectorPanelRenderer
     }
 
     /// <summary>
-    /// The one empty-state builder for option-list editors: the property's own
-    /// description when the widget supplied one (it knows what the source is),
-    /// else the caller's fallback hint.
+    /// The one empty-state builder for option-list editors. A widget that owns
+    /// its option source supplies the text through its property description
+    /// (required choice); a store-backed selector passes the instruction as the
+    /// fallback so its help text stays help text.
     /// </summary>
-    private static TextBlock BuildEmptyOptionsHint(EditorDescription desc, InspectorCallbacks callbacks, string fallback)
+    private static TextBlock BuildEmptyOptionsHint(EditorDescription desc, InspectorCallbacks callbacks, string fallback, bool useDescription = false)
         => new()
         {
-            Text = string.IsNullOrWhiteSpace(desc.Description) ? fallback : desc.Description,
+            Text = useDescription && !string.IsNullOrWhiteSpace(desc.Description) ? desc.Description : fallback,
             FontSize = 11,
             Foreground = callbacks.TryFindResource("TextSecondary") as Brush ?? Brushes.White,
             TextWrapping = TextWrapping.Wrap

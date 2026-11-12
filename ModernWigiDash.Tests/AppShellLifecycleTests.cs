@@ -114,10 +114,21 @@ public class AppShellLifecycleTests
         using var shell = h.Build();
         shell.StartTray();
 
-        h.FakeTray.RaiseMenu(TrayMenuCommand.Quit);
+        try
+        {
+            ProcessLifecycle.ExitReason = null;
 
-        Assert.AreEqual(1, h.CloseCalls, "tray quit triggers window close");
-        Assert.AreEqual(1, h.ShutdownCalls, "tray quit executes app shutdown");
+            h.FakeTray.RaiseMenu(TrayMenuCommand.Quit);
+
+            Assert.AreEqual(1, h.CloseCalls, "tray quit triggers window close");
+            Assert.AreEqual(1, h.ShutdownCalls, "tray quit executes app shutdown");
+            Assert.AreEqual(ExitReasonPolicy.TrayQuit, ProcessLifecycle.ExitReason,
+                "the production tray menu must record its cause, not just the wrapper");
+        }
+        finally
+        {
+            ProcessLifecycle.ExitReason = null;
+        }
     }
 
     [TestMethod]

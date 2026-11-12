@@ -211,6 +211,21 @@ public class HwinfoWidgetTests
     }
 
     [TestMethod]
+    public void GetPropertyOptions_UnparseableStoredValue_IsAlsoKeptVisible()
+    {
+        // The old free-text editor could persist arbitrary text; a blank combo
+        // would hide it, so any non-empty unmatched value gets the same entry.
+        VendorService.SetInstance(CreateFakeClient(sensorsReady: true, sensorName: "CPU Temp", sensorCount: 1));
+        var widget = new HwinfoWidget { SensorKey = "not-a-key" };
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(3, options.Count);
+        Assert.AreEqual("not-a-key", options[1].Value);
+        Assert.IsTrue(options[1].DisplayName.Contains("(not available)", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void GetPropertyOptions_OverlongSensorName_TruncatesTheLabel()
     {
         // The vendor's Name/Type are per-string quota bounded (8 KB), so the

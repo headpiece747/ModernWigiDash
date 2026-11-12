@@ -68,7 +68,7 @@ internal sealed class AppShellLifecycle : IDisposable
     {
         _tray = new TrayIconController(
             onShow: () => _lifecycle!.ShowFromTray(),
-            onQuit: () => _lifecycle!.QuitFromTray(),
+            onQuit: () => QuitFromTray(),
             log: trayLog,
             surface: traySurface);
 

@@ -230,9 +230,11 @@ the option source is not.
 - `InspectorPanelRenderer`'s Choice branch: when `RequiresListedValue` is set and
   options are empty, call the shared empty-state builder (extracted from
   `BuildSensorSelector`): `TextBlock`, 11 pt, `TextSecondary`, wrapped, using the
-  property description when present. When options exist, render the ComboBox as
-  today. Free-text Choice stays available to every other widget (Twitch channel
-  entry relies on it).
+  property description. The store-backed `SensorSelector` keeps its own service
+  instruction as the builder's fallback, so the Hardware Monitor's empty state
+  does not lose "Start LibreHardwareService". When options exist, render the
+  ComboBox as today. Free-text Choice stays available to every other widget
+  (Twitch channel entry relies on it).
 - `VendorSensorRefresh` exposes `HasSensorList` (the last list fetch returned at
   least one sensor). `HwinfoWidget.Render` compares it across ticks and calls
   `Context?.RequestInspectorRefresh()` once, on the first render that observes a
@@ -252,12 +254,14 @@ the option source is not.
   fallback. A fresh widget's combo then shows the behavior it renders instead of
   a blank selection beside a live reading, and a configured widget can return to
   the fallback.
-- A persisted key the current list does not contain (a service restart, a
-  renamed sensor) is prepended as `<key> (not available)` and stays selected, so
-  the old text box's information is not lost to a blank combo.
+- Any non-empty stored value no current sensor matches (a service restart, a
+  renamed sensor, or text the old free-form editor allowed) is prepended as
+  `<value> (not available)` and stays selected, so the old text box's
+  information is not lost to a blank combo.
 - `GetSensorList` returns null on a cold cache, or when a refresh has failed
-  before any list was ever cached; otherwise the last good list. A reachable
-  service with zero sensors produces the automatic-only combo, not the hint.
+  before any list was ever cached; otherwise the last good list. A later panel
+  build over a reachable zero-sensor list renders the automatic-only combo; a
+  panel already built keeps the hint by design (no arrival transition).
 
 ### Tests (fix 2)
 
@@ -271,9 +275,12 @@ the option source is not.
   the shared `TestContext` (`TestDoubles.cs:31,49`).
 - `GetPropertyOptions_ListsSensorKeysAndLabels` pins the automatic first entry
   and the two sensor keys after it.
-- `GetPropertyOptions_PersistedKeyNotInTheList_PrependsANotAvailableEntry` and
+- `GetPropertyOptions_PersistedKeyNotInTheList_PrependsANotAvailableEntry`,
+  `GetPropertyOptions_UnparseableStoredValue_IsAlsoKeptVisible`, and
   `GetPropertyOptions_OverlongSensorName_TruncatesTheLabel` pin the stale-pick
-  entry and the 128-character label bound.
+  entries and the 128-character label bound.
+- `Render_SensorSelectorWithoutOptions_KeepsTheServiceInstruction` pins the
+  Hardware Monitor fallback text through the shared builder.
 - The renderer tests construct `EditorDescription` positionally
   (`KeyCaptureEditorTests.cs:218`); the new fields are init-only on the record
   body, so that construction keeps compiling.
@@ -311,6 +318,9 @@ cannot reproduce it.
     review's catch).
   - `MainWindow`'s close handler, after the intercept declines to hide, when no
     reason is set → `user-close`.
+- `AppShellLifecycle` wires the tray controller's quit delegate through its own
+  recording `QuitFromTray`, not straight to `WindowLifecycle.QuitFromTray`
+  (otherwise the menu path records nothing and the marker says `user-close`).
 - The standing-close attribution is a pure rule
   (`ExitReasonPolicy.ForClose`, four tests): a cancelled close records nothing,
   a recorded cause wins, an unattributed standing close is `user-close`.
@@ -339,8 +349,10 @@ fault, and the WER entry on that machine is then the place to look.
 
 Tests: `ExitReasonPolicyTests` (the four attribution cases),
 `RecordSessionEnded_WritesTheReasonAndFlushes` (the committed-shutdown line), and
-`WriteFatalLine_WritesTheTypeToTheDisplayLog` (the hard-fault line). The tray
-path is pinned by `QuitFromTray_RecordsTheTrayQuitReason`; the update-restart and
+`WriteFatalLine_WritesTheTypeToTheDisplayLog` (the hard-fault line). The
+production tray menu is pinned by `TrayQuit_ArmsLatch_ClosesWindow_AndShutsDown`
+(it asserts the recorded cause), and the wrapper by
+`QuitFromTray_RecordsTheTrayQuitReason`; the update-restart and
 second-launch assignments are single call sites, and the update restart's close
 semantics are pinned by `OnWindowClosing_WhenQuitCloseInvoked_BypassesHideIntercept`.
 The three device cycles exercised `user-close` end to end.
@@ -427,7 +439,7 @@ run (wedged endpoint, then the real AIDA64/service run).
 
 ## Verification (final)
 
-Build 0 warnings, 3019 tests, `dotnet format --verify-no-changes` clean.
+Build 0 warnings, 3021 tests, `dotnet format --verify-no-changes` clean.
 On-device: three elevated wedged-endpoint cycles (the 10 s vendor hang with
 frame deliveries and UIA `doctor` at 22-43 ms, plus the 60-87 ms close) and one
 live-panel cycle with AIDA64 running and the HWiNFO dropdown populated from the

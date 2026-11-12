@@ -108,11 +108,14 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         };
 
         // A persisted key the current list no longer contains (a service
-        // restart, a renamed sensor) would otherwise render as a blank combo,
-        // and the old text box at least showed the value. Keep it visible and
-        // selectable so the user can see what was stored before picking again.
-        if (VendorSensorRefresh.TryParseKey(SensorKey, out int pickedType, out int pickedId1, out int pickedId2)
-            && !sensors.Any(s => s.ReadingType == pickedType && s.SensorId1 == pickedId1 && s.SensorId2 == pickedId2))
+        // restart, a renamed sensor, or text the old free-form editor allowed)
+        // would otherwise render as a blank combo, and the old text box at
+        // least showed the value. Keep it visible and selectable so the user
+        // can see what was stored before picking again.
+        bool pickedKeyParsed = VendorSensorRefresh.TryParseKey(SensorKey, out int pickedType, out int pickedId1, out int pickedId2);
+        bool pickedKeyPresent = pickedKeyParsed
+            && sensors.Any(s => s.ReadingType == pickedType && s.SensorId1 == pickedId1 && s.SensorId2 == pickedId2);
+        if (!string.IsNullOrEmpty(SensorKey) && !pickedKeyPresent)
         {
             options.Add(new WidgetPropertyOption(SensorKey, $"{SensorKey} (not available)"));
         }
