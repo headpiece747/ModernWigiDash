@@ -60,6 +60,31 @@ public sealed class WigiDashServiceClientTests
     }
 
     [TestMethod]
+    public void Dispose_WhileASensorReadIsInFlight_DoesNotWaitOnTheVendorCall()
+    {
+        // App teardown runs Dispose on the UI thread. A background refresh can
+        // be inside a vendor call the binding allows 10 s to time out; Dispose
+        // must detach and abort, not queue behind that call (the on-device
+        // close spent ~16 s here).
+        var channel = new FakeWcfChannel { BlockOnListOnce = true };
+        var client = new WigiDashServiceClient(channel);
+        try
+        {
+            Assert.IsNull(client.Sensors.GetSensorList(), "the first read schedules the background fetch");
+            Assert.IsTrue(channel.ListEntered.Wait(TimeSpan.FromSeconds(5)),
+                "the background refresh must reach the vendor call");
+
+            Task dispose = Task.Run(client.Dispose);
+            Assert.IsTrue(dispose.Wait(TimeSpan.FromSeconds(2)),
+                "teardown must not wait on the in-flight vendor call");
+        }
+        finally
+        {
+            channel.ListRelease.Set();
+        }
+    }
+
+    [TestMethod]
     public void TryConnect_AfterDispose_ReturnsFalse()
     {
         var client = new WigiDashServiceClient();
@@ -235,6 +260,14 @@ public sealed class WigiDashServiceClientTests
 
         public bool IncludeNullSensor { get; set; }
 
+        public bool BlockOnListOnce { get; set; }
+
+        public ManualResetEventSlim ListEntered { get; } = new(false);
+
+        public ManualResetEventSlim ListRelease { get; } = new(false);
+
+        private int _listBlocked;
+
         public List<VendorSensorItem> Sensors { get; set; } = [];
 
         public bool InitSensorProvider(bool smbus, bool ec, bool presentmon)
@@ -253,6 +286,12 @@ public sealed class WigiDashServiceClientTests
 
         public List<VendorSensorItem> GetSensorList()
         {
+            if (BlockOnListOnce && Interlocked.Exchange(ref _listBlocked, 1) == 0)
+            {
+                ListEntered.Set();
+                ListRelease.Wait(TimeSpan.FromSeconds(30));
+            }
+
             if (ThrowOnList) throw new InvalidOperationException("channel dead");
             return IncludeNullSensor ? [null!, .. Sensors] : Sensors;
         }

@@ -149,6 +149,13 @@ internal static class InspectorPanelRenderer
                 if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) wiring.TypeCombo = combo;
                 panel.Children.Add(combo);
                 break;
+            case WidgetPropertyType.Choice when desc.RequiresListedValue:
+                // A required list that has not produced options yet: never
+                // degrade to a text box, because the persisted value is a code
+                // (the HWiNFO sensor key), not user-typable text.
+                panel.Children.Add(BuildEmptyOptionsHint(desc, callbacks,
+                    "No options available yet. Reopen settings once the source is connected."));
+                break;
             case WidgetPropertyType.Font:
                 IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
                 ? desc.Options
@@ -366,17 +373,26 @@ internal static class InspectorPanelRenderer
     {
         if (desc.Options.Count == 0)
         {
-            return new TextBlock
-            {
-                Text = "No sensors detected. Start LibreHardwareService, then reopen settings to pick a sensor.",
-                FontSize = 11,
-                Foreground = callbacks.TryFindResource("TextSecondary") as Brush ?? Brushes.White,
-                TextWrapping = TextWrapping.Wrap
-            };
+            return BuildEmptyOptionsHint(desc, callbacks,
+                "No sensors detected. Start LibreHardwareService, then reopen settings to pick a sensor.");
         }
 
         return BuildOptionCombo(desc.Options, desc, callbacks);
     }
+
+    /// <summary>
+    /// The one empty-state builder for option-list editors: the property's own
+    /// description when the widget supplied one (it knows what the source is),
+    /// else the caller's fallback hint.
+    /// </summary>
+    private static TextBlock BuildEmptyOptionsHint(EditorDescription desc, InspectorCallbacks callbacks, string fallback)
+        => new()
+        {
+            Text = string.IsNullOrWhiteSpace(desc.Description) ? fallback : desc.Description,
+            FontSize = 11,
+            Foreground = callbacks.TryFindResource("TextSecondary") as Brush ?? Brushes.White,
+            TextWrapping = TextWrapping.Wrap
+        };
 
     private static UIElement BuildColorEditor(EditorDescription desc, InspectorCallbacks callbacks)
     {

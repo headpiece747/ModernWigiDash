@@ -70,10 +70,12 @@ public class HwinfoWidgetTests
 
         var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
 
-        Assert.AreEqual(2, options.Count);
-        Assert.AreEqual("0:0:0", options[0].Value);
-        Assert.AreEqual("0:1:0", options[1].Value);
-        Assert.AreEqual("CPU Temp", options[0].DisplayName);
+        Assert.AreEqual(3, options.Count, "the automatic fallback plus the two sensors");
+        Assert.AreEqual("", options[0].Value, "the empty value is the render fallback (first sensor)");
+        Assert.AreEqual("Automatic (first available sensor)", options[0].DisplayName);
+        Assert.AreEqual("0:0:0", options[1].Value);
+        Assert.AreEqual("0:1:0", options[2].Value);
+        Assert.AreEqual("CPU Temp", options[1].DisplayName);
     }
 
     [TestMethod]
@@ -152,6 +154,73 @@ public class HwinfoWidgetTests
 
         Assert.IsTrue(widget.Renderer.IsDisposedForTest,
             "the host's DisposeAsync channel must release the renderer's paints");
+    }
+
+    [TestMethod]
+    public async Task Render_SensorListArrives_RequestsInspectorRefreshOnce()
+    {
+        // The inspector is built while the vendor cache is cold (the first
+        // GetSensorList only schedules the fetch), so it renders the empty
+        // state. When the list lands, the widget asks for one rebuild: the row
+        // becomes the sensor dropdown without the user reopening the panel.
+        VendorService.SetInstance(CreateFakeClient(sensorsReady: true, sensorName: "CPU Temp", sensorUnit: "°C", value: 45.5));
+        var context = new TestContext();
+        var widget = new HwinfoWidget();
+        await widget.InitializeAsync(context);
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
+        var bounds = new SKRect(0, 0, 200, 100);
+
+        widget.Render(canvas, bounds);
+        widget.Render(canvas, bounds);
+
+        Assert.AreEqual(1, context.InspectorRefreshes,
+            "the inspector rebuilds once, when the sensor list first becomes available");
+    }
+
+    [TestMethod]
+    public async Task Render_NoVendorService_DoesNotRequestInspectorRefresh()
+    {
+        VendorService.SetInstance(null);
+        var context = new TestContext();
+        var widget = new HwinfoWidget();
+        await widget.InitializeAsync(context);
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
+
+        widget.Render(canvas, new SKRect(0, 0, 200, 100));
+
+        Assert.AreEqual(0, context.InspectorRefreshes, "no list transition means no rebuild request");
+    }
+
+    [TestMethod]
+    public void GetPropertyOptions_PersistedKeyNotInTheList_PrependsANotAvailableEntry()
+    {
+        // A stored key the vendor no longer reports (service restart, renamed
+        // sensor) must stay visible: the old text box showed it, and a blank
+        // combo would hide what the widget is actually holding.
+        VendorService.SetInstance(CreateFakeClient(sensorsReady: true, sensorName: "CPU Temp", sensorCount: 1));
+        var widget = new HwinfoWidget { SensorKey = "9:9:9" };
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(3, options.Count, "automatic, the stale pick, and the live sensor");
+        Assert.AreEqual("9:9:9", options[1].Value);
+        Assert.IsTrue(options[1].DisplayName.Contains("(not available)", StringComparison.Ordinal));
+        Assert.AreEqual("0:0:0", options[2].Value);
+    }
+
+    [TestMethod]
+    public void GetPropertyOptions_OverlongSensorName_TruncatesTheLabel()
+    {
+        // The vendor's Name/Type are per-string quota bounded (8 KB), so the
+        // UI label is capped at 128 characters.
+        VendorService.SetInstance(CreateFakeClient(sensorsReady: true, sensorName: new string('X', 200), sensorCount: 1));
+        var widget = new HwinfoWidget();
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(128, options[1].DisplayName.Length);
     }
 
     private static WigiDashServiceClient CreateFakeClient(

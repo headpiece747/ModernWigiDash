@@ -6,7 +6,7 @@ namespace ModernWigiDash.Widgets;
 /// The HWiNFO vendor-sensor refresh core (the ADR-0022 image): the one owner of
 /// the reading state machine behind the <see cref="HwinfoWidget"/>. It owns the
 /// list-refresh cadence (a 250 ms fast-retry until the first list lands, then
-/// a 5 s settle), the sensor-key codec, the 500 ms read throttle, and the
+/// a 5 s settle), the sensor-key codec, the 250 ms read throttle, and the
 /// empty-pick fallback to the first sensor, so "how does the HWiNFO sensor
 /// refresh" is one module the widget drives with one call per render tick. It
 /// reads through the <see cref="ISensorValues"/> seam (the vendor client's
@@ -20,7 +20,6 @@ internal sealed class VendorSensorRefresh(Func<long>? tickProvider = null)
 
     /// <summary>Minimum gap between vendor reads; allows fast 250ms polling.</summary>
     private const long ReadingRefreshMs = 250;
-
     private readonly Func<long> _tick = tickProvider ?? (() => Environment.TickCount64);
 
     private VendorSensorItem[]? _sensorList;
@@ -99,6 +98,11 @@ internal sealed class VendorSensorRefresh(Func<long>? tickProvider = null)
     /// <summary>The stable key for a vendor sensor: reading type + both ids.</summary>
     public static string ComposeKey(int readingType, int sensorId1, int sensorId2)
         => $"{readingType}:{sensorId1}:{sensorId2}";
+
+    /// <summary>True when the last list fetch returned at least one sensor. The
+    /// vendor client keeps its last good list, so this is the one-way signal the
+    /// widget's inspector-refresh transition reads.</summary>
+    public bool HasSensorList => _sensorList is { Length: > 0 };
 
     /// <summary>Parses a key produced by <see cref="ComposeKey"/>; false for an empty/garbage value.</summary>
     public static bool TryParseKey(string? key, out int readingType, out int sensorId1, out int sensorId2)

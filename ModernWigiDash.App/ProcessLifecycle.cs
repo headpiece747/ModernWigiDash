@@ -27,4 +27,17 @@ internal static class ProcessLifecycle
     /// the window minimized under it. Under a test host the flag is set
     /// directly (the host's launch args never carry it).</summary>
     internal static volatile bool StartMinimized;
+
+    /// <summary>What ended the process: <c>tray-quit</c>, <c>update-restart</c>,
+    /// <c>session-end</c>, <c>second-launch</c>, or <c>user-close</c>. One owner,
+    /// set by the path that knows the cause before it closes the window; the
+    /// Closed handler and the exit marker read it. Null when a process dies
+    /// without a recorded cause (a native fault), which is itself evidence.</summary>
+    internal static string? ExitReason
+    {
+        get => _exitReason;
+        set => _exitReason = value;
+    }
+
+    private static volatile string? _exitReason;
 }

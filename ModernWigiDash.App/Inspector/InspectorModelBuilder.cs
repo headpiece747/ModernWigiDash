@@ -52,7 +52,11 @@ internal static class InspectorModelBuilder
                 attr.PropertyType,
                 prop.GetValue(instance) ?? attr.DefaultValue,
                 ResolveOptions(instance, prop, attr, sensorOptions),
-                attr.PropertyType == WidgetPropertyType.Button));
+                attr.PropertyType == WidgetPropertyType.Button)
+            {
+                Description = attr.Description,
+                RequiresListedValue = attr.RequiresListedValue,
+            });
         }
 
         return result;

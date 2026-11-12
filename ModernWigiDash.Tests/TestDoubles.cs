@@ -28,6 +28,7 @@ namespace ModernWigiDash.Tests;
 internal class TestContext : IModernWigiDashContext, IWidgetPropertyPersistingContext, IWidgetNavigationContext, IWidgetScriptLaunchContext, IWidgetCredentialContext
 {
     public int Renders { get; private set; }
+    public int InspectorRefreshes { get; private set; }
     public int AuthShown { get; private set; }
     public int AuthClosed { get; private set; }
     public List<string> Errors { get; } = [];
@@ -45,7 +46,7 @@ internal class TestContext : IModernWigiDashContext, IWidgetPropertyPersistingCo
     public void LogError(string message, Exception? ex = null)
         => Errors.Add(LogLine.Sanitize(message) + (ex != null ? $": {LogLine.Sanitize(ex.ToString())}" : ""));
     public void RequestRender() => Renders++;
-    public void RequestInspectorRefresh() { }
+    public void RequestInspectorRefresh() => InspectorRefreshes++;
     public void ShowDeviceAuthorization(string serviceName, Uri verificationUri, string userCode, DateTimeOffset expiresAt) => AuthShown++;
     public void CloseDeviceAuthorization() => AuthClosed++;
 

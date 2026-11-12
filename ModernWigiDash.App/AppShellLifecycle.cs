@@ -111,7 +111,11 @@ internal sealed class AppShellLifecycle : IDisposable
     public void ShowFromTray() => _lifecycle.ShowFromTray();
 
     /// <summary>Initiates explicit application shutdown via the tray menu.</summary>
-    public void QuitFromTray() => _lifecycle.QuitFromTray();
+    public void QuitFromTray()
+    {
+        ProcessLifecycle.ExitReason = ExitReasonPolicy.TrayQuit;
+        _lifecycle.QuitFromTray();
+    }
 
     /// <summary>Closes the window directly with the explicit-quit latch armed.</summary>
     public void QuitClose() => _lifecycle.QuitClose();

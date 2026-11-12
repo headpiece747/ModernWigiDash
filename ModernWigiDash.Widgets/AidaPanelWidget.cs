@@ -17,6 +17,7 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     private readonly bool _masterBorrowed;
     private readonly AidaMmapReader? _reader;
     private string? _lastLoggedError;
+    private bool _released;
 
     // The draw owner: frame bitmap + version-token discipline, the
     // placeholder paints, and the bitmap build (the widget's draw paths and
@@ -129,7 +130,19 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     {
         if (_masterBorrowed)
         {
-            AidaPanelService.Release();
+            // The shared master's Dispose joins its poll loop, which can be
+            // inside a vendor WCF call (the binding allows a 10 s send timeout)
+            // that the join cannot shorten. The host calls this on the UI
+            // thread when a widget is removed, so the release hops off it. The
+            // service's Acquire waits for an in-flight release before creating
+            // the next master, so the deferred stop cannot fork a second one.
+            // Release exactly once: a second DisposeAsync must not decrement
+            // another widget's borrow.
+            if (!_released)
+            {
+                _released = true;
+                _ = Task.Run(AidaPanelService.Release);
+            }
         }
         else
         {

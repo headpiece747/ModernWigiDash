@@ -72,6 +72,28 @@ public class AppShellLifecycleTests
     }
 
     [TestMethod]
+    public void QuitFromTray_RecordsTheTrayQuitReason()
+    {
+        var h = new ShellHarness();
+        using var shell = h.Build();
+        try
+        {
+            ProcessLifecycle.ExitReason = null;
+
+            shell.QuitFromTray();
+
+            Assert.AreEqual(ExitReasonPolicy.TrayQuit, ProcessLifecycle.ExitReason,
+                "the tray quit is the cause the exit marker must name");
+            Assert.AreEqual(1, h.CloseCalls);
+            Assert.AreEqual(1, h.ShutdownCalls);
+        }
+        finally
+        {
+            ProcessLifecycle.ExitReason = null;
+        }
+    }
+
+    [TestMethod]
     public void TrayClick_ShowsAndActivatesWindow()
     {
         var h = new ShellHarness { Visible = false };

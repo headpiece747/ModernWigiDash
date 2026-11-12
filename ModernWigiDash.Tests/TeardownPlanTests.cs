@@ -87,6 +87,95 @@ public class TeardownPlanTests
     }
 
     [TestMethod]
+    public void WriteExitMarker_RecordedReason_LandsInTheMarkerLine()
+    {
+        // A spontaneous close is unanswerable without the trigger; the exit
+        // line carries it so a reporter's log says which path ended the app.
+        string logPath = Path.Combine(Path.GetTempPath(), $"wmd-exit-{Guid.NewGuid():N}", "display_device.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+        string original = FileLog.LogPath;
+        try
+        {
+            FileLog.LogPath = logPath;
+            ModernWigiDash.App.ProcessLifecycle.ExitReason = "tray-quit";
+            AppClass.WriteExitMarker();
+
+            using var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            string content = reader.ReadToEnd();
+            Assert.IsTrue(content.Contains("=== Application exiting === reason=tray-quit"),
+                "the recorded trigger must ride the exit marker");
+        }
+        finally
+        {
+            ModernWigiDash.App.ProcessLifecycle.ExitReason = null;
+            FileLog.LogPath = original;
+            try { Directory.Delete(Path.GetDirectoryName(logPath)!, recursive: true); }
+            catch (IOException) { /* best-effort: FileLog may still hold the stream */ }
+        }
+    }
+
+    [TestMethod]
+    public void RecordSessionEnded_WritesTheReasonAndFlushes()
+    {
+        // A committed logoff/restart can terminate the process before Closed or
+        // Exit runs, so the session-end reason must reach the log at the
+        // recording site, or the triage table's session-end row is unreachable.
+        string logPath = Path.Combine(Path.GetTempPath(), $"wmd-session-{Guid.NewGuid():N}", "display_device.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+        string original = FileLog.LogPath;
+        try
+        {
+            FileLog.LogPath = logPath;
+            ModernWigiDash.App.ProcessLifecycle.ExitReason = null;
+
+            ModernWigiDash.App.MainWindow.RecordSessionEnded();
+
+            using var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            string content = reader.ReadToEnd();
+            Assert.IsTrue(content.Contains("[SHELL] session ended (reason=session-end)"),
+                "the committed shutdown must leave its own line");
+            Assert.AreEqual(ModernWigiDash.App.ExitReasonPolicy.SessionEnd,
+                ModernWigiDash.App.ProcessLifecycle.ExitReason);
+        }
+        finally
+        {
+            ModernWigiDash.App.ProcessLifecycle.ExitReason = null;
+            FileLog.LogPath = original;
+            try { Directory.Delete(Path.GetDirectoryName(logPath)!, recursive: true); }
+            catch (IOException) { /* best-effort: FileLog may still hold the stream */ }
+        }
+    }
+
+    [TestMethod]
+    public void WriteFatalLine_WritesTheTypeToTheDisplayLog()
+    {
+        // The display log is the file a reporter actually sends; a hard managed
+        // fault must leave a line there even when crash.log is not collected.
+        string logPath = Path.Combine(Path.GetTempPath(), $"wmd-fatal-{Guid.NewGuid():N}", "display_device.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+        string original = FileLog.LogPath;
+        try
+        {
+            FileLog.LogPath = logPath;
+            AppClass.WriteFatalLine(new InvalidOperationException("boom"));
+
+            using var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            string content = reader.ReadToEnd();
+            Assert.IsTrue(content.Contains("=== FATAL unhandled === InvalidOperationException"),
+                "the hard-fault line must name the exception type");
+        }
+        finally
+        {
+            FileLog.LogPath = original;
+            try { Directory.Delete(Path.GetDirectoryName(logPath)!, recursive: true); }
+            catch (IOException) { /* best-effort: FileLog may still hold the stream */ }
+        }
+    }
+
+    [TestMethod]
     public void BuildTeardownPlan_TrayDisposeLandsAfterTheProfilePersist()
     {
         TeardownPlan plan = Plan;

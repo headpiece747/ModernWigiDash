@@ -59,6 +59,7 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
             CrashLog.Append(e.ExceptionObject as Exception);
+            WriteFatalLine(e.ExceptionObject as Exception);
         };
 
         DispatcherUnhandledException += (s, e) =>
@@ -92,7 +93,20 @@ public partial class App : Application
     /// </summary>
     internal static void WriteExitMarker()
     {
-        FileLog.Write("[App] === Application exiting ===");
+        string reason = ProcessLifecycle.ExitReason is { } value ? $" reason={value}" : "";
+        FileLog.Write($"[App] === Application exiting ==={reason}");
+        FileLog.Flush();
+    }
+
+    /// <summary>
+    /// The hard-fault display-log line: the display log is the file a reporter
+    /// actually sends, so a log that ends without the exit marker still says
+    /// why instead of looking like a silent close. Shared by the AppDomain
+    /// handler and the pin test.
+    /// </summary>
+    internal static void WriteFatalLine(Exception? ex)
+    {
+        FileLog.Write($"[App] === FATAL unhandled === {ex?.GetType().Name ?? "unknown"}");
         FileLog.Flush();
     }
 
@@ -122,6 +136,10 @@ public partial class App : Application
             _instanceGuard = new SingleInstanceGuard(ActivateMainWindow);
             if (!_instanceGuard.IsPrimary)
             {
+                // This process exits without a window, so no close line runs;
+                // name it here or the exit marker is reason-less and reads as
+                // an unexplained close (the drift review's catch).
+                ProcessLifecycle.ExitReason = ExitReasonPolicy.SecondLaunch;
                 FileLog.Write("[App] Second launch: signaled the running instance, exiting");
                 Shutdown();
                 return;

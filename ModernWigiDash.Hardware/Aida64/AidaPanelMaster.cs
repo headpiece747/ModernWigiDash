@@ -68,7 +68,15 @@ public sealed class AidaPanelMaster : IDisposable
     private readonly IAidaMmapWriter _writer;
     private readonly AidaMmapReader _reader;
     private readonly Action<string> _log;
+    // Three gates, one owner each. `_gate` guards registered/counter/error
+    // state and is never held across vendor I/O. `_startGate` guards the
+    // loop lifecycle (start/dispose ordering). `_readerGate` guards the map
+    // reads against the reader's disposal. The render tick touches only
+    // `_startGate`, so vendor I/O can never block a frame (the 2026-11-11
+    // freeze: the tick waited on a gate held across WCF calls).
     private readonly System.Threading.Lock _gate = new();
+    private readonly System.Threading.Lock _startGate = new();
+    private readonly System.Threading.Lock _readerGate = new();
     private readonly LogOnChange _failureDedup = new();
     private readonly byte[] _slaveBuffer = new byte[4];
     private readonly byte[] _markerBuffer = new byte[4];
@@ -83,7 +91,8 @@ public sealed class AidaPanelMaster : IDisposable
     private uint _slaveBaseline;
     private bool _slaveAlive;
     private bool _registered;
-    private bool _disposed;
+    private volatile bool _started;
+    private volatile bool _disposed;
     private string? _lastError;
 
     /// <summary>Binds the master to the map it reads and the handshake it writes.</summary>
@@ -124,11 +133,14 @@ public sealed class AidaPanelMaster : IDisposable
     /// <summary>Starts the poll loop (idempotent); the loop registers slot 0 on its first ready tick.</summary>
     public void Start()
     {
-        PollLoop loop;
-        lock (_gate)
+        // Fast path: the render tick calls this every frame, so the steady
+        // state must not take a lock at all.
+        if (_started || _disposed) return;
+
+        lock (_startGate)
         {
-            if (_disposed || _loop is not null) return;
-            loop = new PollLoop(
+            if (_started || _disposed) return;
+            var loop = new PollLoop(
                 "AIDA-MASTER",
                 TimeSpan.FromMilliseconds(PollIntervalMs),
                 ready: EnsureRegistered,
@@ -136,35 +148,35 @@ public sealed class AidaPanelMaster : IDisposable
                 onTickFailure: static () => { },
                 log: _log);
             _loop = loop;
+            _started = true;
+            // Started INSIDE the gate: Dispose captures the same fields under
+            // it, so a loop can never be created after the stop pass.
+            loop.Start();
         }
-
-        loop.Start();
-    }
-
-    /// <summary>Stops the poll loop (idempotent). The slot registration is left in place.</summary>
-    public void Stop()
-    {
-        PollLoop? loop;
-        lock (_gate)
-        {
-            loop = _loop;
-            _loop = null;
-        }
-
-        loop?.Dispose();
     }
 
     /// <summary>Stops the loop and disposes the reader and its map source.</summary>
     public void Dispose()
     {
-        lock (_gate)
+        PollLoop? loop;
+        lock (_startGate)
         {
             if (_disposed) return;
             _disposed = true;
+            loop = _loop;
+            _loop = null;
         }
 
-        Stop();
-        _reader.Dispose();
+        // Stop outside the gate: the join may take seconds, and the gate is
+        // what Start/Dispose use to order themselves.
+        loop?.Dispose();
+
+        // The reader gate waits for at most one in-flight map read; every
+        // read section re-checks _disposed, so no I/O starts after this.
+        lock (_readerGate)
+        {
+            _reader.Dispose();
+        }
     }
 
     /// <summary>
@@ -179,25 +191,36 @@ public sealed class AidaPanelMaster : IDisposable
         {
             if (_disposed) return false;
             if (_registered) return true;
+        }
 
-            if (!_writer.TryInit(out string? initError))
-            {
-                LogOnce($"provider unavailable: {initError}");
-                return false;
-            }
+        // Vendor I/O outside _gate: the ready probe runs until slot 0
+        // registers, and a slow WCF service must not block the render tick
+        // (which only ever touches _startGate) or the diagnostic readers.
+        if (!_writer.TryInit(out string? initError))
+        {
+            LogOnce($"provider unavailable: {initError}");
+            return false;
+        }
 
-            if (!_writer.TryWrite(MapBlockOffset, BuildMapBlock(), out string? writeError))
-            {
-                LogOnce($"slot registration failed: {writeError}");
-                return false;
-            }
+        if (_disposed) return false;
 
+        if (!_writer.TryWrite(MapBlockOffset, BuildMapBlock(), out string? writeError))
+        {
+            LogOnce($"slot registration failed: {writeError}");
+            return false;
+        }
+
+        // A write that returns after teardown must not re-register the master.
+        lock (_gate)
+        {
+            if (_disposed) return false;
             _registered = true;
             _lastError = null;
             _failureDedup.Changed(null);
-            _log("[AIDA-MASTER] registered slot 0 (1016x592, 5x4)");
-            return true;
         }
+
+        _log("[AIDA-MASTER] registered slot 0 (1016x592, 5x4)");
+        return true;
     }
 
     /// <summary>
@@ -207,43 +230,79 @@ public sealed class AidaPanelMaster : IDisposable
     /// </summary>
     internal void PollOnce()
     {
+        uint counter;
         lock (_gate)
         {
             if (_disposed || !_registered) return;
+            counter = _masterCounter++;
+        }
 
-            _writer.TryWrite(MasterCounterOffset, BitConverter.GetBytes(_masterCounter++), out _);
+        _writer.TryWrite(MasterCounterOffset, BitConverter.GetBytes(counter), out _);
+        if (_disposed) return;
 
-            if (!_source.TryRead(SlaveCounterOffset, 4, _slaveBuffer, out _)) return;
+        bool slaveRead;
+        uint slave;
+        lock (_readerGate)
+        {
+            if (_disposed) return;
+            slaveRead = _source.TryRead(SlaveCounterOffset, 4, _slaveBuffer, out _);
+            slave = slaveRead ? BitConverter.ToUInt32(_slaveBuffer, 0) : 0;
+        }
 
-            uint slave = BitConverter.ToUInt32(_slaveBuffer, 0);
-            if (!_slaveAlive)
+        if (!slaveRead) return;
+
+        if (!_slaveAlive)
+        {
+            if (slave == _slaveBaseline) return; // AIDA64 has not written yet
+            _slaveAlive = true;
+        }
+
+        _slaveBaseline = slave;
+
+        bool markerRead;
+        uint marker;
+        lock (_readerGate)
+        {
+            if (_disposed) return;
+            markerRead = _source.TryRead(BitmapOffset, 4, _markerBuffer, out _);
+            marker = markerRead ? BitConverter.ToUInt32(_markerBuffer, 0) : 0;
+        }
+
+        if (!markerRead || marker == 0) return; // no new frame
+
+        AidaFrameSnapshot? frame;
+        string? readError;
+        lock (_readerGate)
+        {
+            if (_disposed) return;
+            frame = _reader.TryReadFrame();
+            readError = _reader.LastError;
+        }
+
+        if (frame is null)
+        {
+            lock (_gate)
             {
-                if (slave == _slaveBaseline) return; // AIDA64 has not written yet
-                _slaveAlive = true;
+                _lastError = readError;
             }
 
-            _slaveBaseline = slave;
-
-            if (!_source.TryRead(BitmapOffset, 4, _markerBuffer, out _)) return;
-            if (BitConverter.ToUInt32(_markerBuffer, 0) == 0) return; // no new frame
-
-            var frame = _reader.TryReadFrame();
-            if (frame is null)
+            LogOnce($"frame read failed: {readError}");
+        }
+        else
+        {
+            Publish(frame);
+            lock (_gate)
             {
-                _lastError = _reader.LastError;
-                LogOnce($"frame read failed: {_lastError}");
-            }
-            else
-            {
-                Publish(frame);
                 _lastError = null;
                 _failureDedup.Changed(null);
             }
-
-            // Ack regardless: AIDA64 writes the next frame only once the marker
-            // is cleared, and an unreadable frame is still consumed.
-            _writer.TryWrite(BitmapOffset, ZeroMarker, out _);
         }
+
+        // Ack regardless: AIDA64 writes the next frame only once the marker
+        // is cleared, and an unreadable frame is still consumed. Skipped after
+        // teardown: the slot is no longer ours to drive.
+        if (_disposed) return;
+        _writer.TryWrite(BitmapOffset, ZeroMarker, out _);
     }
 
     private void Publish(AidaFrameSnapshot frame)

@@ -112,6 +112,10 @@ public partial class MainWindow
             return;
         }
 
-        Close();
+        ProcessLifecycle.ExitReason = ExitReasonPolicy.UpdateRestart;
+        // Explicit quit: a bare Close() is intercepted by the hide-to-tray
+        // policy, which would leave the already-launched updater waiting for a
+        // process that never exits (the update would never install).
+        QuitClose();
     }
 }

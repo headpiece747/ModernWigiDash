@@ -139,6 +139,32 @@ public class InspectorModelBuilderTests
             selector.Options.Select(o => o.Value).ToArray());
     }
 
+    [TestMethod]
+    public void Describe_RequiredChoiceWithoutOptions_CarriesTheFlagAndTheDescription()
+    {
+        var widget = new RequiredChoiceWidgetStub();
+        var descriptions = InspectorModelBuilder.Describe(
+            new PlacedWidgetInstance { PluginId = "required", DisplayName = "Required", ActiveInstance = widget }, []);
+
+        var sensor = descriptions.Single(d => d.Property.Name == nameof(RequiredChoiceWidgetStub.SensorKey));
+
+        Assert.IsTrue(sensor.RequiresListedValue, "the flag must reach the editor so it never degrades to free text");
+        Assert.AreEqual(RequiredChoiceWidgetStub.Hint, sensor.Description);
+        Assert.AreEqual(0, sensor.Options.Count);
+    }
+
+    private sealed class RequiredChoiceWidgetStub : ModernWidgetBase, IWidgetPropertyOptionsProvider
+    {
+        public const string Hint = "Start the vendor service, then reopen settings.";
+
+        [WidgetProperty("Sensor", WidgetPropertyType.Choice, Hint, "", RequiresListedValue = true)]
+        public string SensorKey { get; set; } = "";
+
+        public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName) => [];
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
     private sealed class SensorSelectorWidgetStub : ModernWidgetBase
     {
         [WidgetProperty("Sensor", WidgetPropertyType.SensorSelector)]

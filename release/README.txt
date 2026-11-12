@@ -47,6 +47,32 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Swipe left/right on the display to switch pages.
   - Toggle the layout editor on/off from the app window.
 
+== What's new in v0.9.4 ==
+
+  - AIDA64 Panel no longer freezes the app:
+      * The panel's render path no longer waits on the vendor service. A slow
+        or wedged vendor call (the binding allows a 10 s timeout) used to block
+        the 30 FPS UI thread through a shared lock; frames and the window now
+        keep running while the vendor call times out in the background.
+      * The handshake and map reads run outside the UI-visible lock, and a
+        widget removal no longer waits for the shared master to stop.
+  - HWiNFO Sensor settings are usable:
+      * The Sensor row is a dropdown of the vendor service's sensors, with an
+        "Automatic (first available sensor)" entry that matches the fallback
+        the widget draws.
+      * When the vendor service is unavailable the row explains what to start
+        instead of showing a text box for an internal key.
+      * The dropdown appears as soon as the sensor list arrives; no need to
+        reopen settings.
+  - Faster, truthful close:
+      * Closing the app no longer waits out a wedged vendor service (observed
+        ~16 s, now under 0.1 s to complete teardown).
+      * "Restart to apply" for an update now actually exits the app, so the
+        staged update installs; with hide-to-tray it used to hide instead.
+      * The log records why the app closed: `[App] === Application exiting ===
+        reason=user-close|tray-quit|update-restart|session-end|second-launch`,
+        and a hard managed fault writes `[App] === FATAL unhandled === <type>`.
+
 == What's new in v0.9.3 ==
 
   - Configurable Telemetry Polling Rate & Nyquist Beat Elimination:

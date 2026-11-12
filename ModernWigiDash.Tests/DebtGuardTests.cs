@@ -39,6 +39,8 @@ public sealed class DebtGuardTests
                 "the profile load runs the widget InitializeAsync/Dispose synchronously inside the load (CONTEXT.md StartupWiring): a synchronous user action, not a tick",
             ["ModernWigiDash.Sdk/LoopLifetime.cs"] =
                 "the shared lifetime module's bounded join (the cancel / bounded-join / CTS-handoff dance owned once for PollLoop, FeedLoop, and FrameDelivery)",
+            ["ModernWigiDash.Hardware/Aida64/AidaPanelService.cs"] =
+                "the last AIDA64 borrower's release stops a poll loop that may be inside a vendor WCF call (bounded at 5 s); Acquire waits on a manual-reset gate until the in-flight release completes (each wait at most 6 s), only on a remove-and-re-add, so a second master cannot claim the vendor's single slot 0",
         };
 
         // Monitor.Wait and Thread.Wait are thread joins, not sync-over-async.

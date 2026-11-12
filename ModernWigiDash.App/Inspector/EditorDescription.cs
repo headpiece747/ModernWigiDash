@@ -21,4 +21,13 @@ internal sealed record EditorDescription(
     WidgetPropertyType PropertyType,
     object? CurrentValue,
     IReadOnlyList<WidgetPropertyOption> Options,
-    bool IsAction);
+    bool IsAction)
+{
+    /// <summary>The attribute's help text. Used as the empty-state hint when a
+    /// required option list has not produced options yet.</summary>
+    public string Description { get; init; } = "";
+
+    /// <summary>True when the property must be picked from its option list; see
+    /// <see cref="WidgetPropertyAttribute.RequiresListedValue"/>.</summary>
+    public bool RequiresListedValue { get; init; }
+}

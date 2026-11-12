@@ -12,17 +12,40 @@ namespace ModernWigiDash.Hardware.Aida64;
 public static class AidaPanelService
 {
     private static readonly System.Threading.Lock Gate = new();
+    private static readonly ManualResetEventSlim Idle = new(initialState: true);
     private static AidaPanelMaster? _shared;
     private static int _borrowers;
+    private static bool _releasing;
 
     /// <summary>Borrows the process-wide master, creating it on first use.</summary>
     public static AidaPanelMaster Acquire()
     {
-        lock (Gate)
+        while (true)
         {
-            _shared ??= CreateProduction();
-            _borrowers++;
-            return _shared;
+            lock (Gate)
+            {
+                if (_shared is not null)
+                {
+                    _borrowers++;
+                    return _shared;
+                }
+
+                // The decision and the creation are one critical section: a
+                // release clears _shared and raises _releasing under the same
+                // gate, so a master is only created when no release is in
+                // flight. Slot 0 is one slot; two masters would clear each
+                // other's frame markers.
+                if (!_releasing)
+                {
+                    _shared = CreateProduction();
+                    _borrowers = 1;
+                    return _shared;
+                }
+            }
+
+            // A release is disposing the previous master (its loop join is
+            // bounded at 5 s). Wait for it, then re-check under the gate.
+            Idle.Wait(TimeSpan.FromSeconds(6));
         }
     }
 
@@ -32,14 +55,38 @@ public static class AidaPanelService
         AidaPanelMaster? toDispose = null;
         lock (Gate)
         {
-            if (_borrowers > 0 && --_borrowers == 0)
+            if (_borrowers == 0)
+            {
+                return;
+            }
+
+            if (--_borrowers == 0)
             {
                 toDispose = _shared;
                 _shared = null;
+                _releasing = true;
+                Idle.Reset();
             }
         }
 
-        toDispose?.Dispose();
+        if (toDispose is null)
+        {
+            return;
+        }
+
+        try
+        {
+            toDispose.Dispose();
+        }
+        finally
+        {
+            lock (Gate)
+            {
+                _releasing = false;
+            }
+
+            Idle.Set();
+        }
     }
 
     /// <summary>

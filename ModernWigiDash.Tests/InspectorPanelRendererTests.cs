@@ -346,6 +346,90 @@ public class InspectorPanelRendererTests
         });
     }
 
+    [TestMethod]
+    public void Render_RequiredChoiceWithoutOptions_ShowsTheHintAndNoTextEditor()
+    {
+        // The HWiNFO Sensor row persists a coded key (rt:id1:id2). While the
+        // vendor list is still empty, the row must explain that instead of
+        // offering a text box a user cannot fill correctly.
+        StaRunner.Run(() =>
+        {
+            var widget = new RequiredChoiceWidget();
+            var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO", ActiveInstance = widget };
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+            Assert.IsTrue(
+                VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text == RequiredChoiceWidget.Hint),
+                "the empty state must show the widget's hint");
+            Assert.AreEqual(0, VisualTree.FindDescendants<TextBox>(target).Count(), "no free-text editor for a coded value");
+            Assert.AreEqual(0, VisualTree.FindDescendants<ComboBox>(target).Count(), "no combo without options");
+        });
+    }
+
+    [TestMethod]
+    public void Render_PlainChoiceWithoutOptions_StaysAFreeTextEditor()
+    {
+        // Twitch's channel box relies on free text while the followed-channels
+        // list is empty. Only a required list may replace the text box, so the
+        // arm order (options > 0, then RequiredListedValue) is pinned here.
+        StaRunner.Run(() =>
+        {
+            var widget = new PlainChoiceWidget();
+            var placed = new PlacedWidgetInstance { PluginId = "twitch", DisplayName = "Twitch", ActiveInstance = widget };
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+            Assert.AreEqual(1, VisualTree.FindDescendants<TextBox>(target).Count(),
+                "a plain Choice without options keeps its free-text editor");
+            Assert.IsFalse(
+                VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text == PlainChoiceWidget.Hint),
+                "a plain Choice must not show the required-list empty state");
+        });
+    }
+
+    private sealed class PlainChoiceWidget : ModernWidgetBase
+    {
+        public const string Hint = "Type a channel name.";
+
+        [WidgetProperty("Channel", WidgetPropertyType.Choice, Hint)]
+        public string Channel { get; set; } = "";
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
+    private sealed class RequiredChoiceWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
+    {
+        public const string Hint = "Start the vendor service, then reopen settings.";
+
+        [WidgetProperty("Sensor", WidgetPropertyType.Choice, Hint, "", RequiresListedValue = true)]
+        public string SensorKey { get; set; } = "";
+
+        public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName) => [];
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
     private sealed class BooleanWidget : ModernWidgetBase
     {
         [WidgetProperty("Flag", WidgetPropertyType.Boolean, defaultValue: true)]

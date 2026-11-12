@@ -148,6 +148,12 @@ public sealed class WidgetPropertyAttribute : Attribute
     /// <see cref="IWidgetPropertyOptionsProvider"/> may override them.</summary>
     public string[] Options { get; }
 
+    /// <summary>True when a Choice property must be picked from its option list.
+    /// While the list is empty the inspector shows the property's description as
+    /// an empty state instead of a free-text box: a coded value (the HWiNFO
+    /// sensor key) cannot be typed correctly by hand.</summary>
+    public bool RequiresListedValue { get; init; }
+
     /// <summary>Binds a widget property to an inspector row: the label, editor
     /// kind, help text, fallback value, and static Choice options.</summary>
     /// <param name="displayName">The inspector row label.</param>

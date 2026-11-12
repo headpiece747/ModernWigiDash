@@ -123,8 +123,98 @@ public sealed class AidaPanelMasterTests
         Assert.AreEqual(0, writer.Writes.Count, "no heartbeat and no ack before the slot is registered");
     }
 
+    [TestMethod]
+    public void Start_WhileTheVendorIoIsBlocked_ReturnsWithoutWaiting()
+    {
+        // The render tick calls Start() every frame. The poll loop sits inside
+        // vendor I/O (a WCF call bounded by the binding's 10 s send timeout), so
+        // the tick must not wait on any gate that loop holds. This is the
+        // 2026-11-11 "adding the AIDA64 widget freezes the app" report.
+        var writer = new BlockingAidaMmapWriter();
+        var master = new AidaPanelMaster(
+            new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32)), writer, log: static _ => { });
+        try
+        {
+            master.Start();
+            Assert.IsTrue(writer.WaitUntilEntered(TimeSpan.FromSeconds(5)),
+                "the poll loop must reach the vendor provider init");
+
+            Task second = Task.Run(master.Start);
+            Assert.IsTrue(second.Wait(TimeSpan.FromSeconds(2)),
+                "a render-tick Start must not block behind vendor I/O");
+        }
+        finally
+        {
+            writer.Release();
+            master.Dispose();
+            writer.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public void EnsureRegistered_DisposedDuringTheProviderInit_WritesNoSlot()
+    {
+        // A vendor call that returns after teardown must not register slot 0
+        // on a master the app already disposed.
+        var writer = new BlockingAidaMmapWriter();
+        var master = new AidaPanelMaster(
+            new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32)), writer, log: static _ => { });
+        try
+        {
+            Task<bool> probe = Task.Run(master.EnsureRegistered);
+            Assert.IsTrue(writer.WaitUntilEntered(TimeSpan.FromSeconds(5)));
+
+            master.Dispose();
+            writer.Release();
+
+            Assert.IsTrue(probe.Wait(TimeSpan.FromSeconds(5)));
+            Assert.IsFalse(probe.Result, "a post-teardown registration is refused");
+            Assert.AreEqual(0, writer.Writes.Count, "no slot write may land after teardown");
+        }
+        finally
+        {
+            writer.Release();
+            writer.Dispose();
+        }
+    }
+
     private static AidaPanelMaster Create(IAidaMmapSource source, FakeAidaMmapWriter writer)
         => new(source, writer, log: static _ => { });
+
+    /// <summary>A writer that parks the first provider-init call until released,
+    /// standing in for a slow or wedged vendor WCF call.</summary>
+    private sealed class BlockingAidaMmapWriter : IAidaMmapWriter
+    {
+        private readonly ManualResetEventSlim _entered = new(false);
+        private readonly ManualResetEventSlim _release = new(false);
+        private readonly List<(int Offset, byte[] Data)> _writes = [];
+
+        public IReadOnlyList<(int Offset, byte[] Data)> Writes => _writes;
+
+        public bool WaitUntilEntered(TimeSpan timeout) => _entered.Wait(timeout);
+        public void Release() => _release.Set();
+
+        public bool TryInit(out string? error)
+        {
+            _entered.Set();
+            _release.Wait(TimeSpan.FromSeconds(30));
+            error = null;
+            return true;
+        }
+
+        public bool TryWrite(int offset, byte[] data, out string? error)
+        {
+            _writes.Add((offset, data));
+            error = null;
+            return true;
+        }
+
+        public void Dispose()
+        {
+            _entered.Dispose();
+            _release.Dispose();
+        }
+    }
 
     private static byte[]? WriteAt(FakeAidaMmapWriter writer, int offset)
     {

@@ -39,9 +39,10 @@ public sealed class WigiDashServiceClient : IDisposable
     private readonly TimeProvider _clock;
     private IWigiDashWcf? _channel;
     private ChannelFactory<IWigiDashWcf>? _factory;
-    private bool _sensorReady;
+    private volatile bool _sensorReady;
     private DateTimeOffset _lastProviderAttemptUtc = DateTimeOffset.MinValue;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private int _disposeOnce;
 
     /// <summary>Lock-free readiness flag (the facet's IsReady is read on the UI thread).</summary>
     private volatile bool _connected;
@@ -154,14 +155,26 @@ public sealed class WigiDashServiceClient : IDisposable
         try
         {
             EnsureChannel();
+            // Dispose may have detached the channel between the entry check and
+            // EnsureChannel's own guard; there is nothing to initialize then.
+            if (_channel is null) return;
+
             // A THROWN transport fault must reach the catch below and drop the
             // channel: the former SafeCall wrapper swallowed it, so a faulted
             // channel was retried in place forever and TryConnect could never
             // reopen one (the doc promised the opposite).
-            _sensorReady = _channel!.InitSensorProvider(true, true, true);
+            _sensorReady = _channel.InitSensorProvider(true, true, true);
             if (!_sensorReady)
             {
                 FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
+            }
+
+            // A channel opened while teardown ran is not ours to keep: close the
+            // one this attempt created instead of leaving it to the process exit.
+            if (_disposed)
+            {
+                CloseChannelLocked();
+                return;
             }
 
             _connected = _sensorReady;
@@ -180,7 +193,7 @@ public sealed class WigiDashServiceClient : IDisposable
 
     internal void EnsureChannel()
     {
-        if (_channel != null) return;
+        if (_disposed || _channel != null) return;
         _channel = _createChannel();
     }
 
@@ -265,19 +278,26 @@ public sealed class WigiDashServiceClient : IDisposable
     /// </summary>
     internal bool TryInitAidaProvider()
     {
-        lock (_gate)
+        IWigiDashWcf? channel;
+        try
         {
-            if (_disposed) return false;
-            try
+            // The gate covers the channel handoff only. The call itself runs
+            // outside it: this gate also serializes the HWiNFO cache refresh,
+            // so a wedged AIDA64 call must not hold up the sensor list (the
+            // 2026-11-11 freeze report).
+            lock (_gate)
             {
+                if (_disposed) return false;
                 EnsureChannel();
-                return _channel!.InitAidaProvider();
+                channel = _channel;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _readFailLog.Write(() => $"AIDA64 provider init failed: {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
+
+            return channel!.InitAidaProvider();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _readFailLog.Write(() => $"AIDA64 provider init failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
         }
     }
 
@@ -289,18 +309,23 @@ public sealed class WigiDashServiceClient : IDisposable
     /// </summary>
     internal bool TryWriteAidaMmap(int offset, byte[] buffer)
     {
+        IWigiDashWcf? channel;
         lock (_gate)
         {
             if (_disposed || _channel is null) return false;
-            try
-            {
-                return _channel.WriteAidaMmap(offset, buffer);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _readFailLog.Write(() => $"AIDA64 map write failed at {offset}: {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
+            channel = _channel;
+        }
+
+        // Outside the gate: see TryInitAidaProvider (the HWiNFO refresh shares
+        // this gate, and a slow AIDA write must not delay the sensor list).
+        try
+        {
+            return channel.WriteAidaMmap(offset, buffer);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _readFailLog.Write(() => $"AIDA64 map write failed at {offset}: {ex.GetType().Name}: {ex.Message}");
+            return false;
         }
     }
 
@@ -321,17 +346,29 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>Closes the channel. The vendor's shared provider is left initialized (see the class notes).</summary>
     public void Dispose()
     {
-        lock (_gate)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            // Deliberately NO DeInitSensorProvider here: the HWiNFO provider is
-            // a shared session on the vendor service, so deinitializing it on
-            // our exit would tear it down for the vendor Manager (which does
-            // not re-init on demand). We leave the service's provider as it was
-            // and re-initialize lazily if someone else deinits it.
-            CloseChannelLocked();
-        }
+        // Never wait on in-flight vendor I/O: the UI thread runs this at
+        // teardown, and a background refresh holds _gate across calls whose
+        // binding allows 10 s send/receive timeouts. Detach the channel
+        // atomically and Abort it instead of Close: the graceful close can
+        // spend the 5 s CloseTimeout, and a call still in flight faults into
+        // the existing catch. Idempotent via _disposeOnce, not the gate.
+        if (Interlocked.Exchange(ref _disposeOnce, 1) != 0) return;
+        _disposed = true;
+
+        IWigiDashWcf? channel = Interlocked.Exchange(ref _channel, null);
+        ChannelFactory<IWigiDashWcf>? factory = Interlocked.Exchange(ref _factory, null);
+        _sensorReady = false;
+        _connected = false;
+
+        // Deliberately NO DeInitSensorProvider here: the HWiNFO provider is
+        // a shared session on the vendor service, so deinitializing it on
+        // our exit would tear it down for the vendor Manager (which does
+        // not re-init on demand). We leave the service's provider as it was
+        // and re-initialize lazily if someone else deinits it.
+        try { (channel as ICommunicationObject)?.Abort(); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel abort failed: {ex.GetType().Name}"); }
+        try { factory?.Abort(); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel factory abort failed: {ex.GetType().Name}"); }
     }
 
     // --- Background cache (no WCF I/O on the caller's thread) ---

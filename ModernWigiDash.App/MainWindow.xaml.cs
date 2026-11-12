@@ -708,6 +708,9 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
             // have disposed, and the display-standby last resort runs
             // no matter what.
             ProcessLifecycle.IsClosing = true;
+            // Name the trigger BEFORE the teardown disposes its witnesses: this
+            // is the line that makes an affected machine's log answerable.
+            Log($"[SHELL] window closed (reason={ProcessLifecycle.ExitReason ?? "unknown"}, trayLive={_shellLifecycle.IsTrayLive})");
             new ShutdownOrchestrator(BuildTeardownPlan(), Log).Run();
         };
     }
@@ -762,6 +765,25 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         Closing += OnWindowClosing;
         StateChanged += OnWindowStateChanged;
         Application.Current.SessionEnding += (_, _) => RunSessionEndStandby();
+        // The REASON is recorded only when the session actually ends. The
+        // query-phase SessionEnding event can be vetoed, and a reason latched
+        // there would mislabel every later user close (drift review).
+        Microsoft.Win32.SystemEvents.SessionEnded += OnSystemSessionEnded;
+    }
+
+    private static void OnSystemSessionEnded(object sender, Microsoft.Win32.SessionEndedEventArgs e)
+        => RecordSessionEnded();
+
+    /// <summary>
+    /// Records and reports a committed session end. The process may be
+    /// terminated before the window's Closed handler or the exit marker runs,
+    /// so this is the one write that makes a logoff/restart visible in the log.
+    /// </summary>
+    internal static void RecordSessionEnded()
+    {
+        ProcessLifecycle.ExitReason = ExitReasonPolicy.SessionEnd;
+        FileLog.Write("[SHELL] session ended (reason=session-end)");
+        FileLog.Flush();
     }
 
     /// <summary>The wired arm: LAST step, arms the guarded XAML handlers only after every module exists.</summary>
@@ -793,6 +815,7 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
         new TeardownStep("FramePump", _framePump.Dispose),
         new TeardownStep("PowerLifecycle", () =>
         {
+            Microsoft.Win32.SystemEvents.SessionEnded -= OnSystemSessionEnded;
             _powerModeSource.ModeChanged -= OnPowerModeChanged;
             _powerModeSource.Dispose();
         }),
@@ -1215,7 +1238,14 @@ public partial class MainWindow : Window, ISettingsHubHost, IProfileExportHost, 
 
     internal void QuitClose() => _shellLifecycle.QuitClose();
 
-    private void OnWindowClosing(object? sender, CancelEventArgs e) => _shellLifecycle.OnWindowClosing(e);
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        _shellLifecycle.OnWindowClosing(e);
+        // The intercept may hide instead of closing; only a close that stands
+        // is the user closing the window. A reason recorded by the tray quit,
+        // the update restart, the session end, or the second launch wins.
+        ProcessLifecycle.ExitReason = ExitReasonPolicy.ForClose(e.Cancel, ProcessLifecycle.ExitReason);
+    }
 
     private void OnWindowStateChanged(object? sender, EventArgs e) => _shellLifecycle.OnWindowStateChanged();
 
