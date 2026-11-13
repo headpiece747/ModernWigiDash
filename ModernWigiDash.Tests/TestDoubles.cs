@@ -424,8 +424,12 @@ internal sealed class StubMediaSessionSource : IMediaSessionSource
 {
     public StubMediaSessionSourceManager? Manager { get; set; } = new();
 
+    public Func<Task<IMediaSessionSourceManager?>>? GetManagerAsyncOverride { get; set; }
+
     public Task<IMediaSessionSourceManager?> GetManagerAsync()
-        => Task.FromResult<IMediaSessionSourceManager?>(Manager);
+        => GetManagerAsyncOverride is not null
+            ? GetManagerAsyncOverride()
+            : Task.FromResult<IMediaSessionSourceManager?>(Manager);
 }
 
 /// <summary>One recorded vendor control transfer (direction + request +
@@ -510,34 +514,71 @@ internal sealed class RecordingBackend : ITransferBackend
 /// </summary>
 internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
 {
+    private readonly Lock _lock = new();
     private Action? _currentSessionChanged;
     private Action? _sessionsChanged;
+    private int _currentSessionChangedSubscriptionCount;
+    private int _sessionsChangedSubscriptionCount;
+    private int _disposalCount;
 
     public StubMediaSession? Current { get; set; }
 
     public List<StubMediaSession> Sessions { get; set; } = [];
 
-    public int CurrentSessionChangedSubscriptionCount { get; private set; }
+    public Func<IMediaSessionSourceSession?>? GetCurrentSessionOverride { get; set; }
 
-    public int SessionsChangedSubscriptionCount { get; private set; }
+    public Func<IReadOnlyList<IMediaSessionSourceSession>>? GetSessionsOverride { get; set; }
 
-    public int DisposalCount { get; private set; }
+    public int CurrentSessionChangedSubscriptionCount => Volatile.Read(ref _currentSessionChangedSubscriptionCount);
 
-    public void Dispose() => DisposalCount++;
+    public int SessionsChangedSubscriptionCount => Volatile.Read(ref _sessionsChangedSubscriptionCount);
+
+    public int DisposalCount => Volatile.Read(ref _disposalCount);
+
+    public void Dispose() => Interlocked.Increment(ref _disposalCount);
 
     public event Action? CurrentSessionChanged
     {
-        add { _currentSessionChanged += value; CurrentSessionChangedSubscriptionCount++; }
-        remove { _currentSessionChanged -= value; CurrentSessionChangedSubscriptionCount--; }
+        add
+        {
+            lock (_lock)
+            {
+                _currentSessionChanged += value;
+                _currentSessionChangedSubscriptionCount++;
+            }
+        }
+        remove
+        {
+            lock (_lock)
+            {
+                _currentSessionChanged -= value;
+                _currentSessionChangedSubscriptionCount--;
+            }
+        }
     }
 
     public event Action? SessionsChanged
     {
-        add { _sessionsChanged += value; SessionsChangedSubscriptionCount++; }
-        remove { _sessionsChanged -= value; SessionsChangedSubscriptionCount--; }
+        add
+        {
+            lock (_lock)
+            {
+                _sessionsChanged += value;
+                _sessionsChangedSubscriptionCount++;
+            }
+        }
+        remove
+        {
+            lock (_lock)
+            {
+                _sessionsChanged -= value;
+                _sessionsChangedSubscriptionCount--;
+            }
+        }
     }
 
-    public IMediaSessionSourceSession? GetCurrentSession() => Current;
+    public IMediaSessionSourceSession? GetCurrentSession()
+        => GetCurrentSessionOverride is not null ? GetCurrentSessionOverride() : Current;
 
     /// <summary>When set, GetSessions() hands back a fresh wrapper per session
     /// per call (the production WinRT seam's shape: a new adapter, each
@@ -546,11 +587,25 @@ internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
     public Func<StubMediaSession, IMediaSessionSourceSession>? FreshWrapperFor { get; set; }
 
     public IReadOnlyList<IMediaSessionSourceSession> GetSessions()
-        => FreshWrapperFor is null ? Sessions : Sessions.Select(FreshWrapperFor).ToList();
+    {
+        if (GetSessionsOverride is not null)
+            return GetSessionsOverride();
+        return FreshWrapperFor is null ? Sessions : Sessions.Select(FreshWrapperFor).ToList();
+    }
 
-    public void RaiseCurrentSessionChanged() => _currentSessionChanged?.Invoke();
+    public void RaiseCurrentSessionChanged()
+    {
+        Action? handler;
+        lock (_lock) handler = _currentSessionChanged;
+        handler?.Invoke();
+    }
 
-    public void RaiseSessionsChanged() => _sessionsChanged?.Invoke();
+    public void RaiseSessionsChanged()
+    {
+        Action? handler;
+        lock (_lock) handler = _sessionsChanged;
+        handler?.Invoke();
+    }
 }
 
 /// <summary>
@@ -560,9 +615,14 @@ internal sealed class StubMediaSessionSourceManager : IMediaSessionSourceManager
 /// </summary>
 internal sealed class StubMediaSession : IMediaSessionSourceSession
 {
+    private readonly Lock _lock = new();
     private Action? _mediaPropertiesChanged;
     private Action? _playbackInfoChanged;
     private Action? _timelinePropertiesChanged;
+    private int _mediaPropertiesSubscriptionCount;
+    private int _playbackInfoSubscriptionCount;
+    private int _timelineSubscriptionCount;
+    private int _disposalCount;
 
     public object Identity => this;
 
@@ -576,11 +636,13 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
 
     public Func<Task<MediaPropertiesData?>>? PropertiesFunc { get; set; }
 
-    public int MediaPropertiesSubscriptionCount { get; private set; }
+    public Func<Task<bool>>? ControlActionOverride { get; set; }
 
-    public int PlaybackInfoSubscriptionCount { get; private set; }
+    public int MediaPropertiesSubscriptionCount => Volatile.Read(ref _mediaPropertiesSubscriptionCount);
 
-    public int TimelineSubscriptionCount { get; private set; }
+    public int PlaybackInfoSubscriptionCount => Volatile.Read(ref _playbackInfoSubscriptionCount);
+
+    public int TimelineSubscriptionCount => Volatile.Read(ref _timelineSubscriptionCount);
 
     public int PlayCalls { get; private set; }
 
@@ -602,26 +664,68 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
 
     public long LastSeekTicks { get; private set; }
 
-    public int DisposalCount { get; private set; }
+    public int DisposalCount => Volatile.Read(ref _disposalCount);
 
-    public void Dispose() => DisposalCount++;
+    public void Dispose() => Interlocked.Increment(ref _disposalCount);
 
     public event Action? MediaPropertiesChanged
     {
-        add { _mediaPropertiesChanged += value; MediaPropertiesSubscriptionCount++; }
-        remove { _mediaPropertiesChanged -= value; MediaPropertiesSubscriptionCount--; }
+        add
+        {
+            lock (_lock)
+            {
+                _mediaPropertiesChanged += value;
+                _mediaPropertiesSubscriptionCount++;
+            }
+        }
+        remove
+        {
+            lock (_lock)
+            {
+                _mediaPropertiesChanged -= value;
+                _mediaPropertiesSubscriptionCount--;
+            }
+        }
     }
 
     public event Action? PlaybackInfoChanged
     {
-        add { _playbackInfoChanged += value; PlaybackInfoSubscriptionCount++; }
-        remove { _playbackInfoChanged -= value; PlaybackInfoSubscriptionCount--; }
+        add
+        {
+            lock (_lock)
+            {
+                _playbackInfoChanged += value;
+                _playbackInfoSubscriptionCount++;
+            }
+        }
+        remove
+        {
+            lock (_lock)
+            {
+                _playbackInfoChanged -= value;
+                _playbackInfoSubscriptionCount--;
+            }
+        }
     }
 
     public event Action? TimelinePropertiesChanged
     {
-        add { _timelinePropertiesChanged += value; TimelineSubscriptionCount++; }
-        remove { _timelinePropertiesChanged -= value; TimelineSubscriptionCount--; }
+        add
+        {
+            lock (_lock)
+            {
+                _timelinePropertiesChanged += value;
+                _timelineSubscriptionCount++;
+            }
+        }
+        remove
+        {
+            lock (_lock)
+            {
+                _timelinePropertiesChanged -= value;
+                _timelineSubscriptionCount--;
+            }
+        }
     }
 
     public Task<MediaPropertiesData?> TryGetMediaPropertiesAsync()
@@ -640,7 +744,11 @@ internal sealed class StubMediaSession : IMediaSessionSourceSession
 
     public TimelinePropertiesData? GetTimelineProperties() => Timeline;
 
-    public Task<bool> TryPlayAsync() { PlayCalls++; return Task.FromResult(true); }
+    public Task<bool> TryPlayAsync()
+    {
+        PlayCalls++;
+        return ControlActionOverride is not null ? ControlActionOverride() : Task.FromResult(true);
+    }
 
     public Task<bool> TryPauseAsync() { PauseCalls++; return Task.FromResult(true); }
 
@@ -694,9 +802,11 @@ internal sealed class FreshSessionWrapper : IMediaSessionSourceSession
 
     public string SourceAppUserModelId => _inner.SourceAppUserModelId;
 
-    public int DisposalCount { get; private set; }
+    private int _disposalCount;
 
-    public void Dispose() => DisposalCount++;
+    public int DisposalCount => Volatile.Read(ref _disposalCount);
+
+    public void Dispose() => Interlocked.Increment(ref _disposalCount);
 
     public event Action? MediaPropertiesChanged
     {
@@ -1291,7 +1401,7 @@ internal sealed class FakeHotkeyApi
     public record Registration(IntPtr Hwnd, int Id, int Mod, ushort Vk);
 
     public List<Registration> Registered { get; } = [];
-    public List<(IntPtr Hwnd, int Id, ushort Vk)> Unregistered { get; } = [];
+    public List<(IntPtr Hwnd, int Id)> Unregistered { get; } = [];
 
     public HotkeyApi Api { get; }
 
@@ -1303,7 +1413,7 @@ internal sealed class FakeHotkeyApi
                 Registered.Add(new Registration(handle, id, mod, vk));
                 return true;
             },
-            (handle, id, vk) => Unregistered.Add((handle, id, vk)));
+            (handle, id) => Unregistered.Add((handle, id)));
     }
 }
 

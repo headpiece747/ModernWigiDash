@@ -64,7 +64,7 @@ internal sealed class PresentMonNative : IPresentMonNative
         {
             return null;
         }
-        if (_getIntrospectionRootFn(session, out IntPtr rootPtr) != PmStatus.Success)
+        if (_getIntrospectionRootFn(session, out IntPtr rootPtr) != PmStatus.Success || rootPtr == IntPtr.Zero)
         {
             return null;
         }
@@ -97,11 +97,19 @@ internal sealed class PresentMonNative : IPresentMonNative
         }
         _session = session;
 
-        if (!_queryRegistry.Register(session, out string? reason))
+        try
         {
-            UnavailableReason = reason;
+            if (!_queryRegistry.Register(session, out string? reason))
+            {
+                UnavailableReason = reason;
+                CloseSession();
+                return false;
+            }
+        }
+        catch
+        {
             CloseSession();
-            return false;
+            throw;
         }
 
         UnavailableReason = null;

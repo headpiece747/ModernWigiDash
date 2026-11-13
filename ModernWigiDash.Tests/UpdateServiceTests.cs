@@ -567,4 +567,83 @@ public class UpdateServiceTests
         Assert.IsFalse(File.Exists(Path.Combine(installDir, "ModernWigiDash.App.exe.old")));
         Assert.IsFalse(Directory.Exists(Path.Combine(dir, "staged")), "stale stages must be cleaned at startup");
     }
+
+    [TestMethod]
+    public async Task DownloadAndStage_FailedExtractCleansStageAndRetryOverwritesCleanly()
+    {
+        string dir = NewDir();
+        // First zip contains an unexpected file (no exe), leaving partial files if stage weren't cleaned/overwritten.
+        string badZipPath = Path.Combine(dir, "bad.zip");
+        Directory.CreateDirectory(dir);
+#pragma warning disable S6966
+        using (var badZip = await ZipFile.OpenAsync(badZipPath, ZipArchiveMode.Create))
+        {
+            var entry = badZip.CreateEntry("ModernWigiDash-win-x64/partial.txt");
+            using var w = new StreamWriter(await entry.OpenAsync());
+            await w.WriteAsync("stale");
+        }
+
+        string goodZipPath = Path.Combine(dir, "good.zip");
+        using (var goodZip = await ZipFile.OpenAsync(goodZipPath, ZipArchiveMode.Create))
+        {
+            var entry1 = goodZip.CreateEntry("ModernWigiDash-win-x64/partial.txt");
+            using (var w = new StreamWriter(await entry1.OpenAsync()))
+                await w.WriteAsync("fresh");
+            var entry2 = goodZip.CreateEntry("ModernWigiDash-win-x64/ModernWigiDash.App.exe");
+            using (var w = new StreamWriter(await entry2.OpenAsync()))
+                await w.WriteAsync("exe");
+        }
+#pragma warning restore S6966
+
+        byte[] badBytes = await File.ReadAllBytesAsync(badZipPath);
+        byte[] goodBytes = await File.ReadAllBytesAsync(goodZipPath);
+        int attempt = 0;
+        var service = new UpdateService(
+            downloadFile: async (_, dest, _, _) =>
+            {
+                attempt++;
+                await File.WriteAllBytesAsync(dest, attempt == 1 ? badBytes : goodBytes).ConfigureAwait(false);
+            },
+            sha256Matches: (_, _) => true,
+            updatesRoot: dir);
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "unused");
+
+        bool firstOk = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
+        string stagedVersionDir = Path.Combine(dir, "staged", "0.5.0");
+        Assert.IsFalse(firstOk);
+        Assert.IsFalse(Directory.Exists(stagedVersionDir), "failed staging must clean up the version stage directory");
+
+        // Even if a stray file remains on disk before retry, overwrite extraction succeeds.
+        Directory.CreateDirectory(Path.Combine(stagedVersionDir, "ModernWigiDash-win-x64"));
+        await File.WriteAllTextAsync(Path.Combine(stagedVersionDir, "ModernWigiDash-win-x64", "partial.txt"), "stale").ConfigureAwait(false);
+
+        bool secondOk = await service.DownloadAndStageAsync(info, new Progress<double>()).ConfigureAwait(false);
+        Assert.IsTrue(secondOk, "retry after failed staging must overwrite cleanly without IOException");
+        Assert.AreEqual("fresh", await File.ReadAllTextAsync(Path.Combine(stagedVersionDir, "ModernWigiDash-win-x64", "partial.txt")).ConfigureAwait(false));
+    }
+
+    [TestMethod]
+    public void LaunchUpdater_TrimsTrailingDirectorySeparatorFromInstallDir()
+    {
+        string dir = NewDir();
+        string stageDir = Path.Combine(dir, "staged", "0.5.0");
+        Directory.CreateDirectory(stageDir);
+        string stagedCmd = Path.Combine(stageDir, "apply-update.cmd");
+        File.WriteAllText(stagedCmd, "echo 0.5.0\r\n{{RELAUNCH}}\r\n");
+        File.WriteAllText(
+            UpdateService.StagedCmdHashPath(stagedCmd),
+            UpdateService.ComputeSha256(stagedCmd));
+
+        ProcessStartInfo? started = null;
+        var service = new UpdateService(
+            updatesRoot: dir,
+            startProcess: psi => { started = psi; return null; });
+        var info = new UpdateInfo("0.5.0", "https://x/app.zip", "digest");
+        string installDirWithSlash = Path.Combine(Path.GetTempPath(), "wmd-install") + Path.DirectorySeparatorChar;
+
+        Assert.IsTrue(service.LaunchUpdater(info, installDirWithSlash));
+        Assert.IsNotNull(started);
+        Assert.IsFalse(started.Arguments.Contains("\\\""),
+            $"installDir trailing backslash must be trimmed so quoted arg never ends with \\\": {started.Arguments}");
+    }
 }

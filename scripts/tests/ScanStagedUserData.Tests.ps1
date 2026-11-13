@@ -95,4 +95,10 @@ Describe 'scan-staged-userdata' {
         Stage-Text 'app_theme.json'
         Invoke-Scan | Should -Be 1
     }
+
+    It 'blocks user-data filenames regardless of casing' {
+        New-FreshRepo
+        Stage-Text 'Profile.json'
+        Invoke-Scan | Should -Be 1
+    }
 }

@@ -20,7 +20,9 @@ namespace ModernWigiDash.App.Hotkey;
 /// </summary>
 internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposable
 {
-    private const int FirstId = 0x574D0001; // "WM" + counter
+    // Win32 RegisterHotKey reserves 0x0000..0xBFFF for applications.
+    private const int FirstId = 1;
+    private const int MaxId = 0xBFFF;
 
     /// <summary>Win32 MOD_NOREPEAT: the OS must not autorepeat a global
     /// hotkey. Added at this OS boundary, so the chord policy's flags stay
@@ -87,7 +89,7 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
         {
             if (desiredCells.Contains(cell)) continue;
             if (_registered.Remove(id))
-                api.UnregisterHotKey(handle, id, cell.Vk);
+                api.UnregisterHotKey(handle, id);
             _idByCell.Remove(cell);
         }
 
@@ -99,12 +101,12 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
             {
                 if (ReferenceEquals(_registered.GetValueOrDefault(heldId).Owner, hotkey.Owner))
                     continue;
-                api.UnregisterHotKey(handle, heldId, cell.Vk);
+                api.UnregisterHotKey(handle, heldId);
                 _idByCell.Remove(cell);
                 _registered.Remove(heldId);
             }
-            int id = _nextId++;
-            if (api.RegisterHotKey(handle, id, hotkey.ModFlags | ModNoRepeat, hotkey.VirtualKey))
+            int id = AllocateId();
+            if (id >= FirstId && api.RegisterHotKey(handle, id, hotkey.ModFlags | ModNoRepeat, hotkey.VirtualKey))
             {
                 _idByCell[cell] = id;
                 _registered[id] = (hotkey.VirtualKey, hotkey.Owner);
@@ -135,6 +137,18 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
         Clear();
     }
 
+    private int AllocateId()
+    {
+        for (int n = 0; n <= MaxId - FirstId; n++)
+        {
+            var id = _nextId;
+            _nextId = id >= MaxId ? FirstId : id + 1;
+            if (!_registered.ContainsKey(id)) return id;
+        }
+
+        return -1;
+    }
+
     private void Clear()
     {
         if (_handle == IntPtr.Zero)
@@ -143,8 +157,8 @@ internal sealed class GlobalHotkeyManager(HotkeyApi api, DiagLog log) : IDisposa
             _registered.Clear();
             return;
         }
-        foreach ((var cell, int id) in _idByCell.ToList())
-            api.UnregisterHotKey(_handle, id, cell.Vk);
+        foreach (int id in _idByCell.Values)
+            api.UnregisterHotKey(_handle, id);
         _idByCell.Clear();
         _registered.Clear();
     }

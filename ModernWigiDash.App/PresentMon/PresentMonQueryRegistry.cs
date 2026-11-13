@@ -105,13 +105,14 @@ internal sealed class PresentMonQueryRegistry
             new PresentMonQueryElement(PresentMonProtocol.MetricBetweenPresents, PresentMonProtocol.StatNone, 0, 0, 0, 0),
         };
         PmStatus frameStatus = _capability.RegisterFrame(session, out _frameQuery, frameElements, (ulong)frameElements.Length, out uint blobSize);
-        if (frameStatus != PmStatus.Success || blobSize == 0)
+        if (frameStatus != PmStatus.Success || blobSize == 0 || blobSize > int.MaxValue)
         {
             unavailableReason = $"Failed to register the PresentMon frame query (status {frameStatus}, blobSize {blobSize}).";
+            Free();
             return false;
         }
         _frameElements = frameElements;
-        _frameBlobSize = (int)blobSize;
+        _frameBlobSize = checked((int)blobSize);
 
         return true;
     }
@@ -133,7 +134,7 @@ internal sealed class PresentMonQueryRegistry
 
     public PresentMonPollResult PollDynamic(int processId)
     {
-        if (_dynamicQuery == IntPtr.Zero || _dynamicElements is null)
+        if (_dynamicQuery == IntPtr.Zero || _dynamicElements is null || _chainStride <= 0)
         {
             return new PresentMonPollResult(null, PmStatus.Success);
         }
@@ -149,10 +150,11 @@ internal sealed class PresentMonQueryRegistry
         int capacity = 32;
         while (true)
         {
+            int requiredBytes = checked(_chainStride * capacity);
             byte[]? blob = _dynamicBlob;
-            if (blob is null || blob.Length < _chainStride * capacity)
+            if (blob is null || blob.Length < requiredBytes)
             {
-                blob = _dynamicBlob = new byte[_chainStride * capacity];
+                blob = _dynamicBlob = new byte[requiredBytes];
             }
             uint numSwapChains = (uint)capacity;
             PmStatus status = _capability.PollDynamic(_dynamicQuery, (uint)processId, blob, ref numSwapChains);
@@ -211,7 +213,7 @@ internal sealed class PresentMonQueryRegistry
 
         const uint MaxFramesPerCall = 256;
         byte[]? buffer = _frameBlob;
-        int size = _frameBlobSize * (int)MaxFramesPerCall;
+        int size = checked(_frameBlobSize * (int)MaxFramesPerCall);
         if (buffer is null || buffer.Length != size)
         {
             buffer = _frameBlob = new byte[size];
@@ -230,10 +232,11 @@ internal sealed class PresentMonQueryRegistry
                 break;
             }
 
-            for (uint i = 0; i < framesToRead; i++)
+            uint count = Math.Min(framesToRead, MaxFramesPerCall);
+            for (uint i = 0; i < count; i++)
             {
                 frameTimes.Add(PresentMonBlobReader.ReadFrameDouble(
-                    buffer.AsSpan((int)i * _frameBlobSize), _frameElements[0]));
+                    buffer.AsSpan(checked((int)i * _frameBlobSize)), _frameElements[0]));
             }
 
             if (framesToRead < MaxFramesPerCall)

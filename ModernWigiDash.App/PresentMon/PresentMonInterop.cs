@@ -46,6 +46,8 @@ internal delegate PmStatus PmCloseSession(IntPtr handle);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate PmStatus PmStartTrackingProcess(IntPtr handle, uint processId);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate PmStatus PmStopTrackingProcess(IntPtr handle, uint processId);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

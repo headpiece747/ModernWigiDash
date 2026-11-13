@@ -20,7 +20,7 @@ public class GlobalHotkeyManagerTests
     private sealed class FakeApi
     {
         public record Registration(IntPtr Hwnd, int Id, int Mod, ushort Vk);
-        public record Unregistration(IntPtr Hwnd, int Id, ushort Vk);
+        public record Unregistration(IntPtr Hwnd, int Id);
 
         public List<Registration> Registered { get; } = [];
         public List<Unregistration> Unregistered { get; } = [];
@@ -40,7 +40,7 @@ public class GlobalHotkeyManagerTests
                     Registered.Add(new Registration(handle, id, mod, vk));
                     return true;
                 },
-                (handle, id, vk) => Unregistered.Add(new Unregistration(handle, id, vk)));
+                (handle, id) => Unregistered.Add(new Unregistration(handle, id)));
         }
     }
 
@@ -110,12 +110,13 @@ public class GlobalHotkeyManagerTests
         var c = Candidate(new FakeProvider(), 0x8, (ushort)'C', "Win+C");
 
         manager.Refresh(Handle, [a, b]);
+        int aId = fake.Registered.Single(r => r.Vk == (ushort)'A').Id;
         int bId = fake.Registered.Single(r => r.Vk == (ushort)'B').Id;
         manager.Refresh(Handle, [b, c]);
 
         Assert.AreEqual(3, fake.Registered.Count, "A and B registered, then C");
         Assert.AreEqual(1, fake.Unregistered.Count, "only A left the desired set");
-        Assert.AreEqual((ushort)'A', fake.Unregistered.Single().Vk);
+        Assert.AreEqual(aId, fake.Unregistered.Single().Id);
         Assert.AreEqual(bId, fake.Registered.Single(r => r.Vk == (ushort)'B').Id, "the held cell B keeps its id");
     }
 
@@ -255,5 +256,23 @@ public class GlobalHotkeyManagerTests
         manager.RefreshPass(Handle, [first, duplicate], killSwitchTripped: false);
         CollectionAssert.AreEqual(new[] { line }, logLines,
             "and never again (the cell is now marked logged)");
+    }
+
+    [TestMethod]
+    public void Refresh_AllocatedIdsStayWithinWin32ApplicationRange()
+    {
+        var (manager, fake, _) = CreateManager();
+        var desired = Enumerable.Range(0, 5)
+            .Select(i => Candidate(new FakeProvider(), 0x2, (ushort)('A' + i), $"Ctrl+{(char)('A' + i)}"))
+            .ToArray();
+
+        manager.Refresh(Handle, desired);
+
+        Assert.AreEqual(5, fake.Registered.Count);
+        foreach (var reg in fake.Registered)
+        {
+            Assert.IsGreaterThanOrEqualTo(1, reg.Id);
+            Assert.IsLessThanOrEqualTo(0xBFFF, reg.Id);
+        }
     }
 }

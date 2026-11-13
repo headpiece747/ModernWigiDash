@@ -77,6 +77,68 @@ public class PresentMonIntrospectionTests
         }
     }
 
+    [TestMethod]
+    public void ParseMetrics_NullPointersAndZeroData_ReturnsEmptyOrSkipsNullEntries()
+    {
+        Assert.AreEqual(0, PresentMonIntrospection.ParseMetrics(IntPtr.Zero).Count);
+
+        IntPtr rootBlock = Marshal.AllocHGlobal(Marshal.SizeOf<Root>());
+        IntPtr emptyDataMetricsArray = AllocObjArray(IntPtr.Zero, 2);
+        IntPtr badStatArray = AllocObjArray(IntPtr.Zero, 2);
+        IntPtr statOneBlock = Marshal.AllocHGlobal(Marshal.SizeOf<StatInfo>());
+        IntPtr statPtrs = Marshal.AllocHGlobal(IntPtr.Size * 2);
+        IntPtr goodStatArray = AllocObjArray(statPtrs, 2);
+        IntPtr metricValid = Marshal.AllocHGlobal(Marshal.SizeOf<Metric>());
+        IntPtr metricBadStats = Marshal.AllocHGlobal(Marshal.SizeOf<Metric>());
+        IntPtr metricPtrs = Marshal.AllocHGlobal(IntPtr.Size * 3);
+        IntPtr populatedMetricsArray = AllocObjArray(metricPtrs, 3);
+
+        try
+        {
+            // Case 1: null pMetrics pointer on root
+            Marshal.StructureToPtr(new Root { pMetrics = IntPtr.Zero }, rootBlock, false);
+            Assert.AreEqual(0, PresentMonIntrospection.ParseMetrics(rootBlock).Count);
+
+            // Case 2: non-zero count with null pData on metrics array
+            Marshal.StructureToPtr(new Root { pMetrics = emptyDataMetricsArray }, rootBlock, false);
+            Assert.AreEqual(0, PresentMonIntrospection.ParseMetrics(rootBlock).Count);
+
+            // Case 3: null metric element + valid metric with mixed null/valid stat ptrs + metric with null stat pData
+            Marshal.StructureToPtr(new StatInfo { stat = 5 }, statOneBlock, false);
+            Marshal.WriteIntPtr(statPtrs, 0, IntPtr.Zero);
+            Marshal.WriteIntPtr(statPtrs, IntPtr.Size, statOneBlock);
+
+            Marshal.StructureToPtr(new Metric { id = 10, type = 1, unit = 2, pStatInfo = goodStatArray }, metricValid, false);
+            Marshal.StructureToPtr(new Metric { id = 11, type = 1, unit = 2, pStatInfo = badStatArray }, metricBadStats, false);
+
+            Marshal.WriteIntPtr(metricPtrs, 0, IntPtr.Zero);
+            Marshal.WriteIntPtr(metricPtrs, IntPtr.Size, metricValid);
+            Marshal.WriteIntPtr(metricPtrs, IntPtr.Size * 2, metricBadStats);
+            Marshal.StructureToPtr(new Root { pMetrics = populatedMetricsArray }, rootBlock, false);
+
+            var parsed = PresentMonIntrospection.ParseMetrics(rootBlock);
+
+            Assert.AreEqual(2, parsed.Count);
+            Assert.AreEqual(10, parsed[0].Id);
+            CollectionAssert.AreEqual(new[] { 5 }, parsed[0].AllowedStats.ToArray());
+            Assert.AreEqual(11, parsed[1].Id);
+            Assert.AreEqual(0, parsed[1].AllowedStats.Count);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(populatedMetricsArray);
+            Marshal.FreeHGlobal(metricPtrs);
+            Marshal.FreeHGlobal(metricBadStats);
+            Marshal.FreeHGlobal(metricValid);
+            Marshal.FreeHGlobal(goodStatArray);
+            Marshal.FreeHGlobal(statPtrs);
+            Marshal.FreeHGlobal(statOneBlock);
+            Marshal.FreeHGlobal(badStatArray);
+            Marshal.FreeHGlobal(emptyDataMetricsArray);
+            Marshal.FreeHGlobal(rootBlock);
+        }
+    }
+
     private static IntPtr AllocObjArray(IntPtr pData, ulong size)
     {
         IntPtr block = Marshal.AllocHGlobal(Marshal.SizeOf<ObjArray>());

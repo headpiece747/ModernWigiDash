@@ -31,18 +31,13 @@ subscription bookkeeping) would add surface for the same property.
   held by the client. A read that finds a missing or stale entry schedules a
   background refresh and returns the current snapshot (null before the first
   one), so the UI thread never performs WCF I/O.
-- The refresh runs on the thread pool, single-flight and rate-limited (one
-  attempt per second); the cache time-to-live is 2 s for the sensor list and
-  500 ms for a reading. The HWiNFO widget is unchanged: it already treats null
-  as "no data" and draws its placeholder.
+- The refresh runs on the thread pool, single-flight and rate-limited (`250 ms` minimum interval); the cache time-to-live is 2 s for the sensor list and 250 ms for a reading. The HWiNFO widget renders `"No sensor data"` / `"Vendor service not connected"` placeholders when unavailable, shows fallback option entries while waiting for sensors, and requests one inspector rebuild when the sensor list first arrives.
 - Connection state (the channel, the provider, the reconnect/retry machine)
   still mutates under `_gate`, the lock the synchronous `TryConnect` path uses.
   Only the published snapshot swaps under a separate `_cacheLock`, so a reader
   never waits on an in-flight I/O. `ISensorValues.IsReady` is a lock-free
   volatile flag.
-- A failed refresh clears the cached readings (the widget degrades to its
-  placeholder instead of showing a stale value) and its time-to-live stamps
-  back the next attempt off, so a wedged service costs one pool-thread attempt
+- A failed refresh (`fetchFailed`) clears the cached sensor list, cached readings, and requested keys unconditionally — even if `GetSensorList` or a partial read succeeded earlier in the same refresh — so the widget degrades to its placeholder instead of showing a stale list or value, and its backoff timestamps delay the next attempt, so a wedged service costs one pool-thread attempt
   per rate-limit window, not a UI block.
 
 ## Consequences
@@ -53,7 +48,7 @@ subscription bookkeeping) would add surface for the same property.
 - One client serves every HWiNFO widget, so N widgets no longer mean N
   independent 673-item list reads.
 - A stalled vendor service can no longer freeze the UI. The cost moves to one
-  thread-pool thread blocked for the binding timeout, at most once per second.
+  thread-pool thread blocked for the binding timeout, at most once per 250 ms reading window (`2 s` for list-only refreshes).
 - The facet tests await the background refresh (`TestWait`) instead of asserting
   synchronously; the channel-factory and clock seams make the whole
   open -> fail -> drop -> reopen sequence drivable without the service.

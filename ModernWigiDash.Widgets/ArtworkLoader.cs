@@ -22,6 +22,7 @@ public sealed class ArtworkLoader
     private readonly IArtworkDecoder _decoder;
     private readonly Action<string, Exception?>? _logError;
     private readonly RetiredBitmapSet _retirement = new();
+    private readonly Lock _lock = new();
 
     private SKBitmap? _albumArt;
     private SKColor _bgColor = DefaultBackground;
@@ -52,7 +53,16 @@ public sealed class ArtworkLoader
     }
 
     /// <summary>The artwork state last published to the renderer (never null).</summary>
-    public ArtworkLoaded Current => new(_albumArt, _loadedArtworkKey, _bgColor);
+    public ArtworkLoaded Current
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return new(_albumArt, _loadedArtworkKey, _bgColor);
+            }
+        }
+    }
 
     /// <summary>
     /// Reacts to a monitor snapshot update: clears the artwork pipeline when the
@@ -61,23 +71,58 @@ public sealed class ArtworkLoader
     /// </summary>
     public void NotifySnapshotChanged(MediaSessionUpdate? update)
     {
-        if (update is null)
+        bool startDecode = false;
+        bool raiseChanged = false;
+        int version = 0;
+
+        lock (_lock)
         {
-            DisposeArtwork();
-            _bgColor = DefaultBackground;
-            ArtworkChanged?.Invoke();
-            return;
+            if (_disposed) return;
+
+            if (update is null)
+            {
+                ++_artLoadVersion;
+                _currentArtKey = "";
+                _loadingArtworkKey = "";
+                RetireArtworkLocked();
+                _bgColor = DefaultBackground;
+                raiseChanged = true;
+            }
+            else
+            {
+                bool trackChanged = !string.Equals(update.ArtKey, _currentArtKey, StringComparison.Ordinal);
+                bool artworkBecameAvailable = update.Thumbnail is not null &&
+                    !string.Equals(_loadedArtworkKey, update.ArtKey, StringComparison.Ordinal) &&
+                    !string.Equals(_loadingArtworkKey, update.ArtKey, StringComparison.Ordinal);
+                if (trackChanged || artworkBecameAvailable)
+                {
+                    _currentArtKey = update.ArtKey;
+                    version = ++_artLoadVersion;
+                    RetireArtworkLocked();
+                    if (update.Thumbnail is null)
+                    {
+                        _loadingArtworkKey = "";
+                        _bgColor = DefaultBackground;
+                        raiseChanged = true;
+                    }
+                    else
+                    {
+                        _loadingArtworkKey = update.ArtKey;
+                        startDecode = true;
+                    }
+                }
+                else
+                {
+                    raiseChanged = true;
+                }
+            }
         }
 
-        bool trackChanged = !string.Equals(update.ArtKey, _currentArtKey, StringComparison.Ordinal);
-        bool artworkBecameAvailable = update.Thumbnail is not null &&
-            !string.Equals(_loadedArtworkKey, update.ArtKey, StringComparison.Ordinal) && !string.Equals(_loadingArtworkKey, update.ArtKey, StringComparison.Ordinal);
-        if (trackChanged || artworkBecameAvailable)
+        if (startDecode)
         {
-            _currentArtKey = update.ArtKey;
-            _ = LoadArtworkAsync(update.Thumbnail, update.ArtKey);
+            _ = LoadArtworkAsync(update!.Thumbnail!, update.ArtKey, version);
         }
-        else
+        else if (raiseChanged)
         {
             ArtworkChanged?.Invoke();
         }
@@ -92,69 +137,81 @@ public sealed class ArtworkLoader
     /// <summary>Teardown: retires the current artwork and disposes everything pending.</summary>
     public void DisposeAll()
     {
-        _disposed = true;
-        DisposeArtwork();
+        lock (_lock)
+        {
+            _disposed = true;
+            ++_artLoadVersion;
+            _currentArtKey = "";
+            _loadingArtworkKey = "";
+            RetireArtworkLocked();
+            _bgColor = DefaultBackground;
+        }
         _retirement.DisposeAll();
     }
 
     /// <summary>The underlying retirement set (test seam: observes pending drain state).</summary>
     internal RetiredBitmapSet RetirementSet => _retirement;
 
-    private async Task LoadArtworkAsync(IRandomAccessStreamReference? thumbnail, string artKey)
+    private async Task LoadArtworkAsync(IRandomAccessStreamReference thumbnail, string artKey, int version)
     {
-        int version = ++_artLoadVersion;
-        DisposeArtwork();
-
-        if (thumbnail is null)
-        {
-            _bgColor = DefaultBackground;
-            ArtworkChanged?.Invoke();
-            return;
-        }
-
-        _loadingArtworkKey = artKey;
+        ArtworkDecodeResult result;
         try
         {
-            ArtworkDecodeResult result;
-            try
-            {
-                result = await _decoder.DecodeAsync(thumbnail).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logError?.Invoke($"Album art decode failed: {ex.Message}", ex);
-                result = new ArtworkDecodeResult(null, false);
-                _bgColor = DefaultBackground;
-            }
+            result = await _decoder.DecodeAsync(thumbnail).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logError?.Invoke($"Album art decode failed: {ex.Message}", ex);
+            result = new ArtworkDecodeResult(null, false);
+        }
 
-            if (result.Oversized)
-            {
-                _logError?.Invoke("Album art skipped: thumbnail too large to load", null);
-                result = new ArtworkDecodeResult(null, false);
-                _bgColor = DefaultBackground;
-            }
+        if (result.Oversized)
+        {
+            _logError?.Invoke("Album art skipped: thumbnail too large to load", null);
+            result.Bitmap?.Dispose();
+            result = new ArtworkDecodeResult(null, false);
+        }
 
-            if (_disposed || version != _artLoadVersion || !string.Equals(artKey, _currentArtKey, StringComparison.Ordinal))
+        // Extract color from the thread-local decoded bitmap BEFORE publishing
+        // so no concurrent snapshot change or render-thread drain can free it
+        // mid-DrawBitmap.
+        SKColor extractedBg = ExtractBackgroundColor(result.Bitmap);
+        SKBitmap? staleBitmap = null;
+        bool raiseChanged = false;
+
+        lock (_lock)
+        {
+            if (_disposed)
             {
-                result.Bitmap?.Dispose();
+                staleBitmap = result.Bitmap;
+            }
+            else if (version != _artLoadVersion || !string.Equals(artKey, _currentArtKey, StringComparison.Ordinal))
+            {
+                staleBitmap = result.Bitmap;
+                raiseChanged = true;
             }
             else
             {
+                if (string.Equals(_loadingArtworkKey, artKey, StringComparison.Ordinal))
+                {
+                    _loadingArtworkKey = "";
+                }
+                RetireArtworkLocked();
                 _albumArt = result.Bitmap;
-                ExtractBackgroundColor();
-                _loadedArtworkKey = artKey;
+                _bgColor = extractedBg;
+                _loadedArtworkKey = result.Bitmap is not null ? artKey : "";
+                raiseChanged = true;
             }
         }
-        finally
-        {
-            if (string.Equals(_loadingArtworkKey, artKey, StringComparison.Ordinal))
-                _loadingArtworkKey = "";
-        }
 
-        ArtworkChanged?.Invoke();
+        staleBitmap?.Dispose();
+        if (raiseChanged)
+        {
+            ArtworkChanged?.Invoke();
+        }
     }
 
-    private void DisposeArtwork()
+    private void RetireArtworkLocked()
     {
         // Retire instead of disposing: SMTC refresh threads replace the
         // artwork, and the 30 FPS render thread may be inside
@@ -168,15 +225,11 @@ public sealed class ArtworkLoader
         _loadedArtworkKey = "";
     }
 
-    private void ExtractBackgroundColor()
+    private SKColor ExtractBackgroundColor(SKBitmap? art)
     {
-        // Snapshot once: another SMTC refresh thread may retire the artwork
-        // between the null check and the draw.
-        var art = _albumArt;
         if (art is null)
         {
-            _bgColor = DefaultBackground;
-            return;
+            return DefaultBackground;
         }
 
         try
@@ -187,12 +240,12 @@ public sealed class ArtworkLoader
             canvas.DrawBitmap(art, new SKRect(0, 0, 32, 32), HighQualitySampling);
             canvas.Flush();
 
-            _bgColor = ArtworkBackgroundColor.FromSample(sample);
+            return ArtworkBackgroundColor.FromSample(sample);
         }
         catch (Exception ex)
         {
             _logError?.Invoke($"Album art background color extraction failed; using default background: {ex.Message}", ex);
-            _bgColor = DefaultBackground;
+            return DefaultBackground;
         }
     }
 }

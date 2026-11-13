@@ -54,7 +54,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 
 - **Direct-USB Transport.** The App owns the device via `DisplayDeviceEngine` / `DisplayHidTransport`: frames stream over bulk writes and touch is polled at 16 ms, normalized once through the shared `TouchReport.ToEventType` site. No elevation or service installation required.
 - **High-Rate SkiaSharp Rendering.** The App composites at a steady **30 FPS** via `SkiaFrameCompositor`, using a pooled `FrameBufferPool` and zero-allocation hot paths (stack-allocated Z-order sorting, span-based sparklines, array-reuse frame delivery) to keep GC pressure minimal.
-- **In-App Auto-Update.** An amber update button appears in the header when a newer release exists; one click downloads the slim app-only payload (SHA-256 verified), and restarting applies it **in place**. Profile and theme are preserved.
+- **In-App Auto-Update.** An amber update arrow appears in the header when a newer release exists; click it to download the slim app-only payload (SHA-256 verified), then click the green **Restart to apply** button and choose **OK** to swap **in place** (if installed in `Program Files`, Windows prompts for UAC elevation after close). Profile and theme are preserved.
 - **Power Lifecycle.** On Windows sleep the frame pump pauses; on resume it restarts and the USB transport reconnects, so the display resumes streaming cleanly.
 - **Standby on Exit.** The display returns to its vendor Welcome screen and is put to sleep (backlight off) whenever the app closes; starting the app again wakes it.
 
@@ -127,7 +127,7 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 - **OS**: Windows 10 or Windows 11 (x64)
 - **Runtime**: none for release builds (self-contained single-file EXE); the .NET 10 SDK is required only to build from source
 - **Hardware**: [G.Skill WigiDash](https://www.gskill.com/product/412/415/1702982997/WigiDash) 7″ USB touch panel (`USB\VID_28DA&PID_EF01`)
-- **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors), [PresentMon Service](https://github.com/microsoft/PresentMon) (frame-time analytics), and G.SKILL's WigiDash Manager (its service backs the HWiNFO Sensor and AIDA64 Panel widgets). The AIDA64 Panel also needs AIDA64 running with its LCD output set to the WigiDash. The app runs without them; the related widgets show an unavailable state
+- **Optional**: [LibreHardwareService](https://github.com/epinter/LibreHardwareService) (hardware sensors), [PresentMon Service](https://github.com/GameTechDev/PresentMon) (frame-time analytics), and G.SKILL's WigiDash Manager (its service backs the HWiNFO Sensor and AIDA64 Panel widgets). The AIDA64 Panel also needs AIDA64 running with its LCD output set to the WigiDash. The app runs without them; the related widgets show an unavailable state
 
 ---
 
@@ -135,11 +135,11 @@ ModernWigiDash is a single WPF app that owns the USB display directly, no backgr
 
 ### Option A: Download a Release (no .NET install)
 
-Grab the latest `ModernWigiDash-vX.Y.Z-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest). It contains a single, self-contained, ReadyToRun executable. Unzip it next to the `Resources` folder and run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required.
+Grab the latest `ModernWigiDash-vX.Y.Z-win-x64.zip` from the [Releases page](https://github.com/headpiece747/ModernWigiDash/releases/latest) and extract the `ModernWigiDash-win-x64` folder anywhere on your PC (it already includes `ModernWigiDash.App.exe`, `Resources`, and `setup-telemetry.bat`). Plug in the WigiDash over USB first, then run `ModernWigiDash.App.exe`. No .NET runtime or SDK is required. To enable **Hardware Monitor** and **FPS / Frame Time**, right-click `setup-telemetry.bat` and choose **Run as administrator**.
 
 > **First launch:** the release executable is unsigned (open source, no code-signing certificate), so Windows SmartScreen may show *"Windows protected your PC"* once per machine. Click **More info → Run anyway**.
 
-**Updating:** the app checks for new releases at startup. When one is available, an amber button appears in the header. Click it to download, then restart to apply in place. Your profile and theme are preserved. (Dev builds and older release versions without the updater use the manual zip flow.)
+**Updating:** the app checks for new releases at startup. When one is available, an amber update arrow appears in the header. Click it to download, then click the green **Restart to apply** button and choose **OK** to close and swap in place (if you placed the app in a protected folder such as `Program Files`, Windows prompts for administrator permission via UAC right after close; declining leaves the previous version in place). Your profile and theme are preserved. (Dev builds and older release versions without the updater use the manual zip flow.)
 
 ### Option B: Build from Source
 
@@ -158,7 +158,7 @@ The app connects to the display directly over USB. Frames and touch work with no
 
 ## Packaging a Release
 
-Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.6.0`) and the **Release** workflow runs `scripts/build-release.ps1 -Version 0.6.0`, then creates a GitHub Release with the two versioned assets attached. You can also trigger it manually from the **Actions** tab with a tag input.
+Release zips are built and published **automatically by CI**: push a `v*` tag (e.g. `v0.9.6`) and the **Release** workflow runs `scripts/build-release.ps1 -Version 0.9.6`, then creates a GitHub Release with the two versioned assets attached. You can also trigger it manually from the **Actions** tab with a tag input.
 
 Each release ships two zips:
 
@@ -194,7 +194,7 @@ The Client ID is public and is not a user token or secret. The widget uses anony
 
 ## Calendar Widget
 
-The Calendar widget shows a month grid with an agenda list of upcoming events, fed by one or more calendar sources configured in the widget inspector's **Feed editor**.
+The Calendar widget shows a month grid with an agenda list of upcoming events, fed by one or more calendar sources configured via **Feeds** in **WIDGET SETTINGS**.
 
 **Supported sources:**
 
@@ -208,7 +208,7 @@ The Calendar widget shows a month grid with an agenda list of upcoming events, f
 - **Scrollable detail page** – tap an event row to open a full-detail view inside the widget; drag to scroll long events; tap the meeting link (if present) to open it in your browser
 - **Word-wrapped URLs** – long meeting links and run-on sentences break at word boundaries instead of clipping
 - **Notable-dates footer** – shows holidays for the currently viewed day only
-- **Feed editor** – add, edit, and remove calendar feeds directly in the inspector; CalDAV passwords are captured via a secure prompt and stored DPAPI-encrypted alongside the profile
+- **Feed management** – add, edit, and remove calendar feeds directly via **Feeds** in **WIDGET SETTINGS**; CalDAV passwords are captured via a secure prompt and stored DPAPI-encrypted alongside the profile
 - **Security hardening** – the CalDAV fetcher validates redirect targets against the expected origin, refuses credentials over cleartext HTTP, and the iCalendar parser rejects hostile input (oversized payloads, malformed VCALENDAR blocks, entity-injection attempts)
 
 ---

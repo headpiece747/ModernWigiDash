@@ -4,10 +4,22 @@ using ModernWigiDash.Widgets;
 namespace ModernWigiDash.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public class HwinfoWidgetTests
 {
+    private readonly List<WigiDashServiceClient> _clients = [];
+
     [TestCleanup]
-    public void Cleanup() => VendorService.SetInstance(null);
+    public void Cleanup()
+    {
+        VendorService.SetInstance(null);
+        foreach (var client in _clients)
+        {
+            client.Dispose();
+        }
+
+        _clients.Clear();
+    }
 
     [TestMethod]
     public void Render_NoService_ProducesCanvas()
@@ -55,11 +67,33 @@ public class HwinfoWidgetTests
     }
 
     [TestMethod]
-    public void GetPropertyOptions_NoService_ReturnsEmpty()
+    public void GetPropertyOptions_NoService_StillReturnsAutomaticFallbackOption()
     {
         VendorService.SetInstance(null);
         var widget = new HwinfoWidget();
-        Assert.AreEqual(0, widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey)).Count);
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(1, options.Count);
+        Assert.AreEqual("", options[0].Value);
+        Assert.AreEqual("Automatic (first available sensor)", options[0].DisplayName);
+        Assert.IsTrue(options[0].IsFallback);
+    }
+
+    [TestMethod]
+    public void GetPropertyOptions_NoServiceWithPersistedKey_KeepsAutomaticAndPersistedPick()
+    {
+        VendorService.SetInstance(null);
+        var widget = new HwinfoWidget { SensorKey = "6:12:3" };
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(2, options.Count);
+        Assert.AreEqual("", options[0].Value);
+        Assert.AreEqual("6:12:3", options[1].Value);
+        Assert.IsTrue(options[1].DisplayName.Contains("(not available)", StringComparison.Ordinal));
+        Assert.IsTrue(options[0].IsFallback);
+        Assert.IsTrue(options[1].IsFallback);
     }
 
     [TestMethod]
@@ -76,6 +110,9 @@ public class HwinfoWidgetTests
         Assert.AreEqual("0:0:0", options[1].Value);
         Assert.AreEqual("0:1:0", options[2].Value);
         Assert.AreEqual("CPU Temp", options[1].DisplayName);
+        Assert.IsFalse(options[0].IsFallback);
+        Assert.IsFalse(options[1].IsFallback);
+        Assert.IsFalse(options[2].IsFallback);
     }
 
     [TestMethod]
@@ -194,6 +231,30 @@ public class HwinfoWidgetTests
     }
 
     [TestMethod]
+    public async Task Render_ServiceRecoversAfterDisconnect_RequestsInspectorRefreshAgain()
+    {
+        var client = CreateFakeClient(sensorsReady: true, sensorName: "CPU Temp", sensorUnit: "°C", value: 45.5);
+        VendorService.SetInstance(client);
+        var context = new TestContext();
+        var widget = new HwinfoWidget();
+        await widget.InitializeAsync(context);
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
+        var bounds = new SKRect(0, 0, 200, 100);
+
+        widget.Render(canvas, bounds);
+        Assert.AreEqual(1, context.InspectorRefreshes);
+
+        VendorService.SetInstance(null);
+        widget.Render(canvas, bounds);
+        Assert.AreEqual(1, context.InspectorRefreshes, "disconnect alone must not rebuild");
+
+        VendorService.SetInstance(client);
+        widget.Render(canvas, bounds);
+        Assert.AreEqual(2, context.InspectorRefreshes, "recovery after disconnect must refresh the sensor dropdown");
+    }
+
+    [TestMethod]
     public void GetPropertyOptions_PersistedKeyNotInTheList_PrependsANotAvailableEntry()
     {
         // A stored key the vendor no longer reports (service restart, renamed
@@ -208,6 +269,9 @@ public class HwinfoWidgetTests
         Assert.AreEqual("9:9:9", options[1].Value);
         Assert.IsTrue(options[1].DisplayName.Contains("(not available)", StringComparison.Ordinal));
         Assert.AreEqual("0:0:0", options[2].Value);
+        Assert.IsFalse(options[0].IsFallback);
+        Assert.IsFalse(options[1].IsFallback);
+        Assert.IsFalse(options[2].IsFallback);
     }
 
     [TestMethod]
@@ -238,14 +302,16 @@ public class HwinfoWidgetTests
         Assert.AreEqual(128, options[1].DisplayName.Length);
     }
 
-    private static WigiDashServiceClient CreateFakeClient(
+    private WigiDashServiceClient CreateFakeClient(
         bool sensorsReady,
         string? sensorName = null,
         string? sensorUnit = null,
         double value = 0,
         int sensorCount = 1)
     {
-        return new WigiDashServiceClient(new FakeSensorValues(sensorsReady, sensorName, sensorUnit, value, sensorCount));
+        var client = new WigiDashServiceClient(new FakeSensorValues(sensorsReady, sensorName, sensorUnit, value, sensorCount));
+        _clients.Add(client);
+        return client;
     }
 
     private sealed class FakeSensorValues : ISensorValues
@@ -278,5 +344,27 @@ public class HwinfoWidgetTests
             if (!_ready) return null;
             return new VendorSensorReading(_value, true);
         }
+    }
+
+    [TestMethod]
+    public void GetPropertyOptions_WhenSensorNameIsNull_DoesNotThrow()
+    {
+        var client = new WigiDashServiceClient(new NullNameSensorValues());
+        _clients.Add(client);
+        VendorService.SetInstance(client);
+        var widget = new HwinfoWidget();
+
+        var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
+
+        Assert.AreEqual(2, options.Count);
+        Assert.AreEqual("", options[1].DisplayName);
+    }
+
+    private sealed class NullNameSensorValues : ISensorValues
+    {
+        public bool IsReady => true;
+        public IReadOnlyList<VendorSensorItem>? GetSensorList()
+            => [new VendorSensorItem(Guid.NewGuid(), null!, 1, 2, 3, null, null)];
+        public VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2) => null;
     }
 }

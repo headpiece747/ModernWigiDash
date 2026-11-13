@@ -28,11 +28,12 @@ internal sealed class SingleInstanceGuard : IDisposable
     /// signal was sent (the secondary: the caller must exit).</summary>
     public bool IsPrimary { get; }
 
-    private readonly Mutex _mutex;
+    private readonly Mutex? _mutex;
     private readonly EventWaitHandle? _activation;
     private readonly Action _onActivate;
+    private readonly Lock _waitLock = new();
     private RegisteredWaitHandle? _registration;
-    private int _disposed;
+    private bool _disposed;
 
     /// <summary>Production entry point: the real named handles.</summary>
     public SingleInstanceGuard(Action onActivate)
@@ -53,34 +54,50 @@ internal sealed class SingleInstanceGuard : IDisposable
     internal SingleInstanceGuard(Action onActivate, GuardHandleFactory handles)
     {
         (Mutex mutex, bool createdNew) = handles.AcquireMutex();
-        _mutex = mutex;
+        _mutex = createdNew ? mutex : null;
         _onActivate = onActivate;
         IsPrimary = createdNew;
         if (createdNew)
         {
-            _activation = handles.CreateEvent();
-            ParkActivationWait();
+            try
+            {
+                lock (_waitLock)
+                {
+                    _activation = handles.CreateEvent();
+                    ParkActivationWait();
+                }
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
         else
         {
-            // Tell the primary to show itself. The event is manual reset, so
-            // the signal stays set if the primary is still mid-startup and
-            // parks its wait after us — RegisterWaitForSingleObject observes
-            // the already-signaled state and fires immediately. A vanished
-            // event (the primary died between claiming the mutex and
-            // creating the event) is logged, not fatal: this launch exits
-            // either way.
-            try
+            // Release the duplicate mutex handle immediately so a slow secondary
+            // shutdown cannot block a third launch from acquiring primary status.
+            using (mutex)
             {
-                var opened = handles.OpenEvent();
-                using (opened)
+                // Tell the primary to show itself. The event is manual reset, so
+                // the signal stays set if the primary is still mid-startup and
+                // parks its wait after us — RegisterWaitForSingleObject observes
+                // the already-signaled state and fires immediately. A vanished
+                // event (the primary died between claiming the mutex and
+                // creating the event) is logged, not fatal: this launch exits
+                // either way.
+                try
                 {
-                    opened.Set();
+                    var opened = handles.OpenEvent();
+                    using (opened)
+                    {
+                        opened.Set();
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                FileLog.Write($"[App] Second launch could not signal the running instance: {ex.Message}");
+                catch (Exception ex)
+                {
+                    FileLog.Write($"[App] Second launch could not signal the running instance: {ex.Message}");
+                }
             }
         }
     }
@@ -101,7 +118,7 @@ internal sealed class SingleInstanceGuard : IDisposable
     {
         // _activation is non-null here: the primary branch assigns it before
         // the first park, and the only other caller (the one-shot re-park)
-        // runs only on the primary.
+        // runs only on the primary while holding _waitLock.
         _registration = ThreadPool.RegisterWaitForSingleObject(
             _activation!, new WaitOrTimerCallback(OnActivationSignaled), null, Timeout.Infinite, executeOnlyOnce: true);
     }
@@ -110,25 +127,44 @@ internal sealed class SingleInstanceGuard : IDisposable
     private void OnActivationSignaled(object? state, bool timedOut) => ConsumeAndFireActivation();
 #pragma warning restore S1172
 
-    /// <summary>The consume-and-fire step: re-park the one-shot registration
-    /// BEFORE firing (so a fast second secondary launch cannot lose its
-    /// activation), then consume the manual-reset signal and hand it to the
-    /// window. Exposed as a separate method so the no-lost-signal ordering is
-    /// drivable deterministically in tests without racing the thread pool that
-    /// delivers the production callback.</summary>
+    /// <summary>The consume-and-fire step: reset the manual-reset signal and
+    /// re-park the one-shot registration BEFORE firing (so a fast second
+    /// secondary launch cannot lose its activation), then hand it to the
+    /// window. Synchronized against <see cref="Dispose"/> so a late thread-pool
+    /// callback never touches a disposed handle.</summary>
     internal void ConsumeAndFireActivation()
     {
-        ParkActivationWait();
-        _activation?.Reset();
+        lock (_waitLock)
+        {
+            if (_disposed || _activation is null)
+                return;
+
+            try
+            {
+                _activation.Reset();
+                _registration?.Unregister(null);
+                ParkActivationWait();
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+        }
+
+        // Invoked outside _waitLock so a synchronous callback cannot deadlock if it disposes the guard.
         _onActivate();
     }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _registration?.Unregister(null);
-        _registration = null;
-        _activation?.Dispose();
-        _mutex.Dispose();
+        lock (_waitLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _registration?.Unregister(null);
+            _registration = null;
+            _activation?.Dispose();
+            _mutex?.Dispose();
+        }
     }
 }

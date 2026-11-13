@@ -245,12 +245,261 @@ public sealed class WigiDashServiceClientTests
         Assert.IsTrue(client.Sensors.IsReady);
     }
 
+    [TestMethod]
+    public void TryInitAidaProvider_FaultedChannel_DropsChannelSoNextAttemptCanReopen()
+    {
+        int opened = 0;
+        var first = new FakeWcfChannel { ThrowOnAidaInit = true };
+        var second = new FakeWcfChannel();
+        using var client = new WigiDashServiceClient(
+            () => Interlocked.Increment(ref opened) == 1 ? first : second,
+            new FakeTimeProvider());
+
+        Assert.IsFalse(client.TryInitAidaProvider(), "faulted AIDA provider init must return false");
+        Assert.IsTrue(client.TryInitAidaProvider(), "after dropping the faulted channel, the next attempt must open a fresh channel and succeed");
+        Assert.AreEqual(2, opened);
+    }
+
+    [TestMethod]
+    public void TryWriteAidaMmap_FaultedChannel_DropsChannelSoNextInitCanReopen()
+    {
+        int opened = 0;
+        var first = new FakeWcfChannel { ThrowOnAidaWrite = true };
+        var second = new FakeWcfChannel();
+        using var client = new WigiDashServiceClient(
+            () => Interlocked.Increment(ref opened) == 1 ? first : second,
+            new FakeTimeProvider());
+
+        Assert.IsTrue(client.TryInitAidaProvider());
+        Assert.IsFalse(client.TryWriteAidaMmap(0, new byte[4]), "faulted write must return false and drop the dead channel");
+        Assert.IsTrue(client.TryInitAidaProvider(), "the next init must reopen a healthy channel instead of reusing the faulted one");
+        Assert.AreEqual(2, opened);
+    }
+
+    [TestMethod]
+    public async Task TryInitAidaProvider_WhileSensorListRefreshIsBlocked_DoesNotBlock()
+    {
+        var channel = new FakeWcfChannel { BlockOnListOnce = true };
+        using var client = new WigiDashServiceClient(channel);
+        try
+        {
+            Assert.IsNull(client.Sensors.GetSensorList());
+            Assert.IsTrue(channel.ListEntered.Wait(TimeSpan.FromSeconds(5)));
+
+            // Trigger AIDA init and check IsConnected while ListRelease stays unset.
+            // Completing before ListRelease shows AIDA64 never waits on HWiNFO.
+            var aidaTask = Task.Run(() => (Ok: client.TryInitAidaProvider(), Connected: client.IsConnected));
+            var (ok, connected) = await aidaTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.IsFalse(channel.ListRelease.IsSet,
+                "AIDA64 init and IsConnected must complete before releasing the blocked HWiNFO list read");
+            Assert.IsTrue(ok);
+            Assert.IsTrue(connected);
+        }
+        finally
+        {
+            channel.ListRelease.Set();
+        }
+    }
+
+    [TestMethod]
+    public void TryConnect_WhenChannelFactoryThrows_ReturnsFalseWithoutThrowing()
+    {
+        using var client = new WigiDashServiceClient(
+            () => throw new InvalidOperationException("channel open failed"),
+            new FakeTimeProvider());
+
+        Assert.IsFalse(client.TryConnect());
+        Assert.IsFalse(client.IsConnected);
+        Assert.IsFalse(client.Sensors.IsReady);
+    }
+
+    [TestMethod]
+    public void ReinitSensorProvider_WhenInitReturnsFalse_ReturnsFalseAndThrottlesRetry()
+    {
+        var channel = new FakeWcfChannel { InitResult = false };
+        using var client = new WigiDashServiceClient(channel);
+
+        Assert.IsFalse(client.ReinitSensorProvider(channel));
+        Assert.AreEqual(1, channel.InitCalls);
+        Assert.IsFalse(client.Sensors.IsReady);
+        Assert.IsFalse(client.IsConnected);
+
+        // Throttled within retry interval: second call skips WCF InitSensorProvider.
+        Assert.IsFalse(client.ReinitSensorProvider(channel));
+        Assert.AreEqual(1, channel.InitCalls);
+    }
+
+    [TestMethod]
+    public async Task Sensors_FailedCallClearsCachedSensorListAndReconnectRestoresIt()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
+        };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: 1 });
+
+        channel.ThrowOnList = true;
+        clock.Advance(TimeSpan.FromSeconds(3));
+        _ = client.Sensors.GetSensorList();
+
+        await WaitUntilAsync(() => !client.Sensors.IsReady && client.Sensors.GetSensorList() is null);
+        Assert.IsNull(client.Sensors.GetSensorList(),
+            "disconnecting/failing a refresh must clear stale cached sensors so widgets detect disconnect");
+
+        channel.ThrowOnList = false;
+        clock.Advance(TimeSpan.FromSeconds(6));
+        _ = client.Sensors.GetSensorList();
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: 1 });
+        Assert.IsTrue(client.Sensors.IsReady);
+    }
+
+    [TestMethod]
+    public async Task Sensors_ValueFailureWhenListAlsoRefreshes_ClearsCachedListAndReadings()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
+        };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        // Prime both sensor list and cached reading (1, 2, 0).
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        await WaitUntilAsync(() =>
+            client.Sensors.GetSensorList() is { Count: 1 } &&
+            client.Sensors.GetSensorValue(1, 2, 0) is not null);
+
+        // Advance past SensorListTtl (2 s+) so the next refresh fetches a fresh list
+        // (list != null) AND then fails reading sensor value (fetchFailed == true).
+        channel.ThrowOnValue = true;
+        clock.Advance(TimeSpan.FromSeconds(90));
+        _ = client.Sensors.GetSensorList();
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+
+        await WaitUntilAsync(() => !client.Sensors.IsReady && client.Sensors.GetSensorList() is null);
+        Assert.IsNull(client.Sensors.GetSensorList(),
+            "fetchFailed must clear the cached list even when GetSensorList succeeded earlier in the same refresh");
+        Assert.IsNull(client.Sensors.GetSensorValue(1, 2, 0),
+            "fetchFailed must clear stale cached readings even when GetSensorList succeeded earlier in the same refresh");
+    }
+
+    [TestMethod]
+    public async Task Sensors_KeyRequestedDuringInFlightRefresh_SurvivesPublishAndGetsFetched()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel { BlockOnValueOnce = true };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        Assert.IsNull(client.Sensors.GetSensorValue(1, 2, 0));
+        Assert.IsTrue(channel.ValueEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        // Request a second key AFTER RequestedKeys() was snapshotted, while GetSensorValue is still in flight.
+        Assert.IsNull(client.Sensors.GetSensorValue(3, 4, 0));
+
+        channel.ValueRelease.Set();
+        await WaitUntilAsync(() => client.Sensors.GetSensorValue(1, 2, 0) is not null);
+
+        // Advance past the value TTL and poll ONLY (1, 2, 0); if (3, 4, 0) survived
+        // PublishSnapshot in _requestedKeys, the next refresh fetches it too.
+        clock.Advance(TimeSpan.FromMilliseconds(300));
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorValue(3, 4, 0) is not null);
+        Assert.AreEqual(42, client.Sensors.GetSensorValue(3, 4, 0)!.Value, 0.001);
+    }
+
+    [TestMethod]
+    public async Task Dispose_WhileTryInitAidaProviderIsBlocked_AbortsChannelAndRejectsFollowOnInit()
+    {
+        int opened = 0;
+        var channel = new FakeWcfChannel { BlockOnAidaInitOnce = true };
+        var client = new WigiDashServiceClient(() =>
+        {
+            Interlocked.Increment(ref opened);
+            return channel;
+        }, new FakeTimeProvider());
+
+        Task<bool> initTask = Task.Run(client.TryInitAidaProvider);
+        try
+        {
+            Assert.IsTrue(channel.AidaInitEntered.Wait(TimeSpan.FromSeconds(5)));
+
+            client.Dispose();
+            Assert.AreEqual(1, channel.AbortCalls, "Dispose must abort the in-flight channel immediately");
+            Assert.IsFalse(client.IsConnected);
+
+            channel.AidaInitRelease.Set();
+            Assert.IsFalse(await initTask.WaitAsync(TimeSpan.FromSeconds(5)),
+                "an InitAidaProvider completing after Dispose must report false");
+
+            Assert.IsFalse(client.TryInitAidaProvider(), "post-dispose init must be rejected without opening a channel");
+            Assert.AreEqual(1, opened);
+        }
+        finally
+        {
+            channel.AidaInitRelease.Set();
+            await initTask;
+            client.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public void Dispose_RacingTryInitAidaProvider_AbortsEveryOpenedChannelWithoutLeak()
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            var channel = new FakeWcfChannel();
+            int opened = 0;
+            var client = new WigiDashServiceClient(() =>
+            {
+                Interlocked.Increment(ref opened);
+                return channel;
+            }, new FakeTimeProvider());
+
+            using var startGate = new ManualResetEventSlim(false);
+            Task<bool> initTask = Task.Run(() =>
+            {
+                startGate.Wait();
+                return client.TryInitAidaProvider();
+            });
+            Task disposeTask = Task.Run(() =>
+            {
+                startGate.Wait();
+                client.Dispose();
+            });
+
+            startGate.Set();
+            Task.WaitAll(initTask, disposeTask);
+
+            if (Volatile.Read(ref opened) > 0)
+            {
+                Assert.IsGreaterThanOrEqualTo(1, channel.AbortCalls,
+                    $"iteration {i}: every opened channel must be aborted when Dispose races TryInitAidaProvider");
+            }
+
+            Assert.IsFalse(client.IsConnected);
+            Assert.IsFalse(client.TryInitAidaProvider());
+        }
+    }
+
     private static Task WaitUntilAsync(Func<bool> condition)
         => TestWait.WaitUntilAsync(condition, TimeSpan.FromSeconds(5));
 
-    private sealed class FakeWcfChannel : IWigiDashWcf
+    private sealed class FakeWcfChannel : IWigiDashWcf, System.ServiceModel.ICommunicationObject
     {
-        public bool InitCalled { get; private set; }
+        private int _initCalls;
+        private int _abortCalls;
+
+        public bool InitCalled => Volatile.Read(ref _initCalls) > 0;
+        public int InitCalls => Volatile.Read(ref _initCalls);
+        public int AbortCalls => Volatile.Read(ref _abortCalls);
+
+        public bool InitResult { get; set; } = true;
 
         public bool ThrowOnList { get; set; }
 
@@ -258,22 +507,41 @@ public sealed class WigiDashServiceClientTests
 
         public bool ThrowOnInit { get; set; }
 
+        public bool ThrowOnAidaInit { get; set; }
+
+        public bool ThrowOnAidaWrite { get; set; }
+
         public bool IncludeNullSensor { get; set; }
 
         public bool BlockOnListOnce { get; set; }
+
+        public bool BlockOnValueOnce { get; set; }
+
+        public bool BlockOnAidaInitOnce { get; set; }
 
         public ManualResetEventSlim ListEntered { get; } = new(false);
 
         public ManualResetEventSlim ListRelease { get; } = new(false);
 
+        public ManualResetEventSlim ValueEntered { get; } = new(false);
+
+        public ManualResetEventSlim ValueRelease { get; } = new(false);
+
+        public ManualResetEventSlim AidaInitEntered { get; } = new(false);
+
+        public ManualResetEventSlim AidaInitRelease { get; } = new(false);
+
         private int _listBlocked;
+        private int _valueBlocked;
+        private int _aidaInitBlocked;
 
         public List<VendorSensorItem> Sensors { get; set; } = [];
 
         public bool InitSensorProvider(bool smbus, bool ec, bool presentmon)
         {
             if (ThrowOnInit) throw new InvalidOperationException("init dead");
-            InitCalled = true;
+            Interlocked.Increment(ref _initCalls);
+            if (!InitResult) return false;
             Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")];
             return true;
         }
@@ -298,13 +566,76 @@ public sealed class WigiDashServiceClientTests
 
         public double GetSensorValue(int readingType, int sensorId1, int sensorId2, out bool isValid)
         {
+            if (BlockOnValueOnce && Interlocked.Exchange(ref _valueBlocked, 1) == 0)
+            {
+                ValueEntered.Set();
+                ValueRelease.Wait(TimeSpan.FromSeconds(30));
+            }
+
             if (ThrowOnValue) throw new InvalidOperationException("value dead");
             isValid = true;
             return 42;
         }
 
-        public bool InitAidaProvider() => true;
+        public bool InitAidaProvider()
+        {
+            if (BlockOnAidaInitOnce && Interlocked.Exchange(ref _aidaInitBlocked, 1) == 0)
+            {
+                AidaInitEntered.Set();
+                AidaInitRelease.Wait(TimeSpan.FromSeconds(30));
+            }
 
-        public bool WriteAidaMmap(int offset, byte[] buffer) => true;
+            if (ThrowOnAidaInit) throw new InvalidOperationException("aida init dead");
+            return true;
+        }
+
+        public bool WriteAidaMmap(int offset, byte[] buffer)
+        {
+            if (ThrowOnAidaWrite) throw new InvalidOperationException("aida write dead");
+            return true;
+        }
+
+        private EventHandler? _lifecycleHandlers;
+
+        System.ServiceModel.CommunicationState System.ServiceModel.ICommunicationObject.State
+            => AbortCalls > 0 ? System.ServiceModel.CommunicationState.Closed : System.ServiceModel.CommunicationState.Opened;
+
+        event EventHandler? System.ServiceModel.ICommunicationObject.Closed
+        {
+            add => _lifecycleHandlers += value;
+            remove => _lifecycleHandlers -= value;
+        }
+        event EventHandler? System.ServiceModel.ICommunicationObject.Closing
+        {
+            add => _lifecycleHandlers += value;
+            remove => _lifecycleHandlers -= value;
+        }
+        event EventHandler? System.ServiceModel.ICommunicationObject.Faulted
+        {
+            add => _lifecycleHandlers += value;
+            remove => _lifecycleHandlers -= value;
+        }
+        event EventHandler? System.ServiceModel.ICommunicationObject.Opened
+        {
+            add => _lifecycleHandlers += value;
+            remove => _lifecycleHandlers -= value;
+        }
+        event EventHandler? System.ServiceModel.ICommunicationObject.Opening
+        {
+            add => _lifecycleHandlers += value;
+            remove => _lifecycleHandlers -= value;
+        }
+
+        void System.ServiceModel.ICommunicationObject.Abort() => Interlocked.Increment(ref _abortCalls);
+        void System.ServiceModel.ICommunicationObject.Open() => throw new NotSupportedException();
+        void System.ServiceModel.ICommunicationObject.Open(TimeSpan timeout) => throw new NotSupportedException();
+        IAsyncResult System.ServiceModel.ICommunicationObject.BeginOpen(AsyncCallback? callback, object? state) => throw new NotSupportedException();
+        IAsyncResult System.ServiceModel.ICommunicationObject.BeginOpen(TimeSpan timeout, AsyncCallback? callback, object? state) => throw new NotSupportedException();
+        void System.ServiceModel.ICommunicationObject.EndOpen(IAsyncResult result) => throw new NotSupportedException();
+        void System.ServiceModel.ICommunicationObject.Close() => throw new NotSupportedException();
+        void System.ServiceModel.ICommunicationObject.Close(TimeSpan timeout) => throw new NotSupportedException();
+        IAsyncResult System.ServiceModel.ICommunicationObject.BeginClose(AsyncCallback? callback, object? state) => throw new NotSupportedException();
+        IAsyncResult System.ServiceModel.ICommunicationObject.BeginClose(TimeSpan timeout, AsyncCallback? callback, object? state) => throw new NotSupportedException();
+        void System.ServiceModel.ICommunicationObject.EndClose(IAsyncResult result) => throw new NotSupportedException();
     }
 }

@@ -251,4 +251,53 @@ public class PresentMonQueryRegistryTests
         Assert.IsNull(result.Sample);
         Assert.AreEqual(PmStatus.Success, result.Status);
     }
+
+    [TestMethod]
+    public void MetricCatalog_WithDuplicateMetricIds_DeduplicatesWithoutThrowing()
+    {
+        var catalog = new PresentMonMetricCatalog(
+        [
+            new PresentMonMetricInfo(Id: 7, MetricType: 1, Unit: 2, AllowedStats: []),
+            new PresentMonMetricInfo(Id: 7, MetricType: 1, Unit: 2, AllowedStats: [3, 4]),
+            new PresentMonMetricInfo(Id: 8, MetricType: 1, Unit: 2, AllowedStats: [1]),
+            new PresentMonMetricInfo(Id: 8, MetricType: 1, Unit: 2, AllowedStats: [9]),
+        ]);
+
+        Assert.IsTrue(catalog.TryGet(7, out var m7));
+        Assert.IsTrue(catalog.TryGet(8, out var m8));
+        CollectionAssert.AreEqual(new[] { 3, 4 }, m7.AllowedStats.ToArray());
+        CollectionAssert.AreEqual(new[] { 1 }, m8.AllowedStats.ToArray());
+    }
+
+    [TestMethod]
+    public void Register_WhenFrameQueryFails_FreesDynamicQueryHandle()
+    {
+        List<IntPtr> freedDynamic = [];
+        var capability = new PresentMonQueryCapability(
+            registerDynamic: (IntPtr _, out IntPtr handle, PresentMonQueryElement[] _, ulong _, double _, double _) =>
+            {
+                handle = (IntPtr)11;
+                return PmStatus.Success;
+            },
+            freeDynamic: handle =>
+            {
+                freedDynamic.Add(handle);
+                return PmStatus.Success;
+            },
+            pollDynamic: (IntPtr _, uint _, byte[] _, ref uint _) => PmStatus.Success,
+            registerFrame: (IntPtr _, out IntPtr handle, PresentMonQueryElement[] _, ulong _, out uint blobSize) =>
+            {
+                handle = IntPtr.Zero;
+                blobSize = 0;
+                return PmStatus.QueryMalformed;
+            },
+            consumeFrames: (IntPtr _, uint _, byte[] _, ref uint _) => PmStatus.Success,
+            freeFrame: _ => PmStatus.Success);
+
+        var registry = new PresentMonQueryRegistry(capability, _ => new PresentMonMetricCatalog(CatalogMetrics()));
+
+        Assert.IsFalse(registry.Register((IntPtr)9, out _));
+        CollectionAssert.AreEqual(new[] { (IntPtr)11 }, freedDynamic,
+            "partial registration failure must free the dynamic query handle immediately");
+    }
 }

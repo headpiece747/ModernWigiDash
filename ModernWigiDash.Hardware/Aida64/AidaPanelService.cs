@@ -12,40 +12,34 @@ namespace ModernWigiDash.Hardware.Aida64;
 public static class AidaPanelService
 {
     private static readonly System.Threading.Lock Gate = new();
-    private static readonly ManualResetEventSlim Idle = new(initialState: true);
+    private static Task _activeRelease = Task.CompletedTask;
     private static AidaPanelMaster? _shared;
     private static int _borrowers;
-    private static bool _releasing;
 
-    /// <summary>Borrows the process-wide master, creating it on first use.</summary>
-    public static AidaPanelMaster Acquire()
+    /// <summary>Borrows the process-wide master, creating it on first use without
+    /// blocking the UI thread if a previous master is still releasing slot 0.</summary>
+    public static AidaPanelMaster Acquire() => Acquire(CreateProductionWithPriorRelease);
+
+    /// <summary>Test seam: borrows using the supplied factory receiving the prior
+    /// release completion task so slow releases stay off the caller's thread.</summary>
+    internal static AidaPanelMaster Acquire(Func<Task, AidaPanelMaster> factory)
     {
-        while (true)
+        lock (Gate)
         {
-            lock (Gate)
+            if (_shared is not null)
             {
-                if (_shared is not null)
-                {
-                    _borrowers++;
-                    return _shared;
-                }
-
-                // The decision and the creation are one critical section: a
-                // release clears _shared and raises _releasing under the same
-                // gate, so a master is only created when no release is in
-                // flight. Slot 0 is one slot; two masters would clear each
-                // other's frame markers.
-                if (!_releasing)
-                {
-                    _shared = CreateProduction();
-                    _borrowers = 1;
-                    return _shared;
-                }
+                _borrowers++;
+                return _shared;
             }
 
-            // A release is disposing the previous master (its loop join is
-            // bounded at 5 s). Wait for it, then re-check under the gate.
-            Idle.Wait(TimeSpan.FromSeconds(6));
+            if (_activeRelease.IsCompleted)
+            {
+                _activeRelease = Task.CompletedTask;
+            }
+
+            _shared = factory(_activeRelease);
+            _borrowers = 1;
+            return _shared;
         }
     }
 
@@ -53,6 +47,7 @@ public static class AidaPanelService
     public static void Release()
     {
         AidaPanelMaster? toDispose = null;
+        TaskCompletionSource? currentRelease = null;
         lock (Gate)
         {
             if (_borrowers == 0)
@@ -64,8 +59,10 @@ public static class AidaPanelService
             {
                 toDispose = _shared;
                 _shared = null;
-                _releasing = true;
-                Idle.Reset();
+                currentRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _activeRelease = _activeRelease.IsCompleted
+                    ? currentRelease.Task
+                    : Task.WhenAll(_activeRelease, currentRelease.Task);
             }
         }
 
@@ -80,12 +77,22 @@ public static class AidaPanelService
         }
         finally
         {
-            lock (Gate)
+            Task slotReleased = toDispose.SlotReleasedTask;
+            if (slotReleased.IsCompleted)
             {
-                _releasing = false;
+                currentRelease!.TrySetResult();
             }
-
-            Idle.Set();
+            else
+            {
+                // Keep waiting until any hung WCF slot-0 call that outlived
+                // PollLoop's 5s join timeout unwinds and drops _inFlightSlotWork.
+                _ = slotReleased.ContinueWith(
+                    static (_, state) => ((TaskCompletionSource)state!).TrySetResult(),
+                    currentRelease!,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
         }
     }
 
@@ -98,4 +105,7 @@ public static class AidaPanelService
     /// <param name="log">The diagnostic sink; defaults to <see cref="FileLog"/>.</param>
     public static AidaPanelMaster CreateProduction(Action<string>? log = null)
         => new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), log);
+
+    private static AidaPanelMaster CreateProductionWithPriorRelease(Task priorRelease)
+        => new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), priorRelease);
 }

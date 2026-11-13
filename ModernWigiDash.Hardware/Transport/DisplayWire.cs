@@ -18,7 +18,7 @@ namespace ModernWigiDash.Hardware.Transport;
 /// caller says "send this control out" and gets a verdict, with the tracking, the
 /// null-backend safety and the retirement ordering handled here.
 /// </summary>
-internal sealed class DisplayWire
+internal sealed class DisplayWire : IDisposable
 {
     // The teardown-only swap lock: it serializes the backend swap/dispose
     // against the in-flight drain wait. The hot transfer paths never take it —
@@ -37,81 +37,127 @@ internal sealed class DisplayWire
     private int _inFlightTransfers;
 
     private volatile bool _isConnected;
+    private bool _disposed;
 
     /// <summary>Whether a backend is adopted and live. The connect loop's gate,
     /// the frame path's gate and the standby path's gate all read this one
     /// fact rather than testing the backend reference themselves.</summary>
     internal bool IsConnected => _isConnected;
 
-    /// <summary>The adopted backend, for the init sequence (which is handed the
-    /// backend to talk through). Null when nothing is adopted.</summary>
-    internal ITransferBackend? Backend => _backend;
-
     /// <summary>Binds a freshly opened backend as the live one. The connect loop
     /// adopts BEFORE the init sequence, because that sequence talks through the
-    /// backend it is about to accept.</summary>
+    /// backend it is about to accept. If a previous backend was still live, it
+    /// is cleared and drained before publishing the replacement so the new
+    /// backend's transfers cannot starve the old drain.</summary>
     internal void Adopt(ITransferBackend backend)
     {
         lock (_swapLock)
         {
-            _backend = backend;
+            if (_disposed)
+            {
+                backend.Dispose();
+                return;
+            }
+
+            ITransferBackend? previous = Interlocked.Exchange(ref _backend, null);
+            if (previous is not null && !ReferenceEquals(previous, backend))
+                DrainAndDisposeLocked(previous);
+            Interlocked.Exchange(ref _backend, backend);
         }
     }
 
     /// <summary>Records the transport's connection truth: set once the init
     /// sequence completes, cleared by a failed attempt or a release.</summary>
-    internal void SetConnected(bool connected) => _isConnected = connected;
+    internal void SetConnected(bool connected)
+    {
+        lock (_swapLock)
+        {
+            if (!_disposed)
+                _isConnected = connected;
+        }
+    }
 
     /// <summary>Adopts a backend and records it live in one step (the injected-
     /// backend test constructor's case, where liveness comes from the backend
     /// itself).</summary>
     internal void AdoptLive(ITransferBackend backend)
     {
-        Adopt(backend);
-        _isConnected = backend.IsOpen;
+        lock (_swapLock)
+        {
+            if (_disposed)
+            {
+                backend.Dispose();
+                return;
+            }
+
+            ITransferBackend? previous = Interlocked.Exchange(ref _backend, null);
+            if (previous is not null && !ReferenceEquals(previous, backend))
+                DrainAndDisposeLocked(previous);
+            Interlocked.Exchange(ref _backend, backend);
+            _isConnected = backend.IsOpen;
+        }
     }
 
     /// <summary>
     /// Releases a failed attempt's LOCAL device and clears the adopted backend,
-    /// under the swap lock. For a leg's own failure exit: it disposes the device
-    /// that leg opened and never the adopted global backend, which belongs to a
-    /// previous attempt.
+    /// under the swap lock. For a leg's own failure exit: it clears the adopted
+    /// reference before draining in-flight transfers, then disposes the failed
+    /// handle (and any displaced previous handle).
     /// </summary>
     internal void AbandonAttempt(ITransferBackend? localDevice)
     {
         lock (_swapLock)
         {
-            localDevice?.Dispose();
-            _backend = null;
+            _isConnected = false;
+            ITransferBackend? adopted = Interlocked.Exchange(ref _backend, null);
+            DrainAndDisposeLocked(adopted);
+            if (localDevice is not null && !ReferenceEquals(adopted, localDevice))
+                localDevice.Dispose();
         }
     }
 
     /// <summary>
-    /// Retires the live backend: stop new transfers (the liveness gate), wait for
-    /// the in-flight transfers to drain (so the native handle is never freed
+    /// Retires the live backend while leaving the wire reusable for a fallback
+    /// provider leg: stop new transfers (the liveness gate), clear the
+    /// published backend reference so new transfers see null, wait for
+    /// already-started transfers to drain (so the native handle is never freed
     /// mid-transfer), then dispose it.
     ///
     /// The drain wait is bounded by the pipe timeouts (a hung write waits out its
-    /// own timeout — the CloseBound the close budgets derive from), and the lock
-    /// is reentrant, so a re-entrant Dispose calling in is safe. Teardown is the
-    /// only lock user.
+    /// own timeout — the CloseBound the close budgets derive from), and _swapLock
+    /// serializes Adopt, AbandonAttempt, Release, and Dispose.
     /// </summary>
     internal void Release()
     {
         lock (_swapLock)
         {
             _isConnected = false;
-
-            while (Volatile.Read(ref _inFlightTransfers) > 0)
-                Monitor.Wait(_swapLock, 10);
-
-            // The backend owns the device-specific teardown (WinUSB handle free,
-            // LibUsb interface release + close); the wire just drops it.
-            _backend?.Dispose();
-            _backend = null;
+            DrainAndDisposeLocked(Interlocked.Exchange(ref _backend, null));
         }
+    }
 
-        // Context is a shared singleton - don't dispose
+    /// <summary>
+    /// Permanently retires the wire on transport disposal: rejects any
+    /// concurrent or subsequent <see cref="Adopt"/> and releases any live backend.
+    /// </summary>
+    public void Dispose()
+    {
+        lock (_swapLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _isConnected = false;
+            DrainAndDisposeLocked(Interlocked.Exchange(ref _backend, null));
+        }
+    }
+
+    private void DrainAndDisposeLocked(ITransferBackend? backend)
+    {
+        if (backend is null) return;
+        while (Volatile.Read(ref _inFlightTransfers) > 0)
+            Monitor.Wait(_swapLock, 10);
+        // Context is a shared singleton; the backend owns only its device handle.
+        backend.Dispose();
     }
 
     /// <summary>
@@ -124,7 +170,7 @@ internal sealed class DisplayWire
         TrackTransferBegin();
         try
         {
-            return _backend?.ControlOut(request, wValue, data) ?? false;
+            return Volatile.Read(ref _backend)?.ControlOut(request, wValue, data) ?? false;
         }
         finally
         {
@@ -144,7 +190,7 @@ internal sealed class DisplayWire
         TrackTransferBegin();
         try
         {
-            return _backend?.ControlIn(request, buffer, out transferred, wValue, wIndex) ?? false;
+            return Volatile.Read(ref _backend)?.ControlIn(request, buffer, out transferred, wValue, wIndex) ?? false;
         }
         finally
         {
@@ -163,7 +209,7 @@ internal sealed class DisplayWire
         TrackTransferBegin();
         try
         {
-            return _backend?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
+            return Volatile.Read(ref _backend)?.BulkWrite(DisplayProtocolConstants.BulkOutPipeId, data, out _) ?? false;
         }
         finally
         {
@@ -172,14 +218,14 @@ internal sealed class DisplayWire
     }
 
     /// <summary>Runs the given action with transfer tracking (the teardown
-    /// drain waits it out), for a leg that is several transfers wide rather than
-    /// one — the init sequence today.</summary>
-    internal bool RunTracked(Func<bool> action)
+    /// drain waits it out), reading the live backend INSIDE the tracked
+    /// transfer window so Release() cannot dispose it before tracking begins.</summary>
+    internal bool RunTracked(Func<ITransferBackend?, bool> action)
     {
         TrackTransferBegin();
         try
         {
-            return action();
+            return action(Volatile.Read(ref _backend));
         }
         finally
         {
@@ -197,8 +243,15 @@ internal sealed class DisplayWire
     private void TrackTransferBegin() => Interlocked.Increment(ref _inFlightTransfers);
 
     /// <summary>
-    /// Releases the in-flight mark. Teardown re-checks the count after each
-    /// wait slice, so the final release is observed within one slice.
+    /// Releases the in-flight mark and wakes any draining swap/teardown once
+    /// the last transfer finishes.
     /// </summary>
-    private void TrackTransferEnd() => Interlocked.Decrement(ref _inFlightTransfers);
+    private void TrackTransferEnd()
+    {
+        if (Interlocked.Decrement(ref _inFlightTransfers) == 0 && Volatile.Read(ref _backend) is null)
+        {
+            lock (_swapLock)
+                Monitor.PulseAll(_swapLock);
+        }
+    }
 }

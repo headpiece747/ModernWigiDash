@@ -46,13 +46,32 @@ internal static class PresentMonIntrospection
 
     public static IReadOnlyList<PresentMonMetricInfo> ParseMetrics(IntPtr rootPtr)
     {
+        if (rootPtr == IntPtr.Zero)
+        {
+            return [];
+        }
+
         var root = Marshal.PtrToStructure<PmIntrospectionRoot>(rootPtr);
+        if (root.pMetrics == IntPtr.Zero)
+        {
+            return [];
+        }
+
         var metricsArray = Marshal.PtrToStructure<PmIntrospectionObjArray>(root.pMetrics);
+        if (metricsArray.size == 0 || metricsArray.pData == IntPtr.Zero)
+        {
+            return [];
+        }
 
         var result = new List<PresentMonMetricInfo>(checked((int)metricsArray.size));
         for (ulong i = 0; i < metricsArray.size; i++)
         {
             IntPtr metricPtr = Marshal.ReadIntPtr(metricsArray.pData, checked((int)i * IntPtr.Size));
+            if (metricPtr == IntPtr.Zero)
+            {
+                continue;
+            }
+
             var metric = Marshal.PtrToStructure<PmIntrospectionMetric>(metricPtr);
             result.Add(new PresentMonMetricInfo(
                 Id: metric.id,
@@ -72,10 +91,20 @@ internal static class PresentMonIntrospection
         }
 
         var array = Marshal.PtrToStructure<PmIntrospectionObjArray>(statInfoPtr);
+        if (array.size == 0 || array.pData == IntPtr.Zero)
+        {
+            return [];
+        }
+
         var stats = new List<int>(checked((int)array.size));
         for (ulong i = 0; i < array.size; i++)
         {
             IntPtr statPtr = Marshal.ReadIntPtr(array.pData, checked((int)i * IntPtr.Size));
+            if (statPtr == IntPtr.Zero)
+            {
+                continue;
+            }
+
             stats.Add(Marshal.PtrToStructure<PmIntrospectionStatInfo>(statPtr).stat);
         }
 

@@ -49,7 +49,7 @@ public class HotkeyApiTests
         }
 
         Assert.IsTrue(executed, "the production RegisterHotKey binding must run against the real user32.dll");
-        HotkeyApi.Default.UnregisterHotKey(InvalidHwnd, 0, 0);
+        HotkeyApi.Default.UnregisterHotKey(InvalidHwnd, 0);
     }
 
     [TestMethod]
@@ -60,7 +60,7 @@ public class HotkeyApiTests
         bool executed = false;
         try
         {
-            HotkeyApi.Default.UnregisterHotKey(InvalidHwnd, 0, 0);
+            HotkeyApi.Default.UnregisterHotKey(InvalidHwnd, 0);
             executed = true;
         }
         catch (Exception ex)

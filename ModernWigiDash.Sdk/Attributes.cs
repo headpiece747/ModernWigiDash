@@ -86,6 +86,10 @@ public enum WidgetPropertyType
 /// SelectedValue to <see cref="Value"/>.</summary>
 public sealed record WidgetPropertyOption(string Value, string DisplayName)
 {
+    /// <summary>True for fallback/unavailable placeholder options shown only while
+    /// live choices have not loaded yet (so the inspector keeps the status hint visible).</summary>
+    public bool IsFallback { get; init; }
+
     /// <summary>Dropdowns display the label.</summary>
     public override string ToString() => DisplayName;
 }
@@ -148,10 +152,10 @@ public sealed class WidgetPropertyAttribute : Attribute
     /// <see cref="IWidgetPropertyOptionsProvider"/> may override them.</summary>
     public string[] Options { get; }
 
-    /// <summary>True when a Choice property must be picked from its option list.
-    /// While the list is empty the inspector shows the property's description as
-    /// an empty state instead of a free-text box: a coded value (the HWiNFO
-    /// sensor key) cannot be typed correctly by hand.</summary>
+    /// <summary>True when a Choice property must be picked from its option list
+    /// rather than falling back to free-form text. While the list is empty or
+    /// contains only fallback options, the inspector keeps a dropdown affordance
+    /// alongside a status hint (from <see cref="Description"/> or a default).</summary>
     public bool RequiresListedValue { get; init; }
 
     /// <summary>Binds a widget property to an inspector row: the label, editor

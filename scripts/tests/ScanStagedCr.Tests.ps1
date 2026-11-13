@@ -30,6 +30,10 @@ BeforeAll {
     function Stage-Bytes {
         param([string]$Name, [byte[]]$Bytes)
         $f = Join-Path $script:Repo $Name
+        $dir = Split-Path -Parent $f
+        if (-not [string]::IsNullOrWhiteSpace($dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
         [System.IO.File]::WriteAllBytes($f, $Bytes)
         & git -C $script:Repo add -- $Name
     }
@@ -76,5 +80,17 @@ Describe 'scan-staged-cr' {
         & git -C $script:Repo commit -q -m base
         Stage-Bytes 'lone-cr.txt' ([byte[]](0x61, 0x62, 0x0D, 0x64, 0x65, 0x66, 0x0D, 0x0A))
         Invoke-Scan | Should -Be 1
+    }
+
+    It 'blocks a trailing lone CR at the very end of the file' {
+        New-FreshRepo
+        Stage-Bytes 'eof-cr.txt' ([byte[]](0x61, 0x62, 0x0D))
+        Invoke-Scan | Should -Be 1
+    }
+
+    It 'handles staged paths with spaces via core.quotePath=false' {
+        New-FreshRepo
+        Stage-Bytes 'spaced dir/clean file.txt' ([byte[]](0x61, 0x0D, 0x0A))
+        Invoke-Scan | Should -Be 0
     }
 }

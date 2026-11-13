@@ -546,4 +546,267 @@ public class MediaSessionMonitorTests
         string longInput = new string('x', 500);
         Assert.AreEqual(256, MediaSessionMonitor.Sanitize(longInput, "fallback").Length, "capped at 256 chars");
     }
+
+    [TestMethod]
+    public async Task DisposeAsync_WhileInitializeAsyncIsPending_DisposesLateManagerAndAttachesNoSession()
+    {
+        var session = CreateSession("spotify.exe", "Playing");
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        var pendingManager = new TaskCompletionSource<IMediaSessionSourceManager?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var source = new StubMediaSessionSource { GetManagerAsyncOverride = () => pendingManager.Task };
+        var monitor = new MediaSessionMonitor(source);
+
+        Task initTask = monitor.InitializeAsync();
+        await monitor.DisposeAsync();
+        pendingManager.SetResult(manager);
+        await initTask;
+
+        Assert.AreEqual(1, manager.DisposalCount, "manager resolved after DisposeAsync must still be disposed");
+        Assert.AreEqual(0, manager.CurrentSessionChangedSubscriptionCount);
+        Assert.AreEqual(0, manager.SessionsChangedSubscriptionCount);
+        Assert.AreEqual(0, session.MediaPropertiesSubscriptionCount);
+        Assert.IsNull(monitor.CurrentSnapshot);
+    }
+
+    [TestMethod]
+    public async Task CycleSession_WithSingleSessionFreshWrapper_DisposesUnusedWrapper()
+    {
+        var a = CreateSession("one.exe", "Only");
+        var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a] };
+        List<FreshSessionWrapper> wrappers = [];
+        manager.FreshWrapperFor = s =>
+        {
+            var wrapper = new FreshSessionWrapper(s);
+            wrappers.Add(wrapper);
+            return wrapper;
+        };
+        var monitor = CreateMonitor(manager);
+        await monitor.InitializeAsync();
+
+        monitor.CycleSession();
+
+        Assert.AreEqual(1, wrappers.Count);
+        Assert.AreEqual(1, wrappers[0].DisposalCount, "single-session cycle must dispose its transient fresh wrapper");
+        Assert.AreEqual(0, a.DisposalCount);
+    }
+
+    [TestMethod]
+    public async Task Callbacks_WhenManagerOrControlThrows_LogErrorWithoutCrashing()
+    {
+        var session = CreateSession("player.exe", "Song");
+        session.ControlActionOverride = () => throw new InvalidOperationException("COM control error");
+        var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
+        List<string> logged = [];
+        var monitor = new MediaSessionMonitor(new StubMediaSessionSource { Manager = manager }, (msg, _) => logged.Add(msg));
+        await monitor.InitializeAsync();
+
+        manager.GetCurrentSessionOverride = () => throw new InvalidOperationException("COM current error");
+        manager.GetSessionsOverride = () => throw new InvalidOperationException("COM sessions error");
+
+        manager.RaiseCurrentSessionChanged();
+        monitor.CycleSession();
+        manager.GetCurrentSessionOverride = () => null;
+        manager.RaiseCurrentSessionChanged(); // detaches session
+        manager.GetCurrentSessionOverride = () => throw new InvalidOperationException("COM sessions lookup error");
+        manager.RaiseSessionsChanged();
+
+        // Reattach session to exercise failing control command cleanly.
+        manager.GetCurrentSessionOverride = () => session;
+        manager.RaiseCurrentSessionChanged();
+        int loggedBeforeControl = logged.Count;
+        monitor.Play();
+        await Task.Yield();
+
+        Assert.IsGreaterThanOrEqualTo(3, loggedBeforeControl, $"Expected callback errors logged, saw {loggedBeforeControl}");
+        Assert.AreEqual(loggedBeforeControl + 1, logged.Count, $"Expected control error logged, saw {logged.Count - loggedBeforeControl}");
+    }
+
+    [TestMethod]
+    public async Task ConcurrentDisposeAndCallbacks_LeavesCleanDisposedStateWithZeroLeaks()
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            var a = CreateSession("a.exe", "Track A");
+            var b = CreateSession("b.exe", "Track B");
+            var manager = new StubMediaSessionSourceManager { Current = a, Sessions = [a, b] };
+            manager.FreshWrapperFor = s => new FreshSessionWrapper(s);
+            var monitor = new MediaSessionMonitor(new StubMediaSessionSource { Manager = manager });
+            using var gate = new ManualResetEventSlim(false);
+
+            Task init = Task.Run(() => { gate.Wait(); return monitor.InitializeAsync(); });
+            Task cb1 = Task.Run(() =>
+            {
+                gate.Wait();
+                manager.Current = b;
+                manager.RaiseCurrentSessionChanged();
+                manager.RaiseSessionsChanged();
+            });
+            Task cb2 = Task.Run(() =>
+            {
+                gate.Wait();
+                monitor.CycleSession();
+                monitor.Play();
+            });
+            Task dispose = Task.Run(async () =>
+            {
+                gate.Wait();
+                await monitor.DisposeAsync().ConfigureAwait(false);
+            });
+
+            gate.Set();
+            await Task.WhenAll(init, cb1, cb2, dispose);
+
+            Assert.IsNull(monitor.CurrentSnapshot);
+            Assert.AreEqual(0, manager.CurrentSessionChangedSubscriptionCount);
+            Assert.AreEqual(0, manager.SessionsChangedSubscriptionCount);
+            Assert.AreEqual(0, a.MediaPropertiesSubscriptionCount);
+            Assert.AreEqual(0, a.PlaybackInfoSubscriptionCount);
+            Assert.AreEqual(0, a.TimelineSubscriptionCount);
+            Assert.AreEqual(0, b.MediaPropertiesSubscriptionCount);
+            Assert.AreEqual(0, b.PlaybackInfoSubscriptionCount);
+            Assert.AreEqual(0, b.TimelineSubscriptionCount);
+        }
+    }
+
+    [TestMethod]
+    public async Task SessionEvents_WhenAttachOrDetachThrows_LogsAndDisposesWithoutCrashing()
+    {
+        var badAdd = new ThrowingEventSession(throwOnAdd: true, throwOnRemove: false);
+        var manager = new StubMediaSessionSourceManager
+        {
+            GetCurrentSessionOverride = () => badAdd,
+            GetSessionsOverride = () => [badAdd],
+        };
+        var monitor = CreateMonitor(manager);
+
+        await monitor.InitializeAsync();
+        Assert.AreEqual(1, badAdd.DisposalCount, "session that fails += subscription must be disposed immediately");
+        Assert.IsFalse(badAdd.HasSubscribers);
+        Assert.IsNull(monitor.CurrentSnapshot);
+        await monitor.DisposeAsync();
+
+        var badRemove = new ThrowingEventSession(throwOnAdd: false, throwOnRemove: true);
+        var manager2 = new StubMediaSessionSourceManager
+        {
+            GetCurrentSessionOverride = () => badRemove,
+            GetSessionsOverride = () => [badRemove],
+        };
+        var monitor2 = CreateMonitor(manager2);
+
+        await monitor2.InitializeAsync();
+        await monitor2.DisposeAsync();
+        Assert.AreEqual(1, badRemove.DisposalCount, "throwing on -= must still run session disposal");
+
+        var badMgr = new ThrowingRemoveManager();
+        var monitor3 = new MediaSessionMonitor(badMgr);
+        await monitor3.InitializeAsync();
+        await monitor3.DisposeAsync();
+        Assert.AreEqual(1, badMgr.DisposalCount, "throwing on manager -= must detach remaining events and dispose manager");
+        Assert.AreEqual(2, badMgr.DetachAttempts, "both manager events must attempt detach independently");
+        Assert.IsFalse(badMgr.HasSubscribers);
+    }
+
+    private sealed class ThrowingRemoveManager : IMediaSessionSource, IMediaSessionSourceManager
+    {
+        private Action? _handlers;
+        private int _detachAttempts;
+        private int _disposalCount;
+
+        public int DetachAttempts => Volatile.Read(ref _detachAttempts);
+        public int DisposalCount => Volatile.Read(ref _disposalCount);
+        public bool HasSubscribers => Volatile.Read(ref _handlers) is not null;
+
+        public Task<IMediaSessionSourceManager?> GetManagerAsync() => Task.FromResult<IMediaSessionSourceManager?>(this);
+
+        public event Action? CurrentSessionChanged
+        {
+            add { _handlers += value; }
+            remove
+            {
+                Interlocked.Increment(ref _detachAttempts);
+                _handlers -= value;
+                throw new InvalidOperationException("CurrentSessionChanged detach failed");
+            }
+        }
+
+        public event Action? SessionsChanged
+        {
+            add { _handlers += value; }
+            remove
+            {
+                Interlocked.Increment(ref _detachAttempts);
+                _handlers -= value;
+                throw new InvalidOperationException("SessionsChanged detach failed");
+            }
+        }
+
+        public IMediaSessionSourceSession? GetCurrentSession() => null;
+        public IReadOnlyList<IMediaSessionSourceSession> GetSessions() => [];
+        public void Dispose() => Interlocked.Increment(ref _disposalCount);
+    }
+
+    private sealed class ThrowingEventSession(bool throwOnAdd, bool throwOnRemove) : IMediaSessionSourceSession
+    {
+        private Action? _handlers;
+        private int _disposalCount;
+
+        public object Identity => this;
+        public string SourceAppUserModelId => "broken.app";
+        public int DisposalCount => Volatile.Read(ref _disposalCount);
+        public bool HasSubscribers => Volatile.Read(ref _handlers) is not null;
+
+        public event Action? MediaPropertiesChanged
+        {
+            add
+            {
+                if (throwOnAdd) throw new InvalidOperationException("add failed");
+                _handlers += value;
+            }
+            remove
+            {
+                if (throwOnRemove) throw new InvalidOperationException("remove failed");
+                _handlers -= value;
+            }
+        }
+
+        public event Action? PlaybackInfoChanged
+        {
+            add
+            {
+                if (throwOnAdd) throw new InvalidOperationException("add failed");
+                _handlers += value;
+            }
+            remove
+            {
+                if (throwOnRemove) throw new InvalidOperationException("remove failed");
+                _handlers -= value;
+            }
+        }
+
+        public event Action? TimelinePropertiesChanged
+        {
+            add
+            {
+                if (throwOnAdd) throw new InvalidOperationException("add failed");
+                _handlers += value;
+            }
+            remove
+            {
+                if (throwOnRemove) throw new InvalidOperationException("remove failed");
+                _handlers -= value;
+            }
+        }
+
+        public void Dispose() => Interlocked.Increment(ref _disposalCount);
+        public Task<MediaPropertiesData?> TryGetMediaPropertiesAsync() => Task.FromResult<MediaPropertiesData?>(new MediaPropertiesData { Title = "Track" });
+        public PlaybackInfoData? GetPlaybackInfo() => new() { PlaybackStatus = MediaPlaybackStatus.Playing };
+        public TimelinePropertiesData? GetTimelineProperties() => new();
+        public Task<bool> TryPlayAsync() => Task.FromResult(true);
+        public Task<bool> TryPauseAsync() => Task.FromResult(true);
+        public Task<bool> TrySkipNextAsync() => Task.FromResult(true);
+        public Task<bool> TrySkipPreviousAsync() => Task.FromResult(true);
+        public Task<bool> TryChangeShuffleActiveAsync(bool shuffle) => Task.FromResult(true);
+        public Task<bool> TryChangeAutoRepeatModeAsync(MediaRepeatMode mode) => Task.FromResult(true);
+        public Task<bool> TryChangePlaybackPositionAsync(long positionTicks) => Task.FromResult(true);
+    }
 }

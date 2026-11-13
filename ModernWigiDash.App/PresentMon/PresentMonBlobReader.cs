@@ -12,22 +12,25 @@ internal static class PresentMonBlobReader
 {
     /// <summary>
     /// Total bytes occupied by one swap chain's worth of dynamic-query results:
-    /// the sum of every element's <c>DataSize</c>. Used to step between chains.
+    /// the maximum <c>DataOffset + DataSize</c> across all elements so any
+    /// alignment padding between fields is included when stepping between chains.
     /// </summary>
     public static int ChainStrideBytes(IReadOnlyList<PresentMonQueryElement> elements)
     {
-        int total = 0;
+        int stride = 0;
         foreach (var element in elements)
         {
-            total = checked(total + (int)element.DataSize);
+            int end = checked((int)element.DataOffset + (int)element.DataSize);
+            if (end > stride)
+                stride = end;
         }
 
-        return total;
+        return stride;
     }
 
     /// <summary>Reads one IEEE-754 double at <paramref name="offset"/>.</summary>
     public static double ReadDouble(ReadOnlySpan<byte> blob, long offset)
-        => BitConverter.ToDouble(blob[(int)offset..]);
+        => BitConverter.ToDouble(blob[checked((int)offset)..]);
 
     /// <summary>
     /// Reads an element's double from a dynamic-query blob for a given swap
@@ -38,7 +41,7 @@ internal static class PresentMonBlobReader
         int chainIndex,
         int chainStrideBytes,
         PresentMonQueryElement element)
-        => ReadDouble(blob, (long)chainIndex * chainStrideBytes + (long)element.DataOffset);
+        => ReadDouble(blob, checked((long)chainIndex * chainStrideBytes + (long)element.DataOffset));
 
     /// <summary>
     /// Reads an element's value from a dynamic-query blob, matching the
@@ -53,11 +56,12 @@ internal static class PresentMonBlobReader
         int chainStrideBytes,
         PresentMonQueryElement element)
     {
-        long offset = (long)chainIndex * chainStrideBytes + (long)element.DataOffset;
+        int offset = checked((int)((long)chainIndex * chainStrideBytes + (long)element.DataOffset));
         return element.DataSize switch
         {
-            4 => BitConverter.ToInt32(blob[(int)offset..]),
-            _ => ReadDouble(blob, offset),
+            4 => BitConverter.ToInt32(blob[offset..]),
+            8 => ReadDouble(blob, offset),
+            _ => throw new NotSupportedException($"Unsupported PresentMon dynamic element DataSize: {element.DataSize}."),
         };
     }
 

@@ -22,6 +22,31 @@ public class PresentMonBlobReaderTests
     }
 
     [TestMethod]
+    public void ChainStrideBytes_WithAlignmentPadding_UsesMaxElementEndOffset()
+    {
+        PresentMonQueryElement[] elements =
+        [
+            new(Metric: 20, Stat: 12, DeviceId: 0, ArrayIndex: 0, DataOffset: 0, DataSize: 4),
+            DoubleAt(8),
+        ];
+
+        Assert.AreEqual(16, PresentMonBlobReader.ChainStrideBytes(elements),
+            "a padded layout (4-byte field at 0 + 8-byte double aligned at 8) spans 16 bytes, not 12");
+    }
+
+    [TestMethod]
+    public void PmStopTrackingProcess_MatchesStartTrackingCallingConvention()
+    {
+        var stopAttr = Attribute.GetCustomAttribute(
+            typeof(PmStopTrackingProcess),
+            typeof(System.Runtime.InteropServices.UnmanagedFunctionPointerAttribute))
+            as System.Runtime.InteropServices.UnmanagedFunctionPointerAttribute;
+
+        Assert.IsNotNull(stopAttr, "PmStopTrackingProcess must declare UnmanagedFunctionPointer");
+        Assert.AreEqual(System.Runtime.InteropServices.CallingConvention.Cdecl, stopAttr.CallingConvention);
+    }
+
+    [TestMethod]
     public void ReadDynamicDouble_FirstChain_ReadsAtElementDataOffset()
     {
         var element = DoubleAt(16);
@@ -63,11 +88,8 @@ public class PresentMonBlobReaderTests
         var element = DoubleAt(24);
         byte[] blob = new byte[24];
 
-        Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-        {
-            PresentMonBlobReader.ReadDynamicDouble(blob, chainIndex: 0, chainStrideBytes: 24, element);
-            return Task.CompletedTask;
-        });
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => PresentMonBlobReader.ReadDynamicDouble(blob, chainIndex: 0, chainStrideBytes: 24, element));
     }
 
     [TestMethod]

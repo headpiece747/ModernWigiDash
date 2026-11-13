@@ -25,6 +25,9 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     private readonly IMediaSessionSource _source;
     private readonly Action<string, Exception?>? _logError;
 
+    private readonly Lock _stateLock = new();
+    private readonly Lock _snapshotPublishLock = new();
+    private readonly HashSet<IMediaSessionSourceSession> _attaching = new(ReferenceEqualityComparer.Instance);
     private IMediaSessionSourceManager? _manager;
     private IMediaSessionSourceSession? _session;
     // Volatile: the render thread reads the snapshot while the SMTC
@@ -34,6 +37,16 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     private volatile MediaSnapshot? _snapshot;
     private int _refreshVersion;
     private bool _disposed;
+
+    private bool IsDisposed
+    {
+        get { lock (_stateLock) return _disposed; }
+    }
+
+    private IMediaSessionSourceSession? ActiveSession
+    {
+        get { lock (_stateLock) return _disposed ? null : _session; }
+    }
 
     /// <summary>Test seam: injectable clock for the snapshot timestamp.</summary>
     internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -69,32 +82,93 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         try
         {
             var manager = await _source.GetManagerAsync().ConfigureAwait(false);
-            if (_disposed || manager is null) return;
+            if (manager is null) return;
 
-            _manager = manager;
+            if (IsDisposed)
+            {
+                SafeDisposeManager(manager);
+                return;
+            }
+
             manager.CurrentSessionChanged += OnCurrentSessionChanged;
             manager.SessionsChanged += OnSessionsChanged;
+
+            IMediaSessionSourceManager? previousManager = null;
+            bool racedDispose;
+            lock (_stateLock)
+            {
+                if (_disposed)
+                {
+                    racedDispose = true;
+                }
+                else
+                {
+                    previousManager = _manager;
+                    _manager = manager;
+                    racedDispose = false;
+                }
+            }
+
+            if (racedDispose)
+            {
+                UnsubscribeAndDisposeManager(manager);
+                return;
+            }
+
+            if (previousManager is not null && !ReferenceEquals(previousManager, manager))
+            {
+                UnsubscribeAndDisposeManager(previousManager);
+            }
+
             AttachSession(manager.GetCurrentSession());
         }
         catch (Exception ex)
         {
-            _logError?.Invoke($"SMTC init failed: {ex.Message}", ex);
-            SnapshotChanged?.Invoke(null);
+            if (!IsDisposed)
+            {
+                _logError?.Invoke($"SMTC init failed: {ex.Message}", ex);
+                SnapshotChanged?.Invoke(null);
+            }
         }
     }
 
     /// <summary>Advances to the next SMTC session (tap the source badge).</summary>
     public void CycleSession()
     {
-        if (_manager is null) return;
+        IMediaSessionSourceManager? manager;
+        lock (_stateLock)
+        {
+            if (_disposed || _manager is null) return;
+            manager = _manager;
+        }
 
-        var sessions = _manager.GetSessions();
-        if (sessions.Count <= 1) return;
+        IReadOnlyList<IMediaSessionSourceSession> sessions;
+        try
+        {
+            sessions = manager.GetSessions();
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed) _logError?.Invoke($"SMTC cycle failed: {ex.Message}", ex);
+            return;
+        }
+
+        IMediaSessionSourceSession? current = ActiveSession;
+        if (IsDisposed || sessions.Count <= 1)
+        {
+            // GetSessions() may have built fresh WinRT adapters even for 0 or 1 sessions.
+            // Dispose any wrapper we are not holding.
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                if (!ReferenceEquals(sessions[i], current)) SafeDisposeSession(sessions[i]);
+            }
+            return;
+        }
 
         int idx = -1;
         for (int i = 0; i < sessions.Count; i++)
         {
-            if (IsSameSession(sessions[i], _session))
+            if (IsSameSession(sessions[i], current))
             {
                 idx = i;
                 break;
@@ -109,10 +183,9 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         // rooted with its live subscriptions: dispose every fresh wrapper
         // that is neither the arriving one nor the held instance the
         // attach releases.
-        var old = _session;
         for (int i = 0; i < sessions.Count; i++)
         {
-            if (i != nextIdx && !ReferenceEquals(sessions[i], old)) sessions[i].Dispose();
+            if (i != nextIdx && !ReferenceEquals(sessions[i], current)) SafeDisposeSession(sessions[i]);
         }
         AttachSession(sessions[nextIdx]);
     }
@@ -129,28 +202,49 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     }
 
     /// <summary>Sends the play command to the current session.</summary>
-    public void Play() => _ = _session?.TryPlayAsync();
+    public void Play() => DispatchControl(static s => s.TryPlayAsync());
 
     /// <summary>Sends the pause command to the current session.</summary>
-    public void Pause() => _ = _session?.TryPauseAsync();
+    public void Pause() => DispatchControl(static s => s.TryPauseAsync());
 
     /// <summary>Sends the skip-next command to the current session.</summary>
-    public void Next() => _ = _session?.TrySkipNextAsync();
+    public void Next() => DispatchControl(static s => s.TrySkipNextAsync());
 
     /// <summary>Sends the skip-previous command to the current session.</summary>
-    public void Previous() => _ = _session?.TrySkipPreviousAsync();
+    public void Previous() => DispatchControl(static s => s.TrySkipPreviousAsync());
 
     /// <summary>Sends the shuffle command to the current session.</summary>
     /// <param name="enabled">The desired shuffle state.</param>
-    public void SetShuffle(bool enabled) => _ = _session?.TryChangeShuffleActiveAsync(enabled);
+    public void SetShuffle(bool enabled) => DispatchControl(s => s.TryChangeShuffleActiveAsync(enabled));
 
     /// <summary>Sends the repeat-mode command to the current session.</summary>
     /// <param name="mode">The desired repeat mode.</param>
-    public void SetRepeat(MediaRepeatMode mode) => _ = _session?.TryChangeAutoRepeatModeAsync(mode);
+    public void SetRepeat(MediaRepeatMode mode) => DispatchControl(s => s.TryChangeAutoRepeatModeAsync(mode));
 
     /// <summary>Sends the seek command to the current session.</summary>
     /// <param name="position">The desired playback position.</param>
-    public void Seek(TimeSpan position) => _ = _session?.TryChangePlaybackPositionAsync(position.Ticks);
+    public void Seek(TimeSpan position) => DispatchControl(s => s.TryChangePlaybackPositionAsync(position.Ticks));
+
+    private void DispatchControl(Func<IMediaSessionSourceSession, Task<bool>> command)
+    {
+        var session = ActiveSession;
+        if (session is null) return;
+        _ = RunControlAsync(session, command);
+    }
+
+    private async Task RunControlAsync(
+        IMediaSessionSourceSession session,
+        Func<IMediaSessionSourceSession, Task<bool>> command)
+    {
+        try
+        {
+            await command(session).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed) _logError?.Invoke($"SMTC control failed: {ex.Message}", ex);
+        }
+    }
 
     /// <summary>
     /// The play/pause tap policy: a playing session pauses, a non-playing one
@@ -211,35 +305,71 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
     /// <summary>Unsubscribes, disposes the WinRT manager/session adapters, and clears the snapshot.</summary>
     public ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
-        _disposed = true;
-
-        if (_manager is not null)
+        IMediaSessionSourceManager? manager;
+        IMediaSessionSourceSession? session;
+        lock (_stateLock)
         {
-            _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
-            _manager.SessionsChanged -= OnSessionsChanged;
+            if (_disposed) return ValueTask.CompletedTask;
+            _disposed = true;
+            Interlocked.Increment(ref _refreshVersion);
+            manager = _manager;
+            session = _session;
+            _manager = null;
+            _session = null;
+            _snapshot = null;
         }
-        DetachSessionEvents();
+
         // The adapters own the WinRT event subscriptions the monitor's
         // neutral unsubscription does not reach; release them so the WinRT
         // manager/session do not outlive the monitor.
-        _manager?.Dispose();
-        _session?.Dispose();
-        _manager = null;
-        _session = null;
-        _snapshot = null;
+        if (manager is not null)
+        {
+            UnsubscribeAndDisposeManager(manager);
+        }
+
+        if (session is not null)
+        {
+            DetachAndDisposeSession(session);
+        }
 
         return ValueTask.CompletedTask;
     }
 
-    private void OnCurrentSessionChanged() => AttachSession(_manager?.GetCurrentSession());
+    private void OnCurrentSessionChanged()
+    {
+        IMediaSessionSourceManager? manager;
+        lock (_stateLock)
+        {
+            if (_disposed) return;
+            manager = _manager;
+        }
+
+        if (manager is null) return;
+        if (TryGetCurrentSession(manager, out var next))
+        {
+            AttachSession(next);
+        }
+    }
 
     private void OnSessionsChanged()
     {
-        if (_session is null)
-            AttachSession(_manager?.GetCurrentSession());
-        else
+        IMediaSessionSourceManager? manager;
+        bool hasSession;
+        lock (_stateLock)
+        {
+            if (_disposed) return;
+            manager = _manager;
+            hasSession = _session is not null;
+        }
+
+        if (hasSession)
+        {
             _ = RefreshAsync();
+        }
+        else if (manager is not null && TryGetCurrentSession(manager, out var next))
+        {
+            AttachSession(next);
+        }
     }
 
     private void OnMediaPropertiesChanged() => _ = RefreshAsync();
@@ -248,43 +378,206 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
 
     private void OnTimelinePropertiesChanged() => _ = RefreshAsync();
 
+    private bool TryGetCurrentSession(
+        IMediaSessionSourceManager manager,
+        out IMediaSessionSourceSession? session)
+    {
+        try
+        {
+            session = manager.GetCurrentSession();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed) _logError?.Invoke($"SMTC session lookup failed: {ex.Message}", ex);
+            session = null;
+            return false;
+        }
+    }
+
     private void AttachSession(IMediaSessionSourceSession? session)
     {
-        // The in-memory seam hands back the very instance it holds, so a
-        // same-reference attach is a no-op.
-        if (ReferenceEquals(_session, session)) return;
-
-        // A fresh wrapper for a session we already hold (the WinRT seam
-        // builds one per call): tear down its subscriptions and keep the
-        // adapter we already own.
-        if (session is not null && IsSameSession(_session, session))
+        if (session is null)
         {
-            session.Dispose();
+            IMediaSessionSourceSession? oldToClear;
+            lock (_stateLock)
+            {
+                if (_disposed || _session is null) return;
+                oldToClear = _session;
+                _session = null;
+            }
+
+            DetachAndDisposeSession(oldToClear);
+            _ = RefreshAsync();
             return;
         }
 
-        // Release the held session (if any) and adopt the new one, or none.
-        DetachSessionEvents();
-        var old = _session;
-        _session = session;
-        old?.Dispose();
+        while (true)
+        {
+            IMediaSessionSourceSession? currentSnapshot;
+            bool disposedNow;
+            lock (_stateLock)
+            {
+                disposedNow = _disposed;
+                currentSnapshot = _session;
+            }
 
-        if (session is not null)
+            if (disposedNow)
+            {
+                SafeDisposeSession(session);
+                return;
+            }
+
+            // The in-memory seam hands back the very instance it holds, so a
+            // same-reference attach is a no-op.
+            if (ReferenceEquals(currentSnapshot, session)) return;
+
+            // A fresh wrapper for a session we already hold (the WinRT seam
+            // builds one per call): tear down its subscriptions and keep the
+            // adapter we already own.
+            if (currentSnapshot is not null && IsSameSession(currentSnapshot, session))
+            {
+                SafeDisposeSession(session);
+                return;
+            }
+
+            bool readyToSubscribe = false;
+            bool disposeIncoming = false;
+            lock (_stateLock)
+            {
+                if (_disposed)
+                {
+                    disposeIncoming = true;
+                }
+                else if (ReferenceEquals(_session, currentSnapshot))
+                {
+                    if (!_attaching.Add(session)) return;
+                    readyToSubscribe = true;
+                }
+            }
+
+            if (disposeIncoming)
+            {
+                SafeDisposeSession(session);
+                return;
+            }
+
+            if (!readyToSubscribe) continue;
+
+            if (!TrySubscribeSessionEvents(session)) return;
+
+            IMediaSessionSourceSession? displaced = null;
+            bool commit = false;
+            bool rejectDisposed = false;
+            lock (_stateLock)
+            {
+                _attaching.Remove(session);
+                if (_disposed)
+                {
+                    rejectDisposed = true;
+                }
+                else if (ReferenceEquals(_session, currentSnapshot))
+                {
+                    displaced = _session;
+                    _session = session;
+                    commit = true;
+                }
+            }
+
+            if (rejectDisposed)
+            {
+                DetachAndDisposeSession(session);
+                return;
+            }
+
+            if (commit)
+            {
+                if (displaced is not null)
+                {
+                    DetachAndDisposeSession(displaced);
+                }
+                _ = RefreshAsync();
+                return;
+            }
+
+            // Another transition updated _session while we subscribed; undo our
+            // subscriptions and re-evaluate against the new _session.
+            DetachSessionEvents(session);
+        }
+    }
+
+    private bool TrySubscribeSessionEvents(IMediaSessionSourceSession session)
+    {
+        try
         {
             session.MediaPropertiesChanged += OnMediaPropertiesChanged;
             session.PlaybackInfoChanged += OnPlaybackInfoChanged;
             session.TimelinePropertiesChanged += OnTimelinePropertiesChanged;
+            return true;
         }
-
-        _ = RefreshAsync();
+        catch (Exception ex)
+        {
+            lock (_stateLock) _attaching.Remove(session);
+            if (!IsDisposed) _logError?.Invoke($"SMTC event attach failed: {ex.Message}", ex);
+            DetachAndDisposeSession(session);
+            return false;
+        }
     }
 
-    private void DetachSessionEvents()
+    private void SafeDetachEvent(Action unsubscribe)
     {
-        if (_session is null) return;
-        _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-        _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
-        _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+        try
+        {
+            unsubscribe();
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed) _logError?.Invoke($"SMTC event detach failed: {ex.Message}", ex);
+        }
+    }
+
+    private void DetachSessionEvents(IMediaSessionSourceSession session)
+    {
+        SafeDetachEvent(() => session.MediaPropertiesChanged -= OnMediaPropertiesChanged);
+        SafeDetachEvent(() => session.PlaybackInfoChanged -= OnPlaybackInfoChanged);
+        SafeDetachEvent(() => session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged);
+    }
+
+    private void DetachAndDisposeSession(IMediaSessionSourceSession session)
+    {
+        DetachSessionEvents(session);
+        SafeDisposeSession(session);
+    }
+
+    private void UnsubscribeAndDisposeManager(IMediaSessionSourceManager manager)
+    {
+        SafeDetachEvent(() => manager.CurrentSessionChanged -= OnCurrentSessionChanged);
+        SafeDetachEvent(() => manager.SessionsChanged -= OnSessionsChanged);
+        SafeDisposeManager(manager);
+    }
+
+    private void SafeDisposeManager(IMediaSessionSourceManager manager)
+    {
+        try
+        {
+            manager.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logError?.Invoke($"SMTC manager dispose failed: {ex.Message}", ex);
+        }
+    }
+
+    private void SafeDisposeSession(IMediaSessionSourceSession session)
+    {
+        try
+        {
+            session.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logError?.Invoke($"SMTC session dispose failed: {ex.Message}", ex);
+        }
     }
 
     private async Task RefreshAsync()
@@ -294,11 +587,27 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
         // version bump is atomic and the stale check below reads the latest
         // value, so a refresh overtaken after its await bails out.
         int refreshVersion = Interlocked.Increment(ref _refreshVersion);
-        var session = _session;
+        IMediaSessionSourceSession? session;
+        bool disposed;
+        lock (_stateLock)
+        {
+            disposed = _disposed;
+            session = _session;
+        }
+
+        if (disposed) return;
+
         if (session is null)
         {
-            _snapshot = null;
-            SnapshotChanged?.Invoke(null);
+            lock (_snapshotPublishLock)
+            {
+                lock (_stateLock)
+                {
+                    if (_disposed || refreshVersion != Volatile.Read(ref _refreshVersion)) return;
+                    _snapshot = null;
+                }
+                SnapshotChanged?.Invoke(null);
+            }
             return;
         }
 
@@ -307,26 +616,35 @@ public sealed class MediaSessionMonitor : IAsyncDisposable
             var props = await session.TryGetMediaPropertiesAsync().ConfigureAwait(false);
             var info = session.GetPlaybackInfo();
             var timeline = session.GetTimelineProperties();
-            if (_disposed || refreshVersion != Volatile.Read(ref _refreshVersion)) return;
+            if (IsDisposed || refreshVersion != Volatile.Read(ref _refreshVersion)) return;
 
-            var previous = _snapshot;
-            var snapshot = BuildSnapshot(session, props, info, timeline);
-            _snapshot = snapshot;
-
-            string artKey = $"{session.SourceAppUserModelId}:{props?.Title}:{props?.Artist}:{props?.AlbumTitle}";
-            if (previous is not null && previous.Position > TimeSpan.FromSeconds(3) &&
-                snapshot.Position < TimeSpan.FromSeconds(2.5))
+            lock (_snapshotPublishLock)
             {
-                // Some SMTC providers reuse metadata across track transitions.
-                // A timeline reset is still a reliable signal to reload artwork.
-                artKey += $":track{refreshVersion}";
-            }
+                MediaSnapshot? previous;
+                MediaSnapshot snapshot;
+                lock (_stateLock)
+                {
+                    if (_disposed || refreshVersion != Volatile.Read(ref _refreshVersion)) return;
+                    previous = _snapshot;
+                    snapshot = BuildSnapshot(session, props, info, timeline);
+                    _snapshot = snapshot;
+                }
 
-            SnapshotChanged?.Invoke(new MediaSessionUpdate(snapshot, props?.Thumbnail, artKey));
+                string artKey = $"{session.SourceAppUserModelId}:{props?.Title}:{props?.Artist}:{props?.AlbumTitle}";
+                if (previous is not null && previous.Position > TimeSpan.FromSeconds(3) &&
+                    snapshot.Position < TimeSpan.FromSeconds(2.5))
+                {
+                    // Some SMTC providers reuse metadata across track transitions.
+                    // A timeline reset is still a reliable signal to reload artwork.
+                    artKey += $":track{refreshVersion}";
+                }
+
+                SnapshotChanged?.Invoke(new MediaSessionUpdate(snapshot, props?.Thumbnail, artKey));
+            }
         }
         catch (Exception ex)
         {
-            _logError?.Invoke($"SMTC refresh failed: {ex.Message}", ex);
+            if (!IsDisposed) _logError?.Invoke($"SMTC refresh failed: {ex.Message}", ex);
         }
     }
 

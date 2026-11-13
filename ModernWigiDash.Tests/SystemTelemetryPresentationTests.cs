@@ -40,7 +40,7 @@ public class SystemTelemetryPresentationTests
 
         Assert.IsFalse(display.HasReading);
         Assert.AreEqual("Select a sensor", display.PlaceholderTitle);
-        Assert.AreEqual("Open Settings and pick a sensor reading", display.PlaceholderSubtitle);
+        Assert.AreEqual("Select a reading in Widget Settings", display.PlaceholderSubtitle);
     }
 
     [TestMethod]

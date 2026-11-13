@@ -149,6 +149,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
 
     public ConnectionState Connect()
     {
+        if (Volatile.Read(ref _isDisposed) != 0)
+            return ConnectionState.DeviceNotFound;
+
         if (_wire.IsConnected)
             return ConnectionState.Connected;
 
@@ -166,6 +169,9 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         ConnectionState lastFailure = ConnectionState.DeviceNotFound;
         foreach (var provider in ProviderFactories)
         {
+            if (Volatile.Read(ref _isDisposed) != 0)
+                return ConnectionState.DeviceNotFound;
+
             // This attempt's file-log vocabulary: the loop binds the provider's
             // tag into a DiagLog once, and every line it emits for this leg —
             // exception, success, init failure — rides that tag (the DiagLog
@@ -187,6 +193,12 @@ internal sealed class DisplayHidTransport : IDisplayTransport
                 return ConnectionState.DeviceNotResponding;
             }
 
+            if (Volatile.Read(ref _isDisposed) != 0)
+            {
+                attempt.Backend?.Dispose();
+                return ConnectionState.DeviceNotFound;
+            }
+
             if (attempt.Backend is null)
             {
                 // The leg's own tag, from the record: this line and the
@@ -205,11 +217,22 @@ internal sealed class DisplayHidTransport : IDisplayTransport
             }
 
             // Adopt the backend before init: SendInitCommands talks through it.
+            // If Dispose() raced in just before Adopt, DisplayWire.Adopt disposes
+            // it immediately and refuses publication.
             _wire.Adopt(attempt.Backend);
+            if (Volatile.Read(ref _isDisposed) != 0)
+                return ConnectionState.DeviceNotFound;
+
             legLog.Write($"Direct {provider.DisplayName} connection opened");
 
             if (SendInitCommands())
             {
+                if (Volatile.Read(ref _isDisposed) != 0)
+                {
+                    _wire.Release();
+                    return ConnectionState.DeviceNotFound;
+                }
+
                 // Connected only once init completes — the transport's contract
                 // must not report connected while the init sequence is still
                 // running (the engine's ConnectionState gate already blocks
@@ -350,8 +373,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
         // without the connect loop. The wire's transfer tracking
         // (RunTracked) wraps the call, so the teardown drain still waits out
         // an in-flight init write.
-        var seq = new InitSequence(_wire.Backend!, initLog);
-        bool initOk = _wire.RunTracked(() => seq.Run());
+        bool initOk = _wire.RunTracked(backend => backend is not null && new InitSequence(backend, initLog).Run());
 
         _logger.LogInformation("Device initialization complete (3 pages), ok={InitOk}", initOk);
         return initOk;
@@ -409,7 +431,7 @@ internal sealed class DisplayHidTransport : IDisplayTransport
     public void Dispose()
     {
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) != 0) return;
-        _wire.Release();
+        _wire.Dispose();
         GC.SuppressFinalize(this);
     }
 }

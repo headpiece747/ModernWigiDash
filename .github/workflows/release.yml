@@ -34,15 +34,18 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/run-gates.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/ps-hygiene.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build release zip
         shell: pwsh
         run: |
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
           if ([string]::IsNullOrWhiteSpace($tag)) { throw "Provide a tag input for a manual release, or push a v* tag." }
-          $version = $tag.TrimStart("v")
+          $version = $tag.TrimStart('v', 'V')
           ./scripts/build-release.ps1 -Version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -51,7 +54,7 @@ jobs:
         run: |
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
           if ([string]::IsNullOrWhiteSpace($tag)) { throw "Provide a tag input for a manual release, or push a v* tag." }
-          $version = $tag.TrimStart("v")
+          $version = $tag.TrimStart('v', 'V')
           # Both artifacts are load-bearing: the full bundle is the fresh
           # install, the app-only zip is the in-app updater's payload.
           $fullZip = "ModernWigiDash-v$version-win-x64.zip"
@@ -71,9 +74,11 @@ jobs:
           if ($existing) {
             Write-Host "Release $tag already exists; replacing its assets in place."
             gh release upload $tag $fullZip $slimZip --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
             Write-Host "Creating release $tag."
             gh release create $tag $fullZip $slimZip --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
       - name: Verify published assets
@@ -88,12 +93,13 @@ jobs:
           # anything, so a mismatch fails the run while the release keeps
           # whatever it already held.
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
-          $version = $tag.TrimStart("v")
+          $version = $tag.TrimStart('v', 'V')
           $expected = [ordered]@{
             "ModernWigiDash-v$version-win-x64.zip"  = (Get-Item "ModernWigiDash-v$version-win-x64.zip").Length
             "ModernWigiDash-v$version-app-only.zip" = (Get-Item "ModernWigiDash-v$version-app-only.zip").Length
           }
           $release = gh release view $tag --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -eq $release) { throw "Failed to query published assets for $tag." }
           foreach ($name in $expected.Keys) {
             $asset = $release.assets | Where-Object { $_.name -eq $name }
             if (-not $asset) { throw "Release $tag has no asset named $name after publish." }
@@ -116,11 +122,13 @@ jobs:
           $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ inputs.tag }}" }
           $credit = "Thanks to [ElmorLabs](https://github.com/ElmorLabs-WigiDash) for the WigiDash service the HWiNFO Sensor and AIDA64 Panel widgets read, and for the help with both integrations."
           $release = gh release view $tag --json body | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $null -eq $release) { throw "Failed to query release notes for $tag." }
           if ($release.body -like "*ElmorLabs-WigiDash*") {
             Write-Host "Release $tag notes already carry the credit."
           } else {
             $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
             [System.IO.File]::WriteAllText($notesPath, ($credit + "`r`n`r`n" + $release.body), [System.Text.UTF8Encoding]::new($false))
             gh release edit $tag --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release notes for $tag." }
             Write-Host "Prepended the ElmorLabs credit to the release notes of $tag."
           }

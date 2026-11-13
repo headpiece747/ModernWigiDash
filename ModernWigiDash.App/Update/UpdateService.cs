@@ -119,12 +119,18 @@ internal sealed class UpdateService
             using var stallBound = CancellationTokenSource.CreateLinkedTokenSource(ct);
             stallBound.CancelAfter(DownloadStallTimeout);
             await _downloadFile(info.ZipUrl, zipPath, progress, stallBound.Token).ConfigureAwait(false);
-            if (!File.Exists(zipPath)) return false;
+            if (!File.Exists(zipPath))
+            {
+                TryDeleteDirectory(downloadDir);
+                TryDeleteDirectory(stagedDir);
+                return false;
+            }
 
             string actual = ComputeSha256(zipPath);
             if (!_sha256Matches(actual, info.Sha256))
             {
                 TryDeleteDirectory(downloadDir);
+                TryDeleteDirectory(stagedDir);
                 _log.Write($"download digest mismatch for v{info.Version}; download deleted");
                 return false;
             }
@@ -136,6 +142,7 @@ internal sealed class UpdateService
         catch (Exception ex)
         {
             TryDeleteDirectory(downloadDir);
+            TryDeleteDirectory(stagedDir);
             _log.Write($"download/stage failed for v{info.Version}: {ex.Message}");
             return false;
         }
@@ -184,13 +191,14 @@ internal sealed class UpdateService
     {
         try
         {
-            string stageDir = Path.Combine(_updatesRoot, "staged", info.Version);
+            string normalizedInstallDir = Path.TrimEndingDirectorySeparator(installDir);
+            string stageDir = Path.TrimEndingDirectorySeparator(Path.Combine(_updatesRoot, "staged", info.Version));
             string stagedCmd = StagedCmdPath(info);
             // AppContext.BaseDirectory ends with a separator — Path.Combine
             // (not string concat) so the relaunch path never doubles the
             // backslash (start "" "<path>\\exe" fails with "cannot find the
             // path specified" and silently skips the relaunch).
-            string relaunch = $"start \"\" \"{Path.Combine(installDir, "ModernWigiDash.App.exe")}\"";
+            string relaunch = $"start \"\" \"{Path.Combine(normalizedInstallDir, "ModernWigiDash.App.exe")}\"";
 
             string body = File.ReadAllText(stagedCmd);
             // Integrity check: the staged cmd must still match the hash
@@ -216,7 +224,7 @@ internal sealed class UpdateService
             // string, so the doubled-quote form fails silently and the whole
             // command must be a single quoted argument to slash-c.
             string cmdExe = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            string inner = $"\"{liveCmd}\" \"{installDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
+            string inner = $"\"{liveCmd}\" \"{normalizedInstallDir}\" \"{stageDir}\" ModernWigiDash.App.exe";
             var psi = new ProcessStartInfo(cmdExe, $"/c \"{inner}\"")
             {
                 UseShellExecute = true,
@@ -256,14 +264,17 @@ internal sealed class UpdateService
     internal static string ExtractSlimZip(string zipPath, string targetDir)
     {
         using var archive = ZipFile.OpenRead(zipPath);
-        string root = Path.GetFullPath(targetDir) + Path.DirectorySeparatorChar;
+        string fullRoot = Path.GetFullPath(targetDir);
+        string root = fullRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
         foreach (string fullName in archive.Entries.Select(entry => entry.FullName))
         {
             string dest = Path.GetFullPath(Path.Combine(targetDir, fullName));
             if (!dest.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"Zip entry escapes the stage directory: {fullName}");
         }
-        ZipFile.ExtractToDirectory(zipPath, targetDir);
+        ZipFile.ExtractToDirectory(zipPath, targetDir, overwriteFiles: true);
         string exe = Path.Combine(targetDir, "ModernWigiDash-win-x64", "ModernWigiDash.App.exe");
         if (!File.Exists(exe)) throw new InvalidDataException("Slim zip has no ModernWigiDash.App.exe");
         return exe;
@@ -287,8 +298,11 @@ internal sealed class UpdateService
 
     private static async Task<string?> DownloadTextAsync(string url, string? userAgent)
     {
-        var req = new HttpRequestMessage(HttpMethod.Get, url);
-        if (!string.IsNullOrWhiteSpace(userAgent)) req.Headers.UserAgent.ParseAdd(userAgent);
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        if (!string.IsNullOrWhiteSpace(userAgent) && !string.Equals(userAgent, RepoUserAgent, StringComparison.Ordinal))
+        {
+            req.Headers.UserAgent.ParseAdd(userAgent);
+        }
         using var resp = await SharedHttp.SendAsync(req).ConfigureAwait(false);
         return resp.IsSuccessStatusCode ? await resp.Content.ReadAsStringAsync().ConfigureAwait(false) : null;
     }

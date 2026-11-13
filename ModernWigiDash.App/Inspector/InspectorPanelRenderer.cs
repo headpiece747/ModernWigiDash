@@ -134,6 +134,9 @@ internal static class InspectorPanelRenderer
         target.Add(propPanel);
     }
 
+    private const string DefaultUnavailableOptionsHint =
+        "No options available yet. Connect the data source, then select this widget again.";
+
     /// <summary>
     /// Adds the type-specific editor for one property description into
     /// <paramref name="panel"/>. The choice and path branches record the
@@ -144,18 +147,8 @@ internal static class InspectorPanelRenderer
         var provider = wiring.Provider;
         switch (desc.PropertyType)
         {
-            case WidgetPropertyType.Choice when desc.Options.Count > 0:
-                var combo = BuildOptionCombo(desc.Options, desc, callbacks);
-                if (string.Equals(provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal)) wiring.TypeCombo = combo;
-                panel.Children.Add(combo);
-                break;
-            case WidgetPropertyType.Choice when desc.RequiresListedValue:
-                // A required list that has not produced options yet: never
-                // degrade to a text box, because the persisted value is a code
-                // (the HWiNFO sensor key), not user-typable text.
-                panel.Children.Add(BuildEmptyOptionsHint(desc, callbacks,
-                    "No options available yet. Reopen settings once the source is connected.",
-                    useDescription: true));
+            case WidgetPropertyType.Choice when desc.Options.Count > 0 || desc.RequiresListedValue:
+                panel.Children.Add(BuildChoiceEditor(desc, callbacks, wiring));
                 break;
             case WidgetPropertyType.Font:
                 IReadOnlyList<WidgetPropertyOption> fontOptions = desc.Options.Count > 0
@@ -370,12 +363,55 @@ internal static class InspectorPanelRenderer
         return row;
     }
 
+    private static UIElement BuildChoiceEditor(EditorDescription desc, InspectorCallbacks callbacks, ActionCommandWiring wiring)
+    {
+        if (desc.Options.Count > 0)
+        {
+            var combo = BuildOptionCombo(desc.Options, desc, callbacks);
+            if (string.Equals(wiring.Provider?.ActionCommandVisibilityChoicePropertyName, desc.Property.Name, StringComparison.Ordinal))
+            {
+                wiring.TypeCombo = combo;
+            }
+
+            return desc.RequiresListedValue && desc.Options.All(static o => o.IsFallback)
+                ? WrapWithStatusHint(combo, desc, callbacks, DefaultUnavailableOptionsHint)
+                : combo;
+        }
+
+        // A required list that has not produced options yet: keep a disabled
+        // placeholder ComboBox visible above the hint so the dropdown affordance
+        // stays present and never degrades to free text.
+        string? currentText = desc.CurrentValue?.ToString();
+        string placeholderValue = currentText ?? "";
+        string placeholderText = string.IsNullOrEmpty(currentText) ? "No options available" : currentText;
+        var placeholderCombo = new ComboBox
+        {
+            ItemsSource = new[] { new WidgetPropertyOption(placeholderValue, placeholderText) },
+            DisplayMemberPath = nameof(WidgetPropertyOption.DisplayName),
+            SelectedValuePath = nameof(WidgetPropertyOption.Value),
+            SelectedIndex = 0,
+            IsEnabled = false,
+            Padding = new Thickness(8, 4, 8, 4)
+        };
+        return WrapWithStatusHint(placeholderCombo, desc, callbacks, DefaultUnavailableOptionsHint);
+    }
+
+    private static StackPanel WrapWithStatusHint(UIElement editor, EditorDescription desc, InspectorCallbacks callbacks, string fallback)
+    {
+        var stack = new StackPanel();
+        stack.Children.Add(editor);
+        var hint = BuildEmptyOptionsHint(desc, callbacks, fallback, useDescription: true);
+        hint.Margin = new Thickness(0, 4, 0, 0);
+        stack.Children.Add(hint);
+        return stack;
+    }
+
     private static UIElement BuildSensorSelector(EditorDescription desc, InspectorCallbacks callbacks)
     {
         if (desc.Options.Count == 0)
         {
             return BuildEmptyOptionsHint(desc, callbacks,
-                "No sensors detected. Start LibreHardwareService, then reopen settings to pick a sensor.");
+                "No sensors detected. Start LibreHardwareService, then select this widget again to pick a sensor.");
         }
 
         return BuildOptionCombo(desc.Options, desc, callbacks);

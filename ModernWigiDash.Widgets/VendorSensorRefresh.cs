@@ -91,7 +91,7 @@ internal sealed class VendorSensorRefresh(Func<long>? tickProvider = null)
             return null;
         }
 
-        _lastReading = new SensorReading(sensor.Name, sensor.Unit ?? string.Empty, reading.Value);
+        _lastReading = new SensorReading(sensor.Name ?? string.Empty, sensor.Unit ?? string.Empty, reading.Value);
         return _lastReading;
     }
 
@@ -99,9 +99,9 @@ internal sealed class VendorSensorRefresh(Func<long>? tickProvider = null)
     public static string ComposeKey(int readingType, int sensorId1, int sensorId2)
         => $"{readingType}:{sensorId1}:{sensorId2}";
 
-    /// <summary>True when the last list fetch returned at least one sensor. The
-    /// vendor client keeps its last good list, so this is the one-way signal the
-    /// widget's inspector-refresh transition reads.</summary>
+    /// <summary>True while the last refreshed list held at least one sensor;
+    /// drops to false if the service disconnects or returns no sensors so widgets
+    /// can detect reconnect transitions.</summary>
     public bool HasSensorList => _sensorList is { Length: > 0 };
 
     /// <summary>Parses a key produced by <see cref="ComposeKey"/>; false for an empty/garbage value.</summary>

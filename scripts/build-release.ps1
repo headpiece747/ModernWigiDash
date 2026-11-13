@@ -32,7 +32,7 @@ $ZipDir     = Join-Path $Staging "ModernWigiDash-win-x64"
 $ZipPath    = Join-Path $Root $OutputZip
 
 # --- Pre-flight validation: check for hardcoded versions in XAML ---
-$xamlMatches = & git grep -n -E "\bv[0-9]+\.[0-9]+" -- "*.xaml" 2>$null
+$xamlMatches = & git grep -n -E "\b[vV][0-9]+\.[0-9]+" -- "*.xaml" 2>$null
 if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($xamlMatches)) {
     throw "Pre-flight failed: hardcoded version strings found in XAML markup:`n$xamlMatches"
 }
@@ -45,7 +45,7 @@ function Get-LatestReleaseVersion([string]$Repo) {
     $json = & curl.exe -f -L -sS --retry 5 --retry-all-errors --retry-delay 3 "https://api.github.com/repos/$Repo/releases/latest"
     if ($LASTEXITCODE -ne 0) { throw "Could not query latest release for $Repo" }
     $release = $json | ConvertFrom-Json
-    return $release.tag_name.TrimStart("v")
+    return $release.tag_name.TrimStart('v', 'V')
 }
 
 if (-not $SkipTelemetry) {
@@ -79,11 +79,13 @@ if (-not $SkipTelemetry) {
     catch { }
 }
 
-$Downloads = [ordered]@{
-    "LibreHardwareService.msi"             = "$LhsRelease/LibreHardwareService.msi"
+$LhsCacheFiles = [ordered]@{
+    "LibreHardwareService.msi" = "$LhsRelease/LibreHardwareService.msi"
+    "LHS-LICENSE.txt"          = "https://raw.githubusercontent.com/epinter/LibreHardwareService/main/LICENSE"
+}
+$PmCacheFiles = [ordered]@{
     $pmMsiName                             = $pmMsiUrl
     "PresentMon-$PresentMonVersion-x64.exe" = "$PmRelease/PresentMon-$PresentMonVersion-x64.exe"
-    "LHS-LICENSE.txt"                      = "https://raw.githubusercontent.com/epinter/LibreHardwareService/main/LICENSE"
     "PresentMon-LICENSE.txt"               = "https://raw.githubusercontent.com/GameTechDev/PresentMon/main/LICENSE.txt"
 }
 
@@ -116,12 +118,13 @@ $publishArgs = @(
     "-p:DebugType=None", "-p:DebugSymbols=false"
 )
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    $fileVer = ($Version -split '[-+]')[0]
     $publishArgs += "-p:InformationalVersion=$Version"
     # The csproj pins <Version>0.0.0</Version> so dev builds parse as
     # unversioned (AppVersion -> IsDevBuild -> updater off); that also pins
     # the Windows FileVersion resource to 0.0.0. Stamp it explicitly so
     # release exes show the real version in Explorer's Details tab.
-    $publishArgs += "-p:FileVersion=$Version"
+    $publishArgs += "-p:FileVersion=$fileVer"
 }
 & dotnet publish (Join-Path $Root "ModernWigiDash.App\ModernWigiDash.App.csproj") @publishArgs | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
@@ -129,7 +132,7 @@ if (-not [string]::IsNullOrWhiteSpace($Version)) {
     # Enforce the stamp: a missing FileVersion (csproj 0.0.0) shipped once
     # as a silent regression. Fail the build instead of the eyeball pass.
     $fileVersion = (Get-Item (Join-Path $publishOut "ModernWigiDash.App.exe")).VersionInfo.FileVersion
-    if ($fileVersion -ne $Version) { throw "Version stamp check failed: exe FileVersion is '$fileVersion', expected '$Version'" }
+    if ($fileVersion -ne $fileVer) { throw "Version stamp check failed: exe FileVersion is '$fileVersion', expected '$fileVer'" }
 }
 
 # --- 2. Assemble the zip root ---
@@ -142,24 +145,28 @@ Copy-Item (Join-Path $publishOut "Resources") (Join-Path $ZipDir "Resources") -R
 # --- 3. Telemetry bundle (unless skipped) ---
 if (-not $SkipTelemetry) {
     Write-Host "Downloading telemetry installers + licenses..."
-    New-Item -ItemType Directory -Path $CacheDir -Force | Out-Null
+    $lhsCacheDir = Join-Path $CacheDir "lhs-$LhsVersion"
+    $pmCacheDir  = Join-Path $CacheDir "pm-$PresentMonVersion"
+    New-Item -ItemType Directory -Path $lhsCacheDir, $pmCacheDir -Force | Out-Null
     $lhsDir = Join-Path $ZipDir "telemetry\LibreHardwareService"
     $pmDir  = Join-Path $ZipDir "telemetry\PresentMon"
     $licDir = Join-Path $ZipDir "telemetry\third-party-licenses"
     New-Item -ItemType Directory -Path $lhsDir, $pmDir, $licDir -Force | Out-Null
 
-    foreach ($name in $Downloads.Keys) {
-        $cached = Join-Path $CacheDir $name
-        Get-Download -Url $Downloads[$name] -Dest $cached
+    foreach ($name in $LhsCacheFiles.Keys) {
+        Get-Download -Url $LhsCacheFiles[$name] -Dest (Join-Path $lhsCacheDir $name)
+    }
+    foreach ($name in $PmCacheFiles.Keys) {
+        Get-Download -Url $PmCacheFiles[$name] -Dest (Join-Path $pmCacheDir $name)
     }
 
-    Copy-Item (Join-Path $CacheDir "LibreHardwareService.msi") $lhsDir
-    Copy-Item (Join-Path $CacheDir $pmMsiName) $pmDir
-    Copy-Item (Join-Path $CacheDir "PresentMon-$PresentMonVersion-x64.exe") $pmDir
-    Copy-Item (Join-Path $CacheDir "LHS-LICENSE.txt") $lhsDir
-    Copy-Item (Join-Path $CacheDir "PresentMon-LICENSE.txt") $pmDir
-    Copy-Item (Join-Path $CacheDir "LHS-LICENSE.txt") (Join-Path $licDir "LHS-LICENSE.txt")
-    Copy-Item (Join-Path $CacheDir "PresentMon-LICENSE.txt") (Join-Path $licDir "PresentMon-LICENSE.txt")
+    Copy-Item (Join-Path $lhsCacheDir "LibreHardwareService.msi") $lhsDir
+    Copy-Item (Join-Path $pmCacheDir $pmMsiName) $pmDir
+    Copy-Item (Join-Path $pmCacheDir "PresentMon-$PresentMonVersion-x64.exe") $pmDir
+    Copy-Item (Join-Path $lhsCacheDir "LHS-LICENSE.txt") $lhsDir
+    Copy-Item (Join-Path $pmCacheDir "PresentMon-LICENSE.txt") $pmDir
+    Copy-Item (Join-Path $lhsCacheDir "LHS-LICENSE.txt") (Join-Path $licDir "LHS-LICENSE.txt")
+    Copy-Item (Join-Path $pmCacheDir "PresentMon-LICENSE.txt") (Join-Path $licDir "PresentMon-LICENSE.txt")
 
     $notices = @"
 ModernWigiDash redistributes the following third-party components:
@@ -167,13 +174,13 @@ ModernWigiDash redistributes the following third-party components:
 1. LibreHardwareService  v$LhsVersion
    License: MPL-2.0
    Source:  https://github.com/epinter/LibreHardwareService
-   Files:   LibreHardwareService.msi, LICENSE (in LibreHardwareService/)
+   Files:   LibreHardwareService.msi, LHS-LICENSE.txt (in LibreHardwareService/)
 
 2. PresentMon Service    v$PresentMonVersion
    License: MIT
    Source:  https://github.com/GameTechDev/PresentMon
    Files:   $pmMsiName, PresentMon-$PresentMonVersion-x64.exe,
-            LICENSE.txt (in PresentMon/)
+            PresentMon-LICENSE.txt (in PresentMon/)
 
 Full license texts are included next to each component and in this folder.
 MPL-2.0 requires that corresponding source be made available; both components'
@@ -273,21 +280,56 @@ if (-not [string]::IsNullOrWhiteSpace($Version) -and $unpackedVersion -ne $Versi
     throw "Release package verification failed: unpacked exe FileVersion is '$unpackedVersion', expected '$Version'"
 }
 
-$unpackedResources = Join-Path $smokeDir "ModernWigiDash-win-x64\Resources"
-$unpackedReadme = Join-Path $smokeDir "ModernWigiDash-win-x64\README.txt"
-if (-not (Test-Path $unpackedResources) -or -not (Test-Path $unpackedReadme)) {
-    throw "Release package verification failed: Resources or README.txt missing from unpacked full zip!"
+$unpackedRoot = Join-Path $smokeDir "ModernWigiDash-win-x64"
+$unpackedResources = Join-Path $unpackedRoot "Resources"
+$unpackedReadme = Join-Path $unpackedRoot "README.txt"
+$unpackedLicense = Join-Path $unpackedRoot "LICENSE-ModernWigiDash.txt"
+if (-not (Test-Path $unpackedResources) -or -not (Test-Path $unpackedReadme) -or -not (Test-Path $unpackedLicense)) {
+    throw "Release package verification failed: Resources, README.txt, or LICENSE-ModernWigiDash.txt missing from unpacked full zip!"
 }
 
 if (-not $SkipTelemetry) {
-    $unpackedLhs = Join-Path $smokeDir "ModernWigiDash-win-x64\telemetry\LibreHardwareService\LibreHardwareService.msi"
-    $unpackedPm = Join-Path $smokeDir "ModernWigiDash-win-x64\telemetry\PresentMon\$pmMsiName"
-    if (-not (Test-Path $unpackedLhs) -or -not (Test-Path $unpackedPm)) {
-        throw "Release package verification failed: Bundled telemetry installers missing from unpacked full zip!"
+    $expectedTelemetryPaths = @(
+        (Join-Path $unpackedRoot "setup-telemetry.bat"),
+        (Join-Path $unpackedRoot "telemetry\LibreHardwareService\LibreHardwareService.msi"),
+        (Join-Path $unpackedRoot "telemetry\LibreHardwareService\LHS-LICENSE.txt"),
+        (Join-Path $unpackedRoot "telemetry\PresentMon\$pmMsiName"),
+        (Join-Path $unpackedRoot "telemetry\PresentMon\PresentMon-$PresentMonVersion-x64.exe"),
+        (Join-Path $unpackedRoot "telemetry\PresentMon\PresentMon-LICENSE.txt"),
+        (Join-Path $unpackedRoot "telemetry\third-party-licenses\NOTICES.txt"),
+        (Join-Path $unpackedRoot "telemetry\third-party-licenses\telemetry-versions.txt"),
+        (Join-Path $unpackedRoot "telemetry\third-party-licenses\LHS-LICENSE.txt"),
+        (Join-Path $unpackedRoot "telemetry\third-party-licenses\PresentMon-LICENSE.txt")
+    )
+    foreach ($expectedPath in $expectedTelemetryPaths) {
+        if (-not (Test-Path $expectedPath)) {
+            throw "Release package verification failed: expected telemetry asset missing from unpacked full zip: $expectedPath"
+        }
     }
 }
 
 Remove-Item $smokeDir -Recurse -Force
+
+$smokeSlimDir = Join-Path $Staging "smoke-verify-slim"
+if (Test-Path $smokeSlimDir) { Remove-Item $smokeSlimDir -Recurse -Force }
+New-Item -ItemType Directory -Path $smokeSlimDir -Force | Out-Null
+
+Expand-Archive -LiteralPath $SlimZipPath -DestinationPath $smokeSlimDir -Force
+$slimExe = Join-Path $smokeSlimDir "ModernWigiDash-win-x64\ModernWigiDash.App.exe"
+if (-not (Test-Path $slimExe)) {
+    throw "Release package verification failed: ModernWigiDash.App.exe missing from unpacked app-only zip!"
+}
+$slimVersion = (Get-Item $slimExe).VersionInfo.FileVersion
+if (-not [string]::IsNullOrWhiteSpace($Version) -and $slimVersion -ne $Version) {
+    throw "Release package verification failed: unpacked app-only exe FileVersion is '$slimVersion', expected '$Version'"
+}
+foreach ($relPath in @("Resources", "README.txt", "LICENSE-ModernWigiDash.txt")) {
+    $fullRel = Join-Path $smokeSlimDir "ModernWigiDash-win-x64\$relPath"
+    if (-not (Test-Path $fullRel)) {
+        throw "Release package verification failed: $relPath missing from unpacked app-only zip!"
+    }
+}
+Remove-Item $smokeSlimDir -Recurse -Force
 Write-Host "Release package sandbox smoke verification PASSED." -ForegroundColor Green
 
 # --- 6. Contents manifest + size ---

@@ -27,7 +27,7 @@ public class GlobalHotkeyAttachmentTests
         {
             Api = new HotkeyApi(
                 (_, id, _, _) => { RegisteredIds.Add(id); return true; },
-                (_, id, _) => UnregisteredIds.Add(id));
+                (_, id) => UnregisteredIds.Add(id));
         }
     }
 

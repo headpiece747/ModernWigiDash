@@ -24,7 +24,22 @@ internal sealed class PresentMonMetricCatalog
     private readonly IReadOnlyDictionary<int, PresentMonMetricInfo> _metrics;
 
     public PresentMonMetricCatalog(IEnumerable<PresentMonMetricInfo> metrics)
-        => _metrics = metrics.ToDictionary(m => m.Id);
+        => _metrics = BuildLookup(metrics);
+
+    private static Dictionary<int, PresentMonMetricInfo> BuildLookup(IEnumerable<PresentMonMetricInfo> metrics)
+    {
+        var lookup = new Dictionary<int, PresentMonMetricInfo>();
+        foreach (var metric in metrics)
+        {
+            if (!lookup.TryAdd(metric.Id, metric) &&
+                lookup[metric.Id].AllowedStats.Count == 0 &&
+                metric.AllowedStats.Count > 0)
+            {
+                lookup[metric.Id] = metric;
+            }
+        }
+        return lookup;
+    }
 
     public bool TryGet(int metricId, out PresentMonMetricInfo info)
     {

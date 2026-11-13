@@ -32,7 +32,7 @@ public static class SystemTelemetryPresentation
     /// <summary>The placeholder title when a snapshot is live but no sensor is selected.</summary>
     public const string NoSensorTitle = "Select a sensor";
     /// <summary>The placeholder subtitle for the no-sensor-selected state.</summary>
-    public const string NoSensorSubtitle = "Open Settings and pick a sensor reading";
+    public const string NoSensorSubtitle = "Select a reading in Widget Settings";
     /// <summary>The placeholder title when the selected sensor is absent from the snapshot.</summary>
     public const string SensorMissingTitle = "Sensor not found";
 

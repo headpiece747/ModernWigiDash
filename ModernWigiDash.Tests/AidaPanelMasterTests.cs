@@ -178,6 +178,33 @@ public sealed class AidaPanelMasterTests
         }
     }
 
+    [TestMethod]
+    public void PollOnce_RepeatedWriteFailures_ClearsRegistrationSoServiceRestartRecovers()
+    {
+        var writer = new FakeAidaMmapWriter();
+        using var master = new AidaPanelMaster(new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32)), writer, log: static _ => { });
+        Assert.IsTrue(master.EnsureRegistered());
+
+        writer.WriteResult = false;
+        master.PollOnce();
+        Assert.IsTrue(master.IsRegistered, "a single transient write failure must not drop registration");
+
+        master.PollOnce();
+        Assert.IsTrue(master.IsRegistered, "two write failures must keep registration before threshold 3");
+
+        master.PollOnce();
+        Assert.IsFalse(master.IsRegistered,
+            "three consecutive write failures mean the vendor service restarted or lost the map; registration must reset so EnsureRegistered runs again");
+        Assert.IsNull(master.TryGetPublished(),
+            "heartbeat write failure on tick 3 must abort the tick without publishing or acking");
+
+        writer.WriteResult = true;
+        master.PollOnce();
+        Assert.IsFalse(master.IsRegistered, "PollOnce stays idle until EnsureRegistered re-registers slot 0");
+        Assert.IsTrue(master.EnsureRegistered());
+        Assert.IsTrue(master.IsRegistered);
+    }
+
     private static AidaPanelMaster Create(IAidaMmapSource source, FakeAidaMmapWriter writer)
         => new(source, writer, log: static _ => { });
 

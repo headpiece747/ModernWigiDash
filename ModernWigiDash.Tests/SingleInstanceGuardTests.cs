@@ -150,6 +150,42 @@ public class SingleInstanceGuardTests
         Assert.IsFalse(guard.IsPrimary, "a second claim against a held mutex is the secondary");
     }
 
+    [TestMethod]
+    public void ConsumeAndFireActivation_AfterDispose_DoesNotThrowOrFireCallback()
+    {
+        int activations = 0;
+        var guard = new SingleInstanceGuard(() => Interlocked.Increment(ref activations),
+            InMemoryHandles(UniqueName("mutex"), UniqueName("event")));
+
+        guard.Dispose();
+
+        // Simulate an already-queued ThreadPool WaitOrTimerCallback firing cleanly after teardown.
+        guard.ConsumeAndFireActivation();
+
+        Assert.AreEqual(0, Volatile.Read(ref activations),
+            "a disposed guard must ignore late activation callbacks without throwing ObjectDisposedException");
+    }
+
+    [TestMethod]
+    public void Primary_WhenCreateEventThrows_DisposesAcquiredMutex()
+    {
+        string mutexName = UniqueName("mutex");
+        Mutex? createdMutex = null;
+        var handles = new SingleInstanceGuard.GuardHandleFactory(
+            AcquireMutex: () =>
+            {
+                createdMutex = new Mutex(initiallyOwned: false, mutexName, out bool createdNew);
+                return (createdMutex, createdNew);
+            },
+            CreateEvent: () => throw new InvalidOperationException("event creation failed"),
+            OpenEvent: () => throw new InvalidOperationException("unused"));
+
+        Assert.ThrowsExactly<InvalidOperationException>(() => new SingleInstanceGuard(() => { }, handles));
+        Assert.IsNotNull(createdMutex);
+        // Disposed Mutex throws ObjectDisposedException when accessing SafeWaitHandle/WaitOne.
+        Assert.ThrowsExactly<ObjectDisposedException>(() => createdMutex.WaitOne(0));
+    }
+
     private static string UniqueName(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
     /// <summary>In-memory handle factories over real (uniquely named)

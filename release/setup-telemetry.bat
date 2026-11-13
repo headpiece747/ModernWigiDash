@@ -13,7 +13,14 @@ rem --- Auto-elevate: if not admin, relaunch as admin (UAC prompt) ---
 net session >nul 2>&1
 if errorlevel 1 (
     echo Requesting administrator rights...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs"
+    set "WMD_SETUP=%~f0"
+    set "WMD_SETUP_DIR=%~dp0"
+    powershell -NoProfile -Command "$ErrorActionPreference = 'Stop'; Start-Process -FilePath $env:WMD_SETUP -WorkingDirectory $env:WMD_SETUP_DIR -Verb RunAs"
+    if errorlevel 1 (
+        echo Administrator elevation was cancelled or failed.
+        pause
+        exit /b 1
+    )
     exit /b 0
 )
 
@@ -35,7 +42,16 @@ if not exist "%LHS_MSI%" (
     start /wait "" msiexec.exe /i "%LHS_MSI%" /qn /norestart
     set "LHS_RC=!errorlevel!"
 )
-if "!LHS_RC!"=="0" (echo   [OK] LibreHardwareService installed) else (echo   [FAIL] LibreHardwareService - msiexec exit code !LHS_RC!)
+set "LHS_OK=0"
+if "!LHS_RC!"=="0" set "LHS_OK=1"
+if "!LHS_RC!"=="3010" set "LHS_OK=1"
+if "!LHS_RC!"=="0" (
+    echo   [OK] LibreHardwareService installed
+) else if "!LHS_RC!"=="3010" (
+    echo   [OK] LibreHardwareService installed ^(reboot recommended^)
+) else (
+    echo   [FAIL] LibreHardwareService - msiexec exit code !LHS_RC!
+)
 
 echo.
 echo Installing PresentMon Shared Service...
@@ -49,21 +65,43 @@ if not defined PM_MSI (
 ) else (
     start /wait "" msiexec.exe /i "%PM_MSI%" /qn /norestart
     set "PM_RC=!errorlevel!"
-    if not "!PM_RC!"=="0" if defined PM_BOOT if exist "%PM_BOOT%" (
+    if not "!PM_RC!"=="0" if not "!PM_RC!"=="3010" if defined PM_BOOT if exist "%PM_BOOT%" (
         echo   msiexec exit code !PM_RC! - retrying with the bootstrapper...
         start /wait "" "%PM_BOOT%" /quiet /norestart
         set "PM_RC=!errorlevel!"
     )
 )
-if "!PM_RC!"=="0" (echo   [OK] PresentMon installed) else (echo   [FAIL] PresentMon - installer exit code !PM_RC!)
+set "PM_OK=0"
+if "!PM_RC!"=="0" set "PM_OK=1"
+if "!PM_RC!"=="3010" set "PM_OK=1"
+if "!PM_RC!"=="0" (
+    echo   [OK] PresentMon installed
+) else if "!PM_RC!"=="3010" (
+    echo   [OK] PresentMon installed ^(reboot recommended^)
+) else (
+    echo   [FAIL] PresentMon - installer exit code !PM_RC!
+)
 
 echo.
-if "!LHS_RC!"=="0" if "!PM_RC!"=="0" (
-    echo Done. Both telemetry services are installed and start automatically.
-    echo Start the app and add the Hardware Monitor / FPS + Frame Time widgets.
+if "!LHS_OK!"=="1" if "!PM_OK!"=="1" (
+    if "!LHS_RC!"=="3010" if "!PM_RC!"=="3010" (
+        echo Done. Both telemetry installers requested a reboot ^(exit code 3010^).
+    ) else if "!LHS_RC!"=="3010" (
+        echo Done. LibreHardwareService requested a reboot ^(code 3010^); PresentMon installed.
+    ) else if "!PM_RC!"=="3010" (
+        echo Done. LibreHardwareService installed; PresentMon requested a reboot ^(code 3010^).
+    ) else (
+        echo Done. Both telemetry services are installed and start automatically.
+    )
+    if "!LHS_RC!"=="3010" echo Note: reboot Windows before using LibreHardwareService ^(installer requested reboot, code 3010^).
+    if "!PM_RC!"=="3010" echo Note: reboot Windows before using PresentMon ^(installer requested reboot, code 3010^).
+    echo Start the app and add the Hardware Monitor and FPS / Frame Time widgets.
 ) else (
     echo One or both installers did not complete. Re-run this script after
     echo checking any error messages above.
+    echo.
+    pause
+    exit /b 1
 )
 echo.
 pause

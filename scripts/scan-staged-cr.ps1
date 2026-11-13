@@ -29,10 +29,10 @@ $ErrorActionPreference = $prevEap
 if ($haveHead) {
     # Staged delta (add/copy/modify/rename/typechange; deletes carry no new
     # bytes).
-    $staged = @((& git -C $root diff --cached --name-only --diff-filter=ACMRT) | Where-Object { $_ })
+    $staged = @((& git -C $root -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRT) | Where-Object { $_ })
 } else {
     # First commit (no HEAD yet): the whole index is the delta.
-    $staged = @((& git -C $root ls-files) | Where-Object { $_ })
+    $staged = @((& git -C $root -c core.quotePath=false ls-files) | Where-Object { $_ })
 }
 if ($staged.Count -eq 0) {
     Write-Output 'lone-CR guard: nothing staged - ok.'
@@ -67,8 +67,8 @@ foreach ($f in $staged) {
             if ($bytes[$i] -eq 0) { $isBinary = $true; break }
         }
         if ($isBinary) { continue }
-        for ($i = 0; $i -lt $bytes.Length - 1; $i++) {
-            if ($bytes[$i] -eq 13 -and $bytes[$i + 1] -ne 10) {
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            if ($bytes[$i] -eq 13 -and ($i + 1 -ge $bytes.Length -or $bytes[$i + 1] -ne 10)) {
                 $bad += ($f + ' : lone CR at byte ' + $i)
                 break
             }

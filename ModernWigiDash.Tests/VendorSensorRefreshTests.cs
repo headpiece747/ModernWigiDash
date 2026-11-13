@@ -6,7 +6,7 @@ namespace ModernWigiDash.Tests;
 /// <summary>
 /// The vendor-sensor refresh core pinned directly: the empty-pick fallback,
 /// the unknown-key no-reading, the invalid-reading degrade, the empty-list
-/// no-reading, the 500&nbsp;ms read throttle, and the 5&nbsp;s list cadence —
+/// no-reading, the 250&nbsp;ms read throttle, and the 5&nbsp;s list cadence —
 /// all drivable through a fake <see cref="ISensorValues"/> + a fake tick, with
 /// no widget, no WPF surface, and no <see cref="VendorService"/> static.
 /// </summary>
@@ -113,10 +113,10 @@ public class VendorSensorRefreshTests
         refresh.Refresh(sensors, "0:1:0");
         int valueCallsAfterFirst = sensors.ValueCalls;
 
-        tick += 600;
+        tick += 260;
         refresh.Refresh(sensors, "0:1:0");
 
-        Assert.AreEqual(valueCallsAfterFirst + 1, sensors.ValueCalls, "a read past the 500 ms window re-reads the sensor");
+        Assert.AreEqual(valueCallsAfterFirst + 1, sensors.ValueCalls, "a read past the 250 ms window re-reads the sensor");
     }
 
     [TestMethod]

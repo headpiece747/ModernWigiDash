@@ -538,3 +538,13 @@
 2026-11-12T03:17:50Z	09e5f7c	manual	ok	0	0	ok	3026	0	ok
 2026-11-12T03:33:42Z	def2ffc	manual	ok	0	0	ok	3026	0	ok
 2026-11-12T03:53:22Z	39b692b	manual	ok	0	0	ok	3026	0	ok
+2026-11-12T13:17:17Z	369f6f4	fix crash-races aida-freeze hwinfo-dropdown - FAILED: Render_HwinfoFallbackOptions_ShowsDropdownAndStatusHint	ok	0	0	FAIL	3037	1	SKIP
+2026-11-12T13:19:38Z	369f6f4	fix crash-races aida-freeze hwinfo-dropdown	ok	0	0	ok	3038	0	ok
+2026-11-13T00:31:03Z	369f6f4	egm-review fixes - FAILED: Render_HwinfoLiveSensors_HidesWaitingStatusHint	ok	14	0	FAIL	3048	1	SKIP
+2026-11-13T00:33:49Z	369f6f4	egm-review fixes	ok	0	0	ok	3049	0	ok
+2026-11-13T12:35:07Z	369f6f4	v0.9.6 pre-release fixes	ok	0	0	ok	3062	0	ok
+2026-11-13T12:46:10Z	369f6f4	v0.9.6 final pre-release	ok	0	0	ok	3062	0	ok
+2026-11-13T13:57:14Z	369f6f4	v0.9.6 release-ready	ok	0	0	ok	3062	0	ok
+2026-11-13T22:55:43Z	369f6f4	v0.9.6 release-ready - FAILED: ConcurrentDisposeAndCallbacks_LeavesCleanDisposedStateWithZeroLeaks	ok	0	0	FAIL	3066	1	SKIP
+2026-11-13T22:58:45Z	369f6f4	v0.9.6 release-ready	ok	0	0	ok	3067	0	ok
+2026-11-13T23:44:41Z	369f6f4	v0.9.6 release-ready	ok	0	0	ok	3070	0	ok

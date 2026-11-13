@@ -214,4 +214,93 @@ public class ArtworkLoaderTests
 
         Assert.AreEqual(0, loader.RetirementSet.PendingCount);
     }
+
+    [TestMethod]
+    public async Task ConcurrentUpdatesAndDisposeAll_NeverThrowsOrLeaksBitmaps()
+    {
+        for (int i = 0; i < 20; i++)
+        {
+            var decoder = new FakeArtworkDecoder
+            {
+                Handler = () => Task.FromResult(new ArtworkDecodeResult(new SKBitmap(8, 8), false)),
+            };
+            var loader = new ArtworkLoader(decoder);
+            using var gate = new ManualResetEventSlim(false);
+
+            Task updater = Task.Run(() =>
+            {
+                gate.Wait();
+                for (int k = 0; k < 20; k++)
+                    loader.NotifySnapshotChanged(Update($"key-{i}-{k}", new FakeThumbnail()));
+            });
+            Task reader = Task.Run(() =>
+            {
+                gate.Wait();
+                for (int r = 0; r < 50; r++)
+                {
+                    _ = loader.Current;
+                    loader.RetirementSet.DisposeRetired();
+                }
+            });
+
+            gate.Set();
+            await Task.WhenAll(updater, reader);
+            loader.DisposeAll();
+            Assert.IsNull(loader.Current.Bitmap);
+            Assert.AreEqual(0, loader.RetirementSet.PendingCount);
+        }
+
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<ArtworkDecodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lateDecoder = new FakeArtworkDecoder { Handler = () => { entered.TrySetResult(); return release.Task; } };
+        var lateLoader = new ArtworkLoader(lateDecoder);
+
+        lateLoader.NotifySnapshotChanged(Update("late", new FakeThumbnail()));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        lateLoader.DisposeAll();
+        var lateBitmap = new SKBitmap(4, 4);
+        release.SetResult(new ArtworkDecodeResult(lateBitmap, false));
+
+        await TestWait.WaitUntilAsync(() => lateBitmap.Handle == IntPtr.Zero, TimeSpan.FromSeconds(5));
+        Assert.IsNull(lateLoader.Current.Bitmap);
+        Assert.AreEqual(0, lateLoader.RetirementSet.PendingCount);
+    }
+
+    [TestMethod]
+    public async Task Load_KeyAtoKeyBtoKeyA_StaleDecodeDoesNotClearActiveLoadingKey()
+    {
+        var tcs1 = new TaskCompletionSource<ArtworkDecodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs2 = new TaskCompletionSource<ArtworkDecodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs3 = new TaskCompletionSource<ArtworkDecodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        var decoder = new FakeArtworkDecoder
+        {
+            Handler = () => Interlocked.Increment(ref calls) switch
+            {
+                1 => tcs1.Task,
+                2 => tcs2.Task,
+                _ => tcs3.Task,
+            }
+        };
+        var loader = new ArtworkLoader(decoder);
+
+        loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
+        loader.NotifySnapshotChanged(Update("keyB", new FakeThumbnail()));
+        loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
+        Assert.AreEqual(3, Volatile.Read(ref calls));
+
+        // Stale v1 for keyA completes while v3 for keyA is still in flight; it must NOT clear _loadingArtworkKey.
+        var staleBitmap = new SKBitmap(4, 4);
+        tcs1.SetResult(new ArtworkDecodeResult(staleBitmap, false));
+        await TestWait.WaitUntilAsync(() => staleBitmap.Handle == IntPtr.Zero, TimeSpan.FromSeconds(5));
+
+        loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
+        Assert.AreEqual(3, Volatile.Read(ref calls), "a duplicate decode must not start while v3 for keyA is active");
+
+        tcs2.SetResult(new ArtworkDecodeResult(null, false));
+        var activeBitmap = new SKBitmap(6, 6);
+        tcs3.SetResult(new ArtworkDecodeResult(activeBitmap, false));
+        await TestWait.WaitUntilAsync(() => ReferenceEquals(loader.Current.Bitmap, activeBitmap), TimeSpan.FromSeconds(5));
+    }
 }

@@ -35,6 +35,7 @@ public sealed class WigiDashServiceClient : IDisposable
     private const long ProviderRetryIntervalMs = 5000;
 
     private readonly System.Threading.Lock _gate = new();
+    private readonly System.Threading.Lock _connectLock = new();
     private readonly Func<IWigiDashWcf> _createChannel;
     private readonly TimeProvider _clock;
     private IWigiDashWcf? _channel;
@@ -42,10 +43,6 @@ public sealed class WigiDashServiceClient : IDisposable
     private volatile bool _sensorReady;
     private DateTimeOffset _lastProviderAttemptUtc = DateTimeOffset.MinValue;
     private volatile bool _disposed;
-    private int _disposeOnce;
-
-    /// <summary>Lock-free readiness flag (the facet's IsReady is read on the UI thread).</summary>
-    private volatile bool _connected;
 
     // --- Background-refreshed cache: the UI thread never performs WCF I/O ---
     private readonly System.Threading.Lock _cacheLock = new();
@@ -102,7 +99,6 @@ public sealed class WigiDashServiceClient : IDisposable
         _clock = TimeProvider.System;
         _channel = channel;
         _sensorReady = true; // the injected channel stands in for a connected service
-        _connected = true;
         Sensors = new SensorValuesFacet(this);
     }
 
@@ -127,61 +123,49 @@ public sealed class WigiDashServiceClient : IDisposable
     /// </summary>
     public bool TryConnect()
     {
+        if (_disposed) return false;
+        EnsureConnected();
         lock (_gate)
         {
-            if (_disposed) return false;
-            EnsureConnectedLocked();
-            return _channel != null && _sensorReady;
+            return !_disposed && _channel != null && _sensorReady;
         }
     }
 
     /// <summary>
     /// (Re)opens the channel and initializes the provider when the client is not
     /// ready, throttled to one attempt per <see cref="ProviderRetryIntervalMs"/>.
-    /// The caller holds <see cref="_gate"/>. A failed leg drops the channel so
-    /// the next attempt reopens it, and never throws: the app recovers when the
-    /// vendor service starts or restarts after the app (the former one-shot
-    /// connect left the widget a placeholder until the next app launch).
+    /// Never holds <see cref="_gate"/> across WCF I/O so status checks and AIDA64
+    /// calls do not stall behind a wedged HWiNFO connect.
     /// </summary>
-    internal void EnsureConnectedLocked()
+    internal void EnsureConnected()
     {
-        if (_disposed || (_channel != null && _sensorReady))
-            return;
-
-        if (!RetryWindowElapsed())
-            return;
-        _lastProviderAttemptUtc = _clock.GetUtcNow();
-
-        try
+        lock (_connectLock)
         {
-            EnsureChannel();
-            // Dispose may have detached the channel between the entry check and
-            // EnsureChannel's own guard; there is nothing to initialize then.
-            if (_channel is null) return;
-
-            // A THROWN transport fault must reach the catch below and drop the
-            // channel: the former SafeCall wrapper swallowed it, so a faulted
-            // channel was retried in place forever and TryConnect could never
-            // reopen one (the doc promised the opposite).
-            _sensorReady = _channel.InitSensorProvider(true, true, true);
-            if (!_sensorReady)
+            IWigiDashWcf? channel = null;
+            try
             {
-                FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
+                lock (_gate)
+                {
+                    if (_disposed || (_channel != null && _sensorReady))
+                        return;
+
+                    if (!RetryWindowElapsed())
+                        return;
+                    _lastProviderAttemptUtc = _clock.GetUtcNow();
+
+                    EnsureChannelLocked();
+                    channel = _channel;
+                }
             }
-
-            // A channel opened while teardown ran is not ours to keep: close the
-            // one this attempt created instead of leaving it to the process exit.
-            if (_disposed)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                CloseChannelLocked();
+                _readFailLog.Write(() => $"vendor channel open failed: {ex.GetType().Name}: {ex.Message}");
+                DropChannelUnconditionally();
                 return;
             }
 
-            _connected = _sensorReady;
-        }
-        catch
-        {
-            CloseChannelLocked();
+            if (channel is null) return;
+            InitSensorProviderCore(channel, logNotReady: true);
         }
     }
 
@@ -191,7 +175,7 @@ public sealed class WigiDashServiceClient : IDisposable
         get { lock (_gate) return _channel != null && _sensorReady; }
     }
 
-    internal void EnsureChannel()
+    private void EnsureChannelLocked()
     {
         if (_disposed || _channel != null) return;
         _channel = _createChannel();
@@ -214,8 +198,18 @@ public sealed class WigiDashServiceClient : IDisposable
             MaxReceivedMessageSize = 20 * 1024 * 1024,
         };
         var endpoint = new EndpointAddress(EndpointAddress);
-        _factory = new ChannelFactory<IWigiDashWcf>(binding, endpoint);
-        return _factory.CreateChannel();
+        var factory = new ChannelFactory<IWigiDashWcf>(binding, endpoint);
+        try
+        {
+            var channel = factory.CreateChannel();
+            _factory = factory;
+            return channel;
+        }
+        catch
+        {
+            try { factory.Abort(); } catch { /* best-effort */ }
+            throw;
+        }
     }
 
     /// <summary>
@@ -225,49 +219,93 @@ public sealed class WigiDashServiceClient : IDisposable
     private bool RetryWindowElapsed()
         => _clock.GetUtcNow() - _lastProviderAttemptUtc >= TimeSpan.FromMilliseconds(ProviderRetryIntervalMs);
 
-    internal bool SafeCall(Func<bool> action)
-    {
-        try { return action(); }
-        catch { return false; }
-    }
-
     /// <summary>
     /// Re-initializes the shared HWiNFO provider when it has been torn down
-    /// underneath us. The caller holds <see cref="_gate"/>. Throttled.
+    /// underneath us. Serializes with <see cref="_connectLock"/> and runs WCF I/O
+    /// outside <see cref="_gate"/>. Throttled.
     /// </summary>
-    internal void ReinitSensorProviderLocked()
+    internal bool ReinitSensorProvider(IWigiDashWcf channel)
     {
-        if (_channel == null || _disposed)
-            return;
-        if (!RetryWindowElapsed())
-            return;
-        _lastProviderAttemptUtc = _clock.GetUtcNow();
-        _sensorReady = SafeCall(() => _channel.InitSensorProvider(true, true, true));
+        lock (_connectLock)
+        {
+            lock (_gate)
+            {
+                if (_disposed || !ReferenceEquals(_channel, channel))
+                    return false;
+                if (!RetryWindowElapsed())
+                    return false;
+                _lastProviderAttemptUtc = _clock.GetUtcNow();
+            }
+
+            return InitSensorProviderCore(channel, logNotReady: false);
+        }
     }
 
-    internal IReadOnlyList<VendorSensorItem>? GetRawSensorList()
+    private bool InitSensorProviderCore(IWigiDashWcf channel, bool logNotReady)
+    {
+        bool ready;
+        try
+        {
+            ready = channel.InitSensorProvider(true, true, true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _readFailLog.Write(() => $"sensor provider init failed: {ex.GetType().Name}: {ex.Message}");
+            DropFaultedChannel(channel);
+            return false;
+        }
+
+        IWigiDashWcf? orphanChannel = null;
+        ChannelFactory<IWigiDashWcf>? orphanFactory = null;
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                if (ReferenceEquals(_channel, channel))
+                    DetachChannelLocked(out orphanChannel, out orphanFactory);
+                else
+                    orphanChannel = channel;
+            }
+            else if (ReferenceEquals(_channel, channel))
+            {
+                _sensorReady = ready;
+                if (logNotReady && !ready)
+                {
+                    FileLog.Write($"{SensorInitTag} vendor service connected but no providers initialized");
+                }
+                return ready;
+            }
+        }
+
+        AbortSafely(orphanChannel, orphanFactory);
+        return false;
+    }
+
+    internal IReadOnlyList<VendorSensorItem>? GetRawSensorList(IWigiDashWcf channel)
     {
         try
         {
-            return _channel!.GetSensorList()?.ToList();
+            return channel.GetSensorList()?.ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _readFailLog.Write(() => $"sensor list read failed: {ex.GetType().Name}: {ex.Message}");
+            DropFaultedChannel(channel);
             return null;
         }
     }
 
-    internal (double Value, bool IsValid)? GetRawSensorValue(int rt, int id1, int id2)
+    internal (double Value, bool IsValid)? GetRawSensorValue(IWigiDashWcf channel, int rt, int id1, int id2)
     {
         try
         {
-            var value = _channel!.GetSensorValue(rt, id1, id2, out var isValid);
+            var value = channel.GetSensorValue(rt, id1, id2, out var isValid);
             return (value, isValid);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _readFailLog.Write(() => $"sensor value ({rt}:{id1}:{id2}) read failed: {ex.GetType().Name}: {ex.Message}");
+            DropFaultedChannel(channel);
             return null;
         }
     }
@@ -278,7 +316,7 @@ public sealed class WigiDashServiceClient : IDisposable
     /// </summary>
     internal bool TryInitAidaProvider()
     {
-        IWigiDashWcf? channel;
+        IWigiDashWcf? channel = null;
         try
         {
             // The gate covers the channel handoff only. The call itself runs
@@ -288,15 +326,18 @@ public sealed class WigiDashServiceClient : IDisposable
             lock (_gate)
             {
                 if (_disposed) return false;
-                EnsureChannel();
+                EnsureChannelLocked();
                 channel = _channel;
             }
 
-            return channel!.InitAidaProvider();
+            if (channel is null) return false;
+            bool ok = channel.InitAidaProvider();
+            return !_disposed && ok;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _readFailLog.Write(() => $"AIDA64 provider init failed: {ex.GetType().Name}: {ex.Message}");
+            DropFaultedChannel(channel);
             return false;
         }
     }
@@ -304,8 +345,8 @@ public sealed class WigiDashServiceClient : IDisposable
     /// <summary>
     /// Writes the small master-handshake bytes into the vendor's AIDA64 shared
     /// map (the header, the widget record, the heartbeat counter, the frame
-    /// ack). Never throws; a failure leaves the channel alone (a rejected write
-    /// is not a dead channel).
+    /// ack). Never throws; a logical rejection returns false cleanly, whereas a
+    /// transport fault drops the channel so the next poll can reconnect.
     /// </summary>
     internal bool TryWriteAidaMmap(int offset, byte[] buffer)
     {
@@ -320,55 +361,89 @@ public sealed class WigiDashServiceClient : IDisposable
         // this gate, and a slow AIDA write must not delay the sensor list).
         try
         {
-            return channel.WriteAidaMmap(offset, buffer);
+            bool ok = channel.WriteAidaMmap(offset, buffer);
+            return !_disposed && ok;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _readFailLog.Write(() => $"AIDA64 map write failed at {offset}: {ex.GetType().Name}: {ex.Message}");
+            DropFaultedChannel(channel);
             return false;
         }
     }
 
-    private void CloseChannelLocked()
+    private void DropChannelUnconditionally()
     {
-        if (_channel is System.ServiceModel.ICommunicationObject cc)
+        IWigiDashWcf? channel;
+        ChannelFactory<IWigiDashWcf>? factory;
+        lock (_gate)
         {
-            try { cc.Close(TimeSpan.FromSeconds(5)); }
-            catch { try { cc.Abort(); } catch { /* best-effort */ } }
+            DetachChannelLocked(out channel, out factory);
         }
+        AbortSafely(channel, factory);
+    }
+
+    private void DropFaultedChannel(IWigiDashWcf? faulted)
+    {
+        if (faulted is null) return;
+        IWigiDashWcf? channel = null;
+        ChannelFactory<IWigiDashWcf>? factory = null;
+        lock (_gate)
+        {
+            if (ReferenceEquals(_channel, faulted))
+                DetachChannelLocked(out channel, out factory);
+        }
+        AbortSafely(channel, factory);
+    }
+
+    private void DetachChannelLocked(out IWigiDashWcf? channel, out ChannelFactory<IWigiDashWcf>? factory)
+    {
+        channel = _channel;
+        factory = _factory;
         _channel = null;
-        try { _factory?.Close(); } catch { try { _factory?.Abort(); } catch { /* best-effort */ } }
         _factory = null;
         _sensorReady = false;
-        _connected = false;
+    }
+
+    private void AbortSafely(IWigiDashWcf? channel, ChannelFactory<IWigiDashWcf>? factory)
+    {
+        // Abort unconditionally: callers only close here on fault/error or teardown,
+        // where Close() could spend seconds waiting on a half-dead socket.
+        if (channel is ICommunicationObject cc)
+        {
+            try { cc.Abort(); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel abort failed: {ex.GetType().Name}"); }
+        }
+
+        if (factory is not null)
+        {
+            try { factory.Abort(); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel factory abort failed: {ex.GetType().Name}"); }
+        }
     }
 
     /// <summary>Closes the channel. The vendor's shared provider is left initialized (see the class notes).</summary>
     public void Dispose()
     {
-        // Never wait on in-flight vendor I/O: the UI thread runs this at
-        // teardown, and a background refresh holds _gate across calls whose
-        // binding allows 10 s send/receive timeouts. Detach the channel
-        // atomically and Abort it instead of Close: the graceful close can
-        // spend the 5 s CloseTimeout, and a call still in flight faults into
-        // the existing catch. Idempotent via _disposeOnce, not the gate.
-        if (Interlocked.Exchange(ref _disposeOnce, 1) != 0) return;
-        _disposed = true;
-
-        IWigiDashWcf? channel = Interlocked.Exchange(ref _channel, null);
-        ChannelFactory<IWigiDashWcf>? factory = Interlocked.Exchange(ref _factory, null);
-        _sensorReady = false;
-        _connected = false;
+        // All vendor WCF I/O runs outside _gate, so taking _gate here is
+        // sub-microsecond and atomically prevents EnsureChannelLocked() from
+        // publishing a new channel/factory after teardown detaches the old ones.
+        // Abort (never Close) runs outside the lock so UI teardown never waits.
+        IWigiDashWcf? channel;
+        ChannelFactory<IWigiDashWcf>? factory;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            DetachChannelLocked(out channel, out factory);
+        }
 
         // Deliberately NO DeInitSensorProvider here: the HWiNFO provider is
         // a shared session on the vendor service, so deinitializing it on
         // our exit would tear it down for the vendor Manager (which does
         // not re-init on demand). We leave the service's provider as it was
         // and re-initialize lazily if someone else deinits it.
-        try { (channel as ICommunicationObject)?.Abort(); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel abort failed: {ex.GetType().Name}"); }
-        try { factory?.Abort(); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { _readFailLog.Write(() => $"channel factory abort failed: {ex.GetType().Name}"); }
+        AbortSafely(channel, factory);
     }
 
     // --- Background cache (no WCF I/O on the caller's thread) ---
@@ -398,72 +473,83 @@ public sealed class WigiDashServiceClient : IDisposable
     private void RefreshCache()
     {
         IReadOnlyList<VendorSensorItem>? list = null;
+        (int ReadingType, int SensorId1, int SensorId2)[] requested = [];
         var readings = new Dictionary<(int, int, int), VendorSensorReading>();
         bool fetchFailed = false;
         try
         {
+            if (_disposed) return;
+
+            EnsureConnected();
+            IWigiDashWcf? channel;
             lock (_gate)
             {
                 if (_disposed) return;
+                channel = _channel;
+            }
+            if (channel == null)
+            {
+                fetchFailed = true;
+                return;
+            }
 
-                EnsureConnectedLocked();
-                if (_channel == null) return;
+            var now = _clock.GetUtcNow();
+            bool listStale;
+            lock (_cacheLock)
+            {
+                listStale = _cachedSensors == null || now - _cachedSensorsAtUtc >= SensorListTtl;
+            }
 
-                var now = _clock.GetUtcNow();
-                bool listStale;
-                lock (_cacheLock)
+            if (listStale)
+            {
+                var raw = GetRawSensorList(channel);
+                if (raw == null)
                 {
-                    listStale = _cachedSensors == null || now - _cachedSensorsAtUtc >= SensorListTtl;
+                    fetchFailed = true;
+                    return;
                 }
 
-                if (listStale)
+                if (raw.Count == 0)
                 {
-                    var raw = GetRawSensorList();
-                    if (raw == null)
+                    // Empty means the shared provider was torn down; re-init and re-read.
+                    if (!ReinitSensorProvider(channel))
                     {
-                        CloseChannelLocked();
                         fetchFailed = true;
                         return;
                     }
 
-                    if (raw.Count == 0)
+                    raw = GetRawSensorList(channel);
+                    if (raw == null)
                     {
-                        // Empty means the shared provider was torn down; re-init and re-read.
-                        ReinitSensorProviderLocked();
-                        raw = GetRawSensorList();
-                        if (raw == null)
-                        {
-                            CloseChannelLocked();
-                            fetchFailed = true;
-                            return;
-                        }
-                    }
-
-                    list = ProjectSensors(raw);
-                }
-
-                foreach (var key in RequestedKeys())
-                {
-                    var value = GetRawSensorValue(key.ReadingType, key.SensorId1, key.SensorId2);
-                    if (value == null)
-                    {
-                        CloseChannelLocked();
                         fetchFailed = true;
-                        break;
+                        return;
                     }
-
-                    readings[key] = new VendorSensorReading(value.Value.Value, value.Value.IsValid);
                 }
+
+                list = ProjectSensors(raw);
+            }
+
+            requested = RequestedKeys();
+            foreach (var key in requested)
+            {
+                var value = GetRawSensorValue(channel, key.ReadingType, key.SensorId1, key.SensorId2);
+                if (value == null)
+                {
+                    fetchFailed = true;
+                    break;
+                }
+
+                readings[key] = new VendorSensorReading(value.Value.Value, value.Value.IsValid);
             }
         }
-        catch
+        catch (Exception ex)
         {
             fetchFailed = true;
-            // Best-effort: a failed refresh publishes null and backs off via the TTL stamps.
+            _readFailLog.Write(() => $"sensor refresh failed: {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {
-            PublishSnapshot(list, readings, fetchFailed);
+            PublishSnapshot(list, requested, readings, fetchFailed);
             Interlocked.Exchange(ref _refreshInFlight, 0);
         }
     }
@@ -478,6 +564,7 @@ public sealed class WigiDashServiceClient : IDisposable
 
     private void PublishSnapshot(
         IReadOnlyList<VendorSensorItem>? list,
+        (int ReadingType, int SensorId1, int SensorId2)[] requested,
         IReadOnlyDictionary<(int, int, int), VendorSensorReading> readings,
         bool fetchFailed)
     {
@@ -486,16 +573,22 @@ public sealed class WigiDashServiceClient : IDisposable
             if (_disposed) return;
             var now = _clock.GetUtcNow();
 
+            if (fetchFailed)
+            {
+                // A failed refresh or lost connection: clear cached sensors and
+                // readings regardless of whether list/partial reads succeeded
+                // earlier in the same cycle, so widgets degrade to placeholder
+                // and refresh once sensors return.
+                _cachedSensors = null;
+                _cachedReadings.Clear();
+                _cachedSensorsAtUtc = now;
+                _requestedKeys.Clear();
+                return;
+            }
+
             if (list != null)
             {
                 _cachedSensors = list;
-                _cachedSensorsAtUtc = now;
-            }
-            else if (fetchFailed)
-            {
-                // A failed refresh: drop the readings so the widget degrades to
-                // its placeholder instead of showing a stale value.
-                _cachedReadings.Clear();
                 _cachedSensorsAtUtc = now;
             }
 
@@ -508,7 +601,10 @@ public sealed class WigiDashServiceClient : IDisposable
                 _cachedReadingsAtUtc = now;
             }
 
-            _requestedKeys.Clear();
+            foreach (var key in requested)
+            {
+                _requestedKeys.Remove(key);
+            }
         }
     }
 
@@ -525,7 +621,7 @@ public sealed class WigiDashServiceClient : IDisposable
                 continue;
             }
 
-            items.Add(new VendorSensorItem(s.Guid, s.Name, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit));
+            items.Add(new VendorSensorItem(s.Guid, s.Name ?? string.Empty, s.ReadingType, s.SensorId1, s.SensorId2, s.Type, s.Unit));
         }
 
         return items;
@@ -535,7 +631,7 @@ public sealed class WigiDashServiceClient : IDisposable
 
     private sealed class SensorValuesFacet(WigiDashServiceClient owner) : ISensorValues
     {
-        public bool IsReady => owner._connected;
+        public bool IsReady => owner._sensorReady;
 
         public IReadOnlyList<VendorSensorItem>? GetSensorList()
         {

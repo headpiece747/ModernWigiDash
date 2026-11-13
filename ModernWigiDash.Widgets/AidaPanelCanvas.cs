@@ -54,7 +54,7 @@ internal sealed class AidaPanelCanvas : IDisposable
         TextRenderHelper.DrawTitleSubtitlePlaceholder(
             canvas, bounds,
             "AIDA64",
-            "AIDA64 not connected",
+            "Start AIDA64 (LCD -> WigiDash) + WigiDash service",
             text, _placeholderTitlePaint, _placeholderSubPaint);
     }
 

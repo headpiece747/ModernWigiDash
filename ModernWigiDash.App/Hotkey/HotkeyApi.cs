@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace ModernWigiDash.App.Hotkey;
 
 internal delegate bool RegisterHotKeyFn(IntPtr hWnd, int id, int mod, ushort vk);
-internal delegate void UnregisterHotKeyFn(IntPtr hWnd, int id, ushort vk);
+internal delegate void UnregisterHotKeyFn(IntPtr hWnd, int id);
 
 /// <summary>
 /// The RegisterHotKey/UnregisterHotKey P/Invoke surface as an injectable
@@ -18,7 +18,9 @@ internal delegate void UnregisterHotKeyFn(IntPtr hWnd, int id, ushort vk);
 internal sealed class HotkeyApi(RegisterHotKeyFn registerHotKey, UnregisterHotKeyFn unregisterHotKey)
 {
     /// <summary>The production binding: the real P/Invoke externs.</summary>
-    public static readonly HotkeyApi Default = new(RegisterHotKeyPInvoke, UnregisterHotKeyPInvoke);
+    public static readonly HotkeyApi Default = new(
+        (hWnd, id, mod, vk) => RegisterHotKeyPInvoke(hWnd, id, mod, vk),
+        (hWnd, id) => _ = UnregisterHotKeyPInvoke(hWnd, id));
 
     internal RegisterHotKeyFn RegisterHotKey { get; } = registerHotKey;
     internal UnregisterHotKeyFn UnregisterHotKey { get; } = unregisterHotKey;
@@ -33,8 +35,9 @@ internal sealed class HotkeyApi(RegisterHotKeyFn registerHotKey, UnregisterHotKe
     // immediately, so no registration residue remains).
     [DllImport("user32.dll", EntryPoint = "RegisterHotKey", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool RegisterHotKeyPInvoke(IntPtr hWnd, int id, int fsModifiers, ushort vk);
+    private static extern bool RegisterHotKeyPInvoke(IntPtr hWnd, int id, int fsModifiers, uint vk);
 
-    [DllImport("user32.dll", EntryPoint = "UnregisterHotKey")]
-    private static extern void UnregisterHotKeyPInvoke(IntPtr hWnd, int id, ushort vk);
+    [DllImport("user32.dll", EntryPoint = "UnregisterHotKey", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKeyPInvoke(IntPtr hWnd, int id);
 }

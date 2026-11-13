@@ -20,7 +20,7 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
 {
     /// <summary>The "Sensor": which vendor sensor to display, keyed by reading type + ids.</summary>
     [WidgetProperty("Sensor", WidgetPropertyType.Choice,
-        "No HWiNFO sensors available yet. The G.SKILL WigiDash service provides the list; start it if it is not running.",
+        "No HWiNFO sensors available yet. Start the G.SKILL WigiDash service and HWiNFO if they are not running.",
         "", RequiresListedValue = true)]
     public string SensorKey { get; set; } = "";
 
@@ -29,11 +29,9 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
     // one call per render tick through the client's ISensorValues facet.
     private readonly VendorSensorRefresh _refresh = new();
 
-    // The vendor client keeps its last good sensor list, so availability is a
-    // one-way signal per instance. The inspector can be built while the cache
-    // is still cold (the first GetSensorList only schedules the fetch); the
-    // transition then asks it to rebuild with the options that arrived, so the
-    // Sensor row becomes a dropdown without the user reopening the panel.
+    // Tracks whether the last refresh observed live sensors so the inspector
+    // rebuilds when the cold cache populates or when the service reconnects
+    // after a disconnect.
     private bool _hadSensorList;
 
     /// <inheritdoc />
@@ -41,8 +39,7 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
     {
         var (accent, text) = ResolveColors();
 
-        var client = (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient
-            ?? VendorService.Instance;
+        var client = ResolveClient();
         if (client == null)
         {
             NotifySensorListChanged(false);
@@ -91,59 +88,65 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         if (!string.Equals(propertyName, nameof(SensorKey), StringComparison.Ordinal))
             return [];
 
-        var client = (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient
-            ?? VendorService.Instance;
+        var client = ResolveClient();
         var sensors = client?.Sensors.GetSensorList();
-        if (sensors == null)
-            return [];
+
+        bool hasLiveSensors = sensors is { Count: > 0 };
 
         var options = new List<WidgetPropertyOption>
         {
             // The refresh core falls back to the first sensor when the key is
-            // empty or unparseable (the empty-pick rule). Naming that fallback
-            // as an option makes a fresh widget's combo show the behavior it
-            // actually renders, instead of a blank selection beside a live
-            // reading, and gives a way back to it after a pick.
-            new("", "Automatic (first available sensor)"),
+            // empty or unparseable (the empty-pick rule). Keep this option
+            // present even while the vendor cache is cold or offline so the
+            // Sensor dropdown never vanishes in settings.
+            new("", "Automatic (first available sensor)") { IsFallback = !hasLiveSensors },
         };
 
         // A persisted key the current list no longer contains (a service
-        // restart, a renamed sensor, or text the old free-form editor allowed)
-        // would otherwise render as a blank combo, and the old text box at
-        // least showed the value. Keep it visible and selectable so the user
-        // can see what was stored before picking again.
+        // restart, a renamed sensor, an offline cache, or text the old free-form
+        // editor allowed) must stay visible and selectable so the user can see
+        // what was stored or switch back to Automatic.
         bool pickedKeyParsed = VendorSensorRefresh.TryParseKey(SensorKey, out int pickedType, out int pickedId1, out int pickedId2);
-        bool pickedKeyPresent = pickedKeyParsed
+        bool pickedKeyPresent = sensors != null
+            && pickedKeyParsed
             && sensors.Any(s => s.ReadingType == pickedType && s.SensorId1 == pickedId1 && s.SensorId2 == pickedId2);
         if (!string.IsNullOrEmpty(SensorKey) && !pickedKeyPresent)
         {
-            options.Add(new WidgetPropertyOption(SensorKey, $"{SensorKey} (not available)"));
+            options.Add(new WidgetPropertyOption(SensorKey, $"{SensorKey} (not available)") { IsFallback = !hasLiveSensors });
         }
 
-        options.AddRange(sensors.Select(s =>
+        if (sensors != null)
         {
-            var source = string.IsNullOrWhiteSpace(s.Type) ? null : s.Type;
-            var label = source == null ? s.Name : $"{s.Name} ({source})";
-            // The vendor's Name/Type are untrusted and only per-string quota
-            // bounded (8 KB); bound the UI label too.
-            if (label.Length > 128)
+            options.AddRange(sensors.Select(s =>
             {
-                label = label[..128];
-            }
+                var name = s.Name ?? string.Empty;
+                var source = string.IsNullOrWhiteSpace(s.Type) ? null : s.Type;
+                var label = source == null ? name : $"{name} ({source})";
+                // The vendor's Name/Type are untrusted and only per-string quota
+                // bounded (8 KB); bound the UI label too.
+                if (label.Length > 128)
+                {
+                    label = label[..128];
+                }
 
-            return new WidgetPropertyOption(VendorSensorRefresh.ComposeKey(s.ReadingType, s.SensorId1, s.SensorId2), label);
-        }));
+                return new WidgetPropertyOption(VendorSensorRefresh.ComposeKey(s.ReadingType, s.SensorId1, s.SensorId2), label);
+            }));
+        }
 
         return options;
     }
 
     private void NotifySensorListChanged(bool hasList)
     {
-        // One-way: the vendor client keeps its last good list, so only the
-        // first arrival is a reason to rebuild the inspector. Latching (rather
-        // than edge-toggling) also keeps a teardown-time null client from
-        // requesting a rebuild of a panel that is going away.
-        if (!hasList || _hadSensorList)
+        if (!hasList)
+        {
+            // Reset so a service disconnect + reconnect refreshes the dropdown
+            // once sensors return, without flashing the inspector on loss.
+            _hadSensorList = false;
+            return;
+        }
+
+        if (_hadSensorList)
         {
             return;
         }
@@ -159,5 +162,9 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
             "HWiNFO",
             serviceReady ? "No sensor data" : "Vendor service not connected",
             ColorOf("#9CA3AF", SKColors.Gray));
+
+    private ModernWigiDash.Hardware.Service.WigiDashServiceClient? ResolveClient()
+        => (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient
+            ?? VendorService.Instance;
 
 }

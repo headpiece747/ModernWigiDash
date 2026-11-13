@@ -10,6 +10,7 @@ using ModernWigiDash.App.Inspector;
 namespace ModernWigiDash.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public class InspectorPanelRendererTests
 {
     [TestMethod]
@@ -373,7 +374,155 @@ public class InspectorPanelRendererTests
                 VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text == RequiredChoiceWidget.Hint),
                 "the empty state must show the widget's hint");
             Assert.AreEqual(0, VisualTree.FindDescendants<TextBox>(target).Count(), "no free-text editor for a coded value");
-            Assert.AreEqual(0, VisualTree.FindDescendants<ComboBox>(target).Count(), "no combo without options");
+            var placeholderCombo = VisualTree.FindDescendants<ComboBox>(target).Single();
+            Assert.IsFalse(placeholderCombo.IsEnabled, "empty required Choice must keep a disabled placeholder dropdown");
+            Assert.AreEqual("No options available", ((WidgetPropertyOption)placeholderCombo.Items[0]!).DisplayName);
+        });
+    }
+
+    [TestMethod]
+    public void Render_HwinfoFallbackOptions_ShowsDropdownAndStatusHint()
+    {
+        StaRunner.Run(() =>
+        {
+            ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            try
+            {
+                var widget = new HwinfoWidget();
+                var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO Sensor", ActiveInstance = widget };
+                var target = new StackPanel();
+                var callbacks = new InspectorCallbacks
+                {
+                    TryFindResource = _ => null,
+                    ApplyInspectorPropertyValue = (_, _) => { },
+                    ShowIconSelectorPopup = (_, _, _) => { },
+                    AttachDropdownWithinWindow = _ => { },
+                    BrowseFile = (_, _) => null,
+                    BrowseFolder = _ => null,
+                };
+
+                InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+                var sensorCombo = VisualTree.FindDescendants<ComboBox>(target)
+                    .FirstOrDefault(c => c.IsEnabled
+                        && c.ItemsSource is IEnumerable<WidgetPropertyOption> opts
+                        && opts.Any(o => o.DisplayName == "Automatic (first available sensor)"));
+                Assert.IsNotNull(sensorCombo,
+                    "HWiNFO settings must still present an active Sensor dropdown while waiting for the vendor list");
+                Assert.IsTrue(
+                    VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text.Contains("No HWiNFO sensors available yet", StringComparison.Ordinal)),
+                    "the hint beneath the dropdown must still explain why no live sensors appear yet");
+            }
+            finally
+            {
+                ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            }
+        });
+    }
+
+    [TestMethod]
+    public void Render_HwinfoOfflinePersistedKey_PreservesKeyDropdownAndHint()
+    {
+        StaRunner.Run(() =>
+        {
+            ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            try
+            {
+                var widget = new HwinfoWidget { SensorKey = "6:12:3" };
+                var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO Sensor", ActiveInstance = widget };
+                var target = new StackPanel();
+                var callbacks = new InspectorCallbacks
+                {
+                    TryFindResource = _ => null,
+                    ApplyInspectorPropertyValue = (_, _) => { },
+                    ShowIconSelectorPopup = (_, _, _) => { },
+                    AttachDropdownWithinWindow = _ => { },
+                    BrowseFile = (_, _) => null,
+                    BrowseFolder = _ => null,
+                };
+
+                InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+                var sensorCombo = VisualTree.FindDescendants<ComboBox>(target)
+                    .FirstOrDefault(c => c.IsEnabled
+                        && c.ItemsSource is IEnumerable<WidgetPropertyOption> opts
+                        && opts.Any(o => o.Value == "6:12:3"));
+                Assert.IsNotNull(sensorCombo, "offline inspector must still display the stored HWiNFO key in the dropdown");
+                Assert.IsTrue(
+                    VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text.Contains("No HWiNFO sensors available yet", StringComparison.Ordinal)),
+                    "offline persisted-key inspector must keep the status hint");
+            }
+            finally
+            {
+                ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            }
+        });
+    }
+
+    [TestMethod]
+    public void Render_HwinfoLiveSensors_HidesWaitingStatusHint()
+    {
+        StaRunner.Run(() =>
+        {
+            using var client = new ModernWigiDash.Hardware.Service.WigiDashServiceClient(new StaticSensorValues());
+            ModernWigiDash.Hardware.Service.VendorService.SetInstance(client);
+            try
+            {
+                var widget = new HwinfoWidget();
+                var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO Sensor", ActiveInstance = widget };
+                var target = new StackPanel();
+                var callbacks = new InspectorCallbacks
+                {
+                    TryFindResource = _ => null,
+                    ApplyInspectorPropertyValue = (_, _) => { },
+                    ShowIconSelectorPopup = (_, _, _) => { },
+                    AttachDropdownWithinWindow = _ => { },
+                    BrowseFile = (_, _) => null,
+                    BrowseFolder = _ => null,
+                };
+
+                InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+                var sensorCombo = VisualTree.FindDescendants<ComboBox>(target)
+                    .FirstOrDefault(c => c.IsEnabled
+                        && c.ItemsSource is IEnumerable<WidgetPropertyOption> opts
+                        && opts.Any(o => o.Value == "0:0:0" && o.DisplayName == "CPU Temp (CPU)"));
+                Assert.IsNotNull(sensorCombo, "live sensors must populate the Sensor dropdown");
+                Assert.IsFalse(
+                    VisualTree.FindDescendants<TextBlock>(target).Any(t => t.Text.Contains("No HWiNFO sensors available yet", StringComparison.Ordinal)),
+                    "waiting hint must disappear once live sensors are present");
+            }
+            finally
+            {
+                ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+            }
+        });
+    }
+
+    [TestMethod]
+    public void Render_RequiredChoiceWithFallbackOnlyAndNoDescription_ShowsDefaultHint()
+    {
+        StaRunner.Run(() =>
+        {
+            var widget = new UndescribedFallbackChoiceWidget();
+            var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO", ActiveInstance = widget };
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+
+            Assert.IsTrue(
+                VisualTree.FindDescendants<TextBlock>(target).Any(t =>
+                    t.Text == "No options available yet. Connect the data source, then select this widget again."),
+                "fallback-only required Choice with no Description must still show the default unavailable-options hint");
         });
     }
 
@@ -464,6 +613,28 @@ public class InspectorPanelRendererTests
         public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName) => [];
 
         public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
+    private sealed class UndescribedFallbackChoiceWidget : ModernWidgetBase, IWidgetPropertyOptionsProvider
+    {
+        [WidgetProperty("Sensor", WidgetPropertyType.Choice, "", "", RequiresListedValue = true)]
+        public string SensorKey { get; set; } = "";
+
+        public IReadOnlyList<WidgetPropertyOption> GetPropertyOptions(string propertyName)
+            => [new("", "Automatic") { IsFallback = true }];
+
+        public override void Render(SkiaSharp.SKCanvas canvas, SkiaSharp.SKRect bounds) { }
+    }
+
+    private sealed class StaticSensorValues : ModernWigiDash.Hardware.Service.ISensorValues
+    {
+        public bool IsReady => true;
+
+        public IReadOnlyList<ModernWigiDash.Hardware.Service.VendorSensorItem>? GetSensorList()
+            => [new ModernWigiDash.Hardware.Service.VendorSensorItem(Guid.NewGuid(), "CPU Temp", 0, 0, 0, "CPU", "C")];
+
+        public ModernWigiDash.Hardware.Service.VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2)
+            => new(45.0, true);
     }
 
     private sealed class BooleanWidget : ModernWidgetBase

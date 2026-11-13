@@ -64,6 +64,124 @@ public class UpdateScriptTests
         StringAssert.Contains(File.ReadAllText(logPath), "another updater is already running");
     }
 
+    [TestMethod]
+    public void ApplyUpdateCmd_HandlesSpacesApostrophesAmpersandsAndTrailingBackslash()
+    {
+        const string fakeExe = "WmdTestApp.exe";
+        string root = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"), "Program Files", "O'Connor & Sons");
+        string install = Path.Combine(root, "install app");
+        string stage = Path.Combine(root, "staged build");
+        Directory.CreateDirectory(install);
+        Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64"));
+        File.WriteAllText(Path.Combine(install, fakeExe), "old-exe");
+        File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe), "new-exe");
+        string cmdPath = WriteCmd(root);
+        string customLog = Path.Combine(root, "logs & notes", "O'Connor.log");
+
+        // Pass installDir WITH trailing separator (exact AppContext.BaseDirectory shape)
+        // and explicit 4th/5th args matching elevated re-invocation.
+        string installWithSlash = install + Path.DirectorySeparatorChar;
+        var psi = new ProcessStartInfo("cmd.exe",
+            $"/S /C \"\"{cmdPath}\" \"{installWithSlash}\" \"{stage}\" {fakeExe} \"\" \"{customLog}\"\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var proc = Process.Start(psi)!;
+        string output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+        Assert.IsTrue(proc.WaitForExit(30_000), $"updater timed out; output: {output}");
+
+        Assert.AreEqual(0, proc.ExitCode, $"updater failed ({proc.ExitCode}): {output}");
+        Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, fakeExe)));
+        Assert.IsTrue(File.Exists(customLog), "explicit 5th log path arg must be honored");
+        StringAssert.Contains(File.ReadAllText(customLog), "swap complete");
+    }
+
+    [TestMethod]
+    public void ApplyUpdateCmd_ElevatedGuardStopsRecursionWhenStillUnwritable()
+    {
+        const string fakeExe = "WmdTestApp.exe";
+        string root = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string missingInstall = Path.Combine(root, "missing-install");
+        string stage = Path.Combine(root, "staged");
+        string cmdPath = WriteCmd(root);
+        string customLog = Path.Combine(root, "custom-elevated.log");
+
+        var psi = new ProcessStartInfo("cmd.exe",
+            $"/S /C \"\"{cmdPath}\" \"{missingInstall}\" \"{stage}\" {fakeExe} elevated \"{customLog}\"\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var proc = Process.Start(psi)!;
+        string output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+        Assert.IsTrue(proc.WaitForExit(15_000), $"elevated guard timed out; output: {output}");
+
+        Assert.AreEqual(5, proc.ExitCode, "already-elevated failure must exit 5 instead of looping RunAs");
+        StringAssert.Contains(File.ReadAllText(customLog), "even after elevation");
+    }
+
+    [TestMethod]
+    public void ApplyUpdateCmd_ElevateBlockBuildsValidEnvQuotedArgsWithoutSingleQuoteBreakage()
+    {
+        const string fakeExe = "WmdTestApp.exe";
+        string root = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"), "O'Connor's Folder");
+        string install = Path.Combine(root, "Program Files", "ModernWigiDash");
+        string stage = Path.Combine(root, "staged");
+        Directory.CreateDirectory(install);
+        Directory.CreateDirectory(Path.Combine(stage, "ModernWigiDash-win-x64"));
+        File.WriteAllText(Path.Combine(install, fakeExe), "old-exe");
+        File.WriteAllText(Path.Combine(stage, "ModernWigiDash-win-x64", fakeExe), "new-exe");
+        string cmdPath = WriteCmd(root);
+        string script = File.ReadAllText(cmdPath);
+
+        Assert.IsFalse(script.Contains("'%~1'"), "must not single-quote %~1 (breaks apostrophe paths in PowerShell)");
+        Assert.IsTrue(script.Contains("$env:WMD_CMD") && script.Contains("$env:WMD_INST") && script.Contains("$env:WMD_LOG"),
+            "elevation must pass arguments via environment variables");
+
+        // Exercise the exact PowerShell [char]34 quoting formula without -Verb RunAs
+        // so apostrophes, spaces, and 5th log arg are verified end-to-end in cmd.exe.
+        string customLog = Path.Combine(root, "O'Connor update.log");
+        var psi = new ProcessStartInfo("powershell.exe",
+            "-NoProfile -Command \"$ErrorActionPreference = 'Stop'; $q = [char]34; $arg = '/S /c ' + $q + $q + $env:WMD_CMD + $q + ' ' + $q + $env:WMD_INST + $q + ' ' + $q + $env:WMD_STG + $q + ' ' + $q + $env:WMD_EXE + $q + ' elevated ' + $q + $env:WMD_LOG + $q + $q; $p = Start-Process -FilePath $env:ComSpec -ArgumentList $arg -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        psi.Environment["WMD_CMD"] = cmdPath;
+        psi.Environment["WMD_INST"] = install;
+        psi.Environment["WMD_STG"] = stage;
+        psi.Environment["WMD_EXE"] = fakeExe;
+        psi.Environment["WMD_LOG"] = customLog;
+
+        using var proc = Process.Start(psi)!;
+        string output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+        Assert.IsTrue(proc.WaitForExit(30_000), $"PowerShell cmd quoting test timed out; output: {output}");
+
+        Assert.AreEqual(0, proc.ExitCode, $"PowerShell quoting failed ({proc.ExitCode}): {output}");
+        Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, fakeExe)));
+        StringAssert.Contains(File.ReadAllText(customLog), "swap complete");
+    }
+
+    [TestMethod]
+    public void ApplyUpdateCmd_StaleOldExeLeftBehind_StillSwapsNewExeCleanly()
+    {
+        const string fakeExe = "WmdTestApp.exe";
+        (string root, string install, string stage) = Arrange(fakeExe);
+        File.WriteAllText(Path.Combine(install, fakeExe + ".old"), "stale-old-exe");
+        string cmdPath = WriteCmd(root);
+
+        (int exit, string output, _) = Run(cmdPath, install, stage, fakeExe);
+
+        Assert.AreEqual(0, exit, $"updater failed ({exit}): {output}");
+        Assert.AreEqual("new-exe", File.ReadAllText(Path.Combine(install, fakeExe)));
+        Assert.IsFalse(File.Exists(Path.Combine(install, fakeExe + ".old")));
+    }
+
     private static (string Root, string Install, string Stage) Arrange(string fakeExe)
     {
         string root = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));

@@ -20,9 +20,10 @@ public partial class App : Application
     public App()
     {
         // Logs live next to the profile, never next to the exe: a Program
-        // Files install is read-only for standard users, and a single-file
-        // host's BaseDirectory is the extraction dir under %TEMP%. Both paths
-        // are pinned here before the first write below, in the ONE state
+        // Files install is read-only for standard users, and keeping user state
+        // decoupled from BaseDirectory (where the executable lives) keeps all
+        // installs clean and redirectable. Both paths are pinned here before the
+        // first write below, in the ONE state
         // directory every user-data file shares (UserStateDirectory) — the
         // profile, the settings and the theme resolve it too, so a test host
         // that rebinds that single seam redirects this whole surface instead

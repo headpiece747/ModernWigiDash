@@ -26,8 +26,8 @@ ModernWigiDash — G.Skill WigiDash widget stack
    No. Everything works with just the app:
      - Clock, Stopwatch & Timer, Audio Visualizer, Now Playing, Twitch, Hotkey,
        Stock & Crypto, Picture & GIF Viewer, Weather Forecast, Calendar, Text,
-       Steam Library — all fine.
-     - Three widgets need a background service:
+       Steam Library, To-Do Companion — all fine.
+     - Four widgets need a background service:
          Hardware Monitor   <- needs LibreHardwareService
          FPS / Frame Time   <- needs PresentMon Service
          HWiNFO Sensor      <- needs the vendor's WigiDash service, which the
@@ -42,10 +42,31 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 == First run ==
 
-  - Add widgets: click a page in the editor, pick widgets from the catalog,
-    drag / resize / rotate, and press the checkmark to save.
+  - Turn on Edit Mode in the app bar to add widgets from the catalog, drag /
+    resize / rotate them, or change page tabs — changes save automatically.
+  - Pick a widget on the canvas to configure its options in Widget Settings.
   - Swipe left/right on the display to switch pages.
-  - Toggle the layout editor on/off from the app window.
+
+== What's new in v0.9.6 ==
+
+  - Telemetry & widget responsiveness:
+      * AIDA64 Panel initializes off the UI thread so adding or restarting
+        the widget never freezes the app.
+      * HWiNFO Sensor keeps its live sensor dropdown in sync and surfaces an
+        automatic first-sensor fallback plus clearer setup guidance.
+  - Stability & crash fixes:
+      * Now Playing (SMTC) synchronizes session callbacks, COM errors, and
+        teardown so WinRT media transitions cannot crash or leak handlers.
+      * PresentMon introspection guards null pointers and duplicate metric IDs.
+      * Vendor sensor cache clears stale list/readings atomically on failure;
+        single-instance startup failure releases its mutex cleanly.
+  - In-app updater & telemetry setup reliability:
+      * Updater normalizes trailing path separators, cleans partial stages on
+        error, allows overwrites on retry, preserves paths containing spaces or
+        apostrophes across UAC, forwards the user log path, and stops after one
+        failed elevation attempt.
+      * setup-telemetry.bat handles reboot-recommended MSI exit code 3010 and
+        apostrophes in folder paths.
 
 == What's new in v0.9.5 ==
 
@@ -162,18 +183,21 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
   Profile + settings:  %LOCALAPPDATA%\ModernWigiDash\
   Theme:               app_theme.json  (same folder)
-  Logs:                display_device.log + crash.log  (same folder)
+  Logs:                display_device.log + crash.log + updates\update.log
   Twitch tokens:       DPAPI-encrypted, same folder (keyed to your Windows user)
   Reset:               close the app, delete that folder, relaunch.
 
 == Troubleshooting ==
 
-  "Display not connected" in the app bar?
-    - The display must be plugged in BEFORE the app starts.
-    - It needs the WinUSB driver bound. The vendor's WigiDash software
-      installs it; otherwise bind it with Zadig:
+  USB status shows "No display", "In use", or "Not responding"?
+    The header status pill retries automatically in the background (5 s to 2 min):
+    - "No display": plug the display in (it will connect on the next retry).
+      If this is a fresh setup without G.SKILL's software, bind WinUSB via Zadig:
         Device:  USB\VID_28DA&PID_EF01  ->  Driver: WinUSB  ->  Replace.
-    - Unplug / replug after installing the driver, then restart the app.
+    - "In use": another program (such as G.SKILL's WigiDash Manager) holds the
+      display. Close it and the app will reconnect, or replug the USB cable.
+    - "Not responding": unplug and replug the display; if it persists,
+      check %LOCALAPPDATA%\ModernWigiDash\display_device.log.
 
   Windows SmartScreen shows "Windows protected your PC"?
     The release exe is unsigned. Click  More info -> Run anyway.
@@ -185,10 +209,18 @@ ModernWigiDash — G.Skill WigiDash widget stack
 
 == Updating ==
 
-  The app's built-in updater uses the separate app-only zip; never
-  use that artifact for a fresh install (it has no telemetry installers).
-  Download the new zip, unzip over the old folder (or delete it), and
-  re-run setup-telemetry.bat once. Profiles and settings are kept.
+  In-app updater (recommended): when an update is found, an amber arrow button
+  appears in the header. Click it to download; once ready it turns green
+  ("Restart to apply" tooltip). Click it and choose OK to close and update in
+  place (profiles and theme are kept). If the app is in a protected folder
+  such as Program Files, Windows will prompt for administrator permission
+  (Windows Command Processor UAC) right after the app closes; declining it
+  cancels the swap (see %LOCALAPPDATA%\ModernWigiDash\updates\update.log).
+
+  Manual update: download the full zip (never the separate app-only zip for a
+  fresh install — it has no telemetry installers), unzip into a clean folder (or
+  overwrite ModernWigiDash.App.exe and Resources/), and re-run
+  setup-telemetry.bat once if telemetry components changed.
 
 == Uninstalling ==
 

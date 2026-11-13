@@ -49,10 +49,10 @@ $ErrorActionPreference = $prevEap
 if ($haveHead) {
     # Staged delta (add/copy/modify/rename/typechange; deletes carry no new
     # bytes, but a rename-in still names the target, so ACMRT covers it).
-    $staged = @((& git -C $root diff --cached --name-only --diff-filter=ACMRT) | Where-Object { $_ })
+    $staged = @((& git -C $root -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRT) | Where-Object { $_ })
 } else {
     # First commit (no HEAD yet): the whole index is the delta.
-    $staged = @((& git -C $root ls-files) | Where-Object { $_ })
+    $staged = @((& git -C $root -c core.quotePath=false ls-files) | Where-Object { $_ })
 }
 if ($staged.Count -eq 0) {
     Write-Output 'user-data guard: nothing staged - ok.'
@@ -66,7 +66,7 @@ foreach ($f in $staged) {
     $base = ($norm -split '/')[-1]
     $hit = $false
     foreach ($n in $blockedNames) {
-        if ($base -eq $n) { $hit = $true; break }
+        if ($base -ieq $n) { $hit = $true; break }
     }
     if (-not $hit) {
         foreach ($s in $blockedPrefixes) {
