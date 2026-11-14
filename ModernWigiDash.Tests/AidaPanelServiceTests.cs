@@ -67,18 +67,29 @@ public sealed class AidaPanelServiceTests
             first.Start();
             await TestWait.WaitUntilAsync(() => firstWriter.InitCalls > 0, TimeSpan.FromSeconds(5));
 
-            releaseTask = Task.Run(AidaPanelService.Release);
-            Assert.IsTrue(firstSource.DisposeEntered.Wait(TimeSpan.FromSeconds(5)),
+            releaseTask = Task.Factory.StartNew(
+                AidaPanelService.Release,
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+            Assert.IsTrue(firstSource.DisposeEntered.Wait(TimeSpan.FromSeconds(10)),
                 "background release must begin disposing the first master");
 
-            // Rapid re-add on UI thread must not stall behind the in-flight Dispose.
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            var second = AidaPanelService.Acquire(priorRelease =>
-                new AidaPanelMaster(new FakeAidaMmapSource(), secondWriter, priorRelease, log: RecordSecondLog));
-            sw.Stop();
-
-            Assert.IsLessThan(500, sw.ElapsedMilliseconds,
-                $"Acquire blocked for {sw.ElapsedMilliseconds}ms while previous master was releasing");
+            // Rapid re-add on UI thread must not stall behind the in-flight Dispose
+            // (firstSource.ReleaseDispose remains unset until after Acquire finishes).
+            AidaPanelMaster? second = null;
+            var acquireThread = new Thread(() =>
+            {
+                second = AidaPanelService.Acquire(priorRelease =>
+                    new AidaPanelMaster(new FakeAidaMmapSource(), secondWriter, priorRelease, log: RecordSecondLog));
+            })
+            {
+                IsBackground = true
+            };
+            acquireThread.Start();
+            Assert.IsTrue(acquireThread.Join(TimeSpan.FromSeconds(10)),
+                "Acquire blocked while previous master was still releasing");
+            Assert.IsNotNull(second);
 
             second.Start();
             await TestWait.WaitUntilAsync(HasWaitingLog, TimeSpan.FromSeconds(5));

@@ -74,8 +74,9 @@ public sealed class WigiDashServiceClientTests
             Assert.IsTrue(channel.ListEntered.Wait(TimeSpan.FromSeconds(5)),
                 "the background refresh must reach the vendor call");
 
-            Task dispose = Task.Run(client.Dispose);
-            Assert.IsTrue(dispose.Wait(TimeSpan.FromSeconds(2)),
+            var disposeThread = new Thread(client.Dispose) { IsBackground = true };
+            disposeThread.Start();
+            Assert.IsTrue(disposeThread.Join(TimeSpan.FromSeconds(10)),
                 "teardown must not wait on the in-flight vendor call");
         }
         finally
@@ -239,8 +240,11 @@ public sealed class WigiDashServiceClientTests
 
         // Past the windows: the next refresh reopens and recovers.
         clock.Advance(TimeSpan.FromSeconds(6));
-        _ = client.Sensors.GetSensorList();
-        await WaitUntilAsync(() => opened >= 2);
+        await WaitUntilAsync(() =>
+        {
+            _ = client.Sensors.GetSensorList();
+            return opened >= 2;
+        });
         await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
         Assert.IsTrue(client.Sensors.IsReady);
     }

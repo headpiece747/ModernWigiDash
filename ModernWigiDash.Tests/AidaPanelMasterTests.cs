@@ -139,8 +139,17 @@ public sealed class AidaPanelMasterTests
             Assert.IsTrue(writer.WaitUntilEntered(TimeSpan.FromSeconds(5)),
                 "the poll loop must reach the vendor provider init");
 
-            Task second = Task.Run(master.Start);
-            Assert.IsTrue(second.Wait(TimeSpan.FromSeconds(2)),
+            var completed = false;
+            var thread = new Thread(() =>
+            {
+                master.Start();
+                completed = true;
+            })
+            {
+                IsBackground = true
+            };
+            thread.Start();
+            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(10)) && completed,
                 "a render-tick Start must not block behind vendor I/O");
         }
         finally

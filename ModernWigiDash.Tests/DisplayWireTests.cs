@@ -9,12 +9,14 @@ public sealed class DisplayWireTests
     public void Release_ConcurrentTransfers_NeverDisposesWhileTransferActiveOrRunsOnDisposedBackend()
     {
         using var wire = new DisplayWire();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource();
+        using var workerStarted = new ManualResetEventSlim(false);
         int uafViolations = 0;
         int transfersExecuted = 0;
 
         var transferThread = Task.Run(() =>
         {
+            workerStarted.Set();
             byte[] buf = new byte[8];
             while (!cts.IsCancellationRequested && Volatile.Read(ref uafViolations) == 0)
             {
@@ -25,6 +27,8 @@ public sealed class DisplayWireTests
             }
         });
 
+        Assert.IsTrue(workerStarted.Wait(TimeSpan.FromSeconds(5)));
+
         for (int i = 0; i < 400 && Volatile.Read(ref uafViolations) == 0; i++)
         {
             var backend = new UseAfterFreeProbeBackend(
@@ -32,6 +36,16 @@ public sealed class DisplayWireTests
                 () => Interlocked.Increment(ref transfersExecuted));
             wire.AdoptLive(backend);
             Thread.SpinWait(50);
+            wire.Release();
+        }
+
+        if (Volatile.Read(ref transfersExecuted) == 0 && Volatile.Read(ref uafViolations) == 0)
+        {
+            var probe = new UseAfterFreeProbeBackend(
+                () => Interlocked.Increment(ref uafViolations),
+                () => Interlocked.Increment(ref transfersExecuted));
+            wire.AdoptLive(probe);
+            SpinWait.SpinUntil(() => Volatile.Read(ref transfersExecuted) > 0, TimeSpan.FromSeconds(5));
             wire.Release();
         }
 
@@ -48,12 +62,14 @@ public sealed class DisplayWireTests
     public void AdoptAndAbandon_ConcurrentTransfers_DrainsDisplacedAndAbandonedBackendsSafely()
     {
         using var wire = new DisplayWire();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource();
+        using var workerStarted = new ManualResetEventSlim(false);
         int uafViolations = 0;
         int transfersExecuted = 0;
 
         var transferThread = Task.Run(() =>
         {
+            workerStarted.Set();
             byte[] buf = new byte[8];
             while (!cts.IsCancellationRequested && Volatile.Read(ref uafViolations) == 0)
             {
@@ -61,6 +77,8 @@ public sealed class DisplayWireTests
                 wire.RunTracked(b => b?.ControlOut(0x02, 0, buf) ?? false);
             }
         });
+
+        Assert.IsTrue(workerStarted.Wait(TimeSpan.FromSeconds(5)));
 
         for (int i = 0; i < 250 && Volatile.Read(ref uafViolations) == 0; i++)
         {
@@ -81,6 +99,16 @@ public sealed class DisplayWireTests
             wire.AbandonAttempt(unadoptedLocal);
             Assert.IsFalse(replacement.IsOpen, "AbandonAttempt must dispose the currently adopted backend");
             Assert.IsFalse(unadoptedLocal.IsOpen, "AbandonAttempt must dispose an unadopted local handle too");
+        }
+
+        if (Volatile.Read(ref transfersExecuted) == 0 && Volatile.Read(ref uafViolations) == 0)
+        {
+            var probe = new UseAfterFreeProbeBackend(
+                () => Interlocked.Increment(ref uafViolations),
+                () => Interlocked.Increment(ref transfersExecuted));
+            wire.Adopt(probe);
+            SpinWait.SpinUntil(() => Volatile.Read(ref transfersExecuted) > 0, TimeSpan.FromSeconds(5));
+            wire.Release();
         }
 
         cts.Cancel();

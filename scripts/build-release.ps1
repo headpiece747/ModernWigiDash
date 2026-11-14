@@ -276,8 +276,8 @@ if (-not (Test-Path $unpackedExe)) {
 }
 
 $unpackedVersion = (Get-Item $unpackedExe).VersionInfo.FileVersion
-if (-not [string]::IsNullOrWhiteSpace($Version) -and $unpackedVersion -ne $Version) {
-    throw "Release package verification failed: unpacked exe FileVersion is '$unpackedVersion', expected '$Version'"
+if (-not [string]::IsNullOrWhiteSpace($fileVer) -and $unpackedVersion -ne $fileVer) {
+    throw "Release package verification failed: unpacked exe FileVersion is '$unpackedVersion', expected '$fileVer'"
 }
 
 $unpackedRoot = Join-Path $smokeDir "ModernWigiDash-win-x64"
@@ -320,8 +320,8 @@ if (-not (Test-Path $slimExe)) {
     throw "Release package verification failed: ModernWigiDash.App.exe missing from unpacked app-only zip!"
 }
 $slimVersion = (Get-Item $slimExe).VersionInfo.FileVersion
-if (-not [string]::IsNullOrWhiteSpace($Version) -and $slimVersion -ne $Version) {
-    throw "Release package verification failed: unpacked app-only exe FileVersion is '$slimVersion', expected '$Version'"
+if (-not [string]::IsNullOrWhiteSpace($fileVer) -and $slimVersion -ne $fileVer) {
+    throw "Release package verification failed: unpacked app-only exe FileVersion is '$slimVersion', expected '$fileVer'"
 }
 foreach ($relPath in @("Resources", "README.txt", "LICENSE-ModernWigiDash.txt")) {
     $fullRel = Join-Path $smokeSlimDir "ModernWigiDash-win-x64\$relPath"

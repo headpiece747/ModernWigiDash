@@ -28,9 +28,10 @@ Release tag `v0.9.6` on the release commit (not yet committed or tagged).
 - **Release packaging, CI, git hooks, and user copy**:
   - `ModernWigiDash.App\PresentMon\PresentMonNative.cs`: Added `try/catch` cleanup in `OpenSession` so a throwing `_queryRegistry.Register` closes `_session` instead of leaving a half-initialized handle.
   - `.github\workflows\release.yml`: Added `$LASTEXITCODE` checks after quality gates, `build-release.ps1`, `gh release upload`/`create`/`view`, and release-note credit prepending.
-  - `scripts\build-release.ps1`: Case-insensitive XAML version pre-flight check, version-keyed `.release-cache` subdirectories (`lhs-$LhsVersion`, `pm-$PresentMonVersion`), corrected `LHS-LICENSE.txt` / `PresentMon-LICENSE.txt` names in `NOTICES.txt`, and expanded `5d` sandbox verification for both full and app-only zip payloads.
+  - `scripts\build-release.ps1`: Case-insensitive XAML version pre-flight check, version-keyed `.release-cache` subdirectories (`lhs-$LhsVersion`, `pm-$PresentMonVersion`), corrected `LHS-LICENSE.txt` / `PresentMon-LICENSE.txt` names in `NOTICES.txt`, `$fileVer` normalization for unpacked `FileVersion` checks, and expanded `5d` sandbox verification for both full and app-only zip payloads.
   - `release\setup-telemetry.bat`: Environment-variable UAC relaunch, accepted MSI exit code `3010` alongside `0` with explicit code-3010 reboot messaging, non-zero exit (`exit /b 1`) on failure, and corrected `"Hardware Monitor and FPS / Frame Time"`; `.gitattributes` enforces `*.bat text eol=crlf`.
   - `scripts\scan-staged-cr.ps1` and `scripts\scan-staged-userdata.ps1`: Added `-c core.quotePath=false`, fixed EOF lone-CR detection, added case-insensitive user-data basename checks, and updated Pester tests.
+  - `ModernWigiDash.Tests\`: Replaced ThreadPool/wall-clock timing races with deterministic thread handshakes and `TestWait.WaitUntilAsync` polling across `DisplayWireTests`, `ArtworkLoaderTests`, `WigiDashServiceClientTests`, `MediaSessionMonitorTests`, `AidaPanelMasterTests`, `AidaPanelServiceTests`, and `SingleInstanceGuardTests` for 2-vCPU CI runners.
   - Updated UI hints (`SystemTelemetryPresentation`, `HwinfoWidget`, `AidaPanelCanvas`, `InspectorPanelRenderer`), `release\README.txt`, `README.md`, `CONTEXT.md`, and `docs\adr\0025-vendor-reads-from-a-background-cache.md`.
 
 ## Procedure
@@ -44,29 +45,40 @@ Owner: `.github/workflows/release.yml` on annotated tag push (no release created
 ## Pre-flight evidence
 
 - `scripts\ps-hygiene.ps1`: `17` `.ps1` files pure ASCII, analyzer clean, `33/33` Pester tests passed (`GateGuard.Tests.ps1`, `ParseRegression.Tests.ps1`, `RefCheck.Tests.ps1`, `ScanStagedCr.Tests.ps1`, `ScanStagedUserData.Tests.ps1`), `0` failed, `0` skipped.
-- `scripts\run-gates.ps1 -Label "v0.9.6 release-ready"`: `0` build warnings, `0` errors, `3070/3070` tests passed (`0` failed), `dotnet format` clean; `scripts\gate-guard.ps1` allowed commit (`2026-11-13T23:44:41Z`, `369f6f4`, `0` min old).
+- `scripts\run-gates.ps1 -Label "v0.9.6 release-ready"`: `0` build warnings, `0` errors, `3070/3070` tests passed (`0` failed), `dotnet format` clean; `scripts\gate-guard.ps1` allowed commit (`2026-11-14T00:37:55Z`, `498696c`).
 - `scripts\build-release.ps1 -Version 0.9.6` (using version-keyed cache under `scripts\.release-cache`):
   - Telemetry bundled (`telemetry-versions.txt`): `LibreHardwareService=0.3.4`, `PresentMon=2.6.0`, with `LHS-LICENSE.txt`, `PresentMon-LICENSE.txt`, and `NOTICES.txt` pointing to `https://github.com/epinter/LibreHardwareService` and `https://github.com/GameTechDev/PresentMon`.
-  - `ModernWigiDash-v0.9.6-win-x64.zip`: `342,802,021` bytes (`326.9 MB`), including single-file `ModernWigiDash.App.exe` (`120,957,415` bytes).
-  - `ModernWigiDash-v0.9.6-app-only.zip`: `114,202,748` bytes (`108.9 MB`, `3.00x`).
+  - `ModernWigiDash-v0.9.6-win-x64.zip`: `342,802,200` bytes (`326.9 MB`), including single-file `ModernWigiDash.App.exe` (`120,957,397` bytes).
+  - `ModernWigiDash-v0.9.6-app-only.zip`: `114,202,927` bytes (`108.9 MB`, `3.00x`).
   - Sandbox verification: `Release package sandbox smoke verification PASSED.`
 
 ## Post-release checks
 
 - Verify `gh release view v0.9.6 --json isDraft,isPrerelease,author,assets`: `isDraft=false`, `isPrerelease=false`, `author=github-actions[bot]`, and `releases/latest` resolves to `v0.9.6`.
 - Verify both `ModernWigiDash-v0.9.6-win-x64.zip` and `ModernWigiDash-v0.9.6-app-only.zip` carry `sha256:` digests and exact byte sizes matching the CI run log's `verified <name>: N bytes` lines (note: CI `Compress-Archive` zip hashes differ from local builds by timestamp metadata).
-- Confirm release notes carry generated PR/commit notes and the ElmorLabs credit (`--generate-notes` + workflow header), and confirm `telemetry/third-party-licenses/telemetry-versions.txt` in the downloaded full zip.
+- Confirm release notes carry generated PR/commit notes and the ElmorLabs credit (`--generate-notes` + workflow header), and confirm in the downloaded full zip:
+  - `telemetry\third-party-licenses\telemetry-versions.txt` records both lines.
+  - `README.txt` starts with `ModernWigiDash v0.9.6` and includes `== What's new in v0.9.6 ==` and `== Version ==`.
 
 ## End-to-end update (from the published v0.9.5 payload)
 
-- Install/run `v0.9.5` and apply the `v0.9.6` update through the in-app updater (`Restart to apply`).
-- Inspect `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` across the single `v0.9.5 -> v0.9.6` restart and record **both counts** below:
+Preconditions:
+
+- Close every running ModernWigiDash instance so the extracted `v0.9.5` does not exit on the single-instance mutex.
+- Back up `profile.json`, `app_theme.json`, and `calendar-credentials.bin` from `%LOCALAPPDATA%\ModernWigiDash`; restore them after the leg.
+
+Steps:
+
+- Download and extract the published `v0.9.5` app-only zip outside the repo, launch it, and apply the `v0.9.6` update through the in-app updater (`Restart to apply`).
+- Confirm relaunch with `FileVersion 0.9.6` and `app=0.9.6` in the log, then inspect `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` across the single `v0.9.5 -> v0.9.6` restart and record **both counts** below:
   - Per-user install `updater start args:` count: `(pending)`
   - Elevated install `swap complete` count: `(pending)`
 
 ## Rollback
 
-If a defect ships in `v0.9.6`, do **not** delete the release and do **not** move the `v0.9.6` tag; ship a forward fix release (`v0.9.7`).
+- **Gates or build fails:** no release exists. Delete the remote and local tag, fix, re-tag (`git push --delete origin v0.9.6`, `git tag -d v0.9.6`).
+- **Assets fail to upload:** fix on `master`, create a throwaway branch at the tag, push it, and dispatch the release workflow from it (`gh workflow run release.yml --ref <branch> -f tag=v0.9.6`); keep `Release -Version` equal to the tag without the `v`.
+- **A broken release is already published:** do **not** delete the release and do **not** move the `v0.9.6` tag; ship a forward fix release (`v0.9.7`).
 
 ## Post-release result
 

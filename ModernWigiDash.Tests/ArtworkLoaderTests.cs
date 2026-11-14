@@ -111,20 +111,21 @@ public class ArtworkLoaderTests
         var decoder = new FakeArtworkDecoder { Result = bitmapA };
         var loader = new ArtworkLoader(decoder);
         int events = 0;
-        loader.ArtworkChanged += () => events++;
+        loader.ArtworkChanged += () => Interlocked.Increment(ref events);
 
         loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
-        await TestWait.WaitUntilAsync(() => loader.Current.Bitmap is not null, TimeSpan.FromSeconds(5));
-        int firstLoadEvents = events;
+        await TestWait.WaitUntilAsync(
+            () => loader.Current.Bitmap is not null && Volatile.Read(ref events) >= 1, TimeSpan.FromSeconds(5));
+        int firstLoadEvents = Volatile.Read(ref events);
 
         decoder.Result = bitmapB;
         loader.NotifySnapshotChanged(Update("keyB", new FakeThumbnail()));
         await TestWait.WaitUntilAsync(
-            () => ReferenceEquals(loader.Current.Bitmap, bitmapB) && events > firstLoadEvents, TimeSpan.FromSeconds(5));
+            () => ReferenceEquals(loader.Current.Bitmap, bitmapB) && Volatile.Read(ref events) > firstLoadEvents, TimeSpan.FromSeconds(5));
 
         Assert.AreEqual("keyB", loader.Current.ArtKey);
         Assert.IsTrue(ReferenceEquals(loader.Current.Bitmap, bitmapB));
-        Assert.IsTrue(events > firstLoadEvents, "the key change must raise the event");
+        Assert.IsTrue(Volatile.Read(ref events) > firstLoadEvents, "the key change must raise the event");
     }
 
     [TestMethod]
@@ -181,16 +182,17 @@ public class ArtworkLoaderTests
         var decoder = new FakeArtworkDecoder { Handler = () => ++calls == 1 ? tcsA.Task : tcsB.Task };
         var loader = new ArtworkLoader(decoder);
         int events = 0;
-        loader.ArtworkChanged += () => events++;
+        loader.ArtworkChanged += () => Interlocked.Increment(ref events);
 
         loader.NotifySnapshotChanged(Update("keyA", new FakeThumbnail()));
         loader.NotifySnapshotChanged(Update("keyB", new FakeThumbnail()));
 
         tcsB.SetResult(new ArtworkDecodeResult(bitmapB, false));
-        await TestWait.WaitUntilAsync(() => ReferenceEquals(loader.Current.Bitmap, bitmapB), TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(
+            () => ReferenceEquals(loader.Current.Bitmap, bitmapB) && Volatile.Read(ref events) >= 1, TimeSpan.FromSeconds(5));
 
         tcsA.SetResult(new ArtworkDecodeResult(bitmapA, false));
-        await TestWait.WaitUntilAsync(() => events >= 2, TimeSpan.FromSeconds(5));
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref events) >= 2, TimeSpan.FromSeconds(5));
 
         Assert.IsTrue(ReferenceEquals(loader.Current.Bitmap, bitmapB),
             "the late stale load must not replace the published artwork");

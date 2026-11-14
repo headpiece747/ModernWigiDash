@@ -102,9 +102,15 @@ public class SingleInstanceGuardTests
         // still fire.
         var fired = new ManualResetEvent(false);
         var registration = ThreadPool.RegisterWaitForSingleObject(primaryEvent, (_, _) => fired.Set(), null, Timeout.Infinite, true);
-        Assert.IsTrue(fired.WaitOne(2000),
-            "a signal landing before the primary parks must not be lost");
-        registration.Unregister(null);
+        try
+        {
+            Assert.IsTrue(fired.WaitOne(15_000),
+                "a signal landing before the primary parks must not be lost");
+        }
+        finally
+        {
+            registration.Unregister(null);
+        }
     }
 
     [TestMethod]

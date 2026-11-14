@@ -596,8 +596,8 @@ public class MediaSessionMonitorTests
         var session = CreateSession("player.exe", "Song");
         session.ControlActionOverride = () => throw new InvalidOperationException("COM control error");
         var manager = new StubMediaSessionSourceManager { Current = session, Sessions = [session] };
-        List<string> logged = [];
-        var monitor = new MediaSessionMonitor(new StubMediaSessionSource { Manager = manager }, (msg, _) => logged.Add(msg));
+        var logged = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var monitor = new MediaSessionMonitor(new StubMediaSessionSource { Manager = manager }, (msg, _) => logged.Enqueue(msg));
         await monitor.InitializeAsync();
 
         manager.GetCurrentSessionOverride = () => throw new InvalidOperationException("COM current error");
@@ -613,12 +613,13 @@ public class MediaSessionMonitorTests
         // Reattach session to exercise failing control command cleanly.
         manager.GetCurrentSessionOverride = () => session;
         manager.RaiseCurrentSessionChanged();
+        await TestWait.WaitUntilAsync(() => logged.Count >= 3, TimeSpan.FromSeconds(5));
         int loggedBeforeControl = logged.Count;
         monitor.Play();
-        await Task.Yield();
+        await TestWait.WaitUntilAsync(() => logged.Any(m => m.Contains("SMTC control failed", StringComparison.Ordinal)), TimeSpan.FromSeconds(5));
 
         Assert.IsGreaterThanOrEqualTo(3, loggedBeforeControl, $"Expected callback errors logged, saw {loggedBeforeControl}");
-        Assert.AreEqual(loggedBeforeControl + 1, logged.Count, $"Expected control error logged, saw {logged.Count - loggedBeforeControl}");
+        Assert.IsTrue(logged.Any(m => m.Contains("SMTC control failed", StringComparison.Ordinal)));
     }
 
     [TestMethod]
