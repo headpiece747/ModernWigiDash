@@ -1,6 +1,6 @@
 # Release v0.9.6
 
-Status: published (GitHub release & CI checks verified; interactive v0.9.5 -> v0.9.6 GUI updater leg pending)
+Status: released (CI, GitHub release, and per-user v0.9.5 -> v0.9.6 E2E verified; elevated UAC leg pending interactive UAC prompt)
 
 ## Target
 
@@ -14,7 +14,7 @@ Release tag `v0.9.6` at `f01062f` (`tag object 8cb494cc91db6e3c44e8bcbf27ac453d8
 ## What changed
 
 - **Media session & artwork concurrency safety (`ModernWigiDash.Widgets`)**:
-  - `MediaSessionMonitor.cs`: Added `_stateLock` and `_snapshotPublishLock` synchronization without holding locks across COM/`Dispose()`/`SnapshotChanged`, disposed late managers when `DisposeAsync` races `InitializeAsync`, disposed single/zero-session fresh wrappers in `CycleSession`, made event subscription non-throwing (`TrySubscribeSessionEvents`), guarded both session and manager `-=` teardown with `SafeDetachEvent` so `SafeDisposeSession`/`SafeDisposeManager` always run, and suppressed post-dispose notifications.
+  - `MediaSessionMonitor.cs`: Added `_stateLock` and `_snapshotPublishLock` synchronization without holding `_stateLock` across COM/`Dispose()`/`SnapshotChanged` (serializing `SnapshotChanged` under `_snapshotPublishLock`), disposed late managers when `DisposeAsync` races `InitializeAsync`, disposed single/zero-session fresh wrappers in `CycleSession`, made event subscription non-throwing (`TrySubscribeSessionEvents`), guarded both session and manager `-=` teardown with `SafeDetachEvent` so `SafeDisposeSession`/`SafeDisposeManager` always run, and suppressed post-dispose notifications.
   - `ArtworkLoader.cs`: Added `_lock` around artwork state/versioning, cleared `_loadingArtworkKey` only for the matching active version (`version == _artLoadVersion`), extracted background color from the thread-local decoded bitmap before publishing `_albumArt`, and disposed late/superseded bitmaps outside `_lock` so render-thread `DisposeRetired()` cannot race `ExtractBackgroundColor`.
 - **PresentMon introspection, query & catalog safety (`ModernWigiDash.App\PresentMon\`)**: Guarded `IntPtr.Zero` pointers (`rootPtr`, `root.pMetrics`, `pData`, null metric slots), deduplicated metric IDs in `PresentMonMetricCatalog`, and freed the dynamic query handle (`Free()`) in `PresentMonQueryRegistry` when frame query registration fails or returns an invalid blob size.
 - **In-app updater, vendor cache, and single-instance hardening**:
@@ -71,8 +71,8 @@ Steps:
 
 - Download and extract the published `v0.9.5` app-only zip outside the repo, launch it, and apply the `v0.9.6` update through the in-app updater (`Restart to apply`).
 - Confirm relaunch with `FileVersion 0.9.6` and `app=0.9.6` in the log, then inspect `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` across the single `v0.9.5 -> v0.9.6` restart and record **both counts** below:
-  - Per-user install `updater start args:` count: `(pending)`
-  - Elevated install `swap complete` count: `(pending)`
+  - Per-user install `updater start args:` count: `1` (`swap complete`: `1`)
+  - Elevated install `swap complete` count: `(pending — requires interactive UAC ConsentUI approval)`
 
 ## Rollback
 
@@ -96,4 +96,10 @@ Steps:
   - `telemetry\third-party-licenses\telemetry-versions.txt`: `LibreHardwareService=0.3.4`, `PresentMon=2.6.0`.
   - `telemetry\third-party-licenses\NOTICES.txt`: lists `LibreHardwareService v0.3.4` (`MPL-2.0`, `LHS-LICENSE.txt`) and `PresentMon Service v2.6.0` (`MIT`, `PresentMon-LICENSE.txt`).
   - `README.txt`: starts with `ModernWigiDash v0.9.6 — G.Skill WigiDash widget stack` and includes `== Version ==` and `== What's new in v0.9.6 ==`.
-- Interactive desktop `v0.9.5 -> v0.9.6` updater leg: `(pending)` (no pre-existing `v0.9.5` install on machine; `updater start args:` / `swap complete` counts above stay `(pending)` until manually executed and recorded).
+- Per-user end-to-end update from published `v0.9.5` (`ModernWigiDash-v0.9.5-app-only.zip` extracted outside the repo to `%TEMP%\wmd-v095-e2e\app\ModernWigiDash-win-x64\`, `FileVersion=0.9.5`):
+  - Launched `v0.9.5` (`pid=4700`) at `01:04:37.610Z` (`[App] === Host === ... app=0.9.5`); clicked `UpdateButton` via UIA to download and stage `v0.9.6` (`updates\update.log` gained `0` lines after download/stage, proving single-launch suppression of the early download-time updater spawn).
+  - Clicked `UpdateButton` -> confirmed `OK` on `"Update ready — restart to apply"` dialog; `v0.9.5` closed cleanly at `01:20:40.709Z` (`[SHELL] window closed (reason=update-restart, trayLive=True)`) and `01:20:40.720Z` (`[App] === Application exiting === reason=update-restart`).
+  - `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` logged `updater start args:` at `20:20:40.73` local and `swap complete` at `20:20:40.90` local (`updater start args:` count = `1`, `swap complete` count = `1`, zero `ERROR: app did not exit within 60s`).
+  - Relaunched `v0.9.6` (`pid=14952`, `FileVersion=0.9.6`) at `01:20:41.446Z` (`[App] === Host === ... app=0.9.6`) and passed `wmd-verify.ps1 doctor` (`enabled`). Startup cleanup removed `downloads/`, `staged/`, and `apply-update-live.cmd`, leaving only `updates\update.log`.
+  - State restore & cleanup: `profile.json` restored byte-identical (`12,274` bytes, `mtimeUtc=2026-11-13T00:37:46.6899832Z`, `sha256:ea1062c849b645d1143a54ad40a42c4c8bb1fa4d015ea67587e3a554ae7aca65`); `app_theme.json` and `calendar-credentials.bin` were absent before and after; scratch directories removed.
+  - Elevated UAC swap leg remains `(pending)` because the agent session runs unelevated (`IsAdmin=False`) and cannot approve a Secure Desktop UAC ConsentUI prompt on a non-writable `Program Files` target.
