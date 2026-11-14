@@ -3,8 +3,8 @@ namespace ModernWigiDash.Tests;
 [TestClass]
 public class StopwatchTimerWidgetTests
 {
-    private static SKCanvas CreateCanvas()
-        => SKSurface.Create(new SKImageInfo(203, 148)).Canvas;
+    private static SKSurface CreateSurface()
+        => SKSurface.Create(new SKImageInfo(203, 148));
 
     private static void Tap(StopwatchTimerWidget widget)
     {
@@ -60,7 +60,8 @@ public class StopwatchTimerWidgetTests
         Tap(widget);
         clock.Advance(TimeSpan.FromSeconds(1));
 
-        widget.Render(CreateCanvas(), new SKRect(0, 0, 203, 148));
+        using var surface = CreateSurface();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 203, 148));
 
         Assert.IsTrue(widget.ElapsedForTest >= TimeSpan.FromSeconds(1), "A running stopwatch must have accrued the elapsed time");
     }
@@ -70,7 +71,8 @@ public class StopwatchTimerWidgetTests
     {
         var widget = new StopwatchTimerWidget { TextColorHex = "#C6E0FF" };
 
-        widget.Render(CreateCanvas(), new SKRect(0, 0, 203, 148));
+        using var surface = CreateSurface();
+        widget.Render(surface.Canvas, new SKRect(0, 0, 203, 148));
 
         Assert.AreEqual(TimeSpan.Zero, widget.ElapsedForTest, "A never-started stopwatch renders its idle zero state");
     }

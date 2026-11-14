@@ -1,6 +1,6 @@
 # Release v0.9.6
 
-Status: released (CI, GitHub release, and per-user v0.9.5 -> v0.9.6 E2E verified; elevated UAC leg pending interactive UAC prompt)
+Status: released (CI, GitHub release, per-user E2E, and elevated E2E verified)
 
 ## Target
 
@@ -72,7 +72,7 @@ Steps:
 - Download and extract the published `v0.9.5` app-only zip outside the repo, launch it, and apply the `v0.9.6` update through the in-app updater (`Restart to apply`).
 - Confirm relaunch with `FileVersion 0.9.6` and `app=0.9.6` in the log, then inspect `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` across the single `v0.9.5 -> v0.9.6` restart and record **both counts** below:
   - Per-user install `updater start args:` count: `1` (`swap complete`: `1`)
-  - Elevated install `swap complete` count: `(pending — requires interactive UAC ConsentUI approval)`
+  - Elevated install `swap complete` count: `1` (`updater start args:` count `2`, `install dir not writable; requesting elevation` count `1`, verified in `C:\ModernWigiDash-e2e-elev` with `ConsentPromptBehaviorAdmin=0`; companion `v0.9.6` `apply-update.cmd` `Program Files` test also `updater start args:` `2`, `swap complete:` `1`)
 
 ## Rollback
 
@@ -102,4 +102,8 @@ Steps:
   - `%LOCALAPPDATA%\ModernWigiDash\updates\update.log` logged `updater start args:` at `20:20:40.73` local and `swap complete` at `20:20:40.90` local (`updater start args:` count = `1`, `swap complete` count = `1`, zero `ERROR: app did not exit within 60s`).
   - Relaunched `v0.9.6` (`pid=14952`, `FileVersion=0.9.6`) at `01:20:41.446Z` (`[App] === Host === ... app=0.9.6`) and passed `wmd-verify.ps1 doctor` (`enabled`). Startup cleanup removed `downloads/`, `staged/`, and `apply-update-live.cmd`, leaving only `updates\update.log`.
   - State restore & cleanup: `profile.json` restored byte-identical (`12,274` bytes, `mtimeUtc=2026-11-13T00:37:46.6899832Z`, `sha256:ea1062c849b645d1143a54ad40a42c4c8bb1fa4d015ea67587e3a554ae7aca65`); `app_theme.json` and `calendar-credentials.bin` were absent before and after; scratch directories removed.
-  - Elevated UAC swap leg remains `(pending)` because the agent session runs unelevated (`IsAdmin=False`) and cannot approve a Secure Desktop UAC ConsentUI prompt on a non-writable `Program Files` target.
+  - Elevated end-to-end verification (`ConsentPromptBehaviorAdmin=0`, unelevated launch -> `:elevate` re-exec -> elevated `v0.9.6` swap & relaunch):
+    - Published `v0.9.5 -> v0.9.6` in `C:\Program Files\ModernWigiDash-e2e-elev\` (`pid=17736`, unelevated): reproduced `v0.9.5`'s pre-fix `:elevate` space-splitting bug (`%~1` split at `Program Files` -> `C:\Program`, looping `requesting elevation` `576` times with `swap complete` `0`; staged/temp dirs cleaned up). Note: `v0.9.5` users in `Program Files` running unelevated must either run `v0.9.5` elevated once (`writable` path, zero `:elevate`) or overwrite with `v0.9.6` zip.
+    - Published `v0.9.5 -> v0.9.6` in ACL-locked `C:\ModernWigiDash-e2e-elev\` (`Users:RX`, `Administrators:F`, unelevated `pid=24236` at `01:51:55.220Z` `app=0.9.5`): `0` updater lines during download/stage; restarted `02:07:22.998Z`; `updates\update.log` logged `updater start args:` (`21:07:23.01` local), `install dir not writable; requesting elevation` (`21:07:23.11` local), re-exec `updater start args:` (`21:07:23.72` local), and `swap complete` (`21:07:24.17` local) — `updater start args:` count = `2`, `requesting elevation` = `1`, `swap complete` = `1`; relaunched elevated `v0.9.6` (`pid=16680`, `runner_isAdmin=True`, `fver=0.9.6`, `doctor=ok`, `02:07:24.646Z` `app=0.9.6`).
+    - Shipped `v0.9.6` `apply-update.cmd` in `C:\Program Files\ModernWigiDash-e2e-v096\` (with spaces, unelevated -> `:elevate`, `WMD_UPDATE_LOG`): `updater start args:` count = `2` (forwarding quoted `"C:\Program Files\ModernWigiDash-e2e-v096"`, `elevated`, and `%LOG%`), `requesting elevation` = `1`, `swap complete` = `1`, relaunched elevated `v0.9.6` (`pid=19440`, `fver=0.9.6`, `doctor=ok`, `02:07:55.700Z` `app=0.9.6`).
+    - All elevated test directories removed, `ModernWigiDash.App` stopped, `updates\` clean (`update.log` only), and `profile.json` preserved/restored byte-identical (`12,274` bytes, `sha256:ea1062c849b645d1143a54ad40a42c4c8bb1fa4d015ea67587e3a554ae7aca65`).

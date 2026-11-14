@@ -219,10 +219,10 @@ public sealed class WigiDashServiceClientTests
         {
             Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")],
         };
-        using var client = new WigiDashServiceClient(() => { opened++; return channel; }, clock);
+        using var client = new WigiDashServiceClient(() => { Interlocked.Increment(ref opened); return channel; }, clock);
 
         await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
-        Assert.AreEqual(1, opened, "the first refresh opens the channel");
+        Assert.AreEqual(1, Volatile.Read(ref opened), "the first refresh opens the channel");
         Assert.IsTrue(client.Sensors.IsReady);
 
         // The channel dies: the next (stale) read schedules a refresh, which
@@ -230,20 +230,20 @@ public sealed class WigiDashServiceClientTests
         channel.ThrowOnList = true;
         clock.Advance(TimeSpan.FromSeconds(3));
         _ = client.Sensors.GetSensorList();
-        await WaitUntilAsync(() => !client.Sensors.IsReady);
+        await WaitUntilAsync(() => !client.Sensors.IsReady && client.Sensors.GetSensorList() is null);
 
         // The reopen is rate-limited: no attempt inside the retry window.
         channel.ThrowOnList = false;
         clock.Advance(TimeSpan.FromMilliseconds(200));
         _ = client.Sensors.GetSensorList();
-        Assert.AreEqual(1, opened, "no reopen inside the retry window");
+        Assert.AreEqual(1, Volatile.Read(ref opened), "no reopen inside the retry window");
 
         // Past the windows: the next refresh reopens and recovers.
         clock.Advance(TimeSpan.FromSeconds(6));
         await WaitUntilAsync(() =>
         {
             _ = client.Sensors.GetSensorList();
-            return opened >= 2;
+            return Volatile.Read(ref opened) >= 2;
         });
         await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: > 0 });
         Assert.IsTrue(client.Sensors.IsReady);

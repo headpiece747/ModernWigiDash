@@ -13,8 +13,8 @@ public class CozyTodoWidgetTests
 {
     private static string NewStatePath() => Path.Combine(Path.GetTempPath(), "wmd-todo-test-" + Guid.NewGuid().ToString("N"), "cozy_state.json");
 
-    private static SKCanvas CreateCanvas(int width = 1016, int height = 592)
-        => SKSurface.Create(new SKImageInfo(width, height)).Canvas;
+    private static SKSurface CreateSurface(int width = 1016, int height = 592)
+        => SKSurface.Create(new SKImageInfo(width, height));
 
     /// <summary>Waits (bounded) until the condition holds: the deterministic
     /// alternative to a fixed sleep racing a fire-and-forget action leg.</summary>
@@ -74,8 +74,8 @@ public class CozyTodoWidgetTests
         var context = new TestContext();
         await widget.InitializeAsync(context);
 
-        var canvas = CreateCanvas(1016, 592);
-        widget.Render(canvas, new SKRect(0, 0, 1016, 592));
+        using var surface = CreateSurface(1016, 592);
+        widget.Render(surface.Canvas, new SKRect(0, 0, 1016, 592));
 
         Assert.IsTrue(context.Renders >= 1);
         await widget.DisposeAsync();
@@ -114,8 +114,8 @@ public class CozyTodoWidgetTests
         await widget.InitializeAsync(context);
 
         SKRect bounds = new(0, 0, 1016, 592);
-        var canvas = CreateCanvas(1016, 592);
-        widget.Render(canvas, bounds);
+        using var surface = CreateSurface(1016, 592);
+        widget.Render(surface.Canvas, bounds);
 
         var geometry = CozyTodoLayout.Compute(bounds, isMinimalist: false, local.CurrentTasks, scrollY: 0f);
         SKPoint feedPoint = new(geometry.FeedButtonRect.MidX, geometry.FeedButtonRect.MidY);
@@ -173,8 +173,8 @@ public class CozyTodoWidgetTests
         await widget.RefreshForTest(); // prime the published snapshot (the canvas's task rows come from it)
 
         SKRect bounds = new(0, 0, 1016, 592);
-        var canvas = CreateCanvas(1016, 592);
-        widget.Render(canvas, bounds);
+        using var surface = CreateSurface(1016, 592);
+        widget.Render(surface.Canvas, bounds);
 
         var geometry = CozyTodoLayout.Compute(bounds, isMinimalist: false, local.CurrentTasks, scrollY: 0f);
         var row = geometry.TaskRows[0];
@@ -216,8 +216,8 @@ public class CozyTodoWidgetTests
         await widget.RefreshForTest(); // prime the published snapshot (the canvas's task rows come from it)
 
         SKRect bounds = new(0, 0, 1016, 592);
-        var canvas = CreateCanvas(1016, 592);
-        widget.Render(canvas, bounds);
+        using var surface = CreateSurface(1016, 592);
+        widget.Render(surface.Canvas, bounds);
 
         var geometry = CozyTodoLayout.Compute(bounds, isMinimalist: false, local.CurrentTasks, scrollY: 0f);
         var row = geometry.TaskRows[0];
@@ -261,8 +261,8 @@ public class CozyTodoWidgetTests
         var context = new TestContext();
         await widget.InitializeAsync(context);
 
-        var canvas = CreateCanvas(812, 296);
-        widget.Render(canvas, new SKRect(0, 0, 812, 296));
+        using var surface = CreateSurface(812, 296);
+        widget.Render(surface.Canvas, new SKRect(0, 0, 812, 296));
 
         Assert.IsTrue(context.Renders >= 1);
         await widget.DisposeAsync();
@@ -371,8 +371,8 @@ public class CozyTodoWidgetTests
         await widget.RefreshForTest();
 
         SKRect bounds = new(0, 0, 1016, 592);
-        var canvas = CreateCanvas(1016, 592);
-        widget.Render(canvas, bounds);
+        using var surface = CreateSurface(1016, 592);
+        widget.Render(surface.Canvas, bounds);
 
         var geometry = CozyTodoLayout.Compute(bounds, isMinimalist: false, local.CurrentTasks, scrollY: 0f);
 
