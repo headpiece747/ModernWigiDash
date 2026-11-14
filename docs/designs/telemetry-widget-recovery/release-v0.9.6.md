@@ -1,10 +1,10 @@
 # Release v0.9.6
 
-Status: prepared (awaiting release commit & tag v0.9.6)
+Status: published (GitHub release & CI checks verified; interactive v0.9.5 -> v0.9.6 GUI updater leg pending)
 
 ## Target
 
-Release tag `v0.9.6` on the release commit (not yet committed or tagged).
+Release tag `v0.9.6` at `f01062f` (`tag object 8cb494cc91db6e3c44e8bcbf27ac453d81421f4d`).
 
 ## Artifacts
 
@@ -82,4 +82,18 @@ Steps:
 
 ## Post-release result
 
-(pending)
+- Prior tag `v0.9.6` on `498696c` had failed `Release` workflow `43530874217` in `Verify Quality Gates` (`DisplayWireTests.AdoptAndAbandon_ConcurrentTransfers_DrainsDisplacedAndAbandonedBackendsSafely`, `21ms` CI ThreadPool scheduling race) with no GitHub Release created (`gh release view v0.9.6` -> `release not found`). Per `release-v0.9.5.md` rollback procedure, deleted unpublished tag `v0.9.6`, committed deterministic test fixes as `f01062f`, re-tagged `v0.9.6` (`8cb494cc91db6e3c44e8bcbf27ac453d81421f4d`), and pushed `master` + `v0.9.6`.
+- GitHub Actions runs on `f01062f`:
+  - `Release`: run `43535669992` (`success`, `9m41s`).
+  - `CI`: run `43535669513` (`success`).
+  - `CodeQL`: run `43535669565` (`success`).
+- Published GitHub Release (`gh release view v0.9.6`): `isDraft=false`, `isPrerelease=false`, `author.login=github-actions[bot]`, and `releases/latest` resolves to `v0.9.6`.
+- Release notes start with the `ElmorLabs` credit and include `**Full Changelog**: https://github.com/headpiece747/ModernWigiDash/compare/v0.9.5...v0.9.6`.
+- Published assets match CI run `43535669992` `verified <name>: N bytes` log lines:
+  - `ModernWigiDash-v0.9.6-win-x64.zip`: `343,453,360` bytes, `sha256:d568e4a57ecffd7a6e6e3f66827b090f94cc771d7ba3296af9997ee4ef83ab2b`.
+  - `ModernWigiDash-v0.9.6-app-only.zip`: `114,731,185` bytes, `sha256:ef57bae207c5fba35ecbc0c73969bf4b1f82793d560c49f38473b5036eabe4f1`.
+- Downloaded `ModernWigiDash-v0.9.6-win-x64.zip` verified matching SHA-256 (`d568e4a57ecffd7a6e6e3f66827b090f94cc771d7ba3296af9997ee4ef83ab2b`):
+  - `telemetry\third-party-licenses\telemetry-versions.txt`: `LibreHardwareService=0.3.4`, `PresentMon=2.6.0`.
+  - `telemetry\third-party-licenses\NOTICES.txt`: lists `LibreHardwareService v0.3.4` (`MPL-2.0`, `LHS-LICENSE.txt`) and `PresentMon Service v2.6.0` (`MIT`, `PresentMon-LICENSE.txt`).
+  - `README.txt`: starts with `ModernWigiDash v0.9.6 — G.Skill WigiDash widget stack` and includes `== Version ==` and `== What's new in v0.9.6 ==`.
+- Interactive desktop `v0.9.5 -> v0.9.6` updater leg: `(pending)` (no pre-existing `v0.9.5` install on machine; `updater start args:` / `swap complete` counts above stay `(pending)` until manually executed and recorded).
