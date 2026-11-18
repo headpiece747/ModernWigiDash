@@ -90,6 +90,40 @@ public class RetiredBitmapSetTests
     }
 
     [TestMethod]
+    public async Task DisposeRetired_DisposesBitmapsAndIsSafeConcurrentWithRetire()
+    {
+        var set = new RetiredBitmapSet();
+        var single = new SKBitmap(2, 2);
+        Assert.AreNotEqual(IntPtr.Zero, single.Handle);
+        set.Retire(single);
+        set.DisposeRetired();
+        Assert.AreEqual(IntPtr.Zero, single.Handle, "DisposeRetired must actually dispose drained bitmaps");
+
+        using var start = new ManualResetEventSlim(false);
+        var producers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            start.Wait();
+            for (int i = 0; i < 200; i++)
+            {
+                set.Retire(new SKBitmap(1, 1));
+            }
+        })).ToArray();
+        var consumer = Task.Run(() =>
+        {
+            start.Wait();
+            for (int i = 0; i < 200; i++)
+            {
+                set.DisposeRetired();
+            }
+        });
+
+        start.Set();
+        await Task.WhenAll([.. producers, consumer]);
+        set.DisposeAll();
+        Assert.AreEqual(0, set.PendingCount);
+    }
+
+    [TestMethod]
     public void RetireAfterDrain_StaysPendingForNextDrain()
     {
         var set = new RetiredBitmapSet();

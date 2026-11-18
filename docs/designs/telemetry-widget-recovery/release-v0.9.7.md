@@ -21,6 +21,7 @@ Release tag `v0.9.7`.
   - `PollLoop.cs` & `TelemetryFeedCoordinator.cs`: Added `PollLoop.ValidateInterval` and non-blocking `PollLoop.SetInterval(TimeSpan)` mutating `PeriodicTimer.Period` in place under `_timerGate`. `TelemetryFeedCoordinator` propagates `TelemetryPollPeriodMs` (`250` / `500` / `1000` / `2000 ms`) at startup, `SetVendorService`, and `UpdatePollingPeriod` to hardware poll loops, `WigiDashServiceClient`, and `AidaPanelService`.
   - `AidaPanelService.cs`, `AidaPanelMaster.cs`, `IAidaMmapSource.cs`, & `MemoryMappedAidaMmapSource.cs`: Added `AidaPanelService.ResolvePollInterval` (`Clamp(T / 2, 150..500 ms)` Nyquist sampling) and `SetPollingPeriod` / `UpdatePollingPeriod`. Serialized `MemoryMappedAidaMmapSource` `TryRead`, `Reset`, and `Dispose` under `_mutexGate`, separating permanent ACL-denial latching (`_mutexDenied`) from a 5 s retry cooldown for transient mutex absence. Updated `AidaPanelMaster` with 10-tick header reset checks, 5 s producer-inactivity frame clearing, 1-tick torn-read deferral, and separation of MMF read errors from WCF write failure strikes.
   - `AidaPanelCanvas.cs`, `AidaPanelWidget.cs`, & `SettingsDialog.cs`: Added status-aware AIDA64 placeholder subtitles (`GetUnavailableStatus()`) and updated the Settings `Telemetry Polling Rate` hint.
+  - `RetiredBitmapSet.cs` & `RetiredBitmapSetTests.cs`: Fixed `Drain()` to snapshot `_pending.ToArray()` before `_pending.Clear()`, eliminating both the concurrent `InvalidOperationException` when `Retire` races `DisposeRetired` and the skipped disposal of drained bitmaps.
   - Updated `CONTEXT.md`, `docs\adr\0025-vendor-reads-from-a-background-cache.md`, `docs\adr\0028-configurable-telemetry-polling-rate-and-nyquist-cadence.md`, and `release\README.txt`.
 
 ## Procedure
@@ -35,7 +36,7 @@ Owner: `.github/workflows/release.yml` on annotated tag push (no release created
 
 - `scripts\ps-hygiene.ps1`: `17` `.ps1` files pure ASCII, analyzer clean, `33/33` Pester tests passed (`0` failed, `0` skipped).
 - `scripts\ref-check.ps1`: `5` docs checked, `0` stale references.
-- `scripts\run-gates.ps1 -Label "v0.9.7 release-ready"`: `0` build warnings, `0` errors, `3097/3097` tests passed (`0` failed), `dotnet format` clean.
+- `scripts\run-gates.ps1 -Label "v0.9.7 release-ready"`: `0` build warnings, `0` errors, `3098/3098` tests passed (`0` failed), `dotnet format` clean.
 - `scripts\build-release.ps1 -Version 0.9.7` (using version-keyed cache under `scripts\.release-cache`):
   - Telemetry bundled (`telemetry-versions.txt`): `LibreHardwareService=0.3.4`, `PresentMon=2.6.0`, with `LHS-LICENSE.txt`, `PresentMon-LICENSE.txt`, and `NOTICES.txt`.
   - `ModernWigiDash-v0.9.7-win-x64.zip`: `342,810,559` bytes (`326.9 MB`), including single-file `ModernWigiDash.App.exe` (`120,965,968` bytes).

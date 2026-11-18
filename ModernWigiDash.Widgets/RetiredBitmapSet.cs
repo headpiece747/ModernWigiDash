@@ -10,8 +10,6 @@ namespace ModernWigiDash.Widgets;
 /// </summary>
 internal sealed class RetiredBitmapSet
 {
-    private static readonly List<SKBitmap> Empty = [];
-
     private readonly Lock _lock = new();
     private readonly List<SKBitmap> _pending = [];
 
@@ -65,12 +63,12 @@ internal sealed class RetiredBitmapSet
         }
     }
 
-    private List<SKBitmap> Drain()
+    private SKBitmap[] Drain()
     {
         lock (_lock)
         {
-            if (_pending.Count == 0) return Empty;
-            var drained = _pending;
+            if (_pending.Count == 0) return [];
+            var drained = _pending.ToArray();
             _pending.Clear();
             return drained;
         }

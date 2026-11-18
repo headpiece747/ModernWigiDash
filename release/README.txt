@@ -68,6 +68,8 @@ ModernWigiDash — G.Skill WigiDash widget stack
         Nyquist clamping (150-500 ms), clears stale frames after 5 s of producer
         inactivity, defers 1 tick on torn unlocked reads, and preserves shared-
         memory read diagnostics across healthy WCF heartbeats.
+      * Fixed RetiredBitmapSet.Drain() to snapshot pending bitmaps before
+        clearing so concurrent retire/drain passes never fault or skip disposal.
 
 == What's new in v0.9.6 ==
 
