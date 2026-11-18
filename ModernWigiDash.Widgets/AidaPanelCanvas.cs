@@ -48,13 +48,13 @@ internal sealed class AidaPanelCanvas : IDisposable
     }
 
     /// <summary>The house placeholder (ADR-0017 image) drawn when no frame is available.</summary>
-    public void RenderPlaceholder(SKCanvas canvas, SKRect bounds)
+    public void RenderPlaceholder(SKCanvas canvas, SKRect bounds, string? status = null)
     {
         var text = SkColorCache.ColorOf("#9CA3AF", SKColors.Gray);
         TextRenderHelper.DrawTitleSubtitlePlaceholder(
             canvas, bounds,
             "AIDA64",
-            "Start AIDA64 (LCD -> WigiDash) + WigiDash service",
+            string.IsNullOrWhiteSpace(status) ? "Enable LCD -> WigiDash in AIDA64 + WigiDashService" : status,
             text, _placeholderTitlePaint, _placeholderSubPaint);
     }
 

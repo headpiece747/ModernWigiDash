@@ -43,7 +43,7 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         if (client == null)
         {
             NotifySensorListChanged(false);
-            DrawPlaceholder(canvas, bounds, serviceReady: false);
+            DrawPlaceholder(canvas, bounds, VendorSensorStatus.Disconnected, VendorRefreshFailure.NoSensorList);
             return;
         }
 
@@ -54,7 +54,7 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         NotifySensorListChanged(_refresh.HasSensorList);
         if (reading is null)
         {
-            DrawPlaceholder(canvas, bounds, client.Sensors.IsReady);
+            DrawPlaceholder(canvas, bounds, client.Sensors.Status, _refresh.FailureReason);
             return;
         }
 
@@ -112,7 +112,11 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
             && sensors.Any(s => s.ReadingType == pickedType && s.SensorId1 == pickedId1 && s.SensorId2 == pickedId2);
         if (!string.IsNullOrEmpty(SensorKey) && !pickedKeyPresent)
         {
-            options.Add(new WidgetPropertyOption(SensorKey, $"{SensorKey} (not available)") { IsFallback = !hasLiveSensors });
+            options.Add(new WidgetPropertyOption(SensorKey, $"{SensorKey} (not available)")
+            {
+                IsFallback = !hasLiveSensors,
+                IsUnavailable = true,
+            });
         }
 
         if (sensors != null)
@@ -155,13 +159,28 @@ public sealed class HwinfoWidget : TelemetrySensorWidgetBase, IWidgetPropertyOpt
         Context?.RequestInspectorRefresh();
     }
 
-    private void DrawPlaceholder(SKCanvas canvas, SKRect bounds, bool serviceReady)
-        => Renderer.DrawPlaceholder(
+    private void DrawPlaceholder(
+        SKCanvas canvas,
+        SKRect bounds,
+        VendorSensorStatus status,
+        VendorRefreshFailure failure)
+    {
+        var subtitle = status switch
+        {
+            VendorSensorStatus.Disconnected => "Start G.SKILL WigiDashService",
+            VendorSensorStatus.ProviderNotInitialized => "WigiDashService HWiNFO provider not ready",
+            VendorSensorStatus.EmptySensorList => "No HWiNFO sensors reported",
+            VendorSensorStatus.Ready when failure == VendorRefreshFailure.MissingSelectedKey =>
+                "Saved sensor unavailable — re-pick in Inspector",
+            _ => "No sensor data",
+        };
+        Renderer.DrawPlaceholder(
             canvas,
             bounds,
             "HWiNFO",
-            serviceReady ? "No sensor data" : "Vendor service not connected",
+            subtitle,
             ColorOf("#9CA3AF", SKColors.Gray));
+    }
 
     private ModernWigiDash.Hardware.Service.WigiDashServiceClient? ResolveClient()
         => (Context as IWidgetTelemetryContext)?.TryGetVendorService() as ModernWigiDash.Hardware.Service.WigiDashServiceClient

@@ -258,7 +258,7 @@ internal sealed class SettingsDialog : Window
         // Telemetry Polling Rate row
         row.Children.Add(BuildRowLabel("Telemetry Polling Rate", topMargin: 12));
         row.Children.Add(BuildRowHint(
-            "How often hardware sensors and telemetry are polled. 500 ms (2x/sec) is the recommended default."));
+            "How often hardware sensors, HWiNFO, and the AIDA64 panel are polled (500 ms recommended). AIDA64's internal render frequency is configured in AIDA64 LCD Preferences."));
 
         var rateCombo = new ComboBox
         {

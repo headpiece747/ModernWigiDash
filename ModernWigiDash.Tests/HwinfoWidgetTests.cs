@@ -270,6 +270,9 @@ public class HwinfoWidgetTests
         Assert.IsTrue(options[1].DisplayName.Contains("(not available)", StringComparison.Ordinal));
         Assert.AreEqual("0:0:0", options[2].Value);
         Assert.IsFalse(options[0].IsFallback);
+        Assert.IsFalse(options[0].IsUnavailable);
+        Assert.IsTrue(options[1].IsUnavailable);
+        Assert.IsFalse(options[2].IsUnavailable);
         Assert.IsFalse(options[1].IsFallback);
         Assert.IsFalse(options[2].IsFallback);
     }
@@ -300,6 +303,41 @@ public class HwinfoWidgetTests
         var options = widget.GetPropertyOptions(nameof(HwinfoWidget.SensorKey));
 
         Assert.AreEqual(128, options[1].DisplayName.Length);
+    }
+
+    [TestMethod]
+    public void Render_DisconnectedEmptyAndMissingKey_DrawCleanly()
+    {
+        using var bitmap = new SKBitmap(200, 100);
+        using var canvas = new SKCanvas(bitmap);
+        var bounds = new SKRect(0, 0, 200, 100);
+
+        foreach (var status in new[]
+        {
+            VendorSensorStatus.Disconnected,
+            VendorSensorStatus.ProviderNotInitialized,
+            VendorSensorStatus.EmptySensorList,
+        })
+        {
+            var client = new WigiDashServiceClient(new StatusFakeSensorValues(status));
+            _clients.Add(client);
+            VendorService.SetInstance(client);
+            var widget = new HwinfoWidget { SensorKey = "9:9:9" };
+            widget.Render(canvas, bounds);
+        }
+
+        VendorService.SetInstance(CreateFakeClient(sensorsReady: true, sensorCount: 1));
+        var missingWidget = new HwinfoWidget { SensorKey = "9:9:9" };
+        missingWidget.Render(canvas, bounds);
+        Assert.AreEqual(100, bitmap.Height);
+    }
+
+    private sealed class StatusFakeSensorValues(VendorSensorStatus status) : ISensorValues
+    {
+        public bool IsReady => status == VendorSensorStatus.Ready;
+        public VendorSensorStatus Status => status;
+        public IReadOnlyList<VendorSensorItem>? GetSensorList() => [];
+        public VendorSensorReading? GetSensorValue(int readingType, int sensorId1, int sensorId2) => null;
     }
 
     private WigiDashServiceClient CreateFakeClient(

@@ -108,6 +108,39 @@ public sealed class AidaPanelWidgetTests
         Assert.AreEqual(new SKColor(255, 0, 0), bitmap.GetPixel(0, 1));
     }
 
+    [TestMethod]
+    public async Task GetUnavailableStatus_ReflectsMasterAndReaderStates()
+    {
+        var unregisteredMaster = new AidaPanelMaster(new FakeAidaMmapSource(), new FakeAidaMmapWriter(), log: static _ => { });
+        var unregisteredWidget = new AidaPanelWidget(unregisteredMaster);
+        Assert.AreEqual("Connecting to WigiDashService...", unregisteredWidget.GetUnavailableStatus());
+        await unregisteredWidget.DisposeAsync();
+
+        var registeredMaster = new AidaPanelMaster(new FakeAidaMmapSource(), new FakeAidaMmapWriter(), log: static _ => { });
+        Assert.IsTrue(registeredMaster.EnsureRegistered());
+        var waitingWidget = new AidaPanelWidget(registeredMaster);
+        Assert.AreEqual("Waiting for AIDA64 frames", waitingWidget.GetUnavailableStatus());
+        await waitingWidget.DisposeAsync();
+
+        var errorMaster = new AidaPanelMaster(
+            new FakeAidaMmapSource(),
+            new FakeAidaMmapWriter { InitResult = false },
+            log: static _ => { });
+        Assert.IsFalse(errorMaster.EnsureRegistered());
+        Assert.IsNotNull(errorMaster.LastError);
+        var errorMasterWidget = new AidaPanelWidget(errorMaster);
+        Assert.AreEqual(errorMaster.LastError, errorMasterWidget.GetUnavailableStatus());
+        await errorMasterWidget.DisposeAsync();
+
+        using var reader = new AidaMmapReader(new FakeAidaMmapSource());
+        var readerWidget = new AidaPanelWidget(reader);
+        using var surface = SKSurface.Create(new SKImageInfo(200, 100));
+        readerWidget.Render(surface.Canvas, new SKRect(0, 0, 200, 100));
+        Assert.AreEqual(reader.LastError, readerWidget.GetUnavailableStatus());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(readerWidget.GetUnavailableStatus()));
+        await readerWidget.DisposeAsync();
+    }
+
     private static byte[] BuildValidMap(int width, int height)
     {
         const int bitmapOffset = 116;

@@ -31,14 +31,12 @@ subscription bookkeeping) would add surface for the same property.
   held by the client. A read that finds a missing or stale entry schedules a
   background refresh and returns the current snapshot (null before the first
   one), so the UI thread never performs WCF I/O.
-- The refresh runs on the thread pool, single-flight and rate-limited (`250 ms` minimum interval); the cache time-to-live is 2 s for the sensor list and 250 ms for a reading. The HWiNFO widget renders `"No sensor data"` / `"Vendor service not connected"` placeholders when unavailable, shows fallback option entries while waiting for sensors, and requests one inspector rebuild when the sensor list first arrives.
-- Connection state (the channel, the provider, the reconnect/retry machine)
-  still mutates under `_gate`, the lock the synchronous `TryConnect` path uses.
+- The refresh runs on the thread pool, single-flight and rate-limited (`<= 250 ms` minimum interval); the cache time-to-live is 2 s for the sensor list and `150–2000 ms` (matching the configured telemetry polling rate via `SetPollingPeriod`, default `250 ms` initial) for a reading. The HWiNFO widget renders status-specific placeholders (`"Start G.SKILL WigiDashService"`, `"WigiDashService HWiNFO provider not ready"`, `"No HWiNFO sensors reported"`, `"Saved sensor unavailable — re-pick in Inspector"`, or `"No sensor data"`) driven by `VendorSensorStatus` and `VendorRefreshFailure`, shows fallback option entries while waiting for sensors, and requests an inspector rebuild whenever the live sensor list transitions from absent to present.
+- Connection state uses two isolated `ChannelSlot` instances (`_sensorSlot` for HWiNFO and `_aidaSlot` for AIDA64) so an AIDA64 fault never tears down the HWiNFO channel, while `_connectLock` serializes HWiNFO provider connection/re-initialization outside `_gate`.
   Only the published snapshot swaps under a separate `_cacheLock`, so a reader
   never waits on an in-flight I/O. `ISensorValues.IsReady` is a lock-free
-  volatile flag.
-- A failed refresh (`fetchFailed`) clears the cached sensor list, cached readings, and requested keys unconditionally — even if `GetSensorList` or a partial read succeeded earlier in the same refresh — so the widget degrades to its placeholder instead of showing a stale list or value, and its backoff timestamps delay the next attempt, so a wedged service costs one pool-thread attempt
-  per rate-limit window, not a UI block.
+  volatile flag, and `ISensorValues.Status` exposes the current `VendorSensorStatus`.
+- A transport fault or empty/null sensor list (`failAll`) clears the cached sensor list, cached readings, and requested keys and backs off (with separate 5 s retry windows for initial connect and empty-list re-init), whereas a per-key SOAP `FaultException` evicts only the faulted reading (`faultedKeys`) while keeping the channel, sensor list, and remaining readings intact.
 
 ## Consequences
 

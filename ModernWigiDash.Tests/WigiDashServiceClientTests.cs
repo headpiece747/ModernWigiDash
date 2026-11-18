@@ -491,6 +491,158 @@ public sealed class WigiDashServiceClientTests
         }
     }
 
+    [TestMethod]
+    public void CreateProductionChannel_DisablesDefaultWebProxyAndConfigures20MbBuffersAndQuotas()
+    {
+        var (channel, factory) = WigiDashServiceClient.CreateProductionChannel();
+        try
+        {
+            var binding = factory.Endpoint.Binding as System.ServiceModel.BasicHttpBinding;
+            Assert.IsNotNull(binding);
+            Assert.IsFalse(binding.UseDefaultWebProxy);
+            Assert.AreEqual(20 * 1024 * 1024, binding.MaxBufferSize);
+            Assert.AreEqual(20 * 1024 * 1024, binding.MaxReceivedMessageSize);
+            Assert.IsGreaterThanOrEqualTo(65536, binding.ReaderQuotas.MaxStringContentLength);
+            Assert.IsGreaterThanOrEqualTo(1048576, binding.ReaderQuotas.MaxArrayLength);
+        }
+        finally
+        {
+            (channel as System.ServiceModel.ICommunicationObject)?.Abort();
+            factory.Abort();
+        }
+    }
+
+    [TestMethod]
+    public async Task Sensors_InitReturnsFalseThenRecovers_ReinitializesOnNextWindow()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel { InitResult = false };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        Assert.IsNull(client.Sensors.GetSensorList());
+        await WaitUntilAsync(() => channel.InitCalls == 1);
+        Assert.AreEqual(VendorSensorStatus.ProviderNotInitialized, client.Sensors.Status);
+        Assert.IsFalse(client.Sensors.IsReady);
+
+        // Inside the 5 s connect retry window: no extra init attempt.
+        channel.InitResult = true;
+        clock.Advance(TimeSpan.FromSeconds(2));
+        _ = client.Sensors.GetSensorList();
+        await Task.Delay(50);
+        Assert.AreEqual(1, channel.InitCalls);
+
+        // Past the 5 s window: re-initializes and populates sensors.
+        clock.Advance(TimeSpan.FromSeconds(4));
+        _ = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.Status == VendorSensorStatus.Ready && client.Sensors.GetSensorList() is { Count: 1 });
+        Assert.IsTrue(client.Sensors.IsReady);
+    }
+
+    [TestMethod]
+    public async Task Sensors_EmptyListAfterConnect_ReinitializesImmediatelyWithoutFiveSecondLockout()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel { EmptyUntilReinit = true };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        // First cycle connects (InitCalls == 1) and receives [] (simulating shared
+        // provider torn down before GetSensorList returns).
+        _ = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.Status == VendorSensorStatus.EmptySensorList);
+        Assert.AreEqual(1, channel.InitCalls);
+
+        // Only 2.5 s later (< 5 s connect cooldown, >= 2 s list TTL): ReinitSensorProvider
+        // has its own retry clock, so it re-initializes immediately and recovers.
+        clock.Advance(TimeSpan.FromSeconds(2.5));
+        _ = client.Sensors.GetSensorList();
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: 1 });
+
+        Assert.AreEqual(2, channel.InitCalls,
+            "initial connect + ReinitSensorProvider must use separate 5 s retry clocks");
+        Assert.AreEqual(VendorSensorStatus.Ready, client.Sensors.Status);
+    }
+
+    [TestMethod]
+    public async Task Sensors_FaultExceptionOnOneKey_EvictsFaultedReadingAndPreservesChannelAndList()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel
+        {
+            Sensors =
+            [
+                new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "Temp", "C"),
+                new VendorSensorItem(Guid.NewGuid(), "GPU", 1, 2, 1, "Temp", "C"),
+            ],
+        };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        _ = client.Sensors.GetSensorValue(1, 2, 1);
+        await WaitUntilAsync(() =>
+            client.Sensors.GetSensorValue(1, 2, 0) is not null &&
+            client.Sensors.GetSensorValue(1, 2, 1) is not null);
+
+        // One key throws SOAP FaultException: must evict ONLY that reading, keep
+        // the sensor catalog intact, keep the channel open, and keep polling (1,2,1).
+        channel.FaultOnKey = (1, 2, 0);
+        clock.Advance(TimeSpan.FromMilliseconds(300));
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        _ = client.Sensors.GetSensorValue(1, 2, 1);
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorValue(1, 2, 0) is null);
+        Assert.IsTrue(client.Sensors.IsReady);
+        Assert.AreEqual(VendorSensorStatus.Ready, client.Sensors.Status);
+        Assert.AreEqual(2, client.Sensors.GetSensorList()!.Count);
+        Assert.IsNotNull(client.Sensors.GetSensorValue(1, 2, 1));
+    }
+
+    [TestMethod]
+    public async Task TryInitAidaProvider_Fault_DoesNotDropSensorChannel()
+    {
+        var clock = new FakeTimeProvider();
+        var sensorChannel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "Temp", "C")],
+        };
+        var aidaChannel = new FakeWcfChannel { ThrowOnAidaInit = true };
+        int created = 0;
+        using var client = new WigiDashServiceClient(
+            () => Interlocked.Increment(ref created) == 1 ? sensorChannel : aidaChannel,
+            clock);
+
+        await WaitUntilAsync(() => client.Sensors.GetSensorList() is { Count: 1 });
+        Assert.IsTrue(client.IsConnected);
+
+        Assert.IsFalse(client.TryInitAidaProvider());
+        Assert.IsTrue(client.IsConnected, "an AIDA64 fault must never tear down the isolated HWiNFO channel");
+        Assert.AreEqual(VendorSensorStatus.Ready, client.Sensors.Status);
+    }
+
+    [TestMethod]
+    public async Task Sensors_SetPollingPeriod_UpdatesValueTtl()
+    {
+        var clock = new FakeTimeProvider();
+        var channel = new FakeWcfChannel
+        {
+            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "Temp", "C")],
+        };
+        using var client = new WigiDashServiceClient(() => channel, clock);
+        client.SetPollingPeriod(TimeSpan.FromMilliseconds(1000));
+
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        await WaitUntilAsync(() => client.Sensors.GetSensorValue(1, 2, 0) is not null);
+        int callsAfterPrime = channel.ValueCalls;
+
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        await Task.Delay(50);
+        Assert.AreEqual(callsAfterPrime, channel.ValueCalls, "500 ms must stay within the 1000 ms value TTL");
+
+        clock.Advance(TimeSpan.FromMilliseconds(600));
+        _ = client.Sensors.GetSensorValue(1, 2, 0);
+        await WaitUntilAsync(() => channel.ValueCalls > callsAfterPrime);
+    }
+
     private static Task WaitUntilAsync(Func<bool> condition)
         => TestWait.WaitUntilAsync(condition, TimeSpan.FromSeconds(5));
 
@@ -498,12 +650,18 @@ public sealed class WigiDashServiceClientTests
     {
         private int _initCalls;
         private int _abortCalls;
+        private int _valueCalls;
 
         public bool InitCalled => Volatile.Read(ref _initCalls) > 0;
         public int InitCalls => Volatile.Read(ref _initCalls);
         public int AbortCalls => Volatile.Read(ref _abortCalls);
+        public int ValueCalls => Volatile.Read(ref _valueCalls);
 
         public bool InitResult { get; set; } = true;
+
+        public bool EmptyUntilReinit { get; set; }
+
+        public (int ReadingType, int SensorId1, int SensorId2)? FaultOnKey { get; set; }
 
         public bool ThrowOnList { get; set; }
 
@@ -546,7 +704,10 @@ public sealed class WigiDashServiceClientTests
             if (ThrowOnInit) throw new InvalidOperationException("init dead");
             Interlocked.Increment(ref _initCalls);
             if (!InitResult) return false;
-            Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")];
+            if (Sensors.Count == 0)
+            {
+                Sensors = [new VendorSensorItem(Guid.NewGuid(), "CPU", 1, 2, 0, "P-core 0", "C")];
+            }
             return true;
         }
 
@@ -565,6 +726,8 @@ public sealed class WigiDashServiceClientTests
             }
 
             if (ThrowOnList) throw new InvalidOperationException("channel dead");
+            if (EmptyUntilReinit && InitCalls < 2)
+                return [];
             return IncludeNullSensor ? [null!, .. Sensors] : Sensors;
         }
 
@@ -576,6 +739,9 @@ public sealed class WigiDashServiceClientTests
                 ValueRelease.Wait(TimeSpan.FromSeconds(30));
             }
 
+            Interlocked.Increment(ref _valueCalls);
+            if (FaultOnKey == (readingType, sensorId1, sensorId2))
+                throw new System.ServiceModel.FaultException("sensor fault");
             if (ThrowOnValue) throw new InvalidOperationException("value dead");
             isValid = true;
             return 42;

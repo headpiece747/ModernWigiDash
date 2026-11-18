@@ -373,9 +373,34 @@ internal static class InspectorPanelRenderer
                 wiring.TypeCombo = combo;
             }
 
-            return desc.RequiresListedValue && desc.Options.All(static o => o.IsFallback)
-                ? WrapWithStatusHint(combo, desc, callbacks, DefaultUnavailableOptionsHint)
-                : combo;
+            if (desc.RequiresListedValue)
+            {
+                if (desc.Options.All(static o => o.IsFallback))
+                {
+                    return WrapWithStatusHint(combo, desc, callbacks, DefaultUnavailableOptionsHint);
+                }
+
+                string? currentValue = desc.CurrentValue?.ToString();
+                if (!string.IsNullOrEmpty(currentValue) &&
+                    desc.Options.Any(o => o.IsUnavailable && string.Equals(o.Value, currentValue, StringComparison.Ordinal)))
+                {
+                    var wrapped = WrapWithStatusHint(
+                        combo,
+                        desc,
+                        callbacks,
+                        "The saved option is unavailable. Select an available option.",
+                        useDescription: false,
+                        out TextBlock hint);
+                    combo.SelectionChanged += (_, _) =>
+                    {
+                        bool unavailable = (combo.SelectedItem as WidgetPropertyOption)?.IsUnavailable == true;
+                        hint.Visibility = unavailable ? Visibility.Visible : Visibility.Collapsed;
+                    };
+                    return wrapped;
+                }
+            }
+
+            return combo;
         }
 
         // A required list that has not produced options yet: keep a disabled
@@ -396,11 +421,25 @@ internal static class InspectorPanelRenderer
         return WrapWithStatusHint(placeholderCombo, desc, callbacks, DefaultUnavailableOptionsHint);
     }
 
-    private static StackPanel WrapWithStatusHint(UIElement editor, EditorDescription desc, InspectorCallbacks callbacks, string fallback)
+    private static StackPanel WrapWithStatusHint(
+        UIElement editor,
+        EditorDescription desc,
+        InspectorCallbacks callbacks,
+        string fallback,
+        bool useDescription = true)
+        => WrapWithStatusHint(editor, desc, callbacks, fallback, useDescription, out _);
+
+    private static StackPanel WrapWithStatusHint(
+        UIElement editor,
+        EditorDescription desc,
+        InspectorCallbacks callbacks,
+        string fallback,
+        bool useDescription,
+        out TextBlock hint)
     {
         var stack = new StackPanel();
         stack.Children.Add(editor);
-        var hint = BuildEmptyOptionsHint(desc, callbacks, fallback, useDescription: true);
+        hint = BuildEmptyOptionsHint(desc, callbacks, fallback, useDescription);
         hint.Margin = new Thickness(0, 4, 0, 0);
         stack.Children.Add(hint);
         return stack;

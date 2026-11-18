@@ -554,3 +554,4 @@
 2026-11-14T02:12:20Z	ba7b1c0	v0.9.6 release close - FAILED: Sensors_AfterAFailedCall_ReopensTheChannelOnceTheRetryWindowElapses	ok	0	0	FAIL	3069	1	SKIP
 2026-11-14T02:13:47Z	ba7b1c0	v0.9.6 release close	ok	0	0	FAIL	456	0	SKIP
 2026-11-14T02:17:58Z	ba7b1c0	v0.9.6 release close	ok	0	0	ok	3070	0	ok
+2026-11-18T02:25:36Z	15dab7e	v0.9.7 release-ready	ok	0	0	ok	3097	0	ok

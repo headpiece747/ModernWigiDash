@@ -16,4 +16,10 @@ public interface IAidaMmapSource : IDisposable
     /// range is out of the map's bounds, or the copy fails. Never throws.
     /// </summary>
     bool TryRead(int offset, int length, byte[] destination, out string? error);
+
+    /// <summary>
+    /// Drops any cached map handles so the next read opens fresh handles
+    /// (for recovery after an external service restart or map recreation).
+    /// </summary>
+    void Reset() { }
 }

@@ -54,11 +54,22 @@ public sealed class AidaPanelWidget : ModernWidgetBase
     {
         if (!TryAcquireFrame(out byte[] buffer, out int pixelOffset, out int length, out int width, out int height, out long version))
         {
-            _canvas.RenderPlaceholder(canvas, bounds);
+            _canvas.RenderPlaceholder(canvas, bounds, GetUnavailableStatus());
             return;
         }
 
         _canvas.RenderFrame(canvas, bounds, buffer, pixelOffset, length, width, height, version);
+    }
+
+    internal string? GetUnavailableStatus()
+    {
+        if (_master is not null)
+        {
+            return _master.LastError
+                ?? (_master.IsRegistered ? "Waiting for AIDA64 frames" : "Connecting to WigiDashService...");
+        }
+
+        return _reader?.LastError;
     }
 
     /// <summary>

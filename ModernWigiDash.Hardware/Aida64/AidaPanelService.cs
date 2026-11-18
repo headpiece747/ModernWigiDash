@@ -15,6 +15,37 @@ public static class AidaPanelService
     private static Task _activeRelease = Task.CompletedTask;
     private static AidaPanelMaster? _shared;
     private static int _borrowers;
+    private static TimeSpan _pollInterval = TimeSpan.FromMilliseconds(AidaPanelMaster.PollIntervalMs);
+
+    internal static TimeSpan CurrentPollInterval
+    {
+        get { lock (Gate) return _pollInterval; }
+    }
+
+    /// <summary>
+    /// Maps a global telemetry polling period to the AIDA64 panel poll cadence,
+    /// clamped to [150 ms, 500 ms] so >= 2x Nyquist sampling is preserved against
+    /// typical 1 s AIDA64 panel updates (ADR-0028).
+    /// </summary>
+    public static TimeSpan ResolvePollInterval(TimeSpan telemetryPeriod)
+        => TimeSpan.FromMilliseconds(Math.Clamp(telemetryPeriod.TotalMilliseconds / 2.0, 150.0, 500.0));
+
+    /// <summary>
+    /// Updates the AIDA64 polling cadence from the configured telemetry period,
+    /// updating any active shared master without blocking behind vendor I/O.
+    /// </summary>
+    public static void SetPollingPeriod(TimeSpan telemetryPeriod)
+    {
+        var resolved = ResolvePollInterval(telemetryPeriod);
+        AidaPanelMaster? shared;
+        lock (Gate)
+        {
+            _pollInterval = resolved;
+            shared = _shared;
+        }
+
+        shared?.UpdatePollingPeriod(resolved);
+    }
 
     /// <summary>Borrows the process-wide master, creating it on first use without
     /// blocking the UI thread if a previous master is still releasing slot 0.</summary>
@@ -104,8 +135,24 @@ public static class AidaPanelService
     /// </summary>
     /// <param name="log">The diagnostic sink; defaults to <see cref="FileLog"/>.</param>
     public static AidaPanelMaster CreateProduction(Action<string>? log = null)
-        => new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), log);
+    {
+        TimeSpan pollInterval;
+        lock (Gate)
+        {
+            pollInterval = _pollInterval;
+        }
+
+        return new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), log, pollInterval);
+    }
 
     private static AidaPanelMaster CreateProductionWithPriorRelease(Task priorRelease)
-        => new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), priorRelease);
+    {
+        TimeSpan pollInterval;
+        lock (Gate)
+        {
+            pollInterval = _pollInterval;
+        }
+
+        return new(new MemoryMappedAidaMmapSource(), new VendorAidaMmapWriter(), priorRelease, pollInterval: pollInterval);
+    }
 }

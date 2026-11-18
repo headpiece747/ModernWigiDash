@@ -1,6 +1,7 @@
 using System;
 using ModernWigiDash.App.LibreHardwareService;
 using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.Hardware.Aida64;
 using ModernWigiDash.Hardware.Service;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
@@ -17,13 +18,11 @@ namespace ModernWigiDash.App;
 internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDisposable
 {
     private readonly System.Threading.Lock _pollGate = new();
-    private readonly IPresentMonNative _presentMonNative;
     private readonly LhmSharedMemoryReader _lhsReader;
     private readonly PresentMonFrameTimeProducer _presentMonProducer;
-    private PollLoop _sensorPoll;
-    private PollLoop _frameTimePoll;
+    private readonly PollLoop _sensorPoll;
+    private readonly PollLoop _frameTimePoll;
     private TimeSpan _currentPeriod;
-    private bool _running;
     private bool _disposed;
     private readonly Action<string> _log;
 
@@ -52,7 +51,6 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
         TimeSpan? initialPeriod = null)
     {
         _log = log;
-        _presentMonNative = presentMonNative;
         _currentPeriod = initialPeriod ?? TimeSpan.FromMilliseconds(500);
         _vendorClient = vendorClient;
         _lhsReader = new LhmSharedMemoryReader(lhsMapSource ?? new MemoryMappedLhmMapSource());
@@ -79,6 +77,9 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
             "SENSOR", _currentPeriod, () => true, SensorPollTick, () => { }, log);
         _frameTimePoll = new PollLoop(
             "FRAMETIME", _currentPeriod, () => presentMonNative.IsAvailable, FrameTimePollTick, () => { }, log);
+
+        AidaPanelService.SetPollingPeriod(_currentPeriod);
+        _vendorClient?.SetPollingPeriod(_currentPeriod);
     }
 
     /// <summary>Starts background telemetry poll loops.</summary>
@@ -86,7 +87,6 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
     {
         lock (_pollGate)
         {
-            _running = true;
             _sensorPoll.Start();
             _frameTimePoll.Start();
         }
@@ -97,39 +97,36 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
     {
         lock (_pollGate)
         {
-            _running = false;
             _sensorPoll.Stop();
             _frameTimePoll.Stop();
         }
     }
 
     /// <summary>
-    /// Thread-safely updates the telemetry polling cadence for both sensor and
-    /// frame-time background poll loops without restarting the application.
+    /// Thread-safely updates the telemetry polling cadence across sensor,
+    /// frame-time, vendor WCF, and AIDA64 background poll loops without stopping
+    /// threads or blocking the UI thread.
     /// </summary>
     public void UpdatePollingPeriod(TimeSpan newPeriod)
     {
+        bool updated;
         lock (_pollGate)
         {
             if (_disposed) return;
             if (_currentPeriod == newPeriod) return;
 
+            _sensorPoll.SetInterval(newPeriod);
+            _frameTimePoll.SetInterval(newPeriod);
             _currentPeriod = newPeriod;
-            _sensorPoll.Dispose();
-            _frameTimePoll.Dispose();
-
-            _sensorPoll = new PollLoop(
-                "SENSOR", _currentPeriod, () => true, SensorPollTick, () => { }, _log);
-            _frameTimePoll = new PollLoop(
-                "FRAMETIME", _currentPeriod, () => _presentMonNative.IsAvailable, FrameTimePollTick, () => { }, _log);
-
-            if (_running)
-            {
-                _sensorPoll.Start();
-                _frameTimePoll.Start();
-            }
+            updated = true;
 
             _log($"[TELEMETRY] Polling cadence updated to {(int)newPeriod.TotalMilliseconds}ms");
+        }
+
+        if (updated)
+        {
+            _vendorClient?.SetPollingPeriod(newPeriod);
+            AidaPanelService.SetPollingPeriod(newPeriod);
         }
     }
 
@@ -148,6 +145,7 @@ internal sealed class TelemetryFeedCoordinator : IWidgetTelemetryContext, IDispo
     public void SetVendorService(WigiDashServiceClient? client)
     {
         _vendorClient = client;
+        client?.SetPollingPeriod(CurrentPollingPeriod);
         VendorService.SetInstance(client);
     }
 

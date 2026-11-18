@@ -157,6 +157,48 @@ public class SettingsDialogTests
             return null;
         });
 
+    private static (SettingsDialog Dialog, FakeHubHost Host) BuildTelemetryDialog(int seededPollRateMs)
+    {
+        ThemeStore.Replace(new ThemeSettings());
+        var owner = new Window();
+        WpfWindow.ShowOwner(owner);
+        var host = new FakeHubHost(
+            new SettingsHubSeed(null, false, false, "", "", false, TelemetryPollPeriodMs: seededPollRateMs),
+            browseResult: null);
+        var dialog = new SettingsDialog(owner, new ThemeApplicator(), host);
+        dialog.Show();
+        dialog.UpdateLayout();
+        return (dialog, host);
+    }
+
+    private static ComboBox TelemetryPollingCombo(SettingsDialog dialog)
+        => VisualTree.FindDescendants<ComboBox>(dialog).Single();
+
+    [TestMethod]
+    public void Ctor_SeedsTelemetryPollingRate_WithoutCommitting()
+        => Host.Run<object?>(() =>
+        {
+            var (dialog, host) = BuildTelemetryDialog(seededPollRateMs: 1000);
+            var selected = TelemetryPollingCombo(dialog).SelectedItem as SettingsModel.PollingRateOption;
+            Assert.IsNotNull(selected);
+            Assert.AreEqual(1000, selected.Milliseconds);
+            Assert.AreEqual(0, host.TelemetryPollingRateCommits.Count, "seeding must not commit on open");
+            dialog.Close();
+            return null;
+        });
+
+    [TestMethod]
+    public void TelemetryPollingRateCombo_WritesThroughToCommitSeam()
+        => Host.Run<object?>(() =>
+        {
+            var (dialog, host) = BuildTelemetryDialog(seededPollRateMs: 500);
+            var combo = TelemetryPollingCombo(dialog);
+            combo.SelectedItem = SettingsModel.TelemetryPollingRates.Single(o => o.Milliseconds == 250);
+            CollectionAssert.AreEqual(new[] { 250 }, host.TelemetryPollingRateCommits);
+            dialog.Close();
+            return null;
+        });
+
     [TestMethod]
     public void AppearanceGroup_ExposesTheThemeEditorButton()
         => Host.Run<object?>(() =>

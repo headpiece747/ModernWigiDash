@@ -34,10 +34,10 @@ In ModernWigiDash, `WigiDashServiceClient` had `RefreshMinInterval = 1000ms`, ca
    Exposed a "Telemetry Polling Rate" ComboBox in `SettingsDialog` under the Behavior group.
 
 4. **Dynamic Live Update:**
-   `TelemetryFeedCoordinator.UpdatePollingPeriod` safely disposes running poll loops and instantiates new ones at the updated rate. Changes apply immediately without requiring an application restart. `MainWindow` pre-loads `_appSettings` before telemetry wiring to ensure boot-time rates match persisted values.
+   `TelemetryFeedCoordinator.UpdatePollingPeriod` mutates the running sensor and frame-time `PollLoop` timers in place via `PollLoop.SetInterval(TimeSpan)` (`PeriodicTimer.Period`), and propagates the new rate to `WigiDashServiceClient.SetPollingPeriod` and `AidaPanelService.SetPollingPeriod` (`AidaPanelMaster.UpdatePollingPeriod`) without stopping or blocking background worker threads. Changes apply immediately without requiring an application restart. `MainWindow` pre-loads `_appSettings` before telemetry wiring to ensure boot-time rates match persisted values.
 
-5. **WCF Service Client & Throttle Optimization:**
-   `WigiDashServiceClient` reduces `RefreshMinInterval` and `SensorValueTtl` to 250ms. `RefreshCache()` caches `GetRawSensorList()` and only fetches values when cached, eliminating redundant 600+ item SOAP calls. `VendorSensorRefresh` throttle is reduced to 250ms.
+5. **WCF Service Client, AIDA64 Master & Throttle Optimization:**
+   `WigiDashServiceClient.SetPollingPeriod` scales `SensorValueTtl` (`Clamp(period, 150..2000 ms)`) and caps `RefreshMinInterval` at `Min(clamped, 250 ms)`. `RefreshCache()` caches `GetRawSensorList()` and only fetches values when cached, eliminating redundant 600+ item SOAP calls. `VendorSensorRefresh` throttle is reduced to 250ms, and `AidaPanelService.ResolvePollInterval` maps the configured telemetry period `T` to `Clamp(T / 2, 150..500 ms)` so AIDA64's master handshake maintains >= 2x Nyquist sampling.
 
 ## Consequences
 

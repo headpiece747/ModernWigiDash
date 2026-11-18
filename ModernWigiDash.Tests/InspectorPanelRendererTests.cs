@@ -637,6 +637,67 @@ public class InspectorPanelRendererTests
             => new(45.0, true);
     }
 
+    private static StackPanel RenderHwinfoWithStaticSensors(string sensorKey)
+    {
+        using var client = new ModernWigiDash.Hardware.Service.WigiDashServiceClient(new StaticSensorValues());
+        ModernWigiDash.Hardware.Service.VendorService.SetInstance(client);
+        try
+        {
+            var widget = new HwinfoWidget { SensorKey = sensorKey };
+            var placed = new PlacedWidgetInstance { PluginId = "hwinfo", DisplayName = "HWiNFO Sensor", ActiveInstance = widget };
+            var target = new StackPanel();
+            var callbacks = new InspectorCallbacks
+            {
+                TryFindResource = _ => null,
+                ApplyInspectorPropertyValue = (_, _) => { },
+                ShowIconSelectorPopup = (_, _, _) => { },
+                AttachDropdownWithinWindow = _ => { },
+                BrowseFile = (_, _) => null,
+                BrowseFolder = _ => null,
+            };
+
+            InspectorPanelRenderer.Render(placed, InspectorModelBuilder.Describe(placed, []), target.Children, callbacks);
+            return target;
+        }
+        finally
+        {
+            ModernWigiDash.Hardware.Service.VendorService.SetInstance(null);
+        }
+    }
+
+    [TestMethod]
+    public void Render_HwinfoLiveSensorsWithUnavailableSavedKey_ShowsHintAndHidesOnValidPick()
+    {
+        StaRunner.Run(() =>
+        {
+            var target = RenderHwinfoWithStaticSensors("missing-sensor-id");
+            var hint = VisualTree.FindDescendants<TextBlock>(target)
+                .Single(t => t.Text.Contains("The saved option is unavailable.", StringComparison.Ordinal));
+            Assert.AreEqual(Visibility.Visible, hint.Visibility,
+                "selecting a missing persisted HWiNFO key with live sensors present must explain how to recover");
+
+            var combo = VisualTree.FindDescendants<ComboBox>(target)
+                .Single(c => c.Items.OfType<WidgetPropertyOption>().Any(o => o.IsUnavailable));
+            var liveOption = combo.Items.Cast<WidgetPropertyOption>().First(o => !o.IsUnavailable && !string.IsNullOrEmpty(o.Value));
+            combo.SelectedItem = liveOption;
+            Assert.AreEqual(Visibility.Collapsed, hint.Visibility,
+                "picking an available option must hide the unavailable-option warning immediately");
+        });
+    }
+
+    [TestMethod]
+    public void Render_HwinfoLiveSensorsWithAutomaticKey_HidesUnavailableKeyHint()
+    {
+        StaRunner.Run(() =>
+        {
+            var target = RenderHwinfoWithStaticSensors("");
+            Assert.IsFalse(
+                VisualTree.FindDescendants<TextBlock>(target).Any(t =>
+                    t.Text.Contains("The saved option is unavailable.", StringComparison.Ordinal)),
+                "selecting Automatic with live sensors must not display the unavailable-key hint");
+        });
+    }
+
     private sealed class BooleanWidget : ModernWidgetBase
     {
         [WidgetProperty("Flag", WidgetPropertyType.Boolean, defaultValue: true)]

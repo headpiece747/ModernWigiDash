@@ -11,6 +11,21 @@ namespace ModernWigiDash.Tests;
 [DoNotParallelize]
 public sealed class AidaPanelServiceTests
 {
+    [TestInitialize]
+    [TestCleanup]
+    public void ResetDefaultPollingCadence()
+    {
+        AidaPanelService.SetPollingPeriod(TimeSpan.FromMilliseconds(300));
+    }
+
+    [TestMethod]
+    public void ResolvePollInterval_AppliesNyquistClamping()
+    {
+        Assert.AreEqual(TimeSpan.FromMilliseconds(150), AidaPanelService.ResolvePollInterval(TimeSpan.FromMilliseconds(250)));
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), AidaPanelService.ResolvePollInterval(TimeSpan.FromMilliseconds(500)));
+        Assert.AreEqual(TimeSpan.FromMilliseconds(500), AidaPanelService.ResolvePollInterval(TimeSpan.FromMilliseconds(1000)));
+        Assert.AreEqual(TimeSpan.FromMilliseconds(500), AidaPanelService.ResolvePollInterval(TimeSpan.FromMilliseconds(2000)));
+    }
     [TestMethod]
     public void Acquire_SharesOneMasterAndTheLastReleaseRecyclesIt()
     {

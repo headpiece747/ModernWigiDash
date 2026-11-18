@@ -90,6 +90,9 @@ public sealed record WidgetPropertyOption(string Value, string DisplayName)
     /// live choices have not loaded yet (so the inspector keeps the status hint visible).</summary>
     public bool IsFallback { get; init; }
 
+    /// <summary>True when a persisted selection is not present among the current live options.</summary>
+    public bool IsUnavailable { get; init; }
+
     /// <summary>Dropdowns display the label.</summary>
     public override string ToString() => DisplayName;
 }

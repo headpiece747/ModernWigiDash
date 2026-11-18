@@ -69,6 +69,7 @@ public sealed class AidaPanelMaster : IDisposable
     private readonly AidaMmapReader _reader;
     private readonly Action<string> _log;
     private readonly Task? _waitBeforeRegister;
+    private readonly TimeProvider _clock;
     // Three gates, one owner each. `_gate` guards registered/counter/error
     // state and is never held across vendor I/O. `_startGate` guards the
     // loop lifecycle (start/dispose ordering). `_readerGate` guards the map
@@ -81,19 +82,24 @@ public sealed class AidaPanelMaster : IDisposable
     private readonly LogOnChange _failureDedup = new();
     private readonly byte[] _slaveBuffer = new byte[4];
     private readonly byte[] _markerBuffer = new byte[4];
+    private readonly byte[] _headerBuffer = new byte[4];
     private readonly byte[][] _ring = new byte[RingDepth][];
     private readonly Guid _instanceId = Guid.NewGuid();
     private readonly TaskCompletionSource _slotQuiesced =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private PollLoop? _loop;
+    private TimeSpan _pollInterval;
     private AidaPublishedFrame? _published;
     private int _ringIndex;
     private int _inFlightSlotWork;
     private long _generation;
     private uint _masterCounter;
     private uint _slaveBaseline;
+    private DateTimeOffset _lastSlaveProgressUtc = DateTimeOffset.MinValue;
     private int _consecutiveWriteFailures;
+    private int _consecutiveFrameReadFailures;
+    private int _idleHeaderCheckTicks;
     private bool _slaveAlive;
     private bool _registered;
     private volatile bool _started;
@@ -104,8 +110,15 @@ public sealed class AidaPanelMaster : IDisposable
     /// <param name="source">The map read seam (the master owns and disposes it).</param>
     /// <param name="writer">The handshake write seam.</param>
     /// <param name="log">The diagnostic sink; defaults to <see cref="FileLog"/>.</param>
-    public AidaPanelMaster(IAidaMmapSource source, IAidaMmapWriter writer, Action<string>? log = null)
-        : this(source, writer, waitBeforeRegister: null, log)
+    /// <param name="pollInterval">Optional initial poll interval (defaults to 150 ms).</param>
+    /// <param name="timeProvider">Optional clock for liveness timeouts (defaults to <see cref="TimeProvider.System"/>).</param>
+    public AidaPanelMaster(
+        IAidaMmapSource source,
+        IAidaMmapWriter writer,
+        Action<string>? log = null,
+        TimeSpan? pollInterval = null,
+        TimeProvider? timeProvider = null)
+        : this(source, writer, waitBeforeRegister: null, log, pollInterval, timeProvider)
     {
     }
 
@@ -113,13 +126,19 @@ public sealed class AidaPanelMaster : IDisposable
         IAidaMmapSource source,
         IAidaMmapWriter writer,
         Task? waitBeforeRegister,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        TimeSpan? pollInterval = null,
+        TimeProvider? timeProvider = null)
     {
+        var interval = pollInterval ?? TimeSpan.FromMilliseconds(PollIntervalMs);
+        PollLoop.ValidateInterval(interval, nameof(pollInterval));
         _source = source;
         _writer = writer;
         _reader = new AidaMmapReader(source);
         _waitBeforeRegister = waitBeforeRegister;
         _log = log ?? FileLog.Write;
+        _pollInterval = interval;
+        _clock = timeProvider ?? TimeProvider.System;
         for (int i = 0; i < RingDepth; i++)
         {
             _ring[i] = new byte[AidaMmapReader.PanelPayloadBytes];
@@ -161,7 +180,7 @@ public sealed class AidaPanelMaster : IDisposable
             if (_started || _disposed) return;
             var loop = new PollLoop(
                 "AIDA-MASTER",
-                TimeSpan.FromMilliseconds(PollIntervalMs),
+                _pollInterval,
                 ready: EnsureRegistered,
                 tick: PollOnce,
                 onTickFailure: static () => { },
@@ -171,6 +190,21 @@ public sealed class AidaPanelMaster : IDisposable
             // Started INSIDE the gate: Dispose captures the same fields under
             // it, so a loop can never be created after the stop pass.
             loop.Start();
+        }
+    }
+
+    /// <summary>
+    /// Updates the master poll loop cadence in place without blocking behind
+    /// in-flight vendor WCF calls or joining the background worker thread.
+    /// </summary>
+    public void UpdatePollingPeriod(TimeSpan interval)
+    {
+        PollLoop.ValidateInterval(interval, nameof(interval));
+        lock (_startGate)
+        {
+            if (_disposed) return;
+            _pollInterval = interval;
+            _loop?.SetInterval(interval);
         }
     }
 
@@ -242,14 +276,20 @@ public sealed class AidaPanelMaster : IDisposable
             // (which only ever touches _startGate) or the diagnostic readers.
             if (!_writer.TryInit(out string? initError))
             {
+                lock (_gate) _lastError = initError;
                 LogOnce($"provider unavailable: {initError}");
                 return false;
             }
 
-            if (_disposed) return false;
+            lock (_readerGate)
+            {
+                if (_disposed) return false;
+                _source.Reset();
+            }
 
             if (!_writer.TryWrite(MapBlockOffset, BuildMapBlock(), out string? writeError))
             {
+                lock (_gate) _lastError = writeError;
                 LogOnce($"slot registration failed: {writeError}");
                 return false;
             }
@@ -259,7 +299,12 @@ public sealed class AidaPanelMaster : IDisposable
             {
                 if (_disposed) return false;
                 _registered = true;
+                _slaveAlive = false;
+                _slaveBaseline = 0;
+                _consecutiveFrameReadFailures = 0;
                 _consecutiveWriteFailures = 0;
+                _idleHeaderCheckTicks = 0;
+                _lastSlaveProgressUtc = _clock.GetUtcNow();
                 _lastError = null;
                 _failureDedup.Changed(null);
             }
@@ -310,35 +355,121 @@ public sealed class AidaPanelMaster : IDisposable
 
     private bool TryConsumeAvailableFrame()
     {
+        if (++_idleHeaderCheckTicks >= 10)
+        {
+            _idleHeaderCheckTicks = 0;
+            bool headerRead;
+            string? headerError;
+            uint magic = 0;
+            int numWidgets = 0;
+            lock (_readerGate)
+            {
+                if (_disposed) return true;
+                headerRead = _source.TryRead(AidaMmapReader.MagicTagOffset, 4, _headerBuffer, out headerError);
+                if (headerRead)
+                {
+                    magic = BitConverter.ToUInt32(_headerBuffer, 0);
+                    headerRead = _source.TryRead(AidaMmapReader.NumWidgetsOffset, 4, _headerBuffer, out headerError);
+                    if (headerRead)
+                    {
+                        numWidgets = BitConverter.ToInt32(_headerBuffer, 0);
+                    }
+                }
+
+                if (headerRead && (magic != MmapMagicTag || numWidgets <= 0))
+                {
+                    _source.Reset();
+                }
+            }
+
+            if (!headerRead)
+            {
+                lock (_gate) _lastError = headerError;
+                LogOnce($"map header read failed: {headerError}");
+                // MMF read failure while WCF MasterCounter write succeeded: keep slot 0 registered
+                // and preserve the read error instead of tripping WCF write failure strikes.
+                return true;
+            }
+
+            if (magic != MmapMagicTag || numWidgets <= 0)
+            {
+                lock (_gate)
+                {
+                    _registered = false;
+                    _slaveAlive = false;
+                    _slaveBaseline = 0;
+                    _consecutiveFrameReadFailures = 0;
+                    _consecutiveWriteFailures = 0;
+                    _lastError = "AIDA64 slot registration reset";
+                }
+                Volatile.Write(ref _published, null);
+                LogOnce("AIDA64 map header reset; re-registering slot 0");
+                return true;
+            }
+        }
+
         bool slaveRead;
+        string? slaveError;
         uint slave;
         lock (_readerGate)
         {
             if (_disposed) return true;
-            slaveRead = _source.TryRead(SlaveCounterOffset, 4, _slaveBuffer, out _);
+            slaveRead = _source.TryRead(SlaveCounterOffset, 4, _slaveBuffer, out slaveError);
             slave = slaveRead ? BitConverter.ToUInt32(_slaveBuffer, 0) : 0;
         }
 
-        if (!slaveRead) return true;
+        if (!slaveRead)
+        {
+            lock (_gate) _lastError = slaveError;
+            LogOnce($"slave counter read failed: {slaveError}");
+            return true;
+        }
 
+        var now = _clock.GetUtcNow();
         if (!_slaveAlive)
         {
             if (slave == _slaveBaseline) return true; // AIDA64 has not written yet
             _slaveAlive = true;
+            _lastSlaveProgressUtc = now;
+        }
+        else if (slave != _slaveBaseline)
+        {
+            _lastSlaveProgressUtc = now;
+        }
+        else if (now - _lastSlaveProgressUtc >= TimeSpan.FromSeconds(5))
+        {
+            _slaveAlive = false;
+            _consecutiveFrameReadFailures = 0;
+            Volatile.Write(ref _published, null);
+            lock (_gate) _lastError = "Waiting for AIDA64 frames";
+            LogOnce("AIDA64 frame producer inactive; cleared stale frame");
+            return true;
         }
 
         _slaveBaseline = slave;
 
         bool markerRead;
+        string? markerError;
         uint marker;
         lock (_readerGate)
         {
             if (_disposed) return true;
-            markerRead = _source.TryRead(BitmapOffset, 4, _markerBuffer, out _);
+            markerRead = _source.TryRead(BitmapOffset, 4, _markerBuffer, out markerError);
             marker = markerRead ? BitConverter.ToUInt32(_markerBuffer, 0) : 0;
         }
 
-        if (!markerRead || marker == 0) return true; // no new frame
+        if (!markerRead)
+        {
+            lock (_gate) _lastError = markerError;
+            LogOnce($"frame marker read failed: {markerError}");
+            return true;
+        }
+
+        if (marker == 0)
+        {
+            _consecutiveFrameReadFailures = 0;
+            return true; // no new frame
+        }
 
         AidaFrameSnapshot? frame;
         string? readError;
@@ -351,15 +482,25 @@ public sealed class AidaPanelMaster : IDisposable
 
         if (frame is null)
         {
+            _consecutiveFrameReadFailures++;
             lock (_gate)
             {
                 _lastError = readError;
             }
 
             LogOnce($"frame read failed: {readError}");
+            if (_consecutiveFrameReadFailures < 2)
+            {
+                // Unlocked reads can catch AIDA64 mid-write; retry once on the next
+                // tick before clearing the marker and dropping the frame.
+                return true;
+            }
+
+            _consecutiveFrameReadFailures = 0;
         }
         else
         {
+            _consecutiveFrameReadFailures = 0;
             Publish(frame);
             lock (_gate)
             {
@@ -368,9 +509,8 @@ public sealed class AidaPanelMaster : IDisposable
             }
         }
 
-        // Ack regardless: AIDA64 writes the next frame only once the marker
-        // is cleared, and an unreadable frame is still consumed. Skipped after
-        // teardown: the slot is no longer ours to drive.
+        // Ack regardless once retried: AIDA64 writes the next frame only once the marker
+        // is cleared, and a persistently unreadable frame must advance the protocol.
         if (_disposed) return true;
         return _writer.TryWrite(BitmapOffset, ZeroMarker, out _);
     }
@@ -413,7 +553,11 @@ public sealed class AidaPanelMaster : IDisposable
             {
                 _registered = false;
                 _slaveAlive = false;
+                _slaveBaseline = 0;
+                _consecutiveFrameReadFailures = 0;
                 _consecutiveWriteFailures = 0;
+                _lastError = "AIDA64 slot registration lost";
+                Volatile.Write(ref _published, null);
             }
         }
     }

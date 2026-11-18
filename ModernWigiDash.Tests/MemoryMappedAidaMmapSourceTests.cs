@@ -82,6 +82,88 @@ public sealed class MemoryMappedAidaMmapSourceTests
         Assert.IsFalse(source.TryRead(0, 4, new byte[4], out _));
     }
 
+    [TestMethod]
+    public void GetMutex_UnauthorizedAccessLatchesUnlocked_WhileMissingMutexRetriesAfterCooldown()
+    {
+        var clock = new FakeTimeProvider();
+        using var deniedSource = new MemoryMappedAidaMmapSource(
+            _ => throw new UnauthorizedAccessException("denied"),
+            _ => throw new FileNotFoundException(),
+            clock,
+            log: static _ => { });
+        Assert.IsFalse(deniedSource.TryRead(0, 4, new byte[4], out _));
+        deniedSource.Reset();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        // Even after Reset() and advancing time, UnauthorizedAccessException stays latched unlocked.
+        Assert.IsFalse(deniedSource.TryRead(0, 4, new byte[4], out _));
+
+        int mutexProbes = 0;
+        using var lateMutex = new Mutex(false);
+        using var map = MemoryMappedFile.CreateNew(null, 4096);
+        WriteBytes(map, 0, [5, 6, 7, 8]);
+
+        using var retrySource = new MemoryMappedAidaMmapSource(
+            _ => Interlocked.Increment(ref mutexProbes) == 1
+                ? throw new WaitHandleCannotBeOpenedException("not created yet")
+                : lateMutex,
+            _ => map,
+            clock,
+            log: static _ => { });
+
+        var buffer = new byte[4];
+        Assert.IsTrue(retrySource.TryRead(0, 4, buffer, out _));
+        Assert.AreEqual(1, mutexProbes);
+
+        // Within 5 s cooldown: does not re-probe.
+        clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.IsTrue(retrySource.TryRead(0, 4, buffer, out _));
+        Assert.AreEqual(1, mutexProbes);
+
+        // Past 5 s cooldown: acquires late-created mutex.
+        clock.Advance(TimeSpan.FromSeconds(4));
+        Assert.IsTrue(retrySource.TryRead(0, 4, buffer, out _));
+        Assert.AreEqual(2, mutexProbes);
+    }
+
+    [TestMethod]
+    public async Task TryRead_ConcurrentWithResetAndDispose_NeverThrows()
+    {
+        using var mutex = new Mutex(false);
+        using var map = MemoryMappedFile.CreateNew(null, 4096);
+        WriteBytes(map, 0, [9, 8, 7, 6]);
+
+        using var source = new MemoryMappedAidaMmapSource(
+            _ => mutex,
+            _ => map,
+            log: static _ => { });
+
+        using var start = new ManualResetEventSlim(false);
+        var readerTask = Task.Run(() =>
+        {
+            start.Wait();
+            var buf = new byte[4];
+            for (int i = 0; i < 200; i++)
+            {
+                _ = source.TryRead(0, 4, buf, out _);
+            }
+        });
+        var resetTask = Task.Run(() =>
+        {
+            start.Wait();
+            for (int i = 0; i < 50; i++)
+            {
+                source.Reset();
+            }
+        });
+
+        start.Set();
+        await Task.Delay(5);
+        source.Dispose();
+        await Task.WhenAll(readerTask, resetTask);
+
+        Assert.IsFalse(source.TryRead(0, 4, new byte[4], out _));
+    }
+
     private static void WriteBytes(MemoryMappedFile map, int offset, byte[] bytes)
     {
         using var accessor = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Write);

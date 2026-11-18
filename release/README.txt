@@ -47,6 +47,28 @@ ModernWigiDash — G.Skill WigiDash widget stack
   - Pick a widget on the canvas to configure its options in Widget Settings.
   - Swipe left/right on the display to switch pages.
 
+== What's new in v0.9.7 ==
+
+  - HWiNFO Sensor discovery & recovery:
+      * Isolated HWiNFO and AIDA64 WCF channels so AIDA64 slot faults never drop
+        HWiNFO sensors, bypassed system HTTP proxies on localhost WCF calls, and
+        expanded WCF buffer/quota limits for large sensor catalogs.
+      * Separated initial-connect and empty-list re-initialization cooldowns,
+        isolated per-sensor SOAP faults so one bad key no longer wipes the whole
+        sensor list, and bounded Automatic sensor selection to probe up to 16
+        candidates until a live reading is found (re-probing if it later drops).
+      * Added status-specific widget placeholders and an Inspector warning when
+        a saved sensor key is unavailable in the current catalog.
+  - Telemetry Polling Rate & AIDA64 Panel synchronization:
+      * Changing Telemetry Polling Rate in Settings (250 / 500 / 1000 / 2000 ms)
+        now updates running sensor, frame-time, HWiNFO, and AIDA64 polling loops
+        live in place via PollLoop.SetInterval without restarting threads or
+        blocking on vendor I/O.
+      * AIDA64 Panel master cadence scales with the configured polling rate using
+        Nyquist clamping (150-500 ms), clears stale frames after 5 s of producer
+        inactivity, defers 1 tick on torn unlocked reads, and preserves shared-
+        memory read diagnostics across healthy WCF heartbeats.
+
 == What's new in v0.9.6 ==
 
   - Telemetry & widget responsiveness:

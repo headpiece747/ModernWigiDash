@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.Extensions.Time.Testing;
 using ModernWigiDash.App;
 using ModernWigiDash.App.PresentMon;
+using ModernWigiDash.Hardware.Aida64;
 using ModernWigiDash.Hardware.Service;
 using ModernWigiDash.Sdk;
 using ModernWigiDash.Widgets;
@@ -16,8 +17,14 @@ namespace ModernWigiDash.Tests;
 /// and headless integration with <see cref="WidgetHostEnvironment"/>.
 /// </summary>
 [TestClass]
+[DoNotParallelize]
 public class TelemetryFeedCoordinatorTests
 {
+    [TestCleanup]
+    public void ResetAidaPanelCadence()
+    {
+        AidaPanelService.SetPollingPeriod(TimeSpan.FromMilliseconds(300));
+    }
     [TestMethod]
     public void Start_Stop_Dispose_IsIdempotent()
     {
@@ -167,5 +174,22 @@ public class TelemetryFeedCoordinatorTests
         Assert.AreEqual(logCount, logs.Count);
 
         coordinator.Stop();
+    }
+
+    [TestMethod]
+    public void PollingPeriod_PropagatesToAidaPanelServiceAndVendorClientOnBootAndUpdate()
+    {
+        using var vendorClient = new WigiDashServiceClient();
+        using var coordinator = new TelemetryFeedCoordinator(
+            new StubPresentMonNative(),
+            _ => { },
+            vendorClient: vendorClient,
+            initialPeriod: TimeSpan.FromMilliseconds(1000));
+
+        Assert.AreEqual(TimeSpan.FromMilliseconds(500), AidaPanelService.CurrentPollInterval);
+
+        coordinator.UpdatePollingPeriod(TimeSpan.FromMilliseconds(500));
+        Assert.AreEqual(TimeSpan.FromMilliseconds(500), coordinator.CurrentPollingPeriod);
+        Assert.AreEqual(TimeSpan.FromMilliseconds(250), AidaPanelService.CurrentPollInterval);
     }
 }

@@ -13,12 +13,14 @@ namespace ModernWigiDash.Sdk;
 public sealed class PollLoop : IDisposable
 {
     private readonly string _name;
-    private readonly TimeSpan _interval;
+    private TimeSpan _interval;
     private readonly Func<bool> _ready;
     private readonly Action _tick;
     private readonly Action _onTickFailure;
     private readonly Action<string> _log;
     private readonly LoopLifetime _lifetime = new(TimeSpan.FromSeconds(5));
+    private readonly System.Threading.Lock _timerGate = new();
+    private PeriodicTimer? _activeTimer;
     // The failure-message dedup rule, owned once (the LogOnChange module).
     private readonly LogOnChange _failureDedup = new();
 
@@ -35,6 +37,7 @@ public sealed class PollLoop : IDisposable
     /// <param name="log">Log sink.</param>
     public PollLoop(string name, TimeSpan interval, Func<bool> ready, Action tick, Action onTickFailure, Action<string> log)
     {
+        ValidateInterval(interval, nameof(interval));
         _name = name;
         _interval = interval;
         _ready = ready;
@@ -43,13 +46,43 @@ public sealed class PollLoop : IDisposable
         _log = log;
     }
 
+    /// <summary>Validates that an interval falls within <see cref="PeriodicTimer"/>'s supported millisecond bounds.</summary>
+    public static void ValidateInterval(TimeSpan interval, string paramName = "interval")
+    {
+        if (interval < TimeSpan.FromMilliseconds(1) || interval >= TimeSpan.FromMilliseconds(uint.MaxValue))
+            throw new ArgumentOutOfRangeException(paramName);
+    }
+
     /// <summary>Starts the loop (idempotent).</summary>
     public void Start()
     {
+        int intervalMs;
+        lock (_timerGate)
+        {
+            intervalMs = (int)_interval.TotalMilliseconds;
+        }
         var ct = _lifetime.Start(async token => await Loop(token).ConfigureAwait(false));
         if (ct.CanBeCanceled)
         {
-            _log($"[{_name}] polling started ({(int)_interval.TotalMilliseconds}ms, background thread)");
+            _log($"[{_name}] polling started ({intervalMs}ms, background thread)");
+        }
+    }
+
+    /// <summary>
+    /// Updates the tick interval in place without stopping or joining the
+    /// worker thread, so callers on the UI thread never block behind slow I/O.
+    /// </summary>
+    public void SetInterval(TimeSpan interval)
+    {
+        ValidateInterval(interval, nameof(interval));
+
+        lock (_timerGate)
+        {
+            if (_activeTimer is not null)
+            {
+                _activeTimer.Period = interval;
+            }
+            _interval = interval;
         }
     }
 
@@ -75,36 +108,53 @@ public sealed class PollLoop : IDisposable
     {
         // One timer for the loop's lifetime instead of a Task.Delay per tick
         // (the 16ms touch poll would otherwise churn ~60 timers/sec).
-        using var timer = new PeriodicTimer(_interval);
-        while (!ct.IsCancellationRequested)
+        PeriodicTimer timer;
+        lock (_timerGate)
         {
-            try
+            timer = new PeriodicTimer(_interval);
+            _activeTimer = timer;
+        }
+        try
+        {
+            while (!ct.IsCancellationRequested)
             {
-                if (!_ready())
+                try
                 {
-                    try { await Task.Delay(500, ct).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { break; }
-                    continue;
+                    if (!_ready())
+                    {
+                        try { await Task.Delay(500, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { break; }
+                        continue;
+                    }
+
+                    _tick();
+                    _failureDedup.Changed(null); // a successful tick resets the dedup
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (_failureDedup.Changed(ex.Message))
+                    {
+                        _log($"[{_name}] poll failed: {ex.Message}");
+                    }
+                    _onTickFailure();
                 }
 
-                _tick();
-                _failureDedup.Changed(null); // a successful tick resets the dedup
+                try { await timer.WaitForNextTickAsync(ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { break; }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        }
+        finally
+        {
+            lock (_timerGate)
             {
-                break;
+                if (ReferenceEquals(_activeTimer, timer))
+                    _activeTimer = null;
             }
-            catch (Exception ex)
-            {
-                if (_failureDedup.Changed(ex.Message))
-                {
-                    _log($"[{_name}] poll failed: {ex.Message}");
-                }
-                _onTickFailure();
-            }
-
-            try { await timer.WaitForNextTickAsync(ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { break; }
+            timer.Dispose();
         }
     }
 }

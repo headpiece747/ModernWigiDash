@@ -214,6 +214,154 @@ public sealed class AidaPanelMasterTests
         Assert.IsTrue(master.IsRegistered);
     }
 
+    [TestMethod]
+    public void TryConsumeAvailableFrame_TornFrameOnce_RetriesBeforeClearingMarker()
+    {
+        byte[] map = AidaTestMap.BuildValid(64, 32);
+        map[AidaMmapReader.MapHeaderSize] = (byte)'X';
+        var writer = new FakeAidaMmapWriter();
+        using var master = Create(new FakeAidaMmapSource(map), writer);
+        Assert.IsTrue(master.EnsureRegistered());
+
+        // First torn read: marker ack must be deferred so the next tick can retry.
+        master.PollOnce();
+        Assert.IsNull(master.TryGetPublished());
+        Assert.IsNull(WriteAt(writer, AidaPanelMaster.BitmapOffset),
+            "first torn frame read must not clear the marker");
+
+        // Second consecutive failure clears the marker to keep AIDA64 advancing.
+        master.PollOnce();
+        Assert.IsNotNull(WriteAt(writer, AidaPanelMaster.BitmapOffset),
+            "second consecutive torn read must clear the marker");
+    }
+
+    [TestMethod]
+    public void PollOnce_SlaveStagnatesPastTimeout_ClearsPublishedFrame()
+    {
+        var clock = new FakeTimeProvider();
+        var writer = new FakeAidaMmapWriter();
+        using var master = new AidaPanelMaster(
+            new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32, slaveCounter: 1)),
+            writer,
+            log: static _ => { },
+            timeProvider: clock);
+        Assert.IsTrue(master.EnsureRegistered());
+
+        master.PollOnce();
+        Assert.IsNotNull(master.TryGetPublished());
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        master.PollOnce();
+
+        Assert.IsNull(master.TryGetPublished(), "stale frame must clear after 5 s of slave inactivity");
+        Assert.AreEqual("Waiting for AIDA64 frames", master.LastError);
+    }
+
+    [TestMethod]
+    public void PollOnce_ExternalMapResetWhileIdle_ReRegistersSlot()
+    {
+        byte[] map = AidaTestMap.BuildValid(64, 32, slaveCounter: 0);
+        var source = new TrackingResetSource(map);
+        var writer = new FakeAidaMmapWriter();
+        using var master = Create(source, writer);
+        Assert.IsTrue(master.EnsureRegistered());
+        int resetsAfterRegister = source.ResetCalls;
+
+        // 9 ticks stay below the 10-tick header check cadence.
+        for (int i = 0; i < 9; i++)
+        {
+            master.PollOnce();
+        }
+        Assert.IsTrue(master.IsRegistered);
+
+        // External wipe of MmapMagicTag while AIDA64 is still idle triggers reset on tick 10.
+        BitConverter.GetBytes(0u).CopyTo(map, AidaMmapReader.MagicTagOffset);
+        master.PollOnce();
+
+        Assert.IsFalse(master.IsRegistered, "external magic wipe must clear registration even while idle");
+        Assert.IsGreaterThan(resetsAfterRegister, source.ResetCalls);
+    }
+
+    [TestMethod]
+    public void PollOnce_WriteFailuresClearRegistration_ClearsStalePublishedFrame()
+    {
+        var writer = new FakeAidaMmapWriter();
+        using var master = Create(new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32, slaveCounter: 1)), writer);
+        Assert.IsTrue(master.EnsureRegistered());
+        master.PollOnce();
+        Assert.IsNotNull(master.TryGetPublished());
+
+        writer.WriteResult = false;
+        master.PollOnce();
+        master.PollOnce();
+        master.PollOnce();
+
+        Assert.IsFalse(master.IsRegistered);
+        Assert.IsNull(master.TryGetPublished(), "losing registration must clear any stale published frame");
+    }
+
+    [TestMethod]
+    public void UpdatePollingPeriod_WhileVendorIoBlocked_ReturnsWithoutWaiting()
+    {
+        var writer = new BlockingAidaMmapWriter();
+        var master = new AidaPanelMaster(
+            new FakeAidaMmapSource(AidaTestMap.BuildValid(64, 32)), writer, log: static _ => { });
+        try
+        {
+            master.Start();
+            Assert.IsTrue(writer.WaitUntilEntered(TimeSpan.FromSeconds(5)));
+
+            bool completed = false;
+            var thread = new Thread(() =>
+            {
+                master.UpdatePollingPeriod(TimeSpan.FromMilliseconds(250));
+                completed = true;
+            })
+            {
+                IsBackground = true,
+            };
+            thread.Start();
+            Assert.IsTrue(thread.Join(TimeSpan.FromSeconds(5)) && completed,
+                "UpdatePollingPeriod must update in place without blocking behind vendor I/O");
+        }
+        finally
+        {
+            writer.Release();
+            master.Dispose();
+            writer.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public void PollOnce_RepeatedMmapReadFailures_PreservesReadErrorWithoutDroppingRegistration()
+    {
+        var writer = new FakeAidaMmapWriter();
+        using var master = Create(new FakeAidaMmapSource(), writer);
+        Assert.IsTrue(master.EnsureRegistered());
+
+        // Header checks fail after 10 ticks when map is absent; WCF writes stay healthy.
+        for (int i = 0; i < 15; i++)
+        {
+            master.PollOnce();
+        }
+
+        Assert.IsTrue(master.IsRegistered, "healthy WCF writes must not unregister slot 0 on MMF absence");
+        Assert.AreEqual("AIDA64 map unavailable", master.LastError);
+    }
+
+    private sealed class TrackingResetSource(byte[] bytes) : IAidaMmapSource
+    {
+        private readonly FakeAidaMmapSource _inner = new(bytes);
+        public int ResetCalls { get; private set; }
+
+        public bool TryRead(int offset, int length, byte[] destination, out string? error)
+            => _inner.TryRead(offset, length, destination, out error);
+
+        public void Reset() => ResetCalls++;
+
+        public void Dispose() => _inner.Dispose();
+    }
+
     private static AidaPanelMaster Create(IAidaMmapSource source, FakeAidaMmapWriter writer)
         => new(source, writer, log: static _ => { });
 

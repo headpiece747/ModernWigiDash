@@ -249,4 +249,51 @@ public class PollLoopTests
         // Assert
         Assert.AreEqual(2, logged.Count(msg => msg.Contains("poll failed")), "A fresh failure after a success must log again.");
     }
+
+    [TestMethod]
+    public async Task SetInterval_UpdatesActiveTimerWithoutStopping()
+    {
+        int ticks = 0;
+        using var loop = new PollLoop(
+            "T", TimeSpan.FromSeconds(5),
+            ready: () => true,
+            tick: () => Interlocked.Increment(ref ticks),
+            onTickFailure: () => { },
+            log: _ => { });
+
+        loop.Start();
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref ticks) >= 1, TimeSpan.FromSeconds(2));
+
+        loop.SetInterval(TimeSpan.FromMilliseconds(20));
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref ticks) >= 4, TimeSpan.FromSeconds(2));
+        Assert.IsGreaterThanOrEqualTo(4, Volatile.Read(ref ticks));
+    }
+
+    [TestMethod]
+    public async Task SetInterval_BeforeStartOrAfterDispose_IsSafe()
+    {
+        int ticks = 0;
+        var loop = new PollLoop(
+            "T", TimeSpan.FromMilliseconds(500),
+            ready: () => true,
+            tick: () => Interlocked.Increment(ref ticks),
+            onTickFailure: () => { },
+            log: _ => { });
+        loop.SetInterval(TimeSpan.FromMilliseconds(20));
+        loop.Start();
+        await TestWait.WaitUntilAsync(() => Volatile.Read(ref ticks) >= 1, TimeSpan.FromSeconds(2));
+        Assert.IsGreaterThanOrEqualTo(1, Volatile.Read(ref ticks));
+
+        loop.Dispose();
+        loop.SetInterval(TimeSpan.FromMilliseconds(1000));
+    }
+
+    [TestMethod]
+    public void SetInterval_RejectsSubMillisecondOrTooLarge()
+    {
+        using var loop = new PollLoop("T", TimeSpan.FromMilliseconds(100), () => true, () => { }, () => { }, _ => { });
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => loop.SetInterval(TimeSpan.Zero));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => loop.SetInterval(TimeSpan.FromTicks(1)));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => loop.SetInterval(TimeSpan.FromMilliseconds((double)uint.MaxValue)));
+    }
 }
